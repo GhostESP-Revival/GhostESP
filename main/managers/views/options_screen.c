@@ -55,12 +55,14 @@ static void wifi_connect_kb_cb(const char *text);
 static void scroll_options_up(lv_event_t *e) {
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
+    ESP_LOGI(TAG, "Scrolling options down by, %d", scroll_amt);
     lv_obj_scroll_by_bounded(menu_container, 0, scroll_amt, LV_ANIM_OFF);
 }
 
 static void scroll_options_down(lv_event_t *e) {
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
+    ESP_LOGI(TAG, "Scrolling options down by, %d", scroll_amt);
     lv_obj_scroll_by_bounded(menu_container, 0, -scroll_amt, LV_ANIM_OFF);
 }
 
@@ -199,12 +201,14 @@ void options_menu_create() {
     }
 
     if (options == NULL) {
+        ESP_LOGE(TAG, "NULL options menu type");
         display_manager_switch_view(&main_menu_view);
         return;
     }
 
     num_items = 0;
     int button_height = is_small_screen ? 40 : 60;
+    ESP_LOGI(TAG, "Drawing menu options");
     for (int i = 0; options[i] != NULL; i++) {
         lv_obj_t *btn = lv_list_add_btn(menu_container, NULL, options[i]);
         lv_obj_set_height(btn, button_height);
@@ -224,11 +228,13 @@ void options_menu_create() {
 
         num_items++;
     }
-
+    ESP_LOGI(TAG, "%d menu items added", num_items);
     select_option_item(0);
+
     display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
 #ifdef CONFIG_USE_TOUCHSCREEN // only show touch buttons if on a touch screen device.
     // Create scroll buttons and back button
+    ESP_LOGI(TAG, "Drawing Onscreen Nav buttons");
     scroll_up_btn = lv_btn_create(root); // UP button on the LEFT
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_BOTTOM_LEFT, SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING); // Align left
@@ -266,6 +272,8 @@ void options_menu_create() {
     lv_obj_t *back_label = lv_label_create(back_btn);
     lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back"); // Back symbol and text
     lv_obj_center(back_label);
+#else
+    select_option_item(0);
 #endif
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
 }
@@ -327,7 +335,10 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 lv_obj_get_coords(scroll_up_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
-                    scroll_options_up(NULL);
+                    
+                    ESP_LOGI(TAG, "On Screen Nav: Up pressed");
+                    //scroll_options_up(NULL);
+                    lv_event_send(scroll_up_btn, LV_EVENT_CLICKED, NULL);
                     opt_touch_started = false;
                     return;
                 }
@@ -338,18 +349,21 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 lv_obj_get_coords(scroll_down_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
-                    scroll_options_down(NULL);
+                    
+                    ESP_LOGI(TAG, "On Screen Nav: Down pressed");
+                    lv_event_send(scroll_down_btn, LV_EVENT_CLICKED, NULL);
                     opt_touch_started = false;
                     return;
                 }
             }
             // Press on back button
             if (back_btn && lv_obj_is_valid(back_btn)) {
+                ESP_LOGI(TAG, "On Screen Nav: Back pressed");
                 lv_area_t area;
                 lv_obj_get_coords(back_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
-                    back_event_cb(NULL); // Trigger back action
+                    lv_event_send(back_btn, LV_EVENT_CLICKED, NULL); // Trigger back action
                     opt_touch_started = false; // Prevent further processing
                     return;
                 }
