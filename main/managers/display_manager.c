@@ -547,16 +547,11 @@ void display_manager_init(void) {
 #endif // CONFIG_JC3248W535EN_LCD
 
 #if !defined(CONFIG_USE_7_INCHER) && !defined(CONFIG_JC3248W535EN_LCD)
-#ifdef CONFIG_IDF_TARGET_ESP32
-  static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(
-      4))); // We do this due to Dram Memory Constraints on ESP32 WROOM Modules
-  static lv_color_t buf2[CONFIG_TFT_WIDTH * 5]
-      __attribute__((aligned(4))); // Any other devices like ESP32S3 Etc Should
-                                   // be able to handle the * 20 Double Buffer
-#else
-  static lv_color_t buf1[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
-  static lv_color_t buf2[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
-#endif
+  // --- RAM OPTIMIZATION: SINGLE BUFFER, SMALLER SIZE ---
+  static lv_color_t buf1[CONFIG_TFT_WIDTH * 3] __attribute__((aligned(4)));
+  // Only one buffer, pass NULL for single buffering
+  static lv_disp_draw_buf_t disp_buf;
+  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, CONFIG_TFT_WIDTH * 3);
 
   /* Determine display resolution */
 #ifdef CONFIG_USE_CARDPUTER
@@ -567,15 +562,10 @@ void display_manager_init(void) {
   int height = CONFIG_TFT_HEIGHT;
 #endif
 
-  static lv_disp_draw_buf_t disp_buf;
-  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
-
-  /* Initialize the display */
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = width;
   disp_drv.ver_res = height;
-
   disp_drv.flush_cb = invert_flush_cb;
   disp_drv.draw_buf = &disp_buf;
   lv_disp_drv_register(&disp_drv);
@@ -586,19 +576,16 @@ void display_manager_init(void) {
     return;
   }
 #else
-
   esp_err_t ret = lcd_st7262_init();
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "LCD initialization failed");
     return;
   }
-
   ret = lcd_st7262_lvgl_init();
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "LVGL initialization failed");
     return;
   }
-
 #endif
 
   dm.mutex = xSemaphoreCreateMutex();
@@ -756,10 +743,7 @@ void hardware_input_task(void *pvParameters) {
 
   lv_indev_drv_t touch_driver;
   lv_indev_data_t touch_data;
-  uint16_t calData[5] = {339, 3470, 237, 3438, 2};
   bool touch_active = false;
-  int screen_width = LV_HOR_RES;
-  int screen_height = LV_VER_RES;
   TickType_t last_touch_time = xTaskGetTickCount();
   bool is_backlight_dimmed = false;
 #ifdef CONFIG_USE_CARDPUTER
