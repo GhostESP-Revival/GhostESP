@@ -48,10 +48,10 @@ static bool is_config_loaded(void);
 static esp_err_t setup_mdns(void);
 static esp_err_t teardown_mdns(void);
 
-#define MAX_LOG_BUFFER_SIZE (8 * 1024)  // 8KB log buffer size
-#define LOG_CHUNK_SIZE (MAX_LOG_BUFFER_SIZE / 4)  // Size to remove when buffer is full
+#define MAX_LOG_BUFFER_SIZE (2 * 1024)  // 2KB log buffer size
+#define LOG_CHUNK_SIZE (MAX_LOG_BUFFER_SIZE / 4)  // 512 bytes
 #define MAX_FILE_SIZE (5 * 1024 * 1024) // 5 MB
-#define BUFFER_SIZE (1024)              // 1 KB buffer size for reading chunks
+#define BUFFER_SIZE 512
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
 #define SERIAL_BUFFER_SIZE 528          // Size of serial buffer
 
@@ -169,7 +169,7 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
     }
     cJSON_AddItemToObject(response_json, "files", files_array);
 
-    char *response_string = cJSON_Print(response_json);
+    char *response_string = cJSON_PrintUnformatted(response_json);
     if (!response_string) {
         ESP_LOGE(TAG, "Failed to serialize JSON.");
         cJSON_Delete(response_json);
@@ -308,7 +308,7 @@ esp_err_t get_query_param(httpd_req_t *req, const char *key, char *value, size_t
 }
 
 esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
-    char filepath[256 + 1];
+    char filepath[128];
 
     size_t query_len = httpd_req_get_url_query_len(req) + 1;
     if (query_len > 1) {
@@ -317,7 +317,8 @@ esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
 
         char path[256];
         if (httpd_query_key_value(query, "path", path, sizeof(path)) == ESP_OK) {
-            snprintf(filepath, sizeof(filepath), "%s", path);
+            strncpy(filepath, path, sizeof(filepath) - 1);
+            filepath[sizeof(filepath) - 1] = '\0';
             ESP_LOGI(TAG, "Deleting file: %s", filepath);
 
             struct _reent r;
@@ -1463,7 +1464,7 @@ static esp_err_t load_server_config(void) {
     server_config.server_port = 80;
     server_config.ctrl_port = 32768;
     server_config.max_uri_handlers = 60;
-    server_config.stack_size = 8192;
+    server_config.stack_size = 4096;
     server_config.recv_wait_timeout = 10;
     server_config.send_wait_timeout = 10;
 
