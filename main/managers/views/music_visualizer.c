@@ -5,12 +5,23 @@
 #include <lvgl.h>
 #include <math.h>
 #include "esp_log.h"
+#include "driver/i2s.h"
 
 #define NUM_PARTICLES 5
 #define ANIMATION_INTERVAL_MS 5 // Approximately 30 FPS
 
+#define I2S_NUM         (0)
+#define I2S_SAMPLE_RATE (16000)
+#define I2S_BCK_IO      (43) // CLK pin
+#define I2S_DATA_IN_IO  (46) // DATA pin
+#define MIC_SENSITIVITY 2  // Increase for more sensitive, decrease for less
+#define MIC_NOISE_FLOOR 0  // Try 30, 50, 100, etc.
+#define MAX_MIC_AMPLITUDE 10000  // Tune this value for your environment
+
 static const char *TAG = "MusicVisualizer";
 
+void init_pdm_microphone(void);
+static void update_amplitudes_from_mic(void);
 
 lv_timer_t *animation_timer = NULL;
 
@@ -68,6 +79,8 @@ View music_visualizer_view = {
 void animation_timer_callback(lv_timer_t *timer);
 
 void music_visualizer_view_create() {
+  init_pdm_microphone();
+
   display_manager_fill_screen(lv_color_black());
 
   root = lv_obj_create(lv_scr_act());
@@ -153,11 +166,14 @@ void music_visualizer_view_create() {
 }
 
 void animation_timer_callback(lv_timer_t *timer) {
+    update_amplitudes_from_mic();
+
   AmplitudeData amplitudeData;
   bool dataAvailable =
       xQueueReceive(amplitudeQueue, &amplitudeData, 0) == pdTRUE;
 
   if (dataAvailable) {
+    // Only log the first bar height for summary
     for (int i = 0; i < NUM_BARS; i++) {
       lv_obj_set_height(view.bars[i], amplitudeData.bars[i]);
     }
@@ -210,4 +226,57 @@ void music_visualizer_destroy(void) {
     vQueueDelete(amplitudeQueue);
     amplitudeQueue = NULL;
   }
+}
+
+void init_pdm_microphone(void) {
+    i2s_config_t i2s_config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_RX,
+        .sample_rate = I2S_SAMPLE_RATE,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_I2S, // <-- Change this line
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 4,
+        .dma_buf_len = 256,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
+        .fixed_mclk = 0
+    };
+
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = I2S_BCK_IO,
+        .ws_io_num = -1, // Not used for PDM
+        .data_out_num = -1,
+        .data_in_num = I2S_DATA_IN_IO
+    };
+
+    i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM, &pin_config);
+}
+
+static void update_amplitudes_from_mic(void) {
+    int16_t mic_buffer[128];
+    size_t bytes_read = 0;
+    esp_err_t err = i2s_read(I2S_NUM, mic_buffer, sizeof(mic_buffer), &bytes_read, 0);
+    ESP_LOGI(TAG, "i2s_read: err=%d, bytes_read=%d", err, (int)bytes_read);
+
+    uint8_t amplitudes[NUM_BARS] = {0};
+    int samples_per_bar = sizeof(mic_buffer)/sizeof(mic_buffer[0]) / NUM_BARS;
+
+    for (int i = 0; i < NUM_BARS; i++) {
+        int32_t sum = 0;
+        for (int j = 0; j < samples_per_bar; j++) {
+            int idx = i * samples_per_bar + j;
+            sum += abs(mic_buffer[idx]);
+        }
+        float avg = (float)sum / samples_per_bar;
+        float amplitude = avg - MIC_NOISE_FLOOR;
+        if (amplitude < 0) amplitude = 0;
+        if (amplitude > MAX_MIC_AMPLITUDE) amplitude = MAX_MIC_AMPLITUDE;
+        float scaled = (amplitude / MAX_MIC_AMPLITUDE) * LV_VER_RES;
+        amplitudes[i] = (uint16_t)scaled;
+
+        if (i == 0) ESP_LOGI(TAG, "Bar 0 amplitude: %d (raw: %.2f, scaled: %.2f)", amplitudes[i], amplitude, scaled);
+    }
+    music_visualizer_view_update(amplitudes, "Ghost ESP", "Spooky");
 }
