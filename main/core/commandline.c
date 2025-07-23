@@ -35,6 +35,8 @@
 #include "core/cli-handlers/rgb-cli-handler.h"
 #include "core/cli-handlers/sd-cli-handler.h"
 #include "core/cli-handlers/system-cli-handler.h"
+#include "core/cli-handlers/portal-cli-handler.h"
+
 
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
@@ -542,48 +544,6 @@ void handle_ble_scan_cmd(int argc, char **argv) {
 
 #endif
 
-void handle_start_portal(int argc, char **argv) {
-    if (argc < 3 || argc > 4) { // Accept 3 or 4 arguments
-        printf("Usage: %s <FilePath> <AP_SSID> [PSK]\n", argv[0]);
-        TERMINAL_VIEW_ADD_TEXT("Usage: %s <FilePath> <AP_SSID> [PSK]\n", argv[0]);
-        printf("PSK is optional for an open AP.\n");
-        TERMINAL_VIEW_ADD_TEXT("PSK is optional for an open AP.\n");
-        return;
-    }
-    const char *url = argv[1];
-    const char *ap_ssid = argv[2];
-    const char *psk = (argc == 4) ? argv[3] : ""; // Set PSK to empty if not provided
-    if (strlen(url) >= MAX_PORTAL_PATH_LEN) {
-        printf("Error: Provided Path is too long.\n");
-        TERMINAL_VIEW_ADD_TEXT("Error: Path too long.\n");
-        return;
-    }
-    char final_url_or_path[MAX_PORTAL_PATH_LEN];
-    strcpy(final_url_or_path, url);
-
-    // Only prepend /mnt/ if it's not the default portal and doesn't already start with /mnt/
-    if (strcmp(url, "default") != 0 && strncmp(final_url_or_path, "/mnt/ghostesp/evil_portal/portals/", 5) != 0) {
-        const char *prefix = "/mnt/ghostesp/evil_portal/portals/";
-        size_t prefix_len = strlen(prefix);
-        size_t current_len = strlen(final_url_or_path);
-        if (current_len + prefix_len >= MAX_PORTAL_PATH_LEN) {
-            printf("Error: Path too long after prepending %s.\n", prefix);
-            TERMINAL_VIEW_ADD_TEXT("Error: Path too long.\n");
-            return;
-        }
-        memmove(final_url_or_path + prefix_len, final_url_or_path, current_len + 1);
-        memcpy(final_url_or_path, prefix, prefix_len);
-        printf("Prepended %s to path: %s\n", prefix, final_url_or_path);
-        TERMINAL_VIEW_ADD_TEXT("Prepended %s to path: %s\n", prefix, final_url_or_path);
-    }
-    const char *domain = settings_get_portal_domain(&G_Settings);
-    printf("Starting portal with AP_SSID: %s, PSK: %s, Domain: %s\n", ap_ssid, psk, domain ? domain : "(default)");
-    char log_buf[256];
-    snprintf(log_buf, sizeof(log_buf), "Starting portal with AP_SSID: %s, PSK: %s, Domain: %s\n", ap_ssid, (strlen(psk) > 0 ? psk : "<Open>"), domain ? domain : "(default)");
-    TERMINAL_VIEW_ADD_TEXT(log_buf);
-    wifi_manager_start_evil_portal(final_url_or_path, NULL, psk, ap_ssid, domain);
-}
-
 bool ip_str_to_bytes(const char *ip_str, uint8_t *ip_bytes) {
     int ip[4];
     if (sscanf(ip_str, "%d.%d.%d.%d", &ip[0], &ip[1], &ip[2], &ip[3]) == 4) {
@@ -883,12 +843,6 @@ void handle_capture_scan(int argc, char **argv) {
 
     }
 #endif
-}
-
-void stop_portal(int argc, char **argv) {
-    wifi_manager_stop_evil_portal();
-    printf("Stopping evil portal...\n");
-    TERMINAL_VIEW_ADD_TEXT("Stopping evil portal...\n");
 }
 
 
@@ -2089,9 +2043,6 @@ void handle_web_auth_cmd(int argc, char **argv) {
     }
 }
 
-
-void handle_listportals(int argc, char **argv);
-
 void handle_comm_discovery(int argc, char **argv) {
     comm_state_t state = esp_comm_manager_get_state();
     
@@ -2304,7 +2255,7 @@ void register_commands() {
     register_command("select", handle_select_cmd);
     register_command("capture", handle_capture_scan);
     register_command("startportal", handle_start_portal);
-    register_command("stopportal", stop_portal);
+    register_command("stopportal", handle_stop_portal);
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);
@@ -2413,26 +2364,3 @@ void handle_ble_spam_cmd(int argc, char **argv) {
     TERMINAL_VIEW_ADD_TEXT("Usage: blespam [-apple|-ms|-samsung|-google|-random|-s]\n");
 }
 #endif
-
-void handle_listportals(int argc, char **argv) {
-    char portal_names[MAX_PORTALS][MAX_PORTAL_NAME];
-    int count = get_evil_portal_list(portal_names);
-
-    if (count <= 0) {
-        printf("No portals found.\n");
-        TERMINAL_VIEW_ADD_TEXT("No portals found.\n");
-        return;
-    }
-
-    printf("Available Evil Portals:\n");
-    TERMINAL_VIEW_ADD_TEXT("Available Evil Portals:\n");
-    for (int i = 0; i < count; ++i) {
-        printf("  %.508s\n", portal_names[i]);
-        TERMINAL_VIEW_ADD_TEXT("  %.508s\n", portal_names[i]);
-    }
-}
-
-
-
-
-
