@@ -14,9 +14,9 @@
 #define I2S_SAMPLE_RATE (16000)
 #define I2S_BCK_IO      (43) // CLK pin
 #define I2S_DATA_IN_IO  (46) // DATA pin
-#define MIC_SENSITIVITY 2  // Increase for more sensitive, decrease for less
-#define MIC_NOISE_FLOOR 0  // Try 30, 50, 100, etc.
-#define MAX_MIC_AMPLITUDE 10000  // Tune this value for your environment
+#define MIC_SENSITIVITY 1  // Increase for more sensitive, decrease for less
+#define MIC_NOISE_FLOOR 20000  // Try 30, 50, 100, etc.
+#define MAX_MIC_AMPLITUDE 12000  // Tune this value for your environment
 
 static const char *TAG = "MusicVisualizer";
 
@@ -260,6 +260,15 @@ static void update_amplitudes_from_mic(void) {
     esp_err_t err = i2s_read(I2S_NUM, mic_buffer, sizeof(mic_buffer), &bytes_read, 0);
     ESP_LOGI(TAG, "i2s_read: err=%d, bytes_read=%d", err, (int)bytes_read);
 
+    ESP_LOGI(TAG, "Sample[0]=%d Sample[1]=%d Sample[2]=%d", mic_buffer[0], mic_buffer[1], mic_buffer[2]);
+
+    int16_t min = mic_buffer[0], max = mic_buffer[0];
+for (int i = 1; i < 128; i++) {
+    if (mic_buffer[i] < min) min = mic_buffer[i];
+    if (mic_buffer[i] > max) max = mic_buffer[i];
+}
+ESP_LOGI(TAG, "Buffer min: %d, max: %d", min, max);
+
     uint8_t amplitudes[NUM_BARS] = {0};
     int samples_per_bar = sizeof(mic_buffer)/sizeof(mic_buffer[0]) / NUM_BARS;
 
@@ -270,6 +279,7 @@ static void update_amplitudes_from_mic(void) {
             sum += abs(mic_buffer[idx]);
         }
         float avg = (float)sum / samples_per_bar;
+        // Use avg - noise floor
         float amplitude = avg - MIC_NOISE_FLOOR;
         if (amplitude < 0) amplitude = 0;
         if (amplitude > MAX_MIC_AMPLITUDE) amplitude = MAX_MIC_AMPLITUDE;
@@ -278,5 +288,6 @@ static void update_amplitudes_from_mic(void) {
 
         if (i == 0) ESP_LOGI(TAG, "Bar 0 amplitude: %d (raw: %.2f, scaled: %.2f)", amplitudes[i], amplitude, scaled);
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
     music_visualizer_view_update(amplitudes, "Ghost ESP", "Spooky");
 }
