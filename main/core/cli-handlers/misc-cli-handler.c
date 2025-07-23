@@ -20,6 +20,63 @@ extern FSettings G_Settings;
 
 // Help command
 void handle_help(int argc, char **argv) {
+
+    const char *category = (argc > 1) ? argv[1] : "all";
+
+    if (strcmp(category, "wifi") == 0) {
+        printf("\nWi-Fi Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nWi-Fi Commands:\n\n");
+        printf("scanap\n    Start a Wi-Fi access point (AP) scan.\n    Usage: scanap [seconds]\n\n");
+        printf("scansta\n    Start scanning for Wi-Fi stations.\n    Usage: scansta\n\n");
+        printf("attack\n    Launch Wi-Fi attacks (deauth, EAPOL, SAE flood).\n    Usage: attack -d|-e|-s\n\n");
+        printf("list\n    List Wi-Fi scan results or stations.\n    Usage: list -a|-s\n\n");
+        printf("beaconspam\n    Start beacon spam.\n    Usage: beaconspam [option]\n\n");
+        printf("stopspam\n    Stop beacon spam.\n    Usage: stopspam\n\n");
+        printf("stopdeauth\n    Stop deauth/EAPOL/SAE attacks.\n    Usage: stopdeauth\n\n");
+        printf("select\n    Select APs or stations.\n    Usage: select -a|-s <index>\n\n");
+        printf("apcred\n    Change/reset AP credentials.\n    Usage: apcred <ssid> <password> | apcred -r\n\n");
+        printf("apenable\n    Enable/disable AP.\n    Usage: apenable <on|off>\n\n");
+        printf("scanall\n    Combined AP/STA scan.\n    Usage: scanall [seconds]\n\n");
+        printf("congestion\n    Show Wi-Fi channel congestion.\n    Usage: congestion\n\n");
+        TERMINAL_VIEW_ADD_TEXT("scanap, scansta, attack, list, beaconspam, stopspam, stopdeauth, select, apcred, apenable, scanall, congestion\n");
+        return;
+    }
+
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    if (strcmp(category, "ble") == 0) {
+        printf("\nBLE Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nBLE Commands:\n\n");
+        printf("blescan\n    Start BLE scan.\n    Usage: blescan [option]\n\n");
+        printf("blespam\n    Start BLE spam.\n    Usage: blespam [option]\n\n");
+        printf("blewardriving\n    Start BLE wardriving.\n    Usage: blewardriving [-s]\n\n");
+        printf("list -airtags\n    List AirTags.\n    Usage: list -airtags\n\n");
+        printf("select -airtag <index>\n    Select AirTag by index.\n\n");
+        TERMINAL_VIEW_ADD_TEXT("blescan, blespam, blewardriving, list -airtags, select -airtag\n");
+        return;
+    }
+#endif
+
+    if (strcmp(category, "misc") == 0) {
+        printf("\nMiscellaneous Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nMiscellaneous Commands:\n\n");
+        printf("help\n    Show help menu.\n    Usage: help [category]\n\n");
+        printf("chipinfo\n    Show chip info.\n    Usage: chipinfo\n\n");
+        printf("timezone\n    Set timezone.\n    Usage: timezone <TZ_STRING>\n\n");
+        printf("webauth\n    Enable/disable web authentication.\n    Usage: webauth <on|off>\n\n");
+        printf("pineap\n    Start/stop PineAP detection.\n    Usage: pineap [-s]\n\n");
+        printf("scanports\n    Scan ports.\n    Usage: scanports local|IP [option]\n\n");
+        printf("tp_link_test\n    Test TP-Link smart plug.\n    Usage: tp_link_test <on|off|loop>\n\n");
+        TERMINAL_VIEW_ADD_TEXT("help, chipinfo, timezone, webauth, pineap, scanports, tp_link_test\n");
+        return;
+    }
+    if (strcmp(category, "gps") == 0) {
+        printf("\nGPS Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nGPS Commands:\n\n");
+        printf("gpsinfo\n    Show GPS info.\n    Usage: gpsinfo\n\n");
+        printf("startwd\n    Start GPS wardriving.\n    Usage: startwd [seconds]\n\n");
+        TERMINAL_VIEW_ADD_TEXT("gpsinfo, startwd\n");
+        return;
+    }
     printf("\n Ghost ESP Commands:\n\n");
     TERMINAL_VIEW_ADD_TEXT("\n Ghost ESP Commands:\n\n");
 
