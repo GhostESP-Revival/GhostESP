@@ -62,13 +62,7 @@ void handle_stop_portal(int argc, char **argv) {
 }
 
 void handle_listportals(int argc, char **argv) {
-    char (*portal_names)[MAX_PORTAL_NAME] = malloc(MAX_PORTALS * sizeof(*portal_names));
-    if (!portal_names) {
-        printf("Error: Out of memory for portal list.\n");
-        TERMINAL_VIEW_ADD_TEXT("Error: Out of memory for portal list.\n");
-        return;
-    }
-    memset(portal_names, 0, MAX_PORTALS * MAX_PORTAL_NAME);
+    char portal_names[MAX_PORTALS][MAX_PORTAL_NAME] = {0};
 
     int count = get_evil_portal_list(portal_names);
     if (count > MAX_PORTALS) count = MAX_PORTALS;
