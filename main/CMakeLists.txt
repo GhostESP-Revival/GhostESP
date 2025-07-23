@@ -35,3 +35,5 @@ endif()
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-incompatible-pointer-types -Wno-unused-local-typedefs)
 
+include_directories(${CMAKE_SOURCE_DIR}/main/core/cli-handlers)
+
