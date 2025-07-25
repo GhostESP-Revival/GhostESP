@@ -15,6 +15,8 @@ void terminal_view_create(void);
 
 void terminal_view_destroy(void);
 
+void terminal_set_return_view(View *view);
+
 #ifdef CONFIG_WITH_SCREEN
 #define TERMINAL_VIEW_ADD_TEXT(fmt, ...)                                           \
     do {                                                                           \

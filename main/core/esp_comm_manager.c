@@ -318,6 +318,15 @@ static void protocol_task(void* arg) {
                         if (strcmp(requested_name, comm->chip_name) == 0) {
                             comm->state = COMM_STATE_HANDSHAKE;
                             comm->role = COMM_ROLE_SLAVE;
+                            if (!comm->rx_packet_queue) {
+                                comm->rx_packet_queue = xQueueCreate(8, sizeof(comm_packet_t));
+                            }
+                            if (!comm->command_queue) {
+                                comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+                            }
+                            if (!comm->command_executor_task_handle) {
+                                xTaskCreate(command_executor_task, "comm_cmd_exec_task", 8192, comm, 5, &comm->command_executor_task_handle);
+                            }
                             send_handshake_ack();
                             comm->state = COMM_STATE_CONNECTED;
                             printf("I: Handshake complete - slave role\n");
@@ -467,14 +476,11 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     uart_set_pin(UART_NUM_1, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
     s_comm_manager->rx_byte_queue = xQueueCreate(256, sizeof(uint8_t));
-    s_comm_manager->rx_packet_queue = xQueueCreate(64, sizeof(comm_packet_t));
     s_comm_manager->tx_queue = xQueueCreate(32, sizeof(comm_packet_t));
-    s_comm_manager->command_queue = xQueueCreate(16, sizeof(comm_command_t));
-
+    s_comm_manager->rx_packet_queue = xQueueCreate(8, sizeof(comm_packet_t));
     xTaskCreate(rx_task, "comm_rx_task", 2048, s_comm_manager, 12, &s_comm_manager->rx_task_handle);
     xTaskCreate(tx_task, "comm_tx_task", 2048, s_comm_manager, 11, &s_comm_manager->tx_task_handle);
     xTaskCreate(protocol_task, "comm_protocol_task", 3072, s_comm_manager, 10, &s_comm_manager->protocol_task_handle);
-    xTaskCreate(command_executor_task, "comm_cmd_exec_task", 8192, s_comm_manager, 5, &s_comm_manager->command_executor_task_handle);
     
     s_comm_manager->discovery_timer = xTimerCreate("discovery_timer", 
                                                    pdMS_TO_TICKS(DISCOVERY_INTERVAL_MS),

@@ -135,6 +135,47 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable power saving features if you have a battery.
+
+        config HAS_FUEL_GAUGE
+            bool "Enable Fuel Gauge Support"
+            default n
+            help
+                Enable fuel gauge support for accurate battery monitoring.
+
+        config USE_BQ27220_FUEL_GAUGE
+            bool "Use BQ27220 Fuel Gauge"
+            default n
+            depends on HAS_FUEL_GAUGE
+            help
+                Enable support for BQ27220 fuel gauge via I2C.
+
+        config BQ27220_I2C_ADDRESS
+            hex "BQ27220 I2C Address"
+            default 0x55
+            depends on USE_BQ27220_FUEL_GAUGE
+            help
+                I2C address for BQ27220 fuel gauge (default 0x55).
+
+        config BQ27220_I2C_SDA_PIN
+            int "BQ27220 I2C SDA Pin"
+            default 8
+            depends on USE_BQ27220_FUEL_GAUGE
+            help
+                GPIO pin for BQ27220 I2C SDA line.
+
+        config BQ27220_I2C_SCL_PIN
+            int "BQ27220 I2C SCL Pin"
+            default 18
+            depends on USE_BQ27220_FUEL_GAUGE
+            help
+                GPIO pin for BQ27220 I2C SCL line.
+
+        config BQ27220_DESIGN_CAPACITY
+            int "Battery Design Capacity (mAh)"
+            default 1300
+            depends on USE_BQ27220_FUEL_GAUGE
+            help
+                Design capacity of the battery in mAh (default 1300 for T-Embed CC1101).
     
         config HAS_RTC_CLOCK
             bool "Enable RTC Clock"
@@ -172,6 +213,33 @@ menu "Ghost ESP Options"
             depends on HAS_INFRARED
             help
                 Set the GPIO pin used for IR LED transmission and indication.
+
+        config USE_ENCODER
+            bool "Enable Encoder Input"
+            default n
+            help
+                Enable support for rotary encoder input.
+
+        config ENCODER_INA
+            int "Encoder INA Pin"
+            default 4
+            depends on USE_ENCODER
+            help
+                Set the GPIO pin for Encoder INA.
+
+        config ENCODER_INB
+            int "Encoder INB Pin"
+            default 5
+            depends on USE_ENCODER
+            help
+                Set the GPIO pin for Encoder INB.
+
+        config ENCODER_KEY
+            int "Encoder Key Pin"
+            default 0
+            depends on USE_ENCODER
+            help
+                Set the GPIO pin for the Encoder button.
 
     endmenu
     

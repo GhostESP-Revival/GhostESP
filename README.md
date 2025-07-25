@@ -178,6 +178,8 @@ Ghost ESP turns your ESP32 into a powerful, cheap and helpful wireless testing t
 
 - Marauder V6
 
+- LilyGo TEmbed C1101 
+
 </details>
 
 ---

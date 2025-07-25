@@ -6,6 +6,9 @@
 // Function to create an error popup with a given message
 void error_popup_create(const char *message);
 
+// Function to create a persistent error popup that doesn't auto-destroy
+void error_popup_create_persistent(const char *message);
+
 // Function to destroy the error popup
 void error_popup_destroy(void);
 

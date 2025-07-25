@@ -1,6 +1,7 @@
 #include "managers/display_manager.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -13,6 +14,7 @@
 #include "managers/views/options_screen.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/clock_screen.h"
+#include "managers/encoder_manager.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -22,6 +24,7 @@
 #include <limits.h> // for UINT32_MAX
 #include "managers/ap_manager.h"
 #include "core/serial_manager.h"
+#include "managers/wifi_manager.h"
 
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
@@ -36,6 +39,10 @@
 
 #ifdef CONFIG_HAS_BATTERY
 #include "vendor/drivers/axp2101.h"
+#endif
+
+#ifdef CONFIG_HAS_FUEL_GAUGE
+#include "managers/fuel_gauge_manager.h"
 #endif
 
 #ifdef CONFIG_HAS_RTC_CLOCK
@@ -81,6 +88,12 @@ static lv_timer_t *status_update_timer = NULL;
 static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
 static bool is_backlight_dimmed;
+
+#ifdef CONFIG_USE_ENCODER
+static encoder_t g_encoder;
+static joystick_t enc_button; // we'll treat the push‑switch like any other button
+static joystick_t exit_button; // IO6 exit button
+#endif
 
 #define FADE_DURATION_MS 10
 #define DEFAULT_DISPLAY_TIMEOUT_MS 30000
@@ -218,6 +231,42 @@ int getBattery() {
 bool isCharging() { return _isCharging; }
 
 #endif
+
+/**
+ * @brief Get battery information from available sources
+ * @param percentage Pointer to store battery percentage
+ * @param is_charging Pointer to store charging status
+ * @return true if battery data is available, false otherwise
+ */
+static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
+    if (!percentage || !is_charging) {
+        return false;
+    }
+
+#ifdef CONFIG_HAS_FUEL_GAUGE
+    // Try fuel gauge first (most accurate)
+    int fuel_percentage = fuel_gauge_manager_get_percentage();
+    if (fuel_percentage >= 0) {
+        *percentage = (uint8_t)fuel_percentage;
+        *is_charging = fuel_gauge_manager_is_charging();
+        return true;
+    }
+#endif
+
+#ifdef CONFIG_HAS_BATTERY
+    // Fallback to AXP2101
+    axp2101_get_power_level(percentage);
+    *is_charging = axp202_is_charging();
+    return true;
+#elif CONFIG_USE_CARDPUTER
+    // Fallback to Cardputer ADC
+    *percentage = getBattery();
+    *is_charging = isCharging();
+    return true;
+#endif
+
+    return false;
+}
 
 void fade_out_cb(void *obj, int32_t v) {
   if (obj) {
@@ -359,15 +408,25 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
                   (batteryPercentage > 25) ? LV_SYMBOL_BATTERY_2 :
                   (batteryPercentage > 10) ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
 
-#ifdef CONFIG_HAS_BATTERY
-    if (axp202_is_charging()) {
-      battery_symbol = LV_SYMBOL_CHARGE;
-    }
-#elif CONFIG_USE_CARDPUTER
-    if (isCharging()) {
-      battery_symbol = LV_SYMBOL_CHARGE;
-    }
+    // Check charging status from available sources
+    bool is_charging = false;
+#ifdef CONFIG_HAS_FUEL_GAUGE
+    // Try fuel gauge first (most accurate)
+    is_charging = fuel_gauge_manager_is_charging();
 #endif
+    
+    // Fallback to original logic if fuel gauge not available or failed
+    if (!is_charging) {
+#ifdef CONFIG_HAS_BATTERY
+      is_charging = axp202_is_charging();
+#elif CONFIG_USE_CARDPUTER
+      is_charging = isCharging();
+#endif
+    }
+    
+    if (is_charging) {
+      battery_symbol = LV_SYMBOL_CHARGE;
+    }
     lv_label_set_text_fmt(battery_label, "%s %d%%", battery_symbol, batteryPercentage);
   }
 
@@ -382,8 +441,10 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   } else {
     lv_color_t default_color = lv_color_hex(0xCCCCCC);
     if (wifi_label && lv_obj_is_valid(wifi_label)) {
-        if (is_ap_active) {
-            lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x00FF00), 0); // Green for active AP
+        if (wifi_manager_is_evil_portal_active()) {
+            lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x0000FF), 0);
+        } else if (is_ap_active) {
+            lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x00FF00), 0);
         } else {
             lv_obj_set_style_text_color(wifi_label, default_color, 0);
         }
@@ -396,19 +457,28 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     }
     if (battery_label && lv_obj_is_valid(battery_label)) {
       lv_color_t battery_color = default_color;
-#ifdef CONFIG_HAS_BATTERY
-      if (axp202_is_charging()) {
-        battery_color = lv_color_hex(0x00FF00); // Green if charging
-      } else if (batteryPercentage <= 20) {
-        battery_color = lv_color_hex(0xFF0000); // Red if 20% or below
-      }
-#elif CONFIG_USE_CARDPUTER
-      if (isCharging()) {
-        battery_color = lv_color_hex(0x00FF00); // Green if charging
-      } else if (batteryPercentage <= 20) {
-        battery_color = lv_color_hex(0xFF0000); // Red if 20% or below
-      }
+      
+      // Check charging status from available sources
+      bool is_charging = false;
+#ifdef CONFIG_HAS_FUEL_GAUGE
+      // Try fuel gauge first (most accurate)
+      is_charging = fuel_gauge_manager_is_charging();
 #endif
+      
+      // Fallback to original logic if fuel gauge not available or failed
+      if (!is_charging) {
+#ifdef CONFIG_HAS_BATTERY
+        is_charging = axp202_is_charging();
+#elif CONFIG_USE_CARDPUTER
+        is_charging = isCharging();
+#endif
+      }
+      
+      if (is_charging) {
+        battery_color = lv_color_hex(0x00FF00); // Green if charging
+      } else if (batteryPercentage <= 20) {
+        battery_color = lv_color_hex(0xFF0000); // Red if 20% or below
+      }
       lv_obj_set_style_text_color(battery_label, battery_color, 0);
     }
   }
@@ -425,19 +495,19 @@ static void status_update_cb(lv_timer_t *timer) {
   bool server_running = false;
   ap_manager_get_status(&server_running, NULL, NULL); // Get AP server status
 
-#ifdef CONFIG_HAS_BATTERY
-  uint8_t power_level;
-  axp2101_get_power_level(&power_level);
-  bool is_charging = axp202_is_charging();
+  // Get battery information from available sources
+  uint8_t power_level = 0;
+  bool is_charging = false;
+  bool has_battery = get_battery_info(&power_level, &is_charging);
+  
+  int battery_percentage = has_battery ? power_level : -1;
+  
+  // Debug logging for battery status
+  ESP_LOGD(TAG, "Status update - Battery: %d%%, Charging: %s, Has battery: %s", 
+           battery_percentage, is_charging ? "YES" : "NO", has_battery ? "YES" : "NO");
+  
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    is_charging ? power_level : power_level, settings_get_power_save_enabled(&G_Settings), server_running);
-#elif CONFIG_USE_CARDPUTER
-  uint8_t power_level = getBattery();
-  update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    isCharging() ? power_level : power_level, settings_get_power_save_enabled(&G_Settings), server_running);
-#else
-  update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized, -1, settings_get_power_save_enabled(&G_Settings), server_running);
-#endif
+                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
 }
 
 static const uint32_t theme_palettes[15][6] = {
@@ -460,7 +530,13 @@ static const uint32_t theme_palettes[15][6] = {
   };
 
 void display_manager_add_status_bar(const char *CurrentMenuName) {
-  status_bar = lv_obj_create(lv_scr_act());
+    if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
+        lv_label_set_text(mainlabel, CurrentMenuName);
+        lv_obj_move_foreground(status_bar);
+        lv_obj_invalidate(status_bar);
+        return;
+    }
+    status_bar = lv_obj_create(lv_scr_act());
   lv_obj_set_size(status_bar, LV_HOR_RES, 20);
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
   lv_obj_set_style_bg_color(status_bar, lv_color_hex(0x333333), LV_PART_MAIN);
@@ -529,21 +605,16 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   bool server_running = false;
   ap_manager_get_status(&server_running, NULL, NULL); // Get AP server status
 
-#ifdef CONFIG_HAS_BATTERY
-  uint8_t power_level;
-  axp2101_get_power_level(&power_level);
-  bool is_charging = axp202_is_charging();
+  // Get battery information from available sources
+  uint8_t power_level = 0;
+  bool is_charging = false;
+  bool has_battery = get_battery_info(&power_level, &is_charging);
+  
+  int battery_percentage = has_battery ? power_level : -1;
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    is_charging ? power_level : power_level, settings_get_power_save_enabled(&G_Settings), server_running);
-#elif CONFIG_USE_CARDPUTER
-  uint8_t power_level = getBattery();
-  update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    isCharging() ? power_level : power_level, settings_get_power_save_enabled(&G_Settings), server_running);
-#else
-  update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized, -1, settings_get_power_save_enabled(&G_Settings), server_running);
-#endif
+                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
   if (!status_timer_initialized) {
-    status_update_timer = lv_timer_create(status_update_cb, 1000, NULL);
+    status_update_timer = lv_timer_create(status_update_cb, 500, NULL);
     status_timer_initialized = true;
   }
 }
@@ -681,6 +752,26 @@ void display_manager_init(void) {
 #endif
 #endif
 
+#ifdef CONFIG_HAS_FUEL_GAUGE
+  if (fuel_gauge_manager_init()) {
+    ESP_LOGI(TAG, "Fuel gauge manager initialized successfully");
+  } else {
+    ESP_LOGW(TAG, "Failed to initialize fuel gauge manager");
+  }
+#endif
+
+#ifdef CONFIG_USE_ENCODER
+    encoder_init(&g_encoder,
+                 CONFIG_ENCODER_INA,
+                 CONFIG_ENCODER_INB,
+                 true,                       /* pull‑ups */
+                 ENCODER_LATCH_FOUR3);       /* detented knobs */
+    joystick_init(&enc_button, CONFIG_ENCODER_KEY,
+                  500 /*hold ms*/, true);
+    
+    // initialize IO6 exit button
+    joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
+#endif
 // initialize wake button interrupt
 #ifdef CONFIG_IS_S3TWATCH
   wake_up_sem = xSemaphoreCreateBinary();
@@ -746,14 +837,6 @@ void display_manager_switch_view(View *view) {
            dm.current_view ? dm.current_view->name : "NULL", view->name);
 
     if (dm.current_view && dm.current_view->root) {
-      if (status_bar) {
-        lv_obj_del(status_bar);
-        wifi_label = NULL;
-        bt_label = NULL;
-        sd_label = NULL;
-        battery_label = NULL;
-        status_bar = NULL;
-      }
       display_manager_previous_view = dm.current_view; // Store current view as previous
       display_manager_fade_out(dm.current_view->root, fade_out_ready_cb, view);
     } else {
@@ -907,6 +990,126 @@ void hardware_input_task(void *pvParameters) {
         is_backlight_dimmed = false;
         last_touch_time = xTaskGetTickCount(); // Reset inactivity timer
         was_woken_by_interrupt = true; // Set flag
+    }
+#endif
+
+#ifdef CONFIG_USE_ENCODER
+    /* 1 kHz poll; cheap */
+    encoder_tick(&g_encoder);
+
+    /* direction events */
+    int8_t dir = encoder_get_direction(&g_encoder);
+    if (dir) {
+        // treat an encoder turn as “touch”
+        last_touch_time = xTaskGetTickCount();
+        if (is_backlight_dimmed) {
+          set_backlight_brightness(1);
+          is_backlight_dimmed = false;
+          // Don't send input event when waking from dimmed state
+        } else {
+          // Only send input event if display was already active
+          InputEvent ev = {
+              .type = INPUT_TYPE_ENCODER,
+              .data.encoder = { .direction = dir, .button = false }
+          };
+          xQueueSend(input_queue, &ev, 0);
+        }
+    }
+
+    /* push‑switch -> treat like “button” */
+    if (joystick_just_pressed(&enc_button)) {
+        // treat an encoder click as “touch”
+        last_touch_time = xTaskGetTickCount();
+        if (is_backlight_dimmed) {
+          set_backlight_brightness(1);
+          is_backlight_dimmed = false;
+          // Don't send input event when waking from dimmed state
+        } else {
+          // Only send input event if display was already active
+          InputEvent ev = {
+              .type = INPUT_TYPE_ENCODER,
+              .data.encoder = { .direction = 0, .button = true }
+          };
+          xQueueSend(input_queue, &ev, 0);
+        }
+    }
+#endif
+
+#ifdef CONFIG_USE_ENCODER
+    // check IO6 exit button
+    if (joystick_just_pressed(&exit_button)) {
+        last_touch_time = xTaskGetTickCount();
+        if (is_backlight_dimmed) {
+          set_backlight_brightness(1);
+          is_backlight_dimmed = false;
+        } else {
+          InputEvent ev = {
+              .type = INPUT_TYPE_EXIT_BUTTON,
+              .data.exit_pressed = true
+          };
+          xQueueSend(input_queue, &ev, 0);
+        }
+    }
+    
+    // Check for 7-second hold to enter deep sleep
+    if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
+        uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
+        if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
+            ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
+            exit_button.deep_sleep_triggered = true;
+            
+            // Pull IO15 low before sleep
+            gpio_set_level(15, 0);
+            ESP_LOGI("DeepSleep", "IO15 pulled low");
+            
+            ESP_LOGI("DeepSleep", "Configuring wake-up source");
+            
+            // Disable all wake-up sources first
+            esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+            
+            // Temporarily disable the GPIO to avoid immediate wake-up
+            gpio_config_t io_conf = {
+                .pin_bit_mask = (1ULL << 6),
+                .mode = GPIO_MODE_DISABLE,  // Temporarily disable the GPIO
+                .pull_up_en = GPIO_PULLUP_DISABLE,
+                .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                .intr_type = GPIO_INTR_DISABLE
+            };
+            gpio_config(&io_conf);
+            
+            error_popup_create_persistent("SHUTTING DOWN");
+            // Wait a couple of seconds to ignore any button releases
+            ESP_LOGI("DeepSleep", "Waiting 4 seconds before sleep to ignore button release...");
+            vTaskDelay(pdMS_TO_TICKS(4000)); // 4 second delay
+            
+            // Re-enable the GPIO with proper configuration for wake-up
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+            gpio_config(&io_conf);
+            
+            // Configure IO6 as wake source for a new press using EXT0
+            esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0); // Wake on low level (button press)
+            if (ret != ESP_OK) {
+                ESP_LOGE("DeepSleep", "Failed to configure wake-up source: %s", esp_err_to_name(ret));
+                exit_button.deep_sleep_triggered = false;
+                gpio_set_level(15, 1); // Restore IO15 high
+                return;
+            }
+            ESP_LOGI("DeepSleep", "Wake-up source configured for new button press using EXT0");
+            
+            ESP_LOGI("DeepSleep", "Entering deep sleep now...");
+            vTaskDelay(pdMS_TO_TICKS(200)); // Give time for log to print
+            
+            // Final check of GPIO state before sleep
+            ESP_LOGI("DeepSleep", "Final GPIO6 state: %d", gpio_get_level(6));
+            ESP_LOGI("DeepSleep", "Final GPIO15 state: %d", gpio_get_level(15));
+            
+            // Enter deep sleep
+            esp_deep_sleep_start();
+        }
+    } else {
+        // Reset deep sleep trigger when button is released
+        exit_button.deep_sleep_triggered = false;
     }
 #endif
 

@@ -14,6 +14,7 @@ typedef struct {
   uint32_t hold_lim;
   uint32_t cur_hold;
   uint32_t hold_init;
+  bool deep_sleep_triggered;
 } joystick_t;
 
 /**

@@ -176,6 +176,7 @@ esp_err_t wifi_manager_start_evil_portal(const char *URL, const char *SSID,
                                          const char *Password,
                                          const char *ap_ssid,
                                          const char *domain);
+bool wifi_manager_is_evil_portal_active(void);
 
 void screen_music_visualizer_task(void *pvParameters);
 

@@ -41,6 +41,7 @@
 
 static Command *command_list_head = NULL;
 TaskHandle_t VisualizerHandle = NULL;
+TaskHandle_t gps_info_task_handle = NULL;
 
 // Forward declarations for command handlers
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -350,6 +351,13 @@ void handle_stop_flipper(int argc, char **argv) {
     }
     csv_file_close();                  // Close any open CSV files
     gps_manager_deinit(&g_gpsManager); // Clean up GPS if active
+
+    // also stop the gps info display task if it is running
+    if (gps_info_task_handle != NULL) {
+        vTaskDelete(gps_info_task_handle);
+        gps_info_task_handle = NULL;
+    }
+
     wifi_manager_stop_monitor_mode();  // Stop any active monitoring
     wifi_manager_stop_deauth_station();
     wifi_manager_stop_deauth();
@@ -1576,7 +1584,6 @@ void handle_capture(int argc, char **argv) {
 
 void handle_gps_info(int argc, char **argv) {
     bool stop_flag = false;
-    static TaskHandle_t gps_info_task_handle = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0) {

@@ -10,6 +10,9 @@
 #include "esp_vfs_fat.h"
 #include "vendor/drivers/CH422G.h"
 #include "vendor/pcap.h"
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA) /* S3 builds that use the rotary encoder */
+#include "driver/gpio.h"
+#endif
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,6 +44,7 @@ sd_card_manager_t sd_card_manager = { // Change this based on board config
     .spi_mosi_pin = CONFIG_SD_SPI_MOSI_PIN
 #endif
 };
+
 
 #ifdef CONFIG_IS_S3TWATCH
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
@@ -166,6 +170,7 @@ static void sdmmc_card_print_info(const sdmmc_card_t *card) {
 esp_err_t sd_card_init(void) {
   esp_err_t ret = ESP_FAIL;
 
+
 #ifdef CONFIG_IS_S3TWATCH
   ESP_LOGI(SD_TAG, "S3TWatch detected - attempting virtual storage mount");
   
@@ -288,6 +293,8 @@ esp_err_t sd_card_init(void) {
 
   printf("Initializing SD card in SPI mode using configured pins...\n");
 
+
+
 #ifdef CONFIG_Waveshare_LCD
 #define I2C_NUM I2C_NUM_0
 #define I2C_ADDRESS 0x24
@@ -364,6 +371,9 @@ esp_err_t sd_card_init(void) {
 #endif
 
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
+  host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
+#endif
 
   spi_bus_config_t bus_config;
 
@@ -383,6 +393,7 @@ esp_err_t sd_card_init(void) {
 
   bool bus_init_success = false;
 
+#ifndef CONFIG_ENCODER_INA 
 #if defined(CONFIG_IDF_TARGET_ESP32)
   {
     esp_err_t bus_ret = spi_bus_initialize(SPI3_HOST, &bus_config, dmabus);
@@ -414,6 +425,7 @@ esp_err_t sd_card_init(void) {
     }
   }
 #endif
+#endif
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
@@ -425,7 +437,11 @@ esp_err_t sd_card_init(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32)
   slot_config.host_id = SPI3_HOST;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_ENCODER_INA)
+  slot_config.host_id = SPI3_HOST; // use spi3_host (vspi) for sd if encoder is active on esp32s3
+#else
   slot_config.host_id = SPI2_HOST;
+#endif
 #else
   slot_config.host_id = SPI2_HOST;
 #endif

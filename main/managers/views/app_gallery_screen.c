@@ -165,13 +165,18 @@ static void anim_set_x(void *obj, int32_t v) {
  */
 void apps_menu_destroy(void) {
     if (apps_container) {
-        lv_obj_clean(apps_container);
-        lv_obj_del(apps_container);
+        lv_obj_del(apps_container); // This deletes all children recursively
         apps_container = NULL;
         apps_menu_view.root = NULL;
         current_app_obj = NULL;
         back_button = NULL;
     }
+    // Reset state variables for a clean re-create
+    selected_app_index = 0;
+    touch_started = false;
+    touch_start_x = 0;
+    touch_start_y = 0;
+    // If you add timers or other resources, clean them up here!
 }
 
 /**
@@ -270,6 +275,21 @@ static void handle_keyboard_interactions(int keyValue){
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         ESP_LOGW(TAG, "keyboard event");
         handle_keyboard_interactions(event->data.key_value);
+    } else if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) {
+            handle_app_item_selection(selected_app_index);
+        } else {
+            if (event->data.encoder.direction > 0) {
+                select_app_item(selected_app_index + 1, true);
+            } else {
+                select_app_item(selected_app_index - 1, false);
+            }
+        }
+#ifdef CONFIG_USE_ENCODER
+    } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
+        display_manager_switch_view(&main_menu_view);
+#endif
     }
 }
 

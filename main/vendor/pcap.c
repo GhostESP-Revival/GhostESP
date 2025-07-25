@@ -464,6 +464,9 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock() {
 }
 
 esp_err_t pcap_flush_buffer_to_file() {
+  if (pcap_mutex == NULL) {
+    return ESP_OK;
+  }
   if (xSemaphoreTake(pcap_mutex, portMAX_DELAY)) {
     _pcap_flush_buffer_to_file_nolock();
     xSemaphoreGive(pcap_mutex);

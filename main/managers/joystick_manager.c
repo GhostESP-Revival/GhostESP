@@ -12,6 +12,7 @@ void joystick_init(joystick_t *joystick, int pin, uint32_t hold_lim,
   joystick->cur_hold = 0;
   joystick->isheld = false;
   joystick->hold_init = 0;
+  joystick->deep_sleep_triggered = false;
 
   gpio_config_t io_conf = {
       .pin_bit_mask = (1ULL << pin),

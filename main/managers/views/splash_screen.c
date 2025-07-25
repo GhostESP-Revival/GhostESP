@@ -24,7 +24,7 @@ void splash_create(void) {
 
   img = lv_img_create(splash_screen);
 
-  if (LV_VER_RES < 140) { // small screen gets small ghostie
+  if (LV_VER_RES < 140 || LV_HOR_RES > 300) { // small screen gets small ghostie
     lv_img_set_src(img, &ghost); // using ghost sprite as placeholder till logo gets scaled
     lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
     lv_img_set_zoom(img, 384); //256 is 1x zoom - 384 is 1.5x
