@@ -70,7 +70,6 @@ void handle_listportals(int argc, char **argv) {
     if (count <= 0) {
         printf("No portals found.\n");
         TERMINAL_VIEW_ADD_TEXT("No portals found.\n");
-        free(portal_names);
         return;
     }
 
