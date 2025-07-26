@@ -81,5 +81,4 @@ void handle_listportals(int argc, char **argv) {
         printf("%s", buf);
         TERMINAL_VIEW_ADD_TEXT("%s", buf);
     }
-    free(portal_names);
 }
