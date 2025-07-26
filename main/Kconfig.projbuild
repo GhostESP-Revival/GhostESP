@@ -1,5 +1,14 @@
 menu "Ghost ESP Options"
 
+    menu "Device Detials"
+
+    config BUILD_CONFIG_TEMPLATE
+        string "Specify template used to build"
+        default "unknown_board"
+        help
+            Specify GESP build config template that was used at build time.
+    endmenu
+    
     menu "LED Options"
     
     config USE_NEOPIXEL

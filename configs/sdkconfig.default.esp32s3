@@ -1,4 +1,4 @@
-#
+s#
 # Automatically generated file. DO NOT EDIT.
 # Espressif IoT Development Framework (ESP-IDF) 5.3.1 Project Configuration
 #
@@ -2202,6 +2202,11 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # Ghost ESP Options
 #
 
+#
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="default.esp32s3"
+# end of Device Detials
 #
 # LED Options
 #

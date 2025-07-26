@@ -127,8 +127,19 @@ void cmd_wifi_scan_start(int argc, char **argv) {
 }
 
 void cmd_wifi_scan_stop(int argc, char **argv) {
+    // Properly stop any ongoing WiFi scan
+    wifi_manager_stop_scan();
+    
+    // Stop monitor mode
     wifi_manager_stop_monitor_mode();
+    
+    // Close pcap file
     pcap_file_close();
+    
+    // Reset WiFi to a good state
+    esp_wifi_stop();
+    esp_wifi_start();
+    
     printf("WiFi scan stopped.\n");
     TERMINAL_VIEW_ADD_TEXT("WiFi scan stopped.\n");
 }

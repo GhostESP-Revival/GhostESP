@@ -533,6 +533,11 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 
 #
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="JC3248W535EN"
+# end of Device Detials
+#
 # LED Options
 #
 # CONFIG_USE_NEOPIXEL is not set
