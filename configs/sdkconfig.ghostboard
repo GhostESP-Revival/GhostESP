@@ -546,6 +546,11 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 
 #
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="ghostboard"
+# end of Device Detials
+#
 # LED Options
 #
 CONFIG_USE_NEOPIXEL=y

@@ -1852,6 +1852,11 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 #
 
 #
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="flipper.jcmk_gps"
+# end of Device Detials
+#
 # LED Options
 #
 CONFIG_USE_NEOPIXEL=y

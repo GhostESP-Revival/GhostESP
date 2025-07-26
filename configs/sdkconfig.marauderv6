@@ -1978,6 +1978,11 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 #
 
 #
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="marauderv6"
+# end of Device Detials
+#
 # LED Options
 #
 # CONFIG_USE_NEOPIXEL is not set

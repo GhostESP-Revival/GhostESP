@@ -650,6 +650,11 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 
 #
+# Device Detials
+#
+CONFIG_BUILD_CONFIG_TEMPLATE="default.esp32c5"
+# end of Device Detials
+#
 # LED Options
 #
 CONFIG_USE_NEOPIXEL=y

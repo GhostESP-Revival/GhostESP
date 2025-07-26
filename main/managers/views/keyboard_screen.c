@@ -10,6 +10,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#define KEYBOARD_COLUMNS 10
+
 static const char *TAG = "keyboard_screen";
 
 static lv_obj_t *root = NULL;
@@ -20,6 +22,7 @@ static KeyboardSubmitCallback submit_callback = NULL;
 
 static bool is_caps = true;
 static bool is_symbols_mode = false;
+static bool is_capslock = false;
 #ifdef CONFIG_USE_ENCODER
 static lv_obj_t *encoder_cont = NULL;
 static lv_obj_t *encoder_labels[50];
@@ -74,6 +77,7 @@ static void remove_char_from_buffer();
 static void update_input_label();
 static void update_key_labels();
 static void recreate_keyboard_buttons();
+static void get_key_position(int row, int col, int *x, int *width, bool symbols_mode);
 
 static void submit_text() {
     if (input_len > 0) {
@@ -92,9 +96,19 @@ static void submit_text() {
 
 static void add_char_to_buffer(char c) {
     if (input_len < sizeof(input_buffer) - 1) {
-        input_buffer[input_len++] = c;
+        // Use capslock or SHIFT if active, otherwise lowercase
+        bool use_caps = is_capslock || is_caps;
+        if (isalpha((unsigned char)c)) {
+            input_buffer[input_len++] = use_caps ? toupper((unsigned char)c) : tolower((unsigned char)c);
+        } else {
+            input_buffer[input_len++] = c; // Add non-alphabetic characters unchanged
+        }
         input_buffer[input_len] = '\0';
         update_input_label();
+    }
+    if (is_caps && !is_capslock) {
+        is_caps = false; // Reset to lowercase after any key press unless capslock is on
+        update_key_labels(); // Update key labels to reflect the change
     }
 }
 
@@ -144,6 +158,20 @@ static void update_key_labels() {
                                 lv_label_set_text(key_label, new_text);
                             } else {
                                 lv_label_set_text(key_label, key_text);
+                            }
+
+                            // Highlight SHIFT key if active
+                            if (strcmp(key_text, "SHIFT") == 0) {
+                                if (is_capslock) {
+                                    lv_obj_set_style_bg_color(key_btn, lv_color_hex(0x00BFFF), 0); // blue for capslock
+                                    lv_obj_set_style_text_color(key_label, lv_color_hex(0xFFFFFF), 0);
+                                } else if (is_caps) {
+                                    lv_obj_set_style_bg_color(key_btn, lv_color_hex(0xFFD600), 0); // yellow when active
+                                    lv_obj_set_style_text_color(key_label, lv_color_hex(0x000000), 0); // black text
+                                } else {
+                                    lv_obj_set_style_bg_color(key_btn, lv_color_hex(0x7B1FA2), 0); // default purple
+                                    lv_obj_set_style_text_color(key_label, lv_color_hex(0xFFFFFF), 0); // white text
+                                }
                             }
                             lv_obj_clear_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
                         } else {
@@ -218,7 +246,9 @@ static void recreate_keyboard_buttons() {
             
             lv_obj_t *key_btn = lv_btn_create(root);
             lv_obj_remove_style_all(key_btn);
-            lv_obj_set_size(key_btn, current_key_width - 2, key_height);
+            int key_x, key_w;
+            get_key_position(r, c, &key_x, &key_w, is_symbols_mode);
+            lv_obj_set_size(key_btn, key_w - 2, key_height);
             lv_obj_set_pos(key_btn, key_x, key_y);
             
             lv_obj_set_style_bg_color(key_btn, lv_color_hex(0x7B1FA2), 0);
@@ -254,7 +284,7 @@ static void recreate_keyboard_buttons() {
 }
 
 static void keyboard_create() {
-    is_caps = true;
+    is_caps = true; // Start in caps mode
     is_symbols_mode = false;
     input_len = 0;
     memset(input_buffer, 0, sizeof(input_buffer));
@@ -329,7 +359,9 @@ static void keyboard_create() {
             
             lv_obj_t *key_btn = lv_btn_create(root);
             lv_obj_remove_style_all(key_btn);
-            lv_obj_set_size(key_btn, current_key_width - 2, key_height);
+            int key_x, key_w;
+            get_key_position(r, c, &key_x, &key_w, is_symbols_mode);
+            lv_obj_set_size(key_btn, key_w - 2, key_height);
             lv_obj_set_pos(key_btn, key_x, key_y);
             
             lv_obj_set_style_bg_color(key_btn, lv_color_hex(0x7B1FA2), 0);
@@ -339,8 +371,21 @@ static void keyboard_create() {
             lv_obj_set_style_radius(key_btn, 3, 0);
 
             lv_obj_t *key_label = lv_label_create(key_btn);
+            const char *(*current_keys)[KEYBOARD_COLUMNS] = is_symbols_mode ? symbols : keys;
             if (c < row_lens[r]) {
-                lv_label_set_text(key_label, keys[r][c]);
+                const char* key_text = current_keys[r][c];
+                if (!is_symbols_mode && strlen(key_text) == 1) {
+                    char new_text[2];
+                    if (isalpha((unsigned char)key_text[0])) {
+                        new_text[0] = is_caps ? toupper(key_text[0]) : tolower(key_text[0]);
+                    } else {
+                        new_text[0] = key_text[0];
+                    }
+                    new_text[1] = '\0';
+                    lv_label_set_text(key_label, new_text);
+                } else {
+                    lv_label_set_text(key_label, key_text);
+                }
             } else {
                 lv_label_set_text(key_label, "");
                 lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
@@ -397,6 +442,8 @@ static void keyboard_create() {
 #endif
     
     display_manager_add_status_bar("Keyboard");
+
+    update_key_labels();
 }
 
 static void keyboard_destroy() {
@@ -410,6 +457,7 @@ static void keyboard_destroy() {
         input_buffer[0] = '\0';
         is_symbols_mode = false;
         is_caps = true;
+        is_capslock = false;
 #ifdef CONFIG_USE_ENCODER
         encoder_cont = NULL;
         encoder_item_count = 0;
@@ -530,26 +578,24 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             int col = -1;
             int current_x = 0;
             for (int c = 0; c < current_row_lengths[row]; c++) {
-                int current_key_width = base_key_width;
-                
-                // adjust for wider SHIFT and DEL buttons
-                if (!is_symbols_mode && c < row_lengths[row]) {
-                    if (strcmp(keys[row][c], "SHIFT") == 0 || strcmp(keys[row][c], "DEL") == 0 || strcmp(keys[row][c], " ") == 0) {
-                        current_key_width = base_key_width * 2;
-                    }
-                }
-                
-                if (touch_x >= current_x && touch_x < current_x + current_key_width) {
+                int key_x, key_w;
+                get_key_position(row, c, &key_x, &key_w, is_symbols_mode);
+                if (touch_x >= key_x && touch_x < key_x + key_w) {
                     col = c;
                     break;
                 }
-                current_x += current_key_width;
             }
 
             if (col >= 0) {
                 const char* key = current_keys[row][col];
                 if (strcmp(key, "SHIFT") == 0) {
-                    is_caps = !is_caps;
+                    if (is_caps) {
+                        // If SHIFT is already active, toggle capslock
+                        is_capslock = !is_capslock;
+                        is_caps = is_capslock; // Keep caps active if capslock is on
+                    } else {
+                        is_caps = true;
+                    }
                     update_key_labels();
                 } else if (strcmp(key, "SYM") == 0) {
                     is_symbols_mode = true;
@@ -566,11 +612,11 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 } else if (strcmp(key, " ") == 0) {
                     add_char_to_buffer(' ');
                 } else if (strlen(key) == 1) {
-                    if (is_symbols_mode) {
-                        add_char_to_buffer(key[0]);
-                    } else {
-                        add_char_to_buffer(is_caps ? toupper(key[0]) : tolower(key[0]));
+                    char adjusted_char = key[0];
+                    if (!is_symbols_mode && strlen(key) == 1 && isalpha(adjusted_char)) {
+                        adjusted_char = is_caps ? toupper(adjusted_char) : tolower(adjusted_char);
                     }
+                    add_char_to_buffer(adjusted_char);
                 }
             }
         }
@@ -619,3 +665,47 @@ View keyboard_view = {
     .name = "Keyboard Screen",
     .get_hardwareinput_callback = get_keyboard_callback
 };
+
+static void get_key_position(int row, int col, int *x, int *width, bool symbols_mode) {
+    int screen_width = LV_HOR_RES;
+    int padding = 5;
+    const int *row_lens = symbols_mode ? symbols_row_lengths : row_lengths;
+    int actual_len = row_lens[row];
+    int special_count = 0;
+    if (!symbols_mode) {
+        for (int i = 0; i < actual_len; i++) {
+            const char *txt = keys[row][i];
+            if (strcmp(txt, "SHIFT") == 0 || strcmp(txt, "DEL") == 0 || strcmp(txt, " ") == 0) {
+                special_count++;
+            }
+        }
+    }
+    int total_key_width = screen_width - (padding * 2);
+    int current_row_length = max_row_lengths[row];
+    int key_width = total_key_width / current_row_length;
+    int extra_space = special_count * (key_width / 2);
+    int total_keys_width = actual_len * key_width + extra_space;
+    int blank_space = total_key_width - total_keys_width;
+    int key_x = padding + blank_space / 2;
+
+    // Calculate position for each key
+    for (int c = 0; c < col; c++) {
+        int current_key_width = key_width;
+        if (!symbols_mode && c < row_lens[row]) {
+            const char *txt = keys[row][c];
+            if (strcmp(txt, "SHIFT") == 0 || strcmp(txt, "DEL") == 0 || strcmp(txt, " ") == 0) {
+                current_key_width += key_width / 2;
+            }
+        }
+        key_x += current_key_width;
+    }
+    int current_key_width = key_width;
+    if (!symbols_mode && col < row_lens[row]) {
+        const char *txt = keys[row][col];
+        if (strcmp(txt, "SHIFT") == 0 || strcmp(txt, "DEL") == 0 || strcmp(txt, " ") == 0) {
+            current_key_width += key_width / 2;
+        }
+    }
+    *x = key_x;
+    *width = current_key_width;
+}

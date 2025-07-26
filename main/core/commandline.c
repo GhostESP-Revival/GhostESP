@@ -114,7 +114,6 @@ void handle_unknown_command(const char *cmd) {
     printf("Unknown command: %s\n", cmd);
     TERMINAL_VIEW_ADD_TEXT("Unknown command: %s\n", cmd);
 }
-
 void discover_task(void *pvParameter) {
     DIALClient client;
     DIALManager manager;

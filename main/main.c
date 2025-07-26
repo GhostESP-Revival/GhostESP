@@ -25,6 +25,7 @@
 #include "managers/views/splash_screen.h"
 #endif
 
+
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
 void app_main(void) {
@@ -56,6 +57,7 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Initializing Wifi Manager");
     wifi_manager_init();
+
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     // ble_init();
 #endif
@@ -181,6 +183,9 @@ void app_main(void) {
                         &rgb_effect_task_handle);
         }
     }
+
+    ESP_LOGI(TAG, "Build config used: %s", CONFIG_BUILD_CONFIG_TEMPLATE);
+    printf("Build Name: %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
 
     ESP_LOGI(TAG, "Ghost ESP INIT complete. Ghost ESP Ready ;)");
     printf("Ghost ESP Ready ;)\n");
