@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,6 +49,12 @@ bool fuel_gauge_manager_is_charging(void);
  * @return Voltage in mV, 0 if error
  */
 uint16_t fuel_gauge_manager_get_voltage_mv(void);
+
+/**
+ * @brief Reset the fuel gauge
+ * @return ESP_OK if successful, error code otherwise
+ */
+esp_err_t fuel_gauge_manager_reset(void);
 
 /**
  * @brief Deinitialize the fuel gauge manager

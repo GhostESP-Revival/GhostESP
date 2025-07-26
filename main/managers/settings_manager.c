@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <string.h>
 #include <time.h>
+#include <nvs.h>
 
 #define S_TAG "SETTINGS"
 
@@ -85,6 +86,7 @@ void settings_init(FSettings *settings) {
   if (err == ESP_OK) {
     settings_load(settings);
     printf("Settings loaded successfully.\n");
+    settings_print_nvs_stats();
   } else {
     printf("Failed to open NVS handle: %s\n", esp_err_to_name(err));
   }
@@ -963,4 +965,82 @@ void settings_set_esp_comm_pins(FSettings *settings, int32_t tx_pin, int32_t rx_
 void settings_get_esp_comm_pins(const FSettings *settings, int32_t *tx_pin, int32_t *rx_pin) {
   if (tx_pin) *tx_pin = settings->esp_comm_tx_pin;
   if (rx_pin) *rx_pin = settings->esp_comm_rx_pin;
+}
+
+void settings_get_nvs_stats(nvs_stats_t *stats) {
+  esp_err_t err = nvs_get_stats(NULL, stats);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get NVS stats: %s", esp_err_to_name(err));
+    memset(stats, 0, sizeof(nvs_stats_t));
+  }
+}
+
+size_t settings_get_nvs_used_entries(void) {
+  nvs_stats_t stats;
+  settings_get_nvs_stats(&stats);
+  return stats.used_entries;
+}
+
+size_t settings_get_nvs_free_entries(void) {
+  nvs_stats_t stats;
+  settings_get_nvs_stats(&stats);
+  return stats.free_entries;
+}
+
+size_t settings_get_nvs_total_entries(void) {
+  nvs_stats_t stats;
+  settings_get_nvs_stats(&stats);
+  return stats.total_entries;
+}
+
+float settings_get_nvs_usage_percentage(void) {
+  nvs_stats_t stats;
+  settings_get_nvs_stats(&stats);
+  if (stats.total_entries == 0) {
+    return 0.0f;
+  }
+  return ((float)stats.used_entries / (float)stats.total_entries) * 100.0f;
+}
+
+void settings_print_nvs_stats(void) {
+  nvs_stats_t stats;
+  settings_get_nvs_stats(&stats);
+  
+  ESP_LOGI(TAG, "NVS Storage Statistics:");
+  ESP_LOGI(TAG, "  Total entries: %zu", stats.total_entries);
+  ESP_LOGI(TAG, "  Used entries: %zu", stats.used_entries);
+  ESP_LOGI(TAG, "  Free entries: %zu", stats.free_entries);
+  ESP_LOGI(TAG, "  Namespaces: %zu", stats.namespace_count);
+  ESP_LOGI(TAG, "  Usage: %.1f%%", settings_get_nvs_usage_percentage());
+  
+  printf("NVS Storage: %zu/%zu entries used (%.1f%%)\n", 
+         stats.used_entries, stats.total_entries, 
+         settings_get_nvs_usage_percentage());
+}
+
+size_t settings_get_namespace_used_entries(const char *namespace_name) {
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open(namespace_name, NVS_READONLY, &handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open NVS namespace '%s': %s", 
+             namespace_name, esp_err_to_name(err));
+    return 0;
+  }
+  
+  size_t used_entries = 0;
+  err = nvs_get_used_entry_count(handle, &used_entries);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get used entry count for namespace '%s': %s", 
+             namespace_name, esp_err_to_name(err));
+    used_entries = 0;
+  }
+  
+  nvs_close(handle);
+  return used_entries;
+}
+
+void settings_print_namespace_stats(const char *namespace_name) {
+  size_t used_entries = settings_get_namespace_used_entries(namespace_name);
+  ESP_LOGI(TAG, "Namespace '%s': %zu entries used", namespace_name, used_entries);
+  printf("Namespace '%s': %zu entries used\n", namespace_name, used_entries);
 }

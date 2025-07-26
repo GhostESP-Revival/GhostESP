@@ -201,6 +201,16 @@ bool settings_get_web_auth_enabled(const FSettings *settings);
 void settings_set_esp_comm_pins(FSettings *settings, int32_t tx_pin, int32_t rx_pin);
 void settings_get_esp_comm_pins(const FSettings *settings, int32_t *tx_pin, int32_t *rx_pin);
 
+// NVS Storage Monitoring Functions
+void settings_get_nvs_stats(nvs_stats_t *stats);
+size_t settings_get_nvs_used_entries(void);
+size_t settings_get_nvs_free_entries(void);
+size_t settings_get_nvs_total_entries(void);
+float settings_get_nvs_usage_percentage(void);
+void settings_print_nvs_stats(void);
+size_t settings_get_namespace_used_entries(const char *namespace_name);
+void settings_print_namespace_stats(const char *namespace_name);
+
 // Getter and Setter for AP enabled state
 void settings_set_ap_enabled(FSettings *settings, bool enabled);
 bool settings_get_ap_enabled(const FSettings *settings);
