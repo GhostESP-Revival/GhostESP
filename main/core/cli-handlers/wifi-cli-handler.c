@@ -28,8 +28,14 @@ extern void wifi_manager_scanall_chart(void); // If used in scanall
 
 void cmd_wifi_scan_start(int argc, char **argv) {
     if (argc > 1) {
-        int seconds = atoi(argv[1]);
-        wifi_manager_start_scan_with_time(seconds);
+        char *endptr;
+        long seconds = strtol(argv[1], &endptr, 10);
+        if (*endptr != '\0' || seconds <= 0) {
+            printf("Invalid parameter: '%s'. Usage: scanap [seconds]\n", argv[1]);
+            TERMINAL_VIEW_ADD_TEXT("Invalid parameter: '%s'. Usage: scanap [seconds]\n", argv[1]);
+            return;
+        }
+        wifi_manager_start_scan_with_time((int)seconds);
     } else {
         wifi_manager_start_scan();
     }
