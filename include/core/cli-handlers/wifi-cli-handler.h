@@ -29,3 +29,4 @@ void handle_dhcpstarve_cmd(int argc, char **argv);
 #if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv);
 #endif
+void handle_wifi_disconnect(int argc, char **argv);

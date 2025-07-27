@@ -748,3 +748,17 @@ void handle_setcountry(int argc, char **argv) {
     }
 }
 #endif
+
+void handle_wifi_disconnect(int argc, char **argv)
+{
+    wifi_manager_set_manual_disconnect(true);
+    esp_err_t err = esp_wifi_disconnect();
+    if (err == ESP_OK) {
+        printf("WiFi disconnect command sent successfully\n");
+        TERMINAL_VIEW_ADD_TEXT("WiFi disconnect command sent successfully\n");
+    } else {
+        printf("Failed to send disconnect command: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to send disconnect command\n");
+    }
+}
+
