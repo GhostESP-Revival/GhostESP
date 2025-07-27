@@ -24,13 +24,16 @@ void handle_evilportal(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("  sethtmlstr - Set HTML content from buffer\n");
         return;
     }
-
+    if (argc > 3) {
+        printf("Too many arguments. Usage: %s -c <command>\n", argv[0]);
+        TERMINAL_VIEW_ADD_TEXT("Too many arguments. Usage: %s -c <command>\n", argv[0]);
+        return;
+    }
     if (strcmp(argv[1], "-c") != 0) {
         printf("Error: Expected -c flag\n");
         TERMINAL_VIEW_ADD_TEXT("Error: Expected -c flag\n");
         return;
     }
-
     if (strcmp(argv[2], "sethtmlstr") == 0) {
         wifi_manager_set_html_from_uart();
         printf("HTML buffer mode enabled for evil portal\n");
@@ -40,7 +43,6 @@ void handle_evilportal(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("Error: Unknown command '%s'\n", argv[2]);
     }
 }
-
 
 void handle_start_portal(int argc, char **argv) {
     if (argc < 3 || argc > 4) {
@@ -84,12 +86,22 @@ void handle_start_portal(int argc, char **argv) {
 }
 
 void handle_stop_portal(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: %s\n", argv[0]);
+        TERMINAL_VIEW_ADD_TEXT("Usage: %s\n", argv[0]);
+        return;
+    }
     wifi_manager_stop_evil_portal();
     printf("Stopping evil portal...\n");
     TERMINAL_VIEW_ADD_TEXT("Stopping evil portal...\n");
 }
 
 void handle_listportals(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: %s\n", argv[0]);
+        TERMINAL_VIEW_ADD_TEXT("Usage: %s\n", argv[0]);
+        return;
+    }
     char portal_names[MAX_PORTALS][MAX_PORTAL_NAME] = {0};
 
     int count = get_evil_portal_list(portal_names);
