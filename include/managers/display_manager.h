@@ -80,6 +80,8 @@ void display_manager_switch_view(View *view);
 
 void apply_power_management_config(bool power_save_enabled);
 
+void display_manager_update_status_bar_color(void);
+
 void rainbow_effect_cb(lv_timer_t *timer);
 
 /**

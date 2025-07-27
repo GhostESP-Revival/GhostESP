@@ -1,6 +1,6 @@
 # Touch Screen Usage
 
-GhostESP firmware includes touch support, enabling users to interact directly with on-screen elements. Here’s how to navigate the different menus and screens effectively.
+GhostESP firmware includes touch support, enabling users to interact directly with on-screen elements. Here's how to navigate the different menus and screens effectively.
 
 ## Touch Input Zones
 
@@ -37,7 +37,55 @@ A status bar at the top of the screen shows the current menu, SD card status, Wi
 
 When you launch commands (such as attacks, scans, or Evil Portal), the terminal view will show output and logs. Tap the screen to return to the previous menu when finished.
 
-> **Note**: If you’re experiencing issues with touch responsiveness, make sure you have the latest firmware, as updates may improve touch functionality.
+> **Note**: If you're experiencing issues with touch responsiveness, make sure you have the latest firmware, as updates may improve touch functionality.
+
+## Terminal App (Keyboard-Based Boards)
+
+For boards with built-in keyboards (like ESP32-S3-Cardputer):
+
+### Accessing Terminal App
+
+1. Navigate to the main menu
+2. Select "Terminal App"
+3. Use the keyboard to enter commands directly
+
+### Terminal Features
+
+- **Command History**: Previous commands are accessible
+- **Auto-completion**: Tab completion for commands
+- **Real-time Output**: See command results immediately
+- **Keyboard Shortcuts**: Standard terminal shortcuts work
+
+### Using the Terminal
+
+- Type commands as you would in a serial terminal
+- Press Enter to execute commands
+- Use arrow keys to navigate command history
+- Press Ctrl+C to stop running commands
+
+## Power Management
+
+### Display Timeout Settings
+
+- **Never**: Display stays on indefinitely
+- **30 seconds**: Display turns off after 30 seconds of inactivity
+- **1 minute**: Display turns off after 1 minute of inactivity
+- **5 minutes**: Display turns off after 5 minutes of inactivity
+
+### Power Saving Mode
+
+Available on supported devices (Cardputer, S3TWatch):
+
+- **AP Disabled**: Access Point is turned off to save power
+- **CPU Frequency**: Reduced CPU frequency for lower power consumption
+- **Extended Battery Life**: Up to 5X longer battery life
+
+### Enabling Power Saving
+
+1. Navigate to Settings → Display
+2. Select "Power Saving"
+3. Choose your preferred timeout setting
+4. Enable "Power Saving Mode" if available
 
 ---
 
@@ -53,6 +101,8 @@ When you launch commands (such as attacks, scans, or Evil Portal), the terminal 
   Use the top/bottom screen zones or scroll buttons for long lists.
 - **Back Navigation**:  
   Tap the on-screen back button (if present) or use the hardware back button to return to the previous menu.
+- **Terminal Commands**:  
+  Use the Terminal App for direct command input on keyboard-equipped boards.
 
 ---
 

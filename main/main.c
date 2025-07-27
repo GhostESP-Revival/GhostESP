@@ -116,6 +116,9 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing Settings");
     settings_init(&G_Settings);
 
+    ESP_LOGI(TAG, "Configuring WiFi STA from settings");
+    wifi_manager_configure_sta_from_settings();
+
     ESP_LOGI(TAG, "Initializing Comm Manager");
     esp_comm_manager_init_with_defaults();
 

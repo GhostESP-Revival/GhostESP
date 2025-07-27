@@ -82,6 +82,7 @@ Not available on ESP32-S2:
 - `blewardriving -s` - Stop BLE wardriving
 - `blespam -apple|-ms|-samsung|-google|-random|-s` - BLE spam attacks
 
+
 ## 📍 GPS Features
 
 - `startwd` - Begin recording networks with GPS location
@@ -105,6 +106,15 @@ Not available on ESP32-S2:
 - `sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>` - Set SDMMC pins
 - `sd_pins_spi <cs> <clk> <miso> <mosi>` - Set SPI pins
 - `sd_save_config` - Save SD pin config to SD card
+
+## 🔗 Dual ESP32 Communication
+
+- `commstatus` - Check connection status between two ESP32 devices
+- `commsend <command>` - Send any command to the other ESP32 device
+- `commdisconnect` - Disconnect from the other ESP32 device
+- `commdiscovery` - Check discovery status
+- `commconnect <device_name>` - Connect to specific device
+- `commsetpins <tx> <rx>` - Change UART pins for communication
 
 ## 🛠️ Utilities
 

@@ -40,6 +40,7 @@ GhostESP comes packed with various features for wireless network exploration and
   - List available portals on SD card
   - Prompt for SSID and optional PSK
   - Stop portal at any time
+  - HTML upload via Flipper Zero App (max 2048 bytes)
 
 ### Data Collection
 
@@ -72,6 +73,30 @@ GhostESP comes packed with various features for wireless network exploration and
 - **BLE Spam**
   - Apple, Microsoft, Samsung, Google, and random BLE spam modes
   - Stop BLE spam at any time
+
+## Infrared (IR) Functions
+
+### IR Transmit Support
+
+- **FlipperZero IR File Compatibility**
+  - Use FlipperZero formatted IR files
+  - Store files in `/ghostesp/infrared/remotes` or `/ghostesp/infrared/universals` on SD card
+  - Universal Library IR Transmit
+  - Signals File IR Transmit
+
+### IR Protocol Support
+
+- **Supported Protocols**:
+  - NEC
+  - Kaseikyo
+  - Pioneer
+  - RCA
+  - Samsung
+  - SIRC
+  - RC5
+  - RC6
+
+> **Note**: IR functionality is available on LilyGo S3TWatch, ESP32-S3-Cardputer, and LilyGo TEmbed C1101 devices only as of firmware v1.7.
 
 ## Device Controls
 
@@ -116,11 +141,28 @@ GhostESP comes packed with various features for wireless network exploration and
 - Set timezone for clock view
 - Chip and memory info
 - Reboot, stop all operations, crash for debugging
+- Power saving mode for extended battery life
+- Fuel gauge support (BQ27220 initially)
 
 ### SD Card Management
 
 - Show and configure SD card pinout (MMC/SPI)
 - Save SD config to card
+
+### Dual ESP32 Communication
+
+- Connect two ESP32 devices with UART
+- Remote control through WebUI
+- Automatic device discovery
+- Send commands between devices
+- Coordinated attacks and operations
+
+### Display & Interface
+
+- Touch screen navigation
+- Terminal App for keyboard input
+- Power saving display timeout options
+- PWM backlight control on supported devices
 
 ---
 

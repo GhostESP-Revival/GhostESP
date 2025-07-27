@@ -1400,20 +1400,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
             break;
         case WIFI_EVENT_STA_START: {
-            static bool connection_in_progress = false;
-            
-            if(!connection_in_progress) {
-                connection_in_progress = true;
-                
-                // Get configured SSID from station config
-                wifi_config_t sta_config;
-                if(esp_wifi_get_config(WIFI_IF_STA, &sta_config) == ESP_OK) {
-                    printf("\nConnecting to %.*s\n", 18, sta_config.sta.ssid);
-                } else {
-                    printf("\nConnecting to network\n");
-                }
-                esp_wifi_connect();
-            }
+            // No auto-connect here - handled by wifi_manager's wifi_event_handler
+            printf("AP_manager: STA interface started\n");
             break;
         }
         case WIFI_EVENT_STA_DISCONNECTED: {

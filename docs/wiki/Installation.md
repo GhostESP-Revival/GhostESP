@@ -7,7 +7,7 @@ This guide provides detailed instructions for installing GhostESP firmware on yo
 Before starting, ensure you have:
 
 - A compatible ESP32 board (see [Supported Hardware](About.md#supported-hardware))
-- A modern web browser (Google Chrome recommended, as Firefox doesn’t support WebSerial)
+- A modern web browser (Google Chrome recommended, as Firefox doesn't support WebSerial)
 - Appropriate USB cable (Micro USB or USB-C, ensure it's a data cable, not a charge-only cable)
 - **File Extraction Tool**: Install [7-Zip](https://www.7-zip.org/download.html) or a similar program for extracting firmware files.
 - Internet connection for downloading firmware
@@ -27,7 +27,7 @@ Choose your preferred method:
 
 1. **Prepare for Flashing**
    - Visit [Ghost ESP Web Flasher](https://flasher.ghostesp.net/)
-   - If the site doesn’t load correctly, clear your browser cache and try again.
+   - If the site doesn't load correctly, clear your browser cache and try again.
    - Use **Google Chrome** as Firefox does not support WebSerial.
    - Ensure your ESP32 is disconnected from other software or tools to avoid port conflicts.
 
@@ -126,7 +126,7 @@ After flashing, you have several control options to configure and interact with 
 
 1. **Web Interface**
    - Connect to the `GhostNet` AP with the password `GhostNet`
-   - Open a browser and connect to either `ghostesp.local` or `192.168.4.1` to access device settings.
+   - Open a browser and connect to either `ghostesp.local` (requires mDNS support) or `192.168.4.1` to access device settings.
    - Use the auto-updating configuration panel to manage settings, Evil Portal controls, and device info.
 
 1. **Qt6 Control App**
@@ -135,14 +135,19 @@ After flashing, you have several control options to configure and interact with 
 
 1. **Serial Command Line**
    - Connect via a serial interface for direct command-line control.
-   - Provides full access to GhostESP’s command suite and is ideal for advanced users or troubleshooting.
+   - Provides full access to GhostESP's command suite and is ideal for advanced users or troubleshooting.
    - Refer to the [Command Line Interface Documentation](https://github.com/jaylikesbunda/Ghost_ESP/blob/main/main/core/commandline.c) for available commands and usage examples.
    - Android devices can interface with the serial command line directly using the [Serial USB Terminal app](https://play.google.com/store/apps/details?id=de.kai_morich.serial_usb_terminal&hl=en-US)
 
 1. **Flipper Zero App**
    - Control GhostESP directly from the Flipper Zero.
-   - Now available directly from the offical flipper app store!
+   - Now available directly from the official flipper app store!
    - Ensure you have the latest `.fap` version on your Flipper Zero for full functionality and access to features like Evil Portal, Wi-Fi control, and more.
+
+1. **Touch Screen Interface** (for supported boards)
+   - Navigate through menus using touch gestures
+   - Access all major features through the graphical interface
+   - Terminal App available for keyboard-based command input on boards with keyboards
 
 ## Common Installation Issues
 

@@ -9,6 +9,7 @@ A guide to common issues and their solutions for GhostESP firmware.
 - [WiFi & Connection Issues](#wifi-and-connection-issues)
 - [Display & UI Problems](#display-and-ui-problems)
 - [Evil Portal Issues](#evil-portal)
+- [Dual ESP32 Communication Issues](#dual-esp32-communication-issues)
 - [Getting Help](#getting-help)
 
 ## Flashing Problems
@@ -73,6 +74,7 @@ A guide to common issues and their solutions for GhostESP firmware.
   - Single USB-C
   - Dual USB ports
   - MicroUSB variants
+  - AITRIP CYD (ESP32-2432S028R)
 - **Flash Requirements**:
   - Use bootloader mode sequence
   - Select correct board in flasher
@@ -122,6 +124,14 @@ A guide to common issues and their solutions for GhostESP firmware.
   - Check display cable connection
   - Verify board selection matches hardware
 
+### Power Saving Mode
+
+- **Problem**: Display turns off too quickly
+- **Solution**:
+  - Adjust display timeout in settings
+  - Use "Never" setting to keep display always on
+  - Power saving mode can be disabled if needed
+
 ## Evil Portal
 
 ### Evil Portal Setup Steps
@@ -138,8 +148,8 @@ A guide to common issues and their solutions for GhostESP firmware.
 If you're using the Evil Portal feature, note the following:
 
 1. **Connect to the Evil Portal AP**: Instead of connecting to "GhostNet," connect to the Evil Portal's Access Point (AP). The password for the Evil Portal AP is the same as the SSID.
-2. **Web UI Replacement**: When the Evil Portal is active, the normal web UI is replaced. You won’t have access to the web UI until the board is restarted.
-3. **Refreshing Access Points**: If "GhostNet" still appears after activating the Evil Portal, turn your device’s Wi-Fi off and on again to clear cached networks.
+2. **Web UI Replacement**: When the Evil Portal is active, the normal web UI is replaced. You won't have access to the web UI until the board is restarted.
+3. **Refreshing Access Points**: If "GhostNet" still appears after activating the Evil Portal, turn your device off and on again.
 
 > **Tip**: Windows and other devices sometimes cache network access points, so refreshing your Wi-Fi can help display the correct AP.
 
@@ -151,6 +161,35 @@ If you're using the Evil Portal feature, note the following:
 - **Mobile Issues**:
   - "Header fields too long": Add "https://" to URL
   - CSS display issues: Known limitation on mobile
+
+### Flipper Zero App HTML Upload
+
+- **Problem**: HTML upload fails
+- **Solution**:
+  - Ensure HTML is under 2048 bytes
+  - Use simple HTML without complex CSS/JS
+  - Try the built-in template first
+
+## Dual ESP32 Communication Issues
+
+### Connection Problems
+
+- **Problem**: Devices not connecting
+- **Solutions**:
+  1. Check wiring (TX→RX, RX→TX, GND connected)
+  2. Ensure both devices are powered
+  3. Reboot both devices simultaneously
+  4. Wait 30 seconds for discovery
+  5. Run `commstatus` to check connection
+
+### Command Issues
+
+- **Problem**: Commands not working on remote device
+- **Solutions**:
+  1. Verify connection with `commstatus`
+  2. Use exact GhostESP command syntax
+  3. Check if remote device is responsive
+  4. Try reconnecting with `commdisconnect` then reboot
 
 ## Getting Help
 

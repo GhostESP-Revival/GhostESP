@@ -7,6 +7,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "managers/gps_manager.h"
+#include "managers/wifi_manager.h"
 #include <core/commandline.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -26,8 +27,50 @@
 
 char serial_buffer[SERIAL_BUFFER_SIZE];
 
+// HTML capture state
+typedef enum {
+    HTML_STATE_IDLE,
+    HTML_STATE_CAPTURING,
+    HTML_STATE_COMPLETE
+} html_capture_state_t;
+
+static html_capture_state_t html_capture_state = HTML_STATE_IDLE;
+static char html_capture_buffer[2048];
+static size_t html_capture_pos = 0;
+
 // Forward declaration of command handler
 int handle_serial_command(const char *command);
+
+// HTML marker processing
+static void process_html_line(const char* line) {
+    if (strstr(line, "[HTML/BEGIN]") != NULL) {
+        html_capture_state = HTML_STATE_CAPTURING;
+        html_capture_pos = 0;
+        printf("HTML capture started\n");
+        return;
+    }
+    
+    if (strstr(line, "[HTML/CLOSE]") != NULL) {
+        if (html_capture_state == HTML_STATE_CAPTURING) {
+            html_capture_state = HTML_STATE_COMPLETE;
+            wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
+            printf("HTML capture completed (%zu bytes)\n", html_capture_pos);
+        }
+        return;
+    }
+    
+    if (html_capture_state == HTML_STATE_CAPTURING) {
+        size_t line_len = strlen(line);
+        if (html_capture_pos + line_len + 1 < sizeof(html_capture_buffer)) {
+            memcpy(html_capture_buffer + html_capture_pos, line, line_len);
+            html_capture_pos += line_len;
+            html_capture_buffer[html_capture_pos++] = '\n';
+        }
+        return;
+    }
+    
+    handle_serial_command(line);
+}
 
 void serial_task(void *pvParameter) {
   uint8_t *data = (uint8_t *)malloc(BUF_SIZE);
@@ -54,7 +97,7 @@ void serial_task(void *pvParameter) {
         if (incoming_char == '\n' || incoming_char == '\r') {
           serial_buffer[index] = '\0';
           if (index > 0) {
-            handle_serial_command(serial_buffer);
+            process_html_line(serial_buffer);
             index = 0;
           }
         } else if (index < SERIAL_BUFFER_SIZE - 1) {

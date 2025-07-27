@@ -65,6 +65,8 @@ const char *TAG = "WiFiManager";
 
 station_ap_pair_t station_ap_list[MAX_STATIONS];
 int station_count = 0;
+bool manual_disconnect = false;
+static bool boot_connection_attempted = false;
 void *beacon_task_handle = NULL;
 void *deauth_task_handle = NULL;
 int beacon_task_running = 0;
@@ -135,7 +137,6 @@ const size_t NUM_PORTS = sizeof(COMMON_PORTS) / sizeof(COMMON_PORTS[0]);
 static char PORTALURL[512] = "";
 static char domain_str[128] = "";
 EventGroupHandle_t wifi_event_group;
-const int WIFI_CONNECTED_BIT = BIT0;
 wifi_ap_record_t selected_ap;
 wifi_ap_record_t *selected_aps = NULL;
 int selected_ap_count = 0;
@@ -153,6 +154,11 @@ static bool login_done = false;
 static char current_creds_filename[128] = "";
 static char current_keystrokes_filename[128] = "";
 static int ap_connection_count = 0;
+
+#define MAX_HTML_BUFFER_SIZE 2048
+static char* html_buffer = NULL;
+static size_t html_buffer_size = 0;
+static bool use_html_buffer = false;
 
 // Station Scan Channel Hopping Globals
 static esp_timer_handle_t scansta_channel_hop_timer = NULL;
@@ -211,6 +217,10 @@ typedef enum {
     COMPANY_UNKNOWN
 } ECompany;
 
+void wifi_manager_set_manual_disconnect(bool disconnect) {
+    manual_disconnect = disconnect;
+}
+
 static void tolower_str(const uint8_t *src, char *dst) {
     for (int i = 0; i < 33 && src[i] != '\0'; i++) {
         dst[i] = tolower((char)src[i]);
@@ -265,11 +275,16 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
             break;
         case WIFI_EVENT_STA_START:
             printf("STA started\n");
-            esp_wifi_connect();
+            // No auto-connect here - handled by wifi_event_handler
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
-            printf("Disconnected from Wi-Fi\nRetrying...\n");
-            esp_wifi_connect();
+            if (manual_disconnect) {
+                printf("Disconnected from Wi-Fi (manual)\n");
+                manual_disconnect = false; // Reset flag
+            } else {
+                printf("Disconnected from Wi-Fi\n");
+                // No auto-reconnection
+            }
             break;
         default:
             break;
@@ -289,18 +304,37 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
-                               void *event_data) {
+                               void *event_data)
+{
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        printf("WiFi started.\nReady to scan.\n");
-        TERMINAL_VIEW_ADD_TEXT("WiFi started.\nReady to scan.\n");
+        // Only auto-connect on boot if we have saved credentials
+        if (!boot_connection_attempted) {
+            boot_connection_attempted = true;
+            
+            const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
+            if (saved_ssid && strlen(saved_ssid) > 0) {
+                printf("Attempting boot-time connection to saved network: %s\n", saved_ssid);
+                TERMINAL_VIEW_ADD_TEXT("Connecting to saved network: %s\n", saved_ssid);
+                esp_wifi_connect();
+            }
+        }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        printf("WiFi disconnected\n");
-        TERMINAL_VIEW_ADD_TEXT("WiFi disconnected\n");
+        wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
+        printf("Disconnected from WiFi (reason: %d)\n", disconnected->reason);
+        TERMINAL_VIEW_ADD_TEXT("Disconnected from WiFi (reason: %d)\n", disconnected->reason);
+        
+        // No auto-reconnection - only manual connections via 'connect' command
+        if (manual_disconnect) {
+            printf("Disconnected from WiFi (manual)\n");
+            TERMINAL_VIEW_ADD_TEXT("Disconnected from WiFi (manual)\n");
+            manual_disconnect = false; // Reset the flag
+        }
+        
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        printf("Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        TERMINAL_VIEW_ADD_TEXT("Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        printf("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
+        TERMINAL_VIEW_ADD_TEXT("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -781,6 +815,15 @@ esp_err_t portal_handler(httpd_req_t *req) {
     printf("Client requested URL: %s\n", req->uri);
     ESP_LOGI(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
 
+    // Check if we should serve HTML from buffer first
+    if (use_html_buffer && html_buffer != NULL && html_buffer_size > 0) {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, html_buffer, html_buffer_size);
+        ESP_LOGI(TAG, "Served HTML from buffer (size: %zu bytes).", html_buffer_size);
+        ESP_LOGI(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
+        return ESP_OK;
+    }
+
     // Check if we should serve the default embedded portal
     if (strcmp(PORTALURL, "INTERNAL_DEFAULT_PORTAL") == 0) {
         httpd_resp_set_type(req, "text/html");
@@ -1080,6 +1123,14 @@ void wifi_manager_stop_evil_portal() {
     login_done = false; // Reset login state on stop
     current_creds_filename[0] = '\0'; // Clear saved filenames
     current_keystrokes_filename[0] = '\0';
+    
+    // Clean up HTML buffer
+    use_html_buffer = false;
+    if (html_buffer != NULL) {
+        free(html_buffer);
+        html_buffer = NULL;
+    }
+    html_buffer_size = 0;
 
     if (dns_handle != NULL) {
         stop_dns_server(dns_handle);
@@ -1227,6 +1278,45 @@ void wifi_manager_init(void) {
         printf("Global CA certificate store initialized successfully.\n");
     } else {
         printf("Failed to initialize global CA certificate store: %s\n", esp_err_to_name(ret));
+    }
+}
+
+void wifi_manager_configure_sta_from_settings(void) {
+    // Configure STA with saved credentials for boot-time connection
+    const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
+    const char *saved_password = settings_get_sta_password(&G_Settings);
+    if (saved_ssid && strlen(saved_ssid) > 0) {
+        wifi_config_t sta_config = {
+            .sta = {
+                .threshold.authmode = (saved_password && strlen(saved_password) > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN,
+                .pmf_cfg = {.capable = true, .required = false},
+            },
+        };
+        
+        strlcpy((char *)sta_config.sta.ssid, saved_ssid, sizeof(sta_config.sta.ssid));
+        if (saved_password) {
+            strlcpy((char *)sta_config.sta.password, saved_password, sizeof(sta_config.sta.password));
+        }
+        
+        esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+        if (err == ESP_OK) {
+            printf("STA configured with saved credentials: %s\n", saved_ssid);
+            
+            // Mark that we've attempted boot connection and try to connect
+            boot_connection_attempted = true;
+            printf("Attempting boot-time connection to: %s\n", saved_ssid);
+            TERMINAL_VIEW_ADD_TEXT("Connecting to saved network: %s\n", saved_ssid);
+            
+            esp_err_t connect_err = esp_wifi_connect();
+            if (connect_err != ESP_OK) {
+                printf("Failed to initiate connection: %s\n", esp_err_to_name(connect_err));
+                TERMINAL_VIEW_ADD_TEXT("Failed to connect to saved network\n");
+            }
+        } else {
+            printf("Failed to configure STA: %s\n", esp_err_to_name(err));
+        }
+    } else {
+        printf("No saved WiFi credentials found\n");
     }
 }
 
@@ -3031,7 +3121,7 @@ void wifi_manager_start_ip_lookup() {
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     wifi_config_t wifi_config = {
         .sta = {
-            .threshold.authmode = strlen(password) > 8 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN,
+            .threshold.authmode = strlen(password) > 0 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN,
             .pmf_cfg = {.capable = true, .required = false},
         },
     };
@@ -3041,16 +3131,23 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     strlcpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
     // Ensure clean start state
+    // Clear connection bits first
+    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_CONNECTING_BIT);
+    
+    // Set the connecting bit BEFORE any WiFi operations to prevent automatic connection attempts
+    xEventGroupSetBits(wifi_event_group, WIFI_CONNECTING_BIT);
+    
+    // Disconnect any existing connection and wait for it to complete
     esp_wifi_disconnect();
+    // Wait a bit for the disconnection to be processed
     vTaskDelay(pdMS_TO_TICKS(500));
-    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-
+    
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
     int retry_count = 0;
-    const int max_retries = 5;
+    const int max_retries = 8;  // Increased retry count
     bool connected = false;
 
     while (retry_count < max_retries && !connected) {
@@ -3060,25 +3157,38 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
         }
 
         if (ret == ESP_OK) {
+            // Increased timeout to 15 seconds for better reliability
             EventBits_t bits = xEventGroupWaitBits(wifi_event_group, 
-                WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(8000));
+                WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
             
             if (bits & WIFI_CONNECTED_BIT) {
                 connected = true;
+                TERMINAL_VIEW_ADD_TEXT("Connected to %s\n", ssid);
+                printf("Connected to %s\n", ssid);
                 break;
+            } else {
+                TERMINAL_VIEW_ADD_TEXT("Timeout connecting to %s (attempt %d/%d)\n", ssid, retry_count+1, max_retries);
+                printf("Timeout connecting to %s (attempt %d/%d)\n", ssid, retry_count+1, max_retries);
             }
+        } else {
+            TERMINAL_VIEW_ADD_TEXT("Failed to initiate connection to %s (error: %d) (attempt %d/%d)\n", ssid, ret, retry_count+1, max_retries);
+            printf("Failed to initiate connection to %s (error: %d) (attempt %d/%d)\n", ssid, ret, retry_count+1, max_retries);
         }
 
         if (!connected) {
             esp_wifi_disconnect();
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            // Increased delay between retries to prevent overwhelming the AP
+            vTaskDelay(pdMS_TO_TICKS(2000));
             retry_count++;
         }
     }
 
+    // Clear the connecting bit as we're done with the manual connection attempt
+    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTING_BIT);
+
     if (!connected) {
-        TERMINAL_VIEW_ADD_TEXT("Failed after %d attempts\n", max_retries);
-        printf("Connection failed after %d attempts\n", max_retries);
+        TERMINAL_VIEW_ADD_TEXT("Failed to connect to %s after %d attempts\n", ssid, max_retries);
+        printf("Failed to connect to %s after %d attempts\n", ssid, max_retries);
         esp_wifi_disconnect();
     }
 }
@@ -4020,6 +4130,41 @@ void wifi_manager_stop_sae_flood(void) {
     wifi_manager_stop_monitor_mode();
     printf("SAE flood attack stopped. Total frames sent: %d\n", sae_flood_packets_sent);
     TERMINAL_VIEW_ADD_TEXT("SAE flood attack stopped. Total frames sent: %d\n", sae_flood_packets_sent);
+}
+
+void wifi_manager_set_html_from_uart(void) {
+    use_html_buffer = true;
+    if (html_buffer == NULL) {
+        html_buffer = (char*)malloc(MAX_HTML_BUFFER_SIZE);
+        if (html_buffer == NULL) {
+            printf("Failed to allocate HTML buffer\n");
+            use_html_buffer = false;
+            return;
+        }
+    }
+    html_buffer_size = 0;
+    printf("HTML buffer mode enabled, ready to receive HTML content\n");
+}
+
+void wifi_manager_store_html_chunk(const char* data, size_t len, bool is_final) {
+    if (!use_html_buffer || html_buffer == NULL) {
+        return;
+    }
+    
+    if (html_buffer_size + len >= MAX_HTML_BUFFER_SIZE) {
+        printf("HTML buffer overflow, truncating content\n");
+        len = MAX_HTML_BUFFER_SIZE - html_buffer_size - 1;
+    }
+    
+    if (len > 0) {
+        memcpy(html_buffer + html_buffer_size, data, len);
+        html_buffer_size += len;
+    }
+    
+    if (is_final) {
+        html_buffer[html_buffer_size] = '\0';
+        printf("HTML content stored in buffer (%zu bytes)\n", html_buffer_size);
+    }
 }
 
 void wifi_manager_sae_flood_help(void) {

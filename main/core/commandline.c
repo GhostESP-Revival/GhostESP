@@ -487,6 +487,7 @@ void handle_wifi_connection(int argc, char **argv) {
         settings_set_sta_password(&G_Settings, password);
         settings_save(&G_Settings);
     }
+    wifi_manager_set_manual_disconnect(false);
     wifi_manager_connect_wifi(ssid, password);
 
     if (VisualizerHandle == NULL) {
@@ -502,6 +503,19 @@ void handle_wifi_connection(int argc, char **argv) {
     sntp_setservername(0, "pool.ntp.org");
     sntp_init();
 #endif
+}
+
+void handle_wifi_disconnect(int argc, char **argv)
+{
+    wifi_manager_set_manual_disconnect(true);
+    esp_err_t err = esp_wifi_disconnect();
+    if (err == ESP_OK) {
+        printf("WiFi disconnect command sent successfully\n");
+        TERMINAL_VIEW_ADD_TEXT("WiFi disconnect command sent successfully\n");
+    } else {
+        printf("Failed to send disconnect command: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to send disconnect command\n");
+    }
 }
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -1155,6 +1169,24 @@ void handle_help(int argc, char **argv) {
     TERMINAL_VIEW_ADD_TEXT("          /mnt/ added to paths automatically.\n");
     TERMINAL_VIEW_ADD_TEXT("    Usage: startportal [FilePath] [AP_SSID] [PSK]\n");
     TERMINAL_VIEW_ADD_TEXT("           PSK is optional for an open network.\n");
+
+    printf("evilportal\n");
+    printf("    Description: Configure Evil Portal HTML content via UART buffer.\n");
+    printf("    Usage: evilportal -c sethtmlstr\n");
+    printf("    Steps:\n");
+    printf("      1. Run: evilportal -c sethtmlstr\n");
+    printf("      2. Send [HTML/BEGIN] marker over UART\n");
+    printf("      3. Send HTML content over UART\n");
+    printf("      4. Send [HTML/CLOSE] marker over UART\n");
+    printf("      5. Run startportal (will use buffered HTML)\n");
+    TERMINAL_VIEW_ADD_TEXT("evilportal\n");
+    TERMINAL_VIEW_ADD_TEXT("    Desc: Configure Evil Portal HTML via UART buffer.\n");
+    TERMINAL_VIEW_ADD_TEXT("    Usage: evilportal -c sethtmlstr\n");
+    TERMINAL_VIEW_ADD_TEXT("    Steps: 1) evilportal -c sethtmlstr\n");
+    TERMINAL_VIEW_ADD_TEXT("           2) Send [HTML/BEGIN] marker\n");
+    TERMINAL_VIEW_ADD_TEXT("           3) Send HTML content\n");
+    TERMINAL_VIEW_ADD_TEXT("           4) Send [HTML/CLOSE] marker\n");
+    TERMINAL_VIEW_ADD_TEXT("           5) Run startportal\n");
 
 
     printf("stopportal\n");
@@ -2309,6 +2341,9 @@ void handle_web_auth_cmd(int argc, char **argv) {
 
 
 void handle_listportals(int argc, char **argv);
+void handle_evilportal(int argc, char **argv);
+void handle_wifi_disconnect(int argc, char **argv);
+void handle_set_rgb_mode_cmd(int argc, char **argv);
 
 void handle_comm_discovery(int argc, char **argv) {
     comm_state_t state = esp_comm_manager_get_state();
@@ -2621,6 +2656,7 @@ void register_commands() {
     register_command("select", handle_select_cmd);
     register_command("capture", handle_capture_scan);
     register_command("startportal", handle_start_portal);
+    register_command("disconnect", handle_wifi_disconnect);
     register_command("stopportal", stop_portal);
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
@@ -2634,6 +2670,7 @@ void register_commands() {
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("listportals", handle_listportals);
+    register_command("evilportal", handle_evilportal);
     register_command("commdiscovery", handle_comm_discovery);
     register_command("commconnect", handle_comm_connect);
     register_command("commsend", handle_comm_send);
@@ -2679,6 +2716,7 @@ void register_commands() {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blespam", handle_ble_spam_cmd);
 #endif
+    register_command("setrgbmode", handle_set_rgb_mode_cmd);
     
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);
     
@@ -2747,6 +2785,57 @@ void handle_listportals(int argc, char **argv) {
         printf("  %.508s\n", portal_names[i]);
         TERMINAL_VIEW_ADD_TEXT("  %.508s\n", portal_names[i]);
     }
+}
+
+void handle_evilportal(int argc, char **argv) {
+    if (argc < 3) {
+        printf("Usage: %s -c <command>\n", argv[0]);
+        TERMINAL_VIEW_ADD_TEXT("Usage: %s -c <command>\n", argv[0]);
+        printf("Commands:\n");
+        printf("  sethtmlstr - Set HTML content from buffer (use with UART markers)\n");
+        TERMINAL_VIEW_ADD_TEXT("Commands:\n");
+        TERMINAL_VIEW_ADD_TEXT("  sethtmlstr - Set HTML content from buffer\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "-c") != 0) {
+        printf("Error: Expected -c flag\n");
+        TERMINAL_VIEW_ADD_TEXT("Error: Expected -c flag\n");
+        return;
+    }
+
+    if (strcmp(argv[2], "sethtmlstr") == 0) {
+        wifi_manager_set_html_from_uart();
+        printf("HTML buffer mode enabled for evil portal\n");
+        TERMINAL_VIEW_ADD_TEXT("HTML buffer mode enabled for evil portal\n");
+    } else {
+        printf("Error: Unknown command '%s'\n", argv[2]);
+        TERMINAL_VIEW_ADD_TEXT("Error: Unknown command '%s'\n", argv[2]);
+    }
+}
+
+void handle_set_rgb_mode_cmd(int argc, char **argv) {
+    if (argc != 2) {
+        printf("Usage: setrgbmode <normal|rainbow|stealth>\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: setrgbmode <normal|rainbow|stealth>\n");
+        return;
+    }
+    RGBMode mode;
+    if (strcasecmp(argv[1], "normal") == 0) {
+        mode = RGB_MODE_NORMAL;
+    } else if (strcasecmp(argv[1], "rainbow") == 0) {
+        mode = RGB_MODE_RAINBOW;
+    } else if (strcasecmp(argv[1], "stealth") == 0) {
+        mode = RGB_MODE_STEALTH;
+    } else {
+        printf("Invalid mode '%s'. Supported modes: normal, rainbow, stealth\n", argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Invalid mode '%s'. Supported modes: normal, rainbow, stealth\n", argv[1]);
+        return;
+    }
+    settings_set_rgb_mode(&G_Settings, mode);
+    settings_save(&G_Settings);
+    printf("RGB mode set to %s\n", argv[1]);
+    TERMINAL_VIEW_ADD_TEXT("RGB mode set to %s\n", argv[1]);
 }
 
 

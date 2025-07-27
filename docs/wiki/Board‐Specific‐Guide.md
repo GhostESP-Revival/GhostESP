@@ -16,6 +16,7 @@ CYD boards are easily recognizable with their yellow color and built-in display.
   - **CYD2USB**: USB-C only
   - **CYDMicroUSB**: Micro USB only
   - **CYDDualUSB**: USB-C and Micro USB (now supported)
+  - **AITRIP CYD**: ESP32-2432S028R
 
 > **Note**: CYD boards using the **ESP32-2432S028** (2.8 inches) are supported with GhostESP firmware. The **ESP32-2432S024** variant (2.4 inches) is not compatible.
 
@@ -52,6 +53,14 @@ A compact, keyboard-integrated board designed for portability.
 - Built-in display (240x135)
 - Integrated keyboard
 - SD card slot
+- Terminal App for keyboard-based command input
+- **Infrared (IR) support** with FlipperZero file compatibility
+
+### LilyGo Boards
+
+- **LilyGo T-Watch S3**: Smartwatch-style device with touchscreen
+  - **Infrared (IR) support** with FlipperZero file compatibility
+- **LilyGo TEmbed C1101**: Compact embedded board
 
 ### Generic ESP32 Boards
 
@@ -72,6 +81,7 @@ Base models with different levels of compatibility:
 - **Cardputer**: 240x135
 - **AwokMini**: 128x128 with joystick control
 - **Marauder V6 / AwokDual**: 240x320 with touchscreen
+- **LilyGo T-Watch S3**: Touchscreen with watch interface
 
 ### Feature Notes
 
@@ -80,6 +90,7 @@ Base models with different levels of compatibility:
   - Not supported: **Marauder V6**, **Awok Dual Touch**, **Generic ESP32-Wroom** chips, and **Awok Mini**
 - Standby mode available for non-touch displays.
 - Touchscreen support is actively developed, with fixes available for **Marauder V6**.
+- Power saving mode available on **Cardputer**,**S3TWatch**,**LilyGo TEmbed C1101** for extended battery life.
 
 ## 🔌 Getting Started with GhostESP
 
@@ -99,6 +110,7 @@ Base models with different levels of compatibility:
 - Some features, like BLE spam, may be missing in alpha releases.
 - Cache-clearing may be required when using the web flasher.
 - ESP32S2 Boards do not support bluetooth functionality due to lack of hardware.
+- **Infrared (IR) functionality** is limited to **LilyGo S3TWatch** and **ESP32-S3-Cardputer** devices.
 
 ## 👥 Support & Community
 
