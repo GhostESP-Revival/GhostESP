@@ -20,7 +20,22 @@ extern FSettings G_Settings;
 
 // Help command
 void handle_help(int argc, char **argv) {
-    const char *category = (argc > 1) ? argv[1] : "all";
+    const char *category = (argc > 1) ? argv[1] : "unknown"; // Default to "unknown" if no category is provided to fall through ifs
+
+    // List of all categories to print in order
+    const char *all_categories[] = {
+        "wifi", "ble", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+    };
+    int num_categories = sizeof(all_categories) / sizeof(all_categories[0]);
+
+    if (strcmp(category, "all") == 0) {
+        for (int i = 0; i < num_categories; ++i) {
+            // Recursively call this function for each category
+            char *fake_argv[] = { "help", (char *)all_categories[i] };
+            handle_help(2, fake_argv);
+        }
+        return;
+    }
 
     if (strcmp(category, "wifi") == 0) {
         printf("\nWi-Fi Commands:\n\n");
@@ -199,7 +214,8 @@ void handle_help(int argc, char **argv) {
     printf("  help cast      - YouTube cast commands\n");
     printf("  help capture   - Wi-Fi packet capture commands\n");
     printf("  help beacon    - Beacon spam commands\n");
-    printf("  help attack    - Attack/flood commands\n\n");
+    printf("  help attack    - Attack/flood commands\n");
+    printf("  help all      - All commands\n\n");
 
     TERMINAL_VIEW_ADD_TEXT(
         "  help wifi      - Wi-Fi commands\n"
@@ -214,7 +230,8 @@ void handle_help(int argc, char **argv) {
                       "  help cast      - YouTube cast commands\n"
                       "  help capture   - Wi-Fi packet capture commands\n"
                       "  help beacon    - Beacon spam commands\n"
-                      "  help attack    - Attack/flood commands\n\n");
+                      "  help attack    - Attack/flood commands\n"
+                      "  help all      - All commands\n\n");
 
     printf("Type 'help <category>' for details on that category.\n\n");
     TERMINAL_VIEW_ADD_TEXT("Type 'help <category>' for details on that category.\n\n");
@@ -223,11 +240,19 @@ void handle_help(int argc, char **argv) {
 
 // Wardriving command
 void handle_startwd(int argc, char **argv) {
+    if (argc > 2) {
+        printf("Usage: startwd [-s]\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: startwd [-s]\n");
+        return;
+    }
     bool stop_flag = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0) {
             stop_flag = true;
-            break;
+        } else {
+            printf("Unknown argument: %s\nUsage: startwd [-s]\n", argv[i]);
+            TERMINAL_VIEW_ADD_TEXT("Unknown argument: %s\nUsage: startwd [-s]\n", argv[i]);
+            return;
         }
     }
     if (stop_flag) {
@@ -254,7 +279,7 @@ void handle_startwd(int argc, char **argv) {
 
 // Port scan command
 void handle_scan_ports(int argc, char **argv) {
-    if (argc < 2) {
+    if (argc < 3) {
         printf("Usage:\nscanports local [-C/-A/start_port-end_port]\nscanports [IP] [-C/-A/start_port-end_port]\n");
         TERMINAL_VIEW_ADD_TEXT("Usage:\nscanports local [-C/-A/start_port-end_port]\nscanports [IP] [-C/-A/start_port-end_port]\n");
         return;
@@ -263,24 +288,23 @@ void handle_scan_ports(int argc, char **argv) {
     const char *target_ip = NULL;
     const char *port_arg = NULL;
     if (is_local) {
-        if (argc < 3) {
-            printf("Missing port argument for local scan\n");
-            TERMINAL_VIEW_ADD_TEXT("Missing port argument for local scan\n");
+        port_arg = argv[2];
+        if (argc > 3) {
+            printf("Too many arguments for local scan\n");
+            TERMINAL_VIEW_ADD_TEXT("Too many arguments for local scan\n");
             return;
         }
-        port_arg = argv[2];
         wifi_manager_scan_subnet();
         return;
     } else {
-        if (argc < 3) {
-            printf("Missing port argument for IP scan\n");
-            TERMINAL_VIEW_ADD_TEXT("Missing port argument for IP scan\n");
-            return;
-        }
         target_ip = argv[1];
         port_arg = argv[2];
+        if (argc > 3) {
+            printf("Too many arguments for IP scan\n");
+            TERMINAL_VIEW_ADD_TEXT("Too many arguments for IP scan\n");
+            return;
+        }
     }
-    // Example: scan_ports_on_host and scan_ip_port_range are assumed to be implemented elsewhere
     host_result_t result;
     if (strcmp(port_arg, "-C") == 0) {
         scan_ports_on_host(target_ip, &result);
@@ -332,12 +356,21 @@ void handle_web_auth_cmd(int argc, char **argv) {
 
 // PineAP detection command
 void handle_pineap_detection(int argc, char **argv) {
+    if (argc > 2) {
+        printf("Usage: pineap [-s]\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: pineap [-s]\n");
+        return;
+    }
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
         printf("Stopping PineAP detection...\n");
         TERMINAL_VIEW_ADD_TEXT("Stopping PineAP detection...\n");
         stop_pineap_detection();
         wifi_manager_stop_monitor_mode();
         pcap_file_close();
+        return;
+    } else if (argc > 1) {
+        printf("Unknown argument: %s\nUsage: pineap [-s]\n", argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Unknown argument: %s\nUsage: pineap [-s]\n", argv[1]);
         return;
     }
     int err = pcap_file_open("pineap_detection", PCAP_CAPTURE_WIFI);
