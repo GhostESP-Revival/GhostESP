@@ -12,17 +12,32 @@
 extern FSettings G_Settings;
 
 void handle_reboot(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: reboot\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: reboot\n");
+        return;
+    }
     printf("Rebooting system...\n");
     TERMINAL_VIEW_ADD_TEXT("Rebooting system...\n");
     esp_restart();
 }
 
 void handle_crash(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: crash\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: crash\n");
+        return;
+    }
     int *ptr = NULL;
     *ptr = 42;
 }
 
 void handle_chip_info_cmd(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: chipinfo\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: chipinfo\n");
+        return;
+    }
     esp_chip_info_t chip_info;
     esp_chip_info(&chip_info);
 
