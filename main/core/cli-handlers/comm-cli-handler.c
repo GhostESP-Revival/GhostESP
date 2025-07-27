@@ -9,6 +9,11 @@
 extern FSettings G_Settings;
 
 void handle_comm_discovery(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: commdiscovery\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: commdiscovery\n");
+        return;
+    }
     comm_state_t state = esp_comm_manager_get_state();
     if (state == COMM_STATE_SCANNING) {
         printf("Already in discovery mode. Listening for peers...\n");
@@ -85,6 +90,11 @@ void handle_comm_send(int argc, char **argv) {
 }
 
 void handle_comm_status(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: commstatus\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: commstatus\n");
+        return;
+    }
     comm_state_t state = esp_comm_manager_get_state();
     const char* state_str;
     switch(state) {
@@ -106,6 +116,11 @@ void handle_comm_status(int argc, char **argv) {
 }
 
 void handle_comm_disconnect(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: commdisconnect\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: commdisconnect\n");
+        return;
+    }
     esp_comm_manager_disconnect();
     printf("Disconnected from peer.\n");
     TERMINAL_VIEW_ADD_TEXT("Disconnected from peer.\n");
@@ -118,8 +133,14 @@ void handle_comm_setpins(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("Usage: commsetpins <tx_pin> <rx_pin>\n");
         return;
     }
-    int tx_pin = atoi(argv[1]);
-    int rx_pin = atoi(argv[2]);
+    char *endptr1, *endptr2;
+    int tx_pin = strtol(argv[1], &endptr1, 10);
+    int rx_pin = strtol(argv[2], &endptr2, 10);
+    if (*endptr1 != '\0' || *endptr2 != '\0') {
+        printf("Invalid pin numbers. Pins must be integers.\n");
+        TERMINAL_VIEW_ADD_TEXT("Invalid pin numbers.\n");
+        return;
+    }
     if (tx_pin < 0 || tx_pin > 48 || rx_pin < 0 || rx_pin > 48) {
         printf("Invalid pin numbers. Must be between 0-48.\n");
         TERMINAL_VIEW_ADD_TEXT("Invalid pin numbers.\n");
