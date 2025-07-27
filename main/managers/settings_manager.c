@@ -400,11 +400,10 @@ void settings_load(FSettings *settings) {
 
 static void update_rainbow_effect(const FSettings *settings) {
 #ifndef CONFIG_WITH_SCREEN
-  return; // early return to avoid creating with no screen
+  return;
 #endif
 
-
-  if (settings_get_rgb_mode(settings) != 0) {
+  if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
     if (rainbow_timer == NULL) {
       rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
       rainbow_hue = 0;
@@ -413,6 +412,8 @@ static void update_rainbow_effect(const FSettings *settings) {
     if (rainbow_timer != NULL) {
       lv_timer_del(rainbow_timer);
       rainbow_timer = NULL;
+      // Reset status bar color when leaving rainbow mode
+      display_manager_update_status_bar_color();
     }
   }
 }
@@ -590,17 +591,25 @@ void settings_save(const FSettings *settings) {
     printf("Failed to save RGB blue pin\n");
   }
 
-  if (settings_get_rgb_mode(settings) == 0) {
+  if (settings_get_rgb_mode(settings) == RGB_MODE_NORMAL) {
+    // Normal: static color/off
     if (rgb_effect_task_handle != NULL) {
-      vTaskDelete(rgb_effect_task_handle);
-      rgb_effect_task_handle = NULL;
+        vTaskDelete(rgb_effect_task_handle);
+        rgb_effect_task_handle = NULL;
     }
     rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false);
-  } else {
+} else if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
+    // Rainbow: animated
     if (rgb_effect_task_handle == NULL) {
-      xTaskCreate(rainbow_task, "Rainbow Task", 8192, &rgb_manager, 1,
-                  &rgb_effect_task_handle);
+        xTaskCreate(rainbow_task, "Rainbow Task", 8192, &rgb_manager, 1, &rgb_effect_task_handle);
     }
+} else if (settings_get_rgb_mode(settings) == RGB_MODE_STEALTH) {
+    // Stealth: LEDs always off
+    if (rgb_effect_task_handle != NULL) {
+        vTaskDelete(rgb_effect_task_handle);
+        rgb_effect_task_handle = NULL;
+    }
+    rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false); // Ensure LEDs are off
   }
 
 

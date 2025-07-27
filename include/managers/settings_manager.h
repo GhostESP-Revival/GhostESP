@@ -9,8 +9,10 @@
 
 // Enum for RGB Modes
 typedef enum {
-  RGB_MODE_NORMAL = 0,
-  RGB_MODE_RAINBOW = 1,
+    RGB_MODE_NORMAL = 0,
+    RGB_MODE_RAINBOW = 1,
+    RGB_MODE_STEALTH = 2
+    // ...add more modes here if needed
 } RGBMode;
 
 typedef enum {

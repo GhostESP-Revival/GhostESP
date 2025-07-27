@@ -111,7 +111,7 @@ typedef struct {
     int current_value;
 } SettingsItem;
 
-static const char *rgb_mode_options[] = {"Normal", "Rainbow"};
+static const char *rgb_mode_options[] = {"Normal", "Rainbow", "Stealth"};
 static const char *timeout_options[] = {"5s", "10s", "30s", "60s", "Never"};
 static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest"};
 static const char *bool_options[] = {"Off", "On"};
@@ -131,7 +131,7 @@ enum {
 };
 
 static SettingsItem settings_items[] = {
-    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 2, 0},
+    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 3, 0},
     {"Display Timeout", SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1},
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 15, 0},
     {"Third Control", SETTING_THIRD_CONTROL, bool_options, 2, 0},
@@ -537,6 +537,7 @@ static void apply_setting_change(int setting_index, int new_value) {
     switch (item->setting_type) {
         case SETTING_RGB_MODE:
             settings_set_rgb_mode(&G_Settings, new_value);
+            display_manager_update_status_bar_color();
             break;
         case SETTING_DISPLAY_TIMEOUT: {
             uint32_t timeout_ms = new_value == 0 ? 5000 : new_value == 1 ? 10000 : new_value == 2 ? 30000 : new_value == 3 ? 60000 : 0; // Handle "Never"

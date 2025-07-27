@@ -1332,3 +1332,29 @@ void lvgl_tick_task(void *arg) {
   }
   vTaskDelete(NULL);
 }
+
+void display_manager_update_status_bar_color(void) {
+    if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t color = lv_color_hex(theme_palettes[theme][0]);
+    lv_obj_set_style_border_color(status_bar, color, 0);
+
+    // Reset label colors as well
+    lv_color_t default_color = lv_color_hex(0xCCCCCC);
+    if (wifi_label && lv_obj_is_valid(wifi_label)) {
+        lv_obj_set_style_text_color(wifi_label, default_color, 0);
+    }
+    if (bt_label && lv_obj_is_valid(bt_label)) {
+        lv_obj_set_style_text_color(bt_label, default_color, 0);
+    }
+    if (sd_label && lv_obj_is_valid(sd_label)) {
+        lv_obj_set_style_text_color(sd_label, default_color, 0);
+    }
+    if (battery_label && lv_obj_is_valid(battery_label)) {
+        lv_obj_set_style_text_color(battery_label, default_color, 0);
+    }
+    if (mainlabel && lv_obj_is_valid(mainlabel)) {
+        lv_obj_set_style_text_color(mainlabel, lv_color_hex(0x999999), 0);
+    }
+    lv_obj_invalidate(status_bar);
+}

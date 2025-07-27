@@ -41,13 +41,23 @@ An Evil Portal creates a fake WiFi hotspot that looks like a real login page (li
 
    - This creates a WiFi network called "Free WiFi"
 
-
-
 6. **Test It!**
    - Look for "Free WiFi" in your phone's WiFi list
    - Connect to it
    - You should see a login page
    - If it doesn't work, see troubleshooting below
+
+## Alternative: Flipper Zero App Method
+
+If you have the GhostESP Flipper Zero App (v1.4+), you can upload simple HTML directly:
+
+1. **Open the GhostESP App** on your Flipper Zero
+2. **Navigate to WiFi** section then **Evil Portal**
+3. **Select "Set HTML"** option
+4. **Enter your HTML** (max 2048 bytes)
+5. **Start the portal** with your desired SSID ```default FreeWiFi```
+
+> **Note**: This method is limited to 2048 bytes and is best for simple login pages.
 
 ## Step-by-Step Setup
 
@@ -193,4 +203,4 @@ SingleFile is a browser extension that saves web pages as single HTML files, per
 - Choose simple login pages - they work better
 - Avoid pages with lots of images or animations
 - Some sites might not work well - try different ones
-- Hotel/cafe
+- Hotel/cafe login pages often work well as templates

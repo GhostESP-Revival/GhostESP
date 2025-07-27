@@ -20,14 +20,19 @@ Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution
 
 ## Important Notice
 
-GhostESP firmware is actively developed with regular updates. Current version VA1.3.7 includes:
+GhostESP firmware is actively developed with regular updates. Current version v1.7 (Revival) includes:
 
+- **Dual ESP32 communication** with WebUI control
+- **Power saving mode** for up to 5X battery life on supported devices
+- **Infrared (IR) support** with FlipperZero file compatibility
 - Enhanced display support with Flappy Ghost game
 - Evil Portal functionality (online and offline)
 - SD card support for compatible devices
 - CYD RGB LED control support
 - Web UI with auto-updating settings
 - Rave Mode for syncing ESP32 displays/LEDs with audio
+- Terminal App for keyboard-based command input
+- Fuel Gauge support (BQ27220 initially)
 
 For the latest updates and support:
 

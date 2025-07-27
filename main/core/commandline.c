@@ -241,6 +241,7 @@ void handle_wifi_connection(int argc, char **argv) {
         settings_set_sta_password(&G_Settings, password);
         settings_save(&G_Settings);
     }
+    wifi_manager_set_manual_disconnect(false);
     wifi_manager_connect_wifi(ssid, password);
 
     if (VisualizerHandle == NULL) {
@@ -351,6 +352,7 @@ void register_commands() {
     register_command("capture", handle_capture_scan);
     register_command("startportal", handle_start_portal);
     register_command("stopportal", handle_stop_portal);
+    register_command("disconnect", handle_wifi_disconnect);
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);
@@ -363,6 +365,7 @@ void register_commands() {
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("listportals", handle_listportals);
+    register_command("evilportal", handle_evilportal);
     register_command("commdiscovery", handle_comm_discovery);
     register_command("commconnect", handle_comm_connect);
     register_command("commsend", handle_comm_send);
@@ -408,6 +411,7 @@ void register_commands() {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blespam", handle_ble_spam_cmd);
 #endif
+    register_command("setrgbmode", handle_set_rgb_mode_cmd);
     
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);
     

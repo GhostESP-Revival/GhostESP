@@ -37,3 +37,26 @@ Identifying features:
 ![AITRIP CYD ESP32-2432S028 front](../images/CYDs/AITRIP_CYD_ESP32-2432S028-front.jpg)
 
 ---
+
+## Other CYD Variants
+
+### CYD2USB
+- Single USB-C port
+- Compatible with standard CYD firmware
+
+### CYDMicroUSB  
+- Single Micro USB port
+- Compatible with standard CYD firmware
+
+### CYDDualUSB
+- Both USB-C and Micro USB ports
+- Compatible with standard CYD firmware
+
+---
+
+## Important Notes
+
+- **ESP32-2432S028 (2.8 inch)**: Fully supported with all features
+- **ESP32-2432S024 (2.4 inch)**: Not compatible - avoid these boards
+- All CYD boards support SD card functionality
+- RGB LED control is available on all variants

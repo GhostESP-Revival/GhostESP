@@ -12,6 +12,7 @@ The following ESP32 models are officially supported:
   - **CYD2USB** (USB-C)
   - **CYDMicroUSB**
   - **CYDDualUSB** (Both ports)
+  - **AITRIP CYD** (ESP32-2432S028R)
   - **Compatibility Note**: Stable only with **ESP32-2432S028 (2.8 inches)**. Incompatible with **ESP32-2432S024 (2.4 inches)**.
 - **Waveshare LCD (7-inch)**: 800x480 resolution, using ESP32-S3
 - **Crowtech LCD (7-inch)**: 800x480 resolution, using ESP32-S3
@@ -20,6 +21,7 @@ The following ESP32 models are officially supported:
 - **AwokMini**: 128x128 display with joystick for navigation
 - **Awok ESP32 v5**
 - **LilyGo T-Watch S3**
+- **LilyGo TEmbed C1101**
 
 ### Generic Boards
 
@@ -39,17 +41,22 @@ The following ESP32 models are officially supported:
 
 ## Version Status
 
-- **Current version**: v1.5.1
+- **Current version**: v1.7 (Revival)
 - **Framework**: ESP-IDF
 
 ### Recent Feature Additions
 
+- **Dual ESP32 communication** with WebUI control
+- **Power saving mode** for up to 5X battery life on supported devices
+- **Infrared (IR) support** with FlipperZero .ir file compatibility
 - **Support for ESP32C5**: With Limitations
 - **DHCP-Starve attack**
 - **New UI** for a better user experience
 - **AirTag selection and spoofing**
-- **direct station deauthentication**
+- **Direct station deauthentication**
 - **BLE Wardriving**: with GPS Logging
+- **Terminal App** for keyboard-based command input
+- **Fuel Gauge support** (BQ27220 initially)
 
 ### Features Under Development
 
