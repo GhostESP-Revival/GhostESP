@@ -11,7 +11,7 @@ extern FSettings G_Settings;
 extern TaskHandle_t rgb_effect_task_handle;
 
 void handle_rgb_mode(int argc, char **argv) {
-    if (argc < 2) {
+    if (argc != 2) {
         printf("Usage: rgbmode <rainbow|police|strobe|off|color>\n");
         TERMINAL_VIEW_ADD_TEXT("Usage: rgbmode <rainbow|police|strobe|off|color>\n");
         return;
@@ -67,7 +67,7 @@ void handle_rgb_mode(int argc, char **argv) {
         };
         const int num_colors = sizeof(supported_colors) / sizeof(supported_colors[0]);
         int found = 0;
-        uint8_t r, g, b;
+        uint8_t r = 0, g = 0, b = 0;
         for (int i = 0; i < num_colors; i++) {
             if (strcasecmp(argv[1], supported_colors[i].name) == 0) {
                 r = supported_colors[i].r;
@@ -114,6 +114,7 @@ void handle_set_rgb_mode_cmd(int argc, char **argv) {
     printf("RGB mode set to %s\n", argv[1]);
     TERMINAL_VIEW_ADD_TEXT("RGB mode set to %s\n", argv[1]);
 }
+
 void handle_setrgb(int argc, char **argv) {
     if (argc != 4) {
         printf("Usage: setrgbpins <red> <green> <blue>\n");
@@ -122,9 +123,26 @@ void handle_setrgb(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("           (use same value for all pins for single-pin LED strips)\n\n");
         return;
     }
-    gpio_num_t red_pin = (gpio_num_t)atoi(argv[1]);
-    gpio_num_t green_pin = (gpio_num_t)atoi(argv[2]);
-    gpio_num_t blue_pin = (gpio_num_t)atoi(argv[3]);
+    // Validate that all arguments are integers and in valid GPIO range
+    char *endptr;
+    int red_pin = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || red_pin < 0) {
+        printf("Invalid red pin: %s\n", argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Invalid red pin: %s\n", argv[1]);
+        return;
+    }
+    int green_pin = strtol(argv[2], &endptr, 10);
+    if (*endptr != '\0' || green_pin < 0) {
+        printf("Invalid green pin: %s\n", argv[2]);
+        TERMINAL_VIEW_ADD_TEXT("Invalid green pin: %s\n", argv[2]);
+        return;
+    }
+    int blue_pin = strtol(argv[3], &endptr, 10);
+    if (*endptr != '\0' || blue_pin < 0) {
+        printf("Invalid blue pin: %s\n", argv[3]);
+        TERMINAL_VIEW_ADD_TEXT("Invalid blue pin: %s\n", argv[3]);
+        return;
+    }
 
     esp_err_t ret;
     if (red_pin == green_pin && green_pin == blue_pin) {
@@ -136,7 +154,7 @@ void handle_setrgb(int argc, char **argv) {
             settings_set_rgb_separate_pins(&G_Settings, -1, -1, -1);
             settings_save(&G_Settings);
             printf("Single-pin RGB configured on GPIO %d and saved.\n", red_pin);
-            char rgb_buf[64];
+            char rgb_buf[96];
             snprintf(rgb_buf, sizeof(rgb_buf), "Single-pin RGB configured on GPIO %d and saved.\n", red_pin);
             TERMINAL_VIEW_ADD_TEXT(rgb_buf);
         }
@@ -149,7 +167,7 @@ void handle_setrgb(int argc, char **argv) {
             settings_set_rgb_separate_pins(&G_Settings, red_pin, green_pin, blue_pin);
             settings_save(&G_Settings);
             printf("RGB pins updated to R:%d G:%d B:%d and saved.\n", red_pin, green_pin, blue_pin);
-            char rgb_buf[64];
+            char rgb_buf[96];
             snprintf(rgb_buf, sizeof(rgb_buf), "RGB pins updated to R:%d G:%d B:%d and saved.\n", red_pin, green_pin, blue_pin);
             TERMINAL_VIEW_ADD_TEXT(rgb_buf);
         }
