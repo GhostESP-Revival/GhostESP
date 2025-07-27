@@ -5,6 +5,11 @@
 #include <stdlib.h>
 
 void handle_sd_config(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: sd_config\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: sd_config\n");
+        return;
+    }
     sd_card_print_config();
 }
 
@@ -63,5 +68,10 @@ void handle_sd_pins_spi(int argc, char **argv) {
 }
 
 void handle_sd_save_config(int argc, char **argv) {
+    if (argc > 1) {
+        printf("Usage: sd_save_config\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: sd_save_config\n");
+        return;
+    }
     sd_card_save_config();
 }
