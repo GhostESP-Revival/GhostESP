@@ -86,23 +86,14 @@ jobs:
             exit 1
           }
 
-      - name: Download Custom Bootloader
+      - name: Verify Local Bootloader Exists
         run: |
-          BOOTLOADER_URL="https://cdn.spookytools.com/bootloaders/${{ matrix.target.idf_target }}.bin"
-          BOOTLOADER_PATH="build/bootloader/bootloader.bin" # Correct path for bootloader binary
-          echo "Downloading bootloader from $BOOTLOADER_URL..."
-          curl -f -L -o "$BOOTLOADER_PATH" "$BOOTLOADER_URL" || {
-            echo "Error: Bootloader download failed from $BOOTLOADER_URL."
-            # Optional: Fallback to default if needed, or just fail
-            # echo "Falling back to default bootloader build..."
-            # cd build/bootloader && ninja && cd ../.. || exit 1
-            exit 1
-          }
+          BOOTLOADER_PATH="build/bootloader/bootloader.bin"
           if [ ! -f "$BOOTLOADER_PATH" ]; then
-            echo "Error: Bootloader file not found at $BOOTLOADER_PATH after download."
+            echo "Error: Bootloader not found at $BOOTLOADER_PATH. Build may have failed."
             exit 1
           fi
-          echo "Bootloader downloaded successfully to $BOOTLOADER_PATH."
+          echo "Local bootloader found at $BOOTLOADER_PATH."
 
       - name: Package Artifacts into ZIP
         run: |

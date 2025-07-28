@@ -30,9 +30,9 @@ typedef struct {
 } pcap_packet_header_t;
 
 #define MAX_FILE_NAME_LENGTH 528
-#define BUFFER_SIZE 4096
+#define PCAP_BUFFER_SIZE 4096
 
-static uint8_t pcap_buffer[BUFFER_SIZE];
+static uint8_t pcap_buffer[PCAP_BUFFER_SIZE];
 static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;

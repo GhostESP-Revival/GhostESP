@@ -51,7 +51,7 @@ static esp_err_t teardown_mdns(void);
 #define MAX_LOG_BUFFER_SIZE (8 * 1024)  // 8KB log buffer size
 #define LOG_CHUNK_SIZE (MAX_LOG_BUFFER_SIZE / 4)  // Size to remove when buffer is full
 #define MAX_FILE_SIZE (5 * 1024 * 1024) // 5 MB
-#define BUFFER_SIZE (1024)              // 1 KB buffer size for reading chunks
+#define AP_MANAGER_BUFFER_SIZE (1024)   // 1 KB buffer size for reading chunks
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
 #define SERIAL_BUFFER_SIZE 528          // Size of serial buffer
 
@@ -233,7 +233,7 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment");
 
     // Allocate a buffer for sending chunks
-    char *chunk_buf = malloc(BUFFER_SIZE);
+    char *chunk_buf = malloc(AP_MANAGER_BUFFER_SIZE);
     if (!chunk_buf) {
         ESP_LOGE(TAG, "Failed to allocate memory for chunk buffer.");
         fclose(file);
@@ -245,7 +245,7 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
 
     size_t bytes_read;
     esp_err_t ret = ESP_OK;
-    while ((bytes_read = fread(chunk_buf, 1, BUFFER_SIZE, file)) > 0) {
+    while ((bytes_read = fread(chunk_buf, 1, AP_MANAGER_BUFFER_SIZE, file)) > 0) {
         if (httpd_resp_send_chunk(req, chunk_buf, bytes_read) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to send file chunk.");
             ret = ESP_FAIL;
@@ -358,7 +358,7 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Upload path: %s", path_param);
 
     // Buffer for receiving data
-    char *buf = malloc(BUFFER_SIZE + 1);
+    char *buf = malloc(AP_MANAGER_BUFFER_SIZE + 1);
     if (!buf) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Memory allocation failed for buffer.\"}");
@@ -372,7 +372,7 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
     bool headers_parsed = false;
     char *body_start = NULL;
 
-    while ((received = httpd_req_recv(req, buf, BUFFER_SIZE)) > 0) {
+    while ((received = httpd_req_recv(req, buf, AP_MANAGER_BUFFER_SIZE)) > 0) {
         buf[received] = '\0';
         total_received += received;
 

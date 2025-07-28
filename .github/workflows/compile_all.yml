@@ -79,30 +79,31 @@ jobs:
             exit 1
           }
 
-      - name: Download Bootloader
+      - name: Verify Local Bootloader Exists
         run: |
-          BOOTLOADER_URL="https://cdn.spookytools.com/bootloaders/${{ matrix.target.idf_target }}.bin"
-          BOOTLOADER_PATH="build/bootloader.bin"
-          echo "Downloading bootloader from $BOOTLOADER_URL..."
-          curl -L -o "$BOOTLOADER_PATH" "$BOOTLOADER_URL" || {
-            echo "Error: Bootloader download failed."
-            exit 1
-          }
+          BOOTLOADER_PATH="build/bootloader/bootloader.bin"
           if [ ! -f "$BOOTLOADER_PATH" ]; then
-            echo "Error: Bootloader file not found after download."
+            echo "Error: Bootloader not found at $BOOTLOADER_PATH. Build may have failed."
             exit 1
           fi
-          echo "Bootloader downloaded successfully."
+          echo "Local bootloader found at $BOOTLOADER_PATH."
 
       - name: Package Artifacts into ZIP
         run: |
           ARTIFACT_DIR="packaged_artifacts"
           ZIP_FILE="${{ matrix.target.zip_name }}"
           mkdir -p "$ARTIFACT_DIR"
+          # Copy partition table
           cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/" || {
             echo "Failed to copy partition table"
             exit 1
           }
+          # Copy bootloader
+          cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/" || {
+            echo "Failed to copy bootloader"
+            exit 1
+          }
+          # Copy app binary
           cp build/*.bin "$ARTIFACT_DIR/" || {
             echo "Failed to copy binaries"
             exit 1

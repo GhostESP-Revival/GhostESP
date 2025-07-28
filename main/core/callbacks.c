@@ -55,7 +55,6 @@ static void trim_trailing(char *str);
 static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2);
 static bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt);
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-static const char SKIMMER_TAG[] STORE_STR_ATTR = "SKIMMER_DETECT";
 #endif
 static const char *suspicious_names[] STORE_DATA_ATTR = {
     "HC-03", "HC-05", "HC-06",  "HC-08",    "BT-HC05", "JDY-31",
@@ -563,7 +562,6 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     int rssi = pkt->rx_ctrl.rssi;
     int channel = pkt->rx_ctrl.channel;
 
-    bool network_found = false;
     char encryption_type[8] = "OPEN";
 
     while (index + 1 < len) {
@@ -619,6 +617,8 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     wardriving_data.encryption_type[sizeof(wardriving_data.encryption_type) - 1] = '\0';
 
     esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
+    // Suppress unused variable warning
+    (void)err;
 }
 
 void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
