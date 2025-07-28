@@ -18,6 +18,8 @@ extern View keyboard_view;
 static const char *TAG = "Terminal";
 static lv_obj_t *terminal_page = NULL;
 static SemaphoreHandle_t terminal_mutex = NULL;
+static bool retry_cleanup_flag = false;
+static lv_timer_t *terminal_cleanup_retry_timer = NULL;
 static bool terminal_active = false;
 static bool is_stopping = false;
 #define MAX_TEXT_LENGTH 4096
@@ -208,136 +210,205 @@ void text_box_click_cb(lv_event_t *e){
 }
 #endif
 void terminal_view_create(void) {
-  is_stopping = false;
-  if (terminal_view.root != NULL) {
-    return;
-  }
-
-  if (!terminal_mutex) {
-    terminal_mutex = xSemaphoreCreateMutex();
-    if (!terminal_mutex) {
-      ESP_LOGE(TAG, "Failed to create terminal mutex");
-      return;
+    is_stopping = false;
+    if (terminal_view.root != NULL) {
+        return;
     }
-  }
 
-  terminal_active = true;
+    if (!terminal_mutex) {
+        terminal_mutex = xSemaphoreCreateMutex();
+        if (!terminal_mutex) {
+            ESP_LOGE(TAG, "Failed to create terminal mutex");
+            return;
+        }
+    }
 
-  terminal_view.root = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(terminal_view.root, LV_HOR_RES, LV_VER_RES);
-  lv_obj_set_style_bg_color(terminal_view.root, lv_color_black(), 0);
-  lv_obj_set_scrollbar_mode(terminal_view.root, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_pad_all(terminal_view.root, 0, 0);
+    terminal_active = true;
 
-  const int STATUS_BAR_HEIGHT = 20;
+    terminal_view.root = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(terminal_view.root, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(terminal_view.root, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(terminal_view.root, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(terminal_view.root, 0, 0); // Remove border
+    lv_obj_set_scrollbar_mode(terminal_view.root, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_all(terminal_view.root, 0, 0);
 
-  int available_height = LV_VER_RES - STATUS_BAR_HEIGHT;
-  if (LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) {
-      available_height -= (BUTTON_SIZE + BUTTON_PADDING * 2);
-  }
-  int textarea_height = available_height;
+    const int STATUS_BAR_HEIGHT = 20;
+    const int padding = 5;
+    const int textbox_height = 40;
 
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
-  int padding = 5;
-  int textbox_height = 40;
-  int textbox_width = LV_HOR_RES - 2 * padding;
-  textarea_height -= (textbox_height + padding); // only need 1x pad since the text box is at the bottom of the screen
-#endif  
+    int back_button_height = 0;
+    bool show_back_btn = false;
+    bool show_input_bar = false;
 
-  terminal_page = lv_list_create(terminal_view.root);
-  lv_obj_set_pos(terminal_page, 0, STATUS_BAR_HEIGHT); 
-  lv_obj_set_size(terminal_page, LV_HOR_RES, textarea_height);
-  lv_obj_set_style_bg_color(terminal_page, lv_color_black(), 0);
-  lv_obj_set_style_pad_all(terminal_page, 0, 0);
-  lv_obj_set_scrollbar_mode(terminal_page, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_border_width(terminal_page, 0, 0);
-  lv_obj_set_style_clip_corner(terminal_page, false, 0);
-  lv_obj_set_scrollbar_mode(terminal_view.root, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_border_width(terminal_view.root, 0,0 );
-  lv_obj_set_style_radius(terminal_view.root, 0, 0);
-  lv_obj_set_scroll_dir(terminal_page, LV_DIR_VER);
 #ifdef CONFIG_USE_TOUCHSCREEN
-  if (LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) {
-    back_btn = lv_btn_create(terminal_view.root);
-    lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
-    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333333), LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT);
-    lv_obj_center(back_label);
-
-
-    lv_obj_update_layout(terminal_view.root);
-    ESP_LOGW(TAG, "Back pos: x=%d, y=%d, w=%d, h=%d", 
-             lv_obj_get_x(back_btn), lv_obj_get_y(back_btn), 
-             lv_obj_get_width(back_btn), lv_obj_get_height(back_btn));
-  }
-  textbox_width -= BUTTON_SIZE + 2 * BUTTON_PADDING;
-  if (textbox_width < 40) textbox_width = 40;
+    if (LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) {
+        show_back_btn = true;
+        back_button_height = BUTTON_SIZE + BUTTON_PADDING * 2;
+    }
 #endif
 
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
-    input_label = lv_label_create(terminal_view.root);
-    lv_obj_set_size(input_label, textbox_width, textbox_height - 2 * padding);
-    lv_obj_set_style_bg_color(input_label, lv_color_hex(0x1E1E1E), 0);
-    lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_pad_all(input_label, padding, 0);
-    lv_obj_set_style_radius(input_label, 5, 0);
-    lv_obj_align(input_label, LV_ALIGN_BOTTOM_RIGHT, -padding, -2*padding);
-    lv_obj_add_event_cb(input_label, text_box_click_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_flag(input_label, LV_OBJ_FLAG_CLICKABLE);
-    lv_label_set_long_mode(input_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(input_label, "Type Command...");
+    show_input_bar = true;
 #endif
 
-  display_manager_add_status_bar("Terminal");
+    // Calculate the height for the input area (input box + padding)
+    int input_area_height = 0;
+    if (show_back_btn && show_input_bar) {
+        input_area_height = (back_button_height > (textbox_height + padding) ? back_button_height : (textbox_height + padding));
+    } else if (show_back_btn) {
+        input_area_height = back_button_height;
+    } else if (show_input_bar) {
+        input_area_height = textbox_height + padding;
+    } else {
+        input_area_height = 0;
+    }
 
-  if (!terminal_update_timer) { 
-      terminal_update_timer = lv_timer_create(process_queued_messages_callback, 50, NULL);
-      if (!terminal_update_timer) {
-          ESP_LOGE(TAG, "Failed to create terminal update timer");
-      }
-  }
-  createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
+    // Calculate the height for the terminal readout area
+    int textarea_height = LV_VER_RES - STATUS_BAR_HEIGHT - input_area_height;
+
+    // Create the terminal_page to fill all space above the input box and back button
+    terminal_page = lv_list_create(terminal_view.root);
+    lv_obj_set_pos(terminal_page, 0, STATUS_BAR_HEIGHT);
+    lv_obj_set_size(terminal_page, LV_HOR_RES, textarea_height);
+    lv_obj_set_style_bg_color(terminal_page, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(terminal_page, 0, 0);
+    lv_obj_set_scrollbar_mode(terminal_page, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_border_width(terminal_page, 0, 0);
+    lv_obj_set_style_clip_corner(terminal_page, false, 0);
+    lv_obj_set_scroll_dir(terminal_page, LV_DIR_VER);
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (show_back_btn) {
+        back_btn = lv_btn_create(terminal_view.root);
+        lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
+        lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
+        lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+        lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+        lv_obj_t *back_label = lv_label_create(back_btn);
+        lv_label_set_text(back_label, LV_SYMBOL_LEFT);
+        lv_obj_center(back_label);
+
+        lv_obj_update_layout(terminal_view.root);
+        ESP_LOGW(TAG, "Back pos: x=%d, y=%d, w=%d, h=%d",
+                 lv_obj_get_x(back_btn), lv_obj_get_y(back_btn),
+                 lv_obj_get_width(back_btn), lv_obj_get_height(back_btn));
+    }
+#endif
+
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
+    if (show_input_bar) {
+        int textbox_width = LV_HOR_RES - 2 * padding;
+    #ifdef CONFIG_USE_TOUCHSCREEN
+        if (show_back_btn) {
+            textbox_width -= BUTTON_SIZE + 2 * BUTTON_PADDING;
+        }
+    #endif
+        if (textbox_width < 40) textbox_width = 40;
+
+        input_label = lv_label_create(terminal_view.root);
+        lv_obj_set_size(input_label, textbox_width, textbox_height);
+        lv_obj_set_style_bg_color(input_label, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_pad_all(input_label, padding, 0);
+        lv_obj_set_style_radius(input_label, 6, 0);
+        lv_obj_set_style_border_width(input_label, 0, 0);
+        lv_obj_set_style_shadow_width(input_label, 0, 0);
+        lv_obj_align(input_label, LV_ALIGN_BOTTOM_RIGHT, -padding, -padding);
+        lv_obj_add_event_cb(input_label, text_box_click_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_flag(input_label, LV_OBJ_FLAG_CLICKABLE);
+        lv_label_set_long_mode(input_label, LV_LABEL_LONG_CLIP);
+        lv_label_set_text(input_label, "Type Command...");
+        // Center vertically by adjusting vertical padding
+        const lv_font_t *current_font = lv_obj_get_style_text_font(input_label, 0);
+        int font_height = lv_font_get_line_height(current_font);
+        int vertical_pad = (textbox_height - font_height) / 2;
+        if (vertical_pad < 0) vertical_pad = 0; // Prevent negative padding
+        lv_obj_set_style_pad_top(input_label, vertical_pad, 0);
+        lv_obj_set_style_pad_bottom(input_label, vertical_pad, 0);
+    }
+#endif
+
+    display_manager_add_status_bar("Terminal");
+
+    if (!terminal_update_timer) {
+        terminal_update_timer = lv_timer_create(process_queued_messages_callback, 50, NULL);
+        if (!terminal_update_timer) {
+            ESP_LOGE(TAG, "Failed to create terminal update timer");
+        }
+    }
+    createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
+}
+static void terminal_retry_cleanup_cb(lv_timer_t *timer) {
+    if (!retry_cleanup_flag) {
+        lv_timer_del(timer);
+        terminal_cleanup_retry_timer = NULL;
+        return;
+    }
+    ESP_LOGI(TAG, "Retrying terminal cleanup...");
+    // Try to destroy again
+    retry_cleanup_flag = false;
+    terminal_view_destroy();
+    // If cleanup succeeds, the flag will stay false and timer will be deleted
+    // If not, the flag will be set again and timer will keep running
 }
 
 void terminal_view_destroy(void) {
+    // Signal all callbacks/timers to stop
     terminal_active = false;
     is_stopping = true;
-    clear_message_queue();
 
+    // Clear message queue and reset state
+    clear_message_queue();
+    current_text_length = 0;
+    input_len = 0;
+    input_buffer[0] = '\0';
+
+    // Delete timer first to prevent callbacks after objects are freed
     if (terminal_update_timer) {
         lv_timer_del(terminal_update_timer);
         terminal_update_timer = NULL;
     }
 
+    // Safely delete LVGL objects
     if (terminal_mutex) {
         if (xSemaphoreTake(terminal_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-            if (terminal_view.root != NULL) {
+            // Delete LVGL objects if they exist
+            if (terminal_view.root) {
                 lv_obj_del(terminal_view.root);
                 terminal_view.root = NULL;
-                terminal_page = NULL;
-                back_btn = NULL;
-                input_label = NULL;
             }
-            vSemaphoreDelete(terminal_mutex);
+            // Set all pointers to NULL to avoid dangling references
+            terminal_page = NULL;
+            back_btn = NULL;
+            input_label = NULL;
+
+            vSemaphoreDelete(terminal_mutex); // Delete mutex directly after acquiring
             terminal_mutex = NULL;
         } else {
             ESP_LOGE(TAG, "Failed to acquire terminal mutex during destroy. A leak may occur.");
-            terminal_view.root = NULL;
-            terminal_mutex = NULL;
+            retry_cleanup_flag = true; // Set flag to retry cleanup later
+            if (!terminal_cleanup_retry_timer) {
+                terminal_cleanup_retry_timer = lv_timer_create(terminal_retry_cleanup_cb, 250, NULL);
+            }
         }
+    } else {
+        // If mutex is already NULL, still clear pointers
+        terminal_view.root = NULL;
+        terminal_page = NULL;
+        back_btn = NULL;
+        input_label = NULL;
     }
 
-    // Reset state variables
-    current_text_length = 0;
-    input_len = 0;
-    input_buffer[0] = '\0';
+    // Final state reset
     is_stopping = false;
+    if (terminal_cleanup_retry_timer) {
+        lv_timer_del(terminal_cleanup_retry_timer);
+        terminal_cleanup_retry_timer = NULL;
+    }
 }
 
 void terminal_view_add_text(const char *text) {

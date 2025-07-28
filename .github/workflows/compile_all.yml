@@ -24,6 +24,7 @@ jobs:
           - { name: "esp32s2-generic", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32s2-generic.zip" }
           - { name: "esp32s3-generic", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.default.esp32s3",    zip_name: "esp32s3-generic.zip" }
           - { name: "esp32c3-generic", idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.default.esp32c3",    zip_name: "esp32c3-generic.zip" }
+          - { name: "esp32c5-generic", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.default.esp32c5",    zip_name: "esp32c5-generic-v01.zip" }
           - { name: "esp32c6-generic", idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",    zip_name: "esp32c6-generic.zip" }
           - { name: "Awok V5",         idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32v5_awok.zip" }
           - { name: "ghostboard",      idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",         zip_name: "ghostboard.zip" }
@@ -36,9 +37,13 @@ jobs:
           - { name: "CYDDualUSB",      idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDDualUSB",         zip_name: "CYDDualUSB.zip" }
           - { name: "CYD2USB2.4_Inch", idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",     zip_name: "CYD2USB2.4Inch.zip" }
           - { name: "CYD2USB2.4_Inch_C", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient", zip_name: "CYD2USB2.4Inch_C.zip" }
+          - { name: "CYD2432S028R",    idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",       zip_name: "CYD2432S028R.zip" }
           - { name: "Waveshare_LCD",   idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",     zip_name: "Waveshare_LCD.zip" }
           - { name: "Crowtech_LCD",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",      zip_name: "Crowtech_LCD.zip" }
           - { name: "Flipper_JCMK_GPS", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",    zip_name: "Flipper_JCMK_GPS.zip" }
+          - { name: "T-Deck",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",              zip_name: "LilyGo-T-Deck.zip" }
+          - { name: "TEmbedC1101",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",        zip_name: "LilyGo-TEmbedC1101.zip" }
+          - { name: "S3TWatch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",           zip_name: "LilyGo-S3TWatch-2020.zip" }
 
     steps:
       - uses: actions/checkout@v4

@@ -62,6 +62,23 @@ void app_main(void) {
     // ble_init();
 #endif
 
+#ifdef CONFIG_USE_TDECK
+    ESP_LOGI(TAG, "TDECK: Delay for c3 boot");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGI(TAG, "TDECK: END DELAY for c3 boot");
+
+    // SET all SPI CS pins high to get the devices to shut it
+    gpio_set_direction(39, GPIO_MODE_OUTPUT);
+    gpio_set_level(39, 1);
+    gpio_set_direction(12, GPIO_MODE_OUTPUT);
+    gpio_set_level(12, 1);
+    gpio_set_direction(9, GPIO_MODE_OUTPUT);
+    gpio_set_level(9, 1);
+
+    gpio_set_direction(10, GPIO_MODE_OUTPUT);
+    gpio_set_level(10, 1); // set tdeck POWER_ON pin high to enable peripherals
+#endif
+
 #ifdef USB_MODULE
     wifi_manager_auto_deauth();
     return;
@@ -129,17 +146,11 @@ void app_main(void) {
 
 #ifdef CONFIG_USE_JOYSTICK
 
-#define L_BTN 13
-#define C_BTN 34
-#define U_BTN 36
-#define R_BTN 39
-#define D_BTN 35
-
-    joystick_init(&joysticks[0], L_BTN, HOLD_LIMIT, true);
-    joystick_init(&joysticks[1], C_BTN, HOLD_LIMIT, true);
-    joystick_init(&joysticks[2], U_BTN, HOLD_LIMIT, true);
-    joystick_init(&joysticks[3], R_BTN, HOLD_LIMIT, true);
-    joystick_init(&joysticks[4], D_BTN, HOLD_LIMIT, true);
+    joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);
+    joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);
+    joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);
+    joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);
+    joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);
 
     printf("Joystick GPIO Setup Successfully...\n");
 #endif

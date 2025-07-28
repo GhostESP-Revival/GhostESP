@@ -4,9 +4,12 @@
 
 ### Big Changes
 
+
 #### Support for connecting two ESP32 chips running GhostESP with a WebUI section for control
 
 #### Up to 5X the battery life on supported devices with power saving mode
+
+#### Support for the LilyGo T-Deck - @tototo31
 
 #### Support for the LilyGo TEmbed C1101
 
@@ -37,6 +40,7 @@
   - Add build name config variable for debugging and auto-flash support - @tototo31
   - Try to connect to saved WiFi on boot if available
   - Add 'Stealth' mode for silencing RGB - @tototo31
+  - Display backlight percentage setting for PWM enabled devices - @tototo31
   
 ### Changed
 
@@ -49,6 +53,7 @@
   - S3TWatch: Disable tap-to-wake, use touch interrupt instead.
   - Exiting a view now returns to the previous view instead of the main menu - @tototo31
   - Add CAPSLOCK shift toggle to keyboard view - @tototo31
+  - Restyle terminal view - @tototo31
 
 - WebUI
   - Minor style tweaks
@@ -71,6 +76,7 @@
   - Fix stop command not stopping GPS task
   - Fix serial going unresponsive by using 'scanap -stop'
   - Small fixes to the process of connecting to a WiFi network
+  - Fix SAE Flood Attack 
   
 - General
   - Disable and re-enable ESP comm manager UART around GPS usage to avoid driver conflicts

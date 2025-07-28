@@ -21,7 +21,11 @@
 #define JTAG_SUPPORTED 0
 #endif
 
+#ifndef CONFIG_USE_TDECK
 #define UART_NUM UART_NUM_0
+#else
+#define UART_NUM UART_NUM_1
+#endif
 #define BUF_SIZE (1024)
 #define SERIAL_BUFFER_SIZE 528
 

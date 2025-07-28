@@ -125,4 +125,6 @@ joystick_t joysticks[5];
 #ifdef CONFIG_USE_ENCODER
 #endif
 
+void set_backlight_brightness(uint8_t value);
+
 #endif /* DISPLAY_MANAGER_H */

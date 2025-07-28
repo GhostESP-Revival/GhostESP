@@ -23,9 +23,10 @@ void terminal_set_return_view(View *view);
         char buffer[512];                                                          \
         snprintf(buffer, sizeof(buffer), fmt, ##__VA_ARGS__);                      \
         if (esp_comm_manager_is_remote_command()) {                                \
-            esp_comm_manager_send_response((const uint8_t*)buffer, strlen(buffer)); \
+            esp_comm_manager_send_response((const uint8_t*)buffer, strlen(buffer));\
         }                                                                          \
         terminal_view_add_text(buffer);                                            \
+        ap_manager_add_log(buffer);                                                \
     } while (0)
 #else
 #define TERMINAL_VIEW_ADD_TEXT(fmt, ...)                                           \

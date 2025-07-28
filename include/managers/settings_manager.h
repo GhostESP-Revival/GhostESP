@@ -95,6 +95,7 @@ typedef struct {
   int32_t esp_comm_rx_pin; // ESP communication RX pin
   bool ap_enabled; // Enable/disable AP across reboots
   bool power_save_enabled;
+  uint8_t max_screen_brightness; // Max screen brightness (0-100)
 } FSettings;
 
 // Function declarations
@@ -221,6 +222,9 @@ bool settings_get_ap_enabled(const FSettings *settings);
 bool settings_get_power_save_enabled(const FSettings *settings);
 void settings_set_power_save_enabled(FSettings *settings, bool enabled);
 
+// Brightness settings
+void settings_set_max_screen_brightness(FSettings *settings, uint8_t value);
+uint8_t settings_get_max_screen_brightness(const FSettings *settings);
 extern FSettings G_Settings;
 
 #endif // SETTINGS_MANAGER_H

@@ -25,7 +25,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *SD_TAG = "SD_Card_Manager";
+static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
 
 sd_card_manager_t sd_card_manager = { // Change this based on board config
@@ -99,12 +99,7 @@ static void unmount_virtual_storage(void) {
 }
 #endif
 
-static void get_next_pcap_file_name(char *file_name_buffer,
-                                    const char *base_name) {
-  int next_index = get_next_pcap_file_index(base_name);
-  snprintf(file_name_buffer, 128, "/mnt/ghostesp/pcaps/%s_%d.pcap", base_name,
-           next_index);
-}
+// Removed unused function get_next_pcap_file_name - it was defined but never used
 
 void list_files_recursive(const char *dirname, int level) {
   DIR *dir = opendir(dirname);
@@ -393,6 +388,8 @@ esp_err_t sd_card_init(void) {
 
   bool bus_init_success = false;
 
+  
+#ifndef CONFIG_USE_TDECK // tdeck doesnt need this since the spi bus is already inited by display driver
 #ifndef CONFIG_ENCODER_INA 
 #if defined(CONFIG_IDF_TARGET_ESP32)
   {
@@ -424,6 +421,7 @@ esp_err_t sd_card_init(void) {
       return bus_ret;
     }
   }
+#endif
 #endif
 #endif
 
@@ -493,14 +491,14 @@ void sd_card_unmount(void) {
 
 #if SOC_SDMMC_HOST_SUPPORTED && SOC_SDMMC_USE_GPIO_MATRIX
   if (sd_card_manager.is_initialized) {
-    esp_vfs_fat_sdmmc_unmount();
+    esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
     printf("SD card unmounted\n");
     sd_card_manager.is_initialized = false;
   }
 #else
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
-    spi_bus_free(SPI2_HOST);
+    spi_bus_free(SPI2_HOST); // Free the bus if already initialized
     printf("SD card unmounted\n");
   }
 #endif
@@ -967,7 +965,11 @@ bool sd_card_is_virtual_storage() {
 int get_evil_portal_list(char portal_names[MAX_PORTALS][MAX_PORTAL_NAME]) {
     const char *portal_dir = "/mnt/ghostesp/evil_portal/portals";
     DIR *dir = opendir(portal_dir);
-    if (!dir) return 0;
+    if (!dir){
+        ESP_LOGW(TAG, "Failed to open directory: %s\n", portal_dir);
+        return -1; // Return -1 if directory cannot be opened
+    }
+    ESP_LOGI(TAG, "Listing portals in directory: %s\n", portal_dir);
     struct dirent *entry;
     int count = 0;
     while ((entry = readdir(dir)) && count < MAX_PORTALS) {

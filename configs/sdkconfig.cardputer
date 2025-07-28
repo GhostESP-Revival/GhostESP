@@ -1,9 +1,6 @@
 #
 # Automatically generated file. DO NOT EDIT.
-
-
 # Espressif IoT Development Framework (ESP-IDF) 5.5.0 Project Configuration
-
 #
 CONFIG_SOC_ADC_SUPPORTED=y
 CONFIG_SOC_UART_SUPPORTED=y
@@ -633,6 +630,8 @@ CONFIG_TFT_HEIGHT=135
 CONFIG_USE_CARDPUTER=y
 CONFIG_USE_HW_KB=y
 # CONFIG_HAS_BATTERY is not set
+CONFIG_HAS_BATTERY_ADC=y
+CONFIG_ADC_BATTERY_PIN=10
 # CONFIG_HAS_RTC_CLOCK is not set
 # CONFIG_WITH_ETHERNET is not set
 # CONFIG_IS_GHOST_BOARD is not set

@@ -1,6 +1,7 @@
 #include "managers/views/options_screen.h"
 #include "core/serial_manager.h"
 #include "core/commandline.h" // for get_evil_portal_list
+#include "managers/display_manager.h"
 
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
@@ -42,7 +43,11 @@ typedef enum {
 static int current_settings_category = -1;
 
 static int settings_category_indices[][8] = {
-    {1, 2, 5, 3, 4, -1}, // Display: Display Timeout, Menu Theme, Invert Colors, Third Control, Terminal Color
+    {1, 2, 5, 3, 4,
+#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+     9,
+#endif
+     -1}, // Display: Display Timeout, Menu Theme, Invert Colors, Third Control, Terminal Color, Max Brightness if PWM
     {0, 6, 7, 8, -1}, // Config: RGB Mode, Web Auth, AP Enabled, Power Saving Mode
 };
 
@@ -127,8 +132,17 @@ enum {
     SETTING_INVERT_COLORS,
     SETTING_WEB_AUTH,
     SETTING_AP_ENABLED,
-    SETTING_POWER_SAVE
+    SETTING_POWER_SAVE,
+    #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+    SETTING_MAX_BRIGHTNESS
+    #endif
 };
+
+#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+static const char *brightness_options[] = {
+    "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
+};
+#endif
 
 static SettingsItem settings_items[] = {
     {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 3, 0},
@@ -139,7 +153,10 @@ static SettingsItem settings_items[] = {
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0},
     {"Web Auth", SETTING_WEB_AUTH, bool_options, 2, 1},
     {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1},
-    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0}
+    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0},
+    #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+    {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9} // default 100%
+    #endif
 };
 
 static bool is_settings_mode = false;
@@ -407,7 +424,7 @@ void options_menu_create() {
                 }
                 int count = get_evil_portal_list(evil_portal_names);
                 ESP_LOGI(TAG, "get_evil_portal_list returned %d", count);
-                if (count == 0) {
+                if (count <= 0) {
                     evil_portal_options[0] = "default";
                     evil_portal_options[1] = NULL;
                     ESP_LOGI(TAG, "No portals found, using 'default'");
@@ -528,12 +545,16 @@ static void load_current_settings_values(void) {
     settings_items[6].current_value = settings_get_web_auth_enabled(&G_Settings) ? 1 : 0;
     settings_items[7].current_value = settings_get_ap_enabled(&G_Settings) ? 1 : 0;
     settings_items[8].current_value = settings_get_power_save_enabled(&G_Settings) ? 1 : 0;
+#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+    settings_items[9].current_value = (settings_get_max_screen_brightness(&G_Settings) / 10) - 1;
+    // If your value is 100, this gives index 9, for 10% index 0, etc.
+#endif
 }
 
 static void apply_setting_change(int setting_index, int new_value) {
     SettingsItem *item = &settings_items[setting_index];
     item->current_value = new_value;
-    
+
     switch (item->setting_type) {
         case SETTING_RGB_MODE:
             settings_set_rgb_mode(&G_Settings, new_value);
@@ -571,8 +592,14 @@ static void apply_setting_change(int setting_index, int new_value) {
             settings_set_power_save_enabled(&G_Settings, new_value == 1);
             apply_power_management_config(new_value == 1);
             break;
+        #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+        // This setting is only available if LV_DISP_BACKLIGHT_PWM is enabled
+        case SETTING_MAX_BRIGHTNESS:
+            settings_set_max_screen_brightness(&G_Settings, (uint8_t)((new_value + 1) * 10));
+            set_backlight_brightness(100); // set to 100 since brightness becomes scaled by the max
+            break;
+        #endif
     }
-    
     settings_save(&G_Settings);
 }
 
@@ -1725,11 +1752,11 @@ static void menu_builder_cb(lv_timer_t *t)
                 if (!btn) break;
                 lv_obj_set_height(btn, button_height_global);
                 lv_obj_add_style(btn, &style_menu_item, 0);
-                lv_obj_t *label = lv_obj_get_child(btn, 0);
+                lv_obj_t *label = lv_obj_get_child(btn,  0);
                 if (label) {
                     lv_obj_set_style_text_font(label,
                         is_small_screen_global ? &lv_font_montserrat_12 : &lv_font_montserrat_14,
-                        0);
+                                               0);
                     lv_obj_add_style(label, &style_menu_label, 0);
                 }
                 lv_obj_set_user_data(btn, (void *)opt);

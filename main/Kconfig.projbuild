@@ -80,7 +80,6 @@ menu "Ghost ESP Options"
         default n
         help
             Enable touchscreen input.
-
     config USE_7_INCHER
         bool "Use 7-inch Display"
         default n
@@ -126,6 +125,42 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable joystick input.
+        config L_BTN
+            int "Left button data pin"
+            default 0
+            depends on USE_JOYSTICK
+            help
+                Set the data pin for left button
+        config R_BTN
+            int "Right button data pin"
+            default 0
+            depends on USE_JOYSTICK
+            help
+                Set the data pin for right button
+        config U_BTN
+            int "Up button data pin"
+            default 0
+            depends on USE_JOYSTICK
+            help
+                Set the data pin for up button
+        config D_BTN
+            int "Down button data pin"
+            default 0
+            depends on USE_JOYSTICK
+            help
+                Set the data pin for down button
+        config C_BTN
+            int "Center button data pin"
+            default 0
+            depends on USE_JOYSTICK
+            help
+                Set the data pin for center button
+                
+        config USE_TDECK
+            bool "Enable TDECK-plus"
+            default n
+            help
+                Enable tdeck logics.
     
         config USE_CARDPUTER
             bool "Enable Cardputer"
@@ -144,6 +179,20 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable power saving features if you have a battery.
+
+
+        config HAS_BATTERY_ADC
+            bool "Enable battery ADC reading"
+            default n
+            help
+                Enable ADC battery readings
+                
+        config ADC_BATTERY_PIN
+            int "Pin for reading ADC measurements - Unused atm."
+            default -1
+            depends on HAS_BATTERY_ADC
+            help
+                Set ADC battery pin - Unused atm.
 
         config HAS_FUEL_GAUGE
             bool "Enable Fuel Gauge Support"
@@ -266,7 +315,13 @@ menu "Ghost ESP Options"
         depends on HAS_GPS
         help
             Define the UART RX pin for GPS.
-
+    
+    config GPS_UART_BAUD_RATE
+        int "Set baud rate for gps serial"
+        default 9600
+        depends on HAS_GPS
+        help
+            Define the UART RX pin baud rate for GPS.
 
     config NMEA_PARSER_RING_BUFFER_SIZE
         int "NMEA Parser Ring Buffer Size"

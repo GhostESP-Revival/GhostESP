@@ -29,6 +29,9 @@
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
 #include "vendor/m5/m5gfx_wrapper.h"
+#endif
+
+#ifdef CONFIG_HAS_BATTERY_ADC
 #include <esp_adc/adc_oneshot.h>
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
@@ -59,6 +62,18 @@
 #include "vendor/drivers/axs15231b.h"
 #endif
 
+#ifdef CONFIG_USE_TDECK
+#include "lvgl_i2c/i2c_manager.h"
+
+#define LILYGO_KB_SLAVE_ADDRESS              0x55
+#define LILYGO_KB_BRIGHTNESS_CMD             0x01
+#define LILYGO_KB_ALT_B_BRIGHTNESS_CMD       0x02
+
+void set_keyboard_brightness(uint8_t brightness);
+
+#endif
+
+
 #ifndef CONFIG_TFT_WIDTH
 #define CONFIG_TFT_WIDTH 240
 #endif
@@ -67,7 +82,12 @@
 #define CONFIG_TFT_HEIGHT 320
 #endif
 
+#define BACKLIGHT_TIMER LEDC_TIMER_0
+#define RGB_TIMER       LEDC_TIMER_1
+
 #define LVGL_TASK_PERIOD_MS 5
+#define INTERMEDIATE_DIM_PERCENT 20
+#define INTERMEDIATE_DIM_DURATION_MS 5000
 static const char *TAG = "DisplayManager";
 DisplayManager dm = {.current_view = NULL, .previous_view = NULL};
 
@@ -87,11 +107,12 @@ static TaskHandle_t input_task_handle = NULL;
 static lv_timer_t *status_update_timer = NULL;
 static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
-static bool is_backlight_dimmed;
+static bool is_backlight_dimmed = false;
+static bool is_backlight_off = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
-static joystick_t enc_button; // we'll treat the push‑switch like any other button
+static joystick_t enc_button; // we'll treat the push-switch like any other button
 static joystick_t exit_button; // IO6 exit button
 #endif
 
@@ -102,7 +123,7 @@ uint32_t display_timeout_ms = DEFAULT_DISPLAY_TIMEOUT_MS;
 
 static uint16_t original_beacon_interval = 100;
 
-#define BACKLIGHT_SLEEP_POLL_MS 50  // Poll slower when dimmed
+#define BACKLIGHT_SLEEP_POLL_MS 50   // Poll slower when dimmed
 
 #ifdef CONFIG_IS_S3TWATCH
 #define WAKE_UP_PIN GPIO_NUM_16
@@ -155,9 +176,17 @@ static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
 #endif
 }
 
-#ifdef CONFIG_USE_CARDPUTER
+void set_backlight_brightness(uint8_t percentage); // forward declaration
 
+#ifdef CONFIG_HAS_BATTERY_ADC
+
+#ifdef CONFIG_USE_CARDPUTER
 #define _batAdcCh ADC_CHANNEL_9 //sar adc1 channel 9 - ADC1_GPIO10_CHANNEL;
+
+#elif CONFIG_USE_TDECK
+#define _batAdcCh ADC1_GPIO4_CHANNEL
+#endif
+
 #define _batAdcUnit ADC_UNIT_1
 #define _batAdcAtten ADC_ATTEN_DB_12
 bool _isCharging = false;
@@ -187,7 +216,7 @@ int getBattery() {
 
         adc_cali_curve_fitting_config_t cali_cfg = {
             .unit_id = _batAdcUnit,
-            .atten   = _batAdcAtten,
+            .atten    = _batAdcAtten,
             .bitwidth= ADC_BITWIDTH_DEFAULT,
         };
         if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &cali_handle) == ESP_OK) {
@@ -213,7 +242,7 @@ int getBattery() {
         mv = raw * 3300 / 4095;
     }
 
-    // —— charging detection by comparing to last reading ——
+    // -- charging detection by comparing to last reading --
     if (last_mv != 0) {
         int diff = mv - last_mv;
         if (diff >  CHARGE_THRESH_MV) _isCharging = true;
@@ -223,7 +252,7 @@ int getBattery() {
 
     ESP_LOGI(TAG, "Battery ADC mV: %d", mv);
 
-    // percentage between 3300 and 4150 mV
+    // percentage between 3300 and 4150 mV
     percent = (mv - 3300) * 100 / (float)(4150 - 3350);
 
     return (percent < 0) ? 0 : (percent >= 100) ? 100 : percent;
@@ -239,8 +268,9 @@ bool isCharging() { return _isCharging; }
  * @return true if battery data is available, false otherwise
  */
 static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
+    bool result = false;
     if (!percentage || !is_charging) {
-        return false;
+        return result;
     }
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
@@ -249,23 +279,22 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
     if (fuel_percentage >= 0) {
         *percentage = (uint8_t)fuel_percentage;
         *is_charging = fuel_gauge_manager_is_charging();
-        return true;
+        result = true;
     }
-#endif
-
-#ifdef CONFIG_HAS_BATTERY
+#elif defined(CONFIG_HAS_BATTERY)
     // Fallback to AXP2101
     axp2101_get_power_level(percentage);
     *is_charging = axp202_is_charging();
-    return true;
-#elif CONFIG_USE_CARDPUTER
-    // Fallback to Cardputer ADC
-    *percentage = getBattery();
+    result = true;
+#elif defined(CONFIG_HAS_BATTERY_ADC)
+    // Fallback to ADC
+    *percentage = (uint8_t)getBattery();
     *is_charging = isCharging();
-    return true;
+    result = true;
 #endif
+    ESP_LOGI(TAG, "get_battery_info %d%%, Charging: %d", *percentage, *is_charging);
 
-    return false;
+    return result;
 }
 
 void fade_out_cb(void *obj, int32_t v) {
@@ -284,7 +313,6 @@ void rainbow_effect_cb(lv_timer_t *timer) {
   if (!status_bar || !lv_obj_is_valid(status_bar)) {
     return;
   }
-
 
   rainbow_hue = (rainbow_hue + 5) % 360;
 
@@ -404,9 +432,9 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     const char *battery_symbol;
 
     battery_symbol = (batteryPercentage > 75) ? LV_SYMBOL_BATTERY_FULL :
-                  (batteryPercentage > 50) ? LV_SYMBOL_BATTERY_3 :
-                  (batteryPercentage > 25) ? LV_SYMBOL_BATTERY_2 :
-                  (batteryPercentage > 10) ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
+             (batteryPercentage > 50) ? LV_SYMBOL_BATTERY_3 :
+             (batteryPercentage > 25) ? LV_SYMBOL_BATTERY_2 :
+             (batteryPercentage > 10) ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
 
     // Check charging status from available sources
     bool is_charging = false;
@@ -414,16 +442,16 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     // Try fuel gauge first (most accurate)
     is_charging = fuel_gauge_manager_is_charging();
 #endif
-    
+
     // Fallback to original logic if fuel gauge not available or failed
     if (!is_charging) {
 #ifdef CONFIG_HAS_BATTERY
       is_charging = axp202_is_charging();
-#elif CONFIG_USE_CARDPUTER
+#elif CONFIG_HAS_BATTERY_ADC
       is_charging = isCharging();
 #endif
     }
-    
+
     if (is_charging) {
       battery_symbol = LV_SYMBOL_CHARGE;
     }
@@ -457,23 +485,23 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     }
     if (battery_label && lv_obj_is_valid(battery_label)) {
       lv_color_t battery_color = default_color;
-      
+
       // Check charging status from available sources
       bool is_charging = false;
 #ifdef CONFIG_HAS_FUEL_GAUGE
       // Try fuel gauge first (most accurate)
       is_charging = fuel_gauge_manager_is_charging();
 #endif
-      
+
       // Fallback to original logic if fuel gauge not available or failed
       if (!is_charging) {
 #ifdef CONFIG_HAS_BATTERY
         is_charging = axp202_is_charging();
-#elif CONFIG_USE_CARDPUTER
+#elif CONFIG_HAS_BATTERY_ADC
         is_charging = isCharging();
 #endif
       }
-      
+
       if (is_charging) {
         battery_color = lv_color_hex(0x00FF00); // Green if charging
       } else if (batteryPercentage <= 20) {
@@ -499,13 +527,13 @@ static void status_update_cb(lv_timer_t *timer) {
   uint8_t power_level = 0;
   bool is_charging = false;
   bool has_battery = get_battery_info(&power_level, &is_charging);
-  
+
   int battery_percentage = has_battery ? power_level : -1;
-  
+
   // Debug logging for battery status
-  ESP_LOGD(TAG, "Status update - Battery: %d%%, Charging: %s, Has battery: %s", 
+  ESP_LOGD(TAG, "Status update - Battery: %d%%, Charging: %s, Has battery: %s",
            battery_percentage, is_charging ? "YES" : "NO", has_battery ? "YES" : "NO");
-  
+
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
                     battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
 }
@@ -527,7 +555,7 @@ static const uint32_t theme_palettes[15][6] = {
         {0x0077BE,0x00CED1,0x20B2AA,0x4682B4,0x5F9EA0,0x00008B}, // Ocean
         {0xFF4500,0xFF8C00,0xFFD700,0xFF1493,0x8B008B,0x2E0854}, // Sunset
         {0x556B2F,0x6B8E23,0x228B22,0x2E8B57,0x8FBC8F,0x8B4513}  // Forest
-  };
+    };
 
 void display_manager_add_status_bar(const char *CurrentMenuName) {
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
@@ -549,7 +577,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   }
   lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_radius(status_bar, 0, LV_PART_MAIN);
-  
+
   // create status bar left container
   lv_obj_t *left_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(left_container);
@@ -609,7 +637,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   uint8_t power_level = 0;
   bool is_charging = false;
   bool has_battery = get_battery_info(&power_level, &is_charging);
-  
+
   int battery_percentage = has_battery ? power_level : -1;
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
                     battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
@@ -645,7 +673,7 @@ void display_manager_init(void) {
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .duty_resolution = LEDC_TIMER_10_BIT,
-      .timer_num = LEDC_TIMER_0,
+      .timer_num = BACKLIGHT_TIMER,
       .freq_hz = 5000, // 5 kHz
       .clk_cfg = LEDC_AUTO_CLK,
   };
@@ -655,7 +683,7 @@ void display_manager_init(void) {
   ledc_channel_config_t ledc_channel = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .channel = LEDC_CHANNEL_0,
-      .timer_sel = LEDC_TIMER_0,
+      .timer_sel = BACKLIGHT_TIMER,
       .intr_type = LEDC_INTR_DISABLE,
       .gpio_num = CONFIG_LV_DISP_PIN_BCKL,
       .duty = 0, // Set initial duty to 0
@@ -664,6 +692,9 @@ void display_manager_init(void) {
   };
   ledc_channel_config(&ledc_channel);
 
+#ifdef CONFIG_USE_TDECK
+set_keyboard_brightness(0xFF); // Set to 100% brightness
+#endif
 #ifndef CONFIG_JC3248W535EN_LCD
   lv_init();
 #ifdef CONFIG_USE_CARDPUTER
@@ -764,11 +795,11 @@ void display_manager_init(void) {
     encoder_init(&g_encoder,
                  CONFIG_ENCODER_INA,
                  CONFIG_ENCODER_INB,
-                 true,                       /* pull‑ups */
-                 ENCODER_LATCH_FOUR3);       /* detented knobs */
+                 true,                    /* pull-ups */
+                 ENCODER_LATCH_FOUR3);    /* detented knobs */
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
-    
+
     // initialize IO6 exit button
     joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
 #endif
@@ -787,9 +818,9 @@ void display_manager_init(void) {
 
     gpio_install_isr_service(0);
     gpio_isr_handler_add(WAKE_UP_PIN, gpio_isr_handler, (void*)WAKE_UP_PIN);
-    // Wake from light‑sleep on *low‑level*, not edge
+    // Wake from light-sleep on *low-level*, not edge
     gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
-    esp_sleep_enable_gpio_wakeup();  // light‑sleep only
+    esp_sleep_enable_gpio_wakeup();  // light-sleep only
   } else {
     ESP_LOGE(TAG, "Failed to create wake_up_sem");
   }
@@ -799,19 +830,15 @@ void display_manager_init(void) {
   last_touch_time = xTaskGetTickCount();
   is_backlight_dimmed = false;
 
-  // for cardputer. if we don't do this the backlight will flicker on startup until it gets turned off and on again by software
-#if defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH)
-  // override any floating state and force it high
-  gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
-  gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
-  gpio_set_level(    CONFIG_LV_DISP_PIN_BCKL, 1);
-#endif
+  // override any floating state and force it on
+  set_backlight_brightness(100);
+
 
 #ifndef CONFIG_JC3248W535EN_LCD // JC3248W535EN has its own lvgl task
-xTaskCreate(lvgl_tick_task, "LVGL Tick Task", 4096, NULL, 
+xTaskCreate(lvgl_tick_task, "LVGL Tick Task", 4096, NULL,
             RENDERING_TASK_PRIORITY, &lvgl_task_handle);
 #endif
-if (xTaskCreate(hardware_input_task, "RawInput", 4096, NULL, 
+if (xTaskCreate(hardware_input_task, "RawInput", 4096, NULL,
                 HARDWARE_INPUT_TASK_PRIORITY, &input_task_handle) != pdPASS) {
     ESP_LOGE(TAG, "Failed to create RawInput task\n");
 }
@@ -883,42 +910,53 @@ void display_manager_fill_screen(lv_color_t color) {
 }
 
 void set_backlight_brightness(uint8_t percentage) {
-    /* 
-     * If you've built with PWM support, do your existing LEDC duty code.
-     * Otherwise (i.e. switch mode), just treat >0 as "on" or 0 as "off."
-     */
+    // Clamp to user setting
+    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
+    //if (percentage > max_brightness) percentage = max_brightness;
+
+    //scale percent by max_brightness
+    percentage = (percentage * max_brightness) / 100;
+    if (percentage > 100) percentage = 100;
+    if (percentage < 0) percentage = 0;
+
 #if defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
-    // ————— PWM mode —————
-    if (percentage > 1) percentage = 1;
-    uint32_t duty = percentage * ((1 << LEDC_TIMER_10_BIT) - 1);
+    uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH)
-    // ————— switch mode —————
+    // ----- switch mode -----
     // make sure the pin is configured as a GPIO output
+    gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
     gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage ? 1 : 0);
+    gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
 #else
 # error "Either CONFIG_LV_DISP_BACKLIGHT_PWM or CONFIG_LV_DISP_BACKLIGHT_SWITCH must be set"
 #endif
 
-    /* 
+    ESP_LOGI(TAG, "set_backlight_brightness: %d%% (max allowed: %d%%)", percentage, max_brightness);
+
+#ifdef CONFIG_USE_TDECK
+    // Synchronize keyboard backlight with screen backlight
+    set_keyboard_brightness(percentage == max_brightness ? 0xFF : 0x00);
+#endif
+
+    /*
      * The rest of your pause/resume logic stays exactly the same,
      * so when you call set_backlight_brightness(0) everything
      * (timers, Wi-Fi PS, tasks) still pauses as before.
      */
     if (percentage == 0) {
-        // 1) Disable every wake‑source (we'll re‑enable only the one we actually want)
+        // 1) Disable every wake-source (we'll re-enable only the one we actually want)
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         esp_sleep_disable_wifi_wakeup();
         esp_sleep_disable_wifi_beacon_wakeup();
 
 #ifdef CONFIG_IS_S3TWATCH
-        // 2a) On S3T‑Watch: only GPIO button can wake us
+        // 2a) On S3T-Watch: only GPIO button can wake us
         gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
 
-        // 3a) Pause all UI and drop into light‑sleep until that button is pressed
+        // 3a) Pause all UI and drop into light-sleep until that button is pressed
         if (status_update_timer)   lv_timer_pause(status_update_timer);
         if (status_update_timer)   lv_timer_set_period(status_update_timer, 5000);
 #ifndef CONFIG_USE_CARDPUTER
@@ -940,14 +978,14 @@ void set_backlight_brightness(uint8_t percentage) {
 
 #else
         // 2b) On Cardputer (or other devices without real GPIO wake):
-        //    we do *not* enter light‑sleep at all, we just turn the backlight off
-        //    and rely on our existing polling (touch or key scans) to call
-        //    set_backlight_brightness(1) when user input arrives.
+        //     we do *not* enter light-sleep at all, we just turn the backlight off
+        //     and rely on our existing polling (touch or key scans) to call
+        //     set_backlight_brightness(1) when user input arrives.
 #endif
 
         return;
     } else {
-        is_backlight_dimmed = false;     // <— also clear whenever we restore brightness
+        is_backlight_dimmed = false;      // <— also clear whenever we restore brightness
         if (status_update_timer)   lv_timer_resume(status_update_timer);
         if (status_update_timer)   lv_timer_set_period(status_update_timer, 1000);
         if (lvgl_task_handle)      vTaskResume(lvgl_task_handle);
@@ -980,13 +1018,43 @@ void hardware_input_task(void *pvParameters) {
   uint8_t shift_count = 0;
   bool caps_latch = false; // var for tracking if caps was just toggled
 #endif
-
   while (1) {
+#ifdef CONFIG_USE_TDECK
+    uint8_t data[1];
+    gpio_set_direction(46, GPIO_MODE_INPUT); // probably should be a part of the init process
+    if (gpio_get_level(46)){
+    lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, LILYGO_KB_SLAVE_ADDRESS, 0x00, &data, 1);
+    } else {
+      data[0] = 0; // if the pin is low we assume no data is available
+    }
+    if (memcmp(data, "", 1) != 0){
+
+      ESP_LOGI(TAG, "tdeck keyboard data is %s\n", data);
+
+      bool skip_event = false;
+      touch_active = true;
+      last_touch_time = xTaskGetTickCount();
+      if (is_backlight_dimmed) {
+        set_backlight_brightness(100);
+        is_backlight_dimmed = false;
+        skip_event = true;
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+      if (!skip_event) {
+        InputEvent event;
+        event.type = INPUT_TYPE_KEYBOARD;
+        event.data.key_value = *data;
+        if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
+          ESP_LOGE(TAG, "Failed to send button input to queue\n");
+        }
+      }
+    }
+#endif
 
 // Check for wake interrupt when dimmed
 #ifdef CONFIG_IS_S3TWATCH
     if (is_backlight_dimmed && xSemaphoreTake(wake_up_sem, 0) == pdTRUE) {
-        set_backlight_brightness(1);
+        set_backlight_brightness(100);
         is_backlight_dimmed = false;
         last_touch_time = xTaskGetTickCount(); // Reset inactivity timer
         was_woken_by_interrupt = true; // Set flag
@@ -1003,7 +1071,7 @@ void hardware_input_task(void *pvParameters) {
         // treat an encoder turn as “touch”
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed) {
-          set_backlight_brightness(1);
+          set_backlight_brightness(100);
           is_backlight_dimmed = false;
           // Don't send input event when waking from dimmed state
         } else {
@@ -1016,12 +1084,12 @@ void hardware_input_task(void *pvParameters) {
         }
     }
 
-    /* push‑switch -> treat like “button” */
+    /* push-switch -> treat like “button” */
     if (joystick_just_pressed(&enc_button)) {
         // treat an encoder click as “touch”
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed) {
-          set_backlight_brightness(1);
+          set_backlight_brightness(100);
           is_backlight_dimmed = false;
           // Don't send input event when waking from dimmed state
         } else {
@@ -1040,7 +1108,7 @@ void hardware_input_task(void *pvParameters) {
     if (joystick_just_pressed(&exit_button)) {
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed) {
-          set_backlight_brightness(1);
+          set_backlight_brightness(100);
           is_backlight_dimmed = false;
         } else {
           InputEvent ev = {
@@ -1050,23 +1118,23 @@ void hardware_input_task(void *pvParameters) {
           xQueueSend(input_queue, &ev, 0);
         }
     }
-    
+
     // Check for 7-second hold to enter deep sleep
     if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
         uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
         if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
             ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
-            
+
             // Pull IO15 low before sleep
             gpio_set_level(15, 0);
             ESP_LOGI("DeepSleep", "IO15 pulled low");
-            
+
             ESP_LOGI("DeepSleep", "Configuring wake-up source");
-            
+
             // Disable all wake-up sources first
             esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-            
+
             // Temporarily disable the GPIO to avoid immediate wake-up
             gpio_config_t io_conf = {
                 .pin_bit_mask = (1ULL << 6),
@@ -1076,17 +1144,17 @@ void hardware_input_task(void *pvParameters) {
                 .intr_type = GPIO_INTR_DISABLE
             };
             gpio_config(&io_conf);
-            
+
             error_popup_create_persistent("SHUTTING DOWN");
             // Wait a couple of seconds to ignore any button releases
             ESP_LOGI("DeepSleep", "Waiting 4 seconds before sleep to ignore button release...");
             vTaskDelay(pdMS_TO_TICKS(4000)); // 4 second delay
-            
+
             // Re-enable the GPIO with proper configuration for wake-up
             io_conf.mode = GPIO_MODE_INPUT;
             io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
             gpio_config(&io_conf);
-            
+
             // Configure IO6 as wake source for a new press using EXT0
             esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0); // Wake on low level (button press)
             if (ret != ESP_OK) {
@@ -1096,14 +1164,14 @@ void hardware_input_task(void *pvParameters) {
                 return;
             }
             ESP_LOGI("DeepSleep", "Wake-up source configured for new button press using EXT0");
-            
+
             ESP_LOGI("DeepSleep", "Entering deep sleep now...");
             vTaskDelay(pdMS_TO_TICKS(200)); // Give time for log to print
-            
+
             // Final check of GPIO state before sleep
             ESP_LOGI("DeepSleep", "Final GPIO6 state: %d", gpio_get_level(6));
             ESP_LOGI("DeepSleep", "Final GPIO15 state: %d", gpio_get_level(15));
-            
+
             // Enter deep sleep
             esp_deep_sleep_start();
         }
@@ -1135,12 +1203,12 @@ void hardware_input_task(void *pvParameters) {
           if (is_backlight_dimmed) {
             // CARDPUTER wake logic is keypress-to-wake, which is desired.
             // No changes needed here as it's separate from S3T-Watch touch logic.
-            set_backlight_brightness(1);
+            set_backlight_brightness(100);
             is_backlight_dimmed = false;
             skip_event = true;
             vTaskDelay(pdMS_TO_TICKS(100));
           }
-          
+
           if (!skip_event) {
             InputEvent event;
             // event.type will be set inside the switch for specific keys
@@ -1183,7 +1251,7 @@ void hardware_input_task(void *pvParameters) {
         } else if (touch_active) {
 
           touch_active = false;
-          
+
         }
       }
     }
@@ -1227,7 +1295,7 @@ void hardware_input_task(void *pvParameters) {
       if (is_backlight_dimmed) {
 // Disable tap-to-wake, use button interrupt instead.
 #ifndef CONFIG_IS_S3TWATCH
-        set_backlight_brightness(1);
+        set_backlight_brightness(100);
         is_backlight_dimmed = false;
         skip_event = true;
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -1261,31 +1329,43 @@ void hardware_input_task(void *pvParameters) {
     uint32_t current_timeout = G_Settings.display_timeout_ms;
 
     if (current_timeout != UINT32_MAX) { // Only apply dimming logic if timeout is not 'Never'
-      if (!is_backlight_dimmed && (xTaskGetTickCount() - last_touch_time > pdMS_TO_TICKS(current_timeout))) {
-        ESP_LOGD(TAG, "Display timeout check: last_touch=%lu, timeout=%lu",
-                 (unsigned long)last_touch_time, (unsigned long)current_timeout);
-        ESP_LOGI(TAG, "Display timeout reached, dimming backlight");
-        set_backlight_brightness(0);
+      TickType_t now = xTaskGetTickCount();
+
+      // Stage 1: Dim after timeout
+      if (!is_backlight_dimmed && !is_backlight_off &&
+          (now - last_touch_time > pdMS_TO_TICKS(current_timeout))) {
+        ESP_LOGI(TAG, "Display timeout reached, dimming backlight (intermediate)");
+        set_backlight_brightness(INTERMEDIATE_DIM_PERCENT);
         is_backlight_dimmed = true;
-        last_dim_time = xTaskGetTickCount(); // Record dim time
-      } else if (is_backlight_dimmed && (xTaskGetTickCount() - last_touch_time < pdMS_TO_TICKS(current_timeout))) {
-        ESP_LOGD(TAG, "Display timeout check: last_touch=%lu, timeout=%lu",
-                (unsigned long)last_touch_time, (unsigned long)current_timeout);
-        ESP_LOGI(TAG, "Input detected, waking backlight");
-        set_backlight_brightness(1);
-        is_backlight_dimmed = false;
+        last_dim_time = now;
       }
-    } else if (is_backlight_dimmed) { // If timeout is 'Never' and backlight is dimmed, set to full brightness
-        ESP_LOGI(TAG, "Display timeout set to Never, waking backlight from dimmed state.");
-        set_backlight_brightness(1);
+      // Stage 2: Turn off after dim duration
+      else if (is_backlight_dimmed && !is_backlight_off &&
+               (now - last_dim_time > pdMS_TO_TICKS(INTERMEDIATE_DIM_DURATION_MS))) {
+        ESP_LOGI(TAG, "Intermediate dim duration elapsed, turning backlight off");
+        set_backlight_brightness(0);
+        is_backlight_off = true;
+      }
+      // Wake up on input
+      else if ((is_backlight_dimmed || is_backlight_off) &&
+               (now - last_touch_time < pdMS_TO_TICKS(current_timeout))) {
+        ESP_LOGI(TAG, "Input detected, restoring backlight");
+        set_backlight_brightness(100);
         is_backlight_dimmed = false;
+        is_backlight_off = false;
+      }
+    } else if (is_backlight_dimmed || is_backlight_off) { // If timeout is 'Never' and backlight is dimmed/off, set to full brightness
+        ESP_LOGI(TAG, "Display timeout set to Never, waking backlight from dimmed/off state.");
+        set_backlight_brightness(100);
+        is_backlight_dimmed = false;
+        is_backlight_off = false;
     }
     //end backlight dim logic
     // When backlight is off (dimmed), poll less frequently to save power
     TickType_t delay = (is_backlight_dimmed ? pdMS_TO_TICKS(BACKLIGHT_SLEEP_POLL_MS) : tick_interval);
     vTaskDelay(delay);
   }
-  
+
   vTaskDelete(NULL);
 }
 
@@ -1313,7 +1393,7 @@ void processEvent() {
       xSemaphoreGive(dm.mutex);
 
       ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type,
-             view_name);
+               view_name);
 
       if (input_callback) {
         input_callback(&event);
@@ -1332,6 +1412,16 @@ void lvgl_tick_task(void *arg) {
   }
   vTaskDelete(NULL);
 }
+
+
+#ifdef CONFIG_USE_TDECK
+void set_keyboard_brightness(uint8_t brightness) {
+    uint8_t kb_brightness[2] = {LILYGO_KB_BRIGHTNESS_CMD, brightness};
+    ESP_LOGI(TAG, "Setting keyboard brightness to %d", brightness);
+    // Write the brightness command to the keyboard
+    lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, LILYGO_KB_SLAVE_ADDRESS, 0x00, kb_brightness, 2);
+}
+#endif
 
 void display_manager_update_status_bar_color(void) {
     if (!status_bar || !lv_obj_is_valid(status_bar)) return;
@@ -1358,3 +1448,4 @@ void display_manager_update_status_bar_color(void) {
     }
     lv_obj_invalidate(status_bar);
 }
+
