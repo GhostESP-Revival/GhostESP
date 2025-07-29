@@ -1577,6 +1577,11 @@ View options_menu_view = {.root = NULL,
 
 static void back_event_cb(lv_event_t *e) {
 
+    // Save settings when exiting options menu
+    if (is_settings_mode) {
+        settings_save(&G_Settings);
+    }
+
     // If in Evil Portal select submenu, go back to Evil Portal menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;

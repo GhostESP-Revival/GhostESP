@@ -272,6 +272,20 @@ menu "Ghost ESP Options"
             help
                 Set the GPIO pin used for IR LED transmission and indication.
 
+        config HAS_INFRARED_RX
+            bool "Enable Infrared Receive Support"
+            default n
+            depends on HAS_INFRARED
+            help
+                Enable infrared receive functionality for learning remote signals.
+
+        config INFRARED_RX_PIN
+            int "Infrared RX Pin"
+            default 0
+            depends on HAS_INFRARED_RX
+            help
+                Set the GPIO pin used for IR signal reception.
+
         config USE_ENCODER
             bool "Enable Encoder Input"
             default n

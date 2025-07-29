@@ -29,6 +29,9 @@ typedef struct {
 #define LEDC_DUTY_RES LEDC_TIMER_8_BIT // 8-bit resolution (0-255)
 #define LEDC_FREQUENCY 10000 // 10 kHz PWM frequency
 
+// Global flag to signal rainbow task termination
+static volatile bool rainbow_task_should_exit = false;
+
 void calculate_matrix_dimensions(int total_leds, int *rows, int *cols) {
   int side = (int)sqrt(total_leds);
 
@@ -88,7 +91,14 @@ void rainbow_task(void *pvParameter) {
 #endif
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
 
-  while (1) {
+  // Reset the termination flag when task starts
+  rainbow_task_should_exit = false;
+
+  while (!rainbow_task_should_exit) {
+    // Check flag before each effect iteration
+    if (rainbow_task_should_exit) {
+      break;
+    }
 
     if (rgb_manager->num_leds > 1) {
       rgb_manager_rainbow_effect_matrix(rgb_manager,
@@ -98,9 +108,29 @@ void rainbow_task(void *pvParameter) {
                                  settings_get_rgb_speed(&G_Settings));
     }
 
+    // Check flag again after effect
+    if (rainbow_task_should_exit) {
+      break;
+    }
+
     vTaskDelay(pdMS_TO_TICKS(20));
   }
+
+  // Clear LEDs before exiting
+  if (rgb_manager->strip) {
+    led_strip_clear(rgb_manager->strip);
+    led_strip_refresh(rgb_manager->strip);
+  } else if (rgb_manager->is_separate_pins) {
+    rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
+  }
+
+  ESP_LOGI(TAG, "Rainbow task exiting gracefully");
   vTaskDelete(NULL);
+}
+
+void rgb_manager_signal_rainbow_exit(void) {
+  ESP_LOGI(TAG, "Signaling rainbow task to exit gracefully");
+  rainbow_task_should_exit = true;
 }
 
 void police_task(void *pvParameter) {
@@ -464,7 +494,13 @@ esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
             }
 
             // Refresh the strip after setting pixels
-            return led_strip_refresh(rgb_manager->strip);
+            esp_err_t ret = led_strip_refresh(rgb_manager->strip);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(ret));
+                // Try to clear the strip as a fallback
+                led_strip_clear(rgb_manager->strip);
+            }
+            return ret;
         }
     }
     return ESP_OK;
@@ -474,8 +510,18 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
                                        int delay_ms) {
   double hue = 0.0;
 
-  while (1) {
+  while (!rainbow_task_should_exit) {
+    // Check termination flag before each LED update
+    if (rainbow_task_should_exit) {
+      return;
+    }
+
     for (int i = 0; i < rgb_manager->num_leds; i++) {
+      // Check flag during LED loop for faster response
+      if (rainbow_task_should_exit) {
+        return;
+      }
+
       uint8_t red, green, blue;
 
       double hue_offset =
@@ -508,8 +554,18 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
 void rgb_manager_rainbow_effect(RGBManager_t *rgb_manager, int delay_ms) {
   double hue = 0.0;
 
-  while (1) {
+  while (!rainbow_task_should_exit) {
+    // Check termination flag before each LED update
+    if (rainbow_task_should_exit) {
+      return;
+    }
+
     for (int i = 0; i < rgb_manager->num_leds; i++) {
+      // Check flag during LED loop for faster response
+      if (rainbow_task_should_exit) {
+        return;
+      }
+
       uint8_t red, green, blue;
 
       double hue_offset =

@@ -2,19 +2,23 @@
 
 ## Revival v1.7
 
-### Big Changes
+### Major Updates
 
+- **Dual ESP32 Communication**
+  - Connect two GhostESP devices for synchronized operation.
+  - Dedicated WebUI section for managing linked devices.
 
-#### Support for connecting two ESP32 chips running GhostESP with a WebUI section for control
+- **Power Saving**
+  - Up to 5x the battery life on compatible boards using the new Power Saving Mode (when compared with v1.6.1).
 
-#### Up to 5X the battery life on supported devices with power saving mode
+- **New Boards**
+  - LilyGo TEmbed C1101
+  - LilyGo T-Deck — @tototo31
+  - AITRIP CYD / ESP2432S028R — @tototo31
 
-#### Support for the LilyGo T-Deck - @tototo31
-
-#### Support for the LilyGo TEmbed C1101
-
-#### Support for 'AITRIP CYD' or ESP2432S028R, a CYD device - @tototo31
-
+- **Infrared**
+  - IR receive and decode support for all protocols supported by Flipper Zero firmware. (only enabled on TEmbed C1101)
+  - Ability to Rename, Delete, Add remotes and signals (only enabled on TEmbed C1101)
 
 ### Added
 
@@ -69,6 +73,7 @@
   - Reduce FatFS memory usage on S3TWatch and Cardputer
   - Improve battery reading accuracy on Cardputer
   - Fix keyboard view touch detection logic - @tototo31
+  - Save settings when exiting the settings view
 
 - Commands
   - Add terminal_view_add_text logs to commands missing them
@@ -83,6 +88,9 @@
   - Flush every packet to UART (Flipper) immediately when there's no sd card
   - Miscellaneous refactoring for memory usage
   - Add wifi_manager_stop_beacon function
+  - Check if an RMT channel already exists and clean it up before making a new one
+  - Update LEDs and Status bar when changing from rainbow mode
+
 
 
 ## Revival 1.6.1

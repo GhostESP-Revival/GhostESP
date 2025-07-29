@@ -158,7 +158,7 @@ void app_main(void) {
     display_manager_init();
     ESP_LOGI(TAG, "Presenting splash screen");
     display_manager_switch_view(&splash_view);
-    if (settings_get_rgb_mode(&G_Settings) != 0) {
+    if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
         if (rainbow_timer == NULL) {
             rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
             rainbow_hue = 0;

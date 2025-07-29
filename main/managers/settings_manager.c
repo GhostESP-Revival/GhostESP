@@ -609,25 +609,38 @@ void settings_save(const FSettings *settings) {
            esp_err_to_name(err), err);
   }
 
-  if (settings_get_rgb_mode(settings) == RGB_MODE_NORMAL) {
-    // Normal: static color/off
-    if (rgb_effect_task_handle != NULL) {
-        vTaskDelete(rgb_effect_task_handle);
-        rgb_effect_task_handle = NULL;
-    }
-    rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false);
-  } else if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
-    // Rainbow: animated
-    if (rgb_effect_task_handle == NULL) {
-        xTaskCreate(rainbow_task, "Rainbow Task", 8192, &rgb_manager, 1, &rgb_effect_task_handle);
-    }
+  // Clean up any existing rainbow task before starting a new one
+  if (rgb_effect_task_handle != NULL) {
+      // Signal the rainbow task to exit gracefully instead of forceful deletion
+      rgb_manager_signal_rainbow_exit();
+      
+      // Wait for the task to terminate gracefully (up to 500ms)
+      for (int i = 0; i < 50; i++) {
+          if (eTaskGetState(rgb_effect_task_handle) == eDeleted) {
+              break;
+          }
+          vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      
+      // If task is still running after timeout, force delete as last resort
+      if (eTaskGetState(rgb_effect_task_handle) != eDeleted) {
+          ESP_LOGW(S_TAG, "Rainbow task did not exit gracefully, force deleting");
+          vTaskDelete(rgb_effect_task_handle);
+      }
+      
+      rgb_effect_task_handle = NULL;
+      ESP_LOGI(S_TAG, "Rainbow task cleanup completed");
+  }
+  
+  if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
+      // Rainbow: animated
+      xTaskCreate(rainbow_task, "Rainbow Task", 8192, &rgb_manager, 1, &rgb_effect_task_handle);
   } else if (settings_get_rgb_mode(settings) == RGB_MODE_STEALTH) {
-    // Stealth: LEDs always off
-    if (rgb_effect_task_handle != NULL) {
-        vTaskDelete(rgb_effect_task_handle);
-        rgb_effect_task_handle = NULL;
-    }
-    rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false); // Ensure LEDs are off
+      // Stealth: LEDs always off
+      rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false); // Turn off all LEDs
+  } else {
+      // Normal mode: LEDs off
+      rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false); // Turn off all LEDs
   }
 
 
