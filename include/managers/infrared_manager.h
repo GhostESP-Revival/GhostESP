@@ -52,6 +52,14 @@ void infrared_manager_free_list(infrared_signal_t *signals, size_t count);
  */
 bool infrared_manager_transmit(const infrared_signal_t *signal);
 
+/**
+ * @brief Brute force transmit all signals in a file with a delay between each.
+ * @param path Path to the file containing IR signals.
+ * @param delay_ms Delay in milliseconds between transmissions.
+ * @return true on success, false on failure.
+ */
+bool infrared_manager_bruteforce(const char *path, uint32_t delay_ms);
+
 // Background task support (static allocation to avoid heap usage)
 #define INFRARED_MANAGER_TASK_STACK_SIZE 512
 bool infrared_manager_start_background_task(TaskFunction_t fn, void *arg);
@@ -60,4 +68,4 @@ void infrared_manager_stop_background_task(void);
 // Async enqueue of a parsed IR signal for background transmit
 bool infrared_manager_enqueue_signal(const infrared_signal_t *signal);
 
-#endif // INFRARED_MANAGER_H 
+#endif // INFRARED_MANAGER_H

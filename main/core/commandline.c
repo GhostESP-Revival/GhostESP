@@ -31,6 +31,7 @@
 #include <dirent.h>
 #include "esp_chip_info.h"
 #include "esp_idf_version.h"
+#include "managers/infrared_manager.h"
 
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
@@ -1540,6 +1541,27 @@ void handle_help(int argc, char **argv) {
     TERMINAL_VIEW_ADD_TEXT("        <CC> : Two-letter ISO country code (e.g., US, GB, JP)\n\n");
 #endif
 
+    printf("irsend\n");
+    printf("    Description: Send a single IR signal from a JSON file.\n");
+    printf("    Usage: irsend <file_path>\n\n");
+    TERMINAL_VIEW_ADD_TEXT("irsend\n");
+    TERMINAL_VIEW_ADD_TEXT("    Description: Send a single IR signal from a JSON file.\n");
+    TERMINAL_VIEW_ADD_TEXT("    Usage: irsend <file_path>\n\n");
+
+    printf("irlist\n");
+    printf("    Description: List all IR signals in a JSON or TLV file.\n");
+    printf("    Usage: irlist <file_path>\n\n");
+    TERMINAL_VIEW_ADD_TEXT("irlist\n");
+    TERMINAL_VIEW_ADD_TEXT("    Description: List all IR signals in a JSON or TLV file.\n");
+    TERMINAL_VIEW_ADD_TEXT("    Usage: irlist <file_path>\n\n");
+
+    printf("irbruteforce\n");
+    printf("    Description: Send all IR signals in a file, one after another.\n");
+    printf("    Usage: irbruteforce <file_path> [delay_ms]\n\n");
+    TERMINAL_VIEW_ADD_TEXT("irbruteforce\n");
+    TERMINAL_VIEW_ADD_TEXT("    Description: Send all IR signals in a file, one after another.\n");
+    TERMINAL_VIEW_ADD_TEXT("    Usage: irbruteforce <file_path> [delay_ms]\n\n");
+
     printf("listenprobes\n");
     printf("    Description: Listen for and log probe requests.\n");
     printf("    Usage: listenprobes [channel] [stop]\n");
@@ -1616,19 +1638,56 @@ void handle_help(int argc, char **argv) {
 #endif
 }
 
-void handle_capture(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Usage: capture [-probe|-beacon|-deauth|-raw|-ble]\n");
-        TERMINAL_VIEW_ADD_TEXT("Usage: capture [-probe|-beacon|-deauth|-raw|-ble]\n");
+void handle_ir_send(int argc, char **argv) {
+    if (argc != 2) {
+        printf("Usage: irsend <file_path>\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: irsend <file_path>\n");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
-    if (strcmp(argv[1], "-ble") == 0) {
-        printf("Starting BLE packet capture...\n");
-        TERMINAL_VIEW_ADD_TEXT("Starting BLE packet capture...\n");
-        ble_start_capture();
+    infrared_signal_t signal;
+    if (infrared_manager_read_file(argv[1], &signal)) {
+        bool ok = infrared_manager_transmit(&signal);
+        infrared_manager_free_signal(&signal);
+        printf("IR send %s: %s\n", argv[1], ok ? "OK" : "FAIL");
+        TERMINAL_VIEW_ADD_TEXT("IR send %s: %s\n", argv[1], ok ? "OK" : "FAIL");
+    } else {
+        printf("Failed to read IR signal from %s\n", argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Failed to read IR signal from %s\n", argv[1]);
     }
-#endif
+}
+
+void handle_ir_list(int argc, char **argv) {
+    if (argc != 2) {
+        printf("Usage: irlist <file_path>\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: irlist <file_path>\n");
+        return;
+    }
+    infrared_signal_t *signals = NULL;
+    size_t count = 0;
+    if (infrared_manager_read_list(argv[1], &signals, &count)) {
+        printf("Found %zu IR signals in %s:\n", count, argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Found %zu IR signals in %s:\n", count, argv[1]);
+        for (size_t i = 0; i < count; i++) {
+            printf("  [%zu] %s (%s)\n", i, signals[i].name, signals[i].is_raw ? "raw" : "parsed");
+            TERMINAL_VIEW_ADD_TEXT("  [%zu] %s (%s)\n", i, signals[i].name, signals[i].is_raw ? "raw" : "parsed");
+        }
+        infrared_manager_free_list(signals, count);
+    } else {
+        printf("Failed to read IR signal list from %s\n", argv[1]);
+        TERMINAL_VIEW_ADD_TEXT("Failed to read IR signal list from %s\n", argv[1]);
+    }
+}
+
+void handle_ir_bruteforce(int argc, char **argv) {
+    if (argc < 2 || argc > 3) {
+        printf("Usage: irbruteforce <file_path> [delay_ms]\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: irbruteforce <file_path> [delay_ms]\n");
+        return;
+    }
+    uint32_t delay_ms = (argc == 3) ? atoi(argv[2]) : 500;
+    bool ok = infrared_manager_bruteforce(argv[1], delay_ms);
+    printf("IR brute force %s: %s\n", argv[1], ok ? "OK" : "FAIL");
+    TERMINAL_VIEW_ADD_TEXT("IR brute force %s: %s\n", argv[1], ok ? "OK" : "FAIL");
 }
 
 void handle_gps_info(int argc, char **argv) {
@@ -2719,6 +2778,10 @@ void register_commands() {
     register_command("blespam", handle_ble_spam_cmd);
 #endif
     register_command("setrgbmode", handle_set_rgb_mode_cmd);
+
+    register_command("irsend", handle_ir_send);
+    register_command("irlist", handle_ir_list);
+    register_command("irbruteforce", handle_ir_bruteforce);
     
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);
     
@@ -2845,6 +2908,8 @@ void handle_set_rgb_mode_cmd(int argc, char **argv) {
     printf("RGB mode set to %s\n", argv[1]);
     TERMINAL_VIEW_ADD_TEXT("RGB mode set to %s\n", argv[1]);
 }
+
+
 
 
 
