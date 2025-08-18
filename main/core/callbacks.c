@@ -54,7 +54,8 @@ static bool ssid_hash_exists(pineap_network_t *network, uint32_t hash);
 static void trim_trailing(char *str);
 static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2);
 static bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt);
-static const char SKIMMER_TAG[] STORE_STR_ATTR = "SKIMMER_DETECT";
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+#endif
 static const char *suspicious_names[] STORE_DATA_ATTR = {
     "HC-03", "HC-05", "HC-06",  "HC-08",    "BT-HC05", "JDY-31",
     "AT-09", "HM-10", "CC41-A", "MLT-BT05", "SPP-CA",  "FFD0"};
@@ -64,7 +65,6 @@ int detected_network_count = 0;
 esp_timer_handle_t stop_timer;
 int should_store_wps = 1;
 gps_t *gps = NULL;
-extern RGBManager_t rgb_manager;
 typedef struct {
     uint8_t bssid[6];
     time_t detection_time;
@@ -326,7 +326,9 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
 
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buf;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
-    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    wifi_ieee80211_mac_hdr_t hdr_copy;
+    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));  // Copy to avoid unaligned pointer
+    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
 
     // Only process beacon frames
     if (!is_beacon_packet(ppkt))
@@ -559,7 +561,6 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     int rssi = pkt->rx_ctrl.rssi;
     int channel = pkt->rx_ctrl.channel;
 
-    bool network_found = false;
     char encryption_type[8] = "OPEN";
 
     while (index + 1 < len) {
@@ -615,6 +616,8 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     wardriving_data.encryption_type[sizeof(wardriving_data.encryption_type) - 1] = '\0';
 
     esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
+    // Suppress unused variable warning
+    (void)err;
 }
 
 void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
@@ -829,6 +832,8 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 // Forward declare the struct and callback before use
 struct ble_hs_adv_field;
 static int ble_hs_adv_parse_fields_cb(const struct ble_hs_adv_field *field, void *arg);
+
+static const char SKIMMER_TAG[] STORE_STR_ATTR = "SKIMMER_DETECT";
 
 void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
     if (!event || event->type != BLE_GAP_EVENT_DISC) {
@@ -1060,7 +1065,9 @@ void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (frame_subtype != WIFI_PKT_PROBE_REQ) return;
 
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)pkt->payload;
-    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    wifi_ieee80211_mac_hdr_t hdr_copy;
+    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));  // Copy to avoid unaligned pointer
+    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
     const uint8_t *payload = pkt->payload;
 
     // Extract source and dest MAC and SSID as before...

@@ -13,13 +13,20 @@
 
 static const char *TAG = "MainMenu";
 
+#define ANIM_DURATION 60 // Animation duration in milliseconds HIGH: 30, LOW: 120
+
 lv_obj_t *menu_container;
 static int selected_item_index = 0;
 static int touch_start_x;
 static int touch_start_y;
 static bool touch_started = false;
+static bool is_animating = false;
 static const int SWIPE_THRESHOLD = 50;
 static const int TAP_THRESHOLD = 10; // Add a threshold for tap detection
+
+const View *pending_view_to_switch = NULL;
+static EOptionsMenuType pending_menu_type;
+static bool menu_item_selected = false;
 
 typedef struct {
   const char *name;
@@ -82,14 +89,94 @@ static void anim_set_x(void *obj, int32_t v) {
     lv_obj_set_x((lv_obj_t *)obj, (lv_coord_t)v);
 }
 
-/**
- * @brief Updates the displayed menu item with animation.
- */
+// Add this helper at file scope if not present:
+static void fade_out_ready_cb(lv_anim_t *a) {
+    lv_obj_del((lv_obj_t *)a->var);
+}
+
+static void fade_in_ready_cb(lv_anim_t *a) {
+    is_animating = false;
+}
+
+static void anim_set_opa(void *obj, int32_t v) {
+    lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
+}
+
+static void anim_set_scale(void *obj, int32_t v) {
+    lv_obj_set_style_transform_zoom((lv_obj_t *)obj, v, 0);
+}
+
+static void anim_set_bg_color(void *obj, int32_t v) {
+    // v is a 24-bit RGB value
+    lv_color_t color = lv_color_hex(v);
+    lv_obj_set_style_bg_color((lv_obj_t *)obj, color, LV_PART_MAIN);
+}
+
+static void button_click_anim_cb(lv_anim_t *a) {
+    if (pending_view_to_switch) {
+        if (pending_view_to_switch == &options_menu_view)
+            SelectedMenuType = pending_menu_type;
+        display_manager_switch_view((View *)pending_view_to_switch);
+        pending_view_to_switch = NULL;
+    }
+}
+static void animate_button_click(lv_obj_t *btn) {
+    // Animate opacity down and back up
+    int anim_duration = ANIM_DURATION / 8; // Half duration for click effect - divide by 8 for faster click effect
+    if (anim_duration < 10) anim_duration = 10; // Ensure minimum duration
+    
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, btn);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_50);
+    lv_anim_set_time(&a, anim_duration);
+    lv_anim_set_exec_cb(&a, anim_set_opa);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+
+    lv_anim_t a2;
+    lv_anim_init(&a2);
+    lv_anim_set_var(&a2, btn);
+    lv_anim_set_values(&a2, LV_OPA_50, LV_OPA_COVER);
+    lv_anim_set_time(&a2, anim_duration);
+    lv_anim_set_exec_cb(&a2, anim_set_opa);
+    lv_anim_set_path_cb(&a2, lv_anim_path_ease_in);
+    lv_anim_set_ready_cb(&a2, button_click_anim_cb);
+    lv_anim_start(&a2);
+    
+}
+
 static void update_menu_item(bool slide_left) {
+    static lv_obj_t *prev_item_obj = NULL;
+    is_animating = true; // Set flag to block input during animation
+    // Animate out old item if it exists
     if (current_item_obj) {
-        lv_obj_del(current_item_obj);
+        prev_item_obj = current_item_obj;
+        // Slide out
+        lv_anim_t anim_out;
+        lv_anim_init(&anim_out);
+        lv_anim_set_var(&anim_out, prev_item_obj);
+        int end_x = slide_left ? -LV_HOR_RES : LV_HOR_RES;
+        lv_anim_set_values(&anim_out, 0, end_x);
+        lv_anim_set_time(&anim_out, ANIM_DURATION);
+        lv_anim_set_path_cb(&anim_out, lv_anim_path_ease_in_out);
+        lv_anim_set_exec_cb(&anim_out, anim_set_x);
+        if (!menu_item_selected) { // Only delete if not selecting
+            lv_anim_set_ready_cb(&anim_out, fade_out_ready_cb);
+        }
+        lv_anim_start(&anim_out);
+
+        // Fade out
+        lv_anim_t fade_out;
+        lv_anim_init(&fade_out);
+        lv_anim_set_var(&fade_out, prev_item_obj);
+        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_time(&fade_out, ANIM_DURATION);
+        lv_anim_set_exec_cb(&fade_out, anim_set_opa);
+        lv_anim_start(&fade_out);
     }
 
+    // Create new item (off-screen, transparent)
     current_item_obj = lv_btn_create(menu_container);
     lv_obj_set_style_bg_color(current_item_obj, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_item_obj, 3, LV_PART_MAIN);
@@ -97,38 +184,38 @@ static void update_menu_item(bool slide_left) {
     lv_obj_set_style_border_width(current_item_obj, 2, LV_PART_MAIN);
     lv_obj_set_style_border_color(current_item_obj, menu_items[selected_item_index].border_color, LV_PART_MAIN);
     lv_obj_set_style_radius(current_item_obj, 10, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN); // Remove padding
-    lv_obj_set_style_clip_corner(current_item_obj, false, 0); // Prevent clipping by button
+    lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_clip_corner(current_item_obj, false, 0);
 
     int btn_size = LV_MIN(LV_HOR_RES, LV_VER_RES) * 0.6;
     if (LV_HOR_RES <= 128 && LV_VER_RES <= 128) {
-        btn_size = 80; // Changed from 50 to match app menu minimum size
+        btn_size = 80;
     }
     lv_obj_set_size(current_item_obj, btn_size, btn_size);
+
+    // Start new item off-screen (opposite direction of swipe)
+    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
     lv_obj_align(current_item_obj, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_opa(current_item_obj, LV_OPA_TRANSP, 0); // Start transparent
 
     lv_obj_t *icon = lv_img_create(current_item_obj);
     lv_img_set_src(icon, menu_items[selected_item_index].icon);
 
-    const int icon_size = 50; // Fixed size to match app menu
+    const int icon_size = 50;
     lv_obj_set_size(icon, icon_size, icon_size);
     lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
-    lv_img_set_antialias(icon, false); // Prevent scaling artifacts
-    // Only recolor non-clock icons
-    if (strcmp(menu_items[selected_item_index].name,"Clock")) { 
+    lv_img_set_antialias(icon, false);
+    if (strcmp(menu_items[selected_item_index].name,"Clock")) {
         lv_obj_set_style_img_recolor(icon, menu_items[selected_item_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
     }
-    lv_obj_set_style_clip_corner(icon, false, 0); // Prevent clipping
+    lv_obj_set_style_clip_corner(icon, false, 0);
 
-    // Calculate centered position with offsets
-    int icon_x_offset = -3;  // Match app menu
-    int icon_y_offset = -5;  // Match app menu
+    int icon_x_offset = -3;
+    int icon_y_offset = -5;
     int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
     int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
     lv_obj_set_pos(icon, x_pos, y_pos);
-
-    // Debug output
     lv_coord_t img_width = menu_items[selected_item_index].icon->header.w;
     lv_coord_t img_height = menu_items[selected_item_index].icon->header.h;
     ESP_LOGD(TAG, "Button size: %d x %d, Set Icon size: %d x %d, Original: %d x %d, Pos: %d, %d\n",
@@ -142,35 +229,47 @@ static void update_menu_item(bool slide_left) {
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
     }
 
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, current_item_obj);
-    lv_anim_set_time(&a, 75); // Match app menu timing
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
-    lv_anim_set_values(&a, start_x, 0);
-    lv_anim_set_exec_cb(&a, anim_set_x);
-    lv_anim_start(&a);
+    // Animate in new item (slide and fade)
+    lv_anim_t anim_in;
+    lv_anim_init(&anim_in);
+    lv_anim_set_var(&anim_in, current_item_obj);
+    lv_anim_set_values(&anim_in, start_x, 0);
+    lv_anim_set_time(&anim_in, ANIM_DURATION);
+    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&anim_in, anim_set_x);
+    lv_anim_start(&anim_in);
+
+    lv_anim_t fade_in;
+    lv_anim_init(&fade_in);
+    lv_anim_set_var(&fade_in, current_item_obj);
+    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&fade_in, ANIM_DURATION);
+    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
+    lv_anim_set_ready_cb(&fade_in, fade_in_ready_cb);
+    lv_anim_start(&fade_in);
+
+    // Ensure the new item is fully opaque at the end
+    lv_obj_set_style_opa(current_item_obj, LV_OPA_COVER, 0); // Always fully opaque
 }
 /**
  *  @brief handles keyboard button presses
  */
 
 void handle_keyboard_interactions(int keyValue){
-
-    if (keyValue == 44 || keyValue == ',') { // Left
-        ESP_LOGI(TAG, "Left button pressed\n");
+    // Support both ASCII and LVGL key codes for h/j/k/l
+    if (keyValue == 44 || keyValue == ',' || keyValue == 'h') { // Left or 'h'
+        ESP_LOGI(TAG, "Left button or 'h' pressed\n");
         select_menu_item(selected_item_index - 1, true);
-    } else if (keyValue == 47 || keyValue == '/') { // Right
-        ESP_LOGI(TAG, "Right button pressed\n");
+    } else if (keyValue == 47 || keyValue == '/' || keyValue == 'l') { // Right or 'l'
+        ESP_LOGI(TAG, "Right button or 'l' pressed\n");
         select_menu_item(selected_item_index + 1, false);
-    } else if (keyValue == 13) { // Select
-        ESP_LOGI(TAG, "Enter button pressed\n");
+    } else if (keyValue == 13 || keyValue == 'j') { // Enter or 'j' (down/select)
+        ESP_LOGI(TAG, "Enter button or 'j' pressed\n");
         handle_menu_item_selection(selected_item_index);
-    } else if (keyValue == 29 || keyValue == '`') { // esc
-        ESP_LOGI(TAG, "Esc button pressed\n");
+    } else if (keyValue == 29 || keyValue == '`' || keyValue == 'k') { // Esc or 'k' (up/escape)
+        ESP_LOGI(TAG, "Esc button or 'k' pressed\n");
+        // Optionally, implement up/escape action here if needed
     }
-
 }
 /**
  * @brief Combined handler for menu item events.
@@ -240,6 +339,7 @@ void handle_hardware_button_press(int ButtonPressed) {
  * @brief Selects a menu item and updates the display.
  */
 static void select_menu_item(int index, bool slide_left) {
+    if (is_animating) return; // Block input during animation
     if (index < 0) index = num_items - 1;
     if (index >= num_items) index = 0;
     selected_item_index = index;
@@ -250,43 +350,47 @@ static void select_menu_item(int index, bool slide_left) {
  * @brief Handles the selection of menu items.
  */
 static void handle_menu_item_selection(int item_index) {
-    typedef struct {
-        const char *name;
-        EOptionsMenuType type;
-        View *view;
-    } menu_action_t;
+    if (is_animating) return; // Block input during animation
+    if (current_item_obj) {
+        menu_item_selected = true;
+        // Find the action for this menu item
+        typedef struct {
+            const char *name;
+            EOptionsMenuType type;
+            View *view;
+        } menu_action_t;
 
-    static const menu_action_t menu_actions[] = {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
-        {"BLE", OT_Bluetooth, &options_menu_view},
-#endif
-        {"WiFi", OT_Wifi, &options_menu_view},
-#ifdef CONFIG_HAS_GPS
-        {"GPS", OT_GPS, &options_menu_view},
-#endif
-#if CONFIG_HAS_INFRARED
-        {"Infrared", 0, &infrared_view},
-#endif
-        {"Apps", 0, &apps_menu_view},
-#ifdef CONFIG_HAS_RTC_CLOCK
-        {"Clock", 0, &clock_view},
-#endif
-        {"Settings", OT_Settings, &options_menu_view}
-    };
+        static const menu_action_t menu_actions[] = {
+    #ifndef CONFIG_IDF_TARGET_ESP32S2
+            {"BLE", OT_Bluetooth, &options_menu_view},
+    #endif
+            {"WiFi", OT_Wifi, &options_menu_view},
+    #ifdef CONFIG_HAS_GPS
+            {"GPS", OT_GPS, &options_menu_view},
+    #endif
+    #if CONFIG_HAS_INFRARED
+            {"Infrared", 0, &infrared_view},
+    #endif
+            {"Apps", 0, &apps_menu_view},
+    #ifdef CONFIG_HAS_RTC_CLOCK
+            {"Clock", 0, &clock_view},
+    #endif
+            {"Settings", OT_Settings, &options_menu_view}
+        };
 
-    const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);
-    const char *name = menu_items[item_index].name;
-    for (int i = 0; i < num_actions; ++i) {
-        if (strcmp(name, menu_actions[i].name) == 0) {
-            ESP_LOGI(TAG, "%s selected\n", menu_actions[i].name);
-            if (menu_actions[i].view == &options_menu_view) {
-                SelectedMenuType = menu_actions[i].type;
+        const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);
+        const char *name = menu_items[item_index].name;
+        for (int i = 0; i < num_actions; ++i) {
+            if (strcmp(name, menu_actions[i].name) == 0) {
+                ESP_LOGI(TAG, "%s selected\n", menu_actions[i].name);
+                pending_view_to_switch = menu_actions[i].view;
+                pending_menu_type = menu_actions[i].type;
+                animate_button_click(current_item_obj);
+                return;
             }
-            display_manager_switch_view(menu_actions[i].view);
-            return;
         }
+        ESP_LOGW(TAG, "Unknown menu item selected: %s\n", name);
     }
-    ESP_LOGW(TAG, "Unknown menu item selected: %s\n", name);
 }
 
 /**
@@ -325,6 +429,8 @@ void main_menu_destroy(void) {
 void get_main_menu_callback(void **callback) {
     *callback = main_menu_view.input_callback;
 }
+
+
 
 View main_menu_view = {
     .root = NULL,

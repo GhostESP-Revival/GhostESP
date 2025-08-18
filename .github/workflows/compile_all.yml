@@ -24,6 +24,7 @@ jobs:
           - { name: "esp32s2-generic", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32s2-generic.zip" }
           - { name: "esp32s3-generic", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.default.esp32s3",    zip_name: "esp32s3-generic.zip" }
           - { name: "esp32c3-generic", idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.default.esp32c3",    zip_name: "esp32c3-generic.zip" }
+          - { name: "esp32c5-generic", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.default.esp32c5",    zip_name: "esp32c5-generic-v01.zip" }
           - { name: "esp32c6-generic", idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",    zip_name: "esp32c6-generic.zip" }
           - { name: "Awok V5",         idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32v5_awok.zip" }
           - { name: "ghostboard",      idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",         zip_name: "ghostboard.zip" }
@@ -36,10 +37,16 @@ jobs:
           - { name: "CYDDualUSB",      idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDDualUSB",         zip_name: "CYDDualUSB.zip" }
           - { name: "CYD2USB2.4_Inch", idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",     zip_name: "CYD2USB2.4Inch.zip" }
           - { name: "CYD2USB2.4_Inch_C", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient", zip_name: "CYD2USB2.4Inch_C.zip" }
+          - { name: "CYD2432S028R",    idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",       zip_name: "CYD2432S028R.zip" }
           - { name: "Waveshare_LCD",   idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",     zip_name: "Waveshare_LCD.zip" }
           - { name: "Crowtech_LCD",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",      zip_name: "Crowtech_LCD.zip" }
           - { name: "Flipper_JCMK_GPS", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",    zip_name: "Flipper_JCMK_GPS.zip" }
-
+          - { name: "T-Deck",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",              zip_name: "LilyGo-T-Deck.zip" }
+          - { name: "TEmbedC1101",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",        zip_name: "LilyGo-TEmbedC1101.zip" }
+          - { name: "S3TWatch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",           zip_name: "LilyGo-S3TWatch-2020.zip" }
+          - { name: "TDisplayS3-Touch",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",     zip_name: "LilyGo-TDisplayS3-Touch.zip" } 
+          - { name: "JCMK_DevBoardPro", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro", zip_name: "JCMK_DevBoardPro.zip" }
+          - { name: "RabbitLabs_Minion", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.minion", zip_name: "RabbitLabs_Minion.zip" }
     steps:
       - uses: actions/checkout@v4
       
@@ -51,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util
-          git clone -b v5.4.1 --depth 1 https://github.com/espressif/esp-idf.git ~/esp-idf
+          git clone -b v5.5 --depth 1 https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
       - name: Apply Custom SDK Config
@@ -74,30 +81,31 @@ jobs:
             exit 1
           }
 
-      - name: Download Bootloader
+      - name: Verify Local Bootloader Exists
         run: |
-          BOOTLOADER_URL="https://cdn.spookytools.com/bootloaders/${{ matrix.target.idf_target }}.bin"
-          BOOTLOADER_PATH="build/bootloader.bin"
-          echo "Downloading bootloader from $BOOTLOADER_URL..."
-          curl -L -o "$BOOTLOADER_PATH" "$BOOTLOADER_URL" || {
-            echo "Error: Bootloader download failed."
-            exit 1
-          }
+          BOOTLOADER_PATH="build/bootloader/bootloader.bin"
           if [ ! -f "$BOOTLOADER_PATH" ]; then
-            echo "Error: Bootloader file not found after download."
+            echo "Error: Bootloader not found at $BOOTLOADER_PATH. Build may have failed."
             exit 1
           fi
-          echo "Bootloader downloaded successfully."
+          echo "Local bootloader found at $BOOTLOADER_PATH."
 
       - name: Package Artifacts into ZIP
         run: |
           ARTIFACT_DIR="packaged_artifacts"
           ZIP_FILE="${{ matrix.target.zip_name }}"
           mkdir -p "$ARTIFACT_DIR"
+          # Copy partition table
           cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/" || {
             echo "Failed to copy partition table"
             exit 1
           }
+          # Copy bootloader
+          cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/" || {
+            echo "Failed to copy bootloader"
+            exit 1
+          }
+          # Copy app binary
           cp build/*.bin "$ARTIFACT_DIR/" || {
             echo "Failed to copy binaries"
             exit 1

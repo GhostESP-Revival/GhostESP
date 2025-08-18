@@ -1,5 +1,9 @@
 # Features
 
+
+```anything you read here may or may not be entirely accurate or up to date.``` 
+
+
 GhostESP comes packed with various features for wireless network exploration and testing.
 
 ## WiFi Capabilities
@@ -64,8 +68,7 @@ GhostESP comes packed with various features for wireless network exploration and
 
 - **Specialized Detection**
   - AirTag detection mode
-  - Flipper Zero detection mode
-  - BLE spam detector
+  - Flipper Zero detection and RSSI tracking
   - BLE skimmer detection
 
 ### BLE Attacks
@@ -75,6 +78,10 @@ GhostESP comes packed with various features for wireless network exploration and
   - Stop BLE spam at any time
 
 ## Infrared (IR) Functions
+
+### IR Receive Support
+
+- **Easy Learn Mode**<sup>™</sup> Auto button naming (it's not a real trademark)
 
 ### IR Transmit Support
 
@@ -87,12 +94,12 @@ GhostESP comes packed with various features for wireless network exploration and
 ### IR Protocol Support
 
 - **Supported Protocols**:
-  - NEC
+  - NEC, NECext
   - Kaseikyo
   - Pioneer
   - RCA
   - Samsung
-  - SIRC
+  - SIRC, SIRC15, SIRC20
   - RC5
   - RC6
 

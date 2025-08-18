@@ -2,6 +2,9 @@
 
 Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution for ESP32 microcontrollers designed for wireless network exploration and security testing.
 
+
+```anything you read here may or may not be entirely accurate or up to date.``` 
+
 ## Quick Navigation
 
 - [About GhostESP](https://github.com/jaylikesbunda/Ghost_ESP/wiki/About#)
@@ -20,19 +23,18 @@ Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution
 
 ## Important Notice
 
-GhostESP firmware is actively developed with regular updates. Current version v1.7 (Revival) includes:
+GhostESP firmware is actively developed with regular updates. Current version in development (Revival) includes:
 
 - **Dual ESP32 communication** with WebUI control
 - **Power saving mode** for up to 5X battery life on supported devices
 - **Infrared (IR) support** with FlipperZero file compatibility
-- Enhanced display support with Flappy Ghost game
-- Evil Portal functionality (online and offline)
+- Display Support
+- Evil Portal functionality
 - SD card support for compatible devices
-- CYD RGB LED control support
+- RGB LED control support
 - Web UI with auto-updating settings
-- Rave Mode for syncing ESP32 displays/LEDs with audio
 - Terminal App for keyboard-based command input
-- Fuel Gauge support (BQ27220 initially)
+- Fuel Gauge support
 
 For the latest updates and support:
 

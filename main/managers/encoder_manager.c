@@ -10,6 +10,9 @@ static const int8_t KNOBDIR[16] = {
      0,  1, -1,  0};
 
 #define LATCH0 0
+#define ENCODER_DEBOUNCE_US 1000         /* ignore latches quicker than this */
+#define ENCODER_ACCEL_THRESH_US_1 15000  /* <15 ms => 2x */
+#define ENCODER_ACCEL_THRESH_US_2 5000   /* <5 ms  => 4x */
 #define LATCH3 3
 
 /* helper for ms timestamps */
@@ -17,8 +20,7 @@ static inline uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
-
-/* ----------- IMPLEMENTATION ----------- */
+\
 
 void encoder_init(encoder_t *enc,
                   int pin_a,
@@ -78,10 +80,39 @@ void encoder_tick(encoder_t *enc)
         if (latched) {
             uint64_t now_us = esp_timer_get_time();
             uint32_t diff_us = (uint32_t)(now_us - enc->pos_time_us);
+
+            /* Debounce */
+            if (diff_us < ENCODER_DEBOUNCE_US) {
+                return; /* ignore bounce */
+            }
+
+            /* Adaptive smoothing: restart average window if speed changes >30% */
+            if (enc->rpm_time_count) {
+                uint32_t last = enc->rpm_time_diffs_us[(enc->rpm_time_index + ENCODER_RPM_SMOOTHING_SIZE - 1) % ENCODER_RPM_SMOOTHING_SIZE];
+                if (last) {
+                    uint32_t diff_abs = (diff_us > last) ? (diff_us - last) : (last - diff_us);
+                    if (diff_abs * 100 > last * 30) {
+                        enc->rpm_time_count = 0;
+                    }
+                }
+            }
+            /* Update RPM buffer */
             if (enc->rpm_time_count < ENCODER_RPM_SMOOTHING_SIZE) enc->rpm_time_count++;
             enc->rpm_time_diffs_us[enc->rpm_time_index] = diff_us;
             enc->rpm_time_index = (enc->rpm_time_index + 1) % ENCODER_RPM_SMOOTHING_SIZE;
-            enc->position_ext = (enc->mode == ENCODER_LATCH_TWO03) ? (enc->position >> 1) : (enc->position >> 2);
+
+            /* Acceleration */
+            int accel_mult = 1;
+            if (diff_us < ENCODER_ACCEL_THRESH_US_2) {
+                accel_mult = 4;
+            } else if (diff_us < ENCODER_ACCEL_THRESH_US_1) {
+                accel_mult = 2;
+            }
+
+            int32_t base_ext = (enc->mode == ENCODER_LATCH_TWO03) ? (enc->position >> 1) : (enc->position >> 2);
+            int32_t delta = base_ext - enc->position_ext;
+            enc->position_ext += delta * accel_mult;
+
             enc->pos_time_prev_us = enc->pos_time_us;
             enc->pos_time_us = now_us;
             enc->pos_time_prev_ms = (uint32_t)(enc->pos_time_prev_us / 1000);

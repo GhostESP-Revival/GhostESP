@@ -9,7 +9,7 @@
 
 // Define constants
 #define GPS_MAX_FILE_NAME_LENGTH 64
-#define BUFFER_SIZE 2048
+#define GPS_BUFFER_SIZE 2048
 #define MIN_SPEED_THRESHOLD 0.1   // Minimum 0.1 m/s (~0.36 km/h)
 #define MAX_SPEED_THRESHOLD 340.0 // Maximum 340 m/s (~1224 km/h)
 

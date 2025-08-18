@@ -1,6 +1,6 @@
 # About GhostESP
 
-GhostESP is a robust and feature-rich firmware designed for ESP32 microcontrollers, enabling advanced wireless network exploration and security testing.
+GhostESP: Revival is an open source firmware for ESP32 microcontrollers.
 
 ## Supported Hardware
 
@@ -36,12 +36,11 @@ The following ESP32 models are officially supported:
 
 - **Performance** varies across ESP32 models and may impact certain features.
 - **Hardware-specific limitations**: Certain features, like SD card support and touchscreen responsiveness, depend on board compatibility.
-- **Web flasher**: Cache clearing may be necessary for proper function.
 - **Firmware updates**: Beta development may include experimental features.
 
 ## Version Status
 
-- **Current version**: v1.7 (Revival)
+- **Current version**: v1.7dev (Revival)
 - **Framework**: ESP-IDF
 
 ### Recent Feature Additions
@@ -67,12 +66,15 @@ The following ESP32 models are officially supported:
 
 ## Acknowledgments
 
-GhostESP builds upon the work of several open-source projects and developers:
+GhostESP is based on the work of several open-source projects and developers that may or may not be listed here:
 
 - **JustCallMeKoKo**: ESP32 development foundations
 - **thibauts**: CastV2 protocol insights
 - **MarcoLucidi01**: DIAL protocol integration
 - Community contributors for board support
+- **FlipperZero**: IR support
+- **Spooky**: Original GhostESP developer
+- **Tototo31**: Bug-Fixes, Feature Additions and Board Support
 
 ## Project Goals
 

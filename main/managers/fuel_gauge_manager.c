@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include "esp_pm.h"
 
 #ifdef CONFIG_USE_BQ27220_FUEL_GAUGE
 
@@ -52,12 +53,22 @@ static bool is_initialized = false;
 static bool i2c_initialized_by_us = false;
 static fuel_gauge_data_t last_data = {0};
 
+#if CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t fg_i2c_pm_lock = NULL;
+#endif
+
 static uint16_t bq27220_read_word(uint8_t reg) {
     uint8_t data[2] = {0};
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
+#endif
 
     esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
                                                  &reg, 1, data, 2,
                                                  pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
+#endif
 
     if (ret != ESP_OK) {
         return 0xFFFF;
@@ -71,10 +82,17 @@ static esp_err_t bq27220_write_word(uint8_t reg, uint16_t data) {
     write_data[0] = reg;
     write_data[1] = data & 0xFF;
     write_data[2] = (data >> 8) & 0xFF;
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
+#endif
     
-    return i2c_master_write_to_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
+    esp_err_t ret = i2c_master_write_to_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
                                       write_data, 3,
                                       pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
+#endif
+    return ret;
 }
 
 static esp_err_t bq27220_control_command(uint16_t command) {
@@ -148,9 +166,15 @@ static esp_err_t bq27220_exit_config_update(void) {
 
 static uint8_t bq27220_read_byte(uint8_t reg) {
     uint8_t data = 0xFF;
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
+#endif
     esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
-                                                 &reg, 1, &data, 1,
-                                                 pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+                                                  &reg, 1, &data, 1,
+                                                  pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
+#endif
     if (ret != ESP_OK) {
         return 0xFF;
     }
@@ -272,6 +296,11 @@ static esp_err_t fuel_gauge_i2c_init(void) {
     }
 
     i2c_initialized_by_us = true;
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock == NULL) {
+        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "fg_i2c", &fg_i2c_pm_lock);
+    }
+#endif
     ESP_LOGI(TAG, "I2C initialized successfully on port %d", I2C_MASTER_NUM);
     return ESP_OK;
 }

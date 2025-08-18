@@ -6,10 +6,12 @@
 #include <esp_types.h>
 #include <managers/display_manager.h>
 
-// Initialize the SerialManager
 void serial_manager_init();
 
-// Task function for reading serial commands
+void serial_manager_deinit();
+
+int serial_manager_get_uart_num();
+
 void serial_task(void *pvParameter);
 
 int handle_serial_command(const char *input);

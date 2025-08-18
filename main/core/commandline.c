@@ -5,6 +5,7 @@
 #include "core/serial_manager.h"
 #include "esp_sntp.h"
 #include "managers/ap_manager.h"
+#include "sdkconfig.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -44,6 +45,7 @@ TaskHandle_t VisualizerHandle = NULL;
 TaskHandle_t gps_info_task_handle = NULL;
 
 // Forward declarations for command handlers
+void cmd_wifi_scan_stop(int argc, char **argv);
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 void handle_list_airtags_cmd(int argc, char **argv);
 void handle_select_airtag(int argc, char **argv);
@@ -118,6 +120,16 @@ void handle_unknown_command(const char *cmd) {
 
 void cmd_wifi_scan_start(int argc, char **argv) {
     if (argc > 1) {
+        if (strcmp(argv[1], "-stop") == 0) {
+            cmd_wifi_scan_stop(argc, argv);
+            return;
+        }
+        if (strcmp(argv[1], "-live") == 0) {
+            printf("Starting live AP scan...\n");
+            TERMINAL_VIEW_ADD_TEXT("Starting live AP scan...\n");
+            wifi_manager_start_live_ap_scan();
+            return;
+        }
         int seconds = atoi(argv[1]);
         wifi_manager_start_scan_with_time(seconds);
     } else {
@@ -226,20 +238,30 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_start_eapollogoff_attack();
             return;
         } else if (strcmp(argv[1], "-s") == 0) {
+            if (argc < 3) {
+                printf("Usage: attack -s <password>\n");
+                TERMINAL_VIEW_ADD_TEXT("Usage: attack -s <password>\n");
+                return;
+            }
             printf("SAE flood attack starting...\n");
             TERMINAL_VIEW_ADD_TEXT("SAE flood attack starting...\n");
-            wifi_manager_start_sae_flood();
+            wifi_manager_start_sae_flood(argv[2]);
             return;
         }
     }
-    printf("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
-    TERMINAL_VIEW_ADD_TEXT("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+    printf("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
+    TERMINAL_VIEW_ADD_TEXT("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
 }
 
 void handle_sae_flood_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: saeflood <password>\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: saeflood <password>\n");
+        return;
+    }
     printf("Starting SAE flood attack...\n");
     TERMINAL_VIEW_ADD_TEXT("Starting SAE flood attack...\n");
-    wifi_manager_start_sae_flood();
+    wifi_manager_start_sae_flood(argv[1]);
 }
 
 void handle_stop_sae_flood_cmd(int argc, char **argv) {
@@ -966,69 +988,122 @@ void handle_timezone_cmd(int argc, char **argv) {
 
 void handle_scan_ports(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage:\n");
         TERMINAL_VIEW_ADD_TEXT("Usage:\n");
-        printf("scanports local [-C/-A/start_port-end_port]\n");
-        TERMINAL_VIEW_ADD_TEXT("scanports local [-C/-A/start_port-end_port]\n");
-        printf("scanports [IP] [-C/-A/start_port-end_port]\n");
-        TERMINAL_VIEW_ADD_TEXT("scanports [IP] [-C/-A/start_port-end_port]\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanports local\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanports <IP> [all | start-end]\n");
         return;
     }
 
-    bool is_local = strcmp(argv[1], "local") == 0;
-    const char *target_ip = NULL;
-    const char *port_arg = NULL;
-
-    // Parse arguments based on whether it's a local scan
-    if (is_local) {
-        if (argc < 3) {
-            printf("Missing port argument for local scan\n");
-            TERMINAL_VIEW_ADD_TEXT("Missing port argument for local scan\n");
-            return;
+    // Handle local subnet scan
+    if (strcmp(argv[1], "local") == 0) {
+        if (argc > 2) {
+            TERMINAL_VIEW_ADD_TEXT("Info: 'local' scan does not take arguments.\n");
         }
-        port_arg = argv[2];
-    } else {
-        if (argc < 3) {
-            printf("Missing port argument for IP scan\n");
-            TERMINAL_VIEW_ADD_TEXT("Missing port argument for IP scan\n");
-            return;
-        }
-        target_ip = argv[1];
-        port_arg = argv[2];
-    }
-
-    if (is_local) {
+        TERMINAL_VIEW_ADD_TEXT("Starting local subnet scan...\n");
         wifi_manager_scan_subnet();
         return;
     }
 
-    host_result_t result;
-    if (strcmp(port_arg, "-C") == 0) {
+    // Handle remote IP scan
+    const char *target_ip = argv[1];
+    int start_port = 0, end_port = 0;
+
+    // Default to common ports if no range is specified
+    if (argc < 3) {
+        host_result_t result;
+        char msg_buf[64];
+        snprintf(msg_buf, sizeof(msg_buf), "Scanning common tcp ports on %s...\n", target_ip);
+        printf("%s", msg_buf);
+        TERMINAL_VIEW_ADD_TEXT(msg_buf);
         scan_ports_on_host(target_ip, &result);
+
         if (result.num_open_ports > 0) {
-            printf("Open ports on %s:\n", target_ip);
-            char open_buf[64];
-            snprintf(open_buf, sizeof(open_buf), "Open ports on %s:\n", target_ip);
-            TERMINAL_VIEW_ADD_TEXT(open_buf);
+            snprintf(msg_buf, sizeof(msg_buf), "Found %d open ports on %s:\n", result.num_open_ports, target_ip);
+            printf("%s", msg_buf);
+            TERMINAL_VIEW_ADD_TEXT(msg_buf);
             for (int i = 0; i < result.num_open_ports; i++) {
-                printf("Port %d\n", result.open_ports[i]);
                 char port_buf[32];
-                snprintf(port_buf, sizeof(port_buf), "Port %d\n", result.open_ports[i]);
+                snprintf(port_buf, sizeof(port_buf), "  Port %d\n", result.open_ports[i]);
+                printf("%s", port_buf);
                 TERMINAL_VIEW_ADD_TEXT(port_buf);
             }
+        } else {
+            printf("No common open ports found.\n");
+            TERMINAL_VIEW_ADD_TEXT("No common open ports found.\n");
         }
+
+        host_result_t udp_result;
+        snprintf(msg_buf, sizeof(msg_buf), "Scanning common udp ports on %s...\n", target_ip);
+        printf("%s", msg_buf);
+        TERMINAL_VIEW_ADD_TEXT(msg_buf);
+        scan_udp_ports_on_host(target_ip, &udp_result);
+        if (udp_result.num_open_ports > 0) {
+            snprintf(msg_buf, sizeof(msg_buf), "Found %d udp ports responding on %s:\n", udp_result.num_open_ports, target_ip);
+            printf("%s", msg_buf);
+            TERMINAL_VIEW_ADD_TEXT(msg_buf);
+            for (int i = 0; i < udp_result.num_open_ports; i++) {
+                char port_buf[32];
+                snprintf(port_buf, sizeof(port_buf), "  UDP %d\n", udp_result.open_ports[i]);
+                printf("%s", port_buf);
+                TERMINAL_VIEW_ADD_TEXT(port_buf);
+            }
+        } else {
+            printf("No common udp responses found.\n");
+            TERMINAL_VIEW_ADD_TEXT("No common udp responses found.\n");
+        }
+        return;
+    }
+
+    // Parse port range argument
+    const char *port_arg = argv[2];
+    if (strcmp(port_arg, "all") == 0) {
+        start_port = 1;
+        end_port = 65535;
+    } else if (sscanf(port_arg, "%d-%d", &start_port, &end_port) != 2 || start_port < 1 ||
+               end_port > 65535 || start_port > end_port) {
+        TERMINAL_VIEW_ADD_TEXT("Error: Invalid port range. Use 'all' or 'start-end'.\n");
+        return;
+    }
+
+    char msg_buf[64];
+    snprintf(msg_buf, sizeof(msg_buf), "Scanning %s tcp ports %d-%d...\n", target_ip, start_port, end_port);
+    printf("%s", msg_buf);
+    TERMINAL_VIEW_ADD_TEXT(msg_buf);
+    scan_ip_port_range(target_ip, start_port, end_port);
+
+    snprintf(msg_buf, sizeof(msg_buf), "Scanning %s udp ports %d-%d...\n", target_ip, start_port, end_port);
+    printf("%s", msg_buf);
+    TERMINAL_VIEW_ADD_TEXT(msg_buf);
+    scan_ip_udp_port_range(target_ip, start_port, end_port);
+}
+
+void handle_scan_arp(int argc, char **argv) {
+    TERMINAL_VIEW_ADD_TEXT("Starting ARP scan on local network...\n");
+    printf("Starting ARP scan on local network...\n");
+    wifi_manager_arp_scan_subnet();
+}
+
+void handle_scan_ssh(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: scanssh <IP>\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: scanssh <IP>\n");
+        return;
+    }
+
+    const char *target_ip = argv[1];
+    host_result_t result;
+    char msg_buf[64];
+    
+    printf("Starting SSH scan on %s...\n", target_ip);
+    TERMINAL_VIEW_ADD_TEXT("Starting SSH scan on %s...\n", target_ip);
+    
+    scan_ssh_on_host(target_ip, &result);
+    
+    if (result.num_open_ports > 0) {
+        printf("Found %d SSH service(s) on %s\n", result.num_open_ports, target_ip);
+        TERMINAL_VIEW_ADD_TEXT("Found %d SSH service(s) on %s\n", result.num_open_ports, target_ip);
     } else {
-        int start_port, end_port;
-        if (strcmp(port_arg, "-A") == 0) {
-            start_port = 1;
-            end_port = 65535;
-        } else if (sscanf(port_arg, "%d-%d", &start_port, &end_port) != 2 || start_port < 1 ||
-                   end_port > 65535 || start_port > end_port) {
-            printf("Invalid port range\n");
-            TERMINAL_VIEW_ADD_TEXT("Invalid port range\n");
-            return;
-        }
-        scan_ip_port_range(target_ip, start_port, end_port);
+        TERMINAL_VIEW_ADD_TEXT("No SSH services found.\n");
     }
 }
 
@@ -1037,577 +1112,388 @@ void handle_crash(int argc, char **argv) {
     *ptr = 42;
 }
 
+
+// Help command
 void handle_help(int argc, char **argv) {
-    printf("\n Ghost ESP Commands:\n\n");
-    TERMINAL_VIEW_ADD_TEXT("\n Ghost ESP Commands:\n\n");
+    const char *category = (argc > 1) ? argv[1] : "unknown"; // Default to "unknown" if no category is provided to fall through ifs
 
-    printf("help\n");
-    printf("    Description: Display this help message.\n");
-    printf("    Usage: help\n\n");
-    TERMINAL_VIEW_ADD_TEXT("help\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Display this help message.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: help\n\n");
+    // List of all categories to print in order
+    const char *all_categories[] = {
+        "wifi", "ble", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+    };
+    int num_categories = sizeof(all_categories) / sizeof(all_categories[0]);
 
-    printf("scanap\n");
-    printf("    Description: Start a Wi-Fi access point (AP) scan.\n");
-    printf("    Usage: scanap [seconds]\n\n");
-    TERMINAL_VIEW_ADD_TEXT("scanap\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start a Wi-Fi access point (AP) scan.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: scanap [seconds]\n\n");
+    if (strcmp(category, "all") == 0) {
+        for (int i = 0; i < num_categories; ++i) {
+            // Recursively call this function for each category
+            char *fake_argv[] = { "help", (char *)all_categories[i] };
+            handle_help(2, fake_argv);
+        }
+        return;
+    }
 
-    printf("scansta\n");
-    printf("    Description: Start scanning for Wi-Fi stations (hops channels).\n");
-    printf("    Usage: scansta\n\n");
-    TERMINAL_VIEW_ADD_TEXT("scansta\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start scanning for Wi-Fi stations (hops channels).\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: scansta\n\n");
-
-    printf("stopscan\n");
-    printf("    Description: Stop any ongoing Wi-Fi scan.\n");
-    printf("    Usage: stopscan\n\n");
-    TERMINAL_VIEW_ADD_TEXT("stopscan\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Stop any ongoing Wi-Fi scan.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: stopscan\n\n");
-
-    printf("attack\n");
-    printf("    Description: Launch an attack (e.g., deauthentication attack).\n");
-    printf("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-    printf("    Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
-    printf("    Arguments:\n");
-    printf("        -d  : Start deauth attack (supports multiple APs)\n");
-    printf("        -e  : Start EAPOL logoff attack\n");
-    printf("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n");
-    printf("\n");
-    TERMINAL_VIEW_ADD_TEXT("attack\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Launch an attack (e.g., deauthentication attack).\n");
-    TERMINAL_VIEW_ADD_TEXT("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -d  : Start deauth attack (supports multiple APs)\n");
-    TERMINAL_VIEW_ADD_TEXT("        -e  : Start EAPOL logoff attack\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n");
-    TERMINAL_VIEW_ADD_TEXT("\n");
-
-    printf("list\n");
-    printf("    Description: List Wi-Fi scan results or connected stations.\n");
-    printf("    Usage: list -a | list -s | list -airtags\n");
-    printf("    Arguments:\n");
-    printf("        -a  : Show access points from Wi-Fi scan\n");
-    printf("        -s  : List connected stations\n");
-    printf("        -airtags: List discovered AirTags\n\n");
-    TERMINAL_VIEW_ADD_TEXT("list\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: List Wi-Fi scan results or connected stations.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: list -a | list -s | list -airtags\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -a  : Show access points from Wi-Fi scan\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s  : List connected stations\n");
-    TERMINAL_VIEW_ADD_TEXT("        -airtags: List discovered AirTags\n\n");
-
-    printf("beaconspam\n");
-    printf("    Description: Start beacon spam with different modes.\n");
-    printf("    Usage: beaconspam [OPTION]\n");
-    printf("    Arguments:\n");
-    printf("        -r   : Start random beacon spam\n");
-    printf("        -rr  : Start Rickroll beacon spam\n");
-    printf("        -l   : Start AP List beacon spam\n");
-    printf("        [SSID]: Use specified SSID for beacon spam\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconspam\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start beacon spam with different modes.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconspam [OPTION]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -r   : Start random beacon spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -rr  : Start Rickroll beacon spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -l   : Start AP List beacon spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        [SSID]: Use specified SSID for beacon spam\n\n");
-
-    printf("stopspam\n");
-    printf("    Description: Stop ongoing beacon spam.\n");
-    printf("    Usage: stopspam\n\n");
-    TERMINAL_VIEW_ADD_TEXT("stopspam\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Stop ongoing beacon spam.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: stopspam\n\n");
-
-    printf("stopdeauth\n");
-    printf("    Description: Stop ongoing deauthentication attack.\n");
-    printf("    Usage: stopdeauth\n\n");
-    TERMINAL_VIEW_ADD_TEXT("stopdeauth\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Stop ongoing deauthentication attack.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: stopdeauth\n\n");
-
-    printf("select\n");
-    printf("    Description: Select access point(s), station, or AirTag by index from the scan "
-           "results.\n");
-    printf("    Usage: select -a <num[,num,...]> | select -s <num> | select -airtag <num>\n");
-    printf("    Arguments:\n");
-    printf("        -a      : AP selection index (supports multiple: 1,3,5)\n");
-    printf("        -s      : Station selection index\n");
-    printf("        -airtag : AirTag selection index\n");
-    printf("    Examples:\n");
-    printf("        select -a 4      : Select single AP at index 4\n");
-    printf("        select -a 1,3,5  : Select multiple APs at indices 1, 3, and 5\n\n");
-    TERMINAL_VIEW_ADD_TEXT("select\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Select access point(s), station, or AirTag by index "
-                           "from the scan results.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: select -a <num[,num,...]> | select -s <num> | select -airtag <num>\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -a      : AP selection index (supports multiple: 1,3,5)\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s      : Station selection index\n");
-    TERMINAL_VIEW_ADD_TEXT("        -airtag : AirTag selection index\n");
-    TERMINAL_VIEW_ADD_TEXT("    Examples:\n");
-    TERMINAL_VIEW_ADD_TEXT("        select -a 4      : Select single AP at index 4\n");
-    TERMINAL_VIEW_ADD_TEXT("        select -a 1,3,5  : Select multiple APs at indices 1, 3, and 5\n\n");
-
-    printf("startportal\n");
-    printf("    Description: Start an Evil Portal using a local file or the default embedded page.\n");
-    printf("                 /mnt/ prefix is added automatically to file paths if missing.\n");
-    printf("    Usage: startportal [FilePath] [AP_SSID] [PSK]\n");
-    printf("           PSK is optional for an open network.\n");
-    printf("    Use 'default' as the file path for the default Evil Portal.");
-    TERMINAL_VIEW_ADD_TEXT("startportal\n");
-    TERMINAL_VIEW_ADD_TEXT("    Desc: Start Evil Portal.\n");
-    TERMINAL_VIEW_ADD_TEXT("          Use 'default' as the file path for the default Evil Portal.\n");
-    TERMINAL_VIEW_ADD_TEXT("          /mnt/ added to paths automatically.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: startportal [FilePath] [AP_SSID] [PSK]\n");
-    TERMINAL_VIEW_ADD_TEXT("           PSK is optional for an open network.\n");
-
-    printf("evilportal\n");
-    printf("    Description: Configure Evil Portal HTML content via UART buffer.\n");
-    printf("    Usage: evilportal -c sethtmlstr\n");
-    printf("    Steps:\n");
-    printf("      1. Run: evilportal -c sethtmlstr\n");
-    printf("      2. Send [HTML/BEGIN] marker over UART\n");
-    printf("      3. Send HTML content over UART\n");
-    printf("      4. Send [HTML/CLOSE] marker over UART\n");
-    printf("      5. Run startportal (will use buffered HTML)\n");
-    TERMINAL_VIEW_ADD_TEXT("evilportal\n");
-    TERMINAL_VIEW_ADD_TEXT("    Desc: Configure Evil Portal HTML via UART buffer.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: evilportal -c sethtmlstr\n");
-    TERMINAL_VIEW_ADD_TEXT("    Steps: 1) evilportal -c sethtmlstr\n");
-    TERMINAL_VIEW_ADD_TEXT("           2) Send [HTML/BEGIN] marker\n");
-    TERMINAL_VIEW_ADD_TEXT("           3) Send HTML content\n");
-    TERMINAL_VIEW_ADD_TEXT("           4) Send [HTML/CLOSE] marker\n");
-    TERMINAL_VIEW_ADD_TEXT("           5) Run startportal\n");
-
-
-    printf("stopportal\n");
-    printf("    Description: Stop Evil Portal\n");
-    printf("    Usage: stopportal\n\n");
-    TERMINAL_VIEW_ADD_TEXT("stopportal\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Stop Evil Portal\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: stopportal\n\n");
-
-#ifndef CONFIG_IDF_TARGET_ESP32S2
-    printf("blescan\n");
-    printf("    Description: Handle BLE scanning with various modes.\n");
-    printf("    Usage: blescan [OPTION]\n");
-    printf("    Arguments:\n");
-    printf("        -f   : Start 'Find the Flippers' mode\n");
-    printf("        -ds  : Start BLE spam detector\n");
-    printf("        -a   : Start AirTag scanner\n");
-    printf("        -r   : Scan for raw BLE packets\n");
-    printf("        -s   : Stop BLE scanning\n\n");
-    TERMINAL_VIEW_ADD_TEXT("blescan\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Handle BLE scanning with various modes.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: blescan [OPTION]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    printf("        -f   : Start 'Find the Flippers' mode\n");
-    TERMINAL_VIEW_ADD_TEXT("        -ds  : Start BLE spam detector\n");
-    TERMINAL_VIEW_ADD_TEXT("        -a   : Start AirTag scanner\n");
-    TERMINAL_VIEW_ADD_TEXT("        -r   : Scan for raw BLE packets\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s   : Stop BLE scanning\n\n");
-
-    printf("blespam\n");
-    printf("    Description: Start BLE advertisement spam attacks.\n");
-    printf("    Usage: blespam [OPTION]\n");
-    printf("    Arguments:\n");
-    printf("        -apple     : Apple device spam (AirPods, Apple TV, etc.)\n");
-    printf("        -ms        : Microsoft Swift Pair spam\n");
-    printf("        -samsung   : Samsung Galaxy Watch spam\n");
-    printf("        -google    : Google Fast Pair spam\n");
-    printf("        -random    : Random spam (cycles through all types)\n");
-    printf("        -s         : Stop BLE spam\n\n");
-    TERMINAL_VIEW_ADD_TEXT("blespam\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start BLE advertisement spam attacks.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: blespam [OPTION]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -apple     : Apple device spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -ms        : Microsoft Swift Pair spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -samsung   : Samsung Galaxy Watch spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -google    : Google Fast Pair spam\n");
-    TERMINAL_VIEW_ADD_TEXT("        -random    : Random spam (all types)\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s         : Stop BLE spam\n\n");
-#endif
-
-    printf("capture\n");
-    printf("    Description: Start a WiFi Capture (Requires SD Card or Flipper)\n");
-    printf("    Usage: capture [OPTION]\n");
-    printf("    Arguments:\n");
-    printf("        -probe   : Start Capturing Probe Packets\n");
-    printf("        -beacon  : Start Capturing Beacon Packets\n");
-    printf("        -deauth   : Start Capturing Deauth Packets\n");
-    printf("        -raw   :   Start Capturing Raw Packets\n");
-    printf("        -wps   :   Start Capturing WPS Packets and there Auth Type");
-    printf("        -pwn   :   Start Capturing Pwnagotchi Packets");
-    printf("        -stop   : Stops the active capture\n\n");
-    TERMINAL_VIEW_ADD_TEXT("capture\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start a WiFi Capture (Requires SD Card or Flipper)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: capture [OPTION]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -probe   : Start Capturing Probe Packets\n");
-    TERMINAL_VIEW_ADD_TEXT("        -beacon  : Start Capturing Beacon Packets\n");
-    TERMINAL_VIEW_ADD_TEXT("        -deauth   : Start Capturing Deauth Packets\n");
-    TERMINAL_VIEW_ADD_TEXT("        -raw   :   Start Capturing Raw Packets\n");
-    TERMINAL_VIEW_ADD_TEXT("        -wps   :   Start Capturing WPS Packets and there Auth Type");
-    TERMINAL_VIEW_ADD_TEXT("        -pwn   :   Start Capturing Pwnagotchi Packets");
-    TERMINAL_VIEW_ADD_TEXT("        -stop   : Stops the active capture\n\n");
-
-    printf("connect\n");
-    printf("    Description: Connects to Specific WiFi Network and saves credentials.\n");
-    printf("    Usage: connect <SSID> [Password]\n");
-    TERMINAL_VIEW_ADD_TEXT("connect\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Connects to Specific WiFi Network and saves credentials.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: connect <SSID> [Password]\n");
-
-    printf("dialconnect\n");
-    printf("    Description: Cast a Random Youtube Video on all Smart TV's on "
-           "your LAN (Requires You to Run Connect First)\n");
-    printf("    Usage: dialconnect\n");
-    TERMINAL_VIEW_ADD_TEXT("dialconnect\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Cast a Random Youtube Video on all Smart TV's on your "
-                           "LAN (Requires You to Run Connect First)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: dialconnect\n");
-
-    printf("powerprinter\n");
-    printf("    Description: Print Custom Text to a Printer on your LAN "
-           "(Requires You to Run Connect First)\n");
-    printf("    Usage: powerprinter <Printer IP> <Text> <FontSize> <alignment>\n");
-    printf("    aligment options: CM = Center Middle, TL = Top Left, TR = Top "
-           "Right, BR = Bottom Right, BL = Bottom Left\n\n");
-    TERMINAL_VIEW_ADD_TEXT("powerprinter\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Print Custom Text to a Printer on "
-                           "your LAN (Requires You to Run Connect First)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: powerprinter <Printer IP> <Text> <FontSize> <alignment>\n");
-    TERMINAL_VIEW_ADD_TEXT("    aligment options: CM = Center Middle, TL = Top Left, TR = Top "
-                           "Right, BR = Bottom Right, BL = Bottom Left\n\n");
-
-    printf("blewardriving\n");
-    printf("    Description: Start/Stop BLE wardriving with GPS logging\n");
-    printf("    Usage: blewardriving [-s]\n");
-    printf("    Arguments:\n");
-    printf("        -s  : Stop BLE wardriving\n\n");
-    TERMINAL_VIEW_ADD_TEXT("blewardriving\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start/Stop BLE wardriving with GPS logging\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: blewardriving [-s]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s  : Stop BLE wardriving\n\n");
-
-    printf("pineap\n");
-    printf("    Description: Start/Stop detecting WiFi Pineapples.\n");
-    printf("    Usage: pineap [-s]\n");
-    printf("    Arguments:\n");
-    printf("        -s  : Stop PineAP detection\n\n");
-    TERMINAL_VIEW_ADD_TEXT("pineap\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start/Stop detecting WiFi Pineapples.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: pineap [-s]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -s  : Stop PineAP detection\n\n");
-
-    printf("Port Scanner\n");
-    printf("    Description: Scan ports on local subnet or specific IP\n");
-    printf("    Usage: scanports local [-C/-A/start_port-end_port]\n");
-    printf("           scanports [IP] [-C/-A/start_port-end_port]\n");
-    printf("    Arguments:\n");
-    printf("        -C  : Scan common ports only\n");
-    printf("        -A  : Scan all ports (1-65535)\n");
-    printf("        start_port-end_port : Custom port range (e.g. 80-443)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("Port Scanner\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Scan ports on local subnet or specific IP\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: scanports local [-C/-A/start_port-end_port]\n");
-    TERMINAL_VIEW_ADD_TEXT("           scanports [IP] [-C/-A/start_port-end_port]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        -C  : Scan common ports only\n");
-    TERMINAL_VIEW_ADD_TEXT("        -A  : Scan all ports (1-65535)\n");
-    TERMINAL_VIEW_ADD_TEXT("        start_port-end_port : Custom port range (e.g. 80-443)\n\n");
-
-    printf("congestion\n");
-    printf("    Description: Display Wi-Fi channel congestion chart.\n");
-    printf("    Usage: congestion\n\n");
-    TERMINAL_VIEW_ADD_TEXT("congestion\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Display Wi-Fi channel congestion chart.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: congestion\n\n");
-
-    printf("apcred\n");
-    printf("    Description: Change or reset the GhostNet AP credentials\n");
-    printf("    Usage: apcred <ssid> <password>\n");
-    printf("           apcred -r (reset to defaults)\n");
-    printf("    Arguments:\n");
-    printf("        <ssid>     : New SSID for the AP\n");
-    printf("        <password> : New password (min 8 characters)\n");
-    printf("        -r        : Reset to default (GhostNet/GhostNet)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("apcred\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Change or reset the GhostNet AP credentials\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: apcred <ssid> <password>\n");
-    TERMINAL_VIEW_ADD_TEXT("           apcred -r (reset to defaults)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        <ssid>     : New SSID for the AP\n");
-    TERMINAL_VIEW_ADD_TEXT("        <password> : New password (min 8 characters)\n");
-    TERMINAL_VIEW_ADD_TEXT("        -r        : Reset to default (GhostNet/GhostNet)\n\n");
-
-    printf("apenable\n");
-    printf("    Description: Enable or disable the Access Point across reboots\n");
-    printf("    Usage: apenable <on|off>\n");
-    printf("    Arguments:\n");
-    printf("        on  : Enable the Access Point (requires restart)\n");
-    printf("        off : Disable the Access Point (requires restart)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("apenable\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Enable or disable the Access Point across reboots\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: apenable <on|off>\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        on  : Enable the Access Point (requires restart)\n");
-    TERMINAL_VIEW_ADD_TEXT("        off : Disable the Access Point (requires restart)\n\n");
-
-    printf("chipinfo\n");
-    printf("    Description: Display chip information including model, revision, and features\n");
-    printf("    Usage: chipinfo\n");
-    printf("    Shows:\n");
-    printf("        - Chip model and revision\n");
-    printf("        - CPU cores and features\n");
-    printf("        - Flash size and memory info\n");
-    printf("        - ESP-IDF version\n\n");
-    TERMINAL_VIEW_ADD_TEXT("chipinfo\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Display chip information including model, revision, and features\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: chipinfo\n");
-    TERMINAL_VIEW_ADD_TEXT("    Shows chip model, revision, CPU cores, features, flash size, and memory info\n\n");
-
-    printf("rgbmode\n");
-    printf("    Description: Control LED effects (rainbow, police, strobe, off)\n");
-    printf("    Usage: rgbmode <rainbow|police|strobe|off|color>\n");
-    TERMINAL_VIEW_ADD_TEXT("rgbmode\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Control LED effects (rainbow, police, strobe, off)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: rgbmode <rainbow|police|strobe|off|color>\n");
-
-    printf("setrgbpins\n");
-    printf("    Description: Change RGB LED pins\n");
-    printf("    Usage: setrgbpins <red> <green> <blue>\n");
-    printf("           (use same value for all pins for single-pin LED strips)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("setrgbpins\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Change RGB LED pins\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: setrgbpins <red> <green> <blue>\n");
-    TERMINAL_VIEW_ADD_TEXT("           (use same value for all pins for single-pin LED strips)\n\n");
-
-    // SD Card Commands Help Text
-    printf("\n-- SD Card Pin Configuration --\n");
-    printf("Note: SD Card mode (MMC vs SPI) is set at compile time (sdkconfig).\n");
-    printf("These commands configure pins for the *active* mode.\n");
-    printf("Changing the mode requires recompiling firmware.\n");
-    TERMINAL_VIEW_ADD_TEXT("\n-- SD Card Pin Configuration --\n");
-    TERMINAL_VIEW_ADD_TEXT("Note: SD Card mode (MMC vs SPI) is set at compile time (sdkconfig).\n");
-    TERMINAL_VIEW_ADD_TEXT("These commands configure pins for the *active* mode.\n");
-    TERMINAL_VIEW_ADD_TEXT("Changing the mode requires recompiling firmware.\n");
-
-    printf("sd_config\n");
-    printf("    Description: Show the currently configured GPIO pins for both SDMMC and SPI modes.\n");
-    printf("    Usage: sd_config\n\n");
-    TERMINAL_VIEW_ADD_TEXT("sd_config\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Show current SD GPIO pin configuration.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: sd_config\n\n");
-
-    printf("sd_pins_mmc\n");
-    printf("    Description: Set GPIO pins for SDMMC mode (1 or 4 bit). Requires restart/reinit.\n");
-    printf("                 Only effective if firmware compiled for SDMMC mode.\n");
-    printf("    Usage: sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>\n");
-    printf("    Example: sd_pins_mmc 19 18 20 21 22 23\n\n");
-    TERMINAL_VIEW_ADD_TEXT("sd_pins_mmc\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Set GPIO pins for SDMMC mode. Requires restart.\n");
-    TERMINAL_VIEW_ADD_TEXT("                 Only effective if firmware compiled for SDMMC.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>\n\n");
-
-    printf("sd_pins_spi\n");
-    printf("    Description: Set GPIO pins for SPI mode. Requires restart/reinit.\n");
-    printf("                 Only effective if firmware compiled for SPI mode.\n");
-    printf("    Usage: sd_pins_spi <cs> <clk> <miso> <mosi>\n");
-    printf("    Example: sd_pins_spi 5 18 19 23\n\n");
-    TERMINAL_VIEW_ADD_TEXT("sd_pins_spi\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Set GPIO pins for SPI mode. Requires restart.\n");
-    TERMINAL_VIEW_ADD_TEXT("                 Only effective if firmware compiled for SPI.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: sd_pins_spi <cs> <clk> <miso> <mosi>\n\n");
-
-    printf("sd_save_config\n");
-    printf("    Description: Save the current SD pin configuration (both modes) to the SD card.\n");
-    printf("                 Requires SD card to be mounted.\n");
-    printf("    Usage: sd_save_config\n\n");
-    TERMINAL_VIEW_ADD_TEXT("sd_save_config\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Save current SD pin config to SD card.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: sd_save_config\n\n");
-
-    printf("scanall\n");
-    printf("    Description: Perform combined AP and Station scan, display results.\n");
-    printf("    Usage: scanall [seconds]\n\n");
-    TERMINAL_VIEW_ADD_TEXT("scanall\n");
-    TERMINAL_VIEW_ADD_TEXT("    Desc: Combined AP/STA scan & display.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: scanall [seconds]\n\n");
-
-    printf("timezone\n");
-    printf("    Description: Set the display timezone for the clock view.\n");
-    printf("    Usage: timezone <TZ_STRING>\n\n");
-    TERMINAL_VIEW_ADD_TEXT("timezone\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Set the display timezone for the clock view.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: timezone <TZ_STRING>\n\n");
-
-    printf("beaconadd\n");
-    printf("    Description: Add an SSID to the beacon spam list.\n");
-    printf("    Usage: beaconadd <SSID>\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconadd\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Add an SSID to the beacon spam list.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconadd <SSID>\n\n");
-
-    printf("beaconremove\n");
-    printf("    Description: Remove an SSID from the beacon spam list.\n");
-    printf("    Usage: beaconremove <SSID>\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconremove\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Remove an SSID from the beacon spam list.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconremove <SSID>\n\n");
-
-    printf("beaconclear\n");
-    printf("    Description: Clear the beacon spam list.\n");
-    printf("    Usage: beaconclear\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconclear\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Clear the beacon spam list.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconclear\n\n");
-
-    printf("beaconshow\n");
-    printf("    Description: Show the current beacon spam list.\n");
-    printf("    Usage: beaconshow\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconshow\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Show the current beacon spam list.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconshow\n\n");
-
-    printf("beaconspamlist\n");
-    printf("    Description: Start beacon spamming using the beacon spam list.\n");
-    printf("    Usage: beaconspamlist\n\n");
-    TERMINAL_VIEW_ADD_TEXT("beaconspamlist\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start beacon spamming using the beacon spam list.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: beaconspamlist\n\n");
-
-    printf("dhcpstarve\n");
-    printf("    Description: DHCP starvation flood attack\n");
-    printf("    Usage: dhcpstarve start [threads]\n");
-    printf("           dhcpstarve stop\n");
-    printf("           dhcpstarve display\n\n");
-    TERMINAL_VIEW_ADD_TEXT("dhcpstarve\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: DHCP starvation flood attack\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: dhcpstarve start [threads]\n");
-    TERMINAL_VIEW_ADD_TEXT("           dhcpstarve stop\n");
-    TERMINAL_VIEW_ADD_TEXT("           dhcpstarve display\n\n");
-
-    printf("saeflood\n");
-    printf("    Description: SAE handshake flooding attack (ESP32-C5/C6 only)\n");
-    printf("    Usage: saeflood (requires selected WPA3 AP)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("saeflood\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: SAE handshake flooding attack (ESP32-C5/C6 only)\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: saeflood (requires selected WPA3 AP)\n\n");
-
-    printf("stopsaeflood\n");
-    printf("    Description: Stop SAE flood attack\n");
-    printf("    Usage: stopsaeflood\n\n");
-    TERMINAL_VIEW_ADD_TEXT("stopsaeflood\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Stop SAE flood attack\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: stopsaeflood\n\n");
-
-    printf("saefloodhelp\n");
-    printf("    Description: Show detailed SAE flood attack help\n");
-    printf("    Usage: saefloodhelp\n\n");
-    TERMINAL_VIEW_ADD_TEXT("saefloodhelp\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Show detailed SAE flood attack help\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: saefloodhelp\n\n");
-
+    if (strcmp(category, "wifi") == 0) {
+        printf("\nWi-Fi Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nWi-Fi Commands:\n\n");
+        printf("scanap\n");
+        printf("    Description: Start a Wi-Fi access point (AP) scan.\n");
+        printf("    Usage: scanap [seconds]\n\n");
+        printf("scansta\n");
+        printf("    Description: Start scanning for Wi-Fi stations (hops channels).\n");
+        printf("    Usage: scansta\n\n");
+        printf("stopscan\n");
+        printf("    Description: Stop any ongoing Wi-Fi scan.\n");
+        printf("    Usage: stopscan\n\n");
+        printf("attack\n");
+        printf("    Description: Launch an attack (e.g., deauthentication attack).\n");
+        printf("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
+        printf("    Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        printf("    Arguments:\n");
+        printf("        -d  : Start deauth attack (supports multiple APs)\n");
+        printf("        -e  : Start EAPOL logoff attack\n");
+        printf("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
+        printf("list\n");
+        printf("    Description: List Wi-Fi scan results or connected stations.\n");
+        printf("    Usage: list -a | list -s | list -airtags\n");
+        printf("    Arguments:\n");
+        printf("        -a  : Show access points from Wi-Fi scan\n");
+        printf("        -s  : List connected stations\n");
+        printf("        -airtags: List discovered AirTags\n\n");
+        printf("beaconspam\n");
+        printf("    Description: Start beacon spam with different modes.\n");
+        printf("    Usage: beaconspam [OPTION]\n");
+        printf("    Arguments:\n");
+        printf("        -r   : Start random beacon spam\n");
+        printf("        -rr  : Start Rickroll beacon spam\n");
+        printf("        -l   : Start AP List beacon spam\n");
+        printf("        [SSID]: Use specified SSID for beacon spam\n\n");
+        printf("stopspam\n");
+        printf("    Description: Stop ongoing beacon spam.\n");
+        printf("    Usage: stopspam\n\n");
+        printf("stopdeauth\n");
+        printf("    Description: Stop ongoing deauthentication attack.\n");
+        printf("    Usage: stopdeauth\n\n");
+        printf("select\n");
+        printf("    Description: Select access point(s), station, or AirTag by index from the scan results.\n");
+        printf("    Usage: select -a <num[,num,...]> | select -s <num> | select -airtag <num>\n");
+        printf("    Arguments:\n");
+        printf("        -a      : AP selection index (supports multiple: 1,3,5)\n");
+        printf("        -s      : Station selection index\n");
+        printf("        -airtag : AirTag selection index\n");
+        printf("    Examples:\n");
+        printf("        select -a 4      : Select single AP at index 4\n");
+        printf("        select -a 1,3,5  : Select multiple APs at indices 1, 3, and 5\n\n");
+        printf("scanall\n");
+        printf("    Description: Perform combined AP and Station scan, display results.\n");
+        printf("    Usage: scanall [seconds]\n\n");
+        printf("congestion\n");
+        printf("    Description: Display Wi-Fi channel congestion chart.\n");
+        printf("    Usage: congestion\n\n");
+        printf("connect\n");
+        printf("    Description: Connects to Specific WiFi Network and saves credentials.\n");
+        printf("    Usage: connect <SSID> [Password]\n\n");
+        printf("apcred\n");
+        printf("    Description: Change or reset the GhostNet AP credentials\n");
+        printf("    Usage: apcred <ssid> <password>\n");
+        printf("           apcred -r (reset to defaults)\n");
+        printf("    Arguments:\n");
+        printf("        <ssid>     : New SSID for the AP\n");
+        printf("        <password> : New password (min 8 characters)\n");
+        printf("        -r        : Reset to default (GhostNet/GhostNet)\n\n");
+        printf("apenable\n");
+        printf("    Description: Enable or disable the Access Point across reboots\n");
+        printf("    Usage: apenable <on|off>\n");
+        printf("    Arguments:\n");
+        printf("        on  : Enable the Access Point (requires restart)\n");
+        printf("        off : Disable the Access Point (requires restart)\n\n");
+        printf("listenprobes\n");
+        printf("    Description: Listen for and log probe requests.\n");
+        printf("    Usage: listenprobes [channel] [stop]\n");
+        printf("    Arguments:\n");
+        printf("        [channel] : Listen on specific channel (1-165), omit for channel hopping\n");
+        printf("        stop      : Stop probe request listening\n\n");
 #if CONFIG_IDF_TARGET_ESP32C5
-    printf("setcountry\n");
-    printf("    Description: Set the Wi-Fi country code.\n");
-    printf("    Usage: setcountry <CC>\n");
-    printf("    Arguments:\n");
-    printf("        <CC> : Two-letter ISO country code (e.g., US, GB, JP)\n\n");
-    TERMINAL_VIEW_ADD_TEXT("setcountry\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Set the Wi-Fi country code.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: setcountry <CC>\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        <CC> : Two-letter ISO country code (e.g., US, GB, JP)\n\n");
+        printf("setcountry\n");
+        printf("    Description: Set the Wi-Fi country code.\n");
+        printf("    Usage: setcountry <CC>\n");
+        printf("    Arguments:\n");
+        printf("        <CC> : Two-letter ISO country code (e.g., US, GB, JP)\n\n");
 #endif
-
-    printf("listenprobes\n");
-    printf("    Description: Listen for and log probe requests.\n");
-    printf("    Usage: listenprobes [channel] [stop]\n");
-    printf("    Arguments:\n");
-    printf("        [channel] : Listen on specific channel (1-165), omit for channel hopping\n");
-    printf("        stop      : Stop probe request listening\n\n");
-    TERMINAL_VIEW_ADD_TEXT("listenprobes\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Listen for and log probe requests.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: listenprobes [channel] [stop]\n");
-    TERMINAL_VIEW_ADD_TEXT("    Arguments:\n");
-    TERMINAL_VIEW_ADD_TEXT("        [channel] : Listen on specific channel (1-165), omit for channel hopping\n");
-    TERMINAL_VIEW_ADD_TEXT("        stop      : Stop probe request listening\n\n");
-
-    printf("webauth\n");
-    printf("    Description: Enable/disable web authentication.\n");
-    printf("    Usage: webauth <enable|disable>\n\n");
-    TERMINAL_VIEW_ADD_TEXT("webauth\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Enable/disable web authentication.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: webauth <enable|disable>\n\n");
-
-    printf("commdiscovery\n");
-    printf("    Description: Check discovery status (auto-starts on boot).\n");
-    printf("    Usage: commdiscovery\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commdiscovery\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Check discovery status (auto-starts on boot).\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commdiscovery\n\n");
-
-    printf("commconnect\n");
-    printf("    Description: Connect to a discovered peer ESP32.\n");
-    printf("    Usage: commconnect <peer_name>\n");
-    printf("    Example: commconnect ESP_A1B2C3\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commconnect\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Connect to a discovered peer ESP32.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commconnect <peer_name>\n\n");
-
-    printf("commsend\n");
-    printf("    Description: Send a command to connected peer ESP32.\n");
-    printf("    Usage: commsend <command> [data]\n");
-    printf("    Example: commsend scanap\n");
-    printf("    Example: commsend hello world\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commsend\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Send a command to connected peer ESP32.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commsend <command> [data]\n\n");
-
-    printf("commstatus\n");
-    printf("    Description: Show communication status and connection state.\n");
-    printf("    Usage: commstatus\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commstatus\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Show communication status and connection state.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commstatus\n\n");
-
-    printf("commdisconnect\n");
-    printf("    Description: Disconnect from current peer.\n");
-    printf("    Usage: commdisconnect\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commdisconnect\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Disconnect from current peer.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commdisconnect\n\n");
-
-    printf("commsetpins\n");
-    printf("    Description: Change communication GPIO pins at runtime.\n");
-    printf("    Usage: commsetpins <tx_pin> <rx_pin>\n");
-    printf("    Example: commsetpins 4 5\n\n");
-    TERMINAL_VIEW_ADD_TEXT("commsetpins\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Change communication GPIO pins at runtime.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: commsetpins <tx_pin> <rx_pin>\n\n");
+        TERMINAL_VIEW_ADD_TEXT("scanap, scansta, stopscan, attack, list, beaconspam, stopspam, stopdeauth, select, scanall, congestion, connect, apcred, apenable, listenprobes");
+#if CONFIG_IDF_TARGET_ESP32C5
+        TERMINAL_VIEW_ADD_TEXT(", setcountry");
+#endif
+        TERMINAL_VIEW_ADD_TEXT("\n");
+        return;
+    }
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    printf("blescan\n");
-    printf("    Description: Start Bluetooth Low Energy (BLE) scan.\n");
-    printf("    Usage: blescan [seconds]\n\n");
-    TERMINAL_VIEW_ADD_TEXT("blescan\n");
-    TERMINAL_VIEW_ADD_TEXT("    Description: Start Bluetooth Low Energy (BLE) scan.\n");
-    TERMINAL_VIEW_ADD_TEXT("    Usage: blescan [seconds]\n\n");
+    if (strcmp(category, "ble") == 0) {
+        printf("\nBLE Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nBLE Commands:\n\n");
+        printf("blescan\n");
+        printf("    Description: Handle BLE scanning with various modes.\n");
+        printf("    Usage: blescan [OPTION]\n");
+        printf("    Arguments:\n");
+        printf("        -f   : Start 'Find the Flippers' mode\n");
+        printf("        -ds  : Start BLE spam detector\n");
+        printf("        -a   : Start AirTag scanner\n");
+        printf("        -r   : Scan for raw BLE packets\n");
+        printf("        -s   : Stop BLE scanning\n\n");
+        printf("blespam\n");
+        printf("    Description: Start BLE advertisement spam attacks.\n");
+        printf("    Usage: blespam [OPTION]\n");
+        printf("    Arguments:\n");
+        printf("        -apple     : Apple device spam (AirPods, Apple TV, etc.)\n");
+        printf("        -ms        : Microsoft Swift Pair spam\n");
+        printf("        -samsung   : Samsung Galaxy Watch spam\n");
+        printf("        -google    : Google Fast Pair spam\n");
+        printf("        -random    : Random spam (cycles through all types)\n");
+        printf("        -s         : Stop BLE spam\n\n");
+        printf("blewardriving\n");
+        printf("    Description: Start/Stop BLE wardriving with GPS logging\n");
+        printf("    Usage: blewardriving [-s]\n");
+        printf("    Arguments:\n");
+        printf("        -s  : Stop BLE wardriving\n\n");
+        printf("list -airtags\n");
+        printf("    Description: List discovered AirTags\n");
+        printf("    Usage: list -airtags\n\n");
+        printf("select -airtag <index>\n\n");
+        printf("blescan\n");
+        printf("    Description: Start Bluetooth Low Energy (BLE) scan.\n");
+        printf("    Usage: blescan [seconds]\n\n");
+        TERMINAL_VIEW_ADD_TEXT("blescan, blespam, blewardriving, list -airtags, select -airtag\n");
+        return;
+    }
 #endif
+
+    if (strcmp(category, "comm") == 0) {
+        printf("\nCommunication Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nCommunication Commands:\n\n");
+        printf("commdiscovery\n    Check discovery status.\n    Usage: commdiscovery\n\n");
+        printf("commconnect\n    Connect to a discovered peer ESP32.\n    Usage: commconnect <peer_name>\n    Example: commconnect ESP_A1B2C3\n\n");
+        printf("commsend\n    Send a command to connected peer ESP32.\n    Usage: commsend <command> [data]\n    Example: commsend scanap\n    Example: commsend hello world\n\n");
+        printf("commstatus\n    Show communication status.\n    Usage: commstatus\n\n");
+        printf("commdisconnect\n    Disconnect from current peer.\n    Usage: commdisconnect\n\n");
+        printf("commsetpins\n    Change communication GPIO pins at runtime.\n    Usage: commsetpins <tx_pin> <rx_pin>\n    Example: commsetpins 4 5\n\n");
+        TERMINAL_VIEW_ADD_TEXT("commdiscovery, commconnect, commsend, commstatus, commdisconnect, commsetpins\n");
+        return;
+    }
+
+    if (strcmp(category, "sd") == 0) {
+        printf("\nSD Card Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nSD Card Commands:\n\n");
+        printf("-- SD Card Pin Configuration --\n");
+        printf("Note: SD Card mode (MMC vs SPI) is set at compile time (sdkconfig).\n");
+        printf("These commands configure pins for the *active* mode.\n");
+        printf("Changing the mode requires recompiling firmware.\n");
+        TERMINAL_VIEW_ADD_TEXT("-- SD Card Pin Configuration --\n");
+        TERMINAL_VIEW_ADD_TEXT("Note: SD Card mode (MMC vs SPI) is set at compile time (sdkconfig).\n");
+        TERMINAL_VIEW_ADD_TEXT("These commands configure pins for the *active* mode.\n");
+        TERMINAL_VIEW_ADD_TEXT("Changing the mode requires recompiling firmware.\n");
+        printf("sd_config\n    Show current SD GPIO pin configuration.\n    Usage: sd_config\n\n");
+        printf("sd_pins_mmc\n    Description: Set GPIO pins for SDMMC mode (1 or 4 bit). Requires restart/reinit.\n                 Only effective if firmware compiled for SDMMC mode.\n    Usage: sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>\n    Example: sd_pins_mmc 19 18 20 21 22 23\n\n");
+        printf("sd_pins_spi\n    Description: Set GPIO pins for SPI mode. Requires restart/reinit.\n                 Only effective if firmware compiled for SPI mode.\n    Usage: sd_pins_spi <cs> <clk> <miso> <mosi>\n    Example: sd_pins_spi 5 18 19 23\n\n");
+        printf("sd_save_config\n    Description: Save the current SD pin configuration (both modes) to the SD card.\n                 Requires SD card to be mounted.\n    Usage: sd_save_config\n\n");
+        TERMINAL_VIEW_ADD_TEXT("sd_config, sd_pins_mmc, sd_pins_spi, sd_save_config\n");
+        return;
+    }
+
+    if (strcmp(category, "led") == 0) {
+        printf("\nLED & RGB Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nLED & RGB Commands:\n\n");
+        printf("rgbmode\n    Control LED effects (rainbow, police, strobe, off)\n    Usage: rgbmode <rainbow|police|strobe|off|color>\n\n");
+        printf("setrgbpins\n    Change RGB LED pins\n    Usage: setrgbpins <red> <green> <blue>\n           (use same value for all pins for single-pin LED strips)\n\n");
+        TERMINAL_VIEW_ADD_TEXT("rgbmode, setrgbpins\n");
+        return;
+    }
+
+    if (strcmp(category, "misc") == 0) {
+        printf("\nMiscellaneous Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nMiscellaneous Commands:\n\n");
+        printf("help\n");
+        printf("    Description: Display this help message.\n");
+        printf("    Usage: help [category]\n\n");
+        printf("chipinfo\n");
+        printf("    Description: Display chip information including model, revision, and features\n");
+        printf("    Usage: chipinfo\n");
+        printf("    Shows:\n");
+        printf("        - Chip model and revision\n");
+        printf("        - CPU cores and features\n");
+        printf("        - Flash size and memory info\n");
+        printf("        - ESP-IDF version\n\n");
+        printf("timezone\n");
+        printf("    Description: Set the display timezone for the clock view.\n");
+        printf("    Usage: timezone <TZ_STRING>\n\n");
+        printf("webauth\n");
+        printf("    Description: Enable/disable web authentication.\n");
+        printf("    Usage: webauth <enable|disable>\n\n");
+        printf("pineap\n");
+        printf("    Description: Start/Stop detecting WiFi Pineapples.\n");
+        printf("    Usage: pineap [-s]\n");
+        printf("    Arguments:\n");
+        printf("        -s  : Stop PineAP detection\n\n");
+        printf("Port Scanner\n");
+        printf("    Description: Scan ports on local subnet or specific IP\n");
+        printf("    Usage: scanports local\n");
+        printf("           scanports <IP> [all | start-end]\n");
+        printf("    Arguments:\n");
+        printf("        all  : Scan all ports (1-65535)\n");
+        printf("        start-end : Custom port range (e.g. 80-443)\n");
+        printf("        (no range) : Scan common ports (default)\n\n");
+        printf("scanarp\n");
+        printf("    Description: Perform ARP scan on local network to discover active hosts\n");
+        printf("    Usage: scanarp\n\n");
+        TERMINAL_VIEW_ADD_TEXT("help, chipinfo, timezone, webauth, pineap, scanports, scanarp\n");
+        return;
+    }
+    if (strcmp(category, "gps") == 0) {
+        printf("\nGPS Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nGPS Commands:\n\n");
+        printf("gpsinfo\n    Show GPS info.\n    Usage: gpsinfo\n\n");
+        printf("startwd\n    Start GPS wardriving.\n    Usage: startwd [seconds]\n\n");
+        TERMINAL_VIEW_ADD_TEXT("gpsinfo, startwd\n");
+        return;
+    }
+    if (strcmp(category, "portal") == 0) {
+        printf("\nEvil Portal Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nEvil Portal Commands:\n\n");
+        printf("startportal\n");
+        printf("    Description: Start an Evil Portal using a local file or the default embedded page.\n");
+        printf("                 /mnt/ prefix is added automatically to file paths if missing.\n");
+        printf("    Usage: startportal [FilePath] [AP_SSID] [PSK]\n");
+        printf("           PSK is optional for an open network.\n");
+        printf("    Use 'default' as the file path for the default Evil Portal.\n");
+        printf("\n");
+        printf("evilportal\n");
+        printf("    Description: Configure Evil Portal HTML content via UART buffer.\n");
+        printf("    Usage: evilportal -c sethtmlstr\n");
+        printf("    Steps:\n");
+        printf("      1. Run: evilportal -c sethtmlstr\n");
+        printf("      2. Send [HTML/BEGIN] marker over UART\n");
+        printf("      3. Send HTML content over UART\n");
+        printf("      4. Send [HTML/CLOSE] marker over UART\n");
+        printf("      5. Run startportal (will use buffered HTML)\n");
+        printf("\n");
+        printf("stopportal\n");
+        printf("    Description: Stop Evil Portal\n");
+        printf("    Usage: stopportal\n\n");
+        printf("listportals\n    List available Evil Portal files.\n    Usage: listportals\n\n");
+        TERMINAL_VIEW_ADD_TEXT("startportal, stopportal, listportals\n");
+        return;
+    }
+
+    if (strcmp(category, "printer") == 0) {
+        printf("\nPrinter Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nPrinter Commands:\n\n");
+        printf("powerprinter\n");
+        printf("    Description: Print Custom Text to a Printer on your LAN (Requires You to Run Connect First)\n");
+        printf("    Usage: powerprinter <Printer IP> <Text> <FontSize> <alignment>\n");
+        printf("    aligment options: CM = Center Middle, TL = Top Left, TR = Top Right, BR = Bottom Right, BL = Bottom Left\n\n");
+        TERMINAL_VIEW_ADD_TEXT("powerprinter\n");
+        TERMINAL_VIEW_ADD_TEXT("    Print custom text to a network printer.\n");
+        TERMINAL_VIEW_ADD_TEXT("    Usage: powerprinter <Printer IP> <Text> <FontSize> <alignment>\n\n");
+        return;
+    }
+
+    if (strcmp(category, "cast") == 0) {
+        printf("\nYouTube Cast Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nYouTube Cast Commands:\n\n");
+        printf("dialconnect\n");
+        printf("    Description: Cast a Random Youtube Video on all Smart TV's on your LAN (Requires You to Run Connect First)\n");
+        printf("    Usage: dialconnect\n\n");
+        TERMINAL_VIEW_ADD_TEXT("dialconnect\n");
+        TERMINAL_VIEW_ADD_TEXT("    Cast a random YouTube video to all smart TVs on your LAN.\n");
+        TERMINAL_VIEW_ADD_TEXT("    Usage: dialconnect\n\n");
+        return;
+    }
+
+    if (strcmp(category, "capture") == 0) {
+        printf("\nCapture Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nCapture Commands:\n\n");
+        printf("capture\n");
+        printf("    Description: Start a WiFi Capture (Requires SD Card or Flipper)\n");
+        printf("    Usage: capture [OPTION]\n");
+        printf("    Arguments:\n");
+        printf("        -probe   : Start Capturing Probe Packets\n");
+        printf("        -beacon  : Start Capturing Beacon Packets\n");
+        printf("        -deauth   : Start Capturing Deauth Packets\n");
+        printf("        -raw   :   Start Capturing Raw Packets\n");
+        printf("        -wps   :   Start Capturing WPS Packets and there Auth Type\n");
+        printf("        -pwn   :   Start Capturing Pwnagotchi Packets\n");
+        printf("        -stop   : Stops the active capture\n\n");
+        TERMINAL_VIEW_ADD_TEXT("capture\n");
+        TERMINAL_VIEW_ADD_TEXT("    Start a WiFi packet capture.\n");
+        TERMINAL_VIEW_ADD_TEXT("    Usage: capture [OPTION]\n");
+        TERMINAL_VIEW_ADD_TEXT("    Options: -probe, -beacon, -deauth, -raw, -wps, -pwn, -stop\n\n");
+        return;
+    }
+
+    if (strcmp(category, "beacon") == 0) {
+        printf("\nBeacon Spam Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nBeacon Spam Commands:\n\n");
+        printf("beaconadd\n    Add an SSID to the beacon spam list.\n    Usage: beaconadd <SSID>\n\n");
+        printf("beaconremove\n    Remove an SSID from the beacon spam list.\n    Usage: beaconremove <SSID>\n\n");
+        printf("beaconclear\n    Clear the beacon spam list.\n    Usage: beaconclear\n\n");
+        printf("beaconshow\n    Show the current beacon spam list.\n    Usage: beaconshow\n\n");
+        printf("beaconspamlist\n    Start beacon spamming using the beacon spam list.\n    Usage: beaconspamlist\n\n");
+        TERMINAL_VIEW_ADD_TEXT("beaconadd, beaconremove, beaconclear, beaconshow, beaconspamlist\n");
+        return;
+    }
+
+    if (strcmp(category, "attack") == 0) {
+        printf("\nAttack Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nAttack Commands:\n\n");
+        printf("dhcpstarve\n");
+        printf("    Description: DHCP starvation flood attack\n");
+        printf("    Usage: dhcpstarve start [threads]\n");
+        printf("           dhcpstarve stop\n");
+        printf("           dhcpstarve display\n\n");
+        printf("saeflood\n");
+        printf("    Description: SAE handshake flooding attack (ESP32-C5/C6 only)\n");
+        printf("    Usage: saeflood <password> (requires selected WPA3 AP)\n\n");
+        printf("stopsaeflood\n    Stop SAE flood attack.\n    Usage: stopsaeflood\n\n");
+        printf("saefloodhelp\n    Show detailed SAE flood attack help.\n    Usage: saefloodhelp\n\n");
+        TERMINAL_VIEW_ADD_TEXT("dhcpstarve, saeflood, stopsaeflood, saefloodhelp\n");
+        return;
+    }
+    
+    printf("\nGhost ESP Command Categories:\n\n");
+    TERMINAL_VIEW_ADD_TEXT("\nGhost ESP Command Categories:\n\n");
+
+    printf("  help wifi      - Wi-Fi commands\n");
+    printf("  help ble       - Bluetooth/BLE commands\n");
+    printf("  help comm      - ESP32 communication commands\n");
+    printf("  help sd        - SD card commands\n");
+    printf("  help led       - LED/RGB commands\n");
+    printf("  help gps       - GPS commands\n");
+    printf("  help misc      - Miscellaneous commands\n");
+    printf("  help portal    - Evil Portal commands\n");
+    printf("  help printer   - Printer commands\n");
+    printf("  help cast      - YouTube cast commands\n");
+    printf("  help capture   - Wi-Fi packet capture commands\n");
+    printf("  help beacon    - Beacon spam commands\n");
+    printf("  help attack    - Attack/flood commands\n");
+    printf("  help all      - All commands\n\n");
+
+    TERMINAL_VIEW_ADD_TEXT(
+        "  help wifi      - Wi-Fi commands\n"
+        "  help ble       - Bluetooth/BLE commands\n"
+        "  help comm      - ESP32 communication commands\n"
+        "  help sd        - SD card commands\n"
+        "  help led       - LED/RGB commands\n"
+        "  help gps       - GPS commands\n"
+        "  help misc      - Miscellaneous commands\n");
+    TERMINAL_VIEW_ADD_TEXT("  help portal    - Evil Portal commands\n"
+                      "  help printer   - Printer commands\n"
+                      "  help cast      - YouTube cast commands\n"
+                      "  help capture   - Wi-Fi packet capture commands\n"
+                      "  help beacon    - Beacon spam commands\n"
+                      "  help attack    - Attack/flood commands\n"
+                      "  help all      - All commands\n\n");
+
+    printf("Type 'help <category>' for details on that category.\n\n");
+    TERMINAL_VIEW_ADD_TEXT("Type 'help <category>' for details on that category.\n\n");
 }
 
 void handle_capture(int argc, char **argv) {
@@ -2487,28 +2373,16 @@ void handle_comm_setpins(int argc, char **argv) {
 }
 
 static void comm_command_callback(const char* command, const char* data, void* user_data) {
-    char log_buf[512];
-    if (data && strlen(data) > 0) {
-        snprintf(log_buf, sizeof(log_buf), "Received command from peer: %s with data: %s\n", command, data);
-    } else {
-        snprintf(log_buf, sizeof(log_buf), "Received command from peer: %s\n", command);
-    }
-    printf("%s", log_buf);
-    TERMINAL_VIEW_ADD_TEXT(log_buf);
+    static char full_command[128];
     
-    char full_command[256];
+    // Minimal processing in command executor task - just queue the command
     if (data && strlen(data) > 0) {
-        snprintf(full_command, sizeof(full_command), "%s %s", command, data);
+        snprintf(full_command, sizeof(full_command), "peer:%s %s", command, data);
     } else {
-        snprintf(full_command, sizeof(full_command), "%s", command);
+        snprintf(full_command, sizeof(full_command), "peer:%s", command);
     }
     
-    snprintf(log_buf, sizeof(log_buf), "Executing received command: %s\n", full_command);
-    printf("%s", log_buf);
-    TERMINAL_VIEW_ADD_TEXT(log_buf);
-    esp_comm_manager_set_remote_command_flag(true);
-    handle_serial_command(full_command);
-    esp_comm_manager_set_remote_command_flag(false);
+    simulateCommand(full_command);
 }
 void handle_ap_enable_cmd(int argc, char **argv) {
     if (argc != 2) {
@@ -2627,6 +2501,9 @@ void handle_chip_info_cmd(int argc, char **argv) {
     printf("  Free Heap: %lu bytes\n", esp_get_free_heap_size());
     printf("  Min Free Heap: %lu bytes\n", esp_get_minimum_free_heap_size());
     printf("  IDF Version: %s\n", esp_get_idf_version());
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    printf("  Build Config: %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
+#endif
     
     TERMINAL_VIEW_ADD_TEXT("Chip Information:\n");
     char info_buffer[512];
@@ -2634,6 +2511,11 @@ void handle_chip_info_cmd(int argc, char **argv) {
              "  Model: %s\n  Revision: v%d.%d\n  CPU Cores: %d\n  Free Heap: %lu bytes\n",
              model_name, major_rev, minor_rev, chip_info.cores, esp_get_free_heap_size());
     TERMINAL_VIEW_ADD_TEXT(info_buffer);
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    char build_config_buffer[128];
+    snprintf(build_config_buffer, sizeof(build_config_buffer), "  Build Config: %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
+    TERMINAL_VIEW_ADD_TEXT(build_config_buffer);
+#endif
 }
 
 void register_commands() {
@@ -2667,6 +2549,8 @@ void register_commands() {
     register_command("startwd", handle_startwd);
     register_command("gpsinfo", handle_gps_info);
     register_command("scanports", handle_scan_ports);
+    register_command("scanarp", handle_scan_arp);
+    register_command("scanssh", handle_scan_ssh);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("listportals", handle_listportals);
@@ -2793,8 +2677,10 @@ void handle_evilportal(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("Usage: %s -c <command>\n", argv[0]);
         printf("Commands:\n");
         printf("  sethtmlstr - Set HTML content from buffer (use with UART markers)\n");
+        printf("  clear - Clear HTML buffer and disable buffer mode\n");
         TERMINAL_VIEW_ADD_TEXT("Commands:\n");
         TERMINAL_VIEW_ADD_TEXT("  sethtmlstr - Set HTML content from buffer\n");
+        TERMINAL_VIEW_ADD_TEXT("  clear - Clear HTML buffer and disable buffer mode\n");
         return;
     }
 
@@ -2808,6 +2694,10 @@ void handle_evilportal(int argc, char **argv) {
         wifi_manager_set_html_from_uart();
         printf("HTML buffer mode enabled for evil portal\n");
         TERMINAL_VIEW_ADD_TEXT("HTML buffer mode enabled for evil portal\n");
+    } else if (strcmp(argv[2], "clear") == 0) {
+        wifi_manager_clear_html_buffer();
+        printf("HTML buffer cleared - will use default portal on next startportal\n");
+        TERMINAL_VIEW_ADD_TEXT("HTML buffer cleared - will use default portal on next startportal\n");
     } else {
         printf("Error: Unknown command '%s'\n", argv[2]);
         TERMINAL_VIEW_ADD_TEXT("Error: Unknown command '%s'\n", argv[2]);

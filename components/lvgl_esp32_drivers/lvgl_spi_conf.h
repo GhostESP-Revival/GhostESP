@@ -167,10 +167,14 @@ extern "C" {
 #endif
 
 
-#if defined (CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
-#define SPI_TFT_SPI_MODE    (2)
+#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
+  #if defined(CONFIG_USE_ENCODER)
+    #define SPI_TFT_SPI_MODE (0)
+  #else
+    #define SPI_TFT_SPI_MODE (2)
+  #endif
 #else
-#define SPI_TFT_SPI_MODE    (0)
+  #define SPI_TFT_SPI_MODE (0)
 #endif
 
 /* Touch driver */

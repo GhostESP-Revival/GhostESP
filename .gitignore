@@ -26,3 +26,8 @@ scripts/site/package.json
 scripts/site/rollup.config.mjs
 /.cache
 dependencies.lock
+.venv
+ghost-control-venv
+__pycache__
+*.pyc
+local_builds

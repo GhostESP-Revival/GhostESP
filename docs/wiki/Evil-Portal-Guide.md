@@ -1,5 +1,9 @@
 # Evil Portal Guide for Beginners
 
+
+```anything you read here may or may not be entirely accurate or up to date.``` 
+
+
 ## What is Evil Portal?
 
 An Evil Portal creates a fake WiFi hotspot that looks like a real login page (like those you see at hotels or cafes). When people try to connect, they see a login page you create. This is for educational and authorized testing only!

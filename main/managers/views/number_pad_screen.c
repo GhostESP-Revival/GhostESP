@@ -216,6 +216,32 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
             submit_number();
             return;
         }
+        // --- Vim keybinds ---
+        else if (key_value == 'h') { // Vim left
+            ESP_LOGI(TAG, "Vim 'h' pressed (left)");
+            cursor_pos = (cursor_pos > 0) ? cursor_pos - 1 : option_count - 1;
+        }
+        else if (key_value == 'l') { // Vim right
+            ESP_LOGI(TAG, "Vim 'l' pressed (right)");
+            cursor_pos = (cursor_pos < option_count - 1) ? cursor_pos + 1 : 0;
+        }
+        else if (key_value == 'k') { // Vim up
+            ESP_LOGI(TAG, "Vim 'k' pressed (up)");
+            if (cursor_pos >= 5) {
+                cursor_pos -= 5;
+            } else if (cursor_pos >= 0 && cursor_pos <= 4) {
+                cursor_pos = (cursor_pos == 0) ? 10 : (cursor_pos == 1) ? 11 : (cursor_pos == 2) ? 12 : cursor_pos + 5;
+            }
+        }
+        else if (key_value == 'j') { // Vim down
+            ESP_LOGI(TAG, "Vim 'j' pressed (down)");
+            if (cursor_pos <= 7) {
+                cursor_pos += 5;
+            } else if (cursor_pos >= 10) {
+                cursor_pos = cursor_pos - 10;
+            }
+        }
+        // --- End Vim keybinds ---
         else if (key_value == 44 || key_value == ',') { // Left
             ESP_LOGI(TAG, "Left button pressed\n");
             cursor_pos = (cursor_pos > 0) ? cursor_pos - 1 : option_count - 1;

@@ -1,13 +1,17 @@
 #include "managers/rgb_manager.h"
+#include "managers/settings_manager.h"
+#include "vendor/led/led_strip.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "managers/settings_manager.h"
-#include <math.h>
-
-void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms);
+#include "freertos/semphr.h"
+#include "math.h"
 
 static const char *TAG = "RGBManager";
+static SemaphoreHandle_t rgb_mutex = NULL;
+
+void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms);
 
 typedef struct {
   double r; // ∈ [0, 1]
@@ -28,6 +32,9 @@ typedef struct {
 #define LEDC_CHANNEL_BLUE LEDC_CHANNEL_2
 #define LEDC_DUTY_RES LEDC_TIMER_8_BIT // 8-bit resolution (0-255)
 #define LEDC_FREQUENCY 10000 // 10 kHz PWM frequency
+
+// Global flag to signal rainbow task termination
+static volatile bool rainbow_task_should_exit = false;
 
 void calculate_matrix_dimensions(int total_leds, int *rows, int *cols) {
   int side = (int)sqrt(total_leds);
@@ -82,9 +89,20 @@ rgb hsv2rgb(hsv HSV) {
 }
 
 void rainbow_task(void *pvParameter) {
+#if CONFIG_NUM_LEDS < 1
+    vTaskDelete(NULL);
+    return;
+#endif
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
 
-  while (1) {
+  // Reset the termination flag when task starts
+  rainbow_task_should_exit = false;
+
+  while (!rainbow_task_should_exit) {
+    // Check flag before each effect iteration
+    if (rainbow_task_should_exit) {
+      break;
+    }
 
     if (rgb_manager->num_leds > 1) {
       rgb_manager_rainbow_effect_matrix(rgb_manager,
@@ -94,12 +112,36 @@ void rainbow_task(void *pvParameter) {
                                  settings_get_rgb_speed(&G_Settings));
     }
 
+    // Check flag again after effect
+    if (rainbow_task_should_exit) {
+      break;
+    }
+
     vTaskDelay(pdMS_TO_TICKS(20));
   }
+
+  // Clear LEDs before exiting
+  if (rgb_manager->strip) {
+    led_strip_clear(rgb_manager->strip);
+    led_strip_refresh(rgb_manager->strip);
+  } else if (rgb_manager->is_separate_pins) {
+    rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
+  }
+
+  ESP_LOGI(TAG, "Rainbow task exiting gracefully");
   vTaskDelete(NULL);
 }
 
+void rgb_manager_signal_rainbow_exit(void) {
+  ESP_LOGI(TAG, "Signaling rainbow task to exit gracefully");
+  rainbow_task_should_exit = true;
+}
+
 void police_task(void *pvParameter) {
+#if CONFIG_NUM_LEDS < 1
+    vTaskDelete(NULL);
+    return;
+#endif
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
   while (1) {
 
@@ -112,6 +154,10 @@ void police_task(void *pvParameter) {
 }
 
 void strobe_task(void *pvParameter) {
+#if CONFIG_NUM_LEDS < 1
+    vTaskDelete(NULL);
+    return;
+#endif
     RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
     rgb_manager_strobe_effect(rgb_manager, settings_get_rgb_speed(&G_Settings));
     vTaskDelete(NULL);
@@ -128,8 +174,20 @@ esp_err_t rgb_manager_init(RGBManager_t *rgb_manager, gpio_num_t pin,
                            int num_leds, led_pixel_format_t pixel_format,
                            led_model_t model, gpio_num_t red_pin,
                            gpio_num_t green_pin, gpio_num_t blue_pin) {
+#if CONFIG_NUM_LEDS < 1
+    return ESP_ERR_INVALID_ARG;
+#endif
   if (!rgb_manager)
     return ESP_ERR_INVALID_ARG;
+
+  // Initialize mutex if not already created
+  if (rgb_mutex == NULL) {
+    rgb_mutex = xSemaphoreCreateRecursiveMutex();
+    if (rgb_mutex == NULL) {
+      ESP_LOGE(TAG, "Failed to create RGB mutex");
+      return ESP_ERR_NO_MEM;
+    }
+  }
 
   rgb_manager->pin = pin;
   rgb_manager->num_leds = num_leds;
@@ -276,6 +334,9 @@ void set_led_square(RGBManager_t *rgb_manager, uint8_t size, uint8_t red, uint8_
 }
 
 void update_led_visualizer(uint8_t *amplitudes, size_t num_bars, bool square_mode) {
+#if CONFIG_NUM_LEDS < 1
+    return;
+#endif
   extern RGBManager_t G_RGBManager; // assuming there's a global instance
   RGBManager_t *rgb_manager = &G_RGBManager;
   
@@ -316,26 +377,29 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
     uint8_t adj_green = green * brightness_scale;
     uint8_t adj_blue = blue * brightness_scale;
 
-    // Handle multiple LEDs if present
-    if (rgb_manager->num_leds > 1) {
-      for (int i = 0; i < rgb_manager->num_leds; i++) {
-        esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, i, adj_red,
+    if (rgb_manager->is_separate_pins) {
+      rgb_manager_set_color(rgb_manager, -1, adj_red, adj_green, adj_blue, false);
+    } else {
+      if (rgb_manager->num_leds > 1) {
+        for (int i = 0; i < rgb_manager->num_leds; i++) {
+          esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, i, adj_red,
+                                              adj_green, adj_blue);
+          if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set LED %d color", i);
+            return;
+          }
+        }
+      } else {
+        esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, 0, adj_red,
                                             adj_green, adj_blue);
         if (ret != ESP_OK) {
-          ESP_LOGE(TAG, "Failed to set LED %d color\n", i);
+          ESP_LOGE(TAG, "Failed to set LED color");
           return;
         }
       }
-    } else {
-      esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, 0, adj_red,
-                                          adj_green, adj_blue);
-      if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set LED color\n");
-        return;
-      }
-    }
 
-    led_strip_refresh(rgb_manager->strip);
+      led_strip_refresh(rgb_manager->strip);
+    }
 
     brightness += direction * 5;
 
@@ -346,30 +410,39 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 
-  // Ensure LEDs are off at the end
-  for (int i = 0; i < rgb_manager->num_leds; i++) {
-    led_strip_set_pixel(rgb_manager->strip, i, 0, 0, 0);
+  if (rgb_manager->is_separate_pins) {
+    rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
+  } else {
+    for (int i = 0; i < rgb_manager->num_leds; i++) {
+      led_strip_set_pixel(rgb_manager->strip, i, 0, 0, 0);
+    }
+    led_strip_refresh(rgb_manager->strip);
   }
-  led_strip_refresh(rgb_manager->strip);
 }
 
 esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
                                 uint8_t red, uint8_t green, uint8_t blue,
                                 bool pulse) {
+#if CONFIG_NUM_LEDS < 1
+    return ESP_ERR_INVALID_ARG;
+#endif
     if (!rgb_manager)
         return ESP_ERR_INVALID_ARG;
 
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_STEALTH) {
         // Always turn off all LEDs in stealth mode
-        if (rgb_manager->is_separate_pins) {
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_RED, 1);
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_GREEN, 1);
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_BLUE, 1);
-        } else if (rgb_manager->strip) {
-            for (int i = 0; i < rgb_manager->num_leds; i++) {
-                led_strip_set_pixel(rgb_manager->strip, i, 0, 0, 0);
+        if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {
+            if (rgb_manager->is_separate_pins) {
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_RED, 1);
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_GREEN, 1);
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_BLUE, 1);
+            } else if (rgb_manager->strip) {
+                for (int i = 0; i < rgb_manager->num_leds; i++) {
+                    led_strip_set_pixel(rgb_manager->strip, i, 0, 0, 0);
+                }
+                led_strip_refresh(rgb_manager->strip);
             }
-            led_strip_refresh(rgb_manager->strip);
+            xSemaphoreGiveRecursive(rgb_mutex);
         }
         return ESP_OK;
     }
@@ -386,25 +459,28 @@ esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
         // A more robust check would involve checking the driver state if possible.
         // For now, we assume if is_separate_pins is true, init happened.
 
-        if (ired == 255 && igreen == 255 && iblue == 255) {
-            // Turn off LEDs by setting duty cycle to 0 or stopping
-            // Using stop might be better if it properly handles re-enabling
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_RED, 1);
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_GREEN, 1);
-            ledc_stop(LEDC_MODE, LEDC_CHANNEL_BLUE, 1);
-        } else {
-            // Ensure channels are running before setting duty
-            // This might be redundant if ledc_channel_config ensures they start
-            // ledc_timer_resume(LEDC_MODE, LEDC_TIMER); // If timers could be paused
+        if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {
+            if (ired == 255 && igreen == 255 && iblue == 255) {
+                // Turn off LEDs by setting duty cycle to 0 or stopping
+                // Using stop might be better if it properly handles re-enabling
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_RED, 1);
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_GREEN, 1);
+                ledc_stop(LEDC_MODE, LEDC_CHANNEL_BLUE, 1);
+            } else {
+                // Ensure channels are running before setting duty
+                // This might be redundant if ledc_channel_config ensures they start
+                // ledc_timer_resume(LEDC_MODE, LEDC_TIMER); // If timers could be paused
 
-            ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RED, ired));
-            ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_RED));
+                ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RED, ired));
+                ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_RED));
 
-            ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_GREEN, igreen));
-            ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_GREEN));
+                ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_GREEN, igreen));
+                ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_GREEN));
 
-            ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_BLUE, iblue));
-            ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_BLUE));
+                ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_BLUE, iblue));
+                ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_BLUE));
+            }
+            xSemaphoreGiveRecursive(rgb_mutex);
         }
     } else {
         // Handle single pin LED strip using RMT
@@ -420,30 +496,50 @@ esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
             uint8_t r = red, g = green, b = blue;
             scale_grb_by_brightness(&g, &r, &b, 0.3); // Scale brightness for RMT
 
-            // If led_idx is -1, set all LEDs. Otherwise, set the specified LED.
-            if (led_idx == -1) {
-                // Set all LEDs
-                for (int i = 0; i < rgb_manager->num_leds; i++) {
-                    esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, i, r, g, b);
+            esp_err_t ret = ESP_OK;
+            if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {
+                // If led_idx is -1, set all LEDs. Otherwise, set the specified LED.
+                if (led_idx == -1) {
+                    // Set all LEDs
+                    for (int i = 0; i < rgb_manager->num_leds; i++) {
+                        ret = led_strip_set_pixel(rgb_manager->strip, i, r, g, b);
+                        if (ret != ESP_OK) {
+                            ESP_LOGE(TAG, "Failed to set all LEDs color (at index %d)", i);
+                            // Continue trying other LEDs?
+                        }
+                    }
+                } else if (led_idx >= 0 && led_idx < rgb_manager->num_leds) {
+                    // Set specific LED
+                    ret = led_strip_set_pixel(rgb_manager->strip, led_idx, r, g, b);
                     if (ret != ESP_OK) {
-                        ESP_LOGE(TAG, "Failed to set all LEDs color (at index %d)", i);
-                        // Continue trying other LEDs?
+                        ESP_LOGE(TAG, "Failed to set LED %d color", led_idx);
+                    }
+                } else {
+                     ESP_LOGW(TAG, "Invalid led_idx (%d) for num_leds (%d)", led_idx, rgb_manager->num_leds);
+                     xSemaphoreGiveRecursive(rgb_mutex);
+                     return ESP_ERR_INVALID_ARG; // Invalid index
+                }
+
+                // Refresh the strip after setting pixels
+                if (ret == ESP_OK) {
+                    int attempts = 0;
+                    do {
+                        ret = led_strip_refresh(rgb_manager->strip);
+                        if (ret == ESP_ERR_INVALID_STATE) {
+                            // Previous transfer still running – wait a bit and retry
+                            vTaskDelay(pdMS_TO_TICKS(2));
+                        }
+                    } while (ret == ESP_ERR_INVALID_STATE && ++attempts < 5);
+
+                    if (ret != ESP_OK) {
+                        ESP_LOGE(TAG, "Failed to refresh LED strip after %d attempts: %s", attempts, esp_err_to_name(ret));
+                        // As fallback, clear the strip (non-critical if this fails)
+                        led_strip_clear(rgb_manager->strip);
                     }
                 }
-            } else if (led_idx >= 0 && led_idx < rgb_manager->num_leds) {
-                // Set specific LED
-                esp_err_t ret = led_strip_set_pixel(rgb_manager->strip, led_idx, r, g, b);
-                if (ret != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to set LED %d color", led_idx);
-                    return ret; // Return on error for single pixel set
-                }
-            } else {
-                 ESP_LOGW(TAG, "Invalid led_idx (%d) for num_leds (%d)", led_idx, rgb_manager->num_leds);
-                 return ESP_ERR_INVALID_ARG; // Invalid index
+                xSemaphoreGiveRecursive(rgb_mutex);
             }
-
-            // Refresh the strip after setting pixels
-            return led_strip_refresh(rgb_manager->strip);
+            return ret;
         }
     }
     return ESP_OK;
@@ -453,8 +549,18 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
                                        int delay_ms) {
   double hue = 0.0;
 
-  while (1) {
+  while (!rainbow_task_should_exit) {
+    // Check termination flag before each LED update
+    if (rainbow_task_should_exit) {
+      return;
+    }
+
     for (int i = 0; i < rgb_manager->num_leds; i++) {
+      // Check flag during LED loop for faster response
+      if (rainbow_task_should_exit) {
+        return;
+      }
+
       uint8_t red, green, blue;
 
       double hue_offset =
@@ -468,16 +574,15 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
       blue = (uint8_t)(fmin(rgb_color.b * 255, 120));
 
       clamp_rgb(&red, &green, &blue);
-
       scale_grb_by_brightness(&green, &red, &blue, 0.3);
 
-      esp_err_t ret =
-          led_strip_set_pixel(rgb_manager->strip, i, red, green, blue);
-
-      if (!rgb_manager->is_separate_pins) {
-        led_strip_refresh(rgb_manager->strip);
-      }
+      led_strip_set_pixel(rgb_manager->strip, i, red, green, blue);
       hue = fmod(hue + 0.5, 360.0);
+    }
+
+    // Single refresh at end of frame to avoid overlapping RMT transfers
+    if (!rgb_manager->is_separate_pins) {
+      led_strip_refresh(rgb_manager->strip);
     }
 
     vTaskDelay(pdMS_TO_TICKS(delay_ms));
@@ -487,8 +592,18 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
 void rgb_manager_rainbow_effect(RGBManager_t *rgb_manager, int delay_ms) {
   double hue = 0.0;
 
-  while (1) {
+  while (!rainbow_task_should_exit) {
+    // Check termination flag before each LED update
+    if (rainbow_task_should_exit) {
+      return;
+    }
+
     for (int i = 0; i < rgb_manager->num_leds; i++) {
+      // Check flag during LED loop for faster response
+      if (rainbow_task_should_exit) {
+        return;
+      }
+
       uint8_t red, green, blue;
 
       double hue_offset =
@@ -509,8 +624,8 @@ void rgb_manager_rainbow_effect(RGBManager_t *rgb_manager, int delay_ms) {
         uint8_t iblue = (uint8_t)(255 - blue);
         rgb_manager_set_color(rgb_manager, i, ired, igreen, iblue, false);
       } else {
-        rgb_manager_set_color(rgb_manager, rgb_manager->num_leds == 1 ? 0 : i,
-                              red, green, blue, false);
+        led_strip_set_pixel(rgb_manager->strip,
+                            (rgb_manager->num_leds == 1 ? 0 : i), red, green, blue);
       }
     }
 
@@ -560,6 +675,9 @@ void rgb_manager_policesiren_effect(RGBManager_t *rgb_manager, int delay_ms) {
 }
 
 void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms) {
+#if CONFIG_NUM_LEDS < 1
+    return;
+#endif
     if (rgb_manager->is_separate_pins && rgb_manager->num_leds > 1) {
          ESP_LOGW(TAG, "Strobe effect designed for single LED or strip treated as one.");
     }
@@ -576,6 +694,9 @@ void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms) {
 
 // Deinitialize the RGB LED manager
 esp_err_t rgb_manager_deinit(RGBManager_t *rgb_manager) {
+#if CONFIG_NUM_LEDS < 1
+    return ESP_ERR_INVALID_ARG;
+#endif
   if (!rgb_manager)
     return ESP_ERR_INVALID_ARG;
 
@@ -588,6 +709,12 @@ esp_err_t rgb_manager_deinit(RGBManager_t *rgb_manager) {
     // Clear the LED strip and deinitialize
     led_strip_clear(rgb_manager->strip);
     ESP_LOGI(TAG, "RGBManager deinitialized (LED strip)\n");
+  }
+
+  // Clean up mutex if it exists
+  if (rgb_mutex != NULL) {
+    vSemaphoreDelete(rgb_mutex);
+    rgb_mutex = NULL;
   }
 
   return ESP_OK;

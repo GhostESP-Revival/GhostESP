@@ -2,16 +2,30 @@
 
 ## Overview
 
-The **Ghost ESP Control Panel** is a GUI application that facilitates control and communication with an ESP32 microcontroller over a serial connection. Developed with Python and PyQt6, this tool offers functions for WiFi and BLE scanning, packet capturing, and custom command execution.
+The **Ghost ESP Commander** is a GUI application for controlling and communicating with an ESP32 microcontroller over a serial connection. Built with Python and PyQt6, it provides WiFi/BLE scanning, packet capture, custom commands, firmware flashing, and more.
 
 ## Features
 
-- **Serial Connection Management**: Connect to and communicate with ESP32 devices via serial port.
-- **WiFi Operations**: Scan networks, list access points and stations, perform de-authentication, and send beacon spam.
-- **BLE Operations**: Scan for BLE devices, find specific devices (e.g., AirTag), and stop scans.
-- **Packet Capture**: Capture packets across multiple types, including deauthentication, WPS, and raw data.
-- **Custom Command Support**: Execute custom commands directly from the interface.
-- **Logging and Display Areas**: Real-time logging of commands and responses, with a display for scan results and status updates.
+- **Serial Connection Management**: Connect/disconnect to ESP32 devices via serial port.
+- **WiFi Operations**: Scan networks, list APs/stations, de-auth, beacon spam, and more.
+- **BLE Operations**: Scan for BLE devices, find Flippers/AirTags, stop scans.
+- **Packet Capture**: Capture various WiFi packet types.
+- **Custom Command Support**: Send any command directly.
+- **Logging and Display**: Real-time logs and structured scan/status display.
+- **Auto-Reconnect**: Optionally reconnect if the serial connection drops.
+- **UI Lock/Overlay**: The UI disables and shows a visual overlay when not connected.
+- **Resizable Panes**: Command and display areas can be resized.
+- **Portal File Upload**: Upload custom HTML portals with progress indication.
+- **Automatic Virtual Environment & Dependency Install**: The app will create a Python venv and install dependencies on first run.
+- **Color Terminal Support**: Terminal output supports ANSI color codes for better readability.
+- **Integrated Firmware Flasher**: Flash official or custom firmware images to your ESP32.
+- **Release Bundle Download & Flash**: Download and flash official release bundles directly from GitHub.
+- **Custom Build Panel**: Build, clean, and flash your own firmware using ESP-IDF, with SDKConfig management.
+- **Status Indicators**: Visual indicators for ESP-IDF, sdkconfig, build folder, bootloader, partition table, and firmware presence.
+- **Panel-Specific Instructions**: The flasher output window displays usage instructions for each panel.
+- **Auto-Detect Chip Type**: Chip type is auto-selected based on SDKConfig or asset name.
+- **One-Click SDKConfig Management**: Copy, delete, and edit SDKConfig templates with dedicated buttons.
+- **Cross-Platform Terminal Launch**: `idf.py menuconfig` opens in a new terminal and closes automatically when done.
 
 ## Table of Contents
 
@@ -19,7 +33,11 @@ The **Ghost ESP Control Panel** is a GUI application that facilitates control an
 - [Usage](#usage)
   - [Starting the Application](#starting-the-application)
   - [Connecting to ESP32](#connecting-to-esp32)
+  - [Firmware Flashing](#firmware-flashing)
+  - [Release Bundle Flashing](#release-bundle-flashing)
+  - [Custom Build Panel](#custom-build-panel)
   - [Available Operations](#available-operations)
+  - [Logging and Display](#logging-and-display)
 - [Code Structure](#code-structure)
 - [UI](#ui)
 - [Troubleshooting](#troubleshooting)
@@ -28,72 +46,113 @@ The **Ghost ESP Control Panel** is a GUI application that facilitates control an
 
 ### Prerequisites
 
-1. **Python 3.8+**: Ensure Python 3.8 or later is installed on your system.
-2. **Dependencies**:
-   - Install required packages by running:
-     ```bash
-     pip install pyserial pyqt6
-     ```
-
-3. **Ghost ESP Firmware**: This application is the firmware that can interpret commands sent from the control panel. Please ensure the ESP32 is configured accordingly.
+1. **Python 3.8+**: Install Python 3.8 or later.
+2. **System Dependencies**:
+   ```bash
+   sudo apt update
+   sudo apt install libxcb-cursor0
+   ```
+3. idf.py must be installed and in your path. [See their Manual install instructions](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#manual-installation)
+4. **Ghost ESP Firmware**: Flash your ESP32 with compatible firmware.
 
 ## Usage
 
 ### Starting the Application
 
-Run the main script:
-
 ```bash
-python esp_ghost_control.py
+python main.py
 ```
 
 ### Connecting to ESP32
 
-1. Select a serial port from the dropdown menu in the **Serial Connection** section.
-2. Click **Refresh Ports** if the port is not visible.
-3. Click **Connect** to initiate the connection.
-   - **Note**: The connection status and errors are displayed in the log area.
+1. Select a serial port in the **Serial Connection** section.
+2. Click **Refresh Ports** if needed.
+3. Click **Connect**.
+   - The UI will unlock and overlay will disappear when connected.
+   - Status and errors are shown in the log area.
+
+---
+
+### Firmware Flashing
+
+- **Flash Firmware Panel**:  
+  1. Select the correct chip type for your board.
+  2. Browse and select the `bootloader.bin`, `partition-table.bin`, and `firmware.bin` files.
+  3. Select the serial port.
+  4. Click **Flash Board** to flash your ESP32.
+  5. Use **Exit Flash Mode** to return to the main UI.
+  - **Instructions for each panel are shown in the Flasher Output window when you switch panels.**
+
+### Release Bundle Flashing
+
+- **Flash Release Bundle Panel**:  
+  1. Select a release version or choose **Custom local .zip** to use your own bundle.
+  2. Select the desired asset if multiple are available.
+  3. Download the asset or browse for a local `.zip` file.
+  4. Select the chip type and serial port.
+  5. Click **Flash Bundle** to flash your ESP32.
+  6. Use **Exit Flash Mode** to return to the main UI.
+
+### Custom Build Panel
+
+- **Custom Build Panel**:  
+  1. (Optional) Copy an SDKConfig template or edit your existing one with the edit SDKConfig button.
+  2. Set the target chip and run **Set Target**.
+  3. Use **Run Build** to compile your firmware (requires ESP-IDF in PATH).
+  4. Use **Run idf.py fullclean** to clean the build folder if needed.
+  5. Click **Flash Custom Build** to flash the built firmware from the build folder.
+  6. Use **Exit Flash Mode** to return to the main UI.
+  - **Status indicators** show if ESP-IDF, sdkconfig, build folder, bootloader, partition table, and firmware are present.
+  - **Note:** Use at your own risk. Support will not be provided for unofficial images.
+
+---
 
 ### Available Operations
 
 #### WiFi Operations
 
-- **Scan Access Points**: Scans for nearby WiFi access points.
-- **Start/Stop Deauth**: Initiates or stops a deauthentication command on selected APs.
-- **Beacon Spam**: Sends random beacons, a Rickroll beacon, or AP list beacon spam.
+- **Scan Access Points**: Find nearby WiFi APs.
+- **Start/Stop Deauth**: Deauthenticate selected APs.
+- **Beacon Spam**: Send random, Rickroll, or AP list beacons.
 
 #### BLE Operations
 
-- **Find Flippers**: Searches for known "Flipper" BLE devices.
-- **AirTag Scanner**: Detects nearby AirTags.
-- **Raw BLE Scan**: Initiates a low-level BLE scan.
+- **Find Flippers**: Scan for Flipper BLE devices.
+- **AirTag Scanner**: Detect AirTags.
+- **Raw BLE Scan**: Low-level BLE scan.
 
 #### Packet Capture
 
-Captures and logs specific types of packets from nearby networks.
+- **Capture Probes**: Detect WiFi probe requests.
+- **Capture Deauth**: Track deauth packets.
+- **Capture WPS**: Log WPS packets.
 
-1. **Capture Probes**: Detects WiFi probe requests.
-2. **Capture Deauth**: Tracks deauthentication packets.
-3. **Capture WPS**: Logs WPS-specific packets.
+#### Portal File Upload
 
-### Sending Custom Commands
+- **Send Local HTML as Portal**: Upload a custom HTML file as an evil portal.
+- Progress is shown with an indicator/spinner.
+- After upload, the portal dropdown updates to "uploaded html".
 
-1. Type a custom command into the **Custom Command** input field.
-2. Press **Enter** or click **Send Command** to execute.
+#### Custom Commands
+
+- Type a command in the **Custom Command** field.
+- Press **Enter** or click **Send**.
 
 ### Logging and Display
 
-All command responses, statuses, and logs are displayed in the respective areas:
-
-- **Log Area**: Shows timestamps and command-related feedback.
-- **Display Area**: Shows structured responses, scan results, and status updates.
+- **Log Area**: Shows timestamps and command feedback.
+- **Display Area**: Shows scan results, status, and structured responses.
 
 ## Code Structure
 
-- **`SerialMonitorThread`**: A dedicated thread handling serial data reading, emitting data via `data_received` signal.
-- **`ESP32ControlGUI`**: The main GUI class, encapsulating the UI setup, event handling, and command operations.
-  - **UI Components**: Organized within tabs for WiFi, BLE, and packet capture operations.
-  - **Command Functions**: Encapsulates individual command calls with error handling and logging.
+- **`SerialMonitorThread`**: Reads serial data in a thread, emits via `data_received`.
+- **`PortalFileSenderThread`**: Uploads portal files in a thread, emits progress and completion.
+- **`ESP32ControlGUI`**: Main GUI class, sets up UI, handles events, manages commands and flashing.
+  - **UI Components**: Tabs for WiFi, BLE, capture, portal, settings, and flashing.
+  - **Overlay**: Visual indicator when not connected.
+  - **Resizable Panes**: Uses splitters for flexible layout.
+  - **Status Indicators**: Shows ESP-IDF, sdkconfig, build, and firmware status in the Custom Build panel.
+  - **Panel Instructions**: Flasher Output window gives step-by-step instructions for each flashing panel.
 
 ## UI
 
@@ -101,10 +160,14 @@ All command responses, statuses, and logs are displayed in the respective areas:
 
 ## Troubleshooting
 
-- **Cannot Connect to ESP32**: Ensure the correct port is selected, and ESP32 is properly flashed and powered.
-- **Unexpected Disconnects**: Check for physical connection issues or try lowering the baud rate.
-- **Command Errors**: Ensure commands are compatible with the ESP32’s firmware. Some features may require specific firmware configurations.
+- **Cannot Connect to ESP32**: Check port, firmware, and power.
+- **Unexpected Disconnects**: Check cable, try lower baud rate, enable auto-reconnect.
+- **Command Errors**: Ensure commands match firmware.
+- **UI Overlay Covers Controls**: Overlay only covers main UI; serial controls always accessible.
+- **Portal Upload Hangs**: Make sure you are connected and the ESP32 is ready.
+- **ESP-IDF Not Found**: Ensure `idf.py` is in your PATH for custom build features.
+- **Missing sdkconfig or Build Files**: Use the status indicators in the Custom Build panel to diagnose missing files.
 
 ---
 
-**Note**: This application is intended for development and diagnostic purposes only. Ensure compliance with local regulations when using network diagnostic tools.
+**Note**: This application is for development and diagnostics. Use responsibly and comply with local regulations when using network diagnostic tools.

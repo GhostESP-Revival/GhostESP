@@ -1,5 +1,9 @@
 # Known issues in Ghost ESP
 
+
+```anything you read here may or may not be entirely accurate or up to date.``` 
+
+
 1. **Display Color Inversion**: A number of CYDs invert colors by default
 2. **SD Card Support**: **Marauder V6**, **Generic ESP32** builds, and **Awok variants** have no SD card support.
 3. **GPS Pin Limitations**: Some pins cannot be assigned as GPS input. Notably the Rabbit Labs Yapper board exhibits this behavior.

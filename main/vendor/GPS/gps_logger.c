@@ -19,10 +19,10 @@ static const char *CSV_TAG = "CSV";
 
 static bool is_valid_date(const gps_date_t *date);
 
-#define CSV_BUFFER_SIZE 512
+#define CSV_GPS_BUFFER_SIZE 512
 
 static FILE *csv_file = NULL;
-static char csv_buffer[BUFFER_SIZE];
+static char csv_buffer[GPS_BUFFER_SIZE];
 static size_t buffer_offset = 0;
 static char csv_file_path[GPS_MAX_FILE_NAME_LENGTH];
 static bool gps_connection_logged = false;
@@ -123,12 +123,12 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
              gps_get_absolute_year(gps->date.year), gps->date.month, gps->date.day, gps->tim.hour,
              gps->tim.minute, gps->tim.second, gps->tim.thousand);
 
-    static char data_line[CSV_BUFFER_SIZE];
+    static char data_line[CSV_GPS_BUFFER_SIZE];
     int len;
 
     if (data->ble_data.is_ble_device) {
         // BLE device format - matches WiGLE Bluetooth format
-        len = snprintf(data_line, CSV_BUFFER_SIZE, "%s,%s,%d,%s,%.6f,%.6f,%.1f,%.1f,%s\n",
+        len = snprintf(data_line, CSV_GPS_BUFFER_SIZE, "%s,%s,%d,%s,%.6f,%.6f,%.1f,%.1f,%s\n",
                        data->ble_data.ble_mac,
                        data->ble_data.ble_name[0] ? data->ble_data.ble_name : "[Unknown]",
                        data->ble_data.ble_rssi, timestamp, data->latitude, data->longitude,
@@ -139,19 +139,19 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
         int frequency =
             data->channel > 14 ? 5000 + (data->channel * 5) : 2407 + (data->channel * 5);
 
-        len = snprintf(data_line, CSV_BUFFER_SIZE,
+        len = snprintf(data_line, CSV_GPS_BUFFER_SIZE,
                        "%s,%s,%s,%s,%d,%d,%d,%.6f,%.6f,%.1f,%.1f,WIFI\n", data->bssid, data->ssid,
                        data->encryption_type, timestamp, data->channel, frequency, data->rssi,
                        data->latitude, data->longitude, data->altitude, data->accuracy);
     }
 
-    if (len < 0 || len >= CSV_BUFFER_SIZE) {
+    if (len < 0 || len >= CSV_GPS_BUFFER_SIZE) {
         ESP_LOGE(CSV_TAG, "Buffer overflow prevented");
         return ESP_ERR_NO_MEM;
     }
 
     // Check if buffer needs flushing
-    if (buffer_offset + len >= BUFFER_SIZE) {
+    if (buffer_offset + len >= GPS_BUFFER_SIZE) {
         esp_err_t err = csv_flush_buffer_to_file();
         if (err != ESP_OK) {
             return err;

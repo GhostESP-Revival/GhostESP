@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "managers/gps_manager.h"
 #include "managers/wifi_manager.h"
+#include "managers/views/terminal_screen.h"
 #include <core/commandline.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -21,11 +22,17 @@
 #define JTAG_SUPPORTED 0
 #endif
 
+#ifndef CONFIG_USE_TDECK
 #define UART_NUM UART_NUM_0
+#else
+#define UART_NUM UART_NUM_1
+#endif
 #define BUF_SIZE (1024)
 #define SERIAL_BUFFER_SIZE 528
 
 char serial_buffer[SERIAL_BUFFER_SIZE];
+static TaskHandle_t s_serial_task_handle = NULL;
+static bool s_serial_initialized = false;
 
 // HTML capture state
 typedef enum {
@@ -89,10 +96,16 @@ void serial_task(void *pvParameter) {
     }
 #endif
 
-    // Process data from the main UART
     if (length > 0) {
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
+
+        if (incoming_char == '\b' || (unsigned char)incoming_char == 0x7F) {
+          if (index > 0) {
+            index--;
+          }
+          continue;
+        }
 
         if (incoming_char == '\n' || incoming_char == '\r') {
           serial_buffer[index] = '\0';
@@ -100,10 +113,15 @@ void serial_task(void *pvParameter) {
             process_html_line(serial_buffer);
             index = 0;
           }
-        } else if (index < SERIAL_BUFFER_SIZE - 1) {
-          serial_buffer[index++] = incoming_char;
-        } else {
-          index = 0;
+          continue;
+        }
+
+        if ((unsigned char)incoming_char >= 32 && (unsigned char)incoming_char != 127) {
+          if (index < SERIAL_BUFFER_SIZE - 1) {
+            serial_buffer[index++] = incoming_char;
+          } else {
+            index = 0;
+          }
         }
       }
     }
@@ -144,11 +162,46 @@ void serial_manager_init() {
 
   commandQueue = xQueueCreate(10, sizeof(SerialCommand));
 
-  xTaskCreate(serial_task, "SerialTask", 8192, NULL, 2, NULL);
+  xTaskCreate(serial_task, "SerialTask", 8192, NULL, 2, &s_serial_task_handle);
+  s_serial_initialized = true;
   printf("Serial Started...\n");
 }
 
+void serial_manager_deinit() {
+  if (!s_serial_initialized) {
+    return;
+  }
+  if (s_serial_task_handle) {
+    vTaskDelete(s_serial_task_handle);
+    s_serial_task_handle = NULL;
+  }
+#if JTAG_SUPPORTED
+  usb_serial_jtag_driver_uninstall();
+#endif
+  uart_driver_delete(UART_NUM);
+  if (commandQueue) {
+    vQueueDelete(commandQueue);
+    commandQueue = NULL;
+  }
+  s_serial_initialized = false;
+}
+
+int serial_manager_get_uart_num() { return (int)UART_NUM; }
+
 int handle_serial_command(const char *input) {
+  // Handle peer commands with logging and proper remote flag management
+  if (strncmp(input, "peer:", 5) == 0) {
+    const char* actual_command = input + 5;
+    esp_comm_manager_set_remote_command_flag(true);
+    printf("Received command from peer: %s\n", actual_command);
+    TERMINAL_VIEW_ADD_TEXT("Received command from peer: %s\n", actual_command);
+    printf("Executing received command: %s\n", actual_command);
+    TERMINAL_VIEW_ADD_TEXT("Executing received command: %s\n", actual_command);
+    int result = handle_serial_command(actual_command);
+    esp_comm_manager_set_remote_command_flag(false);
+    return result;
+  }
+  
   char *input_copy = strdup(input);
   if (input_copy == NULL) {
     printf("Memory allocation error\n");
@@ -218,10 +271,13 @@ int handle_serial_command(const char *input) {
 }
 
 void simulateCommand(const char *commandString) {
-  SerialCommand command;
-  strncpy(command.command, commandString, sizeof(command.command) - 1);
-  command.command[sizeof(command.command) - 1] = '\0';
-  if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
-    printf("simulateCommand queue full, command dropped: %s\n", commandString);
+  if (commandQueue) {
+    SerialCommand command;
+    strncpy(command.command, commandString, sizeof(command.command) - 1);
+    command.command[sizeof(command.command) - 1] = '\0';
+    if (xQueueSend(commandQueue, &command, 0) == pdTRUE) {
+      return;
+    }
   }
+  handle_serial_command(commandString);
 }

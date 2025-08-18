@@ -10,6 +10,8 @@
 
 static const char *TAG = "AppGalleryScreen";
 
+#define ANIM_DURATION 60 // ms, use the same value in both files
+
 lv_obj_t *apps_container;
 static int selected_app_index = 0;
 
@@ -39,19 +41,55 @@ static bool touch_started = false;
 static const int SWIPE_THRESHOLD = 50;
 static const int TAP_THRESHOLD = 10;
 
+static bool menu_item_selected = false;
+
 // Animation callback wrapper
 static void anim_set_x(void *obj, int32_t v) {
     lv_obj_set_x((lv_obj_t *)obj, (lv_coord_t)v);
 }
 
+static void fade_out_ready_cb(lv_anim_t *a) {
+    lv_obj_del((lv_obj_t *)a->var);
+}
+
+static void anim_set_opa(void *obj, int32_t v) {
+    lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
+}
+
 /**
  * @brief Updates the displayed app item with animation
  */
- static void update_app_item(bool slide_left) {
+static void update_app_item(bool slide_left) {
+    static lv_obj_t *prev_app_obj = NULL;
+
+    // Animate out old item if it exists
     if (current_app_obj) {
-        lv_obj_del(current_app_obj);
+        prev_app_obj = current_app_obj;
+        // Slide out
+        lv_anim_t anim_out;
+        lv_anim_init(&anim_out);
+        lv_anim_set_var(&anim_out, prev_app_obj);
+        int end_x = slide_left ? -LV_HOR_RES : LV_HOR_RES;
+        lv_anim_set_values(&anim_out, 0, end_x);
+        lv_anim_set_time(&anim_out, ANIM_DURATION);
+        lv_anim_set_path_cb(&anim_out, lv_anim_path_ease_in_out);
+        lv_anim_set_exec_cb(&anim_out, anim_set_x);
+        if (!menu_item_selected) { // Only delete if not selecting
+            lv_anim_set_ready_cb(&anim_out, fade_out_ready_cb);
+        }
+        lv_anim_start(&anim_out);
+
+        // Fade out
+        lv_anim_t fade_out;
+        lv_anim_init(&fade_out);
+        lv_anim_set_var(&fade_out, prev_app_obj);
+        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_time(&fade_out, ANIM_DURATION);
+        lv_anim_set_exec_cb(&fade_out, anim_set_opa);
+        lv_anim_start(&fade_out);
     }
 
+    // Create new item (off-screen, transparent)
     current_app_obj = lv_btn_create(apps_container);
     lv_obj_set_style_bg_color(current_app_obj, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
@@ -67,30 +105,30 @@ static void anim_set_x(void *obj, int32_t v) {
         btn_size = 80;
     }
     lv_obj_set_size(current_app_obj, btn_size, btn_size);
+
+    // Start new item off-screen (opposite direction of swipe)
+    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
     lv_obj_align(current_app_obj, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_opa(current_app_obj, LV_OPA_TRANSP, 0); // Start transparent
 
     lv_obj_t *icon = lv_img_create(current_app_obj);
     lv_img_set_src(icon, app_items[selected_app_index].icon);
-
-    if (strcmp(app_items[selected_app_index].name, "Terminal") == 0) { // Special case for terminal icon
-        lv_obj_set_style_img_recolor(icon, app_items[selected_app_index].border_color, 0); // Recolor to match border
-        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-    }
 
     const int icon_size = 50;
     lv_obj_set_size(icon, icon_size, icon_size);
     lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
     lv_img_set_antialias(icon, false);
+    if (strcmp(app_items[selected_app_index].name,"Flap")) {
+        lv_obj_set_style_img_recolor(icon, app_items[selected_app_index].border_color, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+    }
     lv_obj_set_style_clip_corner(icon, false, 0);
-
 
     int icon_x_offset = -3;
     int icon_y_offset = -5;
     int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
     int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
     lv_obj_set_pos(icon, x_pos, y_pos);
-
-    // Debug output
     lv_coord_t img_width = app_items[selected_app_index].icon->header.w;
     lv_coord_t img_height = app_items[selected_app_index].icon->header.h;
     ESP_LOGD(TAG, "Button size: %d x %d, Set Icon size: %d x %d, Original: %d x %d, Pos: %d, %d\n",
@@ -104,19 +142,26 @@ static void anim_set_x(void *obj, int32_t v) {
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
     }
 
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, current_app_obj);
-    lv_anim_set_time(&a, 75);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
-    lv_anim_set_values(&a, start_x, 0);
-    lv_anim_set_exec_cb(&a, anim_set_x);
-    lv_anim_start(&a);
+    // Animate in new item (slide and fade)
+    lv_anim_t anim_in;
+    lv_anim_init(&anim_in);
+    lv_anim_set_var(&anim_in, current_app_obj);
+    lv_anim_set_values(&anim_in, start_x, 0);
+    lv_anim_set_time(&anim_in, ANIM_DURATION);
+    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&anim_in, anim_set_x);
+    lv_anim_start(&anim_in);
 
-    if (back_button) {
-        lv_obj_move_foreground(back_button);
-    }
+    lv_anim_t fade_in;
+    lv_anim_init(&fade_in);
+    lv_anim_set_var(&fade_in, current_app_obj);
+    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&fade_in, ANIM_DURATION);
+    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
+    lv_anim_start(&fade_in);
+
+    // Ensure the new item is fully opaque at the end
+    lv_obj_set_style_opa(current_app_obj, LV_OPA_COVER, 0); // Always fully opaque
 }
 
 /**
@@ -194,6 +239,12 @@ static void select_app_item(int index, bool slide_left) {
  */
 static void handle_app_item_selection(int item_index) {
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
+
+    // If launching the terminal, set its return view to the apps menu
+    if (app_items[item_index].view == &terminal_view) {
+        terminal_set_return_view(&apps_menu_view);
+    }
+
     display_manager_switch_view(app_items[item_index].view);
 }
 
@@ -222,7 +273,22 @@ static void handle_apps_button_press(int button) {
 
 static void handle_keyboard_interactions(int keyValue){
 
-    if (keyValue == 44 || keyValue == ',') { // Left
+    // Vim keybinds
+    if (keyValue == 'h') { // Vim left
+        ESP_LOGI(TAG, "Vim 'h' pressed (left)");
+        select_app_item(selected_app_index - 1, true);
+    } else if (keyValue == 'l') { // Vim right
+        ESP_LOGI(TAG, "Vim 'l' pressed (right)");
+        select_app_item(selected_app_index + 1, false);
+    } else if (keyValue == 'j' || keyValue == 13) { // Vim down or Enter (select)
+        ESP_LOGI(TAG, "Vim 'j' or Enter pressed (select)");
+        handle_app_item_selection(selected_app_index);
+    } else if (keyValue == 'k' || keyValue == 29 || keyValue == '`') { // Vim up or Esc (back)
+        ESP_LOGI(TAG, "Vim 'k' or Esc pressed (back)");
+        display_manager_switch_view(&main_menu_view);
+    }
+    // Existing keybinds
+    else if (keyValue == 44 || keyValue == ',') { // Left
         ESP_LOGI(TAG, "Left button pressed\n");
         select_app_item(selected_app_index - 1, true);
     } else if (keyValue == 47 || keyValue == '/') { // Right
@@ -235,7 +301,6 @@ static void handle_keyboard_interactions(int keyValue){
         ESP_LOGI(TAG, "Esc button pressed\n");
         display_manager_switch_view(&main_menu_view);
     }
-
 }
 
 /**

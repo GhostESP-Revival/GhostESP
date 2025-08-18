@@ -399,13 +399,13 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
 
   size_t total_packet_size = sizeof(packet_header) + total_length;
 
-  if (total_packet_size > BUFFER_SIZE) {
+  if (total_packet_size > PCAP_BUFFER_SIZE) {
     xSemaphoreGive(pcap_mutex);
     ESP_LOGE(PCAP_TAG, "Packet too large for buffer: %zu", total_packet_size);
     return ESP_ERR_NO_MEM;
   }
 
-  if (buffer_offset + total_packet_size > BUFFER_SIZE) {
+  if (buffer_offset + total_packet_size > PCAP_BUFFER_SIZE) {
     esp_err_t ret = _pcap_flush_buffer_to_file_nolock();
     if (ret != ESP_OK) {
       xSemaphoreGive(pcap_mutex);

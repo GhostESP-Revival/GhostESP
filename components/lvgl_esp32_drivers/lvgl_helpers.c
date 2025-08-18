@@ -187,7 +187,7 @@ bool lvgl_spi_driver_init(int host,
     };
 
     ESP_LOGI(TAG, "Initializing SPI bus...");
-    #if defined (CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    #if defined (CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
     dma_channel = SPI_DMA_CH_AUTO;
     #endif
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4,3,0)

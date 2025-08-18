@@ -1,126 +1,280 @@
-# Ghost ESP Commands Guide
+# GhostESP Command List
 
-## 🔍 Basic Network Scanning
 
-- `scanap [seconds]` - Start scanning for all WiFi networks in range (optional duration)
-- `list -a` - Show complete list of found WiFi networks with technical details (signal strength, security type, channels)
-- `scansta` - Find devices connected to WiFi networks around you
-- `list -s` - Show all discovered connected devices
-- `stopscan` - Stop any active scanning operation
-- `select -a <number[,number,...]>` - Target one or more networks from the scan list (use the number(s) shown in list -a)
-- `select -s <number>` - Target a specific station from the scan list
-- `select -airtag <number>` - Select an AirTag from the scan list
+```anything you read here may or may not be entirely accurate or up to date.``` 
 
-## ⚡ Attack Modes
+<details>
+<summary><strong>Basic Network Scanning</strong></summary>
 
-- `attack -d` - Start deauthentication (temporarily disconnects devices from selected network)
-- `attack -e` - Start EAPOL logoff attack
-- `attack -s` - Start SAE flood attack (ESP32-C5/C6 only)
-- `stopdeauth` - Stop deauth attacks
+- <code>scanap [seconds]</code>  
+  Start scanning for all WiFi networks in range (optional duration)
 
-## 📡 Network Generation
+- <code>list -a</code>  
+  Show complete list of found WiFi networks with technical details (signal strength, security type, channels)
 
-- `beaconspam -r` - Create multiple random fake networks
-- `beaconspam -rr` - Create Never Gonna Give You Up themed networks
-- `beaconspam -l` - Clone all visible networks in the area
-- `beaconspam <name>` - Create a network with your chosen name
-- `stopspam` - Stop creating fake networks
-- `beaconadd <SSID>` - Add an SSID to the beacon spam list
-- `beaconremove <SSID>` - Remove an SSID from the beacon spam list
-- `beaconclear` - Clear the beacon spam list
-- `beaconshow` - Show the current beacon spam list
-- `beaconspamlist` - Start beacon spamming using the beacon spam list
+- <code>scansta</code>  
+  Find devices connected to WiFi networks around you
 
-## 🕸️ Evil Portal Creation
+- <code>list -s</code>  
+  Show all discovered connected devices
 
-- **Start Default Portal:**  
-  `startportal default <AP_SSID> [PSK]`  
-  Example:  
-  `startportal default FreeWiFi`  
+- <code>stopscan</code>  
+  Stop any active scanning operation
+
+- <code>select -a &lt;number[,number,...]&gt;</code>  
+  Target one or more networks from the scan list (use the number(s) shown in list -a)
+
+- <code>select -s &lt;number&gt;</code>  
+  Target a specific station from the scan list
+
+- <code>select -airtag &lt;number&gt;</code>  
+  Select an AirTag from the scan list
+</details>
+
+<details>
+<summary><strong>Attack Modes</strong></summary>
+
+- <code>attack -d</code>  
+  Start deauthentication (temporarily disconnects devices from selected network)
+
+- <code>attack -e</code>  
+  Start EAPOL logoff attack
+
+- <code>attack -s &lt;password&gt;</code>  
+  Start SAE flood attack (ESP32-C5/C6 only)
+
+- <code>stopdeauth</code>  
+  Stop deauth attacks
+</details>
+
+<details>
+<summary><strong>Network Generation (Beacon Spam)</strong></summary>
+
+- <code>beaconspam -r</code>  
+  Create multiple random fake networks
+
+- <code>beaconspam -rr</code>  
+  Create Never Gonna Give You Up themed networks
+
+- <code>beaconspam -l</code>  
+  Clone all visible networks in the area
+
+- <code>beaconspam &lt;name&gt;</code>  
+  Create a network with your chosen name
+
+- <code>stopspam</code>  
+  Stop creating fake networks
+
+- <code>beaconadd &lt;SSID&gt;</code>  
+  Add an SSID to the beacon spam list
+
+- <code>beaconremove &lt;SSID&gt;</code>  
+  Remove an SSID from the beacon spam list
+
+- <code>beaconclear</code>  
+  Clear the beacon spam list
+
+- <code>beaconshow</code>  
+  Show the current beacon spam list
+
+- <code>beaconspamlist</code>  
+  Start beacon spamming using the beacon spam list
+</details>
+
+<details>
+<summary><strong>Evil Portal Creation</strong></summary>
+
+- <strong>Start Default Portal:</strong>  
+  <code>startportal default &lt;AP_SSID&gt; [PSK]</code>  
+  Example: <code>startportal default FreeWiFi</code>  
   (PSK is optional for open APs)
 
-- **Start Custom Portal (Offline HTML):**  
-  `startportal <file-name.html> <AP_SSID> [PSK]`  
-  Example:  
-  `startportal myportal.html FreeWiFi`  
+- <strong>Start Custom Portal (Offline HTML):</strong>  
+  <code>startportal &lt;file-name.html&gt; &lt;AP_SSID&gt; [PSK]</code>  
+  Example: <code>startportal myportal.html FreeWiFi</code>
 
-- **List Available Portals:**  
-  `listportals`  
+- <strong>List Available Portals:</strong>  
+  <code>listportals</code>  
   (Shows all available HTML portals on the SD card)
 
-- **Stop Portal:**  
-  `stopportal`
+- <strong>Stop Portal:</strong>  
+  <code>stopportal</code>
+</details>
 
-## 💾 Network Capture (Requires SD Card/Flipper)
+<details>
+<summary><strong>Network Capture (Requires SD Card/Flipper)</strong></summary>
 
-- `capture -probe` - Save devices searching for WiFi
-- `capture -beacon` - Save network broadcast information
-- `capture -deauth` - Record deauthentication packets
-- `capture -raw` - Save all wireless traffic
-- `capture -wps` - Capture WPS setup packets
-- `capture -pwn` - Record Pwnagotchi activity
-- `capture -eapol` - Record EAPOL/handshake packets
-- `capture -stop` - Stop recording and save data
+- <code>capture -probe</code>  
+  Save devices searching for WiFi
 
-## 🌐 Network Connection & Tools
+- <code>capture -beacon</code>  
+  Save network broadcast information
 
-- `connect <SSID> [Password]` - Connect to a WiFi network and save credentials
-- `dialconnect` - Find and interact with smart TVs on network
-- `powerprinter <ip> <text> <size> <position>` - Send text to network printers  
+- <code>capture -deauth</code>  
+  Record deauthentication packets
+
+- <code>capture -raw</code>  
+  Save all wireless traffic
+
+- <code>capture -wps</code>  
+  Capture WPS setup packets
+
+- <code>capture -pwn</code>  
+  Record Pwnagotchi activity
+
+- <code>capture -eapol</code>  
+  Record EAPOL/handshake packets
+
+- <code>capture -stop</code>  
+  Stop recording and save data
+</details>
+
+<details>
+<summary><strong>Network Connection & Tools</strong></summary>
+
+- <code>connect &lt;SSID&gt; [Password]</code>  
+  Connect to a WiFi network and save credentials
+
+- <code>dialconnect</code>  
+  Find and interact with smart TVs on network
+
+- <code>powerprinter &lt;ip&gt; &lt;text&gt; &lt;size&gt; &lt;position&gt;</code>  
+  Send text to network printers  
   Positions: CM (center), TL (top-left), TR (top-right), BR (bottom-right), BL (bottom-left)
+</details>
 
-## 📱 Bluetooth Operations
+<details>
+<summary><strong>Bluetooth Operations</strong> <em>(Not available on ESP32-S2)</em></summary>
 
-Not available on ESP32-S2:
+- <code>blescan -f</code>  
+  Find Flipper Zero devices
 
-- `blescan -f` - Find Flipper Zero devices
-- `blescan -ds` - Detect Bluetooth spam
-- `blescan -a` - Scan for AirTags
-- `blescan -r` - View all Bluetooth traffic
-- `blescan -s` - Stop Bluetooth scanning
-- `blewardriving` - Start BLE wardriving with GPS logging
-- `blewardriving -s` - Stop BLE wardriving
-- `blespam -apple|-ms|-samsung|-google|-random|-s` - BLE spam attacks
+- <code>blescan -ds</code>  
+  Detect Bluetooth spam
 
+- <code>blescan -a</code>  
+  Scan for AirTags
 
-## 📍 GPS Features
+- <code>blescan -r</code>  
+  View all Bluetooth traffic
 
-- `startwd` - Begin recording networks with GPS location
-- `startwd -s` - Stop GPS recording
-- `gpsinfo` - Show live GPS info
+- <code>blescan -s</code>  
+  Stop Bluetooth scanning
 
-## 🔧 System Commands
+- <code>blewardriving</code>  
+  Start BLE wardriving with GPS logging
 
-- `help` - Show complete command list
-- `stop` - Stop all running operations
-- `reboot` - Restart device
-- `setcountry <CC>` - Set the Wi-Fi country code (ESP32-C5 only)
-- `timezone <TZ_STRING>` - Set the display timezone for the clock view
-- `apcred <ssid> <password>` - Change GhostNet AP credentials
-- `apcred -r` - Reset AP credentials to default
-- `apenable <on|off>` - Enable or disable the Access Point across reboots
-- `chipinfo` - Show chip and memory info
-- `rgbmode <rainbow|police|strobe|off|color>` - Control LED effects
-- `setrgbpins <red> <green> <blue>` - Change RGB LED pins
-- `sd_config` - Show current SD GPIO pin configuration
-- `sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>` - Set SDMMC pins
-- `sd_pins_spi <cs> <clk> <miso> <mosi>` - Set SPI pins
-- `sd_save_config` - Save SD pin config to SD card
+- <code>blewardriving -s</code>  
+  Stop BLE wardriving
 
-## 🔗 Dual ESP32 Communication
+- <code>blespam -apple|-ms|-samsung|-google|-random|-s</code>  
+  BLE spam attacks
+</details>
 
-- `commstatus` - Check connection status between two ESP32 devices
-- `commsend <command>` - Send any command to the other ESP32 device
-- `commdisconnect` - Disconnect from the other ESP32 device
-- `commdiscovery` - Check discovery status
-- `commconnect <device_name>` - Connect to specific device
-- `commsetpins <tx> <rx>` - Change UART pins for communication
+<details>
+<summary><strong>GPS Features</strong></summary>
 
-## 🛠️ Utilities
+- <code>startwd</code>  
+  Begin recording networks with GPS location
 
-- `scanports local [-C/-A/start_port-end_port]` - Scan ports on local subnet
-- `scanports [IP] [-C/-A/start_port-end_port]` - Scan ports on a specific IP
-- `congestion` - Display Wi-Fi channel congestion chart
-- `listenprobes [channel] [stop]` - Listen for and log probe requests
+- <code>startwd -s</code>  
+  Stop GPS recording
 
-> Remember to check your hardware compatibility before using commands
+- <code>gpsinfo</code>  
+  Show live GPS info
+</details>
+
+<details>
+<summary><strong>System Commands</strong></summary>
+
+- <code>help</code>  
+  Show complete command list
+
+- <code>stop</code>  
+  Stop all running operations
+
+- <code>reboot</code>  
+  Restart device
+
+- <code>setcountry &lt;CC&gt;</code>  
+  Set the Wi-Fi country code (ESP32-C5 only)
+
+- <code>timezone &lt;TZ_STRING&gt;</code>  
+  Set the display timezone for the clock view
+
+- <code>apcred &lt;ssid&gt; &lt;password&gt;</code>  
+  Change GhostNet AP credentials
+
+- <code>apcred -r</code>  
+  Reset AP credentials to default
+
+- <code>apenable &lt;on|off&gt;</code>  
+  Enable or disable the Access Point across reboots
+
+- <code>chipinfo</code>  
+  Show chip and memory info
+
+- <code>rgbmode &lt;rainbow|police|strobe|off|color&gt;</code>  
+  Control LED effects
+
+- <code>setrgbpins &lt;red&gt; &lt;green&gt; &lt;blue&gt;</code>  
+  Change RGB LED pins
+
+- <code>sd_config</code>  
+  Show current SD GPIO pin configuration
+
+- <code>sd_pins_mmc &lt;clk&gt; &lt;cmd&gt; &lt;d0&gt; &lt;d1&gt; &lt;d2&gt; &lt;d3&gt;</code>  
+  Set SDMMC pins
+
+- <code>sd_pins_spi &lt;cs&gt; &lt;clk&gt; &lt;miso&gt; &lt;mosi&gt;</code>  
+  Set SPI pins
+
+- <code>sd_save_config</code>  
+  Save SD pin config to SD card
+</details>
+
+<details>
+<summary><strong>Dual ESP32 Communication</strong></summary>
+
+- <code>commstatus</code>  
+  Check connection status between two ESP32 devices
+
+- <code>commsend &lt;command&gt;</code>  
+  Send any command to the other ESP32 device
+
+- <code>commdisconnect</code>  
+  Disconnect from the other ESP32 device
+
+- <code>commdiscovery</code>  
+  Check discovery status
+
+- <code>commconnect &lt;device_name&gt;</code>  
+  Connect to specific device
+
+- <code>commsetpins &lt;tx&gt; &lt;rx&gt;</code>  
+  Change UART pins for communication
+</details>
+
+<details>
+<summary><strong>Utilities</strong></summary>
+
+- <code>scanports local</code>  
+  Scan ports on local subnet
+
+- <code>scanports [IP] [start_port-end_port (OPTIONAL)]</code>  
+  Scan ports on a specific IP
+
+- <code>scanarp</code>  
+  Perform ARP scan on local network to discover active hosts
+
+- <code>scanssh [IP]</code>  
+  Perform SSH scan on a specific IP
+
+- <code>congestion</code>  
+  Display Wi-Fi channel congestion chart
+
+- <code>listenprobes [channel] [stop]</code>  
+  Listen for and log probe requests
+</details>
+
+<sub><em>Remember to check your hardware compatibility before using commands.</em></sub>

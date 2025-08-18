@@ -83,20 +83,34 @@ void gps_manager_init(GPSManager *manager) {
     TERMINAL_VIEW_ADD_TEXT("GPS RX: IO%d\n", current_rx_pin);
 
     esp_comm_manager_deinit();
+    #ifdef CONFIG_USE_TDISPLAY_S3
+    periph_module_disable(PERIPH_UART2_MODULE);
+    #else
     periph_module_disable(PERIPH_UART1_MODULE);
+    #endif
 
     gpio_reset_pin(current_rx_pin);
     vTaskDelay(pdMS_TO_TICKS(10));
 
+    #ifdef CONFIG_USE_TDISPLAY_S3
+    periph_module_enable(PERIPH_UART2_MODULE);
+    #else
     periph_module_enable(PERIPH_UART1_MODULE);
+    #endif
 
     gpio_set_direction(current_rx_pin, GPIO_MODE_INPUT);
     gpio_set_pull_mode(current_rx_pin, GPIO_FLOATING);
 
 
     config.uart.rx_pin = current_rx_pin; //set uart pin for uart init
-    config.uart.uart_port = UART_NUM_1;
-    
+    #ifdef CONFIG_USE_TDISPLAY_S3
+    config.uart.uart_port = UART_NUM_2; // Explicitly set UART3 for GPS
+    #else
+    config.uart.uart_port = UART_NUM_1; // Explicitly set UART1 for GPS
+    #endif
+#ifdef CONFIG_GPS_UART_BAUD_RATE // if we have a custom baud rate set in the build config
+    config.uart.baud_rate = CONFIG_GPS_UART_BAUD_RATE; // set gps baud rate to the build config
+#endif  
 
 #ifdef CONFIG_IS_GHOST_BOARD // always want ghost board to be using pin 2
     config.uart.rx_pin = 2;

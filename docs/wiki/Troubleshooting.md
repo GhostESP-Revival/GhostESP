@@ -1,5 +1,9 @@
 # Troubleshooting
 
+
+```this page is outdated but may help you``` 
+
+
 A guide to common issues and their solutions for GhostESP firmware.
 
 ## Table of Contents

@@ -1,4 +1,7 @@
-# Rave Mode on Ghost ESP - README
+# Rave Mode
+
+
+```this is outdated``` 
 
 Follow these instructions to set up and run Rave Mode on your Ghost ESP with display or LED visualizations. Rave Mode syncs your ESP32's visuals with the audio playing on your computer, creating a dynamic light show!
 

@@ -25,7 +25,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *SD_TAG = "SD_Card_Manager";
+static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
 
 sd_card_manager_t sd_card_manager = { // Change this based on board config
@@ -52,21 +52,21 @@ static bool s_virtual_storage_mounted = false;
 
 static esp_err_t mount_virtual_storage(void) {
     if (s_virtual_storage_mounted) {
-        ESP_LOGI(SD_TAG, "Virtual storage already mounted");
+        ESP_LOGI(TAG, "Virtual storage already mounted");
         return ESP_OK;
     }
 
     const esp_partition_t* storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "storage");
     if (!storage_partition) {
-        ESP_LOGE(SD_TAG, "Storage partition not found");
+        ESP_LOGE(TAG, "Storage partition not found");
         return ESP_ERR_NOT_FOUND;
     }
 
-    ESP_LOGI(SD_TAG, "Found storage partition at offset 0x%lx with size %lu KB", 
+    ESP_LOGI(TAG, "Found storage partition at offset 0x%lx with size %lu KB", 
              (unsigned long)storage_partition->address, (unsigned long)(storage_partition->size / 1024));
     
     if (storage_partition->size < 64 * 1024) {
-        ESP_LOGE(SD_TAG, "Storage partition too small: %lu bytes", (unsigned long)storage_partition->size);
+        ESP_LOGE(TAG, "Storage partition too small: %lu bytes", (unsigned long)storage_partition->size);
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -78,12 +78,12 @@ static esp_err_t mount_virtual_storage(void) {
 
     esp_err_t ret = esp_vfs_fat_spiflash_mount_rw_wl("/mnt", "storage", &mount_config, &s_wl_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(SD_TAG, "Failed to mount virtual storage: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to mount virtual storage: %s", esp_err_to_name(ret));
         return ret;
     }
 
     s_virtual_storage_mounted = true;
-    ESP_LOGI(SD_TAG, "Virtual storage mounted successfully at /mnt");
+    ESP_LOGI(TAG, "Virtual storage mounted successfully at /mnt");
     return ESP_OK;
 }
 
@@ -95,16 +95,9 @@ static void unmount_virtual_storage(void) {
     esp_vfs_fat_spiflash_unmount_rw_wl("/mnt", s_wl_handle);
     s_virtual_storage_mounted = false;
     s_wl_handle = WL_INVALID_HANDLE;
-    ESP_LOGI(SD_TAG, "Virtual storage unmounted");
+    ESP_LOGI(TAG, "Virtual storage unmounted");
 }
 #endif
-
-static void get_next_pcap_file_name(char *file_name_buffer,
-                                    const char *base_name) {
-  int next_index = get_next_pcap_file_index(base_name);
-  snprintf(file_name_buffer, 128, "/mnt/ghostesp/pcaps/%s_%d.pcap", base_name,
-           next_index);
-}
 
 void list_files_recursive(const char *dirname, int level) {
   DIR *dir = opendir(dirname);
@@ -172,18 +165,18 @@ esp_err_t sd_card_init(void) {
 
 
 #ifdef CONFIG_IS_S3TWATCH
-  ESP_LOGI(SD_TAG, "S3TWatch detected - attempting virtual storage mount");
+  ESP_LOGI(TAG, "S3TWatch detected - attempting virtual storage mount");
   
   vTaskDelay(pdMS_TO_TICKS(100));
   
   ret = mount_virtual_storage();
   if (ret == ESP_OK) {
     sd_card_manager.is_initialized = true;
-    ESP_LOGI(SD_TAG, "Virtual storage initialized successfully");
+    ESP_LOGI(TAG, "Virtual storage initialized successfully");
     sd_card_setup_directory_structure();
     return ESP_OK;
   } else {
-    ESP_LOGW(SD_TAG, "Virtual storage mount failed (%s), falling back to physical SD card", esp_err_to_name(ret));
+    ESP_LOGW(TAG, "Virtual storage mount failed (%s), falling back to physical SD card", esp_err_to_name(ret));
   }
 #endif
 
@@ -393,6 +386,8 @@ esp_err_t sd_card_init(void) {
 
   bool bus_init_success = false;
 
+  
+#ifndef CONFIG_USE_TDECK // tdeck doesnt need this since the spi bus is already inited by display driver
 #ifndef CONFIG_ENCODER_INA 
 #if defined(CONFIG_IDF_TARGET_ESP32)
   {
@@ -424,6 +419,7 @@ esp_err_t sd_card_init(void) {
       return bus_ret;
     }
   }
+#endif
 #endif
 #endif
 
@@ -493,14 +489,14 @@ void sd_card_unmount(void) {
 
 #if SOC_SDMMC_HOST_SUPPORTED && SOC_SDMMC_USE_GPIO_MATRIX
   if (sd_card_manager.is_initialized) {
-    esp_vfs_fat_sdmmc_unmount();
+    esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
     printf("SD card unmounted\n");
     sd_card_manager.is_initialized = false;
   }
 #else
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
-    spi_bus_free(SPI2_HOST);
+    spi_bus_free(SPI2_HOST); // Free the bus if already initialized
     printf("SD card unmounted\n");
   }
 #endif
@@ -967,7 +963,11 @@ bool sd_card_is_virtual_storage() {
 int get_evil_portal_list(char portal_names[MAX_PORTALS][MAX_PORTAL_NAME]) {
     const char *portal_dir = "/mnt/ghostesp/evil_portal/portals";
     DIR *dir = opendir(portal_dir);
-    if (!dir) return 0;
+    if (!dir){
+        ESP_LOGW(TAG, "Failed to open directory: %s\n", portal_dir);
+        return -1; // Return -1 if directory cannot be opened
+    }
+    ESP_LOGI(TAG, "Listing portals in directory: %s\n", portal_dir);
     struct dirent *entry;
     int count = 0;
     while ((entry = readdir(dir)) && count < MAX_PORTALS) {

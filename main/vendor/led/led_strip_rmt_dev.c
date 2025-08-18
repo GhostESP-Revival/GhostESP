@@ -3,12 +3,15 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
+// this file has been fucked around in - deki
+
 #include "driver/rmt_tx.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "vendor/led/led_strip.h"
 #include "vendor/led/led_strip_interface.h"
-#include "vendor/led/led_strip_rmt_encoder.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/cdefs.h>
@@ -88,13 +91,17 @@ static esp_err_t led_strip_rmt_refresh(led_strip_t *strip) {
   // Silent error handling for all operations
   esp_err_t err;
 
-  // Try to enable RMT channel
-  err = rmt_enable(rmt_strip->rmt_chan);
-  if (err != ESP_OK) {
-    return err;
+  // Ensure RMT channel is enabled (enable only first time)
+  static bool channel_enabled = false;
+  if (!channel_enabled) {
+    err = rmt_enable(rmt_strip->rmt_chan);
+    if (err != ESP_OK) {
+      return err;
+    }
+    channel_enabled = true;
   }
 
-  // Try to transmit
+  // Transmit
   err = rmt_transmit(
       rmt_strip->rmt_chan, rmt_strip->strip_encoder, rmt_strip->pixel_buf,
       rmt_strip->strip_len * rmt_strip->bytes_per_pixel, &tx_conf);
@@ -110,12 +117,7 @@ static esp_err_t led_strip_rmt_refresh(led_strip_t *strip) {
     return err;
   }
 
-  // Disable RMT channel
-  err = rmt_disable(rmt_strip->rmt_chan);
-  if (err != ESP_OK) {
-    return err;
-  }
-
+  // Keep channel enabled for continuous operation
   return ESP_OK;
 }
 
@@ -192,12 +194,25 @@ esp_err_t led_strip_new_rmt_device(const led_strip_config_t *led_config,
   ESP_GOTO_ON_ERROR(rmt_new_tx_channel(&rmt_chan_config, &rmt_strip->rmt_chan),
                     err, TAG, "create RMT TX channel failed");
 
-  // Create the LED strip encoder
-  led_strip_encoder_config_t strip_encoder_conf = {
-      .resolution = resolution, .led_model = led_config->led_model};
+  // Create bytes encoder for LED strip data
+  rmt_bytes_encoder_config_t bytes_encoder_config = {
+      .bit0 = {
+          .level0 = 1,
+          .duration0 = 0.3 * resolution / 1000000, // T0H=0.3us
+          .level1 = 0,
+          .duration1 = 0.9 * resolution / 1000000, // T0L=0.9us
+      },
+      .bit1 = {
+          .level0 = 1,
+          .duration0 = 0.9 * resolution / 1000000, // T1H=0.9us
+          .level1 = 0,
+          .duration1 = 0.3 * resolution / 1000000, // T1L=0.3us
+      },
+      .flags.msb_first = 1 // WS2812 uses MSB first
+  };
   ESP_GOTO_ON_ERROR(
-      rmt_new_led_strip_encoder(&strip_encoder_conf, &rmt_strip->strip_encoder),
-      err, TAG, "create LED strip encoder failed");
+      rmt_new_bytes_encoder(&bytes_encoder_config, &rmt_strip->strip_encoder),
+      err, TAG, "create bytes encoder failed");
 
   // Assign functions and parameters to the strip object
   rmt_strip->base.led_pixel_format = led_config->led_pixel_format;

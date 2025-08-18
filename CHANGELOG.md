@@ -2,41 +2,62 @@
 
 ## Revival v1.7
 
-### Big Changes
+### Major Updates
 
-#### Support for connecting two ESP32 chips running GhostESP with a WebUI section for control
+- **Dual ESP32 Communication**
+  - Connect two GhostESP devices together.
+  - Dedicated WebUI section for managing linked devices.
 
-#### Up to 5X the battery life on supported devices with power saving mode
+- **Power Saving**
+  - Up to 5x the battery life on compatible boards using the new Power Saving Mode (when compared with v1.6.1).
 
-#### Support for the LilyGo TEmbed C1101
+- **New Board Support**
+  - LilyGo TEmbed C1101
+  - LilyGo TDeck — @tototo31
+  - LilyGo TDisplay S3 Touch
+  - AITRIP CYD / ESP2432S028R — @tototo31
+  - JCMK DevBoard Pro
+  - Rabbit Labs Minion
 
-#### Support for 'AITRIP CYD' or ESP2432S028R, a CYD device - @tototo31
-
-
+- **Infrared RX** (only enabled on TEmbed C1101)
+  - IR receive and decode support for all protocols supported by Flipper Zero firmware.
+  - Ability to Rename, Delete, Add remotes 
+  - Easy Learn Mode: **Name buttons automatically**
+  
 ### Added
 
 - Attacks
   - Support for setting an Evil Portal HTML via the Flipper Zero App with a max size of 2048 bytes (as of app v1.4)
+  - Added option to select Custom Evil Portal html file from the SD Card - @tototo31
 
 - Display
   - Added 'Never' display timeout setting.
   - Added 'Power Saving' setting which turns off the AP and lowers the CPU frequency on Cardputer and S3TWatch.
-  - Terminal App to use commands with the keyboard - @tototo31
-  - Added option to select Custom Evil Portal html file from the SD Card - @tototo31
+  - Display backlight percentage setting for PWM enabled devices - @tototo31
   - Placeholder text for keyboard view - @tototo31
   - Encoder friendly version of the keyboard view
   - Fuel Gauge support with manager and kconf setting (only BQ27220 support initially)
-
+  - Add Vim keybindings for keyboard interactions in various screens - @tototo31
+  - Add zebra menu styling and improve vertical alignment - @tototo31
+  - Smooth mainmenu animations - @tototo31
+  - Keyboard enhancements - @tototo31
+  
 - Commands
+  - Help command reorganised into categories - @tototo31
   - 'chipinfo' command to display chip information
   - 'apenable' command to enable/disable the Access Point
   - 'disconnect' command to disconnect from the current network
   - 'setrgbmode' command to change the RGB mode
+  - 'scanarp' command to initiate an ARP scan on the local network
+  - 'scanssh [IP]' command to initiate an SSH scan on the target IP
+  - '-live' arg for 'scanap' for a non blocking scan that lists APs as they're found
 
 - Misc
   - Add build name config variable for debugging and auto-flash support - @tototo31
   - Try to connect to saved WiFi on boot if available
   - Add 'Stealth' mode for silencing RGB - @tototo31
+  - Terminal App to use commands with the keyboard - @tototo31
+  - Add memory checks for debugging before initializing AP, BLE, and WiFi managers - @tototo31
   
 ### Changed
 
@@ -44,11 +65,11 @@
   - Reuse options screen view for settings screen. Resolves #66 and #65
   - PWM backlight control using ledc on supported devices
   - Moved 'Terminal Color' and 'Third Control' to the Display section in settings
-  - Organise BLE menu into hierarchical sub-menus - @tototo31
   - Color status bar icons based on their activity
   - S3TWatch: Disable tap-to-wake, use touch interrupt instead.
   - Exiting a view now returns to the previous view instead of the main menu - @tototo31
   - Add CAPSLOCK shift toggle to keyboard view - @tototo31
+  - Restyle terminal view - @tototo31
 
 - WebUI
   - Minor style tweaks
@@ -56,6 +77,12 @@
   
 - Attacks
   - Refactor packet capture
+  - Refactor 'scanports' command to be more intuitive and user-friendly
+
+- General
+  - Cap displayed WiFi APs to 50 for 'scanap' output
+  - Organise BLE menu into hierarchical sub-menus - @tototo31
+  - If dualcomm is set to pins used by the serial UART, disable the serial UART
 
 ### Bug Fixes
 
@@ -64,6 +91,9 @@
   - Reduce FatFS memory usage on S3TWatch and Cardputer
   - Improve battery reading accuracy on Cardputer
   - Fix keyboard view touch detection logic - @tototo31
+  - Save settings when exiting the settings view
+  - Update LEDs and Status bar when changing from rainbow mode
+  - Refresh current item highlight when changing theme
 
 - Commands
   - Add terminal_view_add_text logs to commands missing them
@@ -71,13 +101,21 @@
   - Fix stop command not stopping GPS task
   - Fix serial going unresponsive by using 'scanap -stop'
   - Small fixes to the process of connecting to a WiFi network
+  - Refactor SAE Flood Attack - now requires a password to be set as an argument
+  - Handle backspace and DEL properly in serial input
+  - Airtag spoofing fixes
   
 - General
   - Disable and re-enable ESP comm manager UART around GPS usage to avoid driver conflicts
   - Flush every packet to UART (Flipper) immediately when there's no sd card
   - Miscellaneous refactoring for memory usage
   - Add wifi_manager_stop_beacon function
-
+  - Check if an RMT channel already exists and clean it up before making a new one
+  - Randomise BLE Spam MAC addr and add more devices
+  - Better EP credential handling
+  - Keep one led strip rmt instance
+  - Remove legacy led strip rmt driver
+  - Tweaks to evil portal captive portal handling
 
 ## Revival 1.6.1
 

@@ -9,5 +9,6 @@ extern View keyboard_view;
 typedef void (*KeyboardSubmitCallback)(const char *text);
 void keyboard_view_set_submit_callback(KeyboardSubmitCallback cb);
 void keyboard_view_set_placeholder(const char *text);
+void keyboard_view_set_return_view(View *view);
 
 #endif 

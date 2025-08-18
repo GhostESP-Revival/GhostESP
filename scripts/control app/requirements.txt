@@ -1,0 +1,4 @@
+PyQt6
+pyserial
+esptool
+requests
