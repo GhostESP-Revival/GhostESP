@@ -2,30 +2,43 @@
 
 ## Overview
 
-The **Ghost ESP Commander** is a GUI application for controlling and communicating with an ESP32 microcontroller over a serial connection. Built with Python and PyQt6, it provides WiFi/BLE scanning, packet capture, custom commands, firmware flashing, and more.
+The **Ghost ESP Commander** is a comprehensive GUI application for controlling and communicating with an ESP32 microcontroller over a serial connection. Built with Python and PyQt6, it provides extensive functionality including WiFi/BLE/NFC operations, GPS tracking, SD card management, RGB LED control, infrared remote control, advanced command history, real-time status monitoring, and much more.
 
 ## Features
 
-- **Serial Connection Management**: Connect/disconnect to ESP32 devices via serial port.
-- **WiFi Operations**: Scan networks, list APs/stations, de-auth, beacon spam, and more.
-- **BLE Operations**: Scan for BLE devices, find Flippers/AirTags, stop scans.
-- **Packet Capture**: Capture various WiFi packet types.
-- **Custom Command Support**: Send any command directly.
-- **Logging and Display**: Real-time logs and structured scan/status display.
-- **Auto-Reconnect**: Optionally reconnect if the serial connection drops.
-- **UI Lock/Overlay**: The UI disables and shows a visual overlay when not connected.
-- **Resizable Panes**: Command and display areas can be resized.
-- **Portal File Upload**: Upload custom HTML portals with progress indication.
-- **Automatic Virtual Environment & Dependency Install**: The app will create a Python venv and install dependencies on first run.
-- **Color Terminal Support**: Terminal output supports ANSI color codes for better readability.
-- **Integrated Firmware Flasher**: Flash official or custom firmware images to your ESP32.
-- **Release Bundle Download & Flash**: Download and flash official release bundles directly from GitHub.
-- **Custom Build Panel**: Build, clean, and flash your own firmware using ESP-IDF, with SDKConfig management.
-- **Status Indicators**: Visual indicators for ESP-IDF, sdkconfig, build folder, bootloader, partition table, and firmware presence.
-- **Panel-Specific Instructions**: The flasher output window displays usage instructions for each panel.
-- **Auto-Detect Chip Type**: Chip type is auto-selected based on SDKConfig or asset name.
-- **One-Click SDKConfig Management**: Copy, delete, and edit SDKConfig templates with dedicated buttons.
-- **Cross-Platform Terminal Launch**: `idf.py menuconfig` opens in a new terminal and closes automatically when done.
+### Core Functionality
+- **Serial Connection Management**: Connect/disconnect to ESP32 devices via serial port with auto-reconnect capability.
+- **Real-Time Status Dashboard**: Monitor device status, memory usage, battery level, and active operations.
+- **Enhanced Command History**: Advanced command history with search, filtering, and management capabilities.
+- **Custom Command Support**: Send any command directly with intelligent command completion.
+
+### Network Operations
+- **WiFi Operations**: Comprehensive WiFi scanning, AP/station listing, de-auth attacks, beacon spam, and probe monitoring.
+- **BLE Operations**: Bluetooth device scanning, Flipper/AirTag detection, and raw BLE packet analysis.
+- **Evil Portal Management**: Upload and manage custom HTML portals with progress tracking.
+- **Packet Capture**: Capture probes, beacons, deauth packets, WPS data, and Pwnagotchi data.
+
+### Advanced Hardware Control
+- **NFC Operations**: Complete MIFARE Classic, NTAG, and NDEF card operations including emulation and dictionary attacks.
+- **GPS Operations**: GPS tracking, logging, satellite monitoring, and position reporting with configurable intervals.
+- **SD Card Management**: File operations, backup/restore, directory management, and card formatting.
+- **RGB LED Control**: Color picker, mode selection (Normal/Rainbow/Stealth/Custom), brightness control, and LED effects.
+- **Infrared Control**: IR scanning, device-specific remote controls (TV/Audio/DVD/AC/Projector), and IR learning.
+
+### Development Tools
+- **Integrated Firmware Flasher**: Flash official or custom firmware images with progress tracking.
+- **Release Bundle Management**: Download and flash official release bundles from GitHub.
+- **Custom Build System**: Full ESP-IDF integration with build, clean, and flash capabilities.
+- **SDKConfig Management**: Copy, edit, and manage SDKConfig templates with visual status indicators.
+
+### User Experience
+- **Modern UI**: Professional tabbed interface with resizable panels and visual overlays.
+- **Theme Support**: Dark/light theme support with customizable appearance.
+- **Command History Browser**: Visual command history management with search and filtering.
+- **Auto-Detect Features**: Automatic chip type detection and status monitoring.
+- **Cross-Platform Support**: Works on Linux, Windows, and macOS.
+- **Color Terminal Output**: ANSI color code support for better readability.
+- **Automatic Setup**: Virtual environment creation and dependency installation on first run.
 
 ## Table of Contents
 
@@ -110,64 +123,133 @@ python main.py
 ### Available Operations
 
 #### WiFi Operations
-
-- **Scan Access Points**: Find nearby WiFi APs.
-- **Start/Stop Deauth**: Deauthenticate selected APs.
-- **Beacon Spam**: Send random, Rickroll, or AP list beacons.
+- **Scanning**: Scan access points, stations, and probe requests.
+- **Attack Operations**: Start/stop de-auth attacks on selected APs.
+- **Beacon Operations**: Random beacon spam, Rickroll beacons, AP list beacons, custom SSID beacons.
+- **Beacon Management**: Add/remove/clear beacon lists, spam beacon lists.
 
 #### BLE Operations
+- **Device Discovery**: Scan for BLE devices including Flippers and AirTags.
+- **Raw BLE Scanning**: Low-level BLE packet capture and analysis.
 
-- **Find Flippers**: Scan for Flipper BLE devices.
-- **AirTag Scanner**: Detect AirTags.
-- **Raw BLE Scan**: Low-level BLE scan.
+#### NFC Operations
+- **MIFARE Classic**: Scan, read, dump, write, and emulate MIFARE Classic cards.
+- **NTAG Operations**: Scan, read, write, format NTAG cards.
+- **NDEF Operations**: Read, write, and format NDEF data.
+- **Advanced Features**: Dictionary attacks, brute force key attempts, file I/O operations.
+
+#### GPS Operations
+- **Position Tracking**: Start/stop GPS, get position, satellite info, and status.
+- **GPS Logging**: Configurable logging with custom intervals and file paths.
+- **GPS Configuration**: Set baud rate, update rate, and reset GPS module.
+
+#### SD Card Management
+- **Card Operations**: Mount/unmount, get info, list files, and check status.
+- **File Operations**: Download, upload, delete files, create/remove directories.
+- **Backup/Restore**: Backup settings, restore configurations, backup logs.
+- **Card Maintenance**: Format SD cards when needed.
+
+#### RGB LED Control
+- **Mode Selection**: Normal, Rainbow, Stealth, and Custom RGB modes.
+- **Color Control**: Visual color picker with live preview.
+- **Brightness Control**: Adjustable brightness slider (0-100%).
+- **LED Effects**: Rainbow cycle, color fade, breathing, and flash effects.
+
+#### Infrared Control
+- **IR Operations**: Scan, send, receive, and stop IR signals.
+- **Device Control**: Pre-configured remotes for TV, Audio, DVD, AC, Projector.
+- **Custom Devices**: Support for custom device configurations.
+- **IR Learning**: Learn and save IR commands for later use.
 
 #### Packet Capture
+- **Capture Types**: Probes, beacons, deauth packets, raw packets, WPS data, Pwnagotchi data.
+- **Real-Time Monitoring**: Live packet capture with filtering options.
 
-- **Capture Probes**: Detect WiFi probe requests.
-- **Capture Deauth**: Track deauth packets.
-- **Capture WPS**: Log WPS packets.
+#### Evil Portal Management
+- **Portal Upload**: Upload custom HTML files as evil portals.
+- **Progress Tracking**: Visual progress indicators during uploads.
+- **Portal Management**: Start/stop portals with custom configurations.
 
-#### Portal File Upload
+#### Custom Commands & History
+- **Command Entry**: Type any command with intelligent command completion.
+- **Command History**: Visual history browser with search and filtering.
+- **History Management**: Search, filter, and manage command history.
+- **Keyboard Shortcuts**: Enhanced navigation with Ctrl+Up/Down for history search.
 
-- **Send Local HTML as Portal**: Upload a custom HTML file as an evil portal.
-- Progress is shown with an indicator/spinner.
-- After upload, the portal dropdown updates to "uploaded html".
-
-#### Custom Commands
-
-- Type a command in the **Custom Command** field.
-- Press **Enter** or click **Send**.
-
-### Logging and Display
-
-- **Log Area**: Shows timestamps and command feedback.
+### Status Monitoring & Display
+- **Real-Time Dashboard**: Device status, memory usage, battery level, and active operations.
+- **Log Area**: Shows timestamps and command feedback with color-coded output.
 - **Display Area**: Shows scan results, status, and structured responses.
+- **Status Indicators**: Visual feedback for all system components and operations.
 
 ## Code Structure
 
 - **`SerialMonitorThread`**: Reads serial data in a thread, emits via `data_received`.
 - **`PortalFileSenderThread`**: Uploads portal files in a thread, emits progress and completion.
-- **`ESP32ControlGUI`**: Main GUI class, sets up UI, handles events, manages commands and flashing.
-  - **UI Components**: Tabs for WiFi, BLE, capture, portal, settings, and flashing.
-  - **Overlay**: Visual indicator when not connected.
-  - **Resizable Panes**: Uses splitters for flexible layout.
-  - **Status Indicators**: Shows ESP-IDF, sdkconfig, build, and firmware status in the Custom Build panel.
-  - **Panel Instructions**: Flasher Output window gives step-by-step instructions for each flashing panel.
+- **`ESP32ControlGUI`**: Main GUI class with comprehensive device control capabilities.
+  - **Operation Tabs**: WiFi, BLE, NFC, GPS, SD Card, RGB LED, Infrared, Evil Portal, Settings.
+  - **Status Dashboard**: Real-time device monitoring with memory, battery, and operation status.
+  - **Command History**: Advanced history management with search, filtering, and visual browser.
+  - **Enhanced UI**: Professional tabbed interface with resizable panels and visual overlays.
+  - **Status Indicators**: Shows ESP-IDF, sdkconfig, build, firmware, and system component status.
+  - **Panel Instructions**: Context-sensitive help and instructions for all operation panels.
+  - **Flash Mode**: Integrated firmware flashing with official releases, custom builds, and progress tracking.
+  - **Theme Support**: Customizable dark/light themes with user preferences.
 
 ## UI
 
+The Ghost ESP Commander features a modern, professional interface with:
+
+- **Tabbed Operation Panels**: Organized sections for each major functionality
+- **Status Dashboard**: Real-time device monitoring at the top
+- **Resizable Layout**: Flexible command and display areas
+- **Visual Status Indicators**: Color-coded connection and operation status
+- **Professional Theming**: Dark theme with customizable appearance
+
 ![ui](01.png)
+
+*Main interface showing the comprehensive operation tabs and status dashboard*
 
 ## Troubleshooting
 
-- **Cannot Connect to ESP32**: Check port, firmware, and power.
-- **Unexpected Disconnects**: Check cable, try lower baud rate, enable auto-reconnect.
-- **Command Errors**: Ensure commands match firmware.
+### Connection Issues
+- **Cannot Connect to ESP32**: Check port permissions, firmware compatibility, and power supply.
+- **Unexpected Disconnects**: Verify cable integrity, try lower baud rates, enable auto-reconnect.
+- **Port Access Denied**: On Linux, add user to `dialout` group: `sudo usermod -a -G dialout $USER`.
+
+### Command & Operation Issues
+- **Command Errors**: Ensure commands match your firmware version and capabilities.
+- **Operation Timeouts**: Some operations (NFC, GPS) may take time - monitor status dashboard.
+- **Feature Not Available**: Verify your ESP32 hardware supports the requested feature (GPS, NFC, etc.).
+
+### UI & Display Issues
 - **UI Overlay Covers Controls**: Overlay only covers main UI; serial controls always accessible.
-- **Portal Upload Hangs**: Make sure you are connected and the ESP32 is ready.
+- **Status Dashboard Not Updating**: Check connection status and refresh manually if needed.
+- **Command History Not Working**: Ensure focus is on command entry field for keyboard shortcuts.
+
+### Hardware-Specific Issues
+- **NFC Operations Fail**: Check PN532 module connections and power.
+- **GPS No Fix**: Ensure GPS antenna has clear sky view and is properly connected.
+- **SD Card Issues**: Verify card formatting (FAT32) and proper SPI connections.
+- **RGB LED Not Working**: Check LED strip wiring and power supply.
+- **IR Not Responding**: Verify IR LED/transmitter is properly connected and aimed.
+
+### Development & Build Issues
 - **ESP-IDF Not Found**: Ensure `idf.py` is in your PATH for custom build features.
-- **Missing sdkconfig or Build Files**: Use the status indicators in the Custom Build panel to diagnose missing files.
+- **Build Failures**: Check ESP-IDF installation and project configuration.
+- **Missing Components**: Use status indicators to diagnose missing files or configurations.
+- **Flash Failures**: Verify chip type selection and serial port availability.
+
+### File & Upload Issues
+- **Portal Upload Hangs**: Ensure stable connection and sufficient ESP32 memory.
+- **File Operations Fail**: Check SD card mounting and file permissions.
+- **Large File Transfers**: May require extended timeouts for large files.
+
+### Performance & System
+- **High Memory Usage**: Close unused applications during intensive operations.
+- **Slow Response**: Some operations (scanning, capture) are CPU-intensive - be patient.
+- **Virtual Environment Issues**: Delete `.venv` folder and restart if dependency problems occur.
 
 ---
 
-**Note**: This application is for development and diagnostics. Use responsibly and comply with local regulations when using network diagnostic tools.
+**Important Note**: This application provides extensive control over ESP32 devices and network operations. Use responsibly and comply with local regulations when using network diagnostic and security testing tools. Always ensure you have permission to scan networks and test devices.
