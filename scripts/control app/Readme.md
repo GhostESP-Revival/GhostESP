@@ -31,6 +31,20 @@ The **Ghost ESP Commander** is a comprehensive GUI application for controlling a
 - **Custom Build System**: Full ESP-IDF integration with build, clean, and flash capabilities.
 - **SDKConfig Management**: Copy, edit, and manage SDKConfig templates with visual status indicators.
 
+### Communication & Control
+- **Device Communication**: Serial communication controls, device info, status monitoring, and system commands.
+- **Printer Control**: Print text, images, QR codes, and test pages with printer configuration.
+- **Media Casting**: YouTube video casting with quality and volume controls.
+- **Advanced Capture**: WiFi packet capture with configurable channels and duration.
+- **Attack Tools**: DHCP starvation and SAE flood attacks with configuration options.
+- **Beacon Control**: Advanced beacon spam with intervals, channels, and list management.
+
+### System Tools
+- **System Information**: Chip information, help system, and device status monitoring.
+- **System Configuration**: Timezone settings, web authentication toggle, and system parameters.
+- **Network Discovery**: PineAP detection for WiFi Pineapple identification.
+- **ESP32 Communication**: Peer-to-peer ESP32 communication with discovery, connection, and messaging.
+
 ### User Experience
 - **Modern UI**: Professional tabbed interface with resizable panels and visual overlays.
 - **Theme Support**: Dark/light theme support with customizable appearance.
@@ -131,6 +145,9 @@ python main.py
 #### BLE Operations
 - **Device Discovery**: Scan for BLE devices including Flippers and AirTags.
 - **Raw BLE Scanning**: Low-level BLE packet capture and analysis.
+- **BLE Advertisement Spam**: Apple device spam, Microsoft Swift Pair, Samsung Galaxy Watch, Google Fast Pair, and random spam modes.
+- **BLE Wardriving**: GPS-enabled BLE device tracking and logging.
+- **AirTag Management**: List and select discovered AirTags with detailed information.
 
 #### NFC Operations
 - **MIFARE Classic**: Scan, read, dump, write, and emulate MIFARE Classic cards.
@@ -170,6 +187,34 @@ python main.py
 - **Progress Tracking**: Visual progress indicators during uploads.
 - **Portal Management**: Start/stop portals with custom configurations.
 
+#### Communication & Control
+- **Device Communication**: Serial controls, device info, memory usage, battery level, system status, restart/reset.
+- **Printer Operations**: Print text, images, QR codes, test pages with printer configuration and settings.
+- **Media Casting**: YouTube video casting with URL input, quality selection, volume control, and cast management.
+- **Advanced Packet Capture**: Configurable WiFi packet capture with channel selection and duration settings.
+
+#### Attack & Security Tools
+- **DHCP Starvation**: Start/stop DHCP starvation attacks with configurable threads and target networks.
+- **SAE Flood Attack**: WPA3 SAE handshake flooding with password input and attack controls.
+- **Attack Configuration**: Thread settings, target network selection, and attack parameter management.
+
+#### Beacon Control
+- **Beacon Operations**: Random, Rickroll, AP list, and custom SSID beacon spam with configuration options.
+- **Beacon Settings**: Configurable beacon intervals, channels, and spam list management.
+- **Beacon List**: Show/clear beacon lists with visual management interface.
+
+#### System Tools
+- **System Information**: Chip information display, help system, and comprehensive status monitoring.
+- **System Configuration**: Timezone settings, web authentication controls, and system parameter management.
+- **Network Discovery**: PineAP detection for identifying WiFi Pineapples with interface selection.
+- **ESP32 Communication**: Peer-to-peer ESP32 communication with discovery, connection, and message sending.
+
+#### Settings & Configuration
+- **Display Settings**: RGB modes, display timeout, themes, terminal colors, color inversion, and brightness control.
+- **Network Settings**: Web authentication, access point enable/disable, and network configuration.
+- **System Settings**: Third-party control, power saving mode, and system management.
+- **Settings Management**: Save all current settings to device with automatic command detection.
+
 #### Custom Commands & History
 - **Command Entry**: Type any command with intelligent command completion.
 - **Command History**: Visual history browser with search and filtering.
@@ -187,7 +232,7 @@ python main.py
 - **`SerialMonitorThread`**: Reads serial data in a thread, emits via `data_received`.
 - **`PortalFileSenderThread`**: Uploads portal files in a thread, emits progress and completion.
 - **`ESP32ControlGUI`**: Main GUI class with comprehensive device control capabilities.
-  - **Operation Tabs**: WiFi, BLE, NFC, GPS, SD Card, RGB LED, Infrared, Evil Portal, Settings.
+  - **Operation Tabs**: WiFi, BLE, NFC, GPS, SD Card, RGB LED, Infrared, Communication, Printer, Media Casting, Packet Capture, Attack Tools, Beacon Control, System Tools, Evil Portal, Settings.
   - **Status Dashboard**: Real-time device monitoring with memory, battery, and operation status.
   - **Command History**: Advanced history management with search, filtering, and visual browser.
   - **Enhanced UI**: Professional tabbed interface with resizable panels and visual overlays.
@@ -195,6 +240,7 @@ python main.py
   - **Panel Instructions**: Context-sensitive help and instructions for all operation panels.
   - **Flash Mode**: Integrated firmware flashing with official releases, custom builds, and progress tracking.
   - **Theme Support**: Customizable dark/light themes with user preferences.
+  - **Advanced Controls**: Printer configuration, media casting, packet capture settings, attack parameters, beacon configuration, system tools.
 
 ## UI
 

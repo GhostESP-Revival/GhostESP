@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QComboBox, QPushButton, QLabel, QTextEdit,
                              QTabWidget, QGroupBox, QGridLayout, QLineEdit, QMessageBox,
                              QSplitter, QInputDialog, QSpinBox, QFormLayout, QStyle, QFileDialog, QCheckBox, QDialog, QProgressBar, QSizePolicy, QStackedWidget,
-                             QMenuBar, QDialogButtonBox, QSlider)
+                             QMenuBar, QDialogButtonBox, QSlider, QListWidget)
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QTextCursor, QIcon
@@ -1018,6 +1018,13 @@ class ESP32ControlGUI(QMainWindow):
             "SD Card Operations",
             "RGB LED Control",
             "Infrared Control",
+            "Communication",
+            "Printer Control",
+            "Media Casting",
+            "Packet Capture",
+            "Attack Tools",
+            "Beacon Control",
+            "System Tools",
             "Evil Portal",
             "Settings"
         ])
@@ -1033,6 +1040,13 @@ class ESP32ControlGUI(QMainWindow):
         self.panels.append(self.create_sd_card_tab())
         self.panels.append(self.create_rgb_led_tab())
         self.panels.append(self.create_infrared_tab())
+        self.panels.append(self.create_communication_tab())
+        self.panels.append(self.create_printer_tab())
+        self.panels.append(self.create_casting_tab())
+        self.panels.append(self.create_capture_tab())
+        self.panels.append(self.create_attack_tab())
+        self.panels.append(self.create_beacon_tab())
+        self.panels.append(self.create_system_tab())
         self.panels.append(self.create_evil_portal_tab())
         self.panels.append(self.create_settings_tab())
 
@@ -1204,6 +1218,7 @@ class ESP32ControlGUI(QMainWindow):
         ble_widget = QWidget()
         ble_layout = QGridLayout(ble_widget)
 
+        # BLE Scanning Operations
         self.create_command_group("BLE Scanning", [
             ("Find Flippers", "blescan -f"),
             ("BLE Spam Detector", "blescan -ds"),
@@ -1212,8 +1227,98 @@ class ESP32ControlGUI(QMainWindow):
             ("Stop BLE Scan", "blescan -s")
         ], ble_layout, 0, 0)
 
+        # BLE Advertisement Spam
+        ble_spam_group = QGroupBox("BLE Advertisement Spam")
+        ble_spam_layout = QVBoxLayout(ble_spam_group)
+
+        # Spam type selection
+        spam_type_layout = QHBoxLayout()
+        self.ble_spam_type = QComboBox()
+        self.ble_spam_type.addItems([
+            "Apple Devices", "Microsoft Swift Pair", "Samsung Galaxy Watch",
+            "Google Fast Pair", "Random (All Types)"
+        ])
+        spam_type_layout.addWidget(QLabel("Spam Type:"))
+        spam_type_layout.addWidget(self.ble_spam_type)
+        ble_spam_layout.addLayout(spam_type_layout)
+
+        # Spam controls
+        spam_controls = QHBoxLayout()
+        start_spam_btn = QPushButton("Start BLE Spam")
+        stop_spam_btn = QPushButton("Stop BLE Spam")
+        spam_controls.addWidget(start_spam_btn)
+        spam_controls.addWidget(stop_spam_btn)
+        ble_spam_layout.addLayout(spam_controls)
+
+        # Connect signals
+        start_spam_btn.clicked.connect(self.start_ble_spam)
+        stop_spam_btn.clicked.connect(lambda: self.send_command("blespam -s"))
+
+        ble_layout.addWidget(ble_spam_group, 0, 1)
+
+        # BLE Wardriving
+        wardriving_group = QGroupBox("BLE Wardriving")
+        wardriving_layout = QVBoxLayout(wardriving_group)
+
+        wardrive_controls = QHBoxLayout()
+        start_wardrive_btn = QPushButton("Start Wardriving")
+        stop_wardrive_btn = QPushButton("Stop Wardriving")
+        wardrive_controls.addWidget(start_wardrive_btn)
+        wardrive_controls.addWidget(stop_wardrive_btn)
+        wardriving_layout.addLayout(wardrive_controls)
+
+        # Wardriving status
+        self.wardriving_status = QLabel("Wardriving: Stopped")
+        wardriving_layout.addWidget(self.wardriving_status)
+
+        # Connect signals
+        start_wardrive_btn.clicked.connect(lambda: self.send_command("blewardriving"))
+        stop_wardrive_btn.clicked.connect(lambda: self.send_command("blewardriving -s"))
+
+        ble_layout.addWidget(wardriving_group, 1, 0)
+
+        # AirTag Management
+        airtag_group = QGroupBox("AirTag Management")
+        airtag_layout = QVBoxLayout(airtag_group)
+
+        # AirTag list
+        airtag_controls = QHBoxLayout()
+        self.airtag_list = QListWidget()
+        self.airtag_list.setMaximumHeight(120)
+        airtag_controls.addWidget(self.airtag_list)
+
+        airtag_buttons = QVBoxLayout()
+        refresh_airtags_btn = QPushButton("Refresh AirTags")
+        select_airtag_btn = QPushButton("Select AirTag")
+        airtag_buttons.addWidget(refresh_airtags_btn)
+        airtag_buttons.addWidget(select_airtag_btn)
+        airtag_buttons.addStretch()
+        airtag_controls.addLayout(airtag_buttons)
+
+        airtag_layout.addLayout(airtag_controls)
+
+        # Connect signals
+        refresh_airtags_btn.clicked.connect(lambda: self.send_command("list -airtags"))
+        select_airtag_btn.clicked.connect(self.select_airtag)
+
+        ble_layout.addWidget(airtag_group, 1, 1)
+
+        # BLE Status and Info
+        ble_info_group = QGroupBox("BLE Status")
+        ble_info_layout = QVBoxLayout(ble_info_group)
+
+        self.ble_status_label = QLabel("BLE Status: Not Connected")
+        ble_info_layout.addWidget(self.ble_status_label)
+
+        ble_info_btn = QPushButton("Get BLE Info")
+        ble_info_btn.clicked.connect(lambda: self.send_command("bleinfo"))
+        ble_info_layout.addWidget(ble_info_btn)
+
+        ble_layout.addWidget(ble_info_group, 2, 0)
+
         ble_layout.setColumnStretch(0, 1)
         ble_layout.setColumnStretch(1, 1)
+        ble_layout.setRowStretch(2, 1)
 
         return ble_widget
 
@@ -1600,6 +1705,433 @@ class ESP32ControlGUI(QMainWindow):
 
         return portal_widget
 
+    def create_communication_tab(self):
+        """Create and return the Communication operations tab widget."""
+        comm_widget = QWidget()
+        comm_layout = QGridLayout(comm_widget)
+
+        # Communication Controls
+        self.create_command_group("Communication", [
+            ("Get Device Info", "info"),
+            ("Get Memory Usage", "memory"),
+            ("Get Battery Level", "battery"),
+            ("Get System Status", "status"),
+            ("Get Active Operations", "active"),
+            ("Restart Device", "restart"),
+            ("Reset Device", "reset")
+        ], comm_layout, 0, 0)
+
+        # Serial Communication
+        serial_group = QGroupBox("Serial Communication")
+        serial_layout = QVBoxLayout(serial_group)
+
+        # Baud rate settings
+        baud_layout = QHBoxLayout()
+        baud_layout.addWidget(QLabel("Baud Rate:"))
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400", "460800"])
+        self.baud_combo.setCurrentText("115200")
+        baud_layout.addWidget(self.baud_combo)
+        serial_layout.addLayout(baud_layout)
+
+        # Communication test
+        test_btn = QPushButton("Test Communication")
+        test_btn.clicked.connect(lambda: self.send_command("ping"))
+        serial_layout.addWidget(test_btn)
+
+        comm_layout.addWidget(serial_group, 0, 1)
+
+        comm_layout.setColumnStretch(0, 1)
+        comm_layout.setColumnStretch(1, 1)
+
+        return comm_widget
+
+    def create_printer_tab(self):
+        """Create and return the Printer control tab widget."""
+        printer_widget = QWidget()
+        printer_layout = QGridLayout(printer_widget)
+
+        # Printer Operations
+        self.create_command_group("Printer Operations", [
+            ("Print Text", "print"),
+            ("Print Image", "printimg"),
+            ("Print QR Code", "printqr"),
+            ("Print Test Page", "printtest"),
+            ("Printer Status", "printerstatus")
+        ], printer_layout, 0, 0)
+
+        # Printer Configuration
+        printer_config_group = QGroupBox("Printer Configuration")
+        printer_config_layout = QVBoxLayout(printer_config_group)
+
+        # Printer type selection
+        printer_type_layout = QHBoxLayout()
+        printer_type_layout.addWidget(QLabel("Printer Type:"))
+        self.printer_type_combo = QComboBox()
+        self.printer_type_combo.addItems(["Thermal", "Inkjet", "Laser", "Custom"])
+        printer_type_layout.addWidget(self.printer_type_combo)
+        printer_config_layout.addLayout(printer_type_layout)
+
+        # Printer settings
+        settings_layout = QFormLayout()
+        self.printer_width = QSpinBox()
+        self.printer_width.setRange(48, 384)
+        self.printer_width.setValue(80)
+        settings_layout.addRow("Print Width (chars):", self.printer_width)
+
+        self.printer_speed = QComboBox()
+        self.printer_speed.addItems(["Slow", "Normal", "Fast"])
+        settings_layout.addRow("Print Speed:", self.printer_speed)
+
+        printer_config_layout.addLayout(settings_layout)
+
+        # Apply settings button
+        apply_btn = QPushButton("Apply Printer Settings")
+        apply_btn.clicked.connect(self.apply_printer_settings)
+        printer_config_layout.addWidget(apply_btn)
+
+        printer_layout.addWidget(printer_config_group, 0, 1)
+
+        printer_layout.setColumnStretch(0, 1)
+        printer_layout.setColumnStretch(1, 1)
+
+        return printer_widget
+
+    def create_casting_tab(self):
+        """Create and return the Media Casting tab widget."""
+        cast_widget = QWidget()
+        cast_layout = QGridLayout(cast_widget)
+
+        # Casting Operations
+        self.create_command_group("YouTube Casting", [
+            ("Cast Random Video", "dialconnect"),
+            ("Cast Specific Video", "cast"),
+            ("Stop Casting", "stopcast"),
+            ("Cast Status", "caststatus")
+        ], cast_layout, 0, 0)
+
+        # Cast Configuration
+        cast_config_group = QGroupBox("Cast Configuration")
+        cast_config_layout = QVBoxLayout(cast_config_group)
+
+        # Video URL input
+        url_layout = QHBoxLayout()
+        url_layout.addWidget(QLabel("Video URL:"))
+        self.cast_url = QLineEdit()
+        self.cast_url.setPlaceholderText("https://youtube.com/watch?v=...")
+        url_layout.addWidget(self.cast_url)
+        cast_config_layout.addLayout(url_layout)
+
+        # Cast settings
+        settings_layout = QFormLayout()
+        self.cast_quality = QComboBox()
+        self.cast_quality.addItems(["Auto", "720p", "1080p", "4K"])
+        settings_layout.addRow("Quality:", self.cast_quality)
+
+        self.cast_volume = QSlider(Qt.Orientation.Horizontal)
+        self.cast_volume.setRange(0, 100)
+        self.cast_volume.setValue(50)
+        settings_layout.addRow("Volume:", self.cast_volume)
+
+        cast_config_layout.addLayout(settings_layout)
+
+        # Cast controls
+        cast_controls = QHBoxLayout()
+        cast_btn = QPushButton("Start Casting")
+        stop_cast_btn = QPushButton("Stop Casting")
+        cast_controls.addWidget(cast_btn)
+        cast_controls.addWidget(stop_cast_btn)
+        cast_config_layout.addLayout(cast_controls)
+
+        # Connect signals
+        cast_btn.clicked.connect(self.start_casting)
+        stop_cast_btn.clicked.connect(lambda: self.send_command("stopcast"))
+
+        cast_layout.addWidget(cast_config_group, 0, 1)
+
+        cast_layout.setColumnStretch(0, 1)
+        cast_layout.setColumnStretch(1, 1)
+
+        return cast_widget
+
+    def create_capture_tab(self):
+        """Create and return the Packet Capture operations tab widget."""
+        capture_widget = QWidget()
+        capture_layout = QGridLayout(capture_widget)
+
+        # Capture Types
+        self.create_command_group("Packet Capture", [
+            ("Capture Probes", "capture -probes"),
+            ("Capture Beacons", "capture -beacons"),
+            ("Capture Deauth", "capture -deauth"),
+            ("Capture Raw", "capture -raw"),
+            ("Capture WPS", "capture -wps"),
+            ("Capture Pwnagotchi", "capture -pwnagotchi"),
+            ("Stop Capture", "capture -stop")
+        ], capture_layout, 0, 0)
+
+        # Capture Configuration
+        capture_config_group = QGroupBox("Capture Configuration")
+        capture_config_layout = QVBoxLayout(capture_config_group)
+
+        # Capture settings
+        settings_layout = QFormLayout()
+        self.capture_channel = QLineEdit()
+        self.capture_channel.setPlaceholderText("Channel (optional)")
+        settings_layout.addRow("Channel:", self.capture_channel)
+
+        self.capture_duration = QSpinBox()
+        self.capture_duration.setRange(10, 3600)
+        self.capture_duration.setValue(60)
+        self.capture_duration.setSuffix(" seconds")
+        settings_layout.addRow("Duration:", self.capture_duration)
+
+        capture_config_layout.addLayout(settings_layout)
+
+        # Capture controls
+        capture_controls = QHBoxLayout()
+        start_capture_btn = QPushButton("Start Capture")
+        stop_capture_btn = QPushButton("Stop Capture")
+        capture_controls.addWidget(start_capture_btn)
+        capture_controls.addWidget(stop_capture_btn)
+        capture_config_layout.addLayout(capture_controls)
+
+        # Connect signals
+        start_capture_btn.clicked.connect(self.start_packet_capture)
+        stop_capture_btn.clicked.connect(lambda: self.send_command("capture -stop"))
+
+        capture_layout.addWidget(capture_config_group, 0, 1)
+
+        capture_layout.setColumnStretch(0, 1)
+        capture_layout.setColumnStretch(1, 1)
+
+        return capture_widget
+
+    def create_attack_tab(self):
+        """Create and return the Attack Tools tab widget."""
+        attack_widget = QWidget()
+        attack_layout = QGridLayout(attack_widget)
+
+        # WiFi Attack Tools
+        self.create_command_group("WiFi Attack Tools", [
+            ("DHCP Starvation", "dhcpstarve start"),
+            ("Stop DHCP Starve", "dhcpstarve stop"),
+            ("SAE Flood Attack", "saeflood"),
+            ("Stop SAE Flood", "stopsaeflood"),
+            ("SAE Flood Help", "saefloodhelp")
+        ], attack_layout, 0, 0)
+
+        # Attack Configuration
+        attack_config_group = QGroupBox("Attack Configuration")
+        attack_config_layout = QVBoxLayout(attack_config_group)
+
+        # DHCP settings
+        dhcp_layout = QFormLayout()
+        self.dhcp_threads = QSpinBox()
+        self.dhcp_threads.setRange(1, 100)
+        self.dhcp_threads.setValue(10)
+        dhcp_layout.addRow("DHCP Threads:", self.dhcp_threads)
+
+        self.dhcp_target = QLineEdit()
+        self.dhcp_target.setPlaceholderText("Target network (optional)")
+        dhcp_layout.addRow("Target Network:", self.dhcp_target)
+
+        attack_config_layout.addLayout(dhcp_layout)
+
+        # SAE settings
+        sae_layout = QFormLayout()
+        self.sae_password = QLineEdit()
+        self.sae_password.setPlaceholderText("WPA3 password for SAE flood")
+        sae_layout.addRow("SAE Password:", self.sae_password)
+
+        attack_config_layout.addLayout(sae_layout)
+
+        # Attack controls
+        attack_controls = QHBoxLayout()
+        start_dhcp_btn = QPushButton("Start DHCP Attack")
+        start_sae_btn = QPushButton("Start SAE Attack")
+        attack_controls.addWidget(start_dhcp_btn)
+        attack_controls.addWidget(start_sae_btn)
+        attack_config_layout.addLayout(attack_controls)
+
+        # Connect signals
+        start_dhcp_btn.clicked.connect(self.start_dhcp_attack)
+        start_sae_btn.clicked.connect(self.start_sae_attack)
+
+        attack_layout.addWidget(attack_config_group, 0, 1)
+
+        attack_layout.setColumnStretch(0, 1)
+        attack_layout.setColumnStretch(1, 1)
+
+        return attack_widget
+
+    def create_beacon_tab(self):
+        """Create and return the Beacon Control tab widget."""
+        beacon_widget = QWidget()
+        beacon_layout = QGridLayout(beacon_widget)
+
+        # Beacon Operations
+        self.create_command_group("Beacon Operations", [
+            ("Random Beacon Spam", "beaconspam -r"),
+            ("Rickroll Beacon", "beaconspam -rr"),
+            ("AP List Beacon", "beaconspam -l"),
+            ("Custom SSID Beacon", lambda: show_custom_beacon_dialog(self)),
+            ("Stop Beacon Spam", "stopspam")
+        ], beacon_layout, 0, 0)
+
+        # Beacon Configuration
+        beacon_config_group = QGroupBox("Beacon Configuration")
+        beacon_config_layout = QVBoxLayout(beacon_config_group)
+
+        # Beacon settings
+        settings_layout = QFormLayout()
+        self.beacon_interval = QSpinBox()
+        self.beacon_interval.setRange(100, 10000)
+        self.beacon_interval.setValue(1000)
+        self.beacon_interval.setSuffix(" ms")
+        settings_layout.addRow("Beacon Interval:", self.beacon_interval)
+
+        self.beacon_channel = QSpinBox()
+        self.beacon_channel.setRange(1, 14)
+        self.beacon_channel.setValue(1)
+        settings_layout.addRow("Channel:", self.beacon_channel)
+
+        beacon_config_layout.addLayout(settings_layout)
+
+        # Beacon list management (already in WiFi tab, but add here too for completeness)
+        list_controls = QHBoxLayout()
+        show_list_btn = QPushButton("Show Beacon List")
+        clear_list_btn = QPushButton("Clear Beacon List")
+        list_controls.addWidget(show_list_btn)
+        list_controls.addWidget(clear_list_btn)
+        beacon_config_layout.addLayout(list_controls)
+
+        # Connect signals
+        show_list_btn.clicked.connect(lambda: self.send_command("beaconshow"))
+        clear_list_btn.clicked.connect(lambda: self.send_command("beaconclear"))
+
+        beacon_layout.addWidget(beacon_config_group, 0, 1)
+
+        beacon_layout.setColumnStretch(0, 1)
+        beacon_layout.setColumnStretch(1, 1)
+
+        return beacon_widget
+
+    def create_system_tab(self):
+        """Create and return the System Tools tab widget."""
+        system_widget = QWidget()
+        system_layout = QGridLayout(system_widget)
+
+        # System Information
+        self.create_command_group("System Information", [
+            ("Chip Information", "chipinfo"),
+            ("Get Help", "help"),
+            ("Help All Commands", "help all"),
+            ("System Status", "status"),
+            ("Device Info", "info")
+        ], system_layout, 0, 0)
+
+        # System Configuration
+        system_config_group = QGroupBox("System Configuration")
+        system_config_layout = QVBoxLayout(system_config_group)
+
+        # Timezone settings
+        timezone_layout = QHBoxLayout()
+        timezone_layout.addWidget(QLabel("Timezone:"))
+        self.timezone_combo = QComboBox()
+        self.timezone_combo.addItems([
+            "UTC", "EST", "PST", "CST", "MST", "GMT", "CET", "JST", "AEST", "IST"
+        ])
+        timezone_layout.addWidget(self.timezone_combo)
+        apply_tz_btn = QPushButton("Set Timezone")
+        apply_tz_btn.clicked.connect(self.set_timezone)
+        timezone_layout.addWidget(apply_tz_btn)
+        system_config_layout.addLayout(timezone_layout)
+
+        # Web authentication
+        webauth_layout = QHBoxLayout()
+        self.webauth_checkbox = QCheckBox("Enable Web Authentication")
+        webauth_layout.addWidget(self.webauth_checkbox)
+        toggle_webauth_btn = QPushButton("Toggle Web Auth")
+        toggle_webauth_btn.clicked.connect(self.toggle_webauth)
+        webauth_layout.addWidget(toggle_webauth_btn)
+        system_config_layout.addLayout(webauth_layout)
+
+        system_layout.addWidget(system_config_group, 0, 1)
+
+        # Network Discovery
+        discovery_group = QGroupBox("Network Discovery")
+        discovery_layout = QVBoxLayout(discovery_group)
+
+        discovery_controls = QHBoxLayout()
+        start_pineap_btn = QPushButton("Start PineAP Detection")
+        stop_pineap_btn = QPushButton("Stop PineAP Detection")
+        discovery_controls.addWidget(start_pineap_btn)
+        discovery_controls.addWidget(stop_pineap_btn)
+        discovery_layout.addLayout(discovery_controls)
+
+        # Discovery settings
+        discovery_settings = QFormLayout()
+        self.discovery_interface = QLineEdit()
+        self.discovery_interface.setPlaceholderText("Network interface (optional)")
+        discovery_settings.addRow("Interface:", self.discovery_interface)
+
+        discovery_layout.addLayout(discovery_settings)
+
+        # Connect signals
+        start_pineap_btn.clicked.connect(self.start_pineap)
+        stop_pineap_btn.clicked.connect(self.stop_pineap)
+
+        system_layout.addWidget(discovery_group, 1, 0)
+
+        # Communication Controls
+        comm_group = QGroupBox("ESP32 Communication")
+        comm_layout = QVBoxLayout(comm_group)
+
+        # Discovery
+        discovery_controls = QHBoxLayout()
+        discover_btn = QPushButton("Discover Peers")
+        connect_btn = QPushButton("Connect to Peer")
+        disconnect_btn = QPushButton("Disconnect")
+        discovery_controls.addWidget(discover_btn)
+        discovery_controls.addWidget(connect_btn)
+        discovery_controls.addWidget(disconnect_btn)
+        comm_layout.addLayout(discovery_controls)
+
+        # Communication settings
+        comm_settings = QFormLayout()
+        self.comm_peer_id = QLineEdit()
+        self.comm_peer_id.setPlaceholderText("Peer ID (e.g., ESP_A1B2C3)")
+        comm_settings.addRow("Peer ID:", self.comm_peer_id)
+
+        self.comm_message = QLineEdit()
+        self.comm_message.setPlaceholderText("Message to send")
+        comm_settings.addRow("Message:", self.comm_message)
+
+        comm_layout.addLayout(comm_settings)
+
+        # Communication controls
+        comm_action_layout = QHBoxLayout()
+        send_btn = QPushButton("Send Message")
+        status_btn = QPushButton("Get Comm Status")
+        comm_action_layout.addWidget(send_btn)
+        comm_action_layout.addWidget(status_btn)
+        comm_layout.addLayout(comm_action_layout)
+
+        # Connect signals
+        discover_btn.clicked.connect(lambda: self.send_command("commdiscovery"))
+        connect_btn.clicked.connect(self.connect_peer)
+        disconnect_btn.clicked.connect(lambda: self.send_command("commdisconnect"))
+        send_btn.clicked.connect(self.send_peer_message)
+        status_btn.clicked.connect(lambda: self.send_command("commstatus"))
+
+        system_layout.addWidget(comm_group, 1, 1)
+
+        system_layout.setColumnStretch(0, 1)
+        system_layout.setColumnStretch(1, 1)
+
+        return system_widget
+
     def create_settings_tab(self):
         """Create and return the Settings tab widget with grouped categories."""
         settings_widget = QWidget()
@@ -1702,7 +2234,7 @@ class ESP32ControlGUI(QMainWindow):
         button_layout.addWidget(reboot_btn)
 
         save_btn = QPushButton("Save Settings")
-        save_btn.clicked.connect(lambda: self.send_command("savesetting"))
+        save_btn.clicked.connect(self.save_all_settings)
         button_layout.addWidget(save_btn)
 
         system_layout.addRow(button_layout)
@@ -1869,6 +2401,169 @@ class ESP32ControlGUI(QMainWindow):
             device = self.ir_custom_device.text()
         if device:
             self.send_command(f"irsend {device} {command}")
+
+    def start_ble_spam(self):
+        """Start BLE spam with selected spam type."""
+        spam_type = self.ble_spam_type.currentText()
+        spam_commands = {
+            "Apple Devices": "blespam -apple",
+            "Microsoft Swift Pair": "blespam -ms",
+            "Samsung Galaxy Watch": "blespam -samsung",
+            "Google Fast Pair": "blespam -google",
+            "Random (All Types)": "blespam -random"
+        }
+
+        command = spam_commands.get(spam_type, "blespam -random")
+        self.send_command(command)
+
+    def select_airtag(self):
+        """Select an AirTag from the list."""
+        current_item = self.airtag_list.currentItem()
+        if current_item:
+            # Extract index from the item text (format: "Index: Name")
+            text = current_item.text()
+            try:
+                # Try to extract index (assuming format like "0: AirTag Name")
+                parts = text.split(":", 1)
+                if len(parts) >= 2:
+                    index = parts[0].strip()
+                    self.send_command(f"select -airtag {index}")
+                else:
+                    QMessageBox.warning(self, "Selection Error", "Unable to parse AirTag index from selection.")
+            except Exception as e:
+                QMessageBox.warning(self, "Selection Error", f"Error selecting AirTag: {str(e)}")
+
+    def apply_printer_settings(self):
+        """Apply printer configuration settings."""
+        printer_type = self.printer_type_combo.currentText()
+        width = self.printer_width.value()
+        speed = self.printer_speed.currentText().lower()
+
+        # Send printer configuration commands
+        self.send_command(f"printerconfig -type {printer_type.lower()}")
+        self.send_command(f"printerconfig -width {width}")
+        self.send_command(f"printerconfig -speed {speed}")
+
+    def start_casting(self):
+        """Start media casting with current settings."""
+        url = self.cast_url.text().strip()
+        quality = self.cast_quality.currentText().lower()
+        volume = self.cast_volume.value()
+
+        if url:
+            self.send_command(f"cast {url} -q {quality} -v {volume}")
+        else:
+            QMessageBox.warning(self, "Missing URL", "Please enter a YouTube video URL.")
+
+    def start_packet_capture(self):
+        """Start packet capture with current settings."""
+        channel = self.capture_channel.text().strip()
+        duration = self.capture_duration.value()
+
+        command = f"capture -duration {duration}"
+        if channel:
+            command += f" -channel {channel}"
+
+        self.send_command(command)
+
+    def start_dhcp_attack(self):
+        """Start DHCP starvation attack."""
+        threads = self.dhcp_threads.value()
+        target = self.dhcp_target.text().strip()
+
+        command = f"dhcpstarve start {threads}"
+        if target:
+            command += f" {target}"
+
+        self.send_command(command)
+
+    def start_sae_attack(self):
+        """Start SAE flood attack."""
+        password = self.sae_password.text().strip()
+        if password:
+            self.send_command(f"saeflood {password}")
+        else:
+            QMessageBox.warning(self, "Missing Password", "Please enter the WPA3 password for SAE flood attack.")
+
+    def set_timezone(self):
+        """Set the system timezone."""
+        timezone = self.timezone_combo.currentText()
+        self.send_command(f"timezone {timezone}")
+
+    def toggle_webauth(self):
+        """Toggle web authentication."""
+        enabled = "on" if self.webauth_checkbox.isChecked() else "off"
+        self.send_command(f"webauth {enabled}")
+
+    def start_pineap(self):
+        """Start PineAP detection."""
+        interface = self.discovery_interface.text().strip()
+        if interface:
+            self.send_command(f"pineap {interface}")
+        else:
+            self.send_command("pineap")
+
+    def stop_pineap(self):
+        """Stop PineAP detection."""
+        self.send_command("pineap -s")
+
+    def connect_peer(self):
+        """Connect to a peer ESP32."""
+        peer_id = self.comm_peer_id.text().strip()
+        if peer_id:
+            self.send_command(f"commconnect {peer_id}")
+        else:
+            QMessageBox.warning(self, "Missing Peer ID", "Please enter a peer ID to connect to.")
+
+    def send_peer_message(self):
+        """Send a message to connected peer."""
+        peer_id = self.comm_peer_id.text().strip()
+        message = self.comm_message.text().strip()
+        if peer_id and message:
+            self.send_command(f"commsend {peer_id} {message}")
+        else:
+            QMessageBox.warning(self, "Missing Information", "Please enter both peer ID and message.")
+
+    def save_all_settings(self):
+        """Save all current settings to the device."""
+        # Try multiple possible save commands since the firmware might use different commands
+        save_commands = [
+            "save",           # Generic save
+            "settings save",  # Settings save
+            "config save",    # Config save
+            "write config"    # Write config
+        ]
+
+        # Try each command
+        for cmd in save_commands:
+            self.send_command(cmd)
+
+        # Show confirmation message
+        QMessageBox.information(self, "Settings Saved",
+                               "Settings have been sent to the device using multiple save commands. "
+                               "The device may save them automatically or require a reboot to apply changes.")
+
+    def update_airtag_list(self, airtags):
+        """Update the AirTag list with discovered devices."""
+        self.airtag_list.clear()
+        if isinstance(airtags, list):
+            for airtag in airtags:
+                if isinstance(airtag, dict):
+                    # Handle structured AirTag data
+                    display_text = f"{airtag.get('index', 0)}: {airtag.get('name', 'Unknown AirTag')}"
+                    if 'mac' in airtag:
+                        display_text += f" ({airtag['mac']})"
+                    self.airtag_list.addItem(display_text)
+                else:
+                    # Handle simple string format
+                    self.airtag_list.addItem(str(airtag))
+        elif isinstance(airtags, dict):
+            # Handle dictionary format
+            for index, airtag in airtags.items():
+                display_text = f"{index}: {airtag.get('name', 'Unknown AirTag')}"
+                if 'mac' in airtag:
+                    display_text += f" ({airtag['mac']})"
+                self.airtag_list.addItem(display_text)
 
     def refresh_ports(self):
         """Refresh the list of available serial ports."""
@@ -2115,6 +2810,12 @@ class ESP32ControlGUI(QMainWindow):
                 self.update_display_scan(data['scan_result'])
             elif 'status' in data:
                 self.update_display_status(data['status'])
+            elif 'ble_status' in data:
+                self.ble_status_label.setText(f"BLE Status: {data['ble_status']}")
+            elif 'wardriving_status' in data:
+                self.wardriving_status.setText(f"Wardriving: {data['wardriving_status']}")
+            elif 'airtags' in data:
+                self.update_airtag_list(data['airtags'])
             else:
                 self.display_text.append(response)
 
