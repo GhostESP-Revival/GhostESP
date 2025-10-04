@@ -1479,9 +1479,8 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "GPS Info") == 0) {
-    terminal_set_return_view(&options_menu_view);
-display_manager_switch_view(&terminal_view);
-        simulateCommand("gpsinfo");
+        extern View gps_info_view;
+        display_manager_switch_view(&gps_info_view);
         view_switched = true;
     }
 
