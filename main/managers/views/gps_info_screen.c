@@ -456,3 +456,4 @@ static const char* get_accuracy_level(double hdop) {
     if (hdop <= 10.0) return "Okay";
     return "Poor";
 }
+
