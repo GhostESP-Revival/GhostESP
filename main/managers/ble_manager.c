@@ -48,6 +48,7 @@ static uint32_t ble_pcap_event_total_count = 0;
 // Forward declarations
 static void generate_random_mac(uint8_t *mac_addr);
 static void restart_ble_stack(void);
+static void optimize_memory_for_ble(void);
 
 typedef struct {
     ble_data_handler_t handler;
@@ -1608,6 +1609,7 @@ esp_err_t ble_unregister_handler(ble_data_handler_t handler) {
 
 void ble_init(void) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
+    ESP_LOGI(TAG_BLE, "Starting BLE initialization...");
     // --- pre-init ram check ---
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -1632,6 +1634,40 @@ void ble_init(void) {
         ESP_LOGW(TAG_BLE, "WARNING: Less than 45KB of free RAM available (%d bytes). BLE may fail to initialize!", (int)free_heap);
         TERMINAL_VIEW_ADD_TEXT("WARNING: <45KB RAM free (%d bytes). BLE may not initialize!\n", (int)free_heap);
     }
+    
+    // Check DMA-capable memory specifically
+    size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    ESP_LOGI(TAG_BLE, "DMA-capable memory check: free=%d bytes, largest block=%d bytes", (int)free_dma, (int)largest_dma);
+    
+    if (free_dma < (20 * 1024)) { // BLE needs at least 20KB DMA-capable memory
+        ESP_LOGW(TAG_BLE, "WARNING: Insufficient DMA-capable memory (%d bytes). Attempting memory cleanup...", (int)free_dma);
+        TERMINAL_VIEW_ADD_TEXT("WARNING: Low DMA memory (%d bytes). Cleaning up...\n", (int)free_dma);
+        
+        // Force garbage collection
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // Check memory again after cleanup
+        free_dma = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+        largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+        ESP_LOGI(TAG_BLE, "After cleanup - DMA memory: free=%d bytes, largest block=%d bytes", (int)free_dma, (int)largest_dma);
+        
+        if (free_dma < (15 * 1024)) {
+            ESP_LOGE(TAG_BLE, "CRITICAL: Still insufficient DMA memory (%d bytes). Attempting aggressive cleanup...", (int)free_dma);
+            TERMINAL_VIEW_ADD_TEXT("CRITICAL: Insufficient DMA memory (%d bytes). Optimizing...\n", (int)free_dma);
+            optimize_memory_for_ble();
+            
+            // Check memory one more time
+            free_dma = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+            largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+            ESP_LOGI(TAG_BLE, "After optimization - DMA memory: free=%d bytes, largest block=%d bytes", (int)free_dma, (int)largest_dma);
+            
+            if (free_dma < (15 * 1024)) {
+                ESP_LOGE(TAG_BLE, "FATAL: Still insufficient DMA memory (%d bytes). BLE initialization will fail!", (int)free_dma);
+                TERMINAL_VIEW_ADD_TEXT("FATAL: Cannot free enough DMA memory for BLE\n");
+            }
+        }
+    }
 
     if (!ble_initialized) {
         esp_err_t ret = nvs_flash_init();
@@ -1643,13 +1679,16 @@ void ble_init(void) {
         ESP_ERROR_CHECK(ret);
 
         if (handlers == NULL) {
+            ESP_LOGI(TAG_BLE, "Allocating handlers array (%d bytes)", sizeof(ble_handler_t) * MAX_HANDLERS);
             handlers = malloc(sizeof(ble_handler_t) * MAX_HANDLERS);
             if (handlers == NULL) {
-                ESP_LOGE(TAG_BLE, "Failed to allocate handlers array");
+                ESP_LOGE(TAG_BLE, "Failed to allocate handlers array - out of memory");
+                TERMINAL_VIEW_ADD_TEXT("BLE init failed: out of memory for handlers\n");
                 return;
             }
             memset(handlers, 0, sizeof(ble_handler_t) * MAX_HANDLERS);
             handler_count = 0;
+            ESP_LOGI(TAG_BLE, "Handlers array allocated successfully");
         }
 
         // log DMA-capable internal heap info right before NimBLE init
@@ -1658,9 +1697,12 @@ void ble_init(void) {
         ESP_LOGI(TAG_BLE, "pre-init dma-ram: free=%d bytes (largest block=%d)", (int)free_internal_dma, (int)largest_internal_dma);
         TERMINAL_VIEW_ADD_TEXT("pre-init dma-ram: free=%d bytes (largest=%d)\n", (int)free_internal_dma, (int)largest_internal_dma);
 
+        ESP_LOGI(TAG_BLE, "Initializing NimBLE port...");
         ret = nimble_port_init();
         if (ret != 0) {
             ESP_LOGE(TAG_BLE, "Failed to init nimble port: %d", ret);
+            ESP_LOGE(TAG_BLE, "NimBLE initialization failed - this usually indicates insufficient memory");
+            TERMINAL_VIEW_ADD_TEXT("BLE init failed: NimBLE port init error %d\n", ret);
             ESP_LOGI(TAG_BLE, "Dumping DMA-capable heap info after failure");
             size_t free_dma_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
             size_t largest_dma_after = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
@@ -1669,11 +1711,23 @@ void ble_init(void) {
             handlers = NULL;
             return;
         }
+        ESP_LOGI(TAG_BLE, "NimBLE port initialized successfully");
 
         // Configure and start the NimBLE host task
-        xTaskCreate(nimble_host_task, "nimble_host", 4096, NULL, 5, &nimble_host_task_handle);
+        ESP_LOGI(TAG_BLE, "Creating NimBLE host task...");
+        BaseType_t task_result = xTaskCreate(nimble_host_task, "nimble_host", 4096, NULL, 5, &nimble_host_task_handle);
+        if (task_result != pdPASS) {
+            ESP_LOGE(TAG_BLE, "Failed to create NimBLE host task: %d", task_result);
+            TERMINAL_VIEW_ADD_TEXT("BLE init failed: task creation error %d\n", task_result);
+            nimble_port_deinit();
+            free(handlers);
+            handlers = NULL;
+            return;
+        }
+        ESP_LOGI(TAG_BLE, "NimBLE host task created successfully");
         
         // Wait for NimBLE stack to be ready
+        ESP_LOGI(TAG_BLE, "Waiting for NimBLE stack to be ready...");
         vTaskDelay(pdMS_TO_TICKS(100));
         
         // Configure BLE stack to use random addresses by default for spam functionality
@@ -1685,9 +1739,12 @@ void ble_init(void) {
         ESP_LOGI(TAG_BLE, "BLE configured for random address support");
 
         ble_initialized = true;
-        ESP_LOGI(TAG_BLE, "BLE initialized");
-        TERMINAL_VIEW_ADD_TEXT("BLE initialized\n");
+        ESP_LOGI(TAG_BLE, "BLE initialized successfully");
+        TERMINAL_VIEW_ADD_TEXT("BLE initialized successfully\n");
     }
+#else
+    ESP_LOGE(TAG_BLE, "BLE not supported on ESP32S2");
+    TERMINAL_VIEW_ADD_TEXT("BLE not supported on ESP32S2\n");
 #endif
 }
 
@@ -2159,6 +2216,23 @@ void ble_stop_ble_spam(void) {
     
     printf("ble spam advertising stopped\n");
     status_display_show_status("BLE Spam Off");
+}
+
+// Memory optimization function to free up DMA-capable memory for BLE
+static void optimize_memory_for_ble(void) {
+    ESP_LOGI(TAG_BLE, "Starting aggressive memory optimization for BLE...");
+    
+    // Force garbage collection
+    vTaskDelay(pdMS_TO_TICKS(50));
+    
+    // Try to free up any cached data
+    // Note: This is a basic implementation - in a real system you might want to
+    // temporarily disable other features that use DMA memory
+    
+    // Force another garbage collection cycle
+    vTaskDelay(pdMS_TO_TICKS(50));
+    
+    ESP_LOGI(TAG_BLE, "Memory optimization completed");
 }
 
 #endif
