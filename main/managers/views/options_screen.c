@@ -3,6 +3,8 @@
 #include "core/commandline.h" // for get_evil_portal_list
 #include "managers/display_manager.h"
 #include "gui/options_view.h"
+#include "managers/views/wifi_wardriving_screen.h"
+#include "managers/views/ble_wardriving_screen.h"
 
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
@@ -128,8 +130,7 @@ static const char *bluetooth_options[] = {"Find Flippers", "List Flippers", "Sel
                                          "BLE Spam - Google", "BLE Spam - Random", "Stop BLE Spam",
                                          NULL};
 
-static const char *gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
-                                    "BLE Wardriving",   NULL};
+static const char *gps_options[] = {"GPS Info", "WiFi Wardriving Info", "BLE Wardriving", "BLE Wardriving Info", NULL};
 
 static void load_current_settings_values(void);
 
@@ -1339,19 +1340,6 @@ display_manager_switch_view(&terminal_view);
         return;
     }
 
-    else if (strcmp(Selected_Option, "Start Wardriving") == 0) {
-    terminal_set_return_view(&options_menu_view);
-display_manager_switch_view(&terminal_view);
-        simulateCommand("startwd");
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "Stop Wardriving") == 0) {
-    terminal_set_return_view(&options_menu_view);
-display_manager_switch_view(&terminal_view);
-        simulateCommand("startwd -s");
-        view_switched = true;
-    }
 
     else if (strcmp(Selected_Option, "Start AirTag Scanner") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -1484,11 +1472,26 @@ display_manager_switch_view(&terminal_view);
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "WiFi Wardriving Info") == 0) {
+        display_manager_switch_view(&wifi_wardriving_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "BLE Wardriving") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     terminal_set_return_view(&options_menu_view);
 display_manager_switch_view(&terminal_view);
         simulateCommand("blewardriving");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "BLE Wardriving Info") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        display_manager_switch_view(&ble_wardriving_view);
         view_switched = true;
 #else
         error_popup_create("Device Does not Support Bluetooth...");
