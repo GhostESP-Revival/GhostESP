@@ -364,3 +364,19 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
 }
 
 bool gps_is_timeout_detected(void) { return gps_timeout_detected; }
+
+bool gps_is_connected(void) {
+    // Check if GPS is connected and has data (similar to wardriving functions)
+    if (!nmea_hdl) {
+        return false;
+    }
+    
+    gps_t *gps = &((esp_gps_t *)nmea_hdl)->parent;
+    if (!gps) {
+        return false;
+    }
+    
+    // GPS is considered connected if we have any data (even without fix)
+    return (gps->sats_in_use > 0 || gps->latitude != 0 || gps->longitude != 0 || 
+            gps->tim.hour != 0 || gps->tim.minute != 0 || gps->tim.second != 0);
+}

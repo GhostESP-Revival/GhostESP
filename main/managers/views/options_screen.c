@@ -21,6 +21,7 @@ static const char **evil_portal_options = NULL;
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/number_pad_screen.h"
+#include "managers/views/gps_info_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/settings_manager.h"
 #include "esp_log.h"
@@ -1479,7 +1480,6 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "GPS Info") == 0) {
-        extern View gps_info_view;
         display_manager_switch_view(&gps_info_view);
         view_switched = true;
     }

@@ -1,14 +1,16 @@
-#include "gui/gps_info_view.h"
+#include "managers/views/gps_info_screen.h"
 #include "managers/gps_manager.h"
 #include "vendor/GPS/gps_logger.h"
 #include "managers/settings_manager.h"
 #include "core/glog.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 
-static const char *TAG = "GPS_INFO_VIEW";
+static const char *TAG = "GPS_INFO_SCREEN";
 
 // Internal view data
 typedef struct {
@@ -29,21 +31,22 @@ static gps_info_data_t gps_data = {0};
 // GPS info view object
 View gps_info_view = {
     .root = NULL,
-    .create = gps_info_view_create,
-    .destroy = gps_info_view_destroy,
-    .input_callback = gps_info_view_input_cb,
-    .name = "GPS Info",
-    .get_hardwareinput_callback = gps_info_view_get_hardwareinput_callback
+    .create = gps_info_screen_create,
+    .destroy = gps_info_screen_destroy,
+    .input_callback = gps_info_screen_input_cb,
+    .name = "GPS Info Screen",
+    .get_hardwareinput_callback = NULL
 };
 
 // Forward declarations
 static void gps_info_update_timer_cb(lv_timer_t *timer);
 static void back_button_cb(lv_event_t *e);
-static void format_coordinates_display(double lat, double lon, char *lat_str, char *lon_str, size_t size);
 static const char* get_cardinal_direction_display(double course);
 static const char* get_accuracy_level(double hdop);
 
-void gps_info_view_create(void) {
+void gps_info_screen_create(void) {
+    ESP_LOGI(TAG, "Creating GPS info screen");
+    
     if (gps_info_view.root != NULL) {
         ESP_LOGW(TAG, "GPS info view already created");
         return;
@@ -65,6 +68,7 @@ void gps_info_view_create(void) {
     lv_obj_clear_flag(gps_info_view.root, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add status bar
+    ESP_LOGI(TAG, "Adding status bar");
     display_manager_add_status_bar("GPS Information");
 
     const int STATUS_BAR_HEIGHT = 20;
@@ -82,6 +86,7 @@ void gps_info_view_create(void) {
     y_offset += TITLE_HEIGHT;
 
     // Create status label (Fix status)
+    ESP_LOGI(TAG, "Creating status label");
     gps_data.status_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.status_label, "Status: Searching...");
     lv_obj_set_style_text_font(gps_data.status_label, &lv_font_montserrat_12, 0);
@@ -90,6 +95,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create satellites label
+    ESP_LOGI(TAG, "Creating satellites label");
     gps_data.satellites_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.satellites_label, "Satellites: 0/0");
     lv_obj_set_style_text_font(gps_data.satellites_label, &lv_font_montserrat_12, 0);
@@ -98,6 +104,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create coordinates label
+    ESP_LOGI(TAG, "Creating coordinates label");
     gps_data.coordinates_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
     lv_obj_set_style_text_font(gps_data.coordinates_label, &lv_font_montserrat_12, 0);
@@ -106,6 +113,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create altitude label
+    ESP_LOGI(TAG, "Creating altitude label");
     gps_data.altitude_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.altitude_label, "Altitude: N/A");
     lv_obj_set_style_text_font(gps_data.altitude_label, &lv_font_montserrat_12, 0);
@@ -114,6 +122,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create speed label
+    ESP_LOGI(TAG, "Creating speed label");
     gps_data.speed_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.speed_label, "Speed: 0.0 km/h");
     lv_obj_set_style_text_font(gps_data.speed_label, &lv_font_montserrat_12, 0);
@@ -122,6 +131,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create direction label
+    ESP_LOGI(TAG, "Creating direction label");
     gps_data.direction_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.direction_label, "Direction: N/A");
     lv_obj_set_style_text_font(gps_data.direction_label, &lv_font_montserrat_12, 0);
@@ -130,6 +140,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create accuracy label
+    ESP_LOGI(TAG, "Creating accuracy label");
     gps_data.accuracy_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.accuracy_label, "Accuracy: N/A");
     lv_obj_set_style_text_font(gps_data.accuracy_label, &lv_font_montserrat_12, 0);
@@ -138,6 +149,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT;
 
     // Create time label
+    ESP_LOGI(TAG, "Creating time label");
     gps_data.time_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.time_label, "Time: N/A");
     lv_obj_set_style_text_font(gps_data.time_label, &lv_font_montserrat_12, 0);
@@ -146,6 +158,7 @@ void gps_info_view_create(void) {
     y_offset += LABEL_HEIGHT + 10;
 
     // Create back button
+    ESP_LOGI(TAG, "Creating back button");
     lv_obj_t *back_btn = lv_btn_create(gps_info_view.root);
     lv_obj_set_size(back_btn, 80, 30);
     lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, PADDING, -PADDING);
@@ -158,48 +171,61 @@ void gps_info_view_create(void) {
     lv_obj_center(back_label);
     lv_obj_set_style_text_color(back_label, lv_color_white(), 0);
 
-    // Don't initialize GPS manager here - let the existing GPS system handle it
-    // The GPS manager should already be initialized by the main system
+    // Attempt to initialize GPS if not already initialized
+    if (!gps_is_connected()) {
+        ESP_LOGI(TAG, "GPS not connected during screen creation - attempting initialization");
+        gps_manager_init(&g_gpsManager);
+        vTaskDelay(pdMS_TO_TICKS(200)); // Give GPS more time to initialize during creation
+    }
 
     // Create update timer
+    ESP_LOGI(TAG, "Creating update timer (1000ms interval)");
     gps_data.update_timer = lv_timer_create(gps_info_update_timer_cb, 1000, NULL);
     gps_data.is_active = true;
 
-    ESP_LOGI(TAG, "GPS info view created");
+    ESP_LOGI(TAG, "GPS info view created successfully");
 }
 
-void gps_info_view_destroy(void) {
+void gps_info_screen_destroy(void) {
+    ESP_LOGI(TAG, "Destroying GPS info screen - called from: %p", __builtin_return_address(0));
+    
     if (gps_info_view.root == NULL) {
+        ESP_LOGW(TAG, "GPS info view root is already NULL");
         return;
     }
 
     // Stop update timer
     if (gps_data.update_timer) {
+        ESP_LOGI(TAG, "Stopping update timer");
         lv_timer_del(gps_data.update_timer);
         gps_data.update_timer = NULL;
     }
 
     // Destroy all objects
     if (gps_info_view.root) {
+        ESP_LOGI(TAG, "Destroying root object");
         lv_obj_del(gps_info_view.root);
         gps_info_view.root = NULL;
     }
 
     // Clear all pointers
+    ESP_LOGI(TAG, "Clearing GPS data structure");
     memset(&gps_data, 0, sizeof(gps_info_data_t));
     gps_data.is_active = false;
 
-    ESP_LOGI(TAG, "GPS info view destroyed");
+    ESP_LOGI(TAG, "GPS info view destroyed successfully");
 }
 
-void gps_info_view_update_data(void) {
+void gps_info_screen_update_data(void) {
     if (!gps_data.is_active || !gps_info_view.root) {
+        ESP_LOGW(TAG, "Update skipped - view not active or root is NULL");
         return;
     }
 
-    // Check if GPS is available
-    if (!nmea_hdl) {
-        lv_label_set_text(gps_data.status_label, "Status: GPS Disconnected");
+    // Check for GPS timeout first
+    if (gps_is_timeout_detected()) {
+        ESP_LOGW(TAG, "GPS timeout detected - showing timeout status");
+        lv_label_set_text(gps_data.status_label, "Status: GPS Timeout");
         lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFF0000), 0);
         lv_label_set_text(gps_data.satellites_label, "Satellites: 0/0");
         lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
@@ -211,29 +237,80 @@ void gps_info_view_update_data(void) {
         return;
     }
 
-    // Additional safety check for GPS manager
-    if (!g_gpsManager.isinitilized) {
-        lv_label_set_text(gps_data.status_label, "Status: GPS Not Initialized");
+    // Check if GPS is available using the GPS manager's public interface
+    if (!gps_is_connected()) {
+        ESP_LOGI(TAG, "GPS not connected - attempting to initialize GPS");
+        
+        // Attempt to initialize GPS if not connected
+        if (!nmea_hdl) {
+            ESP_LOGI(TAG, "nmea_hdl is NULL - initializing GPS manager");
+            gps_manager_init(&g_gpsManager);
+            
+            // Give GPS a moment to initialize
+            vTaskDelay(pdMS_TO_TICKS(100));
+            
+            // Check again after initialization attempt
+            if (!gps_is_connected()) {
+                ESP_LOGI(TAG, "GPS initialization failed or still not connected - showing disconnected status");
+                lv_label_set_text(gps_data.status_label, "Status: GPS Disconnected");
+                lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFF0000), 0);
+                lv_label_set_text(gps_data.satellites_label, "Satellites: 0/0");
+                lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
+                lv_label_set_text(gps_data.altitude_label, "Altitude: N/A");
+                lv_label_set_text(gps_data.speed_label, "Speed: 0.0 km/h");
+                lv_label_set_text(gps_data.direction_label, "Direction: N/A");
+                lv_label_set_text(gps_data.accuracy_label, "Accuracy: N/A");
+                lv_label_set_text(gps_data.time_label, "Time: N/A");
+                return;
+            } else {
+                ESP_LOGI(TAG, "GPS initialization successful - continuing with data update");
+            }
+        } else {
+            ESP_LOGI(TAG, "GPS not connected but nmea_hdl exists - showing disconnected status");
+            lv_label_set_text(gps_data.status_label, "Status: GPS Disconnected");
+            lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFF0000), 0);
+            lv_label_set_text(gps_data.satellites_label, "Satellites: 0/0");
+            lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
+            lv_label_set_text(gps_data.altitude_label, "Altitude: N/A");
+            lv_label_set_text(gps_data.speed_label, "Speed: 0.0 km/h");
+            lv_label_set_text(gps_data.direction_label, "Direction: N/A");
+            lv_label_set_text(gps_data.accuracy_label, "Accuracy: N/A");
+            lv_label_set_text(gps_data.time_label, "Time: N/A");
+            return;
+        }
+    }
+
+    // Double-check nmea_hdl is available before accessing GPS data
+    if (!nmea_hdl) {
+        ESP_LOGE(TAG, "nmea_hdl is NULL despite gps_is_connected() returning true");
+        lv_label_set_text(gps_data.status_label, "Status: GPS Error");
         lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFF0000), 0);
         return;
     }
 
     gps_t *gps = &((esp_gps_t *)nmea_hdl)->parent;
     if (!gps) {
+        ESP_LOGE(TAG, "GPS data structure is NULL");
         lv_label_set_text(gps_data.status_label, "Status: GPS Error");
         lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFF0000), 0);
         return;
     }
 
-    // Update status
+    ESP_LOGI(TAG, "GPS data: valid=%d, fix=%d, fix_mode=%d, sats=%d", 
+             gps->valid, gps->fix, gps->fix_mode, gps->sats_in_use);
+
+    // Update status - be more lenient like wardriving functions
     if (!gps->valid || gps->fix < GPS_FIX_GPS || gps->fix_mode < GPS_MODE_2D ||
         gps->sats_in_use < 3 || gps->sats_in_use > GPS_MAX_SATELLITES_IN_USE) {
+        // Always show "Searching..." when GPS is available but no fix
+        ESP_LOGI(TAG, "GPS searching for fix - showing searching status");
         lv_label_set_text(gps_data.status_label, "Status: Searching...");
         lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFFA500), 0);
     } else {
         const char *fix_type = (gps->fix_mode == GPS_MODE_3D) ? "3D Fix" : "2D Fix";
         char status_text[32];
         snprintf(status_text, sizeof(status_text), "Status: %s", fix_type);
+        ESP_LOGI(TAG, "GPS fix acquired: %s", fix_type);
         lv_label_set_text(gps_data.status_label, status_text);
         lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0x00FF00), 0);
     }
@@ -245,15 +322,14 @@ void gps_info_view_update_data(void) {
              GPS_MAX_SATELLITES_IN_USE);
     lv_label_set_text(gps_data.satellites_label, sats_text);
 
-    // Update coordinates
+    // Update coordinates - use more compact format
     if (gps->valid && gps->latitude != 0 && gps->longitude != 0) {
-        char lat_str[32], lon_str[32];
-        format_coordinates_display(gps->latitude, gps->longitude, lat_str, lon_str, sizeof(lat_str));
-        
-        char coord_text[128];
-        snprintf(coord_text, sizeof(coord_text), "Coordinates: %s, %s", lat_str, lon_str);
+        char coord_text[64];
+        snprintf(coord_text, sizeof(coord_text), "Lat: %.4f° Lon: %.4f°", gps->latitude, gps->longitude);
+        ESP_LOGI(TAG, "GPS coordinates: lat=%.6f, lon=%.6f", gps->latitude, gps->longitude);
         lv_label_set_text(gps_data.coordinates_label, coord_text);
     } else {
+        ESP_LOGI(TAG, "GPS coordinates not available");
         lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
     }
 
@@ -303,7 +379,7 @@ void gps_info_view_update_data(void) {
     }
 }
 
-void gps_info_view_input_cb(InputEvent *event) {
+void gps_info_screen_input_cb(InputEvent *event) {
     if (!event) return;
     
     switch (event->type) {
@@ -339,42 +415,26 @@ void gps_info_view_input_cb(InputEvent *event) {
     }
 }
 
-void gps_info_view_get_hardwareinput_callback(void **callback) {
-    *callback = gps_info_view_input_cb;
-}
 
 // Static helper functions
 static void gps_info_update_timer_cb(lv_timer_t *timer) {
     // Add safety check to prevent crashes
     if (!gps_data.is_active || !gps_info_view.root) {
+        ESP_LOGW(TAG, "Timer callback skipped - view not active or root is NULL");
         return;
     }
     
-    gps_info_view_update_data();
+    ESP_LOGI(TAG, "Timer callback triggered - updating GPS data");
+    gps_info_screen_update_data();
 }
 
 static void back_button_cb(lv_event_t *e) {
+    ESP_LOGI(TAG, "Back button pressed - switching to options menu");
     // Switch back to options menu
     extern View options_menu_view;
     display_manager_switch_view(&options_menu_view);
 }
 
-static void format_coordinates_display(double lat, double lon, char *lat_str, char *lon_str, size_t size) {
-    char lat_hem = (lat >= 0) ? 'N' : 'S';
-    char lon_hem = (lon >= 0) ? 'E' : 'W';
-    
-    double lat_abs = fabs(lat);
-    double lon_abs = fabs(lon);
-    
-    int lat_deg = (int)lat_abs;
-    int lon_deg = (int)lon_abs;
-    
-    double lat_min = (lat_abs - lat_deg) * 60.0;
-    double lon_min = (lon_abs - lon_deg) * 60.0;
-    
-    snprintf(lat_str, size, "%c%d°%.4f'", lat_hem, lat_deg, lat_min);
-    snprintf(lon_str, size, "%c%d°%.4f'", lon_hem, lon_deg, lon_min);
-}
 
 static const char* get_cardinal_direction_display(double course) {
     if (course < 0) return "Unknown";
