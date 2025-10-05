@@ -72,15 +72,15 @@ void gps_info_screen_create(void) {
     display_manager_add_status_bar("GPS Information");
 
     const int STATUS_BAR_HEIGHT = 20;
-    const int PADDING = 8;
-    const int LABEL_HEIGHT = 25;
-    const int TITLE_HEIGHT = 30;
+    const int PADDING = 4;  // Reduced from 8
+    const int LABEL_HEIGHT = 18;  // Reduced from 25
+    const int TITLE_HEIGHT = 20;  // Reduced from 30
     int y_offset = STATUS_BAR_HEIGHT + PADDING;
 
     // Create title
     lv_obj_t *title_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(title_label, "GPS Status");
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);  // Reduced from 16
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += TITLE_HEIGHT;
@@ -89,7 +89,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating status label");
     gps_data.status_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.status_label, "Status: Searching...");
-    lv_obj_set_style_text_font(gps_data.status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.status_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.status_label, lv_color_hex(0xFFA500), 0);
     lv_obj_align(gps_data.status_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -98,7 +98,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating satellites label");
     gps_data.satellites_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.satellites_label, "Satellites: 0/0");
-    lv_obj_set_style_text_font(gps_data.satellites_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.satellites_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.satellites_label, lv_color_white(), 0);
     lv_obj_align(gps_data.satellites_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -107,7 +107,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating coordinates label");
     gps_data.coordinates_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.coordinates_label, "Coordinates: N/A");
-    lv_obj_set_style_text_font(gps_data.coordinates_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.coordinates_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.coordinates_label, lv_color_white(), 0);
     lv_obj_align(gps_data.coordinates_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -116,7 +116,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating altitude label");
     gps_data.altitude_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.altitude_label, "Altitude: N/A");
-    lv_obj_set_style_text_font(gps_data.altitude_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.altitude_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.altitude_label, lv_color_white(), 0);
     lv_obj_align(gps_data.altitude_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -125,7 +125,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating speed label");
     gps_data.speed_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.speed_label, "Speed: 0.0 km/h");
-    lv_obj_set_style_text_font(gps_data.speed_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.speed_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.speed_label, lv_color_white(), 0);
     lv_obj_align(gps_data.speed_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -134,7 +134,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating direction label");
     gps_data.direction_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.direction_label, "Direction: N/A");
-    lv_obj_set_style_text_font(gps_data.direction_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.direction_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.direction_label, lv_color_white(), 0);
     lv_obj_align(gps_data.direction_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -143,7 +143,7 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating accuracy label");
     gps_data.accuracy_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.accuracy_label, "Accuracy: N/A");
-    lv_obj_set_style_text_font(gps_data.accuracy_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.accuracy_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.accuracy_label, lv_color_white(), 0);
     lv_obj_align(gps_data.accuracy_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -152,18 +152,20 @@ void gps_info_screen_create(void) {
     ESP_LOGI(TAG, "Creating time label");
     gps_data.time_label = lv_label_create(gps_info_view.root);
     lv_label_set_text(gps_data.time_label, "Time: N/A");
-    lv_obj_set_style_text_font(gps_data.time_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(gps_data.time_label, &lv_font_montserrat_10, 0);  // Reduced from 12
     lv_obj_set_style_text_color(gps_data.time_label, lv_color_white(), 0);
     lv_obj_align(gps_data.time_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
-    y_offset += LABEL_HEIGHT + 10;
+    y_offset += LABEL_HEIGHT + 5;  // Reduced spacing from 10 to 5
 
     // Create back button
     ESP_LOGI(TAG, "Creating back button");
     lv_obj_t *back_btn = lv_btn_create(gps_info_view.root);
-    lv_obj_set_size(back_btn, 80, 30);
+    lv_obj_set_size(back_btn, 80, 35);  // Increased size for better touch response
     lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, PADDING, -PADDING);
     lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333333), 0);
     lv_obj_set_style_radius(back_btn, 5, 0);
+    lv_obj_set_style_border_width(back_btn, 0, 0);
+    lv_obj_set_style_shadow_width(back_btn, 0, 0);
     lv_obj_add_event_cb(back_btn, back_button_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *back_label = lv_label_create(back_btn);
@@ -390,7 +392,16 @@ void gps_info_screen_input_cb(InputEvent *event) {
             }
             break;
         case INPUT_TYPE_TOUCH:
-            // Touch input is handled by button callbacks
+            // Handle touch input for back button
+            ESP_LOGI(TAG, "Touch detected at x=%d, y=%d", event->data.touch_data.point.x, event->data.touch_data.point.y);
+            const int PADDING = 4;  // Match the padding used in screen creation
+            if (event->data.touch_data.point.x >= PADDING && 
+                event->data.touch_data.point.x <= PADDING + 80 && 
+                event->data.touch_data.point.y >= LV_VER_RES - PADDING - 35 && 
+                event->data.touch_data.point.y <= LV_VER_RES - PADDING) {
+                ESP_LOGI(TAG, "Touch detected on back button area - calling back button");
+                back_button_cb(NULL);
+            }
             break;
         case INPUT_TYPE_KEYBOARD:
             // Handle keyboard input
@@ -430,9 +441,13 @@ static void gps_info_update_timer_cb(lv_timer_t *timer) {
 
 static void back_button_cb(lv_event_t *e) {
     ESP_LOGI(TAG, "Back button pressed - switching to options menu");
+    ESP_LOGI(TAG, "Current view: %s", gps_info_view.name);
+    
     // Switch back to options menu
     extern View options_menu_view;
     display_manager_switch_view(&options_menu_view);
+    
+    ESP_LOGI(TAG, "View switch completed");
 }
 
 

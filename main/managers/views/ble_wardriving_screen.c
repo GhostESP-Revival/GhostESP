@@ -92,15 +92,15 @@ void ble_wardriving_screen_create(void) {
     display_manager_add_status_bar("BLE Wardriving");
 
     const int STATUS_BAR_HEIGHT = 20;
-    const int PADDING = 8;
-    const int LABEL_HEIGHT = 25;
-    const int TITLE_HEIGHT = 30;
+    const int PADDING = 4;  // Reduced from 8
+    const int LABEL_HEIGHT = 18;  // Reduced from 25
+    const int TITLE_HEIGHT = 20;  // Reduced from 30
     int y_offset = STATUS_BAR_HEIGHT + PADDING;
 
     // Create title
     lv_obj_t *title_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(title_label, "BLE Wardriving Status");
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);  // Reduced from 16
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += TITLE_HEIGHT;
@@ -109,7 +109,7 @@ void ble_wardriving_screen_create(void) {
     ESP_LOGI(TAG, "Creating status label");
     ble_data.status_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.status_label, "Status: Stopped");
-    lv_obj_set_style_text_font(ble_data.status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.status_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.status_label, lv_color_hex(0xFF0000), 0);
     lv_obj_align(ble_data.status_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -117,7 +117,7 @@ void ble_wardriving_screen_create(void) {
     // Create devices found label
     ble_data.devices_found_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.devices_found_label, "Devices Found: 0");
-    lv_obj_set_style_text_font(ble_data.devices_found_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.devices_found_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.devices_found_label, lv_color_white(), 0);
     lv_obj_align(ble_data.devices_found_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -125,7 +125,7 @@ void ble_wardriving_screen_create(void) {
     // Create GPS status label
     ble_data.gps_status_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.gps_status_label, "GPS: Not Available");
-    lv_obj_set_style_text_font(ble_data.gps_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.gps_status_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.gps_status_label, lv_color_hex(0xFFA500), 0);
     lv_obj_align(ble_data.gps_status_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -133,7 +133,7 @@ void ble_wardriving_screen_create(void) {
     // Create coordinates label
     ble_data.coordinates_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.coordinates_label, "Coordinates: N/A");
-    lv_obj_set_style_text_font(ble_data.coordinates_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.coordinates_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.coordinates_label, lv_color_white(), 0);
     lv_obj_align(ble_data.coordinates_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT + 10;
@@ -149,7 +149,7 @@ void ble_wardriving_screen_create(void) {
     // Create current MAC label
     ble_data.current_mac_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.current_mac_label, "MAC: N/A");
-    lv_obj_set_style_text_font(ble_data.current_mac_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.current_mac_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.current_mac_label, lv_color_white(), 0);
     lv_obj_align(ble_data.current_mac_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -157,7 +157,7 @@ void ble_wardriving_screen_create(void) {
     // Create current name label
     ble_data.current_name_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.current_name_label, "Name: N/A");
-    lv_obj_set_style_text_font(ble_data.current_name_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.current_name_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.current_name_label, lv_color_white(), 0);
     lv_obj_align(ble_data.current_name_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -165,7 +165,7 @@ void ble_wardriving_screen_create(void) {
     // Create current RSSI label
     ble_data.current_rssi_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.current_rssi_label, "RSSI: N/A");
-    lv_obj_set_style_text_font(ble_data.current_rssi_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.current_rssi_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.current_rssi_label, lv_color_white(), 0);
     lv_obj_align(ble_data.current_rssi_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -173,13 +173,13 @@ void ble_wardriving_screen_create(void) {
     // Create current type label
     ble_data.current_type_label = lv_label_create(ble_wardriving_view.root);
     lv_label_set_text(ble_data.current_type_label, "Type: N/A");
-    lv_obj_set_style_text_font(ble_data.current_type_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ble_data.current_type_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_data.current_type_label, lv_color_white(), 0);
     lv_obj_align(ble_data.current_type_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
 
     // Create back button
     lv_obj_t *back_btn = lv_btn_create(ble_wardriving_view.root);
-    lv_obj_set_size(back_btn, 80, 30);
+    lv_obj_set_size(back_btn, 70, 25);  // Reduced from 80x30 to 70x25
     lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -PADDING, -PADDING);
     lv_obj_add_event_cb(back_btn, back_button_cb, LV_EVENT_CLICKED, NULL);
     
@@ -317,7 +317,18 @@ void ble_wardriving_screen_input_cb(InputEvent *event) {
             }
             break;
         case INPUT_TYPE_TOUCH:
-            // Touch input is handled by button callbacks
+            // Handle touch input for back button
+            ESP_LOGI(TAG, "Touch detected at x=%d, y=%d", 
+                     event->data.touch_data.point.x, 
+                     event->data.touch_data.point.y);
+            const int PADDING = 4;  // Match the padding used in screen creation
+            if (event->data.touch_data.point.x >= LV_HOR_RES - PADDING - 70 && 
+                event->data.touch_data.point.x <= LV_HOR_RES - PADDING && 
+                event->data.touch_data.point.y >= LV_VER_RES - PADDING - 25 && 
+                event->data.touch_data.point.y <= LV_VER_RES - PADDING) {
+                ESP_LOGI(TAG, "Touch detected on back button area - calling back button");
+                back_button_cb(NULL);
+            }
             break;
         case INPUT_TYPE_KEYBOARD:
             // Handle keyboard input
@@ -388,8 +399,14 @@ static void ble_wardriving_update_timer_cb(lv_timer_t *timer) {
 }
 
 static void back_button_cb(lv_event_t *e) {
-    ESP_LOGI(TAG, "Back button pressed");
+    ESP_LOGI(TAG, "BLE wardriving back button pressed - switching to options menu");
+    ESP_LOGI(TAG, "Current view: %s", ble_wardriving_view.name);
+    
+    // Switch back to options menu
+    extern View options_menu_view;
     display_manager_switch_view(&options_menu_view);
+    
+    ESP_LOGI(TAG, "BLE wardriving view switch completed");
 }
 
 static bool is_ble_wardriving_active(void) {

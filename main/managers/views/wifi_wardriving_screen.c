@@ -95,15 +95,15 @@ void wifi_wardriving_screen_create(void) {
     display_manager_add_status_bar("WiFi Wardriving");
 
     const int STATUS_BAR_HEIGHT = 20;
-    const int PADDING = 8;
-    const int LABEL_HEIGHT = 25;
-    const int TITLE_HEIGHT = 30;
+    const int PADDING = 4;  // Reduced from 8
+    const int LABEL_HEIGHT = 18;  // Reduced from 25
+    const int TITLE_HEIGHT = 20;  // Reduced from 30
     int y_offset = STATUS_BAR_HEIGHT + PADDING;
 
     // Create title
     lv_obj_t *title_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(title_label, "WiFi Wardriving Status");
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);  // Reduced from 16
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += TITLE_HEIGHT;
@@ -112,7 +112,7 @@ void wifi_wardriving_screen_create(void) {
     ESP_LOGI(TAG, "Creating status label");
     wardriving_data.status_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.status_label, "Status: Stopped");
-    lv_obj_set_style_text_font(wardriving_data.status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.status_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.status_label, lv_color_hex(0xFF0000), 0);
     lv_obj_align(wardriving_data.status_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -120,7 +120,7 @@ void wifi_wardriving_screen_create(void) {
     // Create networks found label
     wardriving_data.networks_found_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.networks_found_label, "Networks Found: 0");
-    lv_obj_set_style_text_font(wardriving_data.networks_found_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.networks_found_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.networks_found_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.networks_found_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -128,7 +128,7 @@ void wifi_wardriving_screen_create(void) {
     // Create GPS status label
     wardriving_data.gps_status_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.gps_status_label, "GPS: Not Available");
-    lv_obj_set_style_text_font(wardriving_data.gps_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.gps_status_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.gps_status_label, lv_color_hex(0xFFA500), 0);
     lv_obj_align(wardriving_data.gps_status_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -136,7 +136,7 @@ void wifi_wardriving_screen_create(void) {
     // Create coordinates label
     wardriving_data.coordinates_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.coordinates_label, "Coordinates: N/A");
-    lv_obj_set_style_text_font(wardriving_data.coordinates_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.coordinates_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.coordinates_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.coordinates_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT + 10;
@@ -152,7 +152,7 @@ void wifi_wardriving_screen_create(void) {
     // Create current SSID label
     wardriving_data.current_ssid_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.current_ssid_label, "SSID: N/A");
-    lv_obj_set_style_text_font(wardriving_data.current_ssid_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.current_ssid_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.current_ssid_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.current_ssid_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -160,7 +160,7 @@ void wifi_wardriving_screen_create(void) {
     // Create current BSSID label
     wardriving_data.current_bssid_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.current_bssid_label, "BSSID: N/A");
-    lv_obj_set_style_text_font(wardriving_data.current_bssid_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.current_bssid_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.current_bssid_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.current_bssid_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -168,7 +168,7 @@ void wifi_wardriving_screen_create(void) {
     // Create current RSSI label
     wardriving_data.current_rssi_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.current_rssi_label, "RSSI: N/A");
-    lv_obj_set_style_text_font(wardriving_data.current_rssi_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.current_rssi_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.current_rssi_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.current_rssi_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -176,7 +176,7 @@ void wifi_wardriving_screen_create(void) {
     // Create current channel label
     wardriving_data.current_channel_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.current_channel_label, "Channel: N/A");
-    lv_obj_set_style_text_font(wardriving_data.current_channel_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.current_channel_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.current_channel_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.current_channel_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
     y_offset += LABEL_HEIGHT;
@@ -184,13 +184,13 @@ void wifi_wardriving_screen_create(void) {
     // Create current encryption label
     wardriving_data.current_encryption_label = lv_label_create(wifi_wardriving_view.root);
     lv_label_set_text(wardriving_data.current_encryption_label, "Encryption: N/A");
-    lv_obj_set_style_text_font(wardriving_data.current_encryption_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(wardriving_data.current_encryption_label, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(wardriving_data.current_encryption_label, lv_color_white(), 0);
     lv_obj_align(wardriving_data.current_encryption_label, LV_ALIGN_TOP_LEFT, PADDING, y_offset);
 
     // Create back button
     lv_obj_t *back_btn = lv_btn_create(wifi_wardriving_view.root);
-    lv_obj_set_size(back_btn, 80, 30);
+    lv_obj_set_size(back_btn, 70, 25);  // Reduced from 80x30 to 70x25
     lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -PADDING, -PADDING);
     lv_obj_add_event_cb(back_btn, back_button_cb, LV_EVENT_CLICKED, NULL);
     
@@ -333,7 +333,18 @@ void wifi_wardriving_screen_input_cb(InputEvent *event) {
             }
             break;
         case INPUT_TYPE_TOUCH:
-            // Touch input is handled by button callbacks
+            // Handle touch input for back button
+            ESP_LOGI(TAG, "Touch detected at x=%d, y=%d", 
+                     event->data.touch_data.point.x, 
+                     event->data.touch_data.point.y);
+            const int PADDING = 4;  // Match the padding used in screen creation
+            if (event->data.touch_data.point.x >= LV_HOR_RES - PADDING - 70 && 
+                event->data.touch_data.point.x <= LV_HOR_RES - PADDING && 
+                event->data.touch_data.point.y >= LV_VER_RES - PADDING - 25 && 
+                event->data.touch_data.point.y <= LV_VER_RES - PADDING) {
+                ESP_LOGI(TAG, "Touch detected on back button area - calling back button");
+                back_button_cb(NULL);
+            }
             break;
         case INPUT_TYPE_KEYBOARD:
             // Handle keyboard input
@@ -417,8 +428,14 @@ static void wifi_wardriving_update_timer_cb(lv_timer_t *timer) {
 }
 
 static void back_button_cb(lv_event_t *e) {
-    ESP_LOGI(TAG, "Back button pressed");
+    ESP_LOGI(TAG, "WiFi wardriving back button pressed - switching to options menu");
+    ESP_LOGI(TAG, "Current view: %s", wifi_wardriving_view.name);
+    
+    // Switch back to options menu
+    extern View options_menu_view;
     display_manager_switch_view(&options_menu_view);
+    
+    ESP_LOGI(TAG, "WiFi wardriving view switch completed");
 }
 
 static void start_wifi_wardriving(void) {
