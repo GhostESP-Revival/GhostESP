@@ -16,6 +16,8 @@
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#include "managers/garbage_collector.h"
+#include "../managers/tests/gc_test.h"
 #include "vendor/pcap.h"
 #include "vendor/printer.h"
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -693,7 +695,7 @@ static void dump_task_stacks(void) {
     if (!list) return;
     UBaseType_t out = uxTaskGetSystemState(list, num, NULL);
     for (UBaseType_t i = 0; i < out; i++) {
-        printf("task=%s min_free_stack=%u words\n", list[i].pcTaskName, (unsigned)list[i].usStackHighWaterMark);
+        glog("task=%s min_free_stack=%u words\n", list[i].pcTaskName, (unsigned)list[i].usStackHighWaterMark);
     }
     vPortFree(list);
 #else
@@ -703,10 +705,10 @@ static void dump_task_stacks(void) {
 
 void handle_mem_cmd(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "dump") == 0) {
-        ESP_LOGI(TAG, "heap(8bit) free=%u, largest=%u, min_free=%u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-                 (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
+        glog("heap(8bit) free=%u, largest=%u, min_free=%u\n",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
         heap_caps_dump(MALLOC_CAP_8BIT);
         return;
     }
@@ -737,11 +739,100 @@ void handle_mem_cmd(int argc, char **argv) {
 #endif
     }
 
-    ESP_LOGI(TAG, "heap(8bit) free=%u, largest=%u, min_free=%u",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
+    glog("heap(8bit) free=%u, largest=%u, min_free=%u\n",
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
     dump_task_stacks();
+}
+
+void handle_gc_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("GC commands: init, stats, collect, defrag, cleanup, emergency, objects, pools, ble, wifi, test, simple, verify, leak, stress, benchmark\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "init") == 0) {
+        glog("Initializing GC...\n");
+        esp_err_t ret = gc_init();
+        if (ret == ESP_OK) {
+            glog("GC initialized successfully\n");
+        } else {
+            glog("GC initialization failed: %s\n", esp_err_to_name(ret));
+        }
+    } else if (strcmp(argv[1], "stats") == 0) {
+        gc_print_stats();
+    } else if (strcmp(argv[1], "collect") == 0) {
+        glog("Starting garbage collection...\n");
+        gc_collect();
+        glog("Garbage collection completed\n");
+    } else if (strcmp(argv[1], "defrag") == 0) {
+        glog("Starting memory defragmentation...\n");
+        gc_defragment();
+        glog("Memory defragmentation completed\n");
+    } else if (strcmp(argv[1], "cleanup") == 0) {
+        glog("Starting cleanup of unused objects...\n");
+        gc_cleanup_unused();
+        glog("Cleanup completed\n");
+    } else if (strcmp(argv[1], "emergency") == 0) {
+        glog("Starting emergency cleanup...\n");
+        gc_emergency_cleanup();
+        glog("Emergency cleanup completed\n");
+    } else if (strcmp(argv[1], "objects") == 0) {
+        gc_dump_objects();
+    } else if (strcmp(argv[1], "pools") == 0) {
+        gc_dump_pools();
+    } else if (strcmp(argv[1], "ble") == 0) {
+        glog("Optimizing memory for BLE...\n");
+        gc_register_ble_cleanup();
+        gc_optimize_for_capability(GC_CAP_DMA_INTERNAL);
+        glog("BLE memory optimization completed\n");
+    } else if (strcmp(argv[1], "wifi") == 0) {
+        glog("Optimizing memory for WiFi...\n");
+        gc_register_wifi_cleanup();
+        gc_optimize_for_capability(GC_CAP_DMA_INTERNAL);
+        glog("WiFi memory optimization completed\n");
+    } else if (strcmp(argv[1], "test") == 0) {
+        glog("Running GC tests...\n");
+        gc_run_tests();
+        glog("GC tests completed\n");
+    } else if (strcmp(argv[1], "simple") == 0) {
+        glog("Running simple GC test...\n");
+        if (g_gc_manager == NULL) {
+            glog("ERROR: GC not initialized!\n");
+            return;
+        }
+        glog("GC is initialized\n");
+        void* ptr = GC_MALLOC(64, GC_CAP_DEFAULT, GC_OBJ_BUFFER);
+        if (ptr != NULL) {
+            glog("Allocated 64 bytes at %p\n", ptr);
+            GC_FREE(ptr);
+            glog("Freed memory\n");
+        } else {
+            glog("Failed to allocate memory\n");
+        }
+        gc_print_stats();
+        glog("Simple test completed\n");
+    } else if (strcmp(argv[1], "verify") == 0) {
+        glog("Running GC verification tests...\n");
+        gc_run_verification_tests();
+        glog("GC verification completed\n");
+    } else if (strcmp(argv[1], "leak") == 0) {
+        glog("Running memory leak detection test...\n");
+        gc_run_leak_test();
+        glog("Memory leak test completed\n");
+    } else if (strcmp(argv[1], "stress") == 0) {
+        glog("Running stress test...\n");
+        gc_run_stress_test();
+        glog("Stress test completed\n");
+    } else if (strcmp(argv[1], "benchmark") == 0) {
+        glog("Running performance benchmark...\n");
+        gc_run_benchmark();
+        glog("Benchmark completed\n");
+    } else {
+        glog("Unknown GC command: %s\n", argv[1]);
+        glog("Available commands: init, stats, collect, defrag, cleanup, emergency, objects, pools, ble, wifi, test, simple, verify, leak, stress, benchmark\n");
+    }
 }
 
 void handle_wifi_connection(int argc, char **argv) {
@@ -3015,6 +3106,7 @@ void register_commands() {
     command_init();
     register_command("help", handle_help);
     register_command("mem", handle_mem_cmd);
+    register_command("gc", handle_gc_cmd);
     register_command("scanap", cmd_wifi_scan_start);
     register_command("scansta", handle_sta_scan);
     register_command("scanlocal", handle_ip_lookup);

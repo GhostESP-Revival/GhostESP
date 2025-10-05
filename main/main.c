@@ -8,6 +8,8 @@
 #include "managers/settings_manager.h"
 #include "managers/wifi_manager.h"
 #include "core/esp_comm_manager.h"
+#include "managers/garbage_collector.h"
+#include "core/glog.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -66,6 +68,7 @@ void app_main(void) {
 #endif
 
 
+    MEASURE_INIT_RAM("Garbage Collector", gc_init());
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
     MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -249,6 +252,10 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Free heap after init: %d / %d bytes (%.1f%% free)", (int)free_heap, (int)total_heap, percent_free);
     printf("Free heap after init: %d / %d bytes (%.1f%% free)\n", (int)free_heap, (int)total_heap, percent_free);
+
+    // Print GC statistics
+    glog("=== Startup GC Statistics ===\n");
+    gc_print_stats();
 
     ESP_LOGI(TAG, "Ghost ESP INIT complete. Ghost ESP Ready ;)");
     printf("Ghost ESP Ready ;)\n");

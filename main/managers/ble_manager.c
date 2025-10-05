@@ -12,6 +12,7 @@
 #include "host/util/util.h"
 #include "managers/ble_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "managers/garbage_collector.h"
 #include "core/glog.h"
 #include "nimble/ble.h"
 #include "nimble/nimble_port.h"
@@ -1680,13 +1681,12 @@ void ble_init(void) {
 
         if (handlers == NULL) {
             ESP_LOGI(TAG_BLE, "Allocating handlers array (%d bytes)", sizeof(ble_handler_t) * MAX_HANDLERS);
-            handlers = malloc(sizeof(ble_handler_t) * MAX_HANDLERS);
+            handlers = GC_CALLOC(MAX_HANDLERS, sizeof(ble_handler_t), GC_CAP_DEFAULT, GC_OBJ_BUFFER);
             if (handlers == NULL) {
                 ESP_LOGE(TAG_BLE, "Failed to allocate handlers array - out of memory");
                 TERMINAL_VIEW_ADD_TEXT("BLE init failed: out of memory for handlers\n");
                 return;
             }
-            memset(handlers, 0, sizeof(ble_handler_t) * MAX_HANDLERS);
             handler_count = 0;
             ESP_LOGI(TAG_BLE, "Handlers array allocated successfully");
         }
@@ -2222,15 +2222,10 @@ void ble_stop_ble_spam(void) {
 static void optimize_memory_for_ble(void) {
     ESP_LOGI(TAG_BLE, "Starting aggressive memory optimization for BLE...");
     
-    // Force garbage collection
-    vTaskDelay(pdMS_TO_TICKS(50));
-    
-    // Try to free up any cached data
-    // Note: This is a basic implementation - in a real system you might want to
-    // temporarily disable other features that use DMA memory
-    
-    // Force another garbage collection cycle
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // Use garbage collector for memory optimization
+    gc_register_ble_cleanup();
+    gc_optimize_for_capability(GC_CAP_DMA_INTERNAL);
+    gc_emergency_cleanup();
     
     ESP_LOGI(TAG_BLE, "Memory optimization completed");
 }
