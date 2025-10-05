@@ -15,7 +15,8 @@
 - Added heartbeat-based auto-reconnect for dual communication
 - Ghost (asset by @the1anonlypr3) and Game of Life idle animations for status display
 - Added ability to set settings via cli - @tototo31
-
+- Add joystick support for keyboard input in terminal view - @tototo31
+  
 - **PN532 NFC Capability**
   - **NTAG Support (Type 2)**
     - Read NTAG213/215/216 with NDEF parsing

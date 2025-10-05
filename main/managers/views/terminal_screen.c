@@ -5,6 +5,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/portmacro.h"
 #include "managers/views/main_menu_screen.h"
+#include "managers/views/keyboard_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/display_manager.h"
 #include "esp_timer.h"
@@ -21,6 +22,12 @@ static View *terminal_return_view = NULL;
 
 #include "lvgl.h"
 #include "managers/settings_manager.h"
+
+// Function declarations
+static void submit_text();
+static void add_char_to_buffer(char c);
+static void update_input_label();
+static void keyboard_input_callback(const char *text);
 
 static const char *TAG = "Terminal";
 static lv_obj_t *terminal_scroller = NULL;
@@ -47,15 +54,41 @@ static unsigned long createdTimeInMs = 0;
 static char input_buffer[128] = {0}; // keyboard input buffer
 static int input_len = 0; // input length counter
 
+/*
+ * Joystick Keyboard Input Controls:
+ * 
+ * - Button 1: Open keyboard interface
+ * - Button 0 (left): Exit terminal app
+ * - Button 3 (right): Submit current text
+ * - Button 2 (up): Scroll terminal up
+ * - Button 4 (down): Scroll terminal down
+ */
+
+// Callback function for keyboard input
+static void keyboard_input_callback(const char *text) {
+    if (text) {
+        // Clear current buffer and set new text
+        memset(input_buffer, 0, sizeof(input_buffer));
+        strncpy(input_buffer, text, sizeof(input_buffer) - 1);
+        input_buffer[sizeof(input_buffer) - 1] = '\0';
+        input_len = strlen(input_buffer);
+        update_input_label();
+        
+        // Submit the text to the terminal
+        submit_text();
+        
+        // Return to terminal view
+        display_manager_switch_view(&terminal_view);
+    }
+}
+
+
 static void scroll_terminal_up(void);
 static void scroll_terminal_down(void);
 static void stop_all_operations(void);
 static bool terminal_is_near_bottom(void);
 
-// keyboard function predefs
-static void submit_text();
-static void add_char_to_buffer(char c);
-static void update_input_label();
+// Additional function predefs
 static void append_to_display_buffer(const char *data, size_t len);
 static void recalc_layout_if_needed(void);
 static void terminal_canvas_draw_event(lv_event_t *e);
@@ -188,7 +221,11 @@ static void remove_char_from_buffer() {
 }
 static void update_input_label() {
     if (input_label) {
-        lv_label_set_text(input_label, input_buffer);
+        if (input_len > 0) {
+            lv_label_set_text(input_label, input_buffer);
+        } else {
+            lv_label_set_text(input_label, "Type Command...");
+        }
     }
 }
 static void clear_message_queue(void) {
@@ -581,7 +618,7 @@ static void stop_all_operations(void) {
     }
     ESP_LOGI(TAG, "Stop all operations triggered");
 }
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
 void text_box_click_cb(lv_event_t *e){
   ESP_LOGI(TAG, "Text box clicked");
   printf("Text box clicked\n");
@@ -642,7 +679,7 @@ void terminal_view_create(void) {
     }
 #endif
 
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     show_input_bar = true;
 #endif
 
@@ -711,7 +748,7 @@ void terminal_view_create(void) {
     }
 #endif
 
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN)
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (show_input_bar) {
         int textbox_width = LV_HOR_RES - 2 * padding;
     #ifdef CONFIG_USE_TOUCHSCREEN
@@ -868,7 +905,6 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
 
     if (input_label){
       // Check if the touch is within the input label area
-      lv_obj_t *input_area = lv_obj_get_parent(input_label);
       int input_x_min = lv_obj_get_x(input_label);
       int input_x_max = input_x_min + lv_obj_get_width(input_label);
       int input_y_min = lv_obj_get_y(input_label);
@@ -912,12 +948,23 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
     }
   } else if (event->type == INPUT_TYPE_JOYSTICK) {
     int button = event->data.joystick_index;
+    
     if (button == 1) {
-      stop_all_operations();
+      // Open keyboard for text input
+      if (input_label) {
+        keyboard_view_set_return_view(&terminal_view);
+        keyboard_view_set_submit_callback(keyboard_input_callback);
+        keyboard_view_set_placeholder("Enter command...");
+        display_manager_switch_view(&keyboard_view);
+      }
     } else if (button == 2) {
       scroll_terminal_up();
     } else if (button == 4) {
       scroll_terminal_down();
+    } else if (button == 0) { // left - exit terminal
+      stop_all_operations();
+    } else if (button == 3) { // right - submit text
+      submit_text();
     }
   } else if (event->type == INPUT_TYPE_KEYBOARD) {
     uint8_t key = event->data.key_value;
