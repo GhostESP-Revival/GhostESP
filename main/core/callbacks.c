@@ -3,6 +3,8 @@
 #include "managers/gps_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "managers/views/wifi_wardriving_screen.h"
+#include "managers/views/ble_wardriving_screen.h"
 #include "managers/wifi_manager.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -625,6 +627,9 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
     // Suppress unused variable warning
     (void)err;
+    
+    // Update WiFi wardriving screen with latest network data
+    wifi_wardriving_update_network_data(ssid, wardriving_data.bssid, rssi, channel, encryption_type);
 }
 
 void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
@@ -840,9 +845,14 @@ static int ble_hs_adv_parse_fields_cb(const struct ble_hs_adv_field *field, void
 static const char SKIMMER_TAG[] STORE_STR_ATTR = "SKIMMER_DETECT";
 
 void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
+    ESP_LOGD("BLE_WARDRIVING", "BLE wardriving callback called, event type: %d", event ? event->type : -1);
+    
     if (!event || event->type != BLE_GAP_EVENT_DISC) {
+        ESP_LOGD("BLE_WARDRIVING", "Callback skipped - invalid event or not discovery event");
         return;
     }
+    
+    ESP_LOGI("BLE_WARDRIVING", "Processing BLE discovery event");
 
     wardriving_data_t wardriving_data = {0};
     wardriving_data.ble_data.is_ble_device = true;
@@ -880,6 +890,16 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
     if (err != ESP_OK) {
         ESP_LOGD("BLE_WD", "Skipped logging entry\nGPS data not ready");
     }
+    
+    // Update BLE wardriving screen with latest device data
+    ESP_LOGI("BLE_WARDRIVING", "Updating BLE wardriving screen with device: %s, name: %s, RSSI: %d", 
+             wardriving_data.ble_data.ble_mac, 
+             wardriving_data.ble_data.ble_name, 
+             wardriving_data.ble_data.ble_rssi);
+    ble_wardriving_update_device_data(wardriving_data.ble_data.ble_mac, 
+                                      wardriving_data.ble_data.ble_name, 
+                                      wardriving_data.ble_data.ble_rssi, 
+                                      wardriving_data.ble_data.ble_type);
 }
 
 // Move the callback implementation inside the ESP32S2 guard
