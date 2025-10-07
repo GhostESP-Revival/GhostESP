@@ -144,3 +144,12 @@ Power saving features include:
 ---
 
 For a full list of features and commands, see the [Features](Features.md) and [Commands](Commands.md) guides.
+
+## Web UI Integration
+
+The Ghost ESP firmware includes a comprehensive web interface for remote control and monitoring:
+
+- **Web UI Access**: Connect to the device's AP and navigate to `http://192.168.4.1`
+- **Authentication**: Default credentials are `GhostNet` / `GhostNet`
+- **Remote Control**: Execute commands, manage files, and monitor logs through the web interface
+- **Technical Details**: For complete web UI documentation, see [Web UI Guide](Web-UI-Guide.md)

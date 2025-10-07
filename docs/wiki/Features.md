@@ -45,6 +45,7 @@ GhostESP comes packed with various features for wireless network exploration and
   - Prompt for SSID and optional PSK
   - Stop portal at any time
   - HTML upload via Flipper Zero App (max 2048 bytes)
+  - **Technical Details**: See [Web UI Guide](Web-UI-Guide.md#captive-portal-system)
 
 ### Data Collection
 
@@ -150,6 +151,8 @@ GhostESP comes packed with various features for wireless network exploration and
 - Reboot, stop all operations, crash for debugging
 - Power saving mode for extended battery life
 - Fuel gauge support (BQ27220 initially)
+- **Web UI System**: Comprehensive web interface for remote control and monitoring
+  - **Technical Details**: See [Web UI Guide](Web-UI-Guide.md)
 
 ### SD Card Management
 

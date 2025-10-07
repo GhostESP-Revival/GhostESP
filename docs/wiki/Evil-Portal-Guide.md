@@ -161,6 +161,7 @@ stop
 - Join our [Discord](https://discord.gg/5cyNmUMgwh)
 - Check if your board is supported: [Board Guide](Board‐Specific‐Guide.md)
 - Read about commands: [Commands Guide](Commands.md)
+- **Technical Details**: For advanced implementation details, see [Web UI Guide](Web-UI-Guide.md#captive-portal-system)
 
 ## Creating Custom Portal Pages with SingleFile Extension
 
