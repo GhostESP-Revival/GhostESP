@@ -12,6 +12,16 @@ Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution
 - **[Usage Guide](Usage.md)** - Touch screen and interface navigation
 - **[About GhostESP](About.md)** - Project overview and supported hardware
 
+### 📖 GitHub Wiki Links
+- [About GhostESP](https://github.com/jaylikesbunda/Ghost_ESP/wiki/About#)
+- [Installation Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Installation)
+- [Features Overview](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Features)
+- [Commands](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Commands)
+- [Karma Attack Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Karma-Attack-Guide)
+- [Troubleshooting](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Troubleshooting)
+- [Board-Specific Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Board%E2%80%90Specific%E2%80%90Guide)
+- [Rave Mode](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Rave-Mode)
+
 ### 🎯 Feature-Specific Guides
 - **[Evil Portal Guide](Evil-Portal-Guide.md)** - Complete beginner's guide to captive portals
 - **[Infrared Guide](Infrared-Guide.md)** - IR remote control functionality

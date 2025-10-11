@@ -797,12 +797,7 @@ esp_err_t ap_manager_start_services() {
         return ret;
     }
 
-    // Start mDNS
-    ret = setup_mdns();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to setup mDNS");
-        return ret;
-    }
+    // mDNS is already set up during initial AP bring-up
 
     // Start HTTPD server
     ret = load_server_config();
@@ -1510,7 +1505,7 @@ static esp_err_t load_server_config(void) {
     server_config.server_port = 80;
     server_config.ctrl_port = 32768;
     server_config.max_uri_handlers = 60;
-    server_config.stack_size = 8192;
+    server_config.stack_size = 6144;
     server_config.recv_wait_timeout = 10;
     server_config.send_wait_timeout = 10;
 

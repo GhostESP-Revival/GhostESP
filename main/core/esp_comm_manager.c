@@ -634,7 +634,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                         TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                            "comm_protocol_t", 3072, comm, 15);
+                                                            "comm_protocol_t", 2048, comm, 15);
                         if (!t) {
                             printf("E: failed to create protocol task\n");
                             free_task_resources(&comm->protocol_task_res);
@@ -701,7 +701,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                     TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                        "comm_protocol_t", 3072, comm, 15);
+                                                        "comm_protocol_t", 2048, comm, 15);
                     if (!t) {
                         printf("E: failed to create protocol task\n");
                         free_task_resources(&comm->protocol_task_res);

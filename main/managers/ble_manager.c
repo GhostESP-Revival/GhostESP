@@ -70,7 +70,8 @@ static int selected_airtag_index = -1; // Index of the AirTag selected for spoof
 static ble_handler_t *handlers = NULL;
 static int handler_count = 0;
 static int spam_counter = 0;
-static uint16_t *last_company_id = NULL;
+static bool last_company_id_valid = false;
+static uint16_t last_company_id_value = 0;
 static TickType_t last_detection_time = 0;
 static void ble_pcap_callback(struct ble_gap_event *event, size_t len);
 
@@ -1093,7 +1094,7 @@ void detect_ble_spam_callback(struct ble_gap_event *event, size_t length) {
         spam_counter = 0;
     }
 
-    if (last_company_id != NULL && *last_company_id == current_company_id) {
+    if (last_company_id_valid && last_company_id_value == current_company_id) {
         spam_counter++;
 
         if (spam_counter > MAX_PAYLOADS) {
@@ -1104,14 +1105,9 @@ void detect_ble_spam_callback(struct ble_gap_event *event, size_t length) {
             spam_counter = 0;
         }
     } else {
-        if (last_company_id == NULL) {
-            last_company_id = (uint16_t *)malloc(sizeof(uint16_t));
-        }
-
-        if (last_company_id != NULL) {
-            *last_company_id = current_company_id;
-            spam_counter = 1;
-        }
+        last_company_id_value = current_company_id;
+        last_company_id_valid = true;
+        spam_counter = 1;
     }
 
     last_detection_time = current_time;
@@ -1570,21 +1566,15 @@ void ble_start_scanning(void) {
 }
 
 esp_err_t ble_register_handler(ble_data_handler_t handler) {
-    if (handler_count < MAX_HANDLERS) {
-        ble_handler_t *new_handlers =
-            realloc(handlers, (handler_count + 1) * sizeof(ble_handler_t));
-        if (!new_handlers) {
-            ESP_LOGE(TAG_BLE, "Failed to allocate memory for handlers");
-            return ESP_ERR_NO_MEM;
-        }
-
-        handlers = new_handlers;
-        handlers[handler_count].handler = handler;
-        handler_count++;
-        return ESP_OK;
+    if (!handlers) {
+        return ESP_ERR_INVALID_STATE;
     }
-
-    return ESP_ERR_NO_MEM;
+    if (handler_count >= MAX_HANDLERS) {
+        return ESP_ERR_NO_MEM;
+    }
+    handlers[handler_count].handler = handler;
+    handler_count++;
+    return ESP_OK;
 }
 
 esp_err_t ble_unregister_handler(ble_data_handler_t handler) {
@@ -1593,12 +1583,7 @@ esp_err_t ble_unregister_handler(ble_data_handler_t handler) {
             for (int j = i; j < handler_count - 1; j++) {
                 handlers[j] = handlers[j + 1];
             }
-
             handler_count--;
-            ble_handler_t *new_handlers = realloc(handlers, handler_count * sizeof(ble_handler_t));
-            if (new_handlers || handler_count == 0) {
-                handlers = new_handlers;
-            }
             return ESP_OK;
         }
     }
@@ -1730,10 +1715,7 @@ void ble_stop(void) {
 
     status_display_show_status("BLE Stopping");
 
-    if (last_company_id != NULL) {
-        free(last_company_id);
-        last_company_id = NULL;
-    }
+    last_company_id_valid = false;
 
     // Stop and delete the flush timer if it exists
     if (flush_timer != NULL) {

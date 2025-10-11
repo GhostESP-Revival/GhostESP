@@ -554,8 +554,8 @@ void serial_manager_init() {
   commandQueue = xQueueCreate(6, sizeof(SerialCommand));
   ESP_LOGI("SerialManager", "Command queue created: depth=6, item_size=%u bytes", sizeof(SerialCommand));
 
-  xTaskCreate(serial_task, "SerialTask", 4096, NULL, 2, &s_serial_task_handle);
-  ESP_LOGI("SerialManager", "Serial task created: stack=4096 words (16KB)");
+  xTaskCreate(serial_task, "SerialTask",  5120, NULL, 2, &s_serial_task_handle);
+  ESP_LOGI("SerialManager", "Serial task created");
   s_serial_initialized = true;
   if (!s_uart_disabled) {
     command_history_init();
@@ -606,11 +606,13 @@ int handle_serial_command(const char *input) {
     return result;
   }
   
-  char *input_copy = strdup(input);
-  if (input_copy == NULL) {
-    printf("Memory allocation error\n");
-    return ESP_ERR_INVALID_ARG;
+  char input_copy[SERIAL_BUFFER_SIZE];
+  size_t input_len = strlen(input);
+  if (input_len >= sizeof(input_copy)) {
+    input_len = sizeof(input_copy) - 1;
   }
+  memcpy(input_copy, input, input_len);
+  input_copy[input_len] = '\0';
   char *argv[10];
   int argc = 0;
   char *p = input_copy;
@@ -639,7 +641,6 @@ int handle_serial_command(const char *input) {
       } else {
         // Handle missing closing quote
         printf("Error: Missing closing quote\n");
-        free(input_copy);
         return ESP_ERR_INVALID_ARG;
       }
     } else {
@@ -658,7 +659,6 @@ int handle_serial_command(const char *input) {
   }
 
   if (argc == 0) {
-    free(input_copy);
     return ESP_ERR_INVALID_ARG;
   }
 
@@ -667,13 +667,11 @@ int handle_serial_command(const char *input) {
     // Add command to history before executing
     command_history_add(input);
     cmd_func(argc, argv);
-    free(input_copy);
     return ESP_OK;
   } else {
     // Add command to history even if unknown
     command_history_add(input);
     handle_unknown_command(argv[0]);
-    free(input_copy);
     return ESP_ERR_INVALID_ARG;
   }
 }

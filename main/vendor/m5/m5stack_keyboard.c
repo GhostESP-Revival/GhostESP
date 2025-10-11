@@ -274,7 +274,7 @@ void keyboard_begin(Keyboard_t* keyboard) {
         gpio_isr_handler_add(11, tca_irq_isr, NULL);
         if (!s_tca_sem) s_tca_sem = xSemaphoreCreateBinary();
         if (!s_tca_task){
-            xTaskCreate(tca_keyboard_task, "tca_kbd_task", 3072, NULL, HARDWARE_INPUT_TASK_PRIORITY + 1, &s_tca_task);
+            xTaskCreate(tca_keyboard_task, "tca_kbd_task", 2560, NULL, HARDWARE_INPUT_TASK_PRIORITY + 1, &s_tca_task);
         }
     } else {
         tca_ready = false;

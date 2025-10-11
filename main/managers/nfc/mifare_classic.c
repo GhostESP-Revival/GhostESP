@@ -355,32 +355,37 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
             return true;
         }
     }
-
-    // Load and iterate cached keys
-    mfc_dict_ensure_loaded();
-    const int total = g_dict_key_count;
-    ESP_LOGI("MFC", "Dict: start auth blk=%u keyB=%d total=%d", (unsigned)block, (int)use_key_b, total);
-    if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
-    int idx = 0; int last_cb = 0;
-    for (; idx < total; ++idx) {
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) { ESP_LOGW("MFC", "Dict: cancelled/skip blk=%u keyB=%d at idx=%d", (unsigned)block, (int)use_key_b, idx); return false; }
-        const uint8_t *key = &g_dict_keys[idx*6];
-        if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
-            ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
-            if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
-            else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
-            mfc_record_working_key(key, use_key_b);
-            return true;
+    // Iterate embedded blob directly without caching into RAM
+    {
+        const int total = mfc_dict_total_keys();
+        ESP_LOGI("MFC", "Dict: start auth blk=%u keyB=%d total=%d", (unsigned)block, (int)use_key_b, total);
+        if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
+        int idx = 0; int last_cb = 0;
+        const char *p = s; uint8_t key[6];
+        while (p < e) {
+            if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) { ESP_LOGW("MFC", "Dict: cancelled/skip blk=%u keyB=%d at idx=%d", (unsigned)block, (int)use_key_b, idx); return false; }
+            const char *nl = memchr(p,'\n',(size_t)(e - p));
+            const char *ln_end = nl ? nl : e;
+            if (parse_key_line(p, ln_end, key)) {
+                if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
+                    ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
+                            (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
+                    if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
+                    else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
+                    mfc_record_working_key(key, use_key_b);
+                    return true;
+                }
+                idx++;
+                if (g_prog_cb) {
+                    int pct = (total > 0) ? ((idx * 100) / total) : 0;
+                    if (pct > last_cb) { g_prog_cb(idx, total, g_prog_user); last_cb = pct; }
+                }
+            }
+            p = nl ? (nl + 1) : e;
         }
-        // Throttle progress callbacks to reduce UI overhead
-        if (g_prog_cb) {
-            int pct = ((idx+1) * 100) / (total > 0 ? total : 1);
-            if (pct > last_cb) { g_prog_cb(idx+1, total, g_prog_user); last_cb = pct; }
-        }
+        ESP_LOGI("MFC", "Dict: failed blk=%u keyB=%d", (unsigned)block, (int)use_key_b);
+        return false;
     }
-    ESP_LOGI("MFC", "Dict: failed blk=%u keyB=%d", (unsigned)block, (int)use_key_b);
-    return false;
 }
 
  

@@ -130,7 +130,7 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
         .mode = SPI_TFT_SPI_MODE,
         .spics_io_num=DISP_SPI_CS,              // CS pin
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
-        .queue_size=10,
+        .queue_size=SPI_TRANSACTION_POOL_SIZE,
         .pre_cb=NULL,
         .post_cb=NULL,
 #if defined(DISP_SPI_HALF_DUPLEX)
@@ -267,18 +267,24 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
 		spi_transaction_ext_t *pTransaction = NULL;
 		xQueueReceive(TransactionPool, &pTransaction, portMAX_DELAY);
 		memcpy(pTransaction, &t, sizeof(t));
-		/* try non-blocking to avoid hanging lvgl tick when ble is busy */
-		if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-			spi_transaction_t *presult;
-			if (spi_device_get_trans_result(spi, &presult, 0) == ESP_OK) {
-				xQueueSend(TransactionPool, &presult, portMAX_DELAY);
-			} else {
-				vTaskDelay(1); /* don't fuck the watchdog */
-			}
-			if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-				xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
-			}
-		}
+        /* try non-blocking first; never drop the final flush transaction */
+        bool is_flush = ((flags & DISP_SPI_SIGNAL_FLUSH) != 0);
+        if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
+            spi_transaction_t *presult;
+            if (spi_device_get_trans_result(spi, &presult, 0) == ESP_OK) {
+                xQueueSend(TransactionPool, &presult, portMAX_DELAY);
+            } else {
+                vTaskDelay(1);
+            }
+            if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
+                if (is_flush) {
+                    /* block rather than lose the flush completion */
+                    (void) spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, portMAX_DELAY);
+                } else {
+                    xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
+                }
+            }
+        }
     }
 }
 

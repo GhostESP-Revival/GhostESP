@@ -160,7 +160,8 @@ void app_main(void) {
 
 #ifdef CONFIG_USE_JOYSTICK
 #ifdef CONFIG_USE_IO_EXPANDER
-    esp_err_t io_ret = joystick_io_expander_init();
+    esp_err_t io_ret;
+    MEASURE_INIT_RAM("Joystick IO Expander init", io_ret = joystick_io_expander_init());
     if (io_ret == ESP_OK) {
         printf("IO Expander initialized successfully for joystick input\n");
         // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
@@ -191,7 +192,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing display manager");
     MEASURE_INIT_RAM("Display Manager", display_manager_init() );
     ESP_LOGI(TAG, "Presenting splash screen");
-    display_manager_switch_view(&splash_view);
+    MEASURE_INIT_RAM("Switch to splash view", display_manager_switch_view(&splash_view));
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
         if (rainbow_timer == NULL) {
             rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
@@ -200,13 +201,14 @@ void app_main(void) {
     }
 #endif
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-    status_display_init();
+    MEASURE_INIT_RAM("Status display init", status_display_init());
     if (!status_display_is_ready()) {
         ESP_LOGW(TAG, "Status display failed to initialize");
     }
 #endif
 
-    esp_err_t err = sd_card_init();
+    esp_err_t err = 0;
+    MEASURE_INIT_RAM("SD Card init", err = sd_card_init());
 
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {
@@ -215,22 +217,26 @@ void app_main(void) {
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);
         if (data_pin != GPIO_NUM_NC) {
-            esp_err_t rgb_err = rgb_manager_init(&rgb_manager, data_pin, CONFIG_NUM_LEDS, LED_PIXEL_FORMAT_GRB,
-                                                 LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC);
+            esp_err_t rgb_err;
+            MEASURE_INIT_RAM("RGB Manager (data pin) init", rgb_err = rgb_manager_init(&rgb_manager, data_pin, CONFIG_NUM_LEDS, LED_PIXEL_FORMAT_GRB,
+                                                 LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC));
             initialized = (rgb_err == ESP_OK);
         } else if (red_pin != GPIO_NUM_NC && green_pin != GPIO_NUM_NC && blue_pin != GPIO_NUM_NC) {
-            esp_err_t rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, 1, LED_PIXEL_FORMAT_GRB,
-                                                 LED_MODEL_WS2812, red_pin, green_pin, blue_pin);
+            esp_err_t rgb_err;
+            MEASURE_INIT_RAM("RGB Manager (separate pins) init", rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, 1, LED_PIXEL_FORMAT_GRB,
+                                                 LED_MODEL_WS2812, red_pin, green_pin, blue_pin));
             initialized = (rgb_err == ESP_OK);
         }
-        if (!initialized) {
+            if (!initialized) {
     #ifdef CONFIG_LED_DATA_PIN
-            esp_err_t rgb_err = rgb_manager_init(&rgb_manager, CONFIG_LED_DATA_PIN, CONFIG_NUM_LEDS, LED_ORDER,
-                                                 LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC);
+            esp_err_t rgb_err;
+            MEASURE_INIT_RAM("RGB Manager (fallback) init", rgb_err = rgb_manager_init(&rgb_manager, CONFIG_LED_DATA_PIN, CONFIG_NUM_LEDS, LED_ORDER,
+                                                 LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC));
             initialized = (rgb_err == ESP_OK);
     #elif defined(CONFIG_RED_RGB_PIN) && defined(CONFIG_GREEN_RGB_PIN) && defined(CONFIG_BLUE_RGB_PIN)
-            esp_err_t rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, 1, LED_PIXEL_FORMAT_GRB,
-                                                 LED_MODEL_WS2812, CONFIG_RED_RGB_PIN, CONFIG_GREEN_RGB_PIN, CONFIG_BLUE_RGB_PIN);
+            esp_err_t rgb_err;
+            MEASURE_INIT_RAM("RGB Manager (fallback separate pins) init", rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, 1, LED_PIXEL_FORMAT_GRB,
+                                                 LED_MODEL_WS2812, CONFIG_RED_RGB_PIN, CONFIG_GREEN_RGB_PIN, CONFIG_BLUE_RGB_PIN));
             initialized = (rgb_err == ESP_OK);
     #endif
         }

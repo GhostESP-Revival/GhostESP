@@ -65,7 +65,6 @@ void st7789_init(void)
         {ST7789_IDSET, {0x11}, 1},
         {ST7789_VCMOFSET, {0x35, 0x3E}, 2},
         {ST7789_CABCCTRL, {0xBE}, 1},
-        {ST7789_MADCTL, {0x00}, 1}, // Set to 0x28 if your display is flipped
         {ST7789_COLMOD, {0x55}, 1},
 
 #if ST7789_INVERT_COLORS == 1
@@ -85,7 +84,6 @@ void st7789_init(void)
         {ST7789_GCTRL, {0x07}, 1},
         {0xB6, {0x0A, 0x82, 0x27, 0x00}, 4},
         {ST7789_SLPOUT, {0}, 0x80},
-        {ST7789_DISPON, {0}, 0x80},
         {0, {0}, 0xff},
     };
 
@@ -114,6 +112,7 @@ void st7789_init(void)
     vTaskDelay(100 / portTICK_PERIOD_MS);
 #else
     st7789_send_cmd(ST7789_SWRESET);
+    vTaskDelay(120 / portTICK_PERIOD_MS);
 #endif
 
     printf("ST7789 initialization.\n");
@@ -130,6 +129,8 @@ void st7789_init(void)
     }
 
     st7789_set_orientation(CONFIG_LV_DISPLAY_ORIENTATION);
+    st7789_send_cmd(ST7789_DISPON);
+    vTaskDelay(20 / portTICK_PERIOD_MS);
 }
 
 /* The ST7789 display controller can drive up to 320*240 displays, when using a 240*240 or 240*135

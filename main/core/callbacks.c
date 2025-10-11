@@ -13,6 +13,7 @@
 #include <time.h>
 #include "esp_rom_sys.h"  // Contains esp_rom_printf
 #include <esp_timer.h>  // For esp_timer_get_time
+#include "freertos/task.h"
 
 // prototypes for static inline helpers
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
@@ -58,6 +59,207 @@ static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2);
 static bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt);
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #endif
+
+// handshake pairing and limited beacon emission for eapol capture
+typedef struct {
+    uint8_t ap[6];
+    uint8_t sta[6];
+    uint64_t replay;
+    uint8_t ap_msg;   // 0=unknown, 1..4=M1..M4
+    uint8_t sta_msg;  // 0=unknown, 1..4=M1..M4
+} hs_entry_t;
+
+#define HS_TABLE_MAX 16
+static hs_entry_t hs_table[HS_TABLE_MAX];
+static uint8_t hs_count_local = 0;
+static uint8_t hs_insert_idx_local = 0;
+static uint32_t hs_found_count = 0;
+
+static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
+    return memcmp(a, b, 6) == 0;
+}
+
+static const char *msg_name(uint8_t m) {
+    switch (m) { case 1: return "M1"; case 2: return "M2"; case 3: return "M3"; case 4: return "M4"; default: return "M?"; }
+}
+
+static void process_eapol_candidate_pair(const uint8_t *ap,
+                                         const uint8_t *sta,
+                                         uint64_t replay,
+                                         bool from_ap,
+                                         uint8_t msg_type) {
+    for (uint8_t i = 0; i < hs_count_local; i++) {
+        hs_entry_t *e = &hs_table[i];
+        if (mac_equal(e->ap, ap) && mac_equal(e->sta, sta) && e->replay == replay) {
+            if (from_ap) e->ap_msg = msg_type; else e->sta_msg = msg_type;
+            if (e->ap_msg && e->sta_msg) {
+                hs_found_count++;
+                char ap_str[18];
+                snprintf(ap_str, sizeof(ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                         e->ap[0], e->ap[1], e->ap[2], e->ap[3], e->ap[4], e->ap[5]);
+                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
+                     ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
+                // reset to avoid duplicate notifications for same replay
+                e->ap_msg = 0;
+                e->sta_msg = 0;
+            }
+            return;
+        }
+    }
+    uint8_t idx;
+    if (hs_count_local < HS_TABLE_MAX) {
+        idx = hs_count_local++;
+    } else {
+        idx = hs_insert_idx_local;
+        hs_insert_idx_local = (hs_insert_idx_local + 1) % HS_TABLE_MAX;
+    }
+    hs_entry_t *ne = &hs_table[idx];
+    memcpy(ne->ap, ap, 6);
+    memcpy(ne->sta, sta, 6);
+    ne->replay = replay;
+    ne->ap_msg = from_ap ? msg_type : 0;
+    ne->sta_msg = from_ap ? 0 : msg_type;
+}
+
+typedef struct {
+    uint8_t bssid[6];
+    uint8_t emitted;
+    bool saw_nonempty_ssid;
+} beacon_limiter_t;
+
+#define BEACON_LIMIT_MAX 64
+#define BEACON_MAX_PER_BSSID 3
+static beacon_limiter_t beacon_limits[BEACON_LIMIT_MAX];
+static uint8_t beacon_limit_count = 0;
+static uint8_t beacon_limit_insert = 0;
+
+// probe request dedupe to keep files small
+#define PROBE_DEDUPE_MAX 64
+typedef struct {
+    uint8_t src[6];
+    uint32_t ssid_hash;
+    uint64_t last_ms;
+} probe_dedupe_t;
+static probe_dedupe_t probe_dedupe_tbl[PROBE_DEDUPE_MAX];
+static uint8_t probe_dedupe_count = 0;
+static uint8_t probe_dedupe_insert = 0;
+
+static bool probe_should_emit(const uint8_t *src, uint32_t ssid_hash, uint64_t now_ms) {
+    for (uint8_t i = 0; i < probe_dedupe_count; i++) {
+        probe_dedupe_t *e = &probe_dedupe_tbl[i];
+        if (memcmp(e->src, src, 6) == 0 && e->ssid_hash == ssid_hash) {
+            if (now_ms - e->last_ms < PROBE_DEDUPE_TIMEOUT_MS) {
+                return false;
+            }
+            e->last_ms = now_ms;
+            return true;
+        }
+    }
+    uint8_t idx;
+    if (probe_dedupe_count < PROBE_DEDUPE_MAX) {
+        idx = probe_dedupe_count++;
+    } else {
+        idx = probe_dedupe_insert;
+        probe_dedupe_insert = (probe_dedupe_insert + 1) % PROBE_DEDUPE_MAX;
+    }
+    probe_dedupe_t *ne = &probe_dedupe_tbl[idx];
+    memcpy(ne->src, src, 6);
+    ne->ssid_hash = ssid_hash;
+    ne->last_ms = now_ms;
+    return true;
+}
+
+static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text) {
+    for (uint8_t i = 0; i < beacon_limit_count; i++) {
+        if (mac_equal(beacon_limits[i].bssid, bssid)) {
+            if (beacon_limits[i].emitted >= BEACON_MAX_PER_BSSID) {
+                if (!beacon_limits[i].saw_nonempty_ssid && ssid_has_text) {
+                    beacon_limits[i].saw_nonempty_ssid = true;
+                    return true;
+                }
+                return false;
+            }
+            beacon_limits[i].emitted++;
+            if (ssid_has_text) beacon_limits[i].saw_nonempty_ssid = true;
+            return true;
+        }
+    }
+    uint8_t idx;
+    if (beacon_limit_count < BEACON_LIMIT_MAX) {
+        idx = beacon_limit_count++;
+    } else {
+        idx = beacon_limit_insert;
+        beacon_limit_insert = (beacon_limit_insert + 1) % BEACON_LIMIT_MAX;
+    }
+    memcpy(beacon_limits[idx].bssid, bssid, 6);
+    beacon_limits[idx].emitted = 1;
+    beacon_limits[idx].saw_nonempty_ssid = ssid_has_text;
+    return true;
+}
+
+// queued writer to avoid heavy work in promiscuous callback
+typedef struct {
+    uint16_t length;
+    uint8_t *buffer;
+    pcap_capture_type_t cap_type;
+} pcap_q_item_t;
+
+#define EAPOL_Q_LEN 64
+static QueueHandle_t s_pcap_q = NULL;
+static TaskHandle_t s_pcap_writer_task = NULL;
+
+static void pcap_writer_task(void *arg) {
+    (void)arg;
+    pcap_q_item_t item;
+    uint32_t processed = 0;
+    for (;;) {
+        if (xQueueReceive(s_pcap_q, &item, pdMS_TO_TICKS(500)) == pdTRUE) {
+            if (item.buffer && item.length > 0) {
+                pcap_write_packet_to_buffer(item.buffer, item.length, item.cap_type);
+                free(item.buffer);
+            }
+            processed++;
+            if ((processed & 0xFF) == 0) { // log occasionally to avoid spam
+                UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(NULL);
+                glog("PCAP writer HWM (words): %lu\n", (unsigned long)hwm_words);
+            }
+            if ((processed & 0x1F) == 0) {
+                pcap_flush_buffer_to_file();
+            }
+        } else {
+            // periodic flush even if idle
+            pcap_flush_buffer_to_file();
+        }
+    }
+}
+
+static inline void ensure_pcap_queue_started(void) {
+    if (s_pcap_q == NULL) {
+        s_pcap_q = xQueueCreate(EAPOL_Q_LEN, sizeof(pcap_q_item_t));
+        if (s_pcap_q != NULL && s_pcap_writer_task == NULL) {
+            xTaskCreate(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
+        }
+    }
+}
+
+static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len, pcap_capture_type_t cap_type) {
+    if (!payload || len == 0) return;
+    ensure_pcap_queue_started();
+    if (!s_pcap_q) return;
+    pcap_q_item_t item = {0};
+    item.length = len;
+    item.buffer = (uint8_t *)malloc(len);
+    item.cap_type = cap_type;
+    if (!item.buffer) return;
+    memcpy(item.buffer, payload, len);
+    if (xQueueSend(s_pcap_q, &item, 0) != pdTRUE) {
+        free(item.buffer);
+    }
+}
+
+static inline void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
+    enqueue_pcap_write_typed(payload, len, PCAP_CAPTURE_WIFI);
+}
 static const char *suspicious_names[] STORE_DATA_ATTR = {
     "HC-03", "HC-05", "HC-06",  "HC-08",    "BT-HC05", "JDY-31",
     "AT-09", "HM-10", "CC41-A", "MLT-BT05", "SPP-CA",  "FFD0"};
@@ -292,7 +494,7 @@ static void start_log_task(pineap_network_t *network, const char *new_ssid, int8
     log_data->channel = channel;
     log_data->rssi = rssi;
     log_data->network = network;
-    BaseType_t result = xTaskCreate(log_pineap_detection, "pineap_log", 4096, log_data, 1,
+    BaseType_t result = xTaskCreate(log_pineap_detection, "pineap_log", 1024, log_data, 1,
                                     &network->log_task_handle);
     if (result != pdPASS) {
         free(log_data);
@@ -412,7 +614,7 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
                 memcpy(log_data->bssid, network->bssid, 6);
                 log_data->network = network; // Pass network pointer for up-to-date info
 
-                BaseType_t result = xTaskCreate(log_pineap_detection, "pineap_log", 4096, log_data,
+                BaseType_t result = xTaskCreate(log_pineap_detection, "pineap_log", 1024, log_data,
                                                 1, &network->log_task_handle);
                 if (result != pdPASS) {
                     free(log_data);
@@ -422,8 +624,7 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
 
             // Write to PCAP if capture is active
             if (pcap_file != NULL) {
-                pcap_write_packet_to_buffer(ppkt->payload, ppkt->rx_ctrl.sig_len,
-                                            PCAP_CAPTURE_WIFI);
+                enqueue_pcap_write(ppkt->payload, ppkt->rx_ctrl.sig_len);
             }
         }
     }
@@ -534,11 +735,7 @@ void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     }
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("RAW_SCAN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
 }
 
@@ -637,11 +834,7 @@ void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!is_packet_valid(pkt, type)) return;
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("PROBE_SCAN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
 }
 
@@ -659,11 +852,7 @@ void wifi_beacon_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (frame_subtype != WIFI_PKT_BEACON) return;
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("BEACON_SCAN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
 }
 
@@ -681,11 +870,7 @@ void wifi_deauth_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (frame_subtype != WIFI_PKT_DEAUTH && frame_subtype != 0x0A) return; // 0x0A = disassoc
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("DEAUTH_SCAN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
 }
 
@@ -694,31 +879,144 @@ void wifi_pwn_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("PWN_SCAN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
 }
 
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
-    // EAPOL packets are in DATA frames, not management
-    if (type != WIFI_PKT_DATA) return;
-    
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-    
-    // Additional early filtering
-    if (!is_packet_valid(pkt, type)) return;
-    
-    // Quick EAPOL check - look for 0x888E ethertype
-    if (!is_eapol_response(pkt)) return;
-    
-    if (pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret =
-            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("EAPOL_SCAN", "Failed to write packet to buffer");
+
+    // minimal validation: don't drop on RSSI for handshake capture
+    if (type == WIFI_PKT_MISC) return;
+    if (pkt->rx_ctrl.sig_len < 24) return;
+
+    if (type == WIFI_PKT_DATA) {
+        const uint8_t *frame = pkt->payload;
+        int len = pkt->rx_ctrl.sig_len;
+
+        uint16_t fc = frame[0] | (frame[1] << 8);
+        uint8_t dtype = (fc >> 2) & 0x3;      // 2 = data
+        uint8_t dsub = (fc >> 4) & 0xF;
+        bool qos = (dtype == 0x2) && ((dsub & 0x8) != 0);
+        bool to_ds = (fc >> 8) & 0x1;
+        bool from_ds = (fc >> 9) & 0x1;
+
+        size_t hdr_len = 24;
+        if (to_ds && from_ds) hdr_len = 30;
+        if (qos) hdr_len += 2;
+        if (len < (int)(hdr_len + 8)) return;
+
+        const uint8_t *llc = frame + hdr_len;
+        if (llc[0] != 0xAA || llc[1] != 0xAA || llc[2] != 0x03) return;
+        uint16_t ethertype = (llc[6] << 8) | llc[7];
+        if (ethertype != 0x888E) return;
+
+        const uint8_t *eapol = llc + 8;
+        if (len < (int)(hdr_len + 8 + 17)) return;
+
+        uint8_t key_desc_type = eapol[4];
+        if (key_desc_type != 2) {
+            // still write eapol payloads
+            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            return;
+        }
+
+        uint16_t key_info = (eapol[5] << 8) | eapol[6];
+        bool has_mic = (key_info & 0x0100) != 0;
+        bool is_pairwise = (key_info & 0x0008) != 0;
+        bool is_install = (key_info & 0x0040) != 0;
+        bool is_ack = (key_info & 0x0080) != 0;
+
+        // addresses
+        const uint8_t *addr1 = frame + 4;  // DA
+        const uint8_t *addr2 = frame + 10; // SA
+        const uint8_t *ap_mac = NULL;
+        const uint8_t *sta_mac = NULL;
+
+        if (is_ack) {
+            ap_mac = addr2;
+            sta_mac = addr1;
+        } else {
+            ap_mac = addr1;
+            sta_mac = addr2;
+        }
+
+        uint64_t replay = 0;
+        for (int i = 0; i < 8; i++) replay = (replay << 8) | eapol[9 + i];
+
+        if (is_pairwise && has_mic) {
+            // derive msg type: AP frames with MIC: M3, STA frames with MIC: M2/M4 (install bit is set on M3)
+            uint8_t msg = 0;
+            if (is_ack && is_install) msg = 3;          // AP->STA, MIC, Install => M3
+            else if (!is_ack && !is_install) msg = 2;    // STA->AP, MIC, no Install => M2
+            else if (!is_ack && is_install) msg = 4;     // STA->AP, MIC, Install (rare) => treat as M4
+            else msg = 0;                                // unknown/edge
+            process_eapol_candidate_pair(ap_mac, sta_mac, replay, is_ack, msg);
+        }
+
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        return;
+    }
+
+    if (type == WIFI_PKT_MGMT) {
+        const uint8_t *frame = pkt->payload;
+        if (pkt->rx_ctrl.sig_len < 24) return;
+        uint8_t subtype = (frame[0] & 0xF0) >> 4;
+
+        // assoc/reassoc frames
+        if (subtype == 0x0 || subtype == 0x1 || subtype == 0x2 || subtype == 0x3) {
+            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            return;
+        }
+
+        // authentication frames (useful for context/sae)
+        if (subtype == 0x0B) {
+            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            return;
+        }
+
+        // probe request frames (capture undirected and directed) with de-duplication
+        if (subtype == WIFI_PKT_PROBE_REQ) {
+            const uint8_t *src = frame + 10; // addr2
+            // parse SSID element
+            char ssid[33] = {0};
+            bool ssid_found = false;
+            int index = 24;
+            if (pkt->rx_ctrl.sig_len > index) {
+                const uint8_t *body = frame + index;
+                int body_len = pkt->rx_ctrl.sig_len - index;
+                for (int i = 0; i < body_len - 1; i += 2 + body[i+1]) {
+                    uint8_t tag_num = body[i];
+                    uint8_t tag_len = body[i+1];
+                    if (tag_num == 0 && tag_len < sizeof(ssid) && i + 2 + tag_len <= body_len) {
+                        memcpy(ssid, &body[i+2], tag_len);
+                        ssid[tag_len] = '\0';
+                        if (tag_len == 0) strcpy(ssid, "Broadcast");
+                        ssid_found = true;
+                        break;
+                    }
+                }
+                if (!ssid_found) strcpy(ssid, "Broadcast");
+            }
+            uint32_t h = hash_ssid(ssid);
+            uint64_t now_ms = esp_timer_get_time() / 1000ULL;
+            if (probe_should_emit(src, h, now_ms)) {
+                enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            }
+            return;
+        }
+
+        // limited beacons and probe responses
+        if (subtype == WIFI_PKT_BEACON || subtype == WIFI_PKT_PROBE_RESP) {
+            if (pkt->rx_ctrl.sig_len >= 38) {
+                const uint8_t *bssid = frame + 16;
+                uint8_t ssid_len = frame[37];
+                bool ssid_nonempty = ssid_len > 0;
+                if (beacon_should_emit_limited(bssid, ssid_nonempty)) {
+                    enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+                }
+            }
+            return;
         }
     }
 }
@@ -812,8 +1110,7 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
                             detected_wps_networks[detected_network_count++] = new_network;
                         } else {
-                            pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len,
-                                                        PCAP_CAPTURE_WIFI);
+                            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
                         }
 
                         if (detected_network_count >= MAX_WPS_NETWORKS) {
@@ -1014,8 +1311,8 @@ static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promi
     
     packets_processed++;
     
-    // Log stats every 1000 packets
-    if (total_packets_received % 1000 == 0) {
+    // Log stats less frequently to reduce spam (every ~20000 packets)
+    if (total_packets_received % 20000 == 0) {
         char stats_msg[128];
         snprintf(stats_msg, sizeof(stats_msg), "Filter stats: %lu total, %lu filtered, %lu processed (%.1f%% filtered)", 
                 (unsigned long)total_packets_received, 

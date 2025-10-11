@@ -607,10 +607,11 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 submit_text();
             } else {
                 char c = sel[0];
-                if (!encoder_sym_mode && isalpha((unsigned char)c) && !encoder_uppercase) {
-                    c = (char)tolower((unsigned char)c);
+                if (!encoder_sym_mode && isalpha((unsigned char)c)) {
+                    c = encoder_uppercase ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
                 }
-                add_char_to_buffer(c);
+                // bypass global is_caps so encoder "Aa" accurately controls case
+                add_char_to_buffer_raw(c);
             }
         }
         return;

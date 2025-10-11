@@ -48,6 +48,28 @@
 </details>
 
 <details>
+<summary><strong>Karma Attack</strong></summary>
+
+- <code>karma start</code>  
+  Start Karma attack using all discovered SSIDs (learns from probe requests)
+
+- <code>karma start &lt;SSID1&gt; [SSID2] [SSID3] ...</code>  
+  Start Karma attack with specific SSIDs  
+  Example: <code>karma start FreeWiFi Starbucks McDonald's</code>
+
+- <code>karma stop</code>  
+  Stop Karma attack
+
+**How Karma Works:**
+- Listens for probe requests from nearby devices
+- Automatically caches SSIDs that devices are looking for
+- Creates fake access points with those SSIDs
+- Starts evil portals for each fake network
+- Rotates between multiple SSIDs every 5 seconds
+- Broadcasts beacon frames for all cached SSIDs every 500ms
+</details>
+
+<details>
 <summary><strong>Network Generation (Beacon Spam)</strong></summary>
 
 - <code>beaconspam -r</code>  

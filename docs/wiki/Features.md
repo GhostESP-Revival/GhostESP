@@ -38,6 +38,14 @@ GhostESP comes packed with various features for wireless network exploration and
   - SAE handshake flood (ESP32-C5/C6 only)
   - DHCP starvation attack
 
+- **Karma Attack**
+  - Responds to probe requests with fake access points
+  - Automatically learns SSIDs from nearby devices
+  - Creates fake networks with discovered SSIDs
+  - Integrates with evil portal for captive portal attacks
+  - SSID rotation every 5 seconds for maximum effectiveness
+  - Manual SSID specification for targeted attacks
+
 - **Evil Portal**
   - Custom SSID and domain setup
   - Start built-in or custom HTML captive portals

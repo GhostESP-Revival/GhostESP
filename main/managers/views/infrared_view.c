@@ -1440,7 +1440,7 @@ static void ir_select_item(int index) {
     lv_obj_t *prev = lv_obj_get_child(list, selected_ir_index);
     if(prev) {
         // Check if this is one of the management buttons that have special styling
-        if (showing_commands && selected_ir_index >= signal_count) {
+        if (showing_commands && !in_universals_mode && selected_ir_index >= signal_count) {
             // This is a management button, restore its special styling
             if (selected_ir_index == signal_count) {
                 // Rename button
@@ -1466,7 +1466,7 @@ static void ir_select_item(int index) {
     if(cur) {
         // If the currently selected item is the Delete Remote management option,
         // highlight it with a lighter red instead of the default gray.
-        if (showing_commands && selected_ir_index >= signal_count && selected_ir_index == signal_count + 2) {
+        if (showing_commands && !in_universals_mode && selected_ir_index >= signal_count && selected_ir_index == signal_count + 2) {
             lv_obj_set_style_bg_color(cur, lv_color_hex(0xB22222), LV_PART_MAIN);
         } else {
             lv_obj_set_style_bg_color(cur, lv_color_hex(0x555555), LV_PART_MAIN);
@@ -2048,9 +2048,6 @@ static void file_event_open(int idx) {
             }
             lv_obj_add_event_cb(btn, command_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         }
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-        add_encoder_back_btn();
-#endif
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
         add_encoder_back_btn();
 #endif

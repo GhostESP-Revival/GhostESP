@@ -482,8 +482,6 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI3_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI3_HOST;
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;

@@ -4,55 +4,63 @@
 
 ### Added
 
-- **Hardware**
-  - Added support for Cardputer ADV
-  - Added Kconfig support for IO Expander - @Play2BReal
+#### Hardware
 
-- **Networking & Capture**
-  - Added 802.15.4 packet capture (only on C5, C6)
-  - Added heartbeat-based auto-reconnect for dual communication
+- Added support for Cardputer ADV
+- Added Kconfig support for a secondary status display
+- Added Kconfig support for IO Expander - @Play2BReal
+- Added heartbeat-based auto-reconnect for dual communication
 
-- **Display & UI**
-  - Added 2 alternate main menu layouts (Grid and List)
-  - Ghost (asset by @the1anonlypr3) and Game of Life idle animations for status display
-  - Added Kconfig support for a secondary status display
+#### NFC
 
-- **Input**
-  - Added command history with up/down navigation and full in-line cursor editing to the serial console. - @tototo31
-  - Add joystick support for keyboard input in terminal view - @tototo31
+- NTAG (Type 2) support: read/write NTAG213/215/216 with NDEF parsing and save to Flipper .nfc format
+- MIFARE Classic support (Mini/1K/4K): Flipper dictionary attack, magic backdoor detection, and NDEF TLV parsing
+- File management: 'Saved' menu for .nfc files and 'User Keys' view for `/mnt/ghostesp/nfc/mfc_user_dict.nfc
 
-- **Commands**
-  - Added 'set/getneopixelbrightness' commands to set or get the max brightness of the neopixels - @tototo31
-  - Added ability to set settings via cli - @tototo31
+#### UI
 
-- **Tools**
-  - Added glog - a lightweight logging helper
+- Added 2 alternate main menu layouts (Grid and List)
+- Ghost (asset by @the1anonlypr3) and Game of Life idle animations for status display
+- Added command history with up/down navigation and full in-line cursor editing to the serial console - @tototo31
+- Added joystick support for keyboard input in terminal view - @tototo31
+- Added 'set/getneopixelbrightness' commands and ability to set settings via CLI - @tototo31
 
-- **NFC (PN532)**
-  - **NTAG Support (Type 2)**
-    - Read NTAG213/215/216 with NDEF parsing
-    - Write NTAG213/215/216 from .nfc files
-    - Save to Flipper .nfc format (fully compatible)
-  - **MIFARE Classic Support (Mini/1K/4K)**
-    - Flipper's 1000+ key dictionary attack
-    - Magic backdoor detection (Gen1A clones)
-    - Parse and display NDEF TLV data
-  - **File Management**
-    - 'Saved' menu to browse .nfc files and rename/delete them from the UI
-    - 'User Keys' view to list `/mnt/ghostesp/nfc/mfc_user_dict.nfc`
+#### Attacks
+
+- Added 802.15.4 packet capture (only on C5, C6)
+- Added karma attack - @tototo31 in #108
+
+#### Misc
+
+- Added glog - a lightweight logging helper
 
 ### Changed
+
+#### UI
 
 - Use a fixed-size active-key buffer for keyboard
 - Refactor popups to use reusable popup helpers
 - Refactor options menu to use reusable options view helpers
-- Refactor comm manager to centralize packet handling, add state mutex and handshake timeout, and guard UART driver install
-- Update main menu icons to RGB565A8
 - Enabled software back buttons made for encoder controls on joystick too
-- Joystick builds now use touch keyboard layout with selection highlighting and navigation
-- Changed the C5 to use a single display buffer to save memory
-- Reduced VFS allocation unit size to 4KB
 - Size popup buttons based on what's in them
+- WebUI redesign (Part 2)
+- Organise BLE menu into hierarchical sub-menus - @tototo31
+
+#### Attacks
+
+- Flush PCAP and CSV data to SD Card on a timer
+- EAPOL capture now captures extra packet types for cracking and detects when a crackable handshake is found
+- Added a summary log when starting a packet capture and reduce filter stats frequency
+
+#### Misc
+
+- Lowered pineap task size
+- Changed the C5 to use a single display buffer to save memory
+- Reduce VFS allocation unit size to 4KB
+- Cap displayed WiFi APs to 50 for 'scanap' output
+- Refactor comm manager to centralize packet handling, add state mutex and handshake timeout, and guard UART driver install
+- If dualcomm is set to pins used by the serial UART, disable the serial UART
+- Update main menu icons to RGB565A8
 - Refactored dualcomm logic to be more robust
 
 ### Bug Fixes
@@ -68,22 +76,32 @@
 - Small miscellaneous memory saves
 - Fixed RMT channel allocation on C5 to prevent conflicts with IR TX
 - Disable duplicate filtering in general BLE scanning
-
-
-#### Network & Comms
-
+- Removed heap alloc per command
+- Added deletions for VisualizerHandle on disconnect/stop and rgb_effect_task_handle on rgb off/stop to prevent lingering tasks 
+- Removed second mdns init call
+- Preallocate handlers array, remove reallocs; replace last_company_id malloc with value+flag in BLE manager
+- Free all LED strip resources on deinit
 - Ignore self when discovering peers for dual comm
 - Prevent crash and spam in EAPOL Logoff attack
 - Fixed minor issues with the dns server
 - Fixed BLE capture stopping itself after recieving an event
 - Added sanity checks to IE parsing to prevent OOB reads
 - Accepted HCI packet types now include CMD, ACL, SCO, and ISO
+- Reduce heap churn by reusing a single 4KB transfer buffer in wifi managerstreaming
+- Significantly improve reliability of capturing wifi frames
+- Remove arbitrary limitation on the lines of text in the webUI dual comm terminal
+
+#### Display
+
+- Possible fix for random rotation of ST7789 displays upon flashing
+- Joystick builds now use touch keyboard layout with selection highlighting and navigation
 
 #### Input & UI
 
 - Fix keyboard not using SHIFT correctly and the keyboard view forcing lowercase
 - Remove artificial delay in cardputer keyboard task to make more responsive
 - Improve and refactor terminal message handling
+- Fixed duplicate back button and wrong red styling in universals IR view
 
 ## Revival v1.7.2
 
