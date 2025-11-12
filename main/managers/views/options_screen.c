@@ -248,7 +248,7 @@ static lv_obj_t *back_btn = NULL;
 
 // --- Add Bluetooth submenu arrays and state ---
 static const char *bluetooth_main_options[] = {
-    "AirTag", "Flipper", "Spam", "Raw", "Skimmer", NULL
+    "AirTag", "Flipper", "Spam", "Raw", "Skimmer", "Detectors", NULL
 };
 static const char *bluetooth_airtag_options[] = {
     "Start AirTag Scanner", "List AirTags", "Select AirTag", "Spoof Selected AirTag", "Stop Spoofing", NULL
@@ -266,6 +266,9 @@ static const char *bluetooth_raw_options[] = {
 static const char *bluetooth_skimmer_options[] = {
     "BLE Skimmer Detect", NULL
 };
+static const char *bluetooth_detectors_options[] = {
+    "Apple Detector", "Samsung Detector", "Google Detector", "Tile Detector", "Axon Detector", "Taser Detector", "Flock Detector", NULL
+};
 
 typedef enum {
     BLUETOOTH_MENU_MAIN,
@@ -273,7 +276,8 @@ typedef enum {
     BLUETOOTH_MENU_FLIPPER,
     BLUETOOTH_MENU_SPAM,
     BLUETOOTH_MENU_RAW,
-    BLUETOOTH_MENU_SKIMMER
+    BLUETOOTH_MENU_SKIMMER,
+    BLUETOOTH_MENU_DETECTORS
 } BluetoothMenuState;
 
 static BluetoothMenuState current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
@@ -487,6 +491,7 @@ void options_menu_create() {
             case BLUETOOTH_MENU_SPAM: options = bluetooth_spam_options; break;
             case BLUETOOTH_MENU_RAW: options = bluetooth_raw_options; break;
             case BLUETOOTH_MENU_SKIMMER: options = bluetooth_skimmer_options; break;
+            case BLUETOOTH_MENU_DETECTORS: options = bluetooth_detectors_options; break;
         }
         break;
     case OT_GPS: options = gps_options; break;
@@ -1202,6 +1207,7 @@ void option_event_cb(lv_event_t *e) {
             else if (strcmp(Selected_Option, "Spam") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_SPAM;
             else if (strcmp(Selected_Option, "Raw") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_RAW;
             else if (strcmp(Selected_Option, "Skimmer") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_SKIMMER;
+            else if (strcmp(Selected_Option, "Detectors") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_DETECTORS;
             display_manager_switch_view(&options_menu_view);
             return;
         }
@@ -1575,6 +1581,90 @@ display_manager_switch_view(&terminal_view);
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("capture -skimmer");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Apple Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -apple");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Samsung Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -samsung");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Google Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -google");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Tile Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -tile");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Axon Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -axon");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Taser Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -taser");
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+        
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "Flock Detector") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("blescan -flock");
         view_switched = true;
 #else
         error_popup_create("Device Does not Support Bluetooth...");
