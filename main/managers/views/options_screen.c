@@ -248,7 +248,7 @@ static lv_obj_t *back_btn = NULL;
 
 // --- Add Bluetooth submenu arrays and state ---
 static const char *bluetooth_main_options[] = {
-    "AirTag", "Flipper", "Spam", "Raw", "Skimmer", "Detectors", NULL
+    "AirTag", "Flipper", "Spam", "Raw", "Detectors", NULL
 };
 static const char *bluetooth_airtag_options[] = {
     "Start AirTag Scanner", "List AirTags", "Select AirTag", "Spoof Selected AirTag", "Stop Spoofing", NULL
@@ -264,10 +264,10 @@ static const char *bluetooth_raw_options[] = {
     "Raw BLE Scanner", NULL
 };
 static const char *bluetooth_skimmer_options[] = {
-    "BLE Skimmer Detect", NULL
+    NULL
 };
 static const char *bluetooth_detectors_options[] = {
-    "Apple Detector", "Samsung Detector", "Google Detector", "Tile Detector", "Axon Detector", "Taser Detector", "Flock Detector", NULL
+    "Apple Detector", "Axon Detector", "BLE Skimmer Detect", "Flock Detector", "Google Detector", "Samsung Detector", "Taser Detector", "Tile Detector", NULL
 };
 
 typedef enum {
@@ -1206,7 +1206,6 @@ void option_event_cb(lv_event_t *e) {
             else if (strcmp(Selected_Option, "Flipper") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_FLIPPER;
             else if (strcmp(Selected_Option, "Spam") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_SPAM;
             else if (strcmp(Selected_Option, "Raw") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_RAW;
-            else if (strcmp(Selected_Option, "Skimmer") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_SKIMMER;
             else if (strcmp(Selected_Option, "Detectors") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_DETECTORS;
             display_manager_switch_view(&options_menu_view);
             return;
