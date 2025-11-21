@@ -81,7 +81,15 @@ typedef struct {
     bool selected_for_spoofing;
 } AirTagDevice;
 
+// Reduce array sizes for ESP32 to save DRAM (ESP32 has limited static DRAM: 160KB max)
+#ifdef CONFIG_IDF_TARGET_ESP32
+#define MAX_AIRTAGS 10 // Reduced for ESP32 memory constraints
+#define MAX_DEVICES_DETECT 10 // Reduced for ESP32 memory constraints
+#else
 #define MAX_AIRTAGS 50 // Maximum number of AirTags to store
+#define MAX_DEVICES_DETECT 50
+#endif
+
 static AirTagDevice discovered_airtags[MAX_AIRTAGS];
 static int discovered_airtag_count = 0;
 static int selected_airtag_index = -1; // Index of the AirTag selected for spoofing
@@ -93,8 +101,6 @@ typedef struct {
     char device_type[32];
     int8_t rssi;
 } GenericDevice;
-
-#define MAX_DEVICES_DETECT 50
 static GenericDevice discovered_apple_devices[MAX_DEVICES_DETECT];
 static int discovered_apple_count = 0;
 
