@@ -335,12 +335,10 @@ void mfc_ui_set_cache_mode(bool on) {
     lv_async_call(nfc_set_cache_mode_async, ev);
 }
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
 // Exposed for mifare_classic.c to honor UI skip request (weak extern there)
 bool nfc_is_dict_skip_requested(void) { return nfc_dict_skip_requested; }
-#endif
 
-#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
 static const mfc_attack_hooks_t nfc_ui_attack_hooks = {
     .on_phase = mfc_ui_set_phase,
     .on_cache_mode = mfc_ui_set_cache_mode,
