@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "managers/nfc/mifare_attack.h"
 #ifdef CONFIG_NFC_PN532
 #include "pn532.h"
 #endif
@@ -39,9 +40,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
                            size_t out_path_len);
 #endif
 
-// Optional progress callback for dictionary attack attempts.
-// UI can set this to receive coarse progress updates (current/total keys)
-// while mfc_build_details_summary() and mfc_save_flipper_file() try the
-// embedded dictionary. Set cb=NULL to disable.
 typedef void (*mfc_progress_cb_t)(int current, int total, void* user);
 void mfc_set_progress_callback(mfc_progress_cb_t cb, void* user);
+
+void mfc_set_attack_hooks(const mfc_attack_hooks_t *hooks);

@@ -44,25 +44,27 @@ int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { 
 static const char *TAG = "Main.c";
 void app_main(void) {
     // Pull SPI CS pins HIGH to prevent bus conflicts for the TEmbed C1101
-#ifdef CONFIG_USE_ENCODER
-    ESP_LOGI(TAG, "Initializing SPI CS pins");
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
+        ESP_LOGI(TAG, "Initializing SPI CS pins for TEmbed C1101");
 
-    gpio_reset_pin(CONFIG_LV_DISP_SPI_CS);
-    gpio_set_direction(CONFIG_LV_DISP_SPI_CS, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
-    ESP_LOGI(TAG, "TFT CS pin %d set HIGH", CONFIG_LV_DISP_SPI_CS);
+        gpio_reset_pin(CONFIG_LV_DISP_SPI_CS);
+        gpio_set_direction(CONFIG_LV_DISP_SPI_CS, GPIO_MODE_OUTPUT);
+        gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+        ESP_LOGI(TAG, "TFT CS pin %d set HIGH", CONFIG_LV_DISP_SPI_CS);
 
-    // CC1101 SS pin
-    gpio_reset_pin(12);
-    gpio_set_direction(12, GPIO_MODE_OUTPUT);
-    gpio_set_level(12, 1);
-    ESP_LOGI(TAG, "CC1101 SS pin 12 set HIGH");
+        // CC1101 SS pin
+        gpio_reset_pin(12);
+        gpio_set_direction(12, GPIO_MODE_OUTPUT);
+        gpio_set_level(12, 1);
+        ESP_LOGI(TAG, "CC1101 SS pin 12 set HIGH");
 
-    // SD Card CS pin
-    gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
-    gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
-    ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+        // SD Card CS pin
+        gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
+        gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
+        ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+    }
 #endif
 
 
@@ -94,41 +96,43 @@ void app_main(void) {
     return;
 #endif
 
-#ifdef CONFIG_USE_ENCODER
-    gpio_reset_pin(15);
-    gpio_set_direction(15, GPIO_MODE_OUTPUT);
-    
-    // Check if we woke up from deep sleep
-    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-    
-    switch (wakeup_reason) {
-        case ESP_SLEEP_WAKEUP_UNDEFINED:
-            ESP_LOGI("Main", "Normal startup (not from deep sleep), IO15 set high");
-            break;
-        case ESP_SLEEP_WAKEUP_EXT0:
-            ESP_LOGI("DeepSleep", "Woke up from deep sleep via EXT0 (IO6), pulling IO15 high");
-            gpio_set_level(15, 1);
-            break;
-        case ESP_SLEEP_WAKEUP_EXT1:
-            ESP_LOGI("DeepSleep", "Woke up from deep sleep via EXT1 (IO6), pulling IO15 high");
-            gpio_set_level(15, 1);
-            break;
-        case ESP_SLEEP_WAKEUP_TIMER:
-            ESP_LOGI("Main", "Woke up from deep sleep via timer, IO15 set high");
-            break;
-        case ESP_SLEEP_WAKEUP_TOUCHPAD:
-            ESP_LOGI("Main", "Woke up from deep sleep via touchpad, IO15 set high");
-            break;
-        case ESP_SLEEP_WAKEUP_ULP:
-            ESP_LOGI("Main", "Woke up from deep sleep via ULP, IO15 set high");
-            break;
-        default:
-            ESP_LOGI("Main", "Woke up from deep sleep via unknown cause (%d), IO15 set high", wakeup_reason);
-            break;
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
+        gpio_reset_pin(15);
+        gpio_set_direction(15, GPIO_MODE_OUTPUT);
+        
+        // Check if we woke up from deep sleep
+        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+        
+        switch (wakeup_reason) {
+            case ESP_SLEEP_WAKEUP_UNDEFINED:
+                ESP_LOGI("Main", "Normal startup (not from deep sleep), IO15 set high");
+                break;
+            case ESP_SLEEP_WAKEUP_EXT0:
+                ESP_LOGI("DeepSleep", "Woke up from deep sleep via EXT0 (IO6), pulling IO15 high");
+                gpio_set_level(15, 1);
+                break;
+            case ESP_SLEEP_WAKEUP_EXT1:
+                ESP_LOGI("DeepSleep", "Woke up from deep sleep via EXT1 (IO6), pulling IO15 high");
+                gpio_set_level(15, 1);
+                break;
+            case ESP_SLEEP_WAKEUP_TIMER:
+                ESP_LOGI("Main", "Woke up from deep sleep via timer, IO15 set high");
+                break;
+            case ESP_SLEEP_WAKEUP_TOUCHPAD:
+                ESP_LOGI("Main", "Woke up from deep sleep via touchpad, IO15 set high");
+                break;
+            case ESP_SLEEP_WAKEUP_ULP:
+                ESP_LOGI("Main", "Woke up from deep sleep via ULP, IO15 set high");
+                break;
+            default:
+                ESP_LOGI("Main", "Woke up from deep sleep via unknown cause (%d), IO15 set high", wakeup_reason);
+                break;
+        }
+        
+        // Always set IO15 high on startup
+        gpio_set_level(15, 1);
     }
-    
-    // Always set IO15 high on startup
-    gpio_set_level(15, 1);
 #endif
 
 #ifdef CONFIG_WITH_ETHERNET

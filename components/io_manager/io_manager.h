@@ -16,6 +16,9 @@ typedef struct {
     bool left;
     bool right;
     bool select;
+    bool b1;
+    bool b2;
+    bool b3;
 } btn_event_t;
 
 // IO Manager configuration
@@ -39,9 +42,14 @@ esp_err_t io_manager_init(const io_manager_config_t *config);
 esp_err_t io_manager_deinit(void);
 esp_err_t io_manager_scan_buttons(btn_event_t *event);
 esp_err_t io_manager_get_button_states(btn_event_t *states);
+esp_err_t io_manager_get_cached_button_states(btn_event_t *states);
 uint8_t io_manager_get_raw_state(void);
 void io_manager_reset_events(void);
 void io_manager_debug_states(void);
+bool io_manager_is_initialized(void);
+
+bool io_manager_get_encoder_signals(bool *signal_a, bool *signal_b);
+bool io_manager_get_encoder_button(void);
 
 #ifdef __cplusplus
 }

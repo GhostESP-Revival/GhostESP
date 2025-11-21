@@ -20,6 +20,12 @@ void joystick_init(joystick_t *joystick, int pin, uint32_t hold_lim,
   joystick->hold_init = 0;
   joystick->deep_sleep_triggered = false;
 
+#ifdef CONFIG_USE_IO_EXPANDER
+  if (io_expander_initialized && pin >= 0 && pin <= 7) {
+    return;
+  }
+#endif
+
   gpio_config_t io_conf = {
       .pin_bit_mask = (1ULL << pin),
       .mode = GPIO_MODE_INPUT,
@@ -66,29 +72,12 @@ bool joystick_is_held(joystick_t *joystick) { return joystick->isheld; }
 bool joystick_get_button_state(joystick_t *joystick) {
 #ifdef CONFIG_USE_IO_EXPANDER
   if (io_expander_initialized) {
-    static btn_event_t cached = {0};
-    static esp_err_t last_ret = ESP_FAIL;
-    static uint32_t next_read_ms = 0;
-    static uint32_t cooloff_until_ms = 0;
-    static uint8_t fail_count = 0;
-
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-
-    if (now_ms >= cooloff_until_ms && now_ms >= next_read_ms) {
-      last_ret = io_manager_get_button_states(&cached);
-      if (last_ret == ESP_OK) {
-        fail_count = 0;
-        next_read_ms = now_ms + 30;      // ~33 Hz
-      } else {
-        if (fail_count < 255) fail_count++;
-        // short backoff, then longer if consecutive failures
-        uint32_t backoff = (fail_count < 3) ? 50 : 200;
-        next_read_ms = now_ms + backoff;
-        cooloff_until_ms = now_ms + backoff;
-      }
+    if (joystick->pin == 7) {
+      return io_manager_get_encoder_button();
     }
 
-    if (last_ret == ESP_OK) {
+    btn_event_t cached = {0};
+    if (io_manager_get_cached_button_states(&cached) == ESP_OK) {
       switch (joystick->pin) {
         case 0: return cached.up;     // P00: Up
         case 1: return cached.down;   // P01: Down

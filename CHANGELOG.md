@@ -1,5 +1,11 @@
 # Ghost ESP Changelog
 
+## Revival v1.9
+
+- Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
+- Refactors to NFC logic to make more maintainable
+- After scanning, NFC popup title now specifies the tag type
+
 ## Revival v1.8.1
 
 ### Added

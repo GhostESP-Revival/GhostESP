@@ -26,6 +26,7 @@ typedef struct {
     int pin_a;
     int pin_b;
     bool pullup;
+    bool use_io_expander;        ///< true if pins are on IO expander, not ESP32 GPIOs
 
     /* internal state */
     int8_t  old_state;

@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "managers/nfc/mifare_attack.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -267,6 +268,8 @@ typedef void (*chameleon_progress_cb_t)(int current, int total, void *user);
  * set progress callback for chameleon ultra operations (e.g., classic dict scan)
  */
 void chameleon_manager_set_progress_callback(chameleon_progress_cb_t cb, void *user);
+
+void chameleon_manager_set_attack_hooks(const mfc_attack_hooks_t *hooks);
 
 /**
  * perform mifare classic read using defaults + user + embedded dict; set skip_dict to bypass dict

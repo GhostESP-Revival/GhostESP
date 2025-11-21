@@ -34,9 +34,14 @@ lv_obj_t *popup_create_title_label(lv_obj_t *container, const char *title, const
 lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coord_t width, bool wrap, const lv_font_t *font, lv_coord_t y_ofs);
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
 #include "managers/nfc/mifare_classic.h"
+#include "managers/nfc/mifare_attack.h"
 #endif
 #include "managers/chameleon_manager.h"
 #include "managers/nfc/ndef.h"
+
+// Forward declaration for nfc_get_detected_title
+static const char* nfc_get_detected_title(void);
+
 // freeRTOS used regardless of backend
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -54,6 +59,10 @@ lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coor
 // UI hook from MIFARE Classic layer to indicate sector/block/key phase
 // (implementation declared later after static variables are defined)
 void mfc_ui_set_phase(int sector, int first_block, bool key_b, int total_keys);
+void mfc_ui_set_cache_mode(bool on);
+void mfc_ui_set_paused(bool on);
+bool nfc_is_scan_cancelled(void);
+bool nfc_is_dict_skip_requested(void);
 
 // Forward declaration of this view instance for internal references
 extern View nfc_view;
@@ -330,6 +339,17 @@ void mfc_ui_set_cache_mode(bool on) {
 // Exposed for mifare_classic.c to honor UI skip request (weak extern there)
 bool nfc_is_dict_skip_requested(void) { return nfc_dict_skip_requested; }
 #endif
+
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
+static const mfc_attack_hooks_t nfc_ui_attack_hooks = {
+    .on_phase = mfc_ui_set_phase,
+    .on_cache_mode = mfc_ui_set_cache_mode,
+    .on_paused = mfc_ui_set_paused,
+    .should_cancel = nfc_is_scan_cancelled,
+    .should_skip_dict = nfc_is_dict_skip_requested
+};
+#endif
+
 static void nfc_scan_cancel_cb(lv_event_t *e);
 static void nfc_scan_more_cb(lv_event_t *e);
 static void nfc_scan_save_cb(lv_event_t *e);
@@ -532,7 +552,7 @@ static void nfc_progress_update_async(void *ptr) {
         else if (nfc_cache_fill_phase) snprintf(title, sizeof(title), "Reading sectors... %d%%", percent);
         else if (nfc_dict_skip_requested) snprintf(title, sizeof(title), "Basic read (skipping dict) ...");
         else if (bruteforce_active) snprintf(title, sizeof(title), "Bruteforcing keys... %d%%", percent);
-        else if (nfc_details_ready) snprintf(title, sizeof(title), "NFC Tag");
+        else if (nfc_details_ready) snprintf(title, sizeof(title), "%s", nfc_get_detected_title());
         else snprintf(title, sizeof(title), "Scanning NFC...");
         lv_label_set_text(nfc_title_label, title);
         if (nfc_details_ready && !bruteforce_active && !nfc_cache_fill_phase) lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
@@ -565,6 +585,7 @@ static void nfc_progress_update_async(void *ptr) {
         if (dp->t > 0) snprintf(info, sizeof(info), "Dictionary: %d/%d (%d%%)%s", dp->c, dp->t, percent, phase);
         else snprintf(info, sizeof(info), "Dictionary: %d (unknown total)%s", dp->c, phase);
         lv_label_set_text(nfc_details_label, info);
+        lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
     }
     nfc_dict_pool_free(dp);
 }
@@ -583,6 +604,7 @@ static pn532_io_t g_pn532_instance;
 #endif
 static TaskHandle_t nfc_scan_task_handle = NULL;
 static char *nfc_details_text = NULL;
+static char nfc_detected_title[64] = {0};
 static uint32_t nfc_details_session = 0;
 static uint8_t g_uid[10] = {0};
 static uint8_t g_uid_len = 0;
@@ -599,6 +621,25 @@ typedef struct {
     uint32_t session; // scan session
 } ndef_details_result_t;
 
+static const char* nfc_get_detected_title(void) {
+    return (nfc_detected_title[0] != '\0') ? nfc_detected_title : "NFC Tag";
+}
+
+static void nfc_update_title_from_details(const char *details) {
+    if (!details) return;
+    const char *card = strstr(details, "Card:");
+    if (!card) return;
+    card += 5;
+    while (*card == ' ' || *card == '\t') card++;
+    if (!*card) return;
+    size_t idx = 0;
+    while (card[idx] && card[idx] != '\n' && card[idx] != '|' && idx < sizeof(nfc_detected_title) - 1) {
+        nfc_detected_title[idx] = card[idx];
+        idx++;
+    }
+    nfc_detected_title[idx] = '\0';
+}
+
 static void nfc_set_details_async(void *ptr) {
     if (!ptr) return;
     ndef_details_result_t *res = (ndef_details_result_t *)ptr;
@@ -608,6 +649,10 @@ static void nfc_set_details_async(void *ptr) {
     if (nfc_details_text) { free(nfc_details_text); nfc_details_text = NULL; }
     nfc_details_text = res->text;
     nfc_details_ready = true;
+    nfc_update_title_from_details(nfc_details_text);
+    if (nfc_detected_title[0] == '\0') {
+        snprintf(nfc_detected_title, sizeof(nfc_detected_title), "NFC Tag");
+    }
     // reset phase state and update summary labels to indicate completion
     mfc_phase_sector = -1;
     mfc_phase_first_block = -1;
@@ -625,8 +670,13 @@ static void nfc_set_details_async(void *ptr) {
         }
     }
     // If already showing details, update label
+    if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
+        lv_label_set_text(nfc_title_label, nfc_detected_title);
+        lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
+    }
     if (nfc_details_visible && nfc_details_label && lv_obj_is_valid(nfc_details_label)) {
         lv_label_set_text(nfc_details_label, nfc_details_text);
+        lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
     }
     // Reset dict-skip flag for next scans
     nfc_dict_skip_requested = false;
@@ -702,6 +752,7 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
     free(mem);
     if (!text) return;
     g_model = model;
+    snprintf(nfc_detected_title, sizeof(nfc_detected_title), "%s", ntag_t2_model_str(model));
     ndef_details_result_t *res = (ndef_details_result_t*)malloc(sizeof(*res));
     if (!res) { free(text); return; }
     res->text = text; res->text_len = strlen(text); res->session = nfc_scan_session;
@@ -743,8 +794,12 @@ static void nfc_refresh_cu_details_from_cache(void) {
     if (cached) {
         nfc_details_text = strdup(cached);
         nfc_details_ready = (nfc_details_text != NULL);
+        if (nfc_details_ready) {
+            nfc_update_title_from_details(nfc_details_text);
+        }
     } else {
         nfc_details_ready = false;
+    nfc_detected_title[0] = '\0';
     }
     nfc_details_session = current;
     nfc_reset_more_button_label();
@@ -823,7 +878,7 @@ static void nfc_scan_cu_task(void *arg) {
             }
             // If MIFARE Classic (0x08/0x18/0x09), perform dict-based read on CU
             if (sak == 0x08 || sak == 0x18 || sak == 0x09) {
-                // Reuse PN532 UI progress callback wiring for CU
+                chameleon_manager_set_attack_hooks(&nfc_ui_attack_hooks);
                 chameleon_manager_set_progress_callback(mfc_dict_progress_cb, NULL);
                 (void)chameleon_manager_mf1_read_classic_with_dict(false);
                 // Refresh details text from CU cache
@@ -873,6 +928,7 @@ static void nfc_save_cu_task(void *arg) {
 static void nfc_scan_task(void *arg) {
     const char *TAGT = "NFCScan";
     ESP_LOGI(TAGT, "scan_task: start (cancel=%d)", nfc_scan_cancel);
+    mfc_set_attack_hooks(&nfc_ui_attack_hooks);
     if (g_pn532 == NULL) {
         g_pn532 = &g_pn532_instance;
         // Prefer a single I2C controller for all devices sharing the same pins.
@@ -1593,6 +1649,7 @@ void cleanup_nfc_scan_popup(void *obj) {
     if (nfc_details_text) { free(nfc_details_text); nfc_details_text = NULL; }
     nfc_details_ready = false;
     nfc_details_visible = false;
+    nfc_detected_title[0] = '\0';
     // Clear paused/cache flags so a new scan doesn't inherit a stale state
     nfc_paused = false;
     nfc_cache_fill_phase = false;
@@ -2096,6 +2153,8 @@ static void nfc_show_details_view(bool show) {
         }
         if (nfc_details_label && lv_obj_is_valid(nfc_details_label)) {
             lv_obj_align(nfc_details_label, LV_ALIGN_TOP_MID, 0, 20);
+            lv_label_set_long_mode(nfc_details_label, LV_LABEL_LONG_WRAP);
+            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
         }
         // Set details text
         #if defined(CONFIG_NFC_CHAMELEON)
@@ -2106,6 +2165,7 @@ static void nfc_show_details_view(bool show) {
             } else {
                 lv_label_set_text(nfc_details_label, "Reading tag data...");
             }
+            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
         } else
         #endif
         {
@@ -2115,8 +2175,10 @@ static void nfc_show_details_view(bool show) {
             } else {
                 lv_label_set_text(nfc_details_label, "Reading tag data...");
             }
+            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
             #else
             lv_label_set_text(nfc_details_label, "NFC not available");
+            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
             #endif
         }
         lv_obj_clear_flag(nfc_details_label, LV_OBJ_FLAG_HIDDEN);
@@ -2129,7 +2191,7 @@ static void nfc_show_details_view(bool show) {
         if (nfc_uid_label) lv_obj_clear_flag(nfc_uid_label, LV_OBJ_FLAG_HIDDEN);
         if (nfc_type_label) lv_obj_clear_flag(nfc_type_label, LV_OBJ_FLAG_HIDDEN);
         if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
-            lv_label_set_text(nfc_title_label, "NFC Tag");
+            lv_label_set_text(nfc_title_label, nfc_get_detected_title());
             lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
         }
         if (nfc_scan_more_btn && lv_obj_is_valid(nfc_scan_more_btn)) {

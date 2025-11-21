@@ -147,20 +147,16 @@
      ESP_LOGD(TAG, "SAK: 0x%.2X", pn532_packetbuffer[11]);
  #endif
  
-     /* Card appears to be Mifare Classic */
-     *uid_length = pn532_packetbuffer[12];
- #ifdef CONFIG_MIFAREDEBUG
-     printf("UID:");
- #endif
-     for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
-         uid[i] = pn532_packetbuffer[13 + i];
- #ifdef CONFIG_MIFAREDEBUG
-         printf(" 0x%.2X", uid[i]);
- #endif
-     }
- #ifdef CONFIG_MIFAREDEBUG
-     printf("\n");
- #endif
+    /* Card appears to be Mifare Classic */
+    *uid_length = pn532_packetbuffer[12];
+#ifdef CONFIG_MIFAREDEBUG
+    printf("UID:");
+    for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
+        printf(" 0x%.2X", pn532_packetbuffer[13 + i]);
+    }
+    printf("\n");
+#endif
+    memcpy(uid, pn532_packetbuffer + 13, pn532_packetbuffer[12]);
  
      return ESP_OK;
  }
@@ -213,22 +209,18 @@
         *sak = pn532_packetbuffer[11];
      }
 
-     *uid_length = pn532_packetbuffer[12];
- #ifdef CONFIG_MIFAREDEBUG
-     printf("UID:");
- #endif
-     for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
-         uid[i] = pn532_packetbuffer[13 + i];
- #ifdef CONFIG_MIFAREDEBUG
-         printf(" 0x%.2X", uid[i]);
- #endif
-     }
- #ifdef CONFIG_MIFAREDEBUG
-     printf("\n");
- #endif
+    *uid_length = pn532_packetbuffer[12];
+#ifdef CONFIG_MIFAREDEBUG
+    printf("UID:");
+    for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
+        printf(" 0x%.2X", pn532_packetbuffer[13 + i]);
+    }
+    printf("\n");
+#endif
+    memcpy(uid, pn532_packetbuffer + 13, pn532_packetbuffer[12]);
 
-     return ESP_OK;
- }
+    return ESP_OK;
+}
 
  esp_err_t ntag2xx_get_version(pn532_io_handle_t io_handle, uint8_t version_out[8])
  {
@@ -287,12 +279,13 @@
        return ESP_ERR_INVALID_ARG;
    }
 
-     uint8_t i;
-     pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
-     pn532_packetbuffer[1] = pn532_inListedTag;
-     for (i = 0; i < send_buffer_length; ++i) {
-         pn532_packetbuffer[i + 2] = send_buffer[i];
-     }
+    pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+    pn532_packetbuffer[1] = pn532_inListedTag;
+    memcpy(pn532_packetbuffer + 2, send_buffer, send_buffer_length);
+
+     // detect auth attempts for faster timeout (auth fails quickly)
+     bool is_auth = (send_buffer_length == 12 && (send_buffer[0] == MIFARE_CMD_AUTH_A || send_buffer[0] == MIFARE_CMD_AUTH_B));
+     int32_t wait_timeout = is_auth ? 10 : s_indata_wait_ms;
 
      esp_err_t err = pn532_send_command_wait_ack(io_handle, pn532_packetbuffer, send_buffer_length + 2, PN532_WRITE_TIMEOUT);
    if (ESP_OK != err) {
@@ -300,16 +293,22 @@
        return err;
    }
 
-     err = pn532_wait_ready(io_handle, s_indata_wait_ms);
+     err = pn532_wait_ready(io_handle, wait_timeout);
    if (ESP_OK != err) {
        if (!s_quiet) ESP_LOGI(TAG, "INDATAEXCHANGE timeout waiting for response");
        return err;
    }
 
-     err = pn532_read_data(io_handle, pn532_packetbuffer, sizeof(pn532_packetbuffer), PN532_READ_TIMEOUT);
+     // detect block reads (MIFARE_CMD_READ = 0x30) - read full frame in one go for speed
+     // block read response is always 26 bytes: preamble(3) + len(1) + len_chk(1) + TFI(1) + CMD(1) + status(1) + data(16) + chk(1) + post(1)
+     bool is_block_read = (send_buffer_length == 2 && send_buffer[0] == MIFARE_CMD_READ);
+     uint8_t initial_read = is_block_read ? 26 : 8;
+     
+     err = pn532_read_data(io_handle, pn532_packetbuffer, initial_read, PN532_READ_TIMEOUT);
      if (ESP_OK != err)
          return err;
 
+     // quick check for valid frame header
      if (pn532_packetbuffer[0] == 0 && pn532_packetbuffer[1] == 0 && pn532_packetbuffer[2] == 0xff) {
          uint8_t length = pn532_packetbuffer[3];
          if (0 != ((pn532_packetbuffer[4] + length) & 0xFF)) {
@@ -317,29 +316,31 @@
           return ESP_FAIL;
       }
        if (pn532_packetbuffer[5] == PN532_PN532TOHOST && pn532_packetbuffer[6] == PN532_RESPONSE_INDATAEXCHANGE) {
+            // check status early for fast auth failure
             if ((pn532_packetbuffer[7] & 0x3f) != 0) {
                 if (!s_quiet) ESP_LOGI(TAG, "INDATAEXCHANGE status error: 0x%02X", pn532_packetbuffer[7]);
                 return ESP_FAIL;
             }
-
-            // Subtract TFI, CMD, status
-            if (length < 3) {
-                if (!s_quiet) ESP_LOGI(TAG, "INDATAEXCHANGE payload length underflow: %u", (unsigned)length);
-                return ESP_FAIL;
+            
+            // for block reads we already have all data, for others read remaining if needed
+            if (!is_block_read && length > 3) {
+                uint8_t remaining = length - 3;
+                if (remaining > 0 && remaining <= (sizeof(pn532_packetbuffer) - 8)) {
+                    err = pn532_read_data(io_handle, pn532_packetbuffer + 8, remaining, PN532_READ_TIMEOUT);
+                    if (ESP_OK != err) return err;
+                }
             }
+
+            // subtract TFI, CMD, status (already validated above)
             length -= 3;
 
-            // Clamp to available buffer space to avoid overflow on malformed frames
-            size_t max_payload = (sizeof(pn532_packetbuffer) > 8) ? (sizeof(pn532_packetbuffer) - 8) : 0;
-            if (length > max_payload) {
-                length = (uint8_t)max_payload;
-            }
+            // clamp to available buffer space and response buffer
             if (length > *response_length) {
-                length = *response_length; // silent truncation...
+                length = *response_length;
             }
 
-            for (i = 0; i < length; ++i) {
-                response[i] = pn532_packetbuffer[8 + i];
+            if (length > 0) {
+                memcpy(response, pn532_packetbuffer + 8, length);
             }
             *response_length = length;
 
@@ -365,9 +366,7 @@
   }
 
     pn532_packetbuffer[0] = PN532_COMMAND_INCOMMUNICATETHRU;
-    for (uint8_t i = 0; i < send_buffer_length; ++i) {
-        pn532_packetbuffer[1 + i] = send_buffer[i];
-    }
+    memcpy(pn532_packetbuffer + 1, send_buffer, send_buffer_length);
 
     esp_err_t err = pn532_send_command_wait_ack(io_handle, pn532_packetbuffer, send_buffer_length + 1, PN532_WRITE_TIMEOUT);
   if (ESP_OK != err) {
@@ -447,7 +446,7 @@ void pn532_set_inlist_wait_timeout(int ms) { if (ms > 0) s_inlist_wait_ms = ms; 
      if (ESP_OK != err)
          return err;
  
-     if (pn532_packetbuffer[0] == 0 && pn532_packetbuffer[1] == 0 && pn532_packetbuffer[2] == 0xff)
+     if (*(uint32_t*)pn532_packetbuffer == 0x00ff0000)
      {
          uint8_t length = pn532_packetbuffer[3];
          if (0 != ((pn532_packetbuffer[4] + length) & 0xFF))

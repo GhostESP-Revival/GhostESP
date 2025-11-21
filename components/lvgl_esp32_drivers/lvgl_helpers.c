@@ -31,7 +31,9 @@
  *      DEFINES
  *********************/
 
- #define TAG "lvgl_helpers"
+#define TAG "lvgl_helpers"
+
+static void *s_lvgl_lock_handle = NULL;
 
 /**********************
  *      TYPEDEFS
@@ -149,6 +151,11 @@ void lvgl_driver_init(void)
     #endif
 #else
 #endif
+}
+
+void lvgl_i2c_locking(void* leader)
+{
+    s_lvgl_lock_handle = leader;
 }
 
 
