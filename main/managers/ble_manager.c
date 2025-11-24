@@ -68,6 +68,7 @@ static void ble_on_reset(int reason);
 static void ble_suspend_networking(void);
 static void ble_resume_networking(void);
 static void parse_device_name(const uint8_t *data, size_t len, char *name_buf, size_t name_buf_len);
+static void parse_service_uuids(const uint8_t *data, size_t len, ble_service_uuids_t *uuids);
 static const char *detect_flipper_type_from_adv(const uint8_t *data, size_t len);
 static int ble_gap_event_general(struct ble_gap_event *event, void *arg);
 
@@ -925,7 +926,10 @@ static void restart_ble_stack(void) {
 
     // Stop any active advertising
     if (ble_gap_adv_active()) {
-        ble_gap_adv_stop();
+        int rc = ble_gap_adv_stop();
+        if (rc != 0) {
+            ESP_LOGE(TAG_BLE, "Error stopping advertisement");
+        }
     }
     
     // Stop the NimBLE stack and wait for the host task to exit before deinit
@@ -1004,7 +1008,7 @@ static bool extract_company_id(const uint8_t *payload, size_t length, uint16_t *
     while (index < length) {
         uint8_t field_length = payload[index];
 
-        if (field_length == 0 || index + field_length >= length) {
+        if (field_length == 0 || (size_t)(field_length + 1) > length) {
             break;
         }
 
@@ -1084,6 +1088,65 @@ static void parse_device_name(const uint8_t *data, size_t len, char *name_buf, s
     }
 }
 
+static void parse_service_uuids(const uint8_t *data, size_t len, ble_service_uuids_t *uuids) {
+    if (!data || len < 2 || !uuids) {
+        return;
+    }
+
+    uuids->uuid16_count = 0;
+    uuids->uuid32_count = 0;
+    uuids->uuid128_count = 0;
+
+    size_t index = 0;
+    while (index < len) {
+        uint8_t field_len = data[index];
+        if (field_len == 0) {
+            break;
+        }
+        if (index + field_len >= len) {
+            break;
+        }
+
+        uint8_t field_type = data[index + 1];
+        const uint8_t *payload = &data[index + 2];
+        uint8_t payload_len = (field_len >= 1) ? (uint8_t)(field_len - 1) : 0;
+
+        if ((field_type == 0x02 || field_type == 0x03) && payload_len >= 2) {
+            while (payload_len >= 2 && uuids->uuid16_count < MAX_UUID16) {
+                uint16_t u16 = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+                uuids->uuid16[uuids->uuid16_count++] = u16;
+                payload += 2;
+                payload_len -= 2;
+            }
+        } else if ((field_type == 0x04 || field_type == 0x05) && payload_len >= 4) {
+            while (payload_len >= 4 && uuids->uuid32_count < MAX_UUID32) {
+                uint32_t u32 = (uint32_t)payload[0] |
+                               ((uint32_t)payload[1] << 8) |
+                               ((uint32_t)payload[2] << 16) |
+                               ((uint32_t)payload[3] << 24);
+                uuids->uuid32[uuids->uuid32_count++] = u32;
+                payload += 4;
+                payload_len -= 4;
+            }
+        } else if ((field_type == 0x06 || field_type == 0x07) && payload_len >= 16) {
+            while (payload_len >= 16 && uuids->uuid128_count < MAX_UUID128) {
+                char *out = uuids->uuid128[uuids->uuid128_count];
+                static const char hex[] = "0123456789ABCDEF";
+                for (int i = 0; i < 16; i++) {
+                    out[i * 2]     = hex[(payload[i] >> 4) & 0xF];
+                    out[i * 2 + 1] = hex[payload[i] & 0xF];
+                }
+                out[32] = '\0';
+                uuids->uuid128_count++;
+                payload += 16;
+                payload_len -= 16;
+            }
+        }
+
+        index += field_len + 1;
+    }
+}
+
 static const char *detect_flipper_type_from_adv(const uint8_t *data, size_t len) {
     const uint8_t *p = data;
     size_t remaining = len;
@@ -1091,6 +1154,7 @@ static const char *detect_flipper_type_from_adv(const uint8_t *data, size_t len)
     const char *uuid_type = NULL;
 
     while (remaining > 1) {
+        uint8_t field_length = p[0];
         uint8_t field_len = p[0];
 
         if (field_len == 0 || (size_t)(field_len + 1) > remaining) {
