@@ -102,7 +102,7 @@ void encoder_tick(encoder_t *enc)
     int8_t this_state = (int8_t)(sig1 | (sig2 << 1));
 
     if (enc->old_state != this_state) {
-        ESP_LOGI("Encoder", "State change: %d -> %d (pins: %d, %d)", enc->old_state, this_state, sig1, sig2);
+        ESP_LOGD("Encoder", "State change: %d -> %d (pins: %d, %d)", enc->old_state, this_state, sig1, sig2);
         enc->position += KNOBDIR[this_state | (enc->old_state << 2)];
         enc->old_state = this_state;
 

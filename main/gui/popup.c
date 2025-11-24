@@ -1,6 +1,7 @@
 #include "gui/popup.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "managers/settings_manager.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -23,6 +24,23 @@ struct popup_t {
 static const lv_coord_t DEFAULT_MARGIN = 6;
 static const char *TAG = "PopupLayout";
 
+static const uint32_t popup_theme_accents[15] = {
+    0x1976D2,0xFFCDD2,0x263238,0xFFFFFF,0x002B36,
+    0x888888,0xE91E63,0x9C27B0,0x2196F3,0xFFA500,
+    0x39FF14,0xFF00FF,0x0077BE,0xFF4500,0x556B2F
+};
+
+static lv_color_t popup_get_accent_color(void) {
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    if (theme >= (sizeof(popup_theme_accents) / sizeof(popup_theme_accents[0]))) theme = 0;
+    return lv_color_hex(popup_theme_accents[theme]);
+}
+
+static bool popup_theme_is_bright(void) {
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    return theme == 3;
+}
+
 static lv_coord_t clamp_button_width(lv_coord_t desired, lv_coord_t min_w, lv_coord_t max_w);
 static lv_coord_t popup_measure_button_text_width(lv_obj_t *btn, lv_coord_t padding, lv_coord_t fallback);
 
@@ -38,7 +56,7 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 	lv_obj_set_size(p->container, width, height);
 	lv_obj_align(p->container, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_style_bg_color(p->container, lv_color_hex(0x2E2E2E), 0);
-	lv_obj_set_style_border_color(p->container, lv_color_hex(0x555555), 0);
+	lv_obj_set_style_border_color(p->container, popup_get_accent_color(), 0);
 	lv_obj_set_style_border_width(p->container, 2, 0);
 	lv_obj_set_style_radius(p->container, 10, 0);
 	lv_obj_clear_flag(p->container, LV_OBJ_FLAG_SCROLLABLE);
@@ -100,12 +118,12 @@ lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height) {
 }
 
 lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset) {
-    if (!parent) parent = lv_scr_act();
-    lv_obj_t *container = lv_obj_create(parent);
-    lv_obj_set_size(container, width, height);
-    lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
-    lv_obj_set_style_bg_color(container, lv_color_hex(0x2E2E2E), 0);
-    lv_obj_set_style_border_color(container, lv_color_hex(0x555555), 0);
+    	if (!parent) parent = lv_scr_act();
+	lv_obj_t *container = lv_obj_create(parent);
+    	lv_obj_set_size(container, width, height);
+	lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
+	lv_obj_set_style_bg_color(container, lv_color_hex(0x2E2E2E), 0);
+	lv_obj_set_style_border_color(container, popup_get_accent_color(), 0);
     lv_obj_set_style_border_width(container, 2, 0);
     lv_obj_set_style_radius(container, 10, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
@@ -236,13 +254,17 @@ popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *
 void popup_set_button_selected(lv_obj_t *btn, bool selected) {
     if (!btn || !lv_obj_is_valid(btn)) return;
     if (selected) {
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
+		lv_color_t accent = popup_get_accent_color();
+		lv_obj_set_style_bg_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+		if (lbl) {
+			if (popup_theme_is_bright()) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
+			else lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+		}
     } else {
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(btn, lv_color_hex(0x666666), LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_bg_color(btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_color(btn, lv_color_hex(0x666666), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *lbl = lv_obj_get_child(btn, 0);
         if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
     }

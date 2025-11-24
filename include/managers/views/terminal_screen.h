@@ -17,6 +17,8 @@ void terminal_view_destroy(void);
 
 void terminal_set_return_view(View *view);
 
+void terminal_set_dualcomm_filter(bool enable);
+
 #ifdef CONFIG_WITH_SCREEN
 #define TERMINAL_VIEW_ADD_TEXT(fmt, ...)                                           \
     do {                                                                           \

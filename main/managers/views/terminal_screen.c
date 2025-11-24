@@ -38,6 +38,7 @@ static lv_timer_t *terminal_cleanup_retry_timer = NULL;
 static bool terminal_active = false;
 static bool is_stopping = false;
 static bool terminal_initialized = false; // Flag to track if terminal has been fully initialized
+static bool terminal_dualcomm_only = false;
 #define MAX_TEXT_LENGTH 8192
 #define PROCESSING_INTERVAL_MS 10
 #define PROCESSING_INTERVAL_FAST_MS 5
@@ -393,17 +394,25 @@ static void terminal_push_incoming(const char *data, size_t len) {
   }
 }
 
+static bool terminal_is_dualcomm_line(const char *text);
+static const char *terminal_dualcomm_display_text(const char *text);
+
 static void recalc_layout_if_needed(void) {
   if (!terminal_canvas || !lv_obj_is_valid(terminal_canvas)) return;
-  lv_coord_t w = lv_obj_get_width(terminal_canvas);
-  if (w <= 0) return;
-  if (w != cached_layout_width) {
+  lv_coord_t full_w = lv_obj_get_width(terminal_canvas);
+  if (full_w <= 0) return;
+
+  bool split = terminal_dualcomm_only && (full_w > 0);
+  lv_coord_t col_w = split ? (full_w / 2) : full_w;
+  if (col_w <= 0) col_w = full_w;
+
+  if (col_w != cached_layout_width) {
     // width changed, invalidate cached heights
     for (uint16_t i = 0; i < term_line_count; i++) {
       uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
       term_lines[idx].pxh = 0;
     }
-    cached_layout_width = w;
+    cached_layout_width = col_w;
   }
 
   const lv_font_t *font = lv_obj_get_style_text_font(terminal_canvas, 0);
@@ -417,7 +426,7 @@ static void recalc_layout_if_needed(void) {
     if (L->pxh == 0) {
       lv_point_t sz;
       const char *txt = (L->text && L->text[0]) ? L->text : " ";
-      lv_txt_get_size(&sz, txt, font, letter_space, line_space, w, LV_TEXT_FLAG_NONE);
+      lv_txt_get_size(&sz, txt, font, letter_space, line_space, col_w, LV_TEXT_FLAG_NONE);
       if (sz.y <= 0) sz.y = lv_font_get_line_height(font);
       L->pxh = (uint16_t)sz.y;
     }
@@ -457,24 +466,73 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
   dsc.flag = LV_TEXT_FLAG_NONE;
 
   lv_coord_t w = lv_obj_get_width(obj);
+  bool split = terminal_dualcomm_only && (w > 60);
+  lv_coord_t col_w = split ? (w / 2) : w;
   lv_coord_t local_top = clip->y1 - obj_coords.y1;
   lv_coord_t local_bottom = clip->y2 - obj_coords.y1;
 
-  lv_coord_t y = 0;
-  for (uint16_t i = 0; i < term_line_count; i++) {
-    uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
-    TermLine *L = &term_lines[idx];
-    lv_coord_t h = L->pxh;
-    if ((y + h) < local_top) { y += h; continue; }
-    if (y > local_bottom) break;
-    lv_area_t a;
-    a.x1 = obj_coords.x1;
-    a.y1 = obj_coords.y1 + y;
-    a.x2 = a.x1 + w - 1;
-    a.y2 = a.y1 + h - 1;
-    const char *txt = (L->text && L->text[0]) ? L->text : " ";
-    lv_draw_label(draw_ctx, &dsc, &a, txt, NULL);
-    y += h;
+  if (!split) {
+    // Single-column mode: draw all lines sequentially as before
+    lv_coord_t y = 0;
+    for (uint16_t i = 0; i < term_line_count; i++) {
+      uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
+      TermLine *L = &term_lines[idx];
+      lv_coord_t h = L->pxh;
+      if ((y + h) < local_top) { y += h; continue; }
+      if (y > local_bottom) break;
+      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      lv_area_t a;
+      a.x1 = obj_coords.x1;
+      a.y1 = obj_coords.y1 + y;
+      a.x2 = a.x1 + col_w - 1;
+      a.y2 = a.y1 + h - 1;
+      lv_draw_label(draw_ctx, &dsc, &a, txt, NULL);
+      y += h;
+    }
+  } else {
+    // Split view: compact each column independently
+    // Left column: non-Dual-Comm logs
+    lv_coord_t y_left = 0;
+    for (uint16_t i = 0; i < term_line_count; i++) {
+      uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
+      TermLine *L = &term_lines[idx];
+      lv_coord_t h = L->pxh;
+      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      if (terminal_is_dualcomm_line(txt)) {
+        continue; // skip Dual Comm lines in left column
+      }
+      if ((y_left + h) < local_top) { y_left += h; continue; }
+      if (y_left > local_bottom) break;
+      lv_area_t a;
+      a.x1 = obj_coords.x1;
+      a.y1 = obj_coords.y1 + y_left;
+      a.x2 = a.x1 + col_w - 1;
+      a.y2 = a.y1 + h - 1;
+      lv_draw_label(draw_ctx, &dsc, &a, txt, NULL);
+      y_left += h;
+    }
+
+    // Right column: Dual-Comm-only view
+    lv_coord_t y_right = 0;
+    for (uint16_t i = 0; i < term_line_count; i++) {
+      uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
+      TermLine *L = &term_lines[idx];
+      lv_coord_t h = L->pxh;
+      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      if (!terminal_is_dualcomm_line(txt)) {
+        continue; // skip non-Dual lines in right column
+      }
+      if ((y_right + h) < local_top) { y_right += h; continue; }
+      if (y_right > local_bottom) break;
+      const char *s = terminal_dualcomm_display_text(txt);
+      lv_area_t b;
+      b.x1 = obj_coords.x1 + col_w;
+      b.y1 = obj_coords.y1 + y_right;
+      b.x2 = obj_coords.x1 + w - 1;
+      b.y2 = b.y1 + h - 1;
+      lv_draw_label(draw_ctx, &dsc, &b, s, NULL);
+      y_right += h;
+    }
   }
 }
 
@@ -603,6 +661,7 @@ static void scroll_terminal_down(void) {
 static void stop_all_operations(void) {
     terminal_active = false;
     is_stopping = true;
+    terminal_dualcomm_only = false;
 
     // Send all stop commands
     simulateCommand("stop");
@@ -877,6 +936,31 @@ void terminal_view_destroy(void) {
     }
 }
 
+static bool terminal_is_dualcomm_line(const char *text) {
+  if (!text) return false;
+  if (strstr(text, "RX: ") != NULL) return true;
+  if (strstr(text, "I: Discovered peer:") != NULL) return true;
+  if (strstr(text, "Peer has smaller name") != NULL) return true;
+  if (strstr(text, "I: Connecting to peer:") != NULL) return true;
+  if (strstr(text, "I: Sent command:") != NULL) return true;
+  if (strstr(text, "Handshake completed!") != NULL) return true;
+  if (strstr(text, "W: Handshake timeout") != NULL) return true;
+  if (strstr(text, "W: Connection lost, restarting discovery") != NULL) return true;
+  if (strstr(text, "ESP Comm Response: ") != NULL) return true;
+  return false;
+}
+
+static const char *terminal_dualcomm_display_text(const char *text) {
+  if (!text) return "";
+  // trim leading spaces
+  while (*text == ' ' || *text == '\t') text++;
+  if (strncmp(text, "RX: ", 4) == 0) return text + 4;
+  if (strncmp(text, "I: ", 3) == 0) return text + 3;
+  if (strncmp(text, "W: ", 3) == 0) return text + 3;
+  if (strncmp(text, "ESP Comm Response: ", 20) == 0) return text + 20;
+  return text;
+}
+
 void terminal_view_add_text(const char *text) {
   if (!text || is_stopping || text[0] == '\0') {
       return;
@@ -1036,4 +1120,8 @@ View terminal_view = {
 
 void terminal_set_return_view(View *view) {
     terminal_return_view = view;
+}
+
+void terminal_set_dualcomm_filter(bool enable) {
+    terminal_dualcomm_only = enable;
 }

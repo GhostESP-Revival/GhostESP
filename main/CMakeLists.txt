@@ -57,6 +57,8 @@ if("${IDF_TARGET}" STREQUAL "esp32c5" OR "${IDF_TARGET}" STREQUAL "esp32c6")
     list(APPEND required_components ieee802154)
     # Add Zigbee manager source
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/zigbee_manager.c")
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_nfc_compat.c")
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/smartrider.c")
 endif()
 
 if(CONFIG_HAS_NFC)

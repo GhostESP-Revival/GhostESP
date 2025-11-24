@@ -25,7 +25,7 @@ static KeyboardSubmitCallback submit_callback = NULL;
 static bool is_caps = true;
 static bool is_symbols_mode = false;
 static bool is_capslock = false;
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
 static lv_obj_t *encoder_cont = NULL;
 static lv_obj_t *encoder_labels[50];
 static const char *encoder_alpha_items[41] = {
@@ -51,6 +51,7 @@ static int encoder_offset_x = 0;
 static bool encoder_sym_mode = false;
 static bool encoder_uppercase = true;
 #endif
+
 static char placeholder[64] = "Enter text...";
 
 static bool styles_inited = false;
@@ -292,7 +293,7 @@ static void add_char_to_buffer(char c) {
     if (is_caps && !is_capslock) {
         is_caps = false; // Reset to lowercase after any key press unless capslock is on
         update_key_labels(); // Update key labels to reflect the change
-        #ifdef CONFIG_USE_ENCODER
+        #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_uppercase = (is_capslock || is_caps);
         if (encoder_cont && !encoder_sym_mode) {
             for (int j = 0; j < encoder_item_count; j++) {
@@ -414,7 +415,6 @@ static void recreate_keyboard_buttons() {
         keyboard_build_timer = NULL;
     }
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
-    int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
     int status_bar_height = 20;
     int display_height = 40;
@@ -431,7 +431,7 @@ static void recreate_keyboard_buttons() {
     }
 
     for (int r = 0; r < num_rows; r++) {
-        int total_key_width = screen_width - (padding * 2);
+        int total_key_width = LV_HOR_RES - (padding * 2);
         int current_row_length = max_row_lengths[r];
         int key_width = total_key_width / current_row_length;
         
@@ -506,7 +506,6 @@ static void recreate_keyboard_buttons() {
 static void keyboard_build_step(lv_timer_t *t) {
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (!root || !lv_obj_is_valid(root)) { lv_timer_del(t); keyboard_build_timer = NULL; return; }
-    int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
     int status_bar_height = 20;
     int display_height = 40;
@@ -630,21 +629,20 @@ static void keyboard_create() {
     input_len = 0;
     memset(input_buffer, 0, sizeof(input_buffer));
 
-    int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
     int status_bar_height = 20;
 
     root = lv_obj_create(lv_scr_act());
     keyboard_view.root = root;
     lv_obj_remove_style_all(root);
-    lv_obj_set_size(root, screen_width, screen_height);
+    lv_obj_set_size(root, LV_HOR_RES, screen_height);
     lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     int padding = 5;
     int display_height = 40;
     input_label = lv_label_create(root);
-    lv_obj_set_size(input_label, screen_width - 2 * padding, display_height - 2 * padding);
+    lv_obj_set_size(input_label, LV_HOR_RES - 2 * padding, display_height - 2 * padding);
     lv_obj_set_style_bg_color(input_label, lv_color_hex(0x1E1E1E), 0);
     lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
@@ -673,13 +671,13 @@ static void keyboard_create() {
     }
     keyboard_build_phase = 0;
 
-#if defined(CONFIG_USE_TOUCHSCREEN)
-    // use a single btnmatrix to render the keyboard for touch builds
-    build_key_matrix();
-#elif defined(CONFIG_USE_ENCODER)
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    // use a single btnmatrix to render the keyboard for touch/joystick builds
+    recreate_keyboard_buttons();
+#elif defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
     encoder_cont = lv_obj_create(root);
     lv_obj_remove_style_all(encoder_cont);
-    lv_obj_set_size(encoder_cont, screen_width, display_height);
+    lv_obj_set_size(encoder_cont, LV_HOR_RES, display_height);
     lv_obj_set_pos(encoder_cont, 0, status_bar_height + display_height + padding);
     lv_obj_set_style_bg_opa(encoder_cont, LV_OPA_TRANSP, 0);
     // initialize encoder items and metrics
@@ -687,13 +685,13 @@ static void keyboard_create() {
     encoder_item_count = encoder_alpha_count;
     encoder_sym_mode = false;
     encoder_sel_idx = 0;
-    encoder_screen_width = screen_width;
+    encoder_screen_width = LV_HOR_RES;
     encoder_item_spacing = display_height;
-    encoder_offset_x = (screen_width / 2) - (encoder_item_spacing / 2);
+    encoder_offset_x = (encoder_screen_width / 2) - (encoder_item_spacing / 2);
     lv_obj_set_scroll_dir(encoder_cont, LV_DIR_LEFT | LV_DIR_RIGHT);
     lv_obj_set_scrollbar_mode(encoder_cont, LV_SCROLLBAR_MODE_OFF);
     // pad right to allow last items to center
-    lv_obj_set_style_pad_right(encoder_cont, screen_width, 0);
+    lv_obj_set_style_pad_right(encoder_cont, encoder_screen_width, 0);
     // create and position each item label (centered, avoid clipping)
     for(int i = 0; i < encoder_item_count; i++) {
         encoder_labels[i] = lv_label_create(encoder_cont);
@@ -765,7 +763,7 @@ static void keyboard_destroy() {
         is_symbols_mode = false;
         is_caps = true;
         is_capslock = false;
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_cont = NULL;
         encoder_item_count = 0;
         encoder_screen_width = 0;
@@ -779,8 +777,9 @@ static void keyboard_destroy() {
 }
 
 static void handle_hardware_button_press_keyboard(InputEvent *event) {
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
     if (event->type == INPUT_TYPE_ENCODER) {
+        if (!encoder_cont) return;
         int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;

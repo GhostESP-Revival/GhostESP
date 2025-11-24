@@ -108,10 +108,7 @@ void disp_spi_add_device_config(spi_host_device_t host, spi_device_interface_con
     chained_post_cb=devcfg->post_cb;
     devcfg->post_cb=spi_ready;
     esp_err_t ret=spi_bus_add_device(host, devcfg, &spi);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
-        return; /* bail without asserting to avoid crash when bus init failed */
-    }
+    assert(ret==ESP_OK);
 }
 
 void disp_spi_add_device(spi_host_device_t host)
@@ -152,7 +149,7 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 		assert(TransactionPool != NULL);
 		for (size_t i = 0; i < SPI_TRANSACTION_POOL_SIZE; i++)
 		{
-			spi_transaction_ext_t* pTransaction = (spi_transaction_ext_t*)heap_caps_malloc(sizeof(spi_transaction_ext_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+			spi_transaction_ext_t* pTransaction = (spi_transaction_ext_t*)heap_caps_malloc(sizeof(spi_transaction_ext_t), MALLOC_CAP_DMA);
 			assert(pTransaction != NULL);
 			memset(pTransaction, 0, sizeof(spi_transaction_ext_t));
 			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
@@ -266,24 +263,9 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
 
 		spi_transaction_ext_t *pTransaction = NULL;
 		xQueueReceive(TransactionPool, &pTransaction, portMAX_DELAY);
-		memcpy(pTransaction, &t, sizeof(t));
-        /* try non-blocking first; never drop the final flush transaction */
-        bool is_flush = ((flags & DISP_SPI_SIGNAL_FLUSH) != 0);
-        if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-            spi_transaction_t *presult;
-            if (spi_device_get_trans_result(spi, &presult, 0) == ESP_OK) {
-                xQueueSend(TransactionPool, &presult, portMAX_DELAY);
-            } else {
-                vTaskDelay(1);
-            }
-            if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-                if (is_flush) {
-                    /* block rather than lose the flush completion */
-                    (void) spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, portMAX_DELAY);
-                } else {
-                    xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
-                }
-            }
+        memcpy(pTransaction, &t, sizeof(t));
+        if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, portMAX_DELAY) != ESP_OK) {
+			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);	/* send failed transaction back to the pool to be reused */
         }
     }
 }
@@ -340,4 +322,3 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
         chained_post_cb(trans);
     }
 }
-

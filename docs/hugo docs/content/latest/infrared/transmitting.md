@@ -28,3 +28,45 @@ GhostESP also includes a built-in Universal IR file with popular TV POWER signal
 - Aim the device’s IR LED directly at the target device’s receiver window and stay within a few meters.
 - If nothing happens, close the popup, verify you chose the right protocol (raw vs decoded), and relearn the button or test another signal.
 - Ensure no bright sunlight hits the receiver; ambient infrared noise can reduce range.
+
+## CLI Support
+
+You can transmit signals using the command line interface, which is useful for scripting or automation.
+
+### Sending from file
+
+Use `ir send` to transmit a signal from an existing `.ir` file:
+
+```bash
+# Send the first signal in the file
+ir send /ghostesp/infrared/remotes/TV.ir
+
+# Send the 3rd signal (index 2)
+ir send /ghostesp/infrared/remotes/TV.ir 2
+```
+
+### Inline Sending
+
+You can send raw or parsed signals directly without a file using the `inline` mode markers. This is useful for sending commands from a script or external tool.
+
+**Text Format:**
+
+```text
+[IR/BEGIN]
+name: Power
+type: parsed
+protocol: NEC
+address: FF 00
+command: E7 18
+[IR/CLOSE]
+```
+
+**JSON Format:**
+
+```json
+[IR/BEGIN]
+{"type":"parsed","protocol":"NEC","address":65280,"command":59160}
+[IR/CLOSE]
+```
+
+See the [CLI Reference](/getting-started/command-line-reference/#infrared) for full command details.

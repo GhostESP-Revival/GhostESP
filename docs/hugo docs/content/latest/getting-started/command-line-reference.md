@@ -109,6 +109,17 @@ toc: true
 - **`setrgbpins <r> <g> <b>`** — Override discrete RGB GPIOs; pass the same pin for all three values to switch into single-wire NeoPixel mode on that data pin.
 - **`setneopixelbrightness <0-100>`** / **`getneopixelbrightness`** — Control NeoPixel intensity.
 
+## Infrared
+
+- **`ir list [path]`** — List `.ir` files (default: `/mnt/ghostesp/infrared/remotes`).
+- **`ir show <path|remote_index>`** — Parse and display signals from an IR file. After `ir list`, you can pass a numeric remote index.
+- **`ir send <path|remote_index> [button_index]`** — Transmit a signal from a file. Use `remote_index` from `ir list` and optional `button_index` from `ir show`.
+- **`ir universals list`** — List built-in universal signals.
+- **`ir universals send <index>`** — Transmit a universal signal.
+- **`ir rx [timeout]`** — Wait up to `timeout` seconds (default 60) for a single IR signal, print it (decoded or RAW), then stop.
+- **`ir learn [path]`** — Wait for a signal (10s). Without `path`, auto-create a new `.ir` file under `/mnt/ghostesp/infrared/remotes`; with `path`, append the learned signal to that file.
+- **`ir inline`** — Display help for sending inline IR data via serial markers (`[IR/BEGIN]` ... `[IR/CLOSE]`).
+
 ## GPS
 
 - **`gpsinfo [-s]`** — Stream current fix, satellites, and speed; pass `-s` to stop the display task.

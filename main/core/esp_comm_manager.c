@@ -32,13 +32,14 @@
 #define COMMAND_TIMEOUT_MS 500
 #define PING_INTERVAL_MS 1000
 #define LINK_TIMEOUT_MS 4000
+#define COMM_PROTOCOL_STACK_WORDS 4096
 
 // protocol constants
 #define PACKET_START_BYTE 0xAA
 #define PACKET_HEADER_SIZE 3
 #define PACKET_CHECKSUM_SIZE 1
 #define PACKET_MAX_PAYLOAD (COMM_PACKET_SIZE - 4)
-#define RESPONSE_LOG_PREFIX "ESP Comm Response: "
+#define RESPONSE_LOG_PREFIX "RX: "
 // flags for PACKET_TYPE_RESPONSE framing
 #define RESP_FLAG_LINE_START 0x01
 
@@ -190,6 +191,7 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
 
     if (buffer_size <= prefix_len + 2) {
         ap_manager_add_log(prefix);
+        terminal_view_add_text(prefix);
         return;
     }
 
@@ -214,6 +216,7 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
     log_buffer[pos] = '\0';
 
     ap_manager_add_log(log_buffer);
+    terminal_view_add_text(log_buffer);
 }
 
 static StackType_t* alloc_task_stack(size_t words);
@@ -572,10 +575,12 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     printf("Discovered peer: %s\n", comm->peer.chip_name);
                     snprintf(log_buffer, sizeof(log_buffer), "I: Discovered peer: %s\n", comm->peer.chip_name);
                     ap_manager_add_log(log_buffer);
+                    terminal_view_add_text(log_buffer);
 
                     if (strcmp(comm->chip_name, comm->peer.chip_name) > 0) {
                         printf("Peer has smaller name, I will initiate connection.\n");
                         ap_manager_add_log("I: Peer has smaller name, I will initiate connection.\n");
+                        terminal_view_add_text("I: Peer has smaller name, I will initiate connection.\n");
                         esp_comm_manager_connect_to_peer(comm->peer.chip_name);
                     }
                 }
@@ -645,7 +650,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                         TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                            "comm_protocol_t", 2048, comm, 10);
+                                                            "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
                         if (!t) {
                             printf("E: failed to create protocol task\n");
                             free_task_resources(&comm->protocol_task_res);
@@ -655,6 +660,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     unlock_state(comm);
                     printf("Handshake complete!\n");
                     ap_manager_add_log("Handshake completed!\n");
+                    terminal_view_add_text("Handshake completed!\n");
                 }
             }
             break;
@@ -712,7 +718,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                     TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                        "comm_protocol_t", 2048, comm, 10);
+                                                        "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
                     if (!t) {
                         printf("E: failed to create protocol task\n");
                         free_task_resources(&comm->protocol_task_res);
@@ -722,6 +728,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 unlock_state(comm);
                 printf("Handshake complete!\n");
                 ap_manager_add_log("Handshake completed!\n");
+                terminal_view_add_text("Handshake completed!\n");
             }
             break;
 
@@ -1028,12 +1035,19 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             tx_pin = U0TXD_GPIO_NUM;
             rx_pin = U0RXD_GPIO_NUM;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+        s_uart_num = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            tx_pin = GPIO_NUM_1;
+            rx_pin = GPIO_NUM_2;
+        }
     } else {
         s_uart_num = UART_NUM_1;
     }
 #else
     s_uart_num = UART_NUM_1;
 #endif
+
     // Don't deinitialize serial manager on TDECK to avoid UART conflicts
 #ifndef CONFIG_USE_TDECK
     if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
@@ -1225,11 +1239,11 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
     send_handshake_request(peer_name);
 
     printf("Connecting to peer: %s\n", peer_name);
-
-    // Log to web UI
     char log_msg[64];
     snprintf(log_msg, sizeof(log_msg), "I: Connecting to peer: %s\n", peer_name);
     ap_manager_add_log(log_msg);
+    terminal_view_add_text(log_msg);
+
     unlock_state(s_comm_manager);
     return true;
 }
@@ -1274,6 +1288,7 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s\n", command);
         ap_manager_add_log(log_msg);
+        terminal_view_add_text(log_msg);
     }
     return result;
 }
@@ -1449,6 +1464,7 @@ static void handshake_timer_callback(TimerHandle_t xTimer) {
     if (comm->state == COMM_STATE_HANDSHAKE) {
         printf("Handshake timeout\n");
         ap_manager_add_log("W: Handshake timeout\n");
+        terminal_view_add_text("W: Handshake timeout\n");
         comm->state = COMM_STATE_SCANNING;
         if (comm->discovery_timer) {
             xTimerStart(comm->discovery_timer, 0);
@@ -1466,6 +1482,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
     }
     printf("Connection lost (%s)\n", reason ? reason : "unknown");
     ap_manager_add_log("W: Connection lost, restarting discovery\n");
+    terminal_view_add_text("W: Connection lost, restarting discovery\n");
 
     comm->state = COMM_STATE_SCANNING;
 

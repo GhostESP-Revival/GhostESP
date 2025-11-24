@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "managers/nfc/ndef.h"
 #include "managers/nfc/ntag_t2.h"
+#include "managers/nfc/flipper_nfc_compat.h"
 
 char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
                                   size_t tlv_len,
@@ -121,6 +122,18 @@ static void mfc_cache_store_block(int abs_block, const uint8_t data[16]){
     if (abs_block < 0 || abs_block >= g_mfc_blocks) return;
     memcpy(&g_mfc_cache[abs_block * 16], data, 16);
     BITSET_SET(g_mfc_known, abs_block);
+}
+// Check if all blocks in a sector are already present in the cache
+static bool mfc_sector_all_blocks_known(MFC_TYPE t, int sector) {
+    if (!g_mfc_known || sector < 0) return false;
+    int first = mfc_first_block_of_sector(t, sector);
+    int blocks = mfc_blocks_in_sector(t, sector);
+    for (int b = 0; b < blocks; ++b) {
+        int idx = first + b;
+        if (idx < 0 || idx >= g_mfc_blocks) return false;
+        if (!BITSET_TEST(g_mfc_known, idx)) return false;
+    }
+    return true;
 }
 static bool mfc_cache_matches(const uint8_t* uid, uint8_t uid_len){
     if (!g_mfc_cache || !g_mfc_known || g_mfc_uid_len != uid_len) return false;
@@ -1452,6 +1465,12 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
     for (int s = 0; s < sectors; ++s) {
         if (mfc_call_should_skip_dict()) break;
         if (mfc_call_should_cancel()) break;
+        // If every block in this sector is already cached from the first pass,
+        // avoid re-auth and re-reading for this sector in the second pass.
+        if (mfc_sector_all_blocks_known(t, s)) {
+            if (g_prog_cb) g_prog_cb(s + 1, sectors, g_prog_user);
+            continue;
+        }
         int first = mfc_first_block_of_sector(t, s);
         int blocks = mfc_blocks_in_sector(t, s);
         uint8_t auth_blk = mfc_auth_target_block(t, s);
@@ -1481,41 +1500,6 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
             authed = true; usedB_cur = true; used_key_cur = s_last_key_b;
         }
         if (!authed) {
-            bool usedB = false; const uint8_t *uk = NULL;
-            if (mfc_auth_with_user_interleaved(io, auth_blk, uid, uid_len, &usedB, &uk)) {
-                authed = true; usedB_cur = usedB; used_key_cur = uk;
-            }
-        }
-        for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-            if (mfc_auth_block(io, auth_blk, false, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                authed = true; mfc_record_working_key(DEFAULT_KEYS[k], false);
-                usedB_cur = false; used_key_cur = DEFAULT_KEYS[k];
-            }
-        }
-        for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-            if (mfc_auth_block(io, auth_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                authed = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
-                usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
-            }
-        }
-#if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
-        if (!authed) {
-            bool skip_dict = false;
-            #ifdef CONFIG_HAS_NFC
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) skip_dict = true;
-            #endif
-            if (!skip_dict) {
-                bool usedB = false;
-                if (mfc_auth_with_dict_interleaved(io, auth_blk, uid, uid_len, &usedB)) {
-                    authed = true; usedB_cur = usedB;
-                    if (usedB && g_last_key_b_valid) used_key_cur = g_last_key_b; else if (!usedB && g_last_key_a_valid) used_key_cur = g_last_key_a;
-                }
-            }
-        }
-#endif
-        if (!authed) {
             if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s)) {
                 const uint8_t *ka = &g_sector_key_a[s*6];
                 if (mfc_auth_block(io, trailer_blk, false, ka, uid, uid_len) == ESP_OK) {
@@ -1534,41 +1518,6 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
             if (!authed && mfc_auth_with_known(io, trailer_blk, true, uid, uid_len)) {
                 authed = true; usedB_cur = true; used_key_cur = s_last_key_b;
             }
-            if (!authed) {
-                bool usedB = false; const uint8_t *uk = NULL;
-                if (mfc_auth_with_user_interleaved(io, trailer_blk, uid, uid_len, &usedB, &uk)) {
-                    authed = true; usedB_cur = usedB; used_key_cur = uk;
-                }
-            }
-            for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-                if (mfc_auth_block(io, trailer_blk, false, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                    authed = true; mfc_record_working_key(DEFAULT_KEYS[k], false);
-                    usedB_cur = false; used_key_cur = DEFAULT_KEYS[k];
-                }
-            }
-            for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-                if (mfc_auth_block(io, trailer_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                    authed = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
-                    usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
-                }
-            }
-#if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
-            if (!authed) {
-                bool skip_dict = false;
-                #ifdef CONFIG_HAS_NFC
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) skip_dict = true;
-                #endif
-                if (!skip_dict) {
-                    bool usedB = false;
-                    if (mfc_auth_with_dict_interleaved(io, trailer_blk, uid, uid_len, &usedB)) {
-                        authed = true; usedB_cur = usedB;
-                        if (usedB && g_last_key_b_valid) used_key_cur = g_last_key_b; else if (!usedB && g_last_key_a_valid) used_key_cur = g_last_key_a;
-                    }
-                }
-            }
-#endif
         }
         if (authed && used_key_cur) mfc_cache_record_sector_key(s, usedB_cur, used_key_cur);
         if (authed && used_key_cur) mfc_key_reuse_sweep(io, t, uid, uid_len, usedB_cur, used_key_cur, s);
@@ -1823,6 +1772,82 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
     // Avoid unused-variable warnings for a_cnt/b_cnt (kept for logs/metrics above)
     (void)a_cnt; (void)b_cnt;
 
+    // Try Flipper parsers first (heap allocation to avoid stack overflow)
+    MfClassicData* flipper_data = (MfClassicData*)calloc(1, sizeof(MfClassicData));
+    if (!flipper_data) goto skip_flipper_parse; // Skip if allocation fails
+    flipper_data->type = (t == MFC_4K) ? MfClassicType4k : (t == MFC_MINI) ? MfClassicTypeMini : MfClassicType1k;
+    // Copy blocks
+    if (g_mfc_cache && g_mfc_known) {
+        int max_blocks = g_mfc_blocks;
+        if (max_blocks > 256) max_blocks = 256;
+        for (int b = 0; b < max_blocks; b++) {
+            if (BITSET_TEST(g_mfc_known, b)) {
+                memcpy(flipper_data->block[b].data, &g_mfc_cache[b * 16], 16);
+                // Set bit in block_read_mask (32 bytes = 256 bits)
+                flipper_data->block_read_mask[b / 8] |= (1 << (b % 8));
+            }
+        }
+    }
+    // Copy keys (important for SmartRider which checks sector 0 key)
+    // We put them in the trailer blocks of MfClassicData because that's where flipper expects them
+    // but our cache keeps them separate.
+    // However, the SmartRider plugin uses mf_classic_get_sector_trailer_by_sector which we implemented
+    // to return a pointer to the block. So we must ensure the trailer block IN flipper_data contains the keys.
+    for (int s = 0; s < sectors; s++) {
+        int trailer_idx = mfc_first_block_of_sector(t, s) + mfc_blocks_in_sector(t, s) - 1;
+        if (trailer_idx < 256) {
+            // If we have keys, write them to the trailer block in our temp struct
+            bool haveA = g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s);
+            bool haveB = g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s);
+            if (haveA && g_sector_key_a) {
+                memcpy(flipper_data->block[trailer_idx].data, &g_sector_key_a[s * 6], 6);
+            } else {
+                // Default FF?
+                memset(flipper_data->block[trailer_idx].data, 0xFF, 6);
+            }
+            // Access bits default
+            flipper_data->block[trailer_idx].data[6] = 0xFF;
+            flipper_data->block[trailer_idx].data[7] = 0x07;
+            flipper_data->block[trailer_idx].data[8] = 0x80;
+            flipper_data->block[trailer_idx].data[9] = 0x69;
+            
+            if (haveB && g_sector_key_b) {
+                memcpy(flipper_data->block[trailer_idx].data + 10, &g_sector_key_b[s * 6], 6);
+            } else {
+                memset(flipper_data->block[trailer_idx].data + 10, 0xFF, 6);
+            }
+            
+            // Mark trailer as read so plugin sees it
+            flipper_data->block_read_mask[trailer_idx / 8] |= (1 << (trailer_idx % 8));
+        }
+    }
+
+    char* plugin_text = flipper_nfc_try_parse_mfclassic_from_cache(flipper_data);
+    free(flipper_data); // Done with flipper_data
+    flipper_data = NULL;
+
+    if (plugin_text) {
+        // If plugin parsed successfully, we use that text.
+        // We can either replace entirely or append.
+        // Let's prepend the generic header + plugin text.
+        size_t p_len = strlen(plugin_text);
+        size_t h_len = (size_t)(w - out); // generic header length so far
+        char* final_out = (char*)malloc(p_len + h_len + 2);
+        if (final_out) {
+            memcpy(final_out, out, h_len);
+            final_out[h_len] = '\n';
+            memcpy(final_out + h_len + 1, plugin_text, p_len);
+            final_out[h_len + 1 + p_len] = '\0';
+            free(out);
+            free(plugin_text);
+            fuel_gauge_manager_set_paused(false);
+            return final_out;
+        }
+        free(plugin_text);
+        // fallback to generic if malloc fails
+    }
+
+skip_flipper_parse:
     // Attempt to locate and parse NDEF TLV within sector data blocks and append details
     if (g_mfc_cache && mfc_cache_matches(uid, uid_len)) {
         int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
@@ -1851,7 +1876,6 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
                 int ss = s + 1;
                 while (have < need && ss < sectors) {
                     if (ss == 16 && sectors > 16) { ss++; continue; }
-                    int f2 = mfc_first_block_of_sector(t, ss);
                     int bl2 = mfc_blocks_in_sector(t, ss);
                     have += (size_t)(bl2 - 1) * 16;
                     ss++;

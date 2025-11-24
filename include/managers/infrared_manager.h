@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/rmt_types.h"
+#include "driver/rmt_rx.h"
 
 typedef struct {
     char name[32];
@@ -28,6 +30,7 @@ typedef struct {
 bool infrared_manager_init(void);
 bool infrared_manager_read_file(const char *path, infrared_signal_t *signal);
 void infrared_manager_free_signal(infrared_signal_t *signal);
+bool infrared_manager_parse_buffer_single(const char *buf, infrared_signal_t *signal);
 
 /**
  * @brief Read a JSON file containing an array of IR signal objects.
@@ -60,4 +63,19 @@ void infrared_manager_stop_background_task(void);
 // Async enqueue of a parsed IR signal for background transmit
 bool infrared_manager_enqueue_signal(const infrared_signal_t *signal);
 
-#endif // INFRARED_MANAGER_H 
+// RX Support
+bool infrared_manager_rx_init(void);
+void infrared_manager_rx_deinit(void);
+// Returns true if signal received, false on timeout (timeout_ms < 0 for infinite)
+bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms);
+
+#define IR_RX_MAX_SYMBOLS 128
+typedef struct {
+    size_t num_symbols;
+    rmt_symbol_word_t symbols[IR_RX_MAX_SYMBOLS];
+} infrared_rx_event_t;
+
+rmt_channel_handle_t infrared_manager_get_rx_channel(void);
+QueueHandle_t infrared_manager_get_rx_queue(void);
+
+#endif // INFRARED_MANAGER_H

@@ -101,6 +101,7 @@ Spoof Apple AirTags and other Find My devices to broadcast their location. This 
 
 1. **Scan for AirTags**
    - Open **Menu → Bluetooth → AirTag → Start AirTag Scanner** or run `blescan -a`.
+   - While the scanner is running, RSSI for already discovered AirTags is logged every few seconds in the terminal to show proximity changes.
    - Wait for the scan to complete.
 
 2. **List discovered AirTags**

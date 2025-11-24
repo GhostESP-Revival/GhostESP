@@ -62,6 +62,15 @@ If auto-connection fails, you can manually connect:
 
 Device names are auto-generated based on MAC address (format: `ESP_XXXXXX`).
 
+## On-screen UI
+
+When Dual Comm is active (peer discovered and connected), the Options menu exposes a dedicated Dual Comm section with submenus for session control, scanning, WiFi, attacks, capture, tools, BLE, and GPS. These entries open a split-view terminal so you can see what the local device is doing and how the remote peer responds at the same time.
+
+- Left side: normal terminal logs from the local device (status messages, WiFi scans, attacks, etc.).
+- Right side: Dual Comm-focused messages and responses from the remote peer (discovery status, handshake/connect messages, and `commsend` command output).
+
+Any Dual Comm menu item that sends a `commsend ...` command automatically opens this split terminal view. Launching the generic Terminal app from the Apps menu still shows the standard single-column terminal with all logs combined.
+
 ## Troubleshooting
 
 - **Not connecting**: Check wiring (TX→RX, RX→TX, GND connected). Make sure both devices are powered. Reboot them simultaneously and wait 30 seconds for discovery. Run `commstatus` to check.

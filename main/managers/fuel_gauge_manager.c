@@ -519,7 +519,7 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
     // Update cache
     memcpy(&last_data, data, sizeof(fuel_gauge_data_t));
 
-    ESP_LOGI(TAG, "Battery: %d%%, %dmV, %dmA, %s",
+    ESP_LOGD(TAG, "Battery: %d%%, %dmV, %dmA, %s",
              data->percentage, data->voltage_mv, data->current_ma,
              data->is_charging ? "charging" : "discharging");
 

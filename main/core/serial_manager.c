@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "managers/gps_manager.h"
 #include "managers/wifi_manager.h"
+#include "managers/infrared_manager.h"
 #include "managers/views/terminal_screen.h"
 #include <core/commandline.h>
 #include <ctype.h>
@@ -61,6 +62,16 @@ typedef enum {
 static html_capture_state_t html_capture_state = HTML_STATE_IDLE;
 static char html_capture_buffer[2048];
 static size_t html_capture_pos = 0;
+
+// IR capture state
+typedef enum {
+    IR_STATE_IDLE,
+    IR_STATE_CAPTURING
+} ir_capture_state_t;
+
+static ir_capture_state_t ir_capture_state = IR_STATE_IDLE;
+static char ir_capture_buffer[2048];
+static size_t ir_capture_pos = 0;
 
 // Forward declaration of command handler
 int handle_serial_command(const char *command);
@@ -325,8 +336,45 @@ static void clear_line_from_cursor(void) {
     serial_buffer[cursor_position] = '\0';
 }
 
-// HTML marker processing
+// HTML marker processing and IR inline handling
 static void process_html_line(const char* line) {
+    if (strstr(line, "[IR/BEGIN]") != NULL) {
+        ir_capture_state = IR_STATE_CAPTURING;
+        ir_capture_pos = 0;
+        glog("IR capture started\n");
+        return;
+    }
+
+    if (strstr(line, "[IR/CLOSE]") != NULL) {
+        if (ir_capture_state == IR_STATE_CAPTURING) {
+            ir_capture_state = IR_STATE_IDLE;
+            if (ir_capture_pos >= sizeof(ir_capture_buffer)) {
+                ir_capture_pos = sizeof(ir_capture_buffer) - 1;
+            }
+            ir_capture_buffer[ir_capture_pos] = '\0';
+            infrared_signal_t sig;
+            memset(&sig, 0, sizeof(sig));
+            if (infrared_manager_parse_buffer_single(ir_capture_buffer, &sig)) {
+                bool ok = infrared_manager_transmit(&sig);
+                infrared_manager_free_signal(&sig);
+                glog("IR inline transmit %s\n", ok ? "OK" : "FAIL");
+            } else {
+                glog("IR inline parse failed\n");
+            }
+        }
+        return;
+    }
+
+    if (ir_capture_state == IR_STATE_CAPTURING) {
+        size_t line_len = strlen(line);
+        if (ir_capture_pos + line_len + 1 < sizeof(ir_capture_buffer)) {
+            memcpy(ir_capture_buffer + ir_capture_pos, line, line_len);
+            ir_capture_pos += line_len;
+            ir_capture_buffer[ir_capture_pos++] = '\n';
+        }
+        return;
+    }
+
     if (strstr(line, "[HTML/BEGIN]") != NULL) {
         html_capture_state = HTML_STATE_CAPTURING;
         html_capture_pos = 0;

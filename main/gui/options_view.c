@@ -55,17 +55,56 @@ static inline const lv_font_t *get_item_font(const options_view_t *ov) {
 
 static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
     if (!item || !lv_obj_is_valid(item)) return;
-    lv_obj_t *lbl = lv_obj_get_child(item, 0);
+
+    lv_obj_t *lbl = NULL;
+    uint32_t child_cnt = lv_obj_get_child_cnt(item);
+    for (uint32_t i = 0; i < child_cnt; ++i) {
+        lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
+        if (!child) continue;
+        if (lv_obj_get_user_data(child) == (void *)1) {
+            lbl = child;
+            break;
+        }
+    }
+    if (!lbl && child_cnt > 0) {
+        lbl = lv_obj_get_child(item, 0);
+    }
+
     if (on) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t c = lv_color_hex(theme_palettes[theme][0]);
+        lv_color_t txt = (theme == 3) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
         lv_style_set_bg_color(&ov->style_selected, c);
         lv_style_set_bg_grad_color(&ov->style_selected, c);
         lv_obj_add_style(item, &ov->style_selected, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, (theme == 3) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF), 0);
+        for (uint32_t i = 0; i < child_cnt; ++i) {
+            lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
+            if (!child) continue;
+            void *ud = lv_obj_get_user_data(child);
+            if (ud == (void *)1 || ud == (void *)2) {
+                lv_obj_set_style_text_color(child, txt, 0);
+            }
+#ifndef CONFIG_USE_TOUCHSCREEN
+            if (ud == (void *)2) {
+                lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+            }
+#endif
+        }
     } else {
         lv_obj_remove_style(item, &ov->style_selected, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+        for (uint32_t i = 0; i < child_cnt; ++i) {
+            lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
+            if (!child) continue;
+            void *ud = lv_obj_get_user_data(child);
+            if (ud == (void *)1 || ud == (void *)2) {
+                lv_obj_set_style_text_color(child, lv_color_hex(0xFFFFFF), 0);
+            }
+#ifndef CONFIG_USE_TOUCHSCREEN
+            if (ud == (void *)2) {
+                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+            }
+#endif
+        }
     }
 }
 
@@ -142,6 +181,7 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_width(lbl, LV_PCT(100));
+        lv_obj_set_user_data(lbl, (void *)1);
     }
     ov->items[ov->count++] = btn;
     if (ov->selected < 0) {

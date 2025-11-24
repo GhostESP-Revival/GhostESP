@@ -29,6 +29,7 @@
 #include "managers/nfc/ntag_t2.h"
 #include "managers/nfc/mifare_classic.h"
 #include "managers/nfc/ndef.h"
+#include "managers/nfc/flipper_nfc_compat.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -785,7 +786,7 @@ static int chameleon_notification_cb(uint16_t conn_handle, uint16_t attr_handle,
     }
     
     uint16_t data_len = ctxt->om->om_len;
-    ESP_LOGI(TAG, "Notification received, length: %d", data_len);
+    ESP_LOGD(TAG, "Notification received, length: %d", data_len);
     
     // Minimum Chameleon Ultra response is 10 bytes
     if (data_len >= 10) {
@@ -796,7 +797,7 @@ static int chameleon_notification_cb(uint16_t conn_handle, uint16_t attr_handle,
         g_last_response.status = data[5];
         g_last_response.data_size = data[7];
         
-        ESP_LOGI(TAG, "Response - Command: 0x%04X, Status: 0x%02X, Data size: %d", 
+        ESP_LOGD(TAG, "Response - Command: 0x%04X, Status: 0x%02X, Data size: %d", 
                 g_last_response.command, g_last_response.status, g_last_response.data_size);
         
         // Safely copy data if present and valid
@@ -904,7 +905,7 @@ static bool send_command(uint16_t cmd, uint8_t *data, size_t data_len) {
     
     size_t total_len = 10 + data_len;
     
-    ESP_LOGI(TAG, "Sending command 0x%04X with %d bytes data", cmd, (int)data_len);
+    ESP_LOGD(TAG, "Sending command 0x%04X with %d bytes data", cmd, (int)data_len);
     
     // Reset response flag
     g_response_received = false;
@@ -1010,7 +1011,7 @@ static int chameleon_gap_event_handler(struct ble_gap_event *event, void *arg) {
             break;
             
         case BLE_GAP_EVENT_NOTIFY_RX:
-            ESP_LOGI(TAG, "Notification received on handle 0x%04X", event->notify_rx.attr_handle);
+            ESP_LOGD(TAG, "Notification received on handle 0x%04X", event->notify_rx.attr_handle);
             
             // Check if this is from our RX characteristic
             if (event->notify_rx.attr_handle == g_rx_char_handle) {
@@ -2277,8 +2278,62 @@ char *chameleon_manager_build_cached_details(void) {
     if (g_cu_mfc_cache.valid) {
         size_t cap = 512; size_t len = 0; char *out = (char*)malloc(cap); if (!out) return NULL; out[0] = '\0';
         MFC_TYPE t = g_cu_mfc_cache.type; int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
+
+        // Try Flipper parsers first (heap allocation to avoid stack overflow)
+        MfClassicData* flipper_data = (MfClassicData*)calloc(1, sizeof(MfClassicData));
+        if (!flipper_data) goto skip_flipper_parse;
+        flipper_data->type = (t == MFC_4K) ? MfClassicType4k : (t == MFC_MINI) ? MfClassicTypeMini : MfClassicType1k;
+        
+        // Copy blocks
+        if (g_cu_mfc_cache.blocks && g_cu_mfc_cache.known_bits) {
+            int max_blocks = g_cu_mfc_cache.total_blocks;
+            if (max_blocks > 256) max_blocks = 256;
+            for (int b = 0; b < max_blocks; b++) {
+                if (cu_bitset_test(g_cu_mfc_cache.known_bits, b)) {
+                    memcpy(flipper_data->block[b].data, &g_cu_mfc_cache.blocks[b * 16], 16);
+                    flipper_data->block_read_mask[b / 8] |= (1 << (b % 8));
+                }
+            }
+        }
+        // Copy keys into synthetic trailers
+        for (int s = 0; s < sectors; s++) {
+            int trailer_idx = mfc_first_block_of_sector(t, s) + mfc_blocks_in_sector(t, s) - 1;
+            if (trailer_idx < 256) {
+                bool haveA = g_cu_mfc_cache.key_a_valid && cu_bitset_test(g_cu_mfc_cache.key_a_valid, s);
+                bool haveB = g_cu_mfc_cache.key_b_valid && cu_bitset_test(g_cu_mfc_cache.key_b_valid, s);
+                if (haveA && g_cu_mfc_cache.key_a) {
+                    memcpy(flipper_data->block[trailer_idx].data, &g_cu_mfc_cache.key_a[s * 6], 6);
+                } else {
+                    memset(flipper_data->block[trailer_idx].data, 0xFF, 6);
+                }
+                // Access bits default
+                flipper_data->block[trailer_idx].data[6] = 0xFF;
+                flipper_data->block[trailer_idx].data[7] = 0x07;
+                flipper_data->block[trailer_idx].data[8] = 0x80;
+                flipper_data->block[trailer_idx].data[9] = 0x69;
+                if (haveB && g_cu_mfc_cache.key_b) {
+                    memcpy(flipper_data->block[trailer_idx].data + 10, &g_cu_mfc_cache.key_b[s * 6], 6);
+                } else {
+                    memset(flipper_data->block[trailer_idx].data + 10, 0xFF, 6);
+                }
+                // Mark trailer as read so plugin sees it
+                flipper_data->block_read_mask[trailer_idx / 8] |= (1 << (trailer_idx % 8));
+            }
+        }
+
+        char* plugin_text = flipper_nfc_try_parse_mfclassic_from_cache(flipper_data);
+        free(flipper_data); // Done with flipper_data
+        flipper_data = NULL;
+        
+        if (plugin_text) {
+            if (!cu_details_append(&out, &cap, &len, "%s\n", plugin_text)) { free(plugin_text); free(out); return NULL; }
+            free(plugin_text);
+        }
+
+skip_flipper_parse:
         // Header like PN532
         if (!cu_details_append(&out, &cap, &len, "Card: %s | UID:", cu_mfc_type_str(t))) { free(out); return NULL; }
+
         for (uint8_t i = 0; i < g_cu_mfc_cache.uid_len; ++i) {
             if (!cu_details_append(&out, &cap, &len, " %02X", g_cu_mfc_cache.uid[i])) { free(out); return NULL; }
         }

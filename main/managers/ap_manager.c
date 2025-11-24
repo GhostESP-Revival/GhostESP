@@ -829,8 +829,9 @@ void ap_manager_deinit(void) {
     }
 
     if (log_mutex) {
-        vSemaphoreDelete(log_mutex);
+        SemaphoreHandle_t mutex_to_delete = log_mutex;
         log_mutex = NULL;
+        vSemaphoreDelete(mutex_to_delete);
     }
     
     ESP_LOGI(TAG, "AP Manager deinitialized successfully");

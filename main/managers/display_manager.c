@@ -611,14 +611,22 @@ void fade_out_ready_cb(lv_anim_t *anim) {
 
     new_view->create();
 
-    // Avoid running the per-tick fade animation for the keyboard view because
-    // the opacity animation forces heavy draw work (masks/labels) and can
-    // starve the LVGL tick/watchdog during the keyboard fade-in.
+    // Avoid running the per-tick fade animation for specific heavy views
+    // because the opacity animation forces heavy draw work (masks/labels)
+    // and can starve the LVGL tick/watchdog during the fade-in.
     if (new_view->name && strcmp(new_view->name, "Keyboard Screen") == 0) {
       if (new_view->root) {
         // make fully opaque immediately
         lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
         // temporarily remove rounded radii to avoid expensive mask draws
+        set_radius_recursive(new_view->root, 0);
+      }
+      if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
+    } else if (new_view->name && strcmp(new_view->name, "Options Screen") == 0 && SelectedMenuType == OT_DualComm) {
+      if (new_view->root) {
+        // For the large Dual Comm options list, skip fade-in to keep
+        // LVGL's tick task lightweight.
+        lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
         set_radius_recursive(new_view->root, 0);
       }
       if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);

@@ -43,6 +43,9 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
 void app_main(void) {
+    // Reduce NimBLE log verbosity (keep warnings/errors only)
+    esp_log_level_set("NimBLE", ESP_LOG_WARN);
+
     // Pull SPI CS pins HIGH to prevent bus conflicts for the TEmbed C1101
 #if defined(CONFIG_USE_ENCODER) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
