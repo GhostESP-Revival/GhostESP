@@ -2542,42 +2542,70 @@ void ble_start_blespam_detector(void) {
 }
 
 void ble_start_apple_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_apple_count = 0; // Reset counter
     ble_register_handler(ble_apple_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_samsung_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_samsung_count = 0; // Reset counter
     ble_register_handler(ble_samsung_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_google_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_google_count = 0; // Reset counter
     ble_register_handler(ble_google_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_tile_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_tile_count = 0; // Reset counter
     ble_register_handler(ble_tile_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_axon_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_axon_count = 0; // Reset counter
     ble_register_handler(ble_axon_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_taser_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_taser_count = 0; // Reset counter
     ble_register_handler(ble_taser_detector_callback);
     ble_start_scanning();
 }
 
 void ble_start_flock_detector(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     discovered_flock_count = 0; // Reset counter
     ble_register_handler(ble_flock_detector_callback);
     ble_start_scanning();
