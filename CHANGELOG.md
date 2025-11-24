@@ -16,6 +16,7 @@
 - Fixed BLE scanning not being reliable
 - Added AirTag RSSI update logging so existing tags report RSSI changes every few seconds
 - Add vendor board support and images to documentation - @tototo31
+- Added detectors for Apple, Samsung, Google, Tile, Axon, Taser, and Flock devices - @tototo31
 
 
 
