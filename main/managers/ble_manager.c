@@ -107,26 +107,45 @@ typedef struct {
     char device_type[32];
     int8_t rssi;
 } GenericDevice;
-static GenericDevice discovered_apple_devices[MAX_DEVICES_DETECT];
-static int discovered_apple_count = 0;
 
-static GenericDevice discovered_samsung_devices[MAX_DEVICES_DETECT];
-static int discovered_samsung_count = 0;
+// Runtime detector state (allocated only when active)
+typedef struct {
+    GenericDevice *devices;
+    int count;
+    int capacity;
+} detector_state_t;
 
-static GenericDevice discovered_google_devices[MAX_DEVICES_DETECT];
-static int discovered_google_count = 0;
+static detector_state_t detector_apple = {0};
+static detector_state_t detector_samsung = {0};
+static detector_state_t detector_google = {0};
+static detector_state_t detector_tile = {0};
+static detector_state_t detector_axon = {0};
+static detector_state_t detector_taser = {0};
+static detector_state_t detector_flock = {0};
 
-static GenericDevice discovered_tile_devices[MAX_DEVICES_DETECT];
-static int discovered_tile_count = 0;
+// Helper to allocate a detector's device buffer on demand
+static bool ensure_detector_allocated(detector_state_t *det) {
+    if (!det->devices) {
+        det->capacity = MAX_DEVICES_DETECT;
+        det->devices = malloc(det->capacity * sizeof(GenericDevice));
+        if (!det->devices) {
+            ESP_LOGE(TAG_BLE, "Failed to allocate detector buffer");
+            return false;
+        }
+        det->count = 0;
+    }
+    return true;
+}
 
-static GenericDevice discovered_axon_devices[MAX_DEVICES_DETECT];
-static int discovered_axon_count = 0;
-
-static GenericDevice discovered_taser_devices[MAX_DEVICES_DETECT];
-static int discovered_taser_count = 0;
-
-static GenericDevice discovered_flock_devices[MAX_DEVICES_DETECT];
-static int discovered_flock_count = 0;
+// Helper to free a detector's device buffer when no longer needed
+static void free_detector_buffer(detector_state_t *det) {
+    if (det->devices) {
+        free(det->devices);
+        det->devices = NULL;
+        det->count = 0;
+        det->capacity = 0;
+    }
+}
 
 static ble_handler_t handlers[MAX_HANDLERS];
 static int handler_count = 0;
@@ -1463,11 +1482,11 @@ void airtag_scanner_callback(struct ble_gap_event *event, size_t len) {
     }
 }
 
-// Apple device detector callback
 void ble_apple_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_apple.devices) return;
 
     const uint8_t *payload = event->disc.data;
     size_t payloadLength = event->disc.length_data;
@@ -1527,21 +1546,21 @@ void ble_apple_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_apple_count; j++) {
-        if (memcmp(discovered_apple_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_apple.count; j++) {
+        if (memcmp(detector_apple.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_apple_devices[j].rssi = event->disc.rssi;
+            detector_apple.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_apple_count < MAX_DEVICES_DETECT) {
-        discovered_apple_devices[discovered_apple_count].addr = event->disc.addr;
+    if (!already && detector_apple.count < detector_apple.capacity) {
+        detector_apple.devices[detector_apple.count].addr = event->disc.addr;
         char advertisementName[32];
         parse_device_name(event->disc.data, event->disc.length_data, advertisementName, sizeof(advertisementName));
-        strncpy(discovered_apple_devices[discovered_apple_count].name, advertisementName, sizeof(discovered_apple_devices[discovered_apple_count].name) - 1);
-        strncpy(discovered_apple_devices[discovered_apple_count].device_type, device_type, sizeof(discovered_apple_devices[discovered_apple_count].device_type) - 1);
-        discovered_apple_devices[discovered_apple_count].rssi = event->disc.rssi;
+        strncpy(detector_apple.devices[detector_apple.count].name, advertisementName, sizeof(detector_apple.devices[detector_apple.count].name) - 1);
+        strncpy(detector_apple.devices[detector_apple.count].device_type, device_type, sizeof(detector_apple.devices[detector_apple.count].device_type) - 1);
+        detector_apple.devices[detector_apple.count].rssi = event->disc.rssi;
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1550,19 +1569,19 @@ void ble_apple_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Apple Device: %s\n", device_type);
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_apple_count, mac, advertisementName, event->disc.rssi);
+             detector_apple.count, mac, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Apple: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_apple_count, mac, event->disc.rssi);
+                               device_type, detector_apple.count, mac, event->disc.rssi);
         pulse_once(&rgb_manager, 255, 165, 0); // Orange pulse
-        discovered_apple_count++;
+        detector_apple.count++;
     }
 }
 
-// Samsung device detector callback
 void ble_samsung_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_samsung.devices) return;
 
     bool is_samsung = false;
     char device_type[32] = "Samsung Device";
@@ -1598,21 +1617,21 @@ void ble_samsung_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_samsung_count; j++) {
-        if (memcmp(discovered_samsung_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_samsung.count; j++) {
+        if (memcmp(detector_samsung.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_samsung_devices[j].rssi = event->disc.rssi;
+            detector_samsung.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_samsung_count < MAX_DEVICES_DETECT) {
-        discovered_samsung_devices[discovered_samsung_count].addr = event->disc.addr;
+    if (!already && detector_samsung.count < detector_samsung.capacity) {
+        detector_samsung.devices[detector_samsung.count].addr = event->disc.addr;
         char advertisementName[32];
         parse_device_name(event->disc.data, event->disc.length_data, advertisementName, sizeof(advertisementName));
-        strncpy(discovered_samsung_devices[discovered_samsung_count].name, advertisementName, sizeof(discovered_samsung_devices[discovered_samsung_count].name) - 1);
-        strncpy(discovered_samsung_devices[discovered_samsung_count].device_type, device_type, sizeof(discovered_samsung_devices[discovered_samsung_count].device_type) - 1);
-        discovered_samsung_devices[discovered_samsung_count].rssi = event->disc.rssi;
+        strncpy(detector_samsung.devices[detector_samsung.count].name, advertisementName, sizeof(detector_samsung.devices[detector_samsung.count].name) - 1);
+        strncpy(detector_samsung.devices[detector_samsung.count].device_type, device_type, sizeof(detector_samsung.devices[detector_samsung.count].device_type) - 1);
+        detector_samsung.devices[detector_samsung.count].rssi = event->disc.rssi;
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1621,11 +1640,11 @@ void ble_samsung_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Samsung Device: %s\n", device_type);
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_samsung_count, mac, advertisementName, event->disc.rssi);
+             detector_samsung.count, mac, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Samsung: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_samsung_count, mac, event->disc.rssi);
+                               device_type, detector_samsung.count, mac, event->disc.rssi);
         pulse_once(&rgb_manager, 0, 0, 255); // Blue pulse
-        discovered_samsung_count++;
+        detector_samsung.count++;
     }
 }
 
@@ -1634,6 +1653,7 @@ void ble_google_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_google.devices) return;
 
     bool is_google = false;
     char device_type[32] = "Google Device";
@@ -1684,21 +1704,21 @@ void ble_google_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_google_count; j++) {
-        if (memcmp(discovered_google_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_google.count; j++) {
+        if (memcmp(detector_google.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_google_devices[j].rssi = event->disc.rssi;
+            detector_google.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_google_count < MAX_DEVICES_DETECT) {
-        discovered_google_devices[discovered_google_count].addr = event->disc.addr;
+    if (!already && detector_google.count < detector_google.capacity) {
+        detector_google.devices[detector_google.count].addr = event->disc.addr;
         char advertisementName[32];
         parse_device_name(event->disc.data, event->disc.length_data, advertisementName, sizeof(advertisementName));
-        strncpy(discovered_google_devices[discovered_google_count].name, advertisementName, sizeof(discovered_google_devices[discovered_google_count].name) - 1);
-        strncpy(discovered_google_devices[discovered_google_count].device_type, device_type, sizeof(discovered_google_devices[discovered_google_count].device_type) - 1);
-        discovered_google_devices[discovered_google_count].rssi = event->disc.rssi;
+        strncpy(detector_google.devices[detector_google.count].name, advertisementName, sizeof(detector_google.devices[detector_google.count].name) - 1);
+        strncpy(detector_google.devices[detector_google.count].device_type, device_type, sizeof(detector_google.devices[detector_google.count].device_type) - 1);
+        detector_google.devices[detector_google.count].rssi = event->disc.rssi;
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1707,11 +1727,11 @@ void ble_google_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Google Device: %s\n", device_type);
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_google_count, mac, advertisementName, event->disc.rssi);
+             detector_google.count, mac, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Google: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_google_count, mac, event->disc.rssi);
+                               device_type, detector_google.count, mac, event->disc.rssi);
         pulse_once(&rgb_manager, 255, 255, 0); // Yellow pulse
-        discovered_google_count++;
+        detector_google.count++;
     }
 }
 
@@ -1720,6 +1740,7 @@ void ble_tile_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_tile.devices) return;
 
     bool is_tile = false;
     char device_type[32] = "Tile Tracker";
@@ -1765,21 +1786,21 @@ void ble_tile_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_tile_count; j++) {
-        if (memcmp(discovered_tile_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_tile.count; j++) {
+        if (memcmp(detector_tile.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_tile_devices[j].rssi = event->disc.rssi;
+            detector_tile.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_tile_count < MAX_DEVICES_DETECT) {
-        discovered_tile_devices[discovered_tile_count].addr = event->disc.addr;
+    if (!already && detector_tile.count < detector_tile.capacity) {
+        detector_tile.devices[detector_tile.count].addr = event->disc.addr;
         char advertisementName[32];
         parse_device_name(event->disc.data, event->disc.length_data, advertisementName, sizeof(advertisementName));
-        strncpy(discovered_tile_devices[discovered_tile_count].name, advertisementName, sizeof(discovered_tile_devices[discovered_tile_count].name) - 1);
-        strncpy(discovered_tile_devices[discovered_tile_count].device_type, device_type, sizeof(discovered_tile_devices[discovered_tile_count].device_type) - 1);
-        discovered_tile_devices[discovered_tile_count].rssi = event->disc.rssi;
+        strncpy(detector_tile.devices[detector_tile.count].name, advertisementName, sizeof(detector_tile.devices[detector_tile.count].name) - 1);
+        strncpy(detector_tile.devices[detector_tile.count].device_type, device_type, sizeof(detector_tile.devices[detector_tile.count].device_type) - 1);
+        detector_tile.devices[detector_tile.count].rssi = event->disc.rssi;
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1788,11 +1809,11 @@ void ble_tile_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Tile Tracker\n");
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_tile_count, mac, advertisementName, event->disc.rssi);
+             detector_tile.count, mac, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Tile: (Idx %d) MAC %s RSSI %d\n",
-                               discovered_tile_count, mac, event->disc.rssi);
+                               detector_tile.count, mac, event->disc.rssi);
         pulse_once(&rgb_manager, 0, 255, 255); // Cyan pulse
-        discovered_tile_count++;
+        detector_tile.count++;
     }
 }
 
@@ -1801,6 +1822,7 @@ void ble_axon_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_axon.devices) return;
 
     // Check if MAC address starts with Axon OUIs
     uint8_t *mac = event->disc.addr.val;
@@ -1830,19 +1852,19 @@ void ble_axon_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_axon_count; j++) {
-        if (memcmp(discovered_axon_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_axon.count; j++) {
+        if (memcmp(detector_axon.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_axon_devices[j].rssi = event->disc.rssi;
+            detector_axon.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_axon_count < MAX_DEVICES_DETECT) {
-        discovered_axon_devices[discovered_axon_count].addr = event->disc.addr;
-        strncpy(discovered_axon_devices[discovered_axon_count].name, advertisementName, sizeof(discovered_axon_devices[discovered_axon_count].name) - 1);
-        strncpy(discovered_axon_devices[discovered_axon_count].device_type, device_type, sizeof(discovered_axon_devices[discovered_axon_count].device_type) - 1);
-        discovered_axon_devices[discovered_axon_count].rssi = event->disc.rssi;
+    if (!already && detector_axon.count < detector_axon.capacity) {
+        detector_axon.devices[detector_axon.count].addr = event->disc.addr;
+        strncpy(detector_axon.devices[detector_axon.count].name, advertisementName, sizeof(detector_axon.devices[detector_axon.count].name) - 1);
+        strncpy(detector_axon.devices[detector_axon.count].device_type, device_type, sizeof(detector_axon.devices[detector_axon.count].device_type) - 1);
+        detector_axon.devices[detector_axon.count].rssi = event->disc.rssi;
 
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1851,11 +1873,11 @@ void ble_axon_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Axon Camera\n");
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_axon_count, mac_str, advertisementName, event->disc.rssi);
+             detector_axon.count, mac_str, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Axon: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_axon_count, mac_str, event->disc.rssi);
+                               device_type, detector_axon.count, mac_str, event->disc.rssi);
         pulse_once(&rgb_manager, 255, 0, 255); // Magenta pulse
-        discovered_axon_count++;
+        detector_axon.count++;
     }
 }
 
@@ -1864,6 +1886,7 @@ void ble_taser_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_taser.devices) return;
 
     // Check if MAC address starts with Taser OUI
     uint8_t *mac = event->disc.addr.val;
@@ -1889,19 +1912,19 @@ void ble_taser_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_taser_count; j++) {
-        if (memcmp(discovered_taser_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_taser.count; j++) {
+        if (memcmp(detector_taser.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_taser_devices[j].rssi = event->disc.rssi;
+            detector_taser.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_taser_count < MAX_DEVICES_DETECT) {
-        discovered_taser_devices[discovered_taser_count].addr = event->disc.addr;
-        strncpy(discovered_taser_devices[discovered_taser_count].name, advertisementName, sizeof(discovered_taser_devices[discovered_taser_count].name) - 1);
-        strncpy(discovered_taser_devices[discovered_taser_count].device_type, device_type, sizeof(discovered_taser_devices[discovered_taser_count].device_type) - 1);
-        discovered_taser_devices[discovered_taser_count].rssi = event->disc.rssi;
+    if (!already && detector_taser.count < detector_taser.capacity) {
+        detector_taser.devices[detector_taser.count].addr = event->disc.addr;
+        strncpy(detector_taser.devices[detector_taser.count].name, advertisementName, sizeof(detector_taser.devices[detector_taser.count].name) - 1);
+        strncpy(detector_taser.devices[detector_taser.count].device_type, device_type, sizeof(detector_taser.devices[detector_taser.count].device_type) - 1);
+        detector_taser.devices[detector_taser.count].rssi = event->disc.rssi;
 
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1910,11 +1933,11 @@ void ble_taser_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Taser Device\n");
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_taser_count, mac_str, advertisementName, event->disc.rssi);
+             detector_taser.count, mac_str, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Taser: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_taser_count, mac_str, event->disc.rssi);
+                               device_type, detector_taser.count, mac_str, event->disc.rssi);
         pulse_once(&rgb_manager, 255, 140, 0); // Dark orange pulse
-        discovered_taser_count++;
+        detector_taser.count++;
     }
 }
 
@@ -1923,6 +1946,7 @@ void ble_flock_detector_callback(struct ble_gap_event *event, size_t len) {
     if (event->type != BLE_GAP_EVENT_DISC || !event->disc.data || event->disc.length_data < 4) {
         return;
     }
+    if (!detector_flock.devices) return;
 
     // Check for Flock manufacturer data (Company ID 0x09C8)
     uint16_t company_id;
@@ -1950,19 +1974,19 @@ void ble_flock_detector_callback(struct ble_gap_event *event, size_t len) {
 
     // Check if already discovered
     bool already = false;
-    for (int j = 0; j < discovered_flock_count; j++) {
-        if (memcmp(discovered_flock_devices[j].addr.val, event->disc.addr.val, 6) == 0) {
+    for (int j = 0; j < detector_flock.count; j++) {
+        if (memcmp(detector_flock.devices[j].addr.val, event->disc.addr.val, 6) == 0) {
             already = true;
-            discovered_flock_devices[j].rssi = event->disc.rssi;
+            detector_flock.devices[j].rssi = event->disc.rssi;
             break;
         }
     }
 
-    if (!already && discovered_flock_count < MAX_DEVICES_DETECT) {
-        discovered_flock_devices[discovered_flock_count].addr = event->disc.addr;
-        strncpy(discovered_flock_devices[discovered_flock_count].name, advertisementName, sizeof(discovered_flock_devices[discovered_flock_count].name) - 1);
-        strncpy(discovered_flock_devices[discovered_flock_count].device_type, device_type, sizeof(discovered_flock_devices[discovered_flock_count].device_type) - 1);
-        discovered_flock_devices[discovered_flock_count].rssi = event->disc.rssi;
+    if (!already && detector_flock.count < detector_flock.capacity) {
+        detector_flock.devices[detector_flock.count].addr = event->disc.addr;
+        strncpy(detector_flock.devices[detector_flock.count].name, advertisementName, sizeof(detector_flock.devices[detector_flock.count].name) - 1);
+        strncpy(detector_flock.devices[detector_flock.count].device_type, device_type, sizeof(detector_flock.devices[detector_flock.count].device_type) - 1);
+        detector_flock.devices[detector_flock.count].rssi = event->disc.rssi;
 
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -1971,11 +1995,11 @@ void ble_flock_detector_callback(struct ble_gap_event *event, size_t len) {
 
         glog("Found Flock Device\n");
         glog("Index: %d | MAC: %s | Name: %s | RSSI: %d dBm\n",
-             discovered_flock_count, mac_str, advertisementName, event->disc.rssi);
+             detector_flock.count, mac_str, advertisementName, event->disc.rssi);
         TERMINAL_VIEW_ADD_TEXT("Flock: %s (Idx %d) MAC %s RSSI %d\n",
-                               device_type, discovered_flock_count, mac_str, event->disc.rssi);
+                               device_type, detector_flock.count, mac_str, event->disc.rssi);
         pulse_once(&rgb_manager, 128, 0, 128); // Purple pulse
-        discovered_flock_count++;
+        detector_flock.count++;
     }
 }
 
@@ -2553,6 +2577,15 @@ void ble_stop(void) {
     pcap_flush_buffer_to_file(); // Final flush
     pcap_file_close();           // Close the file after final flush
 
+    // Free detector buffers when stopping
+    free_detector_buffer(&detector_apple);
+    free_detector_buffer(&detector_samsung);
+    free_detector_buffer(&detector_google);
+    free_detector_buffer(&detector_tile);
+    free_detector_buffer(&detector_axon);
+    free_detector_buffer(&detector_taser);
+    free_detector_buffer(&detector_flock);
+
     /* final capture summary */
     glog("BLE capture summary: captured=%lu filtered=%lu total=%lu\n",
          (unsigned long)ble_pcap_packet_count,
@@ -2609,8 +2642,7 @@ void ble_start_apple_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_apple_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_apple)) return;
     ble_register_handler(ble_apple_detector_callback);
     ble_start_scanning();
 }
@@ -2619,8 +2651,7 @@ void ble_start_samsung_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_samsung_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_samsung)) return;
     ble_register_handler(ble_samsung_detector_callback);
     ble_start_scanning();
 }
@@ -2629,8 +2660,7 @@ void ble_start_google_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_google_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_google)) return;
     ble_register_handler(ble_google_detector_callback);
     ble_start_scanning();
 }
@@ -2639,8 +2669,7 @@ void ble_start_tile_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_tile_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_tile)) return;
     ble_register_handler(ble_tile_detector_callback);
     ble_start_scanning();
 }
@@ -2649,8 +2678,7 @@ void ble_start_axon_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_axon_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_axon)) return;
     ble_register_handler(ble_axon_detector_callback);
     ble_start_scanning();
 }
@@ -2659,8 +2687,7 @@ void ble_start_taser_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_taser_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_taser)) return;
     ble_register_handler(ble_taser_detector_callback);
     ble_start_scanning();
 }
@@ -2669,8 +2696,7 @@ void ble_start_flock_detector(void) {
     if (!ble_initialized) {
         ble_init();
     }
-
-    discovered_flock_count = 0; // Reset counter
+    if (!ensure_detector_allocated(&detector_flock)) return;
     ble_register_handler(ble_flock_detector_callback);
     ble_start_scanning();
 }
