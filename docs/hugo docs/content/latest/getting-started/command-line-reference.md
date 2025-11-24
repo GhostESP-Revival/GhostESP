@@ -63,7 +63,7 @@ toc: true
 
 ### Discovery
 
-- **`blescan [-f|-ds|-a|-r|-s]`** — Scan for BLE devices, Flippers, spam detectors, or raw advertising; `-s` stops.
+- **`blescan [-f|-ds|-a|-r|-apple|-samsung|-google|-tile|-axon|-taser|-flock|-s]`** — Scan for BLE devices: Flippers (`-f`), BLE spam detector (`-ds`), AirTag scanner (`-a`), raw advertising (`-r`), or brand/device detectors (`-apple|-samsung|-google|-tile|-axon|-taser|-flock`); `-s` stops.
 - **`blewardriving [-s]`** — Log BLE beacons with GPS metadata.
 
 ### Spoofing
