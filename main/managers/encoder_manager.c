@@ -1,6 +1,11 @@
 #include "managers/encoder_manager.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+
+#ifdef CONFIG_USE_IO_EXPANDER
+#include "io_manager.h"
+#endif
 
 /* --- lookup table from Matthias Hertel’s library --- */
 static const int8_t KNOBDIR[16] = {
@@ -20,7 +25,6 @@ static inline uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
-\
 
 void encoder_init(encoder_t *enc,
                   int pin_a,
@@ -33,18 +37,35 @@ void encoder_init(encoder_t *enc,
     enc->pullup = pullup;
     enc->mode = mode;
 
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << pin_a) | (1ULL << pin_b),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = pullup ? GPIO_PULLUP_ENABLE  : GPIO_PULLUP_DISABLE,
-        .pull_down_en = pullup ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
-        .intr_type    = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
+#ifdef CONFIG_USE_IO_EXPANDER
+    // Check if pins are IO expander pins (pin numbers 0-15 for TCA9535)
+    enc->use_io_expander = (pin_a < 16 && pin_b < 16);
+    if (enc->use_io_expander) {
+        // IO expander pins - no GPIO config needed, TCA9535 handles it
+        bool sig_a = false, sig_b = false;
+        io_manager_get_encoder_signals(&sig_a, &sig_b);
+        int sig1 = sig_a ? 1 : 0;
+        int sig2 = sig_b ? 1 : 0;
+        enc->old_state = (int8_t)(sig1 | (sig2 << 1));
+    } else
+#else
+    enc->use_io_expander = false;
+#endif
+    {
+        // Direct ESP32 GPIO pins
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << pin_a) | (1ULL << pin_b),
+            .mode         = GPIO_MODE_INPUT,
+            .pull_up_en   = pullup ? GPIO_PULLUP_ENABLE  : GPIO_PULLUP_DISABLE,
+            .pull_down_en = pullup ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
+            .intr_type    = GPIO_INTR_DISABLE
+        };
+        gpio_config(&io_conf);
 
-    int sig1 = gpio_get_level(pin_a);
-    int sig2 = gpio_get_level(pin_b);
-    enc->old_state = (int8_t)(sig1 | (sig2 << 1));
+        int sig1 = gpio_get_level(pin_a);
+        int sig2 = gpio_get_level(pin_b);
+        enc->old_state = (int8_t)(sig1 | (sig2 << 1));
+    }
 
     enc->position = 0;
     enc->position_ext = 0;
@@ -58,15 +79,30 @@ void encoder_init(encoder_t *enc,
     for (int i = 0; i < ENCODER_RPM_SMOOTHING_SIZE; ++i) enc->rpm_time_diffs_us[i] = 0;
 }
 
-
 /* poll-style tick (cheap enough to call from a tight loop or 1 kHz FreeRTOS timer) */
 void encoder_tick(encoder_t *enc)
 {
-    int sig1 = gpio_get_level(enc->pin_a);
-    int sig2 = gpio_get_level(enc->pin_b);
+    int sig1, sig2;
+#ifdef CONFIG_USE_IO_EXPANDER
+    if (enc->use_io_expander) {
+        // Read from IO expander
+        bool sig_a = false, sig_b = false;
+        if (!io_manager_get_encoder_signals(&sig_a, &sig_b)) {
+            return;
+        }
+        sig1 = sig_a ? 1 : 0;
+        sig2 = sig_b ? 1 : 0;
+    } else
+#endif
+    {
+        // Read from ESP32 GPIO
+        sig1 = gpio_get_level(enc->pin_a);
+        sig2 = gpio_get_level(enc->pin_b);
+    }
     int8_t this_state = (int8_t)(sig1 | (sig2 << 1));
 
     if (enc->old_state != this_state) {
+        ESP_LOGD("Encoder", "State change: %d -> %d (pins: %d, %d)", enc->old_state, this_state, sig1, sig2);
         enc->position += KNOBDIR[this_state | (enc->old_state << 2)];
         enc->old_state = this_state;
 

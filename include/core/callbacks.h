@@ -40,6 +40,10 @@ typedef struct {
 void start_pineap_detection(void);
 void stop_pineap_detection(void);
 
+// Wardriving channel hopping control functions
+void start_wardriving(void);
+void stop_wardriving(void);
+
 // Forward declarations of callback functions
 void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type);

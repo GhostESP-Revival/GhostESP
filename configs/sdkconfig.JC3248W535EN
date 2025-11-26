@@ -571,6 +571,14 @@ CONFIG_JC3248W535EN_LCD=y
 # CONFIG_HAS_RTC_CLOCK is not set
 # CONFIG_WITH_ETHERNET is not set
 # CONFIG_IS_GHOST_BOARD is not set
+
+#
+# NFC Options
+#
+# CONFIG_NFC_PN532 is not set
+CONFIG_NFC_CHAMELEON=y
+CONFIG_HAS_NFC=y
+# end of NFC Options
 # end of Misc Options
 
 #

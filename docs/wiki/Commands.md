@@ -48,6 +48,28 @@
 </details>
 
 <details>
+<summary><strong>Karma Attack</strong></summary>
+
+- <code>karma start</code>  
+  Start Karma attack using all discovered SSIDs (learns from probe requests)
+
+- <code>karma start &lt;SSID1&gt; [SSID2] [SSID3] ...</code>  
+  Start Karma attack with specific SSIDs  
+  Example: <code>karma start FreeWiFi Starbucks McDonald's</code>
+
+- <code>karma stop</code>  
+  Stop Karma attack
+
+**How Karma Works:**
+- Listens for probe requests from nearby devices
+- Automatically caches SSIDs that devices are looking for
+- Creates fake access points with those SSIDs
+- Starts evil portals for each fake network
+- Rotates between multiple SSIDs every 5 seconds
+- Broadcasts beacon frames for all cached SSIDs every 500ms
+</details>
+
+<details>
 <summary><strong>Network Generation (Beacon Spam)</strong></summary>
 
 - <code>beaconspam -r</code>  
@@ -141,6 +163,87 @@
 - <code>powerprinter &lt;ip&gt; &lt;text&gt; &lt;size&gt; &lt;position&gt;</code>  
   Send text to network printers  
   Positions: CM (center), TL (top-left), TR (top-right), BR (bottom-right), BL (bottom-left)
+</details>
+
+<details>
+<summary><strong>Chameleon Ultra Integration</strong> <em>(13.56MHz NFC/RFID Tool)</em></summary>
+
+- <code>chameleon connect [timeout] [pin]</code>  
+  Connect to Chameleon Ultra device via Bluetooth  
+  Optional timeout (default: 10s) and PIN (4-6 digits) for authentication
+
+- <code>chameleon disconnect</code>  
+  Disconnect from Chameleon Ultra device
+
+- <code>chameleon status</code>  
+  Show connection status and device information
+
+- <code>chameleon battery</code>  
+  Check Chameleon Ultra battery level
+
+- <code>chameleon firmware</code>  
+  Display firmware version information
+
+- <code>chameleon devicemode</code>  
+  Show current device mode (Reader/Emulator)
+
+- <code>chameleon reader</code>  
+  Switch Chameleon Ultra to reader mode
+
+- <code>chameleon emulator</code>  
+  Switch Chameleon Ultra to emulator mode
+
+**HF (13.56MHz) Operations:**
+- <code>chameleon scanhf</code>  
+  Scan for HF cards (ISO14443 Type A/B, MIFARE, NTAG)
+
+- <code>chameleon savehf [filename]</code>  
+  Save last HF scan results to SD card (/mnt/ghostesp/chameleon/)
+
+- <code>chameleon readhf</code>  
+  Basic MIFARE Classic card detection and information collection
+
+- <code>chameleon savedump [filename]</code>  
+  Save complete card dump data to SD card
+
+**LF (125KHz) Operations:**
+- <code>chameleon scanlf</code>  
+  Scan for LF EM410X tags
+
+- <code>chameleon scanhidprox</code>  
+  Scan for HID Proximity cards
+
+- <code>chameleon scanlfall</code>  
+  Try both EM410X and HID Prox scanning
+
+- <code>chameleon savelf [filename]</code>  
+  Save last LF scan results to SD card
+
+**MIFARE Classic Operations:**
+- <code>chameleon mfdetect</code>  
+  Detect MIFARE Classic support and card type
+
+- <code>chameleon mfprng</code>  
+  Test MIFARE Classic PRNG weakness
+
+
+**Slot Management:**
+- <code>chameleon activeslot</code>  
+  Show currently active slot (1-8)
+
+- <code>chameleon setslot &lt;1-8&gt;</code>  
+  Change active slot
+
+- <code>chameleon slotinfo &lt;1-8&gt;</code>  
+  Display information about specific slot
+
+**📋 Notes:**
+- All save commands support optional custom filenames
+- Files are saved to `/mnt/ghostesp/chameleon/` directory on SD card
+- Auto-generated filenames include UID and timestamp
+- Basic card detection and information collection only
+- For advanced analysis, use specialized tools
+
 </details>
 
 <details>

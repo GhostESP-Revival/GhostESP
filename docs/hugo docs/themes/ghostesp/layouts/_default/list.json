@@ -1,0 +1,6 @@
+{{- $pages := slice -}}
+{{- range .Pages -}}
+  {{- $entry := dict "title" .Title "description" ((.Params.description | default .Summary) | plainify) "permalink" .RelPermalink "content" (.Plain | plainify) -}}
+  {{- $pages = $pages | append $entry -}}
+{{- end -}}
+{{- $pages | jsonify -}}

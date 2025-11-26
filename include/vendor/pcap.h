@@ -30,12 +30,7 @@ typedef struct {
 } pcap_packet_header_t;
 
 #define MAX_FILE_NAME_LENGTH 528
-#define PCAP_BUFFER_SIZE 4096
-
-static uint8_t pcap_buffer[PCAP_BUFFER_SIZE];
-static size_t buffer_offset = 0;
-static FILE *pcap_file = NULL;
-static SemaphoreHandle_t pcap_mutex = NULL;
+#define PCAP_BUFFER_SIZE 5120
 
 #define DLT_IEEE802_11_RADIO 127
 #define DLT_BLUETOOTH_HCI_H4 201
@@ -51,6 +46,7 @@ esp_err_t pcap_file_open(const char *base_file_name,
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type);
 esp_err_t pcap_flush_buffer_to_file();
+bool pcap_is_capturing(void);
 void pcap_file_close();
 
 #endif

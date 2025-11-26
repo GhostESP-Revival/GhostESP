@@ -649,6 +649,14 @@ CONFIG_ADC_BATTERY_PIN=4
 # CONFIG_IS_S3TWATCH is not set
 # CONFIG_HAS_INFRARED is not set
 # CONFIG_USE_ENCODER is not set
+
+#
+# NFC Options
+#
+# CONFIG_NFC_PN532 is not set
+CONFIG_NFC_CHAMELEON=y
+CONFIG_HAS_NFC=y
+# end of NFC Options
 # end of Misc Options
 
 #

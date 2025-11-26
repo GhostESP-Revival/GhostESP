@@ -116,6 +116,12 @@ Power saving features include:
 
 - **Evil Portal Operations**:  
   Navigate to Wi-Fi menu → Evil Portal for captive portal options. Configuration and management available through the interface.
+ 
+- **Chameleon Ultra / GhostNet AP**:  
+  Starting a Chameleon Ultra connection from `NFC → Chameleon Ultra` in the display ui temporarily disables the `GhostNet` AP so BLE has priority. When the session ends, the firmware restores the AP automatically after a short delay.
+
+- **Karma Attack Operations**:  
+  Navigate to Wi-Fi menu → Attacks → Start Karma Attack for automatic SSID learning, or Start Karma Attack (Custom SSIDs) to specify target networks manually.
   
 - **Infrared Operations**:  
   Use "Learn Remote" to capture IR signals, "Easy Learn" mode for auto button naming, and "Add Signal" to append signals to existing remotes.

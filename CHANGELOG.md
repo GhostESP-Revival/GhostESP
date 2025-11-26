@@ -1,48 +1,159 @@
 # Ghost ESP Changelog
 
-## Revival v1.8
+## Revival v1.9
+
+- Added IR CLI support
+- Added Flipper Zero NFC parser compatibility layer with support for:
+  - Aime
+  - CSC Service Works
+  - WashCity (Verified working)
+  - Metromoney
+  - Bip
+  - CharlieCard
+  - Disney Infinity (Verified working)
+  - HI!
+  - HID PACS (Verified working)
+  - H World
+  - Kazan
+  - Microel
+  - MiZIP
+  - Plantain
+  - Saflok (Verified working)
+  - Skylanders (Verified working)
+  - SmartRider (Verified working)
+  - Social Moscow
+  - Troika
+  - Two Cities
+  - Umarsh
+  - Zolotaya Korona
+  - Zolotaya Korona Online
+- Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
+- Refactors to NFC logic to make more maintainable
+- After scanning, NFC popup title now specifies the tag type
+- Added dualcomm display menu when connected to a peer with split view terminal showing normal/peer response logs
+- IR and NFC display views and popups now properly use active set UI theme
+- Main menu app colors are now consistent across devices
+- Avoid redundant PN532 Mifare Classic reads for a minor speed up
+- Apps menu now follows main menu theme, controls and layout
+- Reorganised the settings menu and adjusted styling
+- Fixed an issue that would cause MFC dictionary attack to not try all possible keys
+- Fixed BLE scanning not being reliable
+- Added AirTag RSSI update logging so existing tags report RSSI changes every few seconds
+- Add vendor board support and images to documentation - @tototo31
+- Fixed an issue that would cause Chameleon Ultra to recover less keys than a PN532
+
+
+## Revival v1.8.1
 
 ### Added
 
+- Added included TURNHISTVOFF universal IR file with popular TV Power buttons
+
+### Changed
+
+- Suspend Wi-Fi services during BLE commands to guarantee enough free memory for NimBLE to initialize successfully
+- Updated MFC dictionary with new additions
+- Only show touchscreen scroll buttons when the options list is scrollable
+- Refactored the standard mainmenu to reduce memory usage and improve performance
+- Changed default UI theme to 'Bright'
+- Default to WebUI authentication disabled
+- Replaced Basic HTTP auth with HTTP Digest (RFC2617) using HMAC-signed stateless nonces to avoid sending plaintext credentials
+- Default AP authmode changed to WPA2/WPA3 mixed for ESP32‑C5 and ESP32‑C6
+- Refactor NFC to use static pools instead of heap allocations for less fragmentation and better performance
+- WebUI is now served as a gzipped file to reduce loading times
+- IR remotes and universals menus now show “No .ir files” placeholder when no IR files are found
+
+### Fixed
+
+- Prevent accidental mainmenu nav button activation during swipes
+- Fixed main menu color theming to match actually enabled items
+- Fixed potential status bar display issues during screen transitions
+- Fixed potential issue with menu navigation after clearing lists
+- Correct ADC battery percentage scaling math to prevent incorrect readings
+- Fixed BQ27220 reset/reseal flow to more accurately reflect battery state
+
+## Revival v1.8
+
+### TL;DR
+
+- PN532 and Chameleon Ultra support for NTAG and MIFARE Classic (read/write, NDEF, Flipper exports)
+- Cardputer ADV, optional secondary status display and IO expander support
+- WebUI redesign, 2 new main menu layouts
+- Karma attack and 802.15.4 packet capture on C5/C6
+- Heartbeat-based auto-reconnect for dual communication, stability fixes, and QoL improvements
+- Miscellaneous fixes across core, display, Wi‑Fi/BLE, DNS, IR, and wardriving
+
+### Added
+
+#### NFC
+
+##### PN532
+
+- NTAG (Type 2) support: read/write NTAG213/215/216 with NDEF parsing and save to Flipper .nfc format
+- MIFARE Classic support (Mini/1K/4K): Flipper dictionary attack, magic backdoor detection, and NDEF TLV parsing
+- File management: 'Saved' menu for .nfc files and 'User Keys' view for `/mnt/ghostesp/nfc/mfc_user_dict.nfc`
+
+##### Chameleon Ultra
+
+- CLI support: connect/disconnect, status/battery, reader/emulator toggles - @tototo31
+- UI support: PN532 parity with cached details, More/Save flows and dictionary attack
+- NTAG and Mifare Classic NDEF parsing, Flipper `.nfc` exports from `chameleon savehf/savedump/saventag` - @tototo31, @jaylikesbunda
+
+#### Hardware
+
 - Added support for Cardputer ADV
-- Added 802.15.4 packet capture (only on C5, C6)
-- Added 2 alternate main menu layouts (Grid and List)
-- Added glog - a lightweight logging helper
-- Added command history with up/down navigation and full in-line cursor editing (left/right, insert, delete, backspace) to the serial console. - @tototo31
-- Added 'set/getneopixelbrightness' commands to set or get the max brightness of the neopixels - @tototo31
 - Added Kconfig support for a secondary status display
 - Added Kconfig support for IO Expander - @Play2BReal
 - Added heartbeat-based auto-reconnect for dual communication
+
+#### UI
+
+- Added 2 alternate main menu layouts (Grid and List)
 - Ghost (asset by @the1anonlypr3) and Game of Life idle animations for status display
-- Added ability to set settings via cli - @tototo31
-- Add joystick support for keyboard input in terminal view - @tototo31
-  
-- **PN532 NFC Capability**
-  - **NTAG Support (Type 2)**
-    - Read NTAG213/215/216 with NDEF parsing
-    - Write NTAG213/215/216 from .nfc files
-    - Save to Flipper .nfc format (fully compatible)
-  - **MIFARE Classic Support (Mini/1K/4K)**
-    - Flipper's 1000+ key dictionary attack
-    - Magic backdoor detection (Gen1A clones)
-    - Parse and display NDEF TLV data
-  - **File Management**
-    - 'Saved' menu to browse .nfc files and rename/delete them from the UI
-    - 'User Keys' view to list `/mnt/ghostesp/nfc/mfc_user_dict.nfc`
+- Added command history with up/down navigation and full in-line cursor editing to the serial console - @tototo31
+- Added joystick support for keyboard input in terminal view - @tototo31
+- Added 'set/getneopixelbrightness' commands and ability to set settings via CLI - @tototo31
+
+#### Attacks
+
+- Added 802.15.4 packet capture (only on C5, C6)
+- Added karma attack - @tototo31 in #108
+
+#### Misc
+
+- Added glog - a lightweight logging helper
 
 ### Changed
+
+#### UI
 
 - Use a fixed-size active-key buffer for keyboard
 - Refactor popups to use reusable popup helpers
 - Refactor options menu to use reusable options view helpers
-- Refactor comm manager to centralize packet handling, add state mutex and handshake timeout, and guard UART driver install
-- Update main menu icons to RGB565A8
+- Refactor touch keyboard view to significantly reduce memory usage
 - Enabled software back buttons made for encoder controls on joystick too
-- Joystick builds now use touch keyboard layout with selection highlighting and navigation
-- Changed the C5 to use a single display buffer to save memory
-- Reduced VFS allocation unit size to 4KB
 - Size popup buttons based on what's in them
+- WebUI redesign (Part 2)
+- Organise BLE menu into hierarchical sub-menus - @tototo31
+- Lowered LV_MEM_SIZE from 32KB to 16KB on most display configs
+
+#### Attacks
+
+- Flush PCAP and CSV data to SD Card on a timer
+- EAPOL capture now captures extra packet types for cracking and detects when a crackable handshake is found
+- Added a summary log when starting a packet capture and reduce filter stats frequency
+
+#### Misc
+
+- Lowered pineap task size
+- Changed the C5 to use a single display buffer to save memory
+- Reduce VFS allocation unit size to 4KB
+- Cap displayed WiFi APs to 50 for 'scanap' output
+- Refactor comm manager to centralize packet handling, add state mutex and handshake timeout, and guard UART driver install
+- If dualcomm is set to pins used by the serial UART, disable the serial UART
+- Update main menu icons to RGB565A8
 - Refactored dualcomm logic to be more robust
+- lower all CYD LVGL memory buffers to 16KB and swap to single buffer for display
 
 ### Bug Fixes
 
@@ -57,22 +168,33 @@
 - Small miscellaneous memory saves
 - Fixed RMT channel allocation on C5 to prevent conflicts with IR TX
 - Disable duplicate filtering in general BLE scanning
-
-
-#### Network & Comms
-
+- Removed heap alloc per command
+- Added deletions for VisualizerHandle on disconnect/stop and rgb_effect_task_handle on rgb off/stop to prevent lingering tasks 
+- Removed second mdns init call
+- Preallocate handlers array, remove reallocs; replace last_company_id malloc with value+flag in BLE manager
+- Free all LED strip resources on deinit
 - Ignore self when discovering peers for dual comm
 - Prevent crash and spam in EAPOL Logoff attack
 - Fixed minor issues with the dns server
 - Fixed BLE capture stopping itself after recieving an event
 - Added sanity checks to IE parsing to prevent OOB reads
 - Accepted HCI packet types now include CMD, ACL, SCO, and ISO
+- Reduce heap churn by reusing a single 4KB transfer buffer in wifi manager streaming
+- Significantly improve reliability of capturing wifi frames
+- Remove arbitrary limitation on the lines of text in the webUI dual comm terminal
+- Fixed an issue causing potential corruption of pcaps saved to the Flipper Zero
+- Fixed wardriving encryption detection
+- Wardriving now properly hops channels for AP scanning
 
-#### Input & UI
+#### Display
 
+- Possible fix for random rotation of ST7789 displays upon flashing
+- Joystick builds now use touch keyboard layout with selection highlighting and navigation
 - Fix keyboard not using SHIFT correctly and the keyboard view forcing lowercase
 - Remove artificial delay in cardputer keyboard task to make more responsive
 - Improve and refactor terminal message handling
+- Remove key highlight on touch only devices for the keyboard view
+- Fixed duplicate back button and wrong red styling in universals IR view
 
 ## Revival v1.7.2
 

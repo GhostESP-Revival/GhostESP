@@ -128,11 +128,17 @@ esp_err_t pn532_wait_ready(pn532_io_handle_t io_handle, int32_t timeout)
 {
     TickType_t start_ticks = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout > 0) ? pdMS_TO_TICKS(timeout) : portMAX_DELAY;
-    TickType_t elapsed_ticks = 0;
-    while (elapsed_ticks <= timeout_ticks) {
+    // if IRQ available, poll aggressively with yield (GPIO reads are fast)
+    // if no IRQ, use 1ms delay for I2C status checks
+    bool has_irq = (io_handle->irq != GPIO_NUM_NC);
+    
+    while ((xTaskGetTickCount() - start_ticks) <= timeout_ticks) {
         if (io_handle->pn532_is_ready(io_handle) == ESP_OK) return ESP_OK;
-        vTaskDelay(pdMS_TO_TICKS(1));
-        elapsed_ticks = xTaskGetTickCount() - start_ticks;
+        if (has_irq) {
+            portYIELD(); // yield to other tasks, no delay for fast GPIO polling
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(1)); // delay for I2C status checks
+        }
     }
     return ESP_ERR_TIMEOUT;
 }

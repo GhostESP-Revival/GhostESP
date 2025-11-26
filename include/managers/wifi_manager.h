@@ -270,5 +270,11 @@ void wifi_manager_sae_flood_help(void);
 void wifi_manager_set_html_from_uart(void);
 void wifi_manager_store_html_chunk(const char* data, size_t len, bool is_final);
 void wifi_manager_clear_html_buffer(void);
+void wifi_manager_clear_scan_results(void);
+
+// Karma attack functions
+void wifi_manager_start_karma(void);
+void wifi_manager_stop_karma(void);
+void wifi_manager_set_karma_ssid_list(const char **ssids, int count);
 
 #endif // WIFI_MANAGER_H

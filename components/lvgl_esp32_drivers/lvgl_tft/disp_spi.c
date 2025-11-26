@@ -108,10 +108,7 @@ void disp_spi_add_device_config(spi_host_device_t host, spi_device_interface_con
     chained_post_cb=devcfg->post_cb;
     devcfg->post_cb=spi_ready;
     esp_err_t ret=spi_bus_add_device(host, devcfg, &spi);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
-        return; /* bail without asserting to avoid crash when bus init failed */
-    }
+    assert(ret==ESP_OK);
 }
 
 void disp_spi_add_device(spi_host_device_t host)
@@ -130,7 +127,7 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
         .mode = SPI_TFT_SPI_MODE,
         .spics_io_num=DISP_SPI_CS,              // CS pin
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
-        .queue_size=10,
+        .queue_size=SPI_TRANSACTION_POOL_SIZE,
         .pre_cb=NULL,
         .post_cb=NULL,
 #if defined(DISP_SPI_HALF_DUPLEX)
@@ -152,7 +149,7 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 		assert(TransactionPool != NULL);
 		for (size_t i = 0; i < SPI_TRANSACTION_POOL_SIZE; i++)
 		{
-			spi_transaction_ext_t* pTransaction = (spi_transaction_ext_t*)heap_caps_malloc(sizeof(spi_transaction_ext_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+			spi_transaction_ext_t* pTransaction = (spi_transaction_ext_t*)heap_caps_malloc(sizeof(spi_transaction_ext_t), MALLOC_CAP_DMA);
 			assert(pTransaction != NULL);
 			memset(pTransaction, 0, sizeof(spi_transaction_ext_t));
 			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
@@ -266,19 +263,10 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
 
 		spi_transaction_ext_t *pTransaction = NULL;
 		xQueueReceive(TransactionPool, &pTransaction, portMAX_DELAY);
-		memcpy(pTransaction, &t, sizeof(t));
-		/* try non-blocking to avoid hanging lvgl tick when ble is busy */
-		if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-			spi_transaction_t *presult;
-			if (spi_device_get_trans_result(spi, &presult, 0) == ESP_OK) {
-				xQueueSend(TransactionPool, &presult, portMAX_DELAY);
-			} else {
-				vTaskDelay(1); /* don't fuck the watchdog */
-			}
-			if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, 0) != ESP_OK) {
-				xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
-			}
-		}
+        memcpy(pTransaction, &t, sizeof(t));
+        if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, portMAX_DELAY) != ESP_OK) {
+			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);	/* send failed transaction back to the pool to be reused */
+        }
     }
 }
 
@@ -334,4 +322,3 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
         chained_post_cb(trans);
     }
 }
-

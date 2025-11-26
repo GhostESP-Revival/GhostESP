@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.Language.Lang }}" data-theme="{{ default "auto" .Site.Params.defaultTheme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ block "title" . }}{{ if and .Title (not .IsHome) }}{{ .Title }} · {{ end }}{{ .Site.Title }}{{ end }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  {{ $styles := resources.Get "css/main.css" | resources.Minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $styles.RelPermalink }}">
+  {{ $meta := newScratch }}
+  {{ $meta.Set "title" .Site.Title }}
+  {{ if and .Title (not .IsHome) }}{{ $meta.Set "title" .Title }}{{ end }}
+
+  {{ if .Params.description }}
+    {{ $meta.Set "description" (plainify .Params.description) }}
+  {{ else if .Summary }}
+    {{ $meta.Set "description" (plainify .Summary) }}
+  {{ else if .Site.Params.defaultDescription }}
+    {{ $meta.Set "description" (plainify .Site.Params.defaultDescription) }}
+  {{ else }}
+    {{ $meta.Set "description" (plainify .Site.Title) }}
+  {{ end }}
+  {{ $meta.Set "description" (truncate 160 ($meta.Get "description")) }}
+
+  {{ if or .IsHome .IsSection }}
+    {{ $meta.Set "type" "website" }}
+  {{ else }}
+    {{ $meta.Set "type" "article" }}
+  {{ end }}
+
+  {{ if .Params.images }}
+    {{ $meta.Set "image" (index .Params.images 0) }}
+  {{ else if .Site.Params.socialImage }}
+    {{ $meta.Set "image" .Site.Params.socialImage }}
+  {{ else }}
+    {{ with resources.Get "images/ghostesp.png" | fingerprint }}
+      {{ $meta.Set "image" .RelPermalink }}
+    {{ end }}
+  {{ end }}
+
+  {{ $imageURL := "" }}
+  {{ with $meta.Get "image" }}
+    {{ $imageURL = . | absURL }}
+  {{ end }}
+
+  {{ $meta.Set "twitterCard" (cond (ne $imageURL "") "summary_large_image" "summary") }}
+  {{ $locale := default "en_US" .Site.Language.Lang }}
+
+  <meta name="description" content="{{ $meta.Get "description" | htmlEscape }}">
+  <meta property="og:site_name" content="{{ .Site.Title | htmlEscape }}">
+  <meta property="og:type" content="{{ $meta.Get "type" }}">
+  <meta property="og:title" content="{{ $meta.Get "title" | htmlEscape }}">
+  <meta property="og:description" content="{{ $meta.Get "description" | htmlEscape }}">
+  <meta property="og:url" content="{{ .Permalink }}">
+  <meta property="og:locale" content="{{ $locale }}">
+  {{ if ne $imageURL "" }}<meta property="og:image" content="{{ $imageURL }}">{{ end }}
+  <meta name="twitter:card" content="{{ $meta.Get "twitterCard" }}">
+  <meta name="twitter:title" content="{{ $meta.Get "title" | htmlEscape }}">
+  <meta name="twitter:description" content="{{ $meta.Get "description" | htmlEscape }}">
+  {{ if ne $imageURL "" }}<meta name="twitter:image" content="{{ $imageURL }}">{{ end }}
+  <script>
+    (function() {
+      const theme = localStorage.getItem('ghostesp-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+
+      if (window.innerWidth >= 992) {
+        if (localStorage.getItem('sidebarState') === 'open') {
+          document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>');
+        }
+      }
+    })();
+  </script>
+</head>
+<body>
+  {{ $scratch := newScratch }}
+  {{ $versionConfig := .Site.Params.versioning }}
+  {{ $scratch.Set "versionOptions" (slice) }}
+  {{ $scratch.Set "currentVersion" "" }}
+  {{ with $versionConfig }}
+    {{ $opts := default (slice) .options }}
+    {{ $scratch.Set "versionOptions" $opts }}
+    {{ $scratch.Set "currentVersion" (default "latest" .default) }}
+    {{ $rel := $.RelPermalink }}
+    {{ range $opts }}
+      {{ $id := index . "id" }}
+      {{ if or (strings.HasPrefix $rel (printf "/%s/" $id)) (eq $rel (printf "/%s" $id)) (eq $rel (printf "/%s/" $id)) }}
+        {{ $scratch.Set "currentVersion" $id }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+  {{ $versionOptions := $scratch.Get "versionOptions" }}
+  {{ $currentVersion := $scratch.Get "currentVersion" }}
+  {{ $scratch.Set "versionRoot" nil }}
+  {{ if and (gt (len (default (slice) $versionOptions)) 0) (ne $currentVersion "") }}
+    {{ with $.Site.GetPage "section" $currentVersion }}
+      {{ $scratch.Set "versionRoot" . }}
+    {{ end }}
+    {{ if not ($scratch.Get "versionRoot") }}
+      {{ range $versionOptions }}
+        {{ if not ($scratch.Get "versionRoot") }}
+          {{ $candidate := index . "id" }}
+          {{ with $.Site.GetPage "section" $candidate }}
+            {{ $scratch.Set "versionRoot" . }}
+            {{ $scratch.Set "currentVersion" $candidate }}
+          {{ end }}
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+  {{ $versionRoot := $scratch.Get "versionRoot" }}
+  {{ $currentVersion := $scratch.Get "currentVersion" }}
+  {{ $versionOptions := $scratch.Get "versionOptions" }}
+  {{ $hasVersioning := and $versionRoot (gt (len (default (slice) $versionOptions)) 0) }}
+  {{ $scratch.Set "homeLink" "/" }}
+  {{ if $versionRoot }}
+    {{ $scratch.Set "homeLink" $versionRoot.RelPermalink }}
+  {{ else if and $hasVersioning (ne $currentVersion "") }}
+    {{ $scratch.Set "homeLink" (printf "/%s/" $currentVersion) }}
+  {{ end }}
+  {{ $homeLink := $scratch.Get "homeLink" }}
+  {{ $logo := resources.Get "images/ghostesp.png" | fingerprint }}
+  <header class="topbar">
+    <button class="topbar__toggle" type="button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="false">
+      <svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true">
+        <line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"></line>
+        <line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"></line>
+        <line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"></line>
+      </svg>
+    </button>
+    <a href="{{ "/" | relURL }}" class="topbar__brand">
+      {{ with $logo }}
+        <img src="{{ .RelPermalink }}" alt="GhostESP: Revival" class="topbar__logo">
+      {{ end }}
+    </a>
+    <div class="topbar__actions">
+      <button class="topbar__theme" type="button" data-theme-toggle aria-label="Toggle theme">
+        <svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon aria-hidden="true">
+          <g class="icon-theme__sun">
+            <circle cx="12" cy="12" r="5"></circle>
+            <g class="icon-theme__sun-rays">
+              <line x1="12" y1="2.5" x2="12" y2="5.5"></line>
+              <line x1="12" y1="18.5" x2="12" y2="21.5"></line>
+              <line x1="4.5" y1="12" x2="7.5" y2="12"></line>
+              <line x1="16.5" y1="12" x2="19.5" y2="12"></line>
+              <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"></line>
+              <line x1="16.2" y1="16.2" x2="18.4" y2="18.4"></line>
+              <line x1="5.6" y1="18.4" x2="7.8" y2="16.2"></line>
+              <line x1="16.2" y1="7.8" x2="18.4" y2="5.6"></line>
+            </g>
+          </g>
+          <g class="icon-theme__moon">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+          </g>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <div class="app">
+    <aside class="sidebar" id="sidebar"{{ if $hasVersioning }} data-current-version="{{ $currentVersion }}"{{ end }}>
+      <div class="sidebar__brand">
+        <a href="{{ "/" | relURL }}" class="sidebar__title">
+          {{ with $logo }}
+            <img src="{{ .RelPermalink }}" alt="GhostESP: Revival" class="sidebar__logo">
+          {{ end }}
+        </a>
+        {{ with .Site.Params.subtitle }}<p class="sidebar__subtitle">{{ . }}</p>{{ end }}
+      </div>
+      {{ if $hasVersioning }}
+        <div class="sidebar__version">
+          <label for="sidebar-version" class="sidebar__version-label">Firmware version</label>
+          <select id="sidebar-version" class="sidebar__version-select" data-version-select>
+            {{ range $versionOptions }}
+              <option value="{{ index . "id" }}"{{ if eq (index . "id") $currentVersion }} selected{{ end }}>{{ index . "name" }}</option>
+            {{ end }}
+          </select>
+        </div>
+      {{ end }}
+      <div class="sidebar__search">
+        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="{{ "index.json" | relURL }}">
+        <div class="sidebar__search-results" data-search-results role="listbox"></div>
+      </div>
+      <nav class="sidebar__nav">
+        {{ $currentPage := . }}
+        {{ $currentPath := strings.TrimSuffix $currentPage.RelPermalink "/" }}
+        {{ $homePath := strings.TrimSuffix ($homeLink | relURL) "/" }}
+        <a href="{{ $homeLink | relURL }}" class="sidebar__link{{ if eq $currentPath $homePath }} sidebar__link--active{{ end }}">Home</a>
+        {{ if $versionRoot }}
+          {{ range $versionRoot.Sections.ByWeight }}
+            {{ $section := . }}
+            {{ $sectionRel := $section.RelPermalink }}
+            {{ $pages := where $section.Pages "Draft" false }}
+            {{ if gt (len $pages) 0 }}
+              {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
+              {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
+              <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
+                <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
+                  <span>{{ $section.LinkTitle }}</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse{{ if $isActive }} show{{ end }} sidebar__group-items" id="{{ $groupID }}">
+                  <a href="{{ $section.RelPermalink }}" class="sidebar__sublink{{ if eq $currentPage $section }} sidebar__sublink--active{{ end }}">Overview</a>
+                  {{ range (where $pages "File" "!=" nil).ByWeight }}
+                    <a href="{{ .RelPermalink }}" class="sidebar__sublink{{ if eq . $currentPage }} sidebar__sublink--active{{ end }}">{{ .LinkTitle }}</a>
+                  {{ end }}
+                </div>
+              </div>
+            {{ end }}
+          {{ end }}
+          {{ range $versionRoot.RegularPages.ByWeight }}
+            <a href="{{ .RelPermalink }}" class="sidebar__link{{ if eq . $currentPage }} sidebar__link--active{{ end }}">{{ .LinkTitle }}</a>
+          {{ end }}
+        {{ else }}
+          {{ range .Site.Sections.ByWeight }}
+            {{ $section := . }}
+            {{ $pages := where $section.Pages "Draft" false }}
+            {{ if gt (len $pages) 0 }}
+              {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
+              {{ $sectionRel := $section.RelPermalink }}
+              {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
+              <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
+                <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
+                  <span>{{ $section.LinkTitle }}</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse{{ if $isActive }} show{{ end }} sidebar__group-items" id="{{ $groupID }}">
+                  <a href="{{ $section.RelPermalink }}" class="sidebar__sublink{{ if eq $currentPage $section }} sidebar__sublink--active{{ end }}">Overview</a>
+                  {{ range (where $pages "File" "!=" nil).ByWeight }}
+                    <a href="{{ .RelPermalink }}" class="sidebar__sublink{{ if eq . $currentPage }} sidebar__sublink--active{{ end }}">{{ .LinkTitle }}</a>
+                  {{ end }}
+                </div>
+              </div>
+            {{ end }}
+          {{ end }}
+          {{ range (where (where .Site.RegularPages "Section" "") "File" "!=" nil).ByWeight }}
+            <a href="{{ .RelPermalink }}" class="sidebar__link{{ if eq . $currentPage }} sidebar__link--active{{ end }}">{{ .LinkTitle }}</a>
+          {{ end }}
+        {{ end }}
+      </nav>
+    </aside>
+    <div class="content">
+      <main class="content__body">
+        {{ block "main" . }}{{ end }}
+      </main>
+      <footer class="content__footer">
+        <p>website made with love by jay candel <3</p>
+      </footer>
+    </div>
+  </div>
+  <div class="sidebar__overlay" id="overlay" onclick="toggleSidebar()"></div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  {{ with resources.Get "js/search.js" }}
+    {{ $asset := . | fingerprint }}
+    <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
+  {{ with resources.Get "js/sidebar.js" }}
+    {{ $asset := . | fingerprint }}
+    <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
+  {{ with resources.Get "js/theme.js" }}
+    {{ $asset := . | fingerprint }}
+    <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
+</body>
+</html>

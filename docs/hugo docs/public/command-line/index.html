@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command Line Reference · GhostESP Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/css/main.min.e0676c4b5c590498386d815136c5cb736855f844e4a83e4cecd3f166ba84d0af.css" integrity="sha256-4GdsS1xZBJg4bYFRNsXLc2hV&#43;ETkqD5M7NPxZrqE0K8=">
+  <script>
+    (function() {
+      const theme = localStorage.getItem('ghostesp-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+
+      if (window.innerWidth >= 992) {
+        if (localStorage.getItem('sidebarState') === 'open') {
+          document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>');
+        }
+      }
+    })();
+  </script>
+</head>
+<body>
+  
+  <header class="topbar">
+    <button class="topbar__toggle" type="button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="false">
+      <svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true">
+        <line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"></line>
+        <line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"></line>
+        <line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"></line>
+      </svg>
+    </button>
+    <a href="/" class="topbar__brand">
+      
+        <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="topbar__logo">
+      
+    </a>
+    <div class="topbar__actions">
+      <button class="topbar__theme" type="button" data-theme-toggle aria-label="Toggle theme">
+        <svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon aria-hidden="true">
+          <g class="icon-theme__sun">
+            <circle cx="12" cy="12" r="5"></circle>
+            <g class="icon-theme__sun-rays">
+              <line x1="12" y1="2.5" x2="12" y2="5.5"></line>
+              <line x1="12" y1="18.5" x2="12" y2="21.5"></line>
+              <line x1="4.5" y1="12" x2="7.5" y2="12"></line>
+              <line x1="16.5" y1="12" x2="19.5" y2="12"></line>
+              <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"></line>
+              <line x1="16.2" y1="16.2" x2="18.4" y2="18.4"></line>
+              <line x1="5.6" y1="18.4" x2="7.8" y2="16.2"></line>
+              <line x1="16.2" y1="7.8" x2="18.4" y2="5.6"></line>
+            </g>
+          </g>
+          <g class="icon-theme__moon">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+          </g>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__brand">
+        <a href="/" class="sidebar__title">
+          
+            <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="sidebar__logo">
+          
+        </a>
+        
+      </div>
+      <div class="sidebar__search">
+        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="/index.json">
+        <div class="sidebar__search-results" data-search-results role="listbox"></div>
+      </div>
+      <nav class="sidebar__nav">
+        <a href="/" class="sidebar__link">Home</a>
+        
+        
+          
+          
+          
+            
+            
+            
+            <div class="sidebar__group">
+              <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-getting-started" aria-expanded="false" aria-controls="collapse-getting-started">
+                <span>Getting Started</span>
+                <span class="sidebar__group-icon" aria-hidden="true"></span>
+              </button>
+              <div class="collapse sidebar__group-items" id="collapse-getting-started">
+                <a href="/getting-started/" class="sidebar__sublink">Overview</a>
+                
+                  <a href="/getting-started/installation-guide/" class="sidebar__sublink">Installation Guide</a>
+                
+                  <a href="/getting-started/faq/" class="sidebar__sublink">FAQ</a>
+                
+              </div>
+            </div>
+          
+        
+          
+          
+          
+        
+          
+          
+          
+            
+            
+            
+            <div class="sidebar__group">
+              <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-nfc" aria-expanded="false" aria-controls="collapse-nfc">
+                <span>NFC</span>
+                <span class="sidebar__group-icon" aria-hidden="true"></span>
+              </button>
+              <div class="collapse sidebar__group-items" id="collapse-nfc">
+                <a href="/nfc/" class="sidebar__sublink">Overview</a>
+                
+                  <a href="/nfc/scanning/" class="sidebar__sublink">Scanning</a>
+                
+                  <a href="/nfc/saving/" class="sidebar__sublink">Saving Tags</a>
+                
+                  <a href="/nfc/writing/" class="sidebar__sublink">Writing NTAG</a>
+                
+                  <a href="/nfc/supported/" class="sidebar__sublink">Supported Tags</a>
+                
+              </div>
+            </div>
+          
+        
+        
+      </nav>
+    </aside>
+    <div class="content">
+      <main class="content__body">
+        
+<section class="doc">
+  <header>
+    <h1>Command Line Reference</h1>
+    <p>Placeholder for GhostESP command-line documentation</p>
+  </header>
+  
+    <div class="doc__intro">
+      <h2 id="overview">Overview</h2>
+<p>GhostESP provides an extensive command-line interface that is accessible via serial, web terminal, or the touchscreen terminal view.</p>
+
+    </div>
+  
+  <div class="doc__list">
+    
+  </div>
+</section>
+
+      </main>
+      <footer class="content__footer">
+        <p>made with love &lt;3</p>
+      </footer>
+    </div>
+  </div>
+  <div class="sidebar__overlay" id="overlay" onclick="toggleSidebar()"></div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  
+    
+    <script src="/js/search.0cf55c9ee8c259cc3c98b0a101a823a9b4c34446713e64e05b207899bfee3a13.js" integrity="sha256-DPVcnujCWcw8mLChAagjqbTDREZxPmTgWyB4mb/uOhM=" defer></script>
+  
+  
+    
+    <script src="/js/sidebar.51fc76b340b0d17988ca357d9ca29b8acf6ef11c326ffd913dcaf5cb6c1de2fa.js" integrity="sha256-Ufx2s0Cw0XmIyjV9nKKbis9u8Rwyb/2RPcr1y2wd4vo=" defer></script>
+  
+  
+    
+    <script src="/js/theme.f8496df9250aa179fc0d91f6ac046dfe73cc9b262d34b68d12691b6ed1453754.js" integrity="sha256-&#43;Elt&#43;SUKoXn8DZH2rARt/nPMmyYtNLaNEmkbbtFFN1Q=" defer></script>
+  
+</body>
+</html>

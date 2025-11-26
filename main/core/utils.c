@@ -1,6 +1,7 @@
 #include "core/utils.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <string.h>
 #include <sys/dirent.h>
@@ -139,4 +140,15 @@ int get_next_file_index(const char *dir_path, const char *base_name,
   closedir(dir);
   // Return the next index (max found + 1). If none found, max_index is -1, so returns 0.
   return max_index + 1;
+}
+
+void log_heap_status(const char *tag, const char *event) {
+  size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  size_t largest8 = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
+  ESP_LOGI(tag, "[heap] %s free8=%u largest8=%u free32=%u",
+           event,
+           (unsigned)free8,
+           (unsigned)largest8,
+           (unsigned)free32);
 }

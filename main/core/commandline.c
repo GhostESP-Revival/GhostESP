@@ -36,12 +36,16 @@
 #include <dirent.h>
 #include "esp_chip_info.h"
 #include "esp_idf_version.h"
+#include "managers/chameleon_manager.h"
 #include <stddef.h>
-
+#include <ctype.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_heap_trace.h"
+#include <dirent.h>
+#include "managers/infrared_manager.h"
+#include "core/universal_ir.h"
 
 static const char *TAG = "Commandline";
 
@@ -76,6 +80,34 @@ void handle_ble_spam_cmd(int argc, char **argv);
 #endif
 
 #define MAX_PORTAL_PATH_LEN 128 // reasonable i guess?
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
+typedef struct {
+    int last_percent;
+    int last_total;
+} chameleon_cli_progress_state_t;
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
+static void chameleon_cli_progress_cb(int current, int total, void *user) {
+    chameleon_cli_progress_state_t *state = (chameleon_cli_progress_state_t *)user;
+    if (!state || total <= 0) return;
+    if (current < 0) current = 0;
+    if (current > total) current = total;
+    if (total != state->last_total) state->last_percent = -1;
+    int percent = (int)((current * 100) / total);
+    if (percent != state->last_percent) {
+        glog("Classic dictionary progress: %d%% (%d/%d)\n", percent, current, total);
+        state->last_percent = percent;
+        state->last_total = total;
+    }
+}
 
 void command_init() { command_list_head = NULL; }
 
@@ -645,7 +677,7 @@ void handle_stop_flipper(int argc, char **argv) {
     ble_stop();
     ble_stop_ble_spam();
 #endif
-    if (buffer_offset > 0) { // Only flush if there's data in buffer
+    if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
         csv_flush_buffer_to_file();
     }
     csv_file_close();                  // Close any open CSV files
@@ -671,6 +703,16 @@ void handle_stop_flipper(int argc, char **argv) {
     pcap_file_close();
     glog("Stopped activities.\nClosed files.\n");
     status_display_show_status("All Stopped");
+
+    // kill any feature tasks we spawned that may still be around
+    if (VisualizerHandle != NULL) {
+        vTaskDelete(VisualizerHandle);
+        VisualizerHandle = NULL;
+    }
+    if (rgb_effect_task_handle != NULL) {
+        vTaskDelete(rgb_effect_task_handle);
+        rgb_effect_task_handle = NULL;
+    }
 }
 
 void handle_dial_command(int argc, char **argv) {
@@ -716,7 +758,7 @@ void handle_mem_cmd(int argc, char **argv) {
         static heap_trace_record_t recs[256];
         if (argc > 2 && strcmp(argv[2], "start") == 0) {
             esp_err_t e = heap_trace_init_standalone(recs, 256);
-            if (e == ESP_OK) heap_trace_start(HEAP_TRACE_LEAKS | HEAP_TRACE_ALLOCATIONS);
+            if (e == ESP_OK) heap_trace_start(HEAP_TRACE_ALL);
             glog("heap trace start: %s\n", e == ESP_OK ? "ok" : "err");
             return;
         }
@@ -726,7 +768,7 @@ void handle_mem_cmd(int argc, char **argv) {
             return;
         }
         if (argc > 2 && strcmp(argv[2], "dump") == 0) {
-            heap_trace_dump(true);
+            heap_trace_dump();
             return;
         }
         glog("usage: mem trace <start|stop|dump>\n");
@@ -860,6 +902,12 @@ void handle_wifi_disconnect(int argc, char **argv)
         glog("WiFi disconnect command sent successfully\n");
     } else {
         glog("Failed to send disconnect command: %s\n", esp_err_to_name(err));
+    }
+
+    // kill any lingering visualizer task started on connect
+    if (VisualizerHandle != NULL) {
+        vTaskDelete(VisualizerHandle);
+        VisualizerHandle = NULL;
     }
 }
 
@@ -1279,22 +1327,24 @@ void handle_startwd(int argc, char **argv) {
     }
 
     if (stop_flag) {
+        stop_wardriving();
         gps_manager_deinit(&g_gpsManager);
         wifi_manager_stop_monitor_mode();
-        csv_flush_buffer_to_file();
+        if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
+            csv_flush_buffer_to_file();
+        }
         csv_file_close();
         glog("Wardriving stopped.\n");
         status_display_show_status("Wardrive Stop");
     } else {
         gps_manager_init(&g_gpsManager);
-        if (sd_card_exists("/mnt/ghostesp/gps")) {
-            esp_err_t err = csv_file_open("wardriving");
-            if (err != ESP_OK) {
-                glog("Failed to open CSV for wardriving\n");
-                status_display_show_status("CSV Open Fail");
-            }
+        esp_err_t err = csv_file_open("wardriving");
+        if (err != ESP_OK) {
+            glog("Failed to open CSV for wardriving\n");
+            status_display_show_status("CSV Open Fail");
         }
         wifi_manager_start_monitor_mode(wardriving_scan_callback);
+        start_wardriving();
         glog("Wardriving started.\n");
         status_display_show_status("Wardrive Start");
     }
@@ -1432,7 +1482,10 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+#ifdef CONFIG_HAS_INFRARED
+        , "ir"
+#endif
     };
     int num_categories = sizeof(all_categories) / sizeof(all_categories[0]);
 
@@ -1444,6 +1497,7 @@ void handle_help(int argc, char **argv) {
         }
         return;
     }
+
 
     if (strcmp(category, "wifi") == 0) {
         glog("\nWi-Fi Commands:\n\n");
@@ -1524,6 +1578,17 @@ void handle_help(int argc, char **argv) {
         printf("    Arguments:\n");
         printf("        [channel] : Listen on specific channel (1-165), omit for channel hopping\n");
         printf("        stop      : Stop probe request listening\n\n");
+        printf("karma\n");
+        printf("    Description: Start or stop the Karma attack (responds to probe requests with specified or all SSIDs).\n");
+        printf("    Usage: karma start [ssid1 ssid2 ...]\n");
+        printf("           karma stop\n");
+        printf("    Arguments:\n");
+        printf("        start : Begin Karma attack. Optionally specify SSIDs to respond with (default: all known SSIDs).\n");
+        printf("        stop  : Stop Karma attack.\n");
+        printf("    Examples:\n");
+        printf("        karma start\n");
+        printf("        karma start FreeWiFi Starbucks\n");
+        printf("        karma stop\n\n");
 #if CONFIG_IDF_TARGET_ESP32C5
         printf("setcountry\n");
         printf("    Description: Set the Wi-Fi country code.\n");
@@ -1537,7 +1602,7 @@ void handle_help(int argc, char **argv) {
 #if CONFIG_IDF_TARGET_ESP32C5
         TERMINAL_VIEW_ADD_TEXT(", setcountry");
 #endif
-        TERMINAL_VIEW_ADD_TEXT("\n");
+        TERMINAL_VIEW_ADD_TEXT(", karma\n");
         return;
     }
 
@@ -1576,6 +1641,40 @@ void handle_help(int argc, char **argv) {
         printf("    Description: Start Bluetooth Low Energy (BLE) scan.\n");
         printf("    Usage: blescan [seconds]\n\n");
         TERMINAL_VIEW_ADD_TEXT("blescan, blespam, blewardriving, list -airtags, select -airtag\n");
+        return;
+    }
+
+    if (strcmp(category, "chameleon") == 0) {
+        printf("\nChameleon Ultra Commands:\n\n");
+        TERMINAL_VIEW_ADD_TEXT("\nChameleon Ultra Commands:\n\n");
+        printf("chameleon connect [timeout] [pin]\n");
+        printf("    Description: Connect to a Chameleon Ultra device via BLE\n");
+        printf("    Usage: chameleon connect [timeout_seconds] [pin]\n");
+        printf("    Arguments:\n");
+        printf("        timeout_seconds : Connection timeout (default: 10)\n");
+        printf("        pin            : PIN for authentication (4-6 digits, optional)\n\n");
+        printf("chameleon disconnect\n");
+        printf("    Description: Disconnect from the Chameleon Ultra device\n");
+        printf("    Usage: chameleon disconnect\n\n");
+        printf("chameleon status\n");
+        printf("    Description: Check connection status with Chameleon Ultra\n");
+        printf("    Usage: chameleon status\n\n");
+        printf("chameleon scanhf\n");
+        printf("    Description: Scan for High Frequency (HF) RFID tags\n");
+        printf("    Usage: chameleon scanhf\n\n");
+        printf("chameleon scanlf\n");
+        printf("    Description: Scan for Low Frequency (LF) RFID tags\n");
+        printf("    Usage: chameleon scanlf\n\n");
+        printf("chameleon battery\n");
+        printf("    Description: Get battery information from Chameleon Ultra\n");
+        printf("    Usage: chameleon battery\n\n");
+        printf("chameleon reader\n");
+        printf("    Description: Set Chameleon Ultra to reader mode\n");
+        printf("    Usage: chameleon reader\n\n");
+        printf("chameleon emulator\n");
+        printf("    Description: Set Chameleon Ultra to emulator mode\n");
+        printf("    Usage: chameleon emulator\n\n");
+        TERMINAL_VIEW_ADD_TEXT("chameleon connect, chameleon disconnect, chameleon status, chameleon scanhf, chameleon scanlf, chameleon battery, chameleon reader, chameleon emulator\n");
         return;
     }
 #endif
@@ -1783,6 +1882,32 @@ void handle_help(int argc, char **argv) {
         return;
     }
     
+#ifdef CONFIG_HAS_INFRARED
+    if (strcmp(category, "ir") == 0) {
+        glog("\nInfrared Commands:\n\n");
+        printf("ir send\n");
+        printf("    Description: Send an IR signal from a file.\n");
+        printf("    Usage: ir send <path> [index]\n\n");
+        printf("ir learn\n");
+        printf("    Description: Learn an IR signal and save to file.\n");
+        printf("    Usage: ir learn <path>\n\n");
+        printf("ir list\n");
+        printf("    Description: List IR files in default directory.\n");
+        printf("    Usage: ir list [path]\n\n");
+        printf("ir rx\n");
+        printf("    Description: Receive and display IR signals (Matrix mode).\n");
+        printf("    Usage: ir rx [timeout]\n\n");
+        printf("ir show\n");
+        printf("    Description: Show content of an IR file.\n");
+        printf("    Usage: ir show <path>\n\n");
+        printf("ir universals\n");
+        printf("    Description: Manage universal IR signals.\n");
+        printf("    Usage: ir universals <list|send>\n\n");
+        TERMINAL_VIEW_ADD_TEXT("ir send, ir learn, ir list, ir rx, ir show, ir universals\n");
+        return;
+    }
+#endif
+
     glog("\nGhost ESP Command Categories:\n\n");
 
     printf("  help wifi      - Wi-Fi commands\n");
@@ -1798,6 +1923,9 @@ void handle_help(int argc, char **argv) {
     printf("  help capture   - Wi-Fi packet capture commands\n");
     printf("  help beacon    - Beacon spam commands\n");
     printf("  help attack    - Attack/flood commands\n");
+#ifdef CONFIG_HAS_INFRARED
+    printf("  help ir        - Infrared commands\n");
+#endif
     printf("  help all      - All commands\n\n");
 
     TERMINAL_VIEW_ADD_TEXT(
@@ -1814,6 +1942,9 @@ void handle_help(int argc, char **argv) {
                       "  help capture   - Wi-Fi packet capture commands\n"
                       "  help beacon    - Beacon spam commands\n"
                       "  help attack    - Attack/flood commands\n"
+#ifdef CONFIG_HAS_INFRARED
+                      "  help ir        - Infrared commands\n"
+#endif
                       "  help all      - All commands\n\n");
 
     printf("Type 'help <category>' for details on that category.\n\n");
@@ -1889,7 +2020,7 @@ void handle_ble_wardriving(int argc, char **argv) {
     if (stop_flag) {
         ble_stop();
         gps_manager_deinit(&g_gpsManager);
-        if (buffer_offset > 0) { // Only flush if there's data in buffer
+        if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
             csv_flush_buffer_to_file();
         }
         csv_file_close();
@@ -1992,7 +2123,11 @@ void handle_apcred(int argc, char **argv) {
         .ap = {
             .ssid_len = strlen(new_ssid),
             .max_connection = 4,
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+            .authmode = WIFI_AUTH_WPA2_WPA3_PSK
+#else
             .authmode = WIFI_AUTH_WPA2_PSK
+#endif
         },
     };
     strcpy((char *)ap_config.ap.ssid, new_ssid);
@@ -2085,6 +2220,10 @@ void handle_rgb_mode(int argc, char **argv) {
         }
         glog("RGB disabled\n");
         status_display_show_status("RGB Off");
+        if (rgb_effect_task_handle != NULL) {
+            vTaskDelete(rgb_effect_task_handle);
+            rgb_effect_task_handle = NULL;
+        }
     } else {
         // Otherwise, treat the argument as a color name.
         typedef struct {
@@ -2582,8 +2721,10 @@ void handle_listportals(int argc, char **argv);
 void handle_evilportal(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
 void handle_set_rgb_mode_cmd(int argc, char **argv);
+void handle_karma_cmd(int argc, char **argv);
 void handle_set_neopixel_brightness_cmd(int argc, char **argv);
 void handle_get_neopixel_brightness_cmd(int argc, char **argv);
+
 
 void handle_comm_discovery(int argc, char **argv) {
     comm_state_t state = esp_comm_manager_get_state();
@@ -3011,6 +3152,671 @@ void handle_settings_cmd(int argc, char **argv) {
     glog("Use 'settings help' for available commands\n");
 }
 
+#ifdef CONFIG_NFC_CHAMELEON
+void handle_chameleon_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: chameleon <command>\n");
+        printf("Commands:\n");
+        printf("Connection:\n");
+        printf("  connect [timeout] [pin] - Connect to Chameleon Ultra (default timeout: 10s)\n");
+        printf("  disconnect        - Disconnect from Chameleon Ultra\n");
+        printf("  status           - Check connection status\n");
+        printf("Device Info:\n");
+        printf("  firmware         - Get firmware version\n");
+        printf("  devicemode       - Get current device mode\n");
+        printf("  activeslot       - Get active slot number\n");
+        printf("  setslot <1-8>    - Set active slot number\n");
+        printf("  slotinfo <1-8>   - Get slot information\n");
+        printf("  battery          - Get battery information\n");
+        printf("Scanning:\n");
+        printf("  scanhf           - Scan for HF tags\n");
+        printf("  scanlf           - Scan for LF EM410X tags\n");
+        printf("  scanlfall        - Scan for all LF tag types\n");
+        printf("  scanhidprox      - Scan for HID Prox tags\n");
+        printf("MIFARE Classic:\n");
+        printf("  mfdetect         - Detect MIFARE Classic support\n");
+        printf("  mfprng           - Detect MIFARE Classic PRNG type\n");
+        printf("NTAG Cards:\n");
+        printf("  ntagdetect       - Detect and identify NTAG card type\n");
+        printf("  ntagdump         - Dump complete NTAG card data\n");
+        printf("  saventag [filename] - Save NTAG dump to SD card\n");
+        printf("Mode Control:\n");
+        printf("  reader           - Set to reader mode\n");
+        printf("  emulator         - Set to emulator mode\n");
+        printf("Data Management:\n");
+        printf("  savehf [filename] - Save last HF scan to SD card (/mnt/ghostesp/chameleon/)\n");
+        printf("  savelf [filename] - Save last LF scan to SD card (/mnt/ghostesp/chameleon/)\n");
+        printf("  readhf           - Basic MIFARE Classic card detection and information collection\n");
+        printf("  savedump [filename] - Save last card dump to SD card\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: chameleon <command>\n");
+        TERMINAL_VIEW_ADD_TEXT("Commands:\n");
+        TERMINAL_VIEW_ADD_TEXT("Connection:\n");
+        TERMINAL_VIEW_ADD_TEXT("  connect [timeout] [pin] - Connect to Chameleon Ultra (default timeout: 10s)\n");
+        TERMINAL_VIEW_ADD_TEXT("  disconnect        - Disconnect from Chameleon Ultra\n");
+        TERMINAL_VIEW_ADD_TEXT("  status           - Check connection status\n");
+        TERMINAL_VIEW_ADD_TEXT("Device Info:\n");
+        TERMINAL_VIEW_ADD_TEXT("  firmware         - Get firmware version\n");
+        TERMINAL_VIEW_ADD_TEXT("  devicemode       - Get current device mode\n");
+        TERMINAL_VIEW_ADD_TEXT("  activeslot       - Get active slot number\n");
+        TERMINAL_VIEW_ADD_TEXT("  setslot <1-8>    - Set active slot number\n");
+        TERMINAL_VIEW_ADD_TEXT("  slotinfo <1-8>   - Get slot information\n");
+        TERMINAL_VIEW_ADD_TEXT("  battery          - Get battery information\n");
+        TERMINAL_VIEW_ADD_TEXT("Scanning:\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanhf           - Scan for HF tags\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanlf           - Scan for LF EM410X tags\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanlfall        - Scan for all LF tag types\n");
+        TERMINAL_VIEW_ADD_TEXT("  scanhidprox      - Scan for HID Prox tags\n");
+        TERMINAL_VIEW_ADD_TEXT("MIFARE Classic:\n");
+        TERMINAL_VIEW_ADD_TEXT("  mfdetect         - Detect MIFARE Classic support\n");
+        TERMINAL_VIEW_ADD_TEXT("  mfprng           - Detect MIFARE Classic PRNG type\n");
+        TERMINAL_VIEW_ADD_TEXT("NTAG Cards:\n");
+        TERMINAL_VIEW_ADD_TEXT("  ntagdetect       - Detect and identify NTAG card type\n");
+        TERMINAL_VIEW_ADD_TEXT("  ntagdump         - Dump complete NTAG card data\n");
+        TERMINAL_VIEW_ADD_TEXT("  saventag [filename] - Save NTAG dump to SD card\n");
+        TERMINAL_VIEW_ADD_TEXT("Mode Control:\n");
+        TERMINAL_VIEW_ADD_TEXT("  reader           - Set to reader mode\n");
+        TERMINAL_VIEW_ADD_TEXT("  emulator         - Set to emulator mode\n");
+        TERMINAL_VIEW_ADD_TEXT("Data Management:\n");
+        TERMINAL_VIEW_ADD_TEXT("  savehf [filename] - Save last HF scan to SD card (/mnt/ghostesp/chameleon/)\n");
+        TERMINAL_VIEW_ADD_TEXT("  savelf [filename] - Save last LF scan to SD card (/mnt/ghostesp/chameleon/)\n");
+        TERMINAL_VIEW_ADD_TEXT("  readhf           - Basic MIFARE Classic card detection and information collection\n");
+        TERMINAL_VIEW_ADD_TEXT("  savedump [filename] - Save last card dump to SD card\n");
+        return;
+    }
+
+    const char *subcommand = argv[1];
+
+    if (strcmp(subcommand, "connect") == 0) {
+        uint32_t timeout = 10; // Default timeout of 10 seconds
+        const char* pin = NULL;
+        
+        // Parse arguments: connect [timeout] [pin]
+        if (argc > 2) {
+            // Check if second argument is a number (timeout) or PIN
+            if (strlen(argv[2]) <= 2 && atoi(argv[2]) > 0) {
+                // Second argument is timeout
+                timeout = (uint32_t)atoi(argv[2]);
+                if (timeout == 0) {
+                    timeout = 10;
+                }
+                // Check for PIN as third argument
+                if (argc > 3) {
+                    pin = argv[3];
+                }
+            } else {
+                // Second argument is PIN, use default timeout
+                pin = argv[2];
+            }
+        }
+        
+        if (pin != NULL) {
+            printf("Connecting to Chameleon Ultra with %lu second timeout and PIN...\n", timeout);
+            TERMINAL_VIEW_ADD_TEXT("Connecting to Chameleon Ultra with PIN...\n");
+        } else {
+            printf("Connecting to Chameleon Ultra with %lu second timeout...\n", timeout);
+            TERMINAL_VIEW_ADD_TEXT("Connecting to Chameleon Ultra...\n");
+        }
+        
+        chameleon_manager_connect(timeout, pin);
+    }
+    else if (strcmp(subcommand, "disconnect") == 0) {
+        printf("Disconnecting from Chameleon Ultra...\n");
+        TERMINAL_VIEW_ADD_TEXT("Disconnecting from Chameleon Ultra...\n");
+        chameleon_manager_disconnect();
+    }
+    else if (strcmp(subcommand, "status") == 0) {
+        if (chameleon_manager_is_connected()) {
+            printf("Status: Connected to Chameleon Ultra\n");
+            TERMINAL_VIEW_ADD_TEXT("Status: Connected to Chameleon Ultra\n");
+        } else {
+            printf("Status: Not connected to Chameleon Ultra\n");
+            TERMINAL_VIEW_ADD_TEXT("Status: Not connected to Chameleon Ultra\n");
+        }
+    }
+    else if (strcmp(subcommand, "scanhf") == 0) {
+        bool skip_dict = false;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--skip-dict") == 0 || strcmp(argv[i], "--skipdict") == 0) {
+                skip_dict = true;
+            } else {
+                printf("Unknown option for scanhf: %s\n", argv[i]);
+                TERMINAL_VIEW_ADD_TEXT("Unknown option for scanhf\n");
+                return;
+            }
+        }
+
+        if (!chameleon_manager_scan_hf()) {
+            return;
+        }
+
+        bool classic_tag = false;
+        uint8_t uid_len = 0;
+        uint16_t atqa = 0;
+        uint8_t sak = 0;
+        if (chameleon_manager_get_last_hf_scan(NULL, &uid_len, &atqa, &sak)) {
+            if (sak == 0x08 || sak == 0x09 || sak == 0x18) {
+                classic_tag = true;
+            }
+        }
+
+        if (classic_tag) {
+            chameleon_cli_progress_state_t progress_state = {0};
+            progress_state.last_percent = -1;
+            chameleon_manager_set_progress_callback(chameleon_cli_progress_cb, &progress_state);
+
+            if (skip_dict) {
+                glog("Reading MIFARE Classic without dictionary brute-force...\n");
+                glog("Dictionary brute-force skipped by user flag.\n");
+            } else {
+                glog("Reading MIFARE Classic with dictionary brute-force...\n");
+            }
+
+            bool classic_ok = chameleon_manager_mf1_read_classic_with_dict(skip_dict);
+            chameleon_manager_set_progress_callback(NULL, NULL);
+
+            if (!classic_ok) {
+                glog("MIFARE Classic read failed.\n");
+            } else {
+                glog("MIFARE Classic read complete.\n");
+            }
+        } else if (chameleon_manager_last_scan_is_ntag()) {
+            glog("Refreshing NTAG cache...\n");
+
+            if (!chameleon_manager_read_ntag_card()) {
+                glog("Failed to read NTAG card.\n");
+            } else {
+                glog("NTAG read complete.\n");
+            }
+        }
+
+        const char *details = chameleon_manager_get_cached_details();
+        if (details && details[0]) {
+            glog("%s\n", details);
+        }
+    }
+    else if (strcmp(subcommand, "scanlf") == 0) {
+        chameleon_manager_scan_lf();
+    }
+    else if (strcmp(subcommand, "scanlfall") == 0) {
+        // Try multiple LF scan types
+        printf("Scanning for all LF tag types...\n");
+        TERMINAL_VIEW_ADD_TEXT("Scanning for all LF tag types...\n");
+        
+        // First try EM410X
+        printf("1. Trying EM410X scan...\n");
+        TERMINAL_VIEW_ADD_TEXT("1. Trying EM410X scan...\n");
+        if (chameleon_manager_scan_lf()) {
+            return;  // Found something, stop here
+        }
+        
+        // Then try HID Prox
+        printf("2. Trying HID Prox scan...\n");
+        TERMINAL_VIEW_ADD_TEXT("2. Trying HID Prox scan...\n");
+        chameleon_manager_scan_hidprox();
+    }
+    else if (strcmp(subcommand, "battery") == 0) {
+        chameleon_manager_get_battery_info();
+    }
+    else if (strcmp(subcommand, "reader") == 0) {
+        chameleon_manager_set_reader_mode();
+    }
+    else if (strcmp(subcommand, "emulator") == 0) {
+        chameleon_manager_set_emulator_mode();
+    }
+    else if (strcmp(subcommand, "savehf") == 0) {
+        const char* filename = (argc > 2) ? argv[2] : NULL;
+        chameleon_manager_save_last_hf_scan(filename);
+    }
+    else if (strcmp(subcommand, "savelf") == 0) {
+        const char* filename = (argc > 2) ? argv[2] : NULL;
+        chameleon_manager_save_last_lf_scan(filename);
+    }
+    else if (strcmp(subcommand, "readhf") == 0) {
+        chameleon_manager_read_hf_card();
+    }
+    else if (strcmp(subcommand, "savedump") == 0) {
+        const char* filename = (argc > 2) ? argv[2] : NULL;
+        chameleon_manager_save_card_dump(filename);
+    }
+    else if (strcmp(subcommand, "firmware") == 0) {
+        chameleon_manager_get_firmware_version();
+    }
+    else if (strcmp(subcommand, "devicemode") == 0) {
+        chameleon_manager_get_device_mode();
+    }
+    else if (strcmp(subcommand, "activeslot") == 0) {
+        chameleon_manager_get_active_slot();
+    }
+    else if (strcmp(subcommand, "setslot") == 0) {
+        if (argc < 3) {
+            printf("Usage: chameleon setslot <1-8>\n");
+            TERMINAL_VIEW_ADD_TEXT("Usage: chameleon setslot <1-8>\n");
+            return;
+        }
+        uint8_t user_slot = (uint8_t)atoi(argv[2]);
+        if (user_slot < 1 || user_slot > 8) {
+            printf("Error: Slot must be between 1-8\n");
+            TERMINAL_VIEW_ADD_TEXT("Error: Slot must be between 1-8\n");
+            return;
+        }
+        uint8_t device_slot = user_slot - 1; // Convert 1-8 to 0-7
+        chameleon_manager_set_active_slot(device_slot);
+    }
+    else if (strcmp(subcommand, "slotinfo") == 0) {
+        if (argc < 3) {
+            printf("Usage: chameleon slotinfo <1-8>\n");
+            TERMINAL_VIEW_ADD_TEXT("Usage: chameleon slotinfo <1-8>\n");
+            return;
+        }
+        uint8_t user_slot = (uint8_t)atoi(argv[2]);
+        if (user_slot < 1 || user_slot > 8) {
+            printf("Error: Slot must be between 1-8\n");
+            TERMINAL_VIEW_ADD_TEXT("Error: Slot must be between 1-8\n");
+            return;
+        }
+        uint8_t device_slot = user_slot - 1; // Convert 1-8 to 0-7
+        chameleon_manager_get_slot_info(device_slot);
+    }
+    else if (strcmp(subcommand, "scanhidprox") == 0) {
+        chameleon_manager_scan_hidprox();
+    }
+    else if (strcmp(subcommand, "mfdetect") == 0) {
+        chameleon_manager_mf1_detect_support();
+    }
+    else if (strcmp(subcommand, "mfprng") == 0) {
+        chameleon_manager_mf1_detect_prng();
+    }
+    else if (strcmp(subcommand, "ntagdetect") == 0) {
+        chameleon_manager_detect_ntag();
+    }
+    else if (strcmp(subcommand, "ntagdump") == 0) {
+        chameleon_manager_read_ntag_card();
+    }
+    else if (strcmp(subcommand, "saventag") == 0) {
+        const char* filename = (argc > 2) ? argv[2] : NULL;
+        chameleon_manager_save_ntag_dump(filename);
+    }
+    else {
+        printf("Unknown chameleon command: %s\n", subcommand);
+        TERMINAL_VIEW_ADD_TEXT("Unknown chameleon command: %s\n", subcommand);
+        printf("Use 'chameleon' without arguments to see available commands.\n");
+        TERMINAL_VIEW_ADD_TEXT("Use 'chameleon' without arguments to see available commands.\n");
+    }
+}
+#else
+void handle_chameleon_cmd(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    printf("Chameleon support is disabled in this build.\n");
+    TERMINAL_VIEW_ADD_TEXT("Chameleon support is disabled in this build.\n");
+}
+#endif
+
+#define IR_CLI_MAX_REMOTES 128
+static char *g_ir_cli_remote_paths[IR_CLI_MAX_REMOTES];
+static size_t g_ir_cli_remote_count = 0;
+
+static void ir_cli_clear_remote_index(void) {
+    for (size_t i = 0; i < g_ir_cli_remote_count; ++i) {
+        free(g_ir_cli_remote_paths[i]);
+        g_ir_cli_remote_paths[i] = NULL;
+    }
+    g_ir_cli_remote_count = 0;
+}
+
+static bool ir_cli_is_number(const char *s) {
+    if (!s || !*s) return false;
+    while (*s) {
+        if (!isdigit((unsigned char)*s)) return false;
+        ++s;
+    }
+    return true;
+}
+
+static void resolve_ir_path(const char *input, char *output, size_t max_len) {
+    if (!input || strlen(input) == 0) {
+        snprintf(output, max_len, "/mnt/ghostesp/infrared/remotes");
+    } else if (input[0] == '/') {
+        strncpy(output, input, max_len - 1);
+        output[max_len - 1] = '\0';
+    } else {
+        snprintf(output, max_len, "/mnt/ghostesp/infrared/remotes/%s", input);
+    }
+}
+
+void handle_ir_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("Usage: ir <send|inline|list|show|universals|rx>\n");
+        glog("  ir send <path|remote_index> [button_index]\n");
+        glog("  ir inline\n");
+        glog("  ir list [path]\n");
+        glog("  ir show <path|remote_index>\n");
+        glog("  ir universals <list|send> ...\n");
+        glog("  ir rx\n");
+        return;
+    }
+
+    const char *sub = argv[1];
+    char path[256];
+
+    if (strcmp(sub, "send") == 0) {
+        if (argc < 3) {
+            glog("Usage: ir send <path|remote_index> [button_index]\n");
+            return;
+        }
+        const char *arg = argv[2];
+        int button_index = 0;
+        if (argc >= 4) {
+            button_index = atoi(argv[3]);
+        }
+
+        if (ir_cli_is_number(arg) && g_ir_cli_remote_count > 0) {
+            int remote_index = atoi(arg);
+            if (remote_index < 0 || (size_t)remote_index >= g_ir_cli_remote_count) {
+                glog("IR: remote index out of range (0-%d). Run 'ir list' to see indices.\n",
+                     (int)(g_ir_cli_remote_count ? g_ir_cli_remote_count - 1 : 0));
+                return;
+            }
+            strncpy(path, g_ir_cli_remote_paths[remote_index], sizeof(path) - 1);
+            path[sizeof(path) - 1] = '\0';
+        } else {
+            resolve_ir_path(arg, path, sizeof(path));
+        }
+
+        infrared_signal_t *signals = NULL;
+        size_t count = 0;
+        if (!infrared_manager_read_list(path, &signals, &count)) {
+            glog("IR: failed to read list from %s\n", path);
+            return;
+        }
+
+        if (count == 0) {
+            infrared_manager_free_list(signals, count);
+            glog("IR: no signals in %s\n", path);
+            return;
+        }
+
+        if (button_index < 0 || (size_t)button_index >= count) {
+            infrared_manager_free_list(signals, count);
+            glog("IR: index out of range (0-%d)\n", (int)(count - 1));
+            return;
+        }
+
+        bool ok = infrared_manager_transmit(&signals[button_index]);
+        infrared_manager_free_list(signals, count);
+        glog("IR: send %s (index=%d)\n", ok ? "OK" : "FAIL", button_index);
+        return;
+    }
+
+    if (strcmp(sub, "inline") == 0) {
+        glog("IR inline mode:\n");
+        glog("  Send IR content between [IR/BEGIN] and [IR/CLOSE] markers.\n");
+        glog("  Content may be a JSON object or .ir-style text block.\n");
+        return;
+    }
+
+    if (strcmp(sub, "list") == 0) {
+        resolve_ir_path((argc >= 3) ? argv[2] : NULL, path, sizeof(path));
+        DIR *d = opendir(path);
+        if (!d) {
+            glog("IR: failed to open directory %s\n", path);
+            ir_cli_clear_remote_index();
+            return;
+        }
+        ir_cli_clear_remote_index();
+        struct dirent *dir;
+        glog("IR files in %s:\n", path);
+        while ((dir = readdir(d)) != NULL) {
+            if (dir->d_type == DT_REG) {
+                 if (strstr(dir->d_name, ".ir") || strstr(dir->d_name, ".json")) {
+                     int idx = (int)g_ir_cli_remote_count;
+                     if (g_ir_cli_remote_count < IR_CLI_MAX_REMOTES) {
+                         char full[512];
+                         snprintf(full, sizeof(full), "%s/%s", path, dir->d_name);
+                         g_ir_cli_remote_paths[g_ir_cli_remote_count] = strdup(full);
+                         if (g_ir_cli_remote_paths[g_ir_cli_remote_count]) {
+                             g_ir_cli_remote_count++;
+                         }
+                     }
+                     glog("  [%d] %s\n", idx, dir->d_name);
+                 }
+            }
+        }
+        if (g_ir_cli_remote_count == 0) {
+            glog("  (none)\n");
+        }
+        closedir(d);
+        return;
+    }
+
+    if (strcmp(sub, "show") == 0) {
+        if (argc < 3) {
+            glog("Usage: ir show <path|remote_index>\n");
+            return;
+        }
+        const char *arg = argv[2];
+        if (ir_cli_is_number(arg) && g_ir_cli_remote_count > 0) {
+            int remote_index = atoi(arg);
+            if (remote_index < 0 || (size_t)remote_index >= g_ir_cli_remote_count) {
+                glog("IR: remote index out of range (0-%d). Run 'ir list' first.\n",
+                     (int)(g_ir_cli_remote_count ? g_ir_cli_remote_count - 1 : 0));
+                return;
+            }
+            strncpy(path, g_ir_cli_remote_paths[remote_index], sizeof(path) - 1);
+            path[sizeof(path) - 1] = '\0';
+        } else {
+            resolve_ir_path(arg, path, sizeof(path));
+        }
+        infrared_signal_t *signals = NULL;
+        size_t count = 0;
+        if (!infrared_manager_read_list(path, &signals, &count)) {
+            glog("IR: failed to read/parse %s\n", path);
+            return;
+        }
+        glog("Signals in %s (%zu):\n", path, count);
+        for (size_t i = 0; i < count; i++) {
+             const char *proto = signals[i].is_raw ? "RAW" : signals[i].payload.message.protocol;
+             glog("  [%d] %s (%s)", (int)i, signals[i].name, proto);
+             if (!signals[i].is_raw) {
+                 glog(" Addr: 0x%lX Cmd: 0x%lX", 
+                      (unsigned long)signals[i].payload.message.address, 
+                      (unsigned long)signals[i].payload.message.command);
+             }
+             glog("\n");
+        }
+        infrared_manager_free_list(signals, count);
+        return;
+    }
+
+    if (strcmp(sub, "universals") == 0) {
+        if (argc < 3) {
+            glog("Usage: ir universals <list|send>\n");
+            return;
+        }
+        const char *u_sub = argv[2];
+        if (strcmp(u_sub, "list") == 0) {
+            bool show_all = (argc >= 4 && strcmp(argv[3], "-all") == 0);
+
+            const char *uni_path = "/mnt/ghostesp/infrared/universals";
+            DIR *d = opendir(uni_path);
+            if (d) {
+                glog("Universal Files in %s:\n", uni_path);
+                struct dirent *dir;
+                int file_count = 0;
+                while ((dir = readdir(d)) != NULL) {
+                    if (dir->d_type == DT_REG) {
+                         if (strstr(dir->d_name, ".ir") || strstr(dir->d_name, ".json")) {
+                             glog("  %s\n", dir->d_name);
+                             file_count++;
+                         }
+                    }
+                }
+                closedir(d);
+                if (file_count == 0) glog("  (none)\n");
+            }
+
+            size_t count = universal_ir_get_signal_count();
+            if (show_all) {
+                glog("\nBuilt-in Universal Signals (%zu):\n", count);
+                for (size_t i = 0; i < count; i++) {
+                    infrared_signal_t sig;
+                    if (universal_ir_get_signal(i, &sig)) {
+                         glog("  [%d] %s (%s) Addr: 0x%lX Cmd: 0x%lX\n", (int)i, 
+                              sig.name, sig.payload.message.protocol,
+                              (unsigned long)sig.payload.message.address,
+                              (unsigned long)sig.payload.message.command);
+                    }
+                }
+            } else {
+                glog("\nBuilt-in Universal Signals: %zu available.\n", count);
+                glog("Use 'ir universals list -all' to list them.\n");
+            }
+            return;
+        }
+        if (strcmp(u_sub, "send") == 0) {
+            if (argc < 4) {
+                glog("Usage: ir universals send <index>\n");
+                return;
+            }
+            int idx = atoi(argv[3]);
+            infrared_signal_t sig;
+            if (universal_ir_get_signal(idx, &sig)) {
+                bool ok = infrared_manager_transmit(&sig);
+                glog("IR: universal send %s\n", ok ? "OK" : "FAIL");
+            } else {
+                glog("IR: invalid universal index\n");
+            }
+            return;
+        }
+    }
+
+    if (strcmp(sub, "rx") == 0) {
+        if (!infrared_manager_rx_init()) {
+            glog("IR: failed to init RX (hardware busy?)\n");
+            return;
+        }
+        glog("IR RX mode started. Press Ctrl+C or reset to stop (or wait for timeout).\n");
+        // We loop for a while or until 1 signal? 
+        // "rx" usually implies monitoring. Let's monitor for 60 seconds.
+        int timeout_sec = 60;
+        if (argc >= 3) timeout_sec = atoi(argv[2]);
+        if (timeout_sec <= 0) timeout_sec = 60;
+
+        bool received_any = false;
+        int64_t end = esp_timer_get_time() + (int64_t)timeout_sec * 1000000;
+
+        while (true) {
+            int64_t now = esp_timer_get_time();
+            if (now >= end) break;
+
+            int remaining_ms = (int)((end - now) / 1000);
+            if (remaining_ms <= 0) break;
+
+            infrared_signal_t sig;
+            memset(&sig, 0, sizeof(sig));
+
+            if (infrared_manager_rx_receive(&sig, remaining_ms)) {
+                if (sig.is_raw) {
+                    glog("Received RAW: %zu samples, %lu Hz\n", sig.payload.raw.timings_size, (unsigned long)sig.payload.raw.frequency);
+                    infrared_manager_free_signal(&sig);
+                } else {
+                    glog("Received %s: Addr: 0x%lX Cmd: 0x%lX\n",
+                         sig.payload.message.protocol,
+                         (unsigned long)sig.payload.message.address,
+                         (unsigned long)sig.payload.message.command);
+                }
+                received_any = true;
+                break;
+            } else {
+                break;
+            }
+        }
+        infrared_manager_rx_deinit();
+        if (received_any) {
+            glog("IR RX stopped after first signal.\n");
+        } else {
+            glog("IR RX timed out.\n");
+        }
+        return;
+    }
+
+    if (strcmp(sub, "learn") == 0) {
+        if (argc >= 3) {
+            resolve_ir_path(argv[2], path, sizeof(path));
+        } else {
+            path[0] = '\0';
+        }
+
+        if (!infrared_manager_rx_init()) {
+            glog("IR: failed to init RX\n");
+            return;
+        }
+        glog("Waiting for IR signal (10s timeout)...\n");
+        
+        infrared_signal_t sig;
+        memset(&sig, 0, sizeof(sig));
+        if (infrared_manager_rx_receive(&sig, 10000)) {
+            if (sig.is_raw) {
+                glog("Captured RAW signal (%zu samples)\n", sig.payload.raw.timings_size);
+            } else {
+                glog("Captured: %s A:0x%lX C:0x%lX\n", 
+                     sig.payload.message.protocol,
+                     (unsigned long)sig.payload.message.address,
+                     (unsigned long)sig.payload.message.command);
+            }
+
+            if (path[0] == '\0') {
+                const char *base_dir = "/mnt/ghostesp/infrared/remotes";
+                char name_part[96];
+                if (!sig.is_raw && sig.payload.message.protocol[0] != '\0') {
+                    snprintf(name_part, sizeof(name_part), "Learned_%s_%08lX_%08lX",
+                             sig.payload.message.protocol,
+                             (unsigned long)sig.payload.message.address,
+                             (unsigned long)sig.payload.message.command);
+                } else {
+                    unsigned long t_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
+                    snprintf(name_part, sizeof(name_part), "Learned_RAW_%lu", t_ms);
+                }
+                snprintf(path, sizeof(path), "%s/%s.ir", base_dir, name_part);
+            }
+
+            FILE *f = fopen(path, "a");
+            if (f) {
+                fprintf(f, "\nname: %s\n", sig.name[0] ? sig.name : "Learned");
+                if (sig.is_raw) {
+                    fprintf(f, "type: raw\nfrequency: %lu\nduty_cycle: %f\ndata: ", 
+                            (unsigned long)sig.payload.raw.frequency, sig.payload.raw.duty_cycle);
+                    for(size_t i=0; i<sig.payload.raw.timings_size; i++) {
+                        fprintf(f, "%lu%s", (unsigned long)sig.payload.raw.timings[i], (i<sig.payload.raw.timings_size-1)?" ":"\n");
+                    }
+                } else {
+                    fprintf(f, "type: parsed\nprotocol: %s\naddress: %02lX %02lX %02lX %02lX\ncommand: %02lX %02lX %02lX %02lX\n",
+                            sig.payload.message.protocol,
+                            (unsigned long)((sig.payload.message.address >> 24) & 0xFF),
+                            (unsigned long)((sig.payload.message.address >> 16) & 0xFF),
+                            (unsigned long)((sig.payload.message.address >> 8) & 0xFF),
+                            (unsigned long)(sig.payload.message.address & 0xFF),
+                            (unsigned long)((sig.payload.message.command >> 24) & 0xFF),
+                            (unsigned long)((sig.payload.message.command >> 16) & 0xFF),
+                            (unsigned long)((sig.payload.message.command >> 8) & 0xFF),
+                            (unsigned long)(sig.payload.message.command & 0xFF));
+                }
+                fclose(f);
+                glog("Saved to %s\n", path);
+            } else {
+                glog("Error: Failed to open file %s for writing\n", path);
+            }
+            infrared_manager_free_signal(&sig);
+        } else {
+            glog("Timeout, no signal received.\n");
+        }
+        infrared_manager_rx_deinit();
+        return;
+    }
+
+    glog("Unknown ir subcommand: %s\n", sub);
+}
+
 void register_commands() {
     command_init();
     register_command("help", handle_help);
@@ -3064,6 +3870,7 @@ void register_commands() {
     register_command("selectairtag", handle_select_airtag);
     register_command("spoofairtag", handle_spoof_airtag);
     register_command("stopspoof", handle_stop_spoof);
+    register_command("chameleon", handle_chameleon_cmd);
 #endif
 #ifdef DEBUG
     register_command("crash", handle_crash);
@@ -3096,9 +3903,13 @@ void register_commands() {
     register_command("blespam", handle_ble_spam_cmd);
 #endif
     register_command("setrgbmode", handle_set_rgb_mode_cmd);
+    register_command("karma", handle_karma_cmd);
     register_command("setneopixelbrightness", handle_set_neopixel_brightness_cmd);
     register_command("getneopixelbrightness", handle_get_neopixel_brightness_cmd);
-    
+#ifdef CONFIG_HAS_INFRARED
+    register_command("ir", handle_ir_cmd);
+#endif
+
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);
     
     glog("Registered Commands\n");
@@ -3201,6 +4012,40 @@ void handle_set_rgb_mode_cmd(int argc, char **argv) {
     settings_set_rgb_mode(&G_Settings, mode);
     settings_save(&G_Settings);
     glog("RGB mode set to %s\n", argv[1]);
+}
+
+void handle_karma_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
+        return;
+    }
+    if (strcmp(argv[1], "start") == 0) {
+        if (argc > 2) {
+            // User specified SSIDs
+            const char *ssid_list[32];
+            int ssid_count = 0;
+            for (int i = 2; i < argc && ssid_count < 32; ++i) {
+                if (strlen(argv[i]) > 0 && strlen(argv[i]) < 33) {
+                    ssid_list[ssid_count++] = argv[i];
+                }
+            }
+            if (ssid_count > 0) {
+                wifi_manager_set_karma_ssid_list(ssid_list, ssid_count);
+                printf("Karma SSID list set (%d):\n", ssid_count);
+                for (int i = 0; i < ssid_count; ++i) {
+                    printf("  %s\n", ssid_list[i]);
+                    TERMINAL_VIEW_ADD_TEXT("  %s\n", ssid_list[i]);
+                }
+            }
+        }
+        wifi_manager_start_karma();
+    } else if (strcmp(argv[1], "stop") == 0) {
+        wifi_manager_stop_karma();
+    } else {
+        printf("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
+        TERMINAL_VIEW_ADD_TEXT("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
+    }
 }
 
 void handle_set_neopixel_brightness_cmd(int argc, char **argv) {

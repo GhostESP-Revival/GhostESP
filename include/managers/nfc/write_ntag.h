@@ -3,7 +3,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "sdkconfig.h"
+#ifdef CONFIG_NFC_PN532
 #include "pn532.h"
+#endif
+#include "esp_err.h"
 #include "managers/nfc/ntag_t2.h"
 
 #ifdef __cplusplus
@@ -26,11 +30,12 @@ void ntag_file_free(ntag_file_image_t *img);
 char *ntag_file_build_details(const ntag_file_image_t *img);
 
 // Write image to tag using PN532. Returns true on success.
-// progress_cb can be NULL. If provided, return false from callback to cancel.
+#ifdef CONFIG_NFC_PN532
 bool ntag_write_to_tag(pn532_io_handle_t io,
                        const ntag_file_image_t *img,
                        bool (*progress_cb)(int current, int total, void *user),
                        void *user);
+#endif
 
 #ifdef __cplusplus
 }

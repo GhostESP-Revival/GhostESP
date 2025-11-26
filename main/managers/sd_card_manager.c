@@ -30,7 +30,7 @@ static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
 
 
-/* time multiplex spi for somethingsomething v1*/
+/* time multiplex spi when display and sd share the spi bus */
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI)
 #include "lvgl_helpers.h"
 #include "lvgl_tft/disp_spi.h"
@@ -41,12 +41,20 @@ static const char *NVS_NAMESPACE = "sd_config";
 #include "lvgl/lvgl.h"
 #endif
 #include "managers/display_manager.h"
+static bool s_display_spi_suspended_flag = false;
+static bool is_shared_display_sd_spi(void) {
+#if defined(CONFIG_LV_DISP_SPI_MOSI) && defined(CONFIG_LV_DISP_SPI_MISO) && defined(CONFIG_LV_DISP_SPI_CLK)
+  return (sd_card_manager.spi_mosi_pin == CONFIG_LV_DISP_SPI_MOSI) &&
+         (sd_card_manager.spi_miso_pin == CONFIG_LV_DISP_SPI_MISO) &&
+         (sd_card_manager.spi_clk_pin  == CONFIG_LV_DISP_SPI_CLK);
+#else
+  return false;
+#endif
+}
 static bool display_spi_suspend_for_sd(void) {
-  #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0) {
+  if (!is_shared_display_sd_spi()) {
     return false;
   }
-  #endif
   /* pause lvgl refresh to stop flush() while we steal the bus */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
@@ -62,14 +70,16 @@ static bool display_spi_suspend_for_sd(void) {
   #ifdef CONFIG_LV_DISP_SPI_CS
   gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
   #endif
+  s_display_spi_suspended_flag = true;
   return true;
 }
 static void display_spi_resume_after_sd(void) {
-  #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0) {
+  if (!is_shared_display_sd_spi()) {
     return;
   }
-  #endif
+  if (!s_display_spi_suspended_flag) {
+    return;
+  }
   (void)lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
                              SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
   disp_spi_add_device(TFT_SPI_HOST);
@@ -80,6 +90,7 @@ static void display_spi_resume_after_sd(void) {
     if (refr) lv_timer_resume(refr);
   }
   display_manager_resume_lvgl_task();
+  s_display_spi_suspended_flag = false;
 }
 #else
 static bool display_spi_suspend_for_sd(void) { return false; }
@@ -482,8 +493,6 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI3_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI3_HOST;
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
@@ -611,13 +620,8 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   }
 
 #if defined(CONFIG_USING_SPI)
-  bool gating_template = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#endif
-  if (gating_template) {
-    if (display_was_suspended) *display_was_suspended = display_spi_suspend_for_sd();
-  }
+  // always pause display SPI if the display shares the same SPI bus with SD
+  if (display_was_suspended) *display_was_suspended = display_spi_suspend_for_sd();
   // Minimal SPI mount path for flush: reuse sd_card_init SPI branch logic
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
@@ -691,9 +695,8 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   if (sd_card_manager.is_initialized) {
     sd_card_unmount();
   }
-  if (display_was_suspended) {
-    display_spi_resume_after_sd();
-  }
+  /* always attempt resume; it's idempotent and guards internally */
+  display_spi_resume_after_sd();
 }
 
 void sd_card_unmount(void) {
@@ -865,7 +868,9 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *evil_portal_dir = "/mnt/ghostesp/evil_portal";
   const char *evil_portal_portals_dir = "/mnt/ghostesp/evil_portal/portals"; 
   const char *universals_dir = "/mnt/ghostesp/infrared/universals";
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
   const char *nfc_dir = "/mnt/ghostesp/nfc";
+#endif
 
   if (!sd_card_exists(root_dir)) {
     printf("Creating directory: %s\n", root_dir);
@@ -999,6 +1004,19 @@ esp_err_t sd_card_setup_directory_structure() {
   } else {
     printf("Directory %s already exists\n", universals_dir);
   }
+
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
+  if (!sd_card_exists(nfc_dir)) {
+    printf("Creating directory: %s\n", nfc_dir);
+    esp_err_t ret = sd_card_create_directory(nfc_dir);
+    if (ret != ESP_OK) {
+      printf("Failed to create directory %s: %s\n", nfc_dir, esp_err_to_name(ret));
+      return ret;
+    }
+  } else {
+    printf("Directory %s already exists\n", nfc_dir);
+  }
+#endif
 
   printf("Directory structure successfully set up.\n");
   return ESP_OK;

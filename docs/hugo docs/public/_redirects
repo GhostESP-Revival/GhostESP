@@ -1,0 +1,8 @@
+/infrared/* /latest/infrared/:splat 302
+/getting-started/* /latest/getting-started/:splat 302
+/nfc/* /latest/nfc/:splat 302
+/firmware/* /latest/firmware/:splat 302
+/hardware/* /latest/hardware/:splat 302
+/docs/latest/* /latest/:splat 301
+/docs/v1.8/* /v1.8/:splat 301
+/docs/* /latest/:splat 302

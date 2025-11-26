@@ -1,0 +1,17 @@
+{{ $level := .Level }}
+{{ $anchor := .Anchor }}
+{{ if eq $level 2 }}
+<h2 id="{{ $anchor }}">
+  {{ .Text | safeHTML }}
+  <a class="heading-anchor" href="{{ printf "#%s" $anchor }}" aria-label="Copy link to this section">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
+        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
+        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
+      </g>
+    </svg>
+  </a>
+</h2>
+{{ else }}
+<h{{ $level }} id="{{ $anchor }}">{{ .Text | safeHTML }}</h{{ $level }}>
+{{ end }}

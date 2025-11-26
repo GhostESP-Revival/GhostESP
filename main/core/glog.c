@@ -4,8 +4,35 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include <stdbool.h>
 
 #define GLOG_BUF_SIZE 512
+#define GLOG_DEFER_MAX 16
+
+static SemaphoreHandle_t s_glog_mutex;
+static volatile int s_glog_defer = 0;
+static char s_glog_q[GLOG_DEFER_MAX][GLOG_BUF_SIZE];
+static uint8_t s_q_head = 0, s_q_tail = 0, s_q_count = 0;
+
+static inline void glog_lock(void) {
+    if (!s_glog_mutex) s_glog_mutex = xSemaphoreCreateMutex();
+    if (s_glog_mutex) xSemaphoreTake(s_glog_mutex, portMAX_DELAY);
+}
+
+static inline void glog_unlock(void) {
+    if (s_glog_mutex) xSemaphoreGive(s_glog_mutex);
+}
+
+static inline void glog_emit(const char *buf) {
+    printf("%s", buf);
+    if (esp_comm_manager_is_remote_command()) {
+        esp_comm_manager_send_response((const uint8_t *)buf, strlen(buf));
+    }
+    terminal_view_add_text(buf);
+    ap_manager_add_log(buf);
+}
 
 void glog(const char *fmt, ...) {
     if (!fmt) return;
@@ -36,13 +63,43 @@ void glog(const char *fmt, ...) {
         }
     }
 
-    printf("%s", buf);
-
-    if (esp_comm_manager_is_remote_command()) {
-        esp_comm_manager_send_response((const uint8_t *)buf, strlen(buf));
+    glog_lock();
+    if (s_glog_defer) {
+        if (s_q_count == GLOG_DEFER_MAX) {
+            s_q_head = (s_q_head + 1) % GLOG_DEFER_MAX;
+            s_q_count--;
+        }
+        memcpy(s_glog_q[s_q_tail], buf, (size_t)written + 1);
+        s_q_tail = (s_q_tail + 1) % GLOG_DEFER_MAX;
+        s_q_count++;
+        glog_unlock();
+        return;
     }
-    terminal_view_add_text(buf);
-    ap_manager_add_log(buf);
+    glog_unlock();
+
+    glog_emit(buf);
+}
+
+void glog_set_defer(int on) {
+    glog_lock();
+    s_glog_defer = (on != 0);
+    glog_unlock();
+}
+
+void glog_flush_deferred(void) {
+    for (;;) {
+        glog_lock();
+        if (s_q_count == 0) {
+            glog_unlock();
+            break;
+        }
+        char out[GLOG_BUF_SIZE];
+        memcpy(out, s_glog_q[s_q_head], GLOG_BUF_SIZE);
+        s_q_head = (s_q_head + 1) % GLOG_DEFER_MAX;
+        s_q_count--;
+        glog_unlock();
+        glog_emit(out);
+    }
 }
 
 

@@ -1,4 +1,7 @@
 #include "managers/nfc/write_ntag.h"
+#ifdef CONFIG_NFC_PN532
+#include "pn532.h"
+#endif
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -127,6 +130,7 @@ char *ntag_file_build_details(const ntag_file_image_t *img) {
     return out;
 }
 
+#ifdef CONFIG_NFC_PN532
 bool ntag_write_to_tag(pn532_io_handle_t io,
                        const ntag_file_image_t *img,
                        bool (*progress_cb)(int current, int total, void *user),
@@ -156,3 +160,4 @@ bool ntag_write_to_tag(pn532_io_handle_t io,
     if (progress_cb) progress_cb(total, total, user);
     return true;
 }
+#endif

@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define DEFAULT_BAUD_RATE 115200
+
 typedef enum {
     COMM_STATE_IDLE,
     COMM_STATE_SCANNING,

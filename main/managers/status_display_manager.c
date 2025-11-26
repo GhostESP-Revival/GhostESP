@@ -119,8 +119,13 @@ static esp_err_t status_display_send(uint8_t control, const uint8_t *data, size_
     i2c_master_write(cmd, (uint8_t *)data, len, true);
     i2c_master_stop(cmd);
     bool locked = i2c_bus_lock(STATUS_DISPLAY_I2C_PORT, 120);
+    if (!locked) {
+        i2c_cmd_link_delete(cmd);
+        ESP_LOGW(TAG, "status display i2c busy, skipping ctrl=0x%02X", control);
+        return ESP_ERR_TIMEOUT;
+    }
     esp_err_t err = i2c_master_cmd_begin(STATUS_DISPLAY_I2C_PORT, cmd, pdMS_TO_TICKS(100));
-    if (locked) i2c_bus_unlock(STATUS_DISPLAY_I2C_PORT);
+    i2c_bus_unlock(STATUS_DISPLAY_I2C_PORT);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2c write failed ctrl=0x%02X len=%u err=%s", control, (unsigned)len, esp_err_to_name(err));
     } else {

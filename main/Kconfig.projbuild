@@ -393,37 +393,49 @@ menu "Ghost ESP Options"
 
         menu "NFC Options"
 
-            config HAS_NFC
-                bool "Enable NFC (PN532)"
+            config NFC_PN532
+                bool "Enable PN532 NFC"
                 default n
                 help
-                    Enable PN532 NFC support and show NFC in main menu.
+                    Enable PN532 NFC support.
+
+            config NFC_CHAMELEON
+                bool "Enable Chameleon Ultra NFC"
+                default y if BT_BLE_ENABLED
+                default n
+                help
+                    Enable using Chameleon Ultra as an NFC backend over BLE.
+
+            # Aggregated flag for UI and generic NFC code
+            config HAS_NFC
+                bool
+                default y if NFC_PN532 || NFC_CHAMELEON
 
             config NFC_SCL_PIN
                 int "NFC Clock Pin (SCL/SCK)"
                 default 22
-                depends on HAS_NFC
+                depends on NFC_PN532
                 help
                     GPIO for PN532 I2C clock (aka SCL/SCK).
 
             config NFC_SDA_PIN
                 int "NFC Data Pin (SDA)"
                 default 21
-                depends on HAS_NFC
+                depends on NFC_PN532
                 help
                     GPIO for PN532 I2C data (SDA).
 
             config NFC_IRQ_PIN
                 int "NFC URQ/IRQ Pin"
                 default -1
-                depends on HAS_NFC
+                depends on NFC_PN532
                 help
                     GPIO for PN532 IRQ (aka URQ). Use -1 if not connected.
 
             config NFC_RST_PIN
                 int "NFC RF RST Pin"
                 default -1
-                depends on HAS_NFC
+                depends on NFC_PN532
                 help
                     GPIO for PN532 reset (RF RST). Use -1 if not connected.
 

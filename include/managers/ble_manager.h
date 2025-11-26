@@ -32,6 +32,7 @@ typedef struct {
 esp_err_t ble_register_handler(ble_data_handler_t handler);
 esp_err_t ble_unregister_handler(ble_data_handler_t handler);
 void ble_init(void);
+void ble_deinit(void);
 void ble_start_find_flippers(void);
 void ble_stop(void);
 void stop_ble_stack(void);

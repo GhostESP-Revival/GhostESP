@@ -37,12 +37,13 @@ def print_banner():
     print("       +======================================+")
     print()
 
-def download_esp_idf(version: str = "5.5") -> Optional[str]:
+def download_esp_idf(version: str = "5.5.1") -> Optional[str]:
     """Download and extract ESP-IDF"""
     print(f"\nDownloading ESP-IDF v{version}...")
     
     # ESP-IDF download URLs
     urls = {
+        "5.5.1": "https://github.com/espressif/esp-idf/releases/download/v5.5.1/esp-idf-v5.5.1.zip",
         "5.5": "https://github.com/espressif/esp-idf/releases/download/v5.5/esp-idf-v5.5.zip",
         "5.4.1": "https://github.com/espressif/esp-idf/releases/download/v5.4.1/esp-idf-v5.4.1.zip"
     }
@@ -203,7 +204,11 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
         export_script = "export.bat" if os.name == 'nt' else "export.sh"
         if os.path.exists(os.path.join(path, export_script)):
             print(f"Found ESP-IDF at: {path}")
-            return path
+            choice = input("Use this ESP-IDF path? [y/n]: ").strip().lower()
+            if choice not in ['n', 'no']:
+                return path
+            else:
+                print("skipping detected ESP-IDF path per user choice")
     
     # Search for version-specific folders
     print("Searching for version-specific installations...")
@@ -228,7 +233,11 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
                             export_script = "export.bat" if os.name == 'nt' else "export.sh"
                             if os.path.exists(os.path.join(full_path, export_script)):
                                 print(f"Found ESP-IDF at: {full_path}")
-                                return full_path
+                                choice = input("Use this ESP-IDF path? [y/n]: ").strip().lower()
+                                if choice not in ['n', 'no']:
+                                    return full_path
+                                else:
+                                    print("skipping detected ESP-IDF path per user choice")
                 except (PermissionError, OSError):
                     continue
     
@@ -236,7 +245,7 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
     if auto_download:
         print("\nESP-IDF not found. Would you like to download it automatically?")
         print("Available versions:")
-        print("  1. ESP-IDF v5.5 (recommended)")
+        print("  1. ESP-IDF v5.5.1 (recommended)")
         print("  2. ESP-IDF v5.4.1")
         print("  3. Manual path input")
         print("  4. Exit")
@@ -244,7 +253,7 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
         choice = input("Enter your choice (1-4): ").strip()
         
         if choice == '1':
-            return download_esp_idf("5.5")
+            return download_esp_idf("5.5.1")
         elif choice == '2':
             return download_esp_idf("5.4.1")
         elif choice == '3':
@@ -280,8 +289,9 @@ def validate_esp_idf(idf_path: str) -> bool:
     
     if not os.path.exists(export_path):
         print(f"ERROR: Invalid ESP-IDF path. {export_script} not found in {idf_path}")
-        print("Please ensure you have ESP-IDF v5.4.1 installed.")
-        print("Download from: https://github.com/espressif/esp-idf/releases/tag/v5.4.1")
+        print("Please ensure you have ESP-IDF v5.5.1 (recommended) or v5.4.1 installed.")
+        print("Download v5.5.1: https://github.com/espressif/esp-idf/releases/tag/v5.5.1")
+        print("Download v5.4.1: https://github.com/espressif/esp-idf/releases/tag/v5.4.1")
         return False
     
     tools_path = os.path.join(idf_path, "tools")
@@ -375,7 +385,9 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "S3TWatch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.S3TWatch", "zip_name": "LilyGo-S3TWatch-2020.zip"},
         {"name": "TDisplayS3-Touch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.TDisplayS3-Touch", "zip_name": "LilyGo-TDisplayS3-Touch.zip"},
         {"name": "JCMK_DevBoardPro", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.JCMK_DevBoardPro", "zip_name": "JCMK_DevBoardPro.zip"},
-        {"name": "Lolin_S3_Pro", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.lolins3pro", "zip_name": "Lolin_S3_Pro.zip"}
+        {"name": "RabbitLabs_Minion", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.minion", "zip_name": "RabbitLabs_Minion.zip"},
+        {"name": "Lolin_S3_Pro", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.lolins3pro", "zip_name": "Lolin_S3_Pro.zip"},
+        {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"}
     ]
 
 def validate_project_directory() -> bool:
@@ -456,6 +468,31 @@ def run_idf_command(cmd: List[str], env: Dict[str, str], cmd_prefix: str = "", c
         print("ERROR: idf.py not found. Make sure ESP-IDF environment is properly set up.")
         return False
 
+def _is_cmake_build_dir(path: str) -> bool:
+    """best-effort check if a directory looks like a cmake build dir"""
+    cmake_cache = os.path.join(path, "CMakeCache.txt")
+    cmake_files = os.path.join(path, "CMakeFiles")
+    ninja_file = os.path.join(path, "build.ninja")
+    return os.path.exists(cmake_cache) or os.path.exists(cmake_files) or os.path.exists(ninja_file)
+
+def _remove_non_cmake_build_dir() -> None:
+    """if 'build' exists but isn't cmake, nuke it so idf.py doesn't bitch"""
+    build_dir = os.path.join(os.getcwd(), "build")
+    if os.path.exists(build_dir) and not _is_cmake_build_dir(build_dir):
+        try:
+            shutil.rmtree(build_dir)
+            print("Removed non-CMake build directory: build")
+        except Exception as e:
+            print(f"WARNING: Failed to remove non-CMake build directory: {e}")
+
+def _set_target_with_recovery(idf_target: str, env: Dict[str, str], cmd_prefix: str) -> bool:
+    """try set-target; if it fails, remove bad build dir and retry once"""
+    if run_idf_command(['idf.py', 'set-target', idf_target], env, cmd_prefix):
+        return True
+    print("Set-target failed once. Checking 'build' directory and retrying...")
+    _remove_non_cmake_build_dir()
+    return run_idf_command(['idf.py', 'set-target', idf_target], env, cmd_prefix)
+
 def run_menuconfig(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = "") -> bool:
     """Run menuconfig for a specific target configuration"""
     print(f"\n{'='*50}")
@@ -481,7 +518,8 @@ def run_menuconfig(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str 
     
     # Set the target
     print(f"Setting target to {target['idf_target']}...")
-    if not run_idf_command(['idf.py', 'set-target', target['idf_target']], env, cmd_prefix):
+    _remove_non_cmake_build_dir()
+    if not _set_target_with_recovery(target['idf_target'], env, cmd_prefix):
         print("ERROR: Failed to set target")
         return False
     
@@ -584,7 +622,8 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
     
     # Set target
     print(f"Setting IDF target to {target['idf_target']}...")
-    if not run_idf_command(['idf.py', 'set-target', target['idf_target']], env, cmd_prefix):
+    _remove_non_cmake_build_dir()
+    if not _set_target_with_recovery(target['idf_target'], env, cmd_prefix):
         print(f"ERROR: Failed to set target {target['idf_target']}")
         return False
     

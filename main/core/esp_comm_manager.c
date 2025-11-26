@@ -32,13 +32,14 @@
 #define COMMAND_TIMEOUT_MS 500
 #define PING_INTERVAL_MS 1000
 #define LINK_TIMEOUT_MS 4000
+#define COMM_PROTOCOL_STACK_WORDS 4096
 
 // protocol constants
 #define PACKET_START_BYTE 0xAA
 #define PACKET_HEADER_SIZE 3
 #define PACKET_CHECKSUM_SIZE 1
 #define PACKET_MAX_PAYLOAD (COMM_PACKET_SIZE - 4)
-#define RESPONSE_LOG_PREFIX "ESP Comm Response: "
+#define RESPONSE_LOG_PREFIX "RX: "
 // flags for PACKET_TYPE_RESPONSE framing
 #define RESP_FLAG_LINE_START 0x01
 
@@ -56,7 +57,6 @@
 #define DEFAULT_TX_PIN GPIO_NUM_6
 #define DEFAULT_RX_PIN GPIO_NUM_7
 #endif
-#define DEFAULT_BAUD_RATE 115200
 
 static const char* TAG = "esp_comm_manager";
 
@@ -191,6 +191,7 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
 
     if (buffer_size <= prefix_len + 2) {
         ap_manager_add_log(prefix);
+        terminal_view_add_text(prefix);
         return;
     }
 
@@ -215,6 +216,7 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
     log_buffer[pos] = '\0';
 
     ap_manager_add_log(log_buffer);
+    terminal_view_add_text(log_buffer);
 }
 
 static StackType_t* alloc_task_stack(size_t words);
@@ -314,7 +316,7 @@ static bool send_packet(const comm_packet_t* packet) {
         if (xQueueSend(s_comm_manager->tx_queue, packet, wait) != pdPASS) {
             s_comm_manager->tx_dropped_packets++;
             if ((s_comm_manager->tx_dropped_packets & 0x0F) == 1) {
-                printf("W: TX queue full, dropped packet type 0x%02x (drops=%lu)\n",
+                printf("TX queue full, dropped packet type 0x%02x (drops=%lu)\n",
                        packet->type, (unsigned long)s_comm_manager->tx_dropped_packets);
             }
             return false;
@@ -370,180 +372,192 @@ static void rx_task(void* arg) {
     TickType_t last_stats_log = 0;
 
     while (1) {
-        int len = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, pdMS_TO_TICKS(30));
-        if (len <= 0) continue;
-
-        size_t buffered_len = 0;
-        if (uart_get_buffered_data_len(s_uart_num, &buffered_len) == ESP_OK) {
-            if (buffered_len > comm->rx_buffer_high_watermark) {
-                comm->rx_buffer_high_watermark = buffered_len;
-            }
-            size_t alert_threshold = UART_RX_BUFFER_SIZE * 3 / 4;
-            if (buffered_len > alert_threshold) {
-                comm->rx_high_water_alerts++;
-                if ((comm->rx_high_water_alerts & 0x0F) == 1) {
-                    printf("W: UART RX buffered %u bytes (alerts=%lu)\n",
-                           (unsigned)buffered_len, (unsigned long)comm->rx_high_water_alerts);
-                }
-            }
+        int len = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, pdMS_TO_TICKS(10));
+        if (len <= 0) {
+            continue;
         }
 
         TickType_t now = xTaskGetTickCount();
 
-        for (int i = 0; i < len; ++i) {
-            uint8_t byte = rx_buffer[i];
+        while (len > 0) {
+            size_t buffered_len = 0;
+            if (uart_get_buffered_data_len(s_uart_num, &buffered_len) == ESP_OK) {
+                if (buffered_len > comm->rx_buffer_high_watermark) {
+                    comm->rx_buffer_high_watermark = buffered_len;
+                }
+                size_t alert_threshold = UART_RX_BUFFER_SIZE * 3 / 4;
+                if (buffered_len > alert_threshold) {
+                    comm->rx_high_water_alerts++;
+                    if ((comm->rx_high_water_alerts & 0x0F) == 1) {
+                        printf("UART RX buffered %u bytes (alerts=%lu)\n",
+                               (unsigned)buffered_len, (unsigned long)comm->rx_high_water_alerts);
+                    }
+                }
+            }
 
-            switch (comm->parse_state) {
-                case PARSE_STATE_IDLE:
-                    if (byte == PACKET_START_BYTE) {
-                        comm->parse_state = PARSE_STATE_START_BYTE;
-                        comm->partial_packet.start_byte = byte;
-                    }
-                    break;
-                    
-                case PARSE_STATE_START_BYTE:
-                    comm->partial_packet.type = byte;
-                    comm->parse_state = PARSE_STATE_TYPE;
-                    break;
-                    
-                case PARSE_STATE_TYPE:
-                    comm->partial_packet.length = byte;
-                    if (byte > COMM_PACKET_SIZE - 4) {
-                        comm->parse_state = PARSE_STATE_IDLE;
-                        break;
-                    }
-                    comm->data_bytes_received = 0;
-                    comm->parse_state = (byte == 0) ? PARSE_STATE_CHECKSUM : PARSE_STATE_DATA;
-                    break;
-                    
-                case PARSE_STATE_DATA:
-                    comm->partial_packet.data[comm->data_bytes_received++] = byte;
-                    if (comm->data_bytes_received >= comm->partial_packet.length) {
-                        comm->parse_state = PARSE_STATE_CHECKSUM;
-                    }
-                    break;
-                    
-                case PARSE_STATE_CHECKSUM:
-                    {
-                        size_t frame_len = PACKET_HEADER_SIZE + comm->partial_packet.length;
-                        const uint8_t* frame_bytes = (const uint8_t*)&comm->partial_packet;
-                        uint8_t crc = calculate_crc8(frame_bytes, frame_len);
-                        bool valid = (crc == byte);
-                        if (valid) {
-                            if (!comm->use_crc) {
-                                comm->use_crc = true;
-                                printf("I: Peer supports CRC-8, upgrading TX checksum\n");
-                            }
-                        } else {
-                            uint8_t legacy = calculate_legacy_checksum(frame_bytes, frame_len);
-                            if (legacy == byte) {
-                                if (comm->use_crc) {
-                                    comm->use_crc = false;
-                                    printf("W: Peer using legacy checksum, downgrading to XOR\n");
-                                }
-                                valid = true;
-                            }
+            for (int i = 0; i < len; ++i) {
+                uint8_t byte = rx_buffer[i];
+
+                switch (comm->parse_state) {
+                    case PARSE_STATE_IDLE:
+                        if (byte == PACKET_START_BYTE) {
+                            comm->parse_state = PARSE_STATE_START_BYTE;
+                            comm->partial_packet.start_byte = byte;
                         }
+                        break;
 
-                        if (valid) {
-                            comm->last_rx_tick = now;
-                            if (comm->rx_packet_queue) {
-                                if (xQueueSend(comm->rx_packet_queue, &comm->partial_packet, pdMS_TO_TICKS(2)) != pdPASS) {
-                                    comm->rx_queue_dropped_packets++;
-                                    if ((comm->rx_queue_dropped_packets & 0x0F) == 1) {
-                                        printf("W: RX packet queue full, dropped type 0x%02x (drops=%lu)\n",
-                                               comm->partial_packet.type,
-                                               (unsigned long)comm->rx_queue_dropped_packets);
-                                    }
+                    case PARSE_STATE_START_BYTE:
+                        comm->partial_packet.type = byte;
+                        comm->parse_state = PARSE_STATE_TYPE;
+                        break;
+
+                    case PARSE_STATE_TYPE:
+                        comm->partial_packet.length = byte;
+                        if (byte > COMM_PACKET_SIZE - 4) {
+                            comm->parse_state = PARSE_STATE_IDLE;
+                            break;
+                        }
+                        comm->data_bytes_received = 0;
+                        comm->parse_state = (byte == 0) ? PARSE_STATE_CHECKSUM : PARSE_STATE_DATA;
+                        break;
+
+                    case PARSE_STATE_DATA:
+                        comm->partial_packet.data[comm->data_bytes_received++] = byte;
+                        if (comm->data_bytes_received >= comm->partial_packet.length) {
+                            comm->parse_state = PARSE_STATE_CHECKSUM;
+                        }
+                        break;
+
+                    case PARSE_STATE_CHECKSUM:
+                        {
+                            size_t frame_len = PACKET_HEADER_SIZE + comm->partial_packet.length;
+                            const uint8_t* frame_bytes = (const uint8_t*)&comm->partial_packet;
+                            uint8_t crc = calculate_crc8(frame_bytes, frame_len);
+                            bool valid = (crc == byte);
+                            if (valid) {
+                                if (!comm->use_crc) {
+                                    comm->use_crc = true;
+                                    printf("Peer supports CRC-8, upgrading TX checksum\n");
                                 }
                             } else {
-                                // Minimal inline handling during scanning/handshake (no protocol task yet)
-                                handle_received_packet(comm, &comm->partial_packet);
-                            }
-                        } else {
-                            comm->rx_crc_error_count++;
-                            if (comm->partial_packet.type == PACKET_TYPE_RESPONSE) {
-                                // Signal protocol task to drop until newline to avoid merging partial lines
-                                comm->rx_drop_until_newline = true;
-                            }
-                            if ((comm->rx_crc_error_count & 0x0F) == 1) {
-                                size_t fifo_bytes = 0;
-                                if (uart_get_buffered_data_len(s_uart_num, &fifo_bytes) != ESP_OK) {
-                                    fifo_bytes = 0;
+                                uint8_t legacy = calculate_legacy_checksum(frame_bytes, frame_len);
+                                if (legacy == byte) {
+                                    if (comm->use_crc) {
+                                        comm->use_crc = false;
+                                        printf("Peer using legacy checksum, downgrading to XOR\n");
+                                    }
+                                    valid = true;
                                 }
-                                UBaseType_t queue_free = comm->rx_packet_queue
-                                    ? uxQueueSpacesAvailable(comm->rx_packet_queue)
-                                    : 0;
-                                printf("W: CRC error on packet type 0x%02x (errors=%lu, fifo=%u, rx_queue_free=%u)\n",
-                                       comm->partial_packet.type,
-                                       (unsigned long)comm->rx_crc_error_count,
-                                       (unsigned)fifo_bytes,
-                                       (unsigned)queue_free);
                             }
-                        }
-                        comm->parse_state = PARSE_STATE_IDLE;
-                    }
-                    break;
-            }
-        }
 
-        if (now - last_stats_log >= pdMS_TO_TICKS(5000)) {
-            size_t fifo_bytes = 0;
-            if (uart_get_buffered_data_len(s_uart_num, &fifo_bytes) != ESP_OK) {
-                fifo_bytes = 0;
+                            if (valid) {
+                                comm->last_rx_tick = now;
+                                if (comm->rx_packet_queue) {
+                                    if (xQueueSend(comm->rx_packet_queue, &comm->partial_packet, pdMS_TO_TICKS(2)) != pdPASS) {
+                                        comm->rx_queue_dropped_packets++;
+                                        if ((comm->rx_queue_dropped_packets & 0x0F) == 1) {
+                                            printf("RX packet queue full, dropped type 0x%02x (drops=%lu)\n",
+                                                   comm->partial_packet.type,
+                                                   (unsigned long)comm->rx_queue_dropped_packets);
+                                        }
+                                    }
+                                } else {
+                                    // Minimal inline handling during scanning/handshake (no protocol task yet)
+                                    handle_received_packet(comm, &comm->partial_packet);
+                                }
+                            } else {
+                                comm->rx_crc_error_count++;
+                                if (comm->partial_packet.type == PACKET_TYPE_RESPONSE) {
+                                    // Signal protocol task to drop until newline to avoid merging partial lines
+                                    comm->rx_drop_until_newline = true;
+                                }
+                                if ((comm->rx_crc_error_count & 0x0F) == 1) {
+                                    size_t fifo_bytes = 0;
+                                    if (uart_get_buffered_data_len(s_uart_num, &fifo_bytes) != ESP_OK) {
+                                        fifo_bytes = 0;
+                                    }
+                                    UBaseType_t queue_free = comm->rx_packet_queue
+                                        ? uxQueueSpacesAvailable(comm->rx_packet_queue)
+                                        : 0;
+                                    printf("CRC error on packet type 0x%02x (errors=%lu, fifo=%u, rx_queue_free=%u)\n",
+                                           comm->partial_packet.type,
+                                           (unsigned long)comm->rx_crc_error_count,
+                                           (unsigned)fifo_bytes,
+                                           (unsigned)queue_free);
+                                }
+                            }
+                            comm->parse_state = PARSE_STATE_IDLE;
+                        }
+                        break;
+                }
             }
-            UBaseType_t queue_free = comm->rx_packet_queue
-                ? uxQueueSpacesAvailable(comm->rx_packet_queue)
-                : 0;
-            // printf("I: RX stats crc_err=%lu rx_queue_drop=%lu tx_drop=%lu fifo=%u high_water=%u high_alerts=%lu queue_free=%u\n",
-            //        (unsigned long)comm->rx_crc_error_count,
-            //        (unsigned long)comm->rx_queue_dropped_packets,
-            //        (unsigned long)comm->tx_dropped_packets,
-            //        (unsigned)fifo_bytes,
-            //        (unsigned)comm->rx_buffer_high_watermark,
-            //        (unsigned long)comm->rx_high_water_alerts,
-            //        (unsigned)queue_free);
-            last_stats_log = now;
+
+            if (now - last_stats_log >= pdMS_TO_TICKS(5000)) {
+                size_t fifo_bytes = 0;
+                if (uart_get_buffered_data_len(s_uart_num, &fifo_bytes) != ESP_OK) {
+                    fifo_bytes = 0;
+                }
+                UBaseType_t queue_free = comm->rx_packet_queue
+                    ? uxQueueSpacesAvailable(comm->rx_packet_queue)
+                    : 0;
+                // printf("I: RX stats crc_err=%lu rx_queue_drop=%lu tx_drop=%lu fifo=%u high_water=%u high_alerts=%lu queue_free=%u\n",
+                //        (unsigned long)comm->rx_crc_error_count,
+                //        (unsigned long)comm->rx_queue_dropped_packets,
+                //        (unsigned long)comm->tx_dropped_packets,
+                //        (unsigned)fifo_bytes,
+                //        (unsigned)comm->rx_buffer_high_watermark,
+                //        (unsigned long)comm->rx_high_water_alerts,
+                //        (unsigned)queue_free);
+                last_stats_log = now;
+            }
+
+            int drained = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, 0);
+            if (drained > 0) {
+                len = drained;
+                now = xTaskGetTickCount();
+            } else {
+                len = 0;
+            }
         }
     }
 }
 
 static void send_discovery_packet(void) {
     if (!s_comm_manager) return;
-    
+
     comm_packet_t packet = {0};
     packet.start_byte = PACKET_START_BYTE;
     packet.type = PACKET_TYPE_DISCOVERY;
     packet.length = DISCOVERY_PAYLOAD_LEN;
-    
+
     memcpy(packet.data, s_comm_manager->chip_id, CHIP_ID_LEN);
     strncpy((char*)packet.data + CHIP_ID_LEN, s_comm_manager->chip_name, CHIP_NAME_COPY_LEN);
     ((char*)packet.data)[CHIP_ID_LEN + CHIP_NAME_COPY_LEN] = '\0';
-    
+
     send_packet(&packet);
 }
 
 static void send_handshake_request(const char* peer_name) {
     if (!s_comm_manager) return;
-    
+
     comm_packet_t packet = {0};
     packet.start_byte = PACKET_START_BYTE;
     packet.type = PACKET_TYPE_HANDSHAKE_REQ;
     packet.length = MAX_CMD_LEN;
-    
+
     strncpy((char*)packet.data, peer_name, MAX_CMD_LEN);
-    
+
     send_packet(&packet);
 }
 
 static void send_handshake_ack(void) {
     if (!s_comm_manager) return;
-    
+
     comm_packet_t packet = {0};
     packet.start_byte = PACKET_START_BYTE;
     packet.type = PACKET_TYPE_HANDSHAKE_ACK;
     packet.length = 0;
-    
+
     send_packet(&packet);
 }
 
@@ -558,13 +572,15 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     memcpy(comm->peer.chip_id, packet->data, CHIP_ID_LEN);
                     strncpy(comm->peer.chip_name, (char*)packet->data + CHIP_ID_LEN, CHIP_NAME_MAX);
                     comm->peer.chip_name[CHIP_NAME_MAX - 1] = '\0';
-                    printf("I: Discovered peer: %s\n", comm->peer.chip_name);
+                    printf("Discovered peer: %s\n", comm->peer.chip_name);
                     snprintf(log_buffer, sizeof(log_buffer), "I: Discovered peer: %s\n", comm->peer.chip_name);
                     ap_manager_add_log(log_buffer);
+                    terminal_view_add_text(log_buffer);
 
                     if (strcmp(comm->chip_name, comm->peer.chip_name) > 0) {
-                        printf("I: Peer has smaller name, I will initiate connection.\n");
+                        printf("Peer has smaller name, I will initiate connection.\n");
                         ap_manager_add_log("I: Peer has smaller name, I will initiate connection.\n");
+                        terminal_view_add_text("I: Peer has smaller name, I will initiate connection.\n");
                         esp_comm_manager_connect_to_peer(comm->peer.chip_name);
                     }
                 }
@@ -583,18 +599,18 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     if (comm->handshake_timer) {
                         xTimerStart(comm->handshake_timer, 0);
                     }
-                if (comm->command_callback && !comm->command_queue) {
-                    comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
-                    if (comm->command_queue && !comm->command_executor_task_handle) {
-                        TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                           "comm_cmd_exec_task", 2048, comm, 5);
-                        if (!t) {
-                            printf("E: failed to create command executor task\n");
-                            free_task_resources(&comm->command_task_res);
+                    if (comm->command_callback && !comm->command_queue) {
+                        comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+                        if (comm->command_queue && !comm->command_executor_task_handle) {
+                            TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
+                                                               "comm_cmd_exec_task", 2048, comm, 5);
+                            if (!t) {
+                                printf("E: failed to create command executor task\n");
+                                free_task_resources(&comm->command_task_res);
+                            }
+                            comm->command_executor_task_handle = t;
                         }
-                        comm->command_executor_task_handle = t;
                     }
-                }
                     send_handshake_ack();
                     comm->state = COMM_STATE_CONNECTED;
                     // reset seq tracking on new connection
@@ -634,7 +650,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                         TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                            "comm_protocol_t", 3072, comm, 15);
+                                                            "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
                         if (!t) {
                             printf("E: failed to create protocol task\n");
                             free_task_resources(&comm->protocol_task_res);
@@ -642,8 +658,9 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->protocol_task_handle = t;
                     }
                     unlock_state(comm);
-                    printf("I: Handshake complete - slave role\n");
-                    ap_manager_add_log("I: Handshake complete - slave role\n");
+                    printf("Handshake complete!\n");
+                    ap_manager_add_log("Handshake completed!\n");
+                    terminal_view_add_text("Handshake completed!\n");
                 }
             }
             break;
@@ -701,7 +718,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                     TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                        "comm_protocol_t", 3072, comm, 15);
+                                                        "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
                     if (!t) {
                         printf("E: failed to create protocol task\n");
                         free_task_resources(&comm->protocol_task_res);
@@ -709,8 +726,9 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->protocol_task_handle = t;
                 }
                 unlock_state(comm);
-                printf("I: Handshake complete - master role\n");
-                ap_manager_add_log("I: Handshake complete - master role\n");
+                printf("Handshake complete!\n");
+                ap_manager_add_log("Handshake completed!\n");
+                terminal_view_add_text("Handshake completed!\n");
             }
             break;
 
@@ -744,7 +762,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
 
                 if (comm->command_queue && xQueueSend(comm->command_queue, &cmd_to_queue, pdMS_TO_TICKS(10)) != pdPASS) {
-                    printf("W: Command queue full, dropped command: %s\n", cmd_to_queue.command);
+                    printf("Command queue full, dropped command: %s\n", cmd_to_queue.command);
                 }
             }
             break;
@@ -809,11 +827,19 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         size_t drop = 0;
                         bool eol_found = false;
                         for (; drop < rem; ++drop) {
-                            if (p[drop] == '\n') { eol_found = true; drop++; break; }
+                            if (p[drop] == '\n') {
+                                eol_found = true;
+                                drop++;
+                                break;
+                            }
                             if (p[drop] == '\r') {
-                                // if CR found and next is LF, drop both
-                                if (drop + 1 < rem && p[drop + 1] == '\n') { drop += 2; } else { drop += 1; }
-                                eol_found = true; break;
+                                if (drop + 1 < rem && p[drop + 1] == '\n') {
+                                    drop += 2;
+                                } else {
+                                    drop += 1;
+                                }
+                                eol_found = true;
+                                break;
                             }
                         }
                         p += drop;
@@ -886,7 +912,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
             break;
 
         default:
-            printf("W: Unknown packet type: 0x%02x\n", packet->type);
+            printf("Unknown packet type: 0x%02x\n", packet->type);
             break;
     }
 }
@@ -912,7 +938,7 @@ static void command_executor_task(void* arg) {
 static void protocol_task(void* arg) {
     esp_comm_manager_t* comm = (esp_comm_manager_t*)arg;
     comm_packet_t packet;
-    
+
     while(1) {
         if (xQueueReceive(comm->rx_packet_queue, &packet, pdMS_TO_TICKS(10)) == pdPASS) {
             handle_received_packet(comm, &packet);
@@ -950,7 +976,7 @@ void esp_comm_manager_init_with_defaults(void) {
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
     if (s_comm_manager) {
-        printf("W: Already initialized\n");
+        printf("Already initialized\n");
         return;
     }
 
@@ -979,8 +1005,8 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->rx_seq_initialized = false;
     s_comm_manager->rx_expected_seq = 0;
     s_comm_manager->rx_drop_until_newline = false;
+    s_comm_manager->last_rx_tick = xTaskGetTickCount();
     s_comm_manager->state_mutex = xSemaphoreCreateMutex();
-    
 
     s_comm_manager->command_callback = s_pending_callback;
     s_comm_manager->callback_user_data = s_pending_callback_user_data;
@@ -1009,12 +1035,19 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             tx_pin = U0TXD_GPIO_NUM;
             rx_pin = U0RXD_GPIO_NUM;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+        s_uart_num = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            tx_pin = GPIO_NUM_1;
+            rx_pin = GPIO_NUM_2;
+        }
     } else {
         s_uart_num = UART_NUM_1;
     }
 #else
     s_uart_num = UART_NUM_1;
 #endif
+
     // Don't deinitialize serial manager on TDECK to avoid UART conflicts
 #ifndef CONFIG_USE_TDECK
     if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
@@ -1034,7 +1067,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     uart_param_config(s_uart_num, &uart_config);
     uart_set_pin(s_uart_num, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 #else
-    printf("W: ESP Comm Manager disabled on TDECK to avoid UART conflicts\n");
+    printf("ESP Comm Manager disabled on TDECK to avoid UART conflicts\n");
 #endif
 
     s_comm_manager->tx_queue = NULL;
@@ -1056,22 +1089,22 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
         printf("E: failed to create rx task\n");
         free_task_resources(&s_comm_manager->rx_task_res);
     }
-    
+
     s_comm_manager->discovery_timer = xTimerCreate("discovery_timer", 
                                                    pdMS_TO_TICKS(DISCOVERY_INTERVAL_MS),
                                                    pdTRUE, NULL, discovery_timer_callback);
     s_comm_manager->handshake_timer = xTimerCreate("handshake_timer",
                                                    pdMS_TO_TICKS(HANDSHAKE_TIMEOUT_MS),
                                                    pdFALSE, s_comm_manager, handshake_timer_callback);
-    
+
     s_comm_manager->initialized = true;
-    
+
     s_comm_manager->state = COMM_STATE_SCANNING;
     if (s_comm_manager->discovery_timer) {
         xTimerStart(s_comm_manager->discovery_timer, 0);
     }
 
-    printf("I: ESP Comm Manager initialized as '%s' on TX:%d RX:%d at %lu baud - Auto-listening for peers\n", 
+    printf("ESP Comm Manager initialized as '%s' on TX:%d RX:%d at %lu baud - Auto-listening for peers\n", 
              s_comm_manager->chip_name, tx_pin, rx_pin, (unsigned long)baud_rate);
 }
 
@@ -1080,12 +1113,21 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
         printf("E: Not initialized\n");
         return false;
     }
-    
-    if (s_comm_manager->state != COMM_STATE_IDLE) {
-        printf("W: Cannot change pins while connected or scanning\n");
+
+    // allow changing pins in IDLE; if SCANNING, temporarily pause discovery and resume after
+    if (s_comm_manager->state != COMM_STATE_IDLE && s_comm_manager->state != COMM_STATE_SCANNING) {
+        printf("Cannot change pins during handshake or while connected\n");
         return false;
     }
-    
+
+    bool paused_scanning = false;
+    if (s_comm_manager->state == COMM_STATE_SCANNING) {
+        if (s_comm_manager->discovery_timer) {
+            xTimerStop(s_comm_manager->discovery_timer, 0);
+        }
+        paused_scanning = true;
+    }
+
     s_comm_manager->tx_pin = tx_pin;
     s_comm_manager->rx_pin = rx_pin;
 
@@ -1101,8 +1143,14 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
 #endif
 
     uart_set_pin(s_uart_num, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    
-    printf("I: Changed pins to TX:%d RX:%d\n", tx_pin, rx_pin);
+
+    printf("Changed pins to TX:%d RX:%d\n", tx_pin, rx_pin);
+
+    if (paused_scanning) {
+        if (s_comm_manager->discovery_timer) {
+            xTimerStart(s_comm_manager->discovery_timer, 0);
+        }
+    }
     return true;
 }
 
@@ -1111,9 +1159,9 @@ bool esp_comm_manager_start_discovery(void) {
         printf("E: Not initialized\n");
         return false;
     }
-    
+
     if (s_comm_manager->state != COMM_STATE_IDLE) {
-        printf("W: Already in discovery or connected\n");
+        printf("Already in discovery or connected\n");
         return false;
     }
 
@@ -1164,8 +1212,8 @@ bool esp_comm_manager_start_discovery(void) {
     if (s_comm_manager->discovery_timer) {
         xTimerStart(s_comm_manager->discovery_timer, 0);
     }
-    
-    printf("I: Started discovery as '%s'\n", s_comm_manager->chip_name);
+
+    printf("Started discovery as '%s'\n", s_comm_manager->chip_name);
     return true;
 }
 
@@ -1174,12 +1222,12 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
         printf("E: Invalid parameters\n");
         return false;
     }
-    
+
     if (s_comm_manager->state != COMM_STATE_SCANNING) {
-        printf("W: Not in scanning state\n");
+        printf("Not in scanning state\n");
         return false;
     }
-    
+
     xTimerStop(s_comm_manager->discovery_timer, 0);
     lock_state(s_comm_manager);
     s_comm_manager->state = COMM_STATE_HANDSHAKE;
@@ -1187,15 +1235,15 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
     if (s_comm_manager->handshake_timer) {
         xTimerStart(s_comm_manager->handshake_timer, 0);
     }
-    
+
     send_handshake_request(peer_name);
-    
-    printf("I: Connecting to peer: %s\n", peer_name);
-    
-    // Log to web UI
+
+    printf("Connecting to peer: %s\n", peer_name);
     char log_msg[64];
     snprintf(log_msg, sizeof(log_msg), "I: Connecting to peer: %s\n", peer_name);
     ap_manager_add_log(log_msg);
+    terminal_view_add_text(log_msg);
+
     unlock_state(s_comm_manager);
     return true;
 }
@@ -1205,25 +1253,25 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         printf("E: Invalid parameters\n");
         return false;
     }
-    
+
     if (s_comm_manager->state != COMM_STATE_CONNECTED) {
-        printf("W: Not connected\n");
+        printf("Not connected\n");
         return false;
     }
-    
+
     comm_packet_t packet = {0};
     packet.start_byte = PACKET_START_BYTE;
     packet.type = PACKET_TYPE_COMMAND;
-    
+
     size_t cmd_len = strlen(command);
     if (cmd_len > MAX_CMD_LEN) {
         cmd_len = MAX_CMD_LEN;
     }
-    
+
     strncpy((char*)packet.data, command, cmd_len);
     ((char*)packet.data)[cmd_len] = '\0';
     packet.length = cmd_len + 1;
-    
+
     if (data) {
         size_t data_len = strlen(data);
         size_t max_data_len = COMM_PACKET_SIZE - packet.length - 4;
@@ -1233,13 +1281,14 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         strncpy((char*)packet.data + packet.length, data, data_len);
         packet.length += data_len;
     }
-    
+
     bool result = send_packet(&packet);
     if (result) {
-        printf("I: Sent command: %s\n", command);
+        printf("Sent command: %s\n", command);
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s\n", command);
         ap_manager_add_log(log_msg);
+        terminal_view_add_text(log_msg);
     }
     return result;
 }
@@ -1250,7 +1299,7 @@ bool esp_comm_manager_send_response(const uint8_t* data, size_t length) {
         return false;
     }
     if (s_comm_manager->state != COMM_STATE_CONNECTED) {
-        printf("W: Not connected, can't send response\n");
+        printf("Not connected, can't send response\n");
         return false;
     }
     const uint8_t* p = data;
@@ -1275,7 +1324,6 @@ bool esp_comm_manager_send_response(const uint8_t* data, size_t length) {
         for (size_t i = 0; i < search_len; ++i) {
             if (p[i] == '\n') { // include the delimiter in this chunk
                 chunk = i + 1;
-                break;
             }
         }
 
@@ -1327,6 +1375,7 @@ bool esp_comm_manager_is_remote_command(void) {
 
 void esp_comm_manager_disconnect(void) {
     if (s_comm_manager) {
+        comm_state_t previous_state = s_comm_manager->state;
         if (s_comm_manager->discovery_timer) {
             xTimerStop(s_comm_manager->discovery_timer, 0);
         }
@@ -1341,7 +1390,13 @@ void esp_comm_manager_disconnect(void) {
             s_comm_manager->ping_timer = NULL;
         }
         unlock_state(s_comm_manager);
-        printf("I: Disconnected\n");
+        if (previous_state == COMM_STATE_SCANNING) {
+            printf("Stopped discovery\n");
+        } else if (previous_state == COMM_STATE_CONNECTED || previous_state == COMM_STATE_HANDSHAKE) {
+            printf("Disconnected\n");
+        } else {
+            printf("Idle\n");
+        }
     }
 }
 
@@ -1399,7 +1454,7 @@ void esp_comm_manager_deinit(void) {
     
     free(s_comm_manager);
     s_comm_manager = NULL;
-    printf("I: ESP Comm Manager de-initialized\n");
+    printf("ESP Comm Manager de-initialized\n");
 } 
 
 static void handshake_timer_callback(TimerHandle_t xTimer) {
@@ -1407,8 +1462,9 @@ static void handshake_timer_callback(TimerHandle_t xTimer) {
     if (!comm) return;
     lock_state(comm);
     if (comm->state == COMM_STATE_HANDSHAKE) {
-        printf("W: Handshake timeout\n");
+        printf("Handshake timeout\n");
         ap_manager_add_log("W: Handshake timeout\n");
+        terminal_view_add_text("W: Handshake timeout\n");
         comm->state = COMM_STATE_SCANNING;
         if (comm->discovery_timer) {
             xTimerStart(comm->discovery_timer, 0);
@@ -1424,8 +1480,9 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         unlock_state(comm);
         return;
     }
-    printf("W: Connection lost (%s)\n", reason ? reason : "unknown");
+    printf("Connection lost (%s)\n", reason ? reason : "unknown");
     ap_manager_add_log("W: Connection lost, restarting discovery\n");
+    terminal_view_add_text("W: Connection lost, restarting discovery\n");
 
     comm->state = COMM_STATE_SCANNING;
 

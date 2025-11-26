@@ -111,6 +111,27 @@ static bool bq27220_is_sealed(void) {
     return (status & 0x2000) != 0;
 }
 
+static esp_err_t bq27220_seal_device(void) {
+    if (bq27220_is_sealed()) {
+        return ESP_OK;
+    }
+
+    esp_err_t ret = bq27220_control_command(BQ27220_SEAL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send seal command: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    if (!bq27220_is_sealed()) {
+        ESP_LOGW(TAG, "Fuel gauge did not enter sealed state");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
 static esp_err_t bq27220_unseal_device(void) {
     if (!bq27220_is_sealed()) {
         return ESP_OK;
@@ -239,6 +260,13 @@ static esp_err_t fuel_gauge_configure(void) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to exit config update mode: %s", esp_err_to_name(ret));
         return ret;
+    }
+
+    if (is_sealed) {
+        esp_err_t seal_ret = bq27220_seal_device();
+        if (seal_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Unable to reseal fuel gauge: %s", esp_err_to_name(seal_ret));
+        }
     }
 
     ESP_LOGI(TAG, "Fuel gauge configuration completed");
@@ -491,7 +519,7 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
     // Update cache
     memcpy(&last_data, data, sizeof(fuel_gauge_data_t));
 
-    ESP_LOGI(TAG, "Battery: %d%%, %dmV, %dmA, %s",
+    ESP_LOGD(TAG, "Battery: %d%%, %dmV, %dmA, %s",
              data->percentage, data->voltage_mv, data->current_ma,
              data->is_charging ? "charging" : "discharging");
 
@@ -511,6 +539,27 @@ bool fuel_gauge_manager_is_charging(void) {
 uint16_t fuel_gauge_manager_get_voltage_mv(void) {
     fuel_gauge_data_t data;
     return fuel_gauge_manager_get_data(&data) ? data.voltage_mv : 0;
+}
+
+esp_err_t fuel_gauge_manager_reset(void) {
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool was_paused = s_paused;
+    s_paused = true;
+
+    esp_err_t ret = fuel_gauge_reset();
+    if (ret == ESP_OK) {
+        memset(&last_data, 0, sizeof(last_data));
+        esp_err_t cfg_ret = fuel_gauge_configure();
+        if (cfg_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Fuel gauge reconfiguration after reset failed: %s", esp_err_to_name(cfg_ret));
+        }
+    }
+
+    s_paused = was_paused;
+    return ret;
 }
 
 void fuel_gauge_manager_deinit(void) {

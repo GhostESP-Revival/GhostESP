@@ -94,6 +94,8 @@ void display_manager_destroy_current_view(void);
  */
 View *display_manager_get_current_view(void);
 
+bool display_manager_is_available(void);
+
 void lvgl_tick_task(void *arg);
 
 void hardware_input_task(void *pvParameters);

@@ -1,0 +1,31 @@
+{{ define "main" }}
+<article class="doc">
+  <header>
+    <h1>{{ .Title }}</h1>
+    {{ with .Params.description }}<p>{{ . }}</p>{{ end }}
+  </header>
+  {{ with .TableOfContents }}
+    <aside class="doc__toc">
+      <h2>On this page</h2>
+      {{ . }}
+    </aside>
+  {{ end }}
+  {{ .Content }}
+  {{ if or .PrevInSection .NextInSection }}
+    <nav class="doc__nav" aria-label="Document navigation">
+      {{ with .NextInSection }}
+        <a class="doc__nav-link doc__nav-link--prev" href="{{ .RelPermalink }}">
+          <span>← Previous</span>
+          <span>{{ .Title }}</span>
+        </a>
+      {{ end }}
+      {{ with .PrevInSection }}
+        <a class="doc__nav-link doc__nav-link--next" href="{{ .RelPermalink }}">
+          <span>Next →</span>
+          <span>{{ .Title }}</span>
+        </a>
+      {{ end }}
+    </nav>
+  {{ end }}
+</article>
+{{ end }}

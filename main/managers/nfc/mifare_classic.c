@@ -2,14 +2,18 @@
 #include <string.h>
 #include <stdio.h>
 #include "managers/nfc/mifare_classic.h"
+#include "managers/nfc/mifare_attack.h"
 #include "managers/sd_card_manager.h"
 #include "esp_log.h"
+#ifdef CONFIG_NFC_PN532
 #include "pn532.h"
+#endif
 #include "managers/fuel_gauge_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managers/nfc/ndef.h"
 #include "managers/nfc/ntag_t2.h"
+#include "managers/nfc/flipper_nfc_compat.h"
 
 char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
                                   size_t tlv_len,
@@ -19,8 +23,25 @@ char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
 
 #define MFC_TAG "MFC"
 static void crc_a_calc(const uint8_t *data, size_t len, uint8_t out[2]);
-// Optional UI hook (weak) for reporting current dictionary attempt phase
-// Declared at file scope so the compiler knows it may be NULL at link time
+
+static const mfc_attack_hooks_t *g_attack_hooks = NULL;
+
+static inline void mfc_call_on_phase(int sector, int first_block, bool key_b, int total_keys) {
+    if (g_attack_hooks && g_attack_hooks->on_phase) g_attack_hooks->on_phase(sector, first_block, key_b, total_keys);
+}
+static inline void mfc_call_on_cache_mode(bool on) {
+    if (g_attack_hooks && g_attack_hooks->on_cache_mode) g_attack_hooks->on_cache_mode(on);
+}
+static inline void mfc_call_on_paused(bool on) {
+    if (g_attack_hooks && g_attack_hooks->on_paused) g_attack_hooks->on_paused(on);
+}
+static inline bool mfc_call_should_cancel(void) {
+    return (g_attack_hooks && g_attack_hooks->should_cancel) ? g_attack_hooks->should_cancel() : false;
+}
+static inline bool mfc_call_should_skip_dict(void) {
+    return (g_attack_hooks && g_attack_hooks->should_skip_dict) ? g_attack_hooks->should_skip_dict() : false;
+}
+
 extern void mfc_ui_set_phase(int sector, int first_block, bool key_b, int total_keys) __attribute__((weak));
 static void mfc_enable_debug_once(void) {
     static bool done = false;
@@ -102,6 +123,18 @@ static void mfc_cache_store_block(int abs_block, const uint8_t data[16]){
     memcpy(&g_mfc_cache[abs_block * 16], data, 16);
     BITSET_SET(g_mfc_known, abs_block);
 }
+// Check if all blocks in a sector are already present in the cache
+static bool mfc_sector_all_blocks_known(MFC_TYPE t, int sector) {
+    if (!g_mfc_known || sector < 0) return false;
+    int first = mfc_first_block_of_sector(t, sector);
+    int blocks = mfc_blocks_in_sector(t, sector);
+    for (int b = 0; b < blocks; ++b) {
+        int idx = first + b;
+        if (idx < 0 || idx >= g_mfc_blocks) return false;
+        if (!BITSET_TEST(g_mfc_known, idx)) return false;
+    }
+    return true;
+}
 static bool mfc_cache_matches(const uint8_t* uid, uint8_t uid_len){
     if (!g_mfc_cache || !g_mfc_known || g_mfc_uid_len != uid_len) return false;
     return (uid_len == 0) ? false : (memcmp(g_mfc_uid, uid, uid_len) == 0);
@@ -119,6 +152,7 @@ static inline void mfc_cache_record_sector_key(int sector, bool usedB, const uin
     }
 }
 
+#ifdef CONFIG_NFC_PN532
 // Minimal PRNG analysis: try to capture a few nonces; if duplicates appear quickly, mark as weak
 static bool g_prng_checked = false;
 static bool g_prng_weak = false;
@@ -193,14 +227,16 @@ static void mfc_try_find_complementary_user_key(pn532_io_handle_t io, MFC_TYPE t
 // Card presence detection functions
 static bool mfc_tag_is_present(pn532_io_handle_t io, const uint8_t* uid, uint8_t uid_len);
 static bool mfc_wait_for_tag_return(pn532_io_handle_t io, const uint8_t* uid, uint8_t uid_len);
-// UI-layer cancel hook (weak) used by reuse sweep regardless of embedded dict config
 extern bool nfc_is_scan_cancelled(void) __attribute__((weak));
-// UI-layer dict-skip hook (weak) so we can call it regardless of embedded dict config
 extern bool nfc_is_dict_skip_requested(void) __attribute__((weak));
  
 static mfc_progress_cb_t g_prog_cb = NULL;
 static void* g_prog_user = NULL;
 void mfc_set_progress_callback(mfc_progress_cb_t cb, void* user) { g_prog_cb = cb; g_prog_user = user; }
+
+void mfc_set_attack_hooks(const mfc_attack_hooks_t *hooks) {
+    g_attack_hooks = hooks;
+}
 
 static inline void crc_a_calc(const uint8_t *data, size_t len, uint8_t out[2]){
     uint16_t crc = 0x6363;
@@ -313,7 +349,7 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
         uint8_t key[6];
         int idx = 0;
         while (fgets(line, sizeof(line), f)) {
-            if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) {
+            if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) {
                 ESP_LOGW("MFC", "Dict(SD): abort at idx=%d blk=%u keyB=%d", idx, (unsigned)block, (int)use_key_b);
                 fclose(f);
                 return false;
@@ -355,32 +391,37 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
             return true;
         }
     }
-
-    // Load and iterate cached keys
-    mfc_dict_ensure_loaded();
-    const int total = g_dict_key_count;
-    ESP_LOGI("MFC", "Dict: start auth blk=%u keyB=%d total=%d", (unsigned)block, (int)use_key_b, total);
-    if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
-    int idx = 0; int last_cb = 0;
-    for (; idx < total; ++idx) {
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) { ESP_LOGW("MFC", "Dict: cancelled/skip blk=%u keyB=%d at idx=%d", (unsigned)block, (int)use_key_b, idx); return false; }
-        const uint8_t *key = &g_dict_keys[idx*6];
-        if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
-            ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
-            if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
-            else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
-            mfc_record_working_key(key, use_key_b);
-            return true;
+    // Iterate embedded blob directly without caching into RAM
+    {
+        const int total = mfc_dict_total_keys();
+        ESP_LOGI("MFC", "Dict: start auth blk=%u keyB=%d total=%d", (unsigned)block, (int)use_key_b, total);
+        if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
+        int idx = 0; int last_cb = 0;
+        const char *p = s; uint8_t key[6];
+        while (p < e) {
+            if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) { ESP_LOGW("MFC", "Dict: cancelled/skip blk=%u keyB=%d at idx=%d", (unsigned)block, (int)use_key_b, idx); return false; }
+            const char *nl = memchr(p,'\n',(size_t)(e - p));
+            const char *ln_end = nl ? nl : e;
+            if (parse_key_line(p, ln_end, key)) {
+                if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
+                    ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
+                            (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
+                    if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
+                    else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
+                    mfc_record_working_key(key, use_key_b);
+                    return true;
+                }
+                idx++;
+                if (g_prog_cb) {
+                    int pct = (total > 0) ? ((idx * 100) / total) : 0;
+                    if (pct > last_cb) { g_prog_cb(idx, total, g_prog_user); last_cb = pct; }
+                }
+            }
+            p = nl ? (nl + 1) : e;
         }
-        // Throttle progress callbacks to reduce UI overhead
-        if (g_prog_cb) {
-            int pct = ((idx+1) * 100) / (total > 0 ? total : 1);
-            if (pct > last_cb) { g_prog_cb(idx+1, total, g_prog_user); last_cb = pct; }
-        }
+        ESP_LOGI("MFC", "Dict: failed blk=%u keyB=%d", (unsigned)block, (int)use_key_b);
+        return false;
     }
-    ESP_LOGI("MFC", "Dict: failed blk=%u keyB=%d", (unsigned)block, (int)use_key_b);
-    return false;
 }
 
  
@@ -389,13 +430,12 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
 static void mfc_key_reuse_sweep(pn532_io_handle_t io, MFC_TYPE t, const uint8_t *uid, uint8_t uid_len,
                                 bool use_key_b, const uint8_t key[6], int current_sector) {
     if (!io || !uid || !key) return;
-    // Respect fast-finish/skip request
-    if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) return;
+    if (mfc_call_should_skip_dict()) return;
     int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
     for (int s = 0; s < sectors; ++s) {
-        if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break;
+        if (mfc_call_should_skip_dict()) break;
         if (s == current_sector) continue;
-        if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) break;
+        if (mfc_call_should_cancel()) break;
         // Skip sectors we already have a valid key recorded for this key type
         if (!use_key_b) {
             if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s)) continue;
@@ -453,12 +493,12 @@ static bool mfc_auth_with_dict_interleaved(pn532_io_handle_t io,
                                            const uint8_t* uid,
                                            uint8_t uid_len,
                                            bool* out_used_key_b){
-    if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) return false;
+    if (mfc_call_should_skip_dict()) return false;
     mfc_dict_ensure_loaded();
     const int total = g_dict_key_count;
     if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
     for (int idx = 0; idx < total; ++idx) {
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) return false;
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
         const uint8_t *key = &g_dict_keys[idx*6];
         if (mfc_auth_block(io, block, false, key, uid, uid_len) == ESP_OK) {
             if (out_used_key_b) *out_used_key_b = false;
@@ -467,7 +507,7 @@ static bool mfc_auth_with_dict_interleaved(pn532_io_handle_t io,
             memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true;
             return true;
         }
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) return false;
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
         if (mfc_auth_block(io, block, true, key, uid, uid_len) == ESP_OK) {
             if (out_used_key_b) *out_used_key_b = true;
             mfc_record_working_key(key, true);
@@ -676,7 +716,7 @@ static bool try_list_keys_u(pn532_io_handle_t io, uint8_t block, bool use_key_b,
                             const uint8_t *uid, uint8_t uid_len,
                             const uint8_t *keys, int count, const uint8_t **ok_key){
     for (int i=0;i<count;i++){
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) {
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) {
             return false;
         }
         const uint8_t *k = &keys[i*6];
@@ -704,58 +744,75 @@ static bool mfc_auth_with_user_interleaved(pn532_io_handle_t io, uint8_t block,
     const int total = (g_user_key_count > 0) ? (g_user_key_count * 2) : 1;
     int step = 0;
     if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
+    bool have_key_a = false;
+    bool have_key_b = false;
+    bool found_any = false;
+    bool first_used_b = false;
+    const uint8_t *first_key = NULL;
     // Debug: entering user dict for this block
     ESP_LOGI("MFC", "User dict: entering for blk=%u with %d keys (cached=%d)", 
              (unsigned)block, g_user_key_count, g_user_dict_cached_for_scan ? 1 : 0);
     for (int i = 0; i < g_user_key_count; ++i) {
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) return false;
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
         const uint8_t *k = &g_user_keys[i*6];
-        // Per-key attempt logs for sector 0 safe auth block (blk=1)
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: try blk=%u A idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-        }
-        esp_err_t erra = mfc_auth_block(io, block, false, k, uid, uid_len);
-        if (erra == ESP_OK) {
-            ESP_LOGI("MFC", "User dict: success blk=%u key=A idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-            if (out_used_key_b) *out_used_key_b = false;
-            if (out_key) *out_key = k;
-            mfc_record_working_key(k, false);
-            return true;
-        }
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: A fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)erra);
+        // Attempt Key A unless we already have one
+        if (!have_key_a) {
+            if (block == 1) {
+                ESP_LOGD("MFC", "User dict: try blk=%u A idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+            }
+            esp_err_t erra = mfc_auth_block(io, block, false, k, uid, uid_len);
+            if (erra == ESP_OK) {
+                ESP_LOGI("MFC", "User dict: success blk=%u key=A idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+                have_key_a = true;
+                if (!found_any) {
+                    found_any = true;
+                    first_used_b = false;
+                    first_key = k;
+                }
+                mfc_record_working_key(k, false);
+            } else if (block == 1) {
+                ESP_LOGD("MFC", "User dict: A fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)erra);
+            }
         }
         if (g_prog_cb) g_prog_cb(++step, total, g_prog_user);
-        if ((&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) || (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested())) return false;
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: try blk=%u B idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-        }
-        esp_err_t errb = mfc_auth_block(io, block, true, k, uid, uid_len);
-        if (errb == ESP_OK) {
-            ESP_LOGI("MFC", "User dict: success blk=%u key=B idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-            if (out_used_key_b) *out_used_key_b = true;
-            if (out_key) *out_key = k;
-            mfc_record_working_key(k, true);
-            return true;
-        }
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: B fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)errb);
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+        // Attempt Key B unless we already have one
+        if (!have_key_b) {
+            if (block == 1) {
+                ESP_LOGD("MFC", "User dict: try blk=%u B idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+            }
+            esp_err_t errb = mfc_auth_block(io, block, true, k, uid, uid_len);
+            if (errb == ESP_OK) {
+                ESP_LOGI("MFC", "User dict: success blk=%u key=B idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+                have_key_b = true;
+                if (!found_any) {
+                    found_any = true;
+                    first_used_b = true;
+                    first_key = k;
+                }
+                mfc_record_working_key(k, true);
+            } else if (block == 1) {
+                ESP_LOGD("MFC", "User dict: B fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)errb);
+            }
         }
         if (g_prog_cb) g_prog_cb(++step, total, g_prog_user);
     }
-    return false;
+    if (found_any) {
+        if (out_used_key_b) *out_used_key_b = first_used_b;
+        if (out_key) *out_key = first_key;
+    }
+    return found_any;
 }
 
 // Attempt to discover the complementary key type for this sector using only the user dictionary
 static void mfc_try_find_complementary_user_key(pn532_io_handle_t io, MFC_TYPE t, int sector, uint8_t auth_blk,
                                                 const uint8_t *uid, uint8_t uid_len, bool usedB_cur) {
     (void)t;
-    // Respect fast-finish/skip request
-    if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) return;
+    if (mfc_call_should_skip_dict()) return;
     int first = mfc_first_block_of_sector(t, sector);
     int blocks = mfc_blocks_in_sector(t, sector);
     uint8_t trailer_blk = (uint8_t)(first + blocks - 1);
@@ -801,7 +858,7 @@ static void mfc_try_find_complementary_user_key(pn532_io_handle_t io, MFC_TYPE t
     }
 
     // 2) user dictionary (respects skip flag)
-    if (!(&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) && g_user_key_count > 0 && g_user_keys) {
+    if (!mfc_call_should_skip_dict() && g_user_key_count > 0 && g_user_keys) {
         for (int i = 0; i < g_user_key_count; ++i) {
             const uint8_t *k = &g_user_keys[i * 6];
             if (!usedB_cur) {
@@ -1131,8 +1188,8 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
         // Build and append one sector-sized buffer instead of per-block writes
         for (int b = 0; b < blocks; ++b) {
             // If Skip requested mid-sector, exit cache fill immediately
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) {
-                mfc_ui_set_cache_mode(false);
+            if (mfc_call_should_skip_dict()) {
+                mfc_call_on_cache_mode(false);
                 return false;
             }
         }
@@ -1144,7 +1201,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
             // fallback to original per-block append behavior when OOM
             for (int b = 0; b < blocks; ++b) {
                 // Reuse original logic per-block (keeps behavior)
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) { mfc_ui_set_cache_mode(false); return false; }
+                if (mfc_call_should_skip_dict()) { mfc_call_on_cache_mode(false); return false; }
                 uint8_t data[16]; bool known = false;
                 if (authed) {
                     uint8_t blk = (uint8_t)(first + b);
@@ -1277,6 +1334,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
     }
     return true;
 }
+#endif // CONFIG_NFC_PN532
 
 MFC_TYPE mfc_type_from_sak(uint8_t sak) {
     if (sak == 0x18) return MFC_4K;
@@ -1307,6 +1365,7 @@ int mfc_first_block_of_sector(MFC_TYPE t, int sector) {
     return sector * 4;
 }
 
+#ifdef CONFIG_NFC_PN532
 static esp_err_t mfc_auth_block(pn532_io_handle_t io, uint8_t block, bool use_key_b,
                                 const uint8_t key[6], const uint8_t *uid, uint8_t uid_len) {
     if (!io || !uid || uid_len < 4) return ESP_ERR_INVALID_ARG;
@@ -1321,7 +1380,7 @@ static esp_err_t mfc_auth_block(pn532_io_handle_t io, uint8_t block, bool use_ke
     esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
     if (err != ESP_OK) {
         // If user requested cancel, bail out immediately to avoid extra I2C ops
-        if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) {
+        if (mfc_call_should_cancel()) {
             return err;
         }
         // Check if authentication failed due to card removal
@@ -1398,10 +1457,10 @@ static bool mfc_tag_is_present(pn532_io_handle_t io, const uint8_t* uid, uint8_t
 }
 static bool mfc_wait_for_tag_return(pn532_io_handle_t io, const uint8_t* uid, uint8_t uid_len) {
     if (!io || !uid || uid_len == 0) return false;
-    mfc_ui_set_paused(true);
+    mfc_call_on_paused(true);
     while (true) {
-        if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) { mfc_ui_set_paused(false); return false; }
-        if (mfc_tag_is_present(io, uid, uid_len)) { mfc_ui_set_paused(false); return true; }
+        if (mfc_call_should_cancel()) { mfc_call_on_paused(false); return false; }
+        if (mfc_tag_is_present(io, uid, uid_len)) { mfc_call_on_paused(false); return true; }
         vTaskDelay(pdMS_TO_TICKS(150));
     }
 }
@@ -1413,24 +1472,28 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
                                                uint8_t sak) {
     if (!io || !uid || uid_len == 0) return;
     // If UI requested a fast finish (Skip), avoid heavy second-pass read entirely
-    if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) {
+    if (mfc_call_should_skip_dict()) {
         return;
     }
-    mfc_ui_set_cache_mode(true);
+    mfc_call_on_cache_mode(true);
     MFC_TYPE t = mfc_type_from_sak(sak);
     int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
     (void)pn532_in_list_passive_target(io);
     mfc_try_backdoor_once(io);
     for (int s = 0; s < sectors; ++s) {
-        // Respect fast-finish request mid-flight
-        if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break;
-        if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) break;
+        if (mfc_call_should_skip_dict()) break;
+        if (mfc_call_should_cancel()) break;
+        // If every block in this sector is already cached from the first pass,
+        // avoid re-auth and re-reading for this sector in the second pass.
+        if (mfc_sector_all_blocks_known(t, s)) {
+            if (g_prog_cb) g_prog_cb(s + 1, sectors, g_prog_user);
+            continue;
+        }
         int first = mfc_first_block_of_sector(t, s);
         int blocks = mfc_blocks_in_sector(t, s);
         uint8_t auth_blk = mfc_auth_target_block(t, s);
         uint8_t trailer_blk = (uint8_t)(first + blocks - 1);
-        // Update UI with sector/phase and coarse progress by sectors
-        mfc_ui_set_phase(s, auth_blk, false, sectors);
+        mfc_call_on_phase(s, auth_blk, false, sectors);
         if (g_prog_cb) g_prog_cb(s, sectors, g_prog_user);
         bool authed = false;
         bool usedB_cur = false;
@@ -1455,41 +1518,6 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
             authed = true; usedB_cur = true; used_key_cur = s_last_key_b;
         }
         if (!authed) {
-            bool usedB = false; const uint8_t *uk = NULL;
-            if (mfc_auth_with_user_interleaved(io, auth_blk, uid, uid_len, &usedB, &uk)) {
-                authed = true; usedB_cur = usedB; used_key_cur = uk;
-            }
-        }
-        for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-            if (mfc_auth_block(io, auth_blk, false, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                authed = true; mfc_record_working_key(DEFAULT_KEYS[k], false);
-                usedB_cur = false; used_key_cur = DEFAULT_KEYS[k];
-            }
-        }
-        for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-            if (mfc_auth_block(io, auth_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                authed = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
-                usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
-            }
-        }
-#if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
-        if (!authed) {
-            bool skip_dict = false;
-            #ifdef CONFIG_HAS_NFC
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) skip_dict = true;
-            #endif
-            if (!skip_dict) {
-                bool usedB = false;
-                if (mfc_auth_with_dict_interleaved(io, auth_blk, uid, uid_len, &usedB)) {
-                    authed = true; usedB_cur = usedB;
-                    if (usedB && g_last_key_b_valid) used_key_cur = g_last_key_b; else if (!usedB && g_last_key_a_valid) used_key_cur = g_last_key_a;
-                }
-            }
-        }
-#endif
-        if (!authed) {
             if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s)) {
                 const uint8_t *ka = &g_sector_key_a[s*6];
                 if (mfc_auth_block(io, trailer_blk, false, ka, uid, uid_len) == ESP_OK) {
@@ -1508,41 +1536,6 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
             if (!authed && mfc_auth_with_known(io, trailer_blk, true, uid, uid_len)) {
                 authed = true; usedB_cur = true; used_key_cur = s_last_key_b;
             }
-            if (!authed) {
-                bool usedB = false; const uint8_t *uk = NULL;
-                if (mfc_auth_with_user_interleaved(io, trailer_blk, uid, uid_len, &usedB, &uk)) {
-                    authed = true; usedB_cur = usedB; used_key_cur = uk;
-                }
-            }
-            for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-                if (mfc_auth_block(io, trailer_blk, false, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                    authed = true; mfc_record_working_key(DEFAULT_KEYS[k], false);
-                    usedB_cur = false; used_key_cur = DEFAULT_KEYS[k];
-                }
-            }
-            for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !authed; ++k) {
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-                if (mfc_auth_block(io, trailer_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                    authed = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
-                    usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
-                }
-            }
-#if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
-            if (!authed) {
-                bool skip_dict = false;
-                #ifdef CONFIG_HAS_NFC
-                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) skip_dict = true;
-                #endif
-                if (!skip_dict) {
-                    bool usedB = false;
-                    if (mfc_auth_with_dict_interleaved(io, trailer_blk, uid, uid_len, &usedB)) {
-                        authed = true; usedB_cur = usedB;
-                        if (usedB && g_last_key_b_valid) used_key_cur = g_last_key_b; else if (!usedB && g_last_key_a_valid) used_key_cur = g_last_key_a;
-                    }
-                }
-            }
-#endif
         }
         if (authed && used_key_cur) mfc_cache_record_sector_key(s, usedB_cur, used_key_cur);
         if (authed && used_key_cur) mfc_key_reuse_sweep(io, t, uid, uid_len, usedB_cur, used_key_cur, s);
@@ -1611,7 +1604,7 @@ static void mfc_cache_complete_with_save_logic(pn532_io_handle_t io,
         // Sector completed; bump progress
         if (g_prog_cb) g_prog_cb(s + 1, sectors, g_prog_user);
     }
-    mfc_ui_set_cache_mode(false);
+    mfc_call_on_cache_mode(false);
 }
 
 char* mfc_build_details_summary(pn532_io_handle_t io,
@@ -1646,16 +1639,15 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
     (void)pn532_in_list_passive_target(io);
 
     for (int s = 0; s < sectors; ++s) {
-        // If Skip requested, finish immediately with whatever we have
-        if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) { ESP_LOGI("MFC", "Summary: fast-finish requested at sector %d", s); break; }
-        if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) { ESP_LOGW("MFC", "Summary: cancelled at sector %d", s); break; }
+        if (mfc_call_should_skip_dict()) { ESP_LOGI("MFC", "Summary: fast-finish requested at sector %d", s); break; }
+        if (mfc_call_should_cancel()) { ESP_LOGW("MFC", "Summary: cancelled at sector %d", s); break; }
         int first = mfc_first_block_of_sector(t, s);
         uint8_t auth_blk = mfc_auth_target_block(t, s);
         bool ok = false;
         bool usedB_cur = false;
         const uint8_t *used_key_cur = NULL;
         ESP_LOGI("MFC", "Summary: sector=%d auth_blk=%d skip=%d backdoor=%d", s, auth_blk,
-                 (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) ? 1 : 0,
+                 mfc_call_should_skip_dict() ? 1 : 0,
                  g_backdoor_enabled ? 1 : 0);
         // If backdoor is enabled, try to read without auth
         if (g_backdoor_enabled) {
@@ -1685,7 +1677,7 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
         // User dict interleaved A/B
         if (!ok) {
             int total = (g_user_key_count > 0) ? (g_user_key_count * 2) : (int)(sizeof(DEFAULT_KEYS)/6);
-            if (mfc_ui_set_phase) mfc_ui_set_phase(s, auth_blk, false, total);
+            mfc_call_on_phase(s, auth_blk, false, total);
             if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
             bool usedB = false; const uint8_t *uk = NULL;
             if (mfc_auth_with_user_interleaved(io, auth_blk, uid, uid_len, &usedB, &uk)) {
@@ -1730,9 +1722,9 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
         }
 #if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
         if (!ok) {
-            if (&nfc_is_scan_cancelled && nfc_is_scan_cancelled()) { ESP_LOGW("MFC", "Summary: cancelled before dict sector=%d", s); break; }
+            if (mfc_call_should_cancel()) { ESP_LOGW("MFC", "Summary: cancelled before dict sector=%d", s); break; }
             ESP_LOGI("MFC", "Summary: defaults failed, try dict interleaved sector=%d blk=%d", s, auth_blk);
-            if (mfc_ui_set_phase) mfc_ui_set_phase(s, auth_blk, false, mfc_dict_total_keys());
+            mfc_call_on_phase(s, auth_blk, false, mfc_dict_total_keys());
             bool usedB = false;
             if (mfc_auth_with_dict_interleaved(io, auth_blk, uid, uid_len, &usedB)) {
                 readable++; if (usedB) b_cnt++; else a_cnt++; ok = true;
@@ -1798,6 +1790,87 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
     // Avoid unused-variable warnings for a_cnt/b_cnt (kept for logs/metrics above)
     (void)a_cnt; (void)b_cnt;
 
+    // Try Flipper parsers first (heap allocation to avoid stack overflow)
+    MfClassicData* flipper_data = (MfClassicData*)calloc(1, sizeof(MfClassicData));
+    if (!flipper_data) goto skip_flipper_parse; // Skip if allocation fails
+    flipper_data->type = (t == MFC_4K) ? MfClassicType4k : (t == MFC_MINI) ? MfClassicTypeMini : MfClassicType1k;
+    // Copy blocks
+    if (g_mfc_cache && g_mfc_known) {
+        int max_blocks = g_mfc_blocks;
+        if (max_blocks > 256) max_blocks = 256;
+        for (int b = 0; b < max_blocks; b++) {
+            if (BITSET_TEST(g_mfc_known, b)) {
+                memcpy(flipper_data->block[b].data, &g_mfc_cache[b * 16], 16);
+                // Set bit in block_read_mask (32 bytes = 256 bits)
+                flipper_data->block_read_mask[b / 8] |= (1 << (b % 8));
+            }
+        }
+    }
+    // Copy UID into Flipper-style view for plugins that rely on mf_classic_get_uid
+    if (g_mfc_uid_len > 0 && g_mfc_uid_len <= sizeof(flipper_data->uid)) {
+        flipper_data->uid_len = g_mfc_uid_len;
+        memcpy(flipper_data->uid, g_mfc_uid, g_mfc_uid_len);
+    }
+    // Copy keys (important for SmartRider which checks sector 0 key)
+    // We put them in the trailer blocks of MfClassicData because that's where flipper expects them
+    // but our cache keeps them separate.
+    // However, the SmartRider plugin uses mf_classic_get_sector_trailer_by_sector which we implemented
+    // to return a pointer to the block. So we must ensure the trailer block IN flipper_data contains the keys.
+    for (int s = 0; s < sectors; s++) {
+        int trailer_idx = mfc_first_block_of_sector(t, s) + mfc_blocks_in_sector(t, s) - 1;
+        if (trailer_idx < 256) {
+            // If we have keys, write them to the trailer block in our temp struct
+            bool haveA = g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s);
+            bool haveB = g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s);
+            if (haveA && g_sector_key_a) {
+                memcpy(flipper_data->block[trailer_idx].data, &g_sector_key_a[s * 6], 6);
+            } else {
+                // Default FF?
+                memset(flipper_data->block[trailer_idx].data, 0xFF, 6);
+            }
+            // Access bits default
+            flipper_data->block[trailer_idx].data[6] = 0xFF;
+            flipper_data->block[trailer_idx].data[7] = 0x07;
+            flipper_data->block[trailer_idx].data[8] = 0x80;
+            flipper_data->block[trailer_idx].data[9] = 0x69;
+            
+            if (haveB && g_sector_key_b) {
+                memcpy(flipper_data->block[trailer_idx].data + 10, &g_sector_key_b[s * 6], 6);
+            } else {
+                memset(flipper_data->block[trailer_idx].data + 10, 0xFF, 6);
+            }
+            
+            // Mark trailer as read so plugin sees it
+            flipper_data->block_read_mask[trailer_idx / 8] |= (1 << (trailer_idx % 8));
+        }
+    }
+
+    char* plugin_text = flipper_nfc_try_parse_mfclassic_from_cache(flipper_data);
+    free(flipper_data); // Done with flipper_data
+    flipper_data = NULL;
+
+    if (plugin_text) {
+        // If plugin parsed successfully, we use that text.
+        // We can either replace entirely or append.
+        // Let's prepend the generic header + plugin text.
+        size_t p_len = strlen(plugin_text);
+        size_t h_len = (size_t)(w - out); // generic header length so far
+        char* final_out = (char*)malloc(p_len + h_len + 2);
+        if (final_out) {
+            memcpy(final_out, out, h_len);
+            final_out[h_len] = '\n';
+            memcpy(final_out + h_len + 1, plugin_text, p_len);
+            final_out[h_len + 1 + p_len] = '\0';
+            free(out);
+            free(plugin_text);
+            fuel_gauge_manager_set_paused(false);
+            return final_out;
+        }
+        free(plugin_text);
+        // fallback to generic if malloc fails
+    }
+
+skip_flipper_parse:
     // Attempt to locate and parse NDEF TLV within sector data blocks and append details
     if (g_mfc_cache && mfc_cache_matches(uid, uid_len)) {
         int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
@@ -1826,7 +1899,6 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
                 int ss = s + 1;
                 while (have < need && ss < sectors) {
                     if (ss == 16 && sectors > 16) { ss++; continue; }
-                    int f2 = mfc_first_block_of_sector(t, ss);
                     int bl2 = mfc_blocks_in_sector(t, ss);
                     have += (size_t)(bl2 - 1) * 16;
                     ss++;
@@ -1904,3 +1976,4 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
     fuel_gauge_manager_set_paused(false);
     return out;
 }
+#endif // CONFIG_NFC_PN532

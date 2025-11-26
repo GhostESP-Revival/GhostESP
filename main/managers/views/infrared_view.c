@@ -23,6 +23,12 @@ static void ir_sd_end(bool display_was_suspended);
 
 static const char *TAG = "infrared_view";
 
+static const uint32_t ir_theme_accent_colors[15] = {
+    0x1976D2,0xFFCDD2,0x263238,0xFFFFFF,0x002B36,
+    0x888888,0xE91E63,0x9C27B0,0x2196F3,0xFFA500,
+    0x39FF14,0xFF00FF,0x0077BE,0xFF4500,0x556B2F
+};
+
 #ifdef CONFIG_HAS_INFRARED_RX
 void cleanup_signal_preview_popup(void *obj);
 void signal_preview_save_cb(lv_event_t *e);
@@ -78,6 +84,7 @@ static bool popup_style_initialized = false;
 #include <string.h>
 #include "managers/infrared_manager.h"
 #include "managers/infrared_decoder.h"
+#include "core/universal_ir.h"
 #include "managers/rgb_manager.h"
 #include "sdkconfig.h"
 #include "managers/sd_card_manager.h"
@@ -142,7 +149,7 @@ static lv_obj_t *learning_popup = NULL;
 static lv_obj_t *learning_cancel_btn = NULL;
 static TaskHandle_t ir_learning_task_handle = NULL;
 static bool ir_learning_cancel = false;
-static rmt_channel_handle_t rx_channel = NULL;
+// static rmt_channel_handle_t rx_channel = NULL; // Removed, using infrared_manager
 static infrared_signal_t learned_signal = {0};
 static char learned_signal_name[64] = {0};
 static bool add_signal_mode = false;
@@ -177,8 +184,9 @@ static bool signal_decoded = false;
 static InfraredDecodedMessage *decoded_message = NULL;
 static InfraredDecoderContext *decoder_context = NULL;
 // queue carries rx_event_copy_t by value (no heap allocs in ISR)
-static QueueHandle_t ir_rx_queue = NULL;
+// static QueueHandle_t ir_rx_queue = NULL; // Removed, using infrared_manager
 
+/*
 #define IR_RX_MAX_SYMBOLS 128
 typedef struct {
     size_t num_symbols;
@@ -186,6 +194,7 @@ typedef struct {
 } rx_event_copy_t;
 
 static bool ir_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx);
+*/
 #endif
 static void command_event_cb(lv_event_t *e);
 static volatile bool universal_transmit_cancel = false;
@@ -197,58 +206,12 @@ static char current_remote_name[64] = "";
 void infrared_rx_pause_for_tx(bool pause) {
 #ifdef CONFIG_HAS_INFRARED_RX
     if (pause) {
-        if (rx_channel) {
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-            rmt_disable(rx_channel);
-            rmt_del_channel(rx_channel);
-            rx_channel = NULL;
-            ESP_LOGI(TAG, "released RMT RX channel for TX on C5");
-#else
-            rmt_disable(rx_channel);
-            ESP_LOGI(TAG, "paused RMT RX (disabled) for TX");
-#endif
-        }
-        return;
-    }
-    if (rx_channel) {
-        if (rmt_enable(rx_channel) == ESP_OK) {
-            ESP_LOGI(TAG, "resumed RMT RX after TX (re-enabled)");
-            return;
+        infrared_manager_rx_deinit();
+        ESP_LOGI(TAG, "paused RMT RX (deinit) for TX");
+    } else {
+        if (infrared_manager_rx_init()) {
+            ESP_LOGI(TAG, "resumed RMT RX after TX (init)");
         } else {
-            ESP_LOGW(TAG, "failed to re-enable RMT RX; recreating channel");
-            rmt_del_channel(rx_channel);
-            rx_channel = NULL;
-        }
-    }
-    if (!rx_channel) {
-        rmt_rx_channel_config_t rx_config = {
-            .gpio_num = CONFIG_INFRARED_RX_PIN,
-            .clk_src = RMT_CLK_SRC_DEFAULT,
-            .resolution_hz = 1000000,
-            .mem_block_symbols = 64,
-            .intr_priority = 0,
-            .flags = {
-                .invert_in = 0,
-                .with_dma = 0,
-                .io_loop_back = 0,
-                .allow_pd = 0,
-            },
-        };
-        if (rmt_new_rx_channel(&rx_config, &rx_channel) == ESP_OK) {
-            if (!ir_rx_queue) {
-                ir_rx_queue = xQueueCreate(1, sizeof(rx_event_copy_t));
-            }
-            if (ir_rx_queue) {
-                rmt_rx_event_callbacks_t cbs = { .on_recv_done = ir_rx_done_callback };
-                if (rmt_rx_register_event_callbacks(rx_channel, &cbs, ir_rx_queue) == ESP_OK) {
-                    if (rmt_enable(rx_channel) == ESP_OK) {
-                        ESP_LOGI(TAG, "resumed RMT RX after TX (recreated)");
-                        return;
-                    }
-                }
-            }
-            rmt_del_channel(rx_channel);
-            rx_channel = NULL;
             ESP_LOGE(TAG, "failed to resume RMT RX after TX");
         }
     }
@@ -593,6 +556,7 @@ static void file_event_open(int idx);
 static void command_event_execute(int idx);
 static void file_event_cb(lv_event_t *e);
 static void command_event_cb(lv_event_t *e);
+static void placeholder_event_cb(lv_event_t *e);
 static void remotes_event_cb(lv_event_t *e);
 static void universals_event_cb(lv_event_t *e);
 #ifdef CONFIG_HAS_INFRARED_RX
@@ -630,7 +594,24 @@ static bool load_ir_file_list_from_dir(const char *dir) {
         if (did) {
             ir_sd_end(susp);
         }
-        return false;
+        
+        // Still add TURNHISTVOFF for universals directory even if SD is not available
+        if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
+            char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
+            if (turnthistvoff_name) {
+                char **new_paths = realloc(ir_file_paths, (ir_file_count + 1) * sizeof(*ir_file_paths));
+                if (new_paths) {
+                    ir_file_paths = new_paths;
+                    ir_file_paths[ir_file_count] = turnthistvoff_name;
+                    ir_file_count++;
+                } else {
+                    free(turnthistvoff_name);
+                }
+            }
+        }
+        
+        // Treat missing or inaccessible directories as empty so callers can show placeholders
+        return true;
     }
 
     struct dirent *entry;
@@ -676,6 +657,22 @@ static bool load_ir_file_list_from_dir(const char *dir) {
     if (did) {
         ir_sd_end(susp);
     }
+    
+    // Add TURNTHISTVOFF to universals directory
+    if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
+        char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
+        if (turnthistvoff_name) {
+            char **new_paths = realloc(ir_file_paths, (ir_file_count + 1) * sizeof(*ir_file_paths));
+            if (new_paths) {
+                ir_file_paths = new_paths;
+                ir_file_paths[ir_file_count] = turnthistvoff_name;
+                ir_file_count++;
+            } else {
+                free(turnthistvoff_name);
+            }
+        }
+    }
+    
     return true;
 }
 
@@ -704,13 +701,28 @@ static void rebuild_ir_file_list_ui(void) {
         lv_obj_add_event_cb(btn, file_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 
+    if (ir_file_count == 0) {
+        lv_obj_t *placeholder = lv_list_add_btn(list, NULL, "No .ir files");
+        lv_obj_set_width(placeholder, LV_HOR_RES);
+        lv_obj_set_style_bg_color(placeholder, lv_color_hex(0x1E1E1E), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(placeholder, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(placeholder, 0, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(placeholder, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_t *placeholder_label = lv_obj_get_child(placeholder, 0);
+        if (placeholder_label) {
+            lv_obj_set_style_text_font(placeholder_label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(placeholder_label, lv_color_hex(0xFFFFFF), 0);
+        }
+        lv_obj_add_event_cb(placeholder, placeholder_event_cb, LV_EVENT_CLICKED, NULL);
+        // Count placeholder as an item so it's selectable but does nothing
+        num_ir_items = 1;
+    }
+
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
     add_encoder_back_btn();
 #endif
 
-    if (ir_file_count > 0) {
-        ir_select_item(0);
-    }
+    ir_select_item(0);
     ESP_LOGI(TAG, "mem[ir_ui_post]: free=%u largest=%u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
@@ -898,6 +910,33 @@ static void universal_transmit_task(void *arg) {
     free(args);
 
     printf("universal_transmit_task: start %s -> %s\n", path, command);
+    
+    // Special handling for TURNHISTVOFF - use universal IR system
+    if (strcmp(path, "TURNHISTVOFF") == 0) {
+        printf("Using universal IR system for TURNHISTVOFF transmission\n");
+        
+        // Get signal count and cycle through all universal power signals
+        size_t signal_count = universal_ir_get_signal_count();
+        universal_transmit_cancel = false;
+        
+        for (size_t i = 0; i < signal_count; i++) {
+            if (universal_transmit_cancel) break;
+            
+            infrared_signal_t signal;
+            if (universal_ir_get_signal(i, &signal)) {
+                printf("Transmitting TURNHISTVOFF signal %zu: %s\n", i, signal.name);
+                infrared_manager_transmit(&signal);
+                infrared_manager_free_signal(&signal);
+                vTaskDelay(pdMS_TO_TICKS(150));
+            }
+        }
+        
+        lv_async_call(cleanup_transmit_popup, NULL);
+        universal_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
     bool susp = false; bool did = ir_sd_begin(&susp);
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -1216,68 +1255,11 @@ void infrared_view_create(void) {
     };
     gpio_config(&io_conf);
     
-    // Initialize RMT RX channel
-    rmt_rx_channel_config_t rx_config = {
-        .gpio_num = CONFIG_INFRARED_RX_PIN,
-        .clk_src = RMT_CLK_SRC_DEFAULT,
-        .resolution_hz = 1000000, // 1MHz resolution
-        .mem_block_symbols = 64, // don't hog all rmt mem so tx can get a channel on c5
-        .intr_priority = 0, // Let driver choose priority
-        .flags = {
-            .invert_in = 0,
-            .with_dma = 0,
-            .io_loop_back = 0,
-            .allow_pd = 0,
-        },
-    };
-    
-    // Ensure any existing channel is cleaned up first
-    if (rx_channel != NULL) {
-        rmt_disable(rx_channel);
-        rmt_del_channel(rx_channel);
-        rx_channel = NULL;
-    }
-    
-    if (rmt_new_rx_channel(&rx_config, &rx_channel) == ESP_OK) {
-        // Create queue for RX data communication
-        if (ir_rx_queue) {
-            vQueueDelete(ir_rx_queue);
-        }
-        // queue will carry rx_event_copy_t by value
-        ir_rx_queue = xQueueCreate(1, sizeof(rx_event_copy_t));
-        
-        if (ir_rx_queue) {
-            // Register RX callback
-            rmt_rx_event_callbacks_t cbs = {
-                .on_recv_done = ir_rx_done_callback,
-            };
-            
-            if (rmt_rx_register_event_callbacks(rx_channel, &cbs, ir_rx_queue) == ESP_OK) {
-                // Enable the RMT channel
-                if (rmt_enable(rx_channel) == ESP_OK) {
-                    ESP_LOGI(TAG, "RMT RX channel initialized successfully");
-                } else {
-                    ESP_LOGE(TAG, "Failed to enable RMT RX channel");
-                    rmt_del_channel(rx_channel);
-                    rx_channel = NULL;
-                    vQueueDelete(ir_rx_queue);
-                    ir_rx_queue = NULL;
-                }
-            } else {
-                ESP_LOGE(TAG, "Failed to register RMT RX callbacks");
-                rmt_del_channel(rx_channel);
-                rx_channel = NULL;
-                vQueueDelete(ir_rx_queue);
-                ir_rx_queue = NULL;
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to create RX queue");
-            rmt_del_channel(rx_channel);
-            rx_channel = NULL;
-        }
+    // Initialize RMT RX channel via manager
+    if (infrared_manager_rx_init()) {
+        ESP_LOGI(TAG, "RMT RX channel initialized successfully via manager");
     } else {
-        ESP_LOGE(TAG, "Failed to create RMT RX channel");
-        rx_channel = NULL;
+        ESP_LOGE(TAG, "Failed to initialize RMT RX channel via manager");
     }
     
     // add learn remote option
@@ -1333,6 +1315,8 @@ void infrared_view_create(void) {
     lv_obj_t *up_label = lv_label_create(ir_scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
     lv_obj_center(up_label);
+    /* hide IR scroll buttons until we know whether the list is scrollable */
+    lv_obj_add_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     ir_scroll_down_btn = lv_btn_create(root);
     lv_obj_set_size(ir_scroll_down_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
@@ -1343,6 +1327,7 @@ void infrared_view_create(void) {
     lv_obj_t *down_label = lv_label_create(ir_scroll_down_btn);
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
     lv_obj_center(down_label);
+    lv_obj_add_flag(ir_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     ir_back_btn = lv_btn_create(root);
     lv_obj_set_size(ir_back_btn, IR_SCROLL_BTN_SIZE + 20, IR_SCROLL_BTN_SIZE);
@@ -1355,6 +1340,20 @@ void infrared_view_create(void) {
     lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
     lv_obj_center(back_label);
     #endif
+    /* reveal IR scroll buttons only if the list is actually scrollable */
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (list && lv_obj_is_valid(list)) {
+        lv_coord_t scroll_bottom = lv_obj_get_scroll_bottom(list);
+        lv_coord_t scroll_top = lv_obj_get_scroll_top(list);
+        if (scroll_bottom > 0 || scroll_top > 0) {
+            if (ir_scroll_up_btn && lv_obj_is_valid(ir_scroll_up_btn)) lv_obj_clear_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+            if (ir_scroll_down_btn && lv_obj_is_valid(ir_scroll_down_btn)) lv_obj_clear_flag(ir_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            if (ir_scroll_up_btn && lv_obj_is_valid(ir_scroll_up_btn)) lv_obj_add_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+            if (ir_scroll_down_btn && lv_obj_is_valid(ir_scroll_down_btn)) lv_obj_add_flag(ir_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
 }
 
 void infrared_view_destroy(void) {
@@ -1392,20 +1391,8 @@ void infrared_view_destroy(void) {
         learned_signal.payload.raw.timings_size = 0;
     }
     
-    // Clean up RMT RX resources
-    if (rx_channel) {
-        rmt_disable(rx_channel);
-        rmt_del_channel(rx_channel);
-        rx_channel = NULL;
-        ESP_LOGI(TAG, "RMT RX channel cleaned up");
-    }
-    
-    // Clean up RX queue
-    if (ir_rx_queue) {
-        vQueueDelete(ir_rx_queue);
-        ir_rx_queue = NULL;
-        ESP_LOGI(TAG, "RX queue cleaned up");
-    }
+    // Clean up RMT RX resources via manager
+    infrared_manager_rx_deinit();
 #endif
     if(root) {
         if(signals) {
@@ -1439,8 +1426,9 @@ static void ir_select_item(int index) {
     // clear previous selection
     lv_obj_t *prev = lv_obj_get_child(list, selected_ir_index);
     if(prev) {
+        lv_obj_t *prev_label = lv_obj_get_child(prev, 0);
         // Check if this is one of the management buttons that have special styling
-        if (showing_commands && selected_ir_index >= signal_count) {
+        if (showing_commands && !in_universals_mode && selected_ir_index >= signal_count) {
             // This is a management button, restore its special styling
             if (selected_ir_index == signal_count) {
                 // Rename button
@@ -1459,17 +1447,36 @@ static void ir_select_item(int index) {
             // Regular command button
             lv_obj_set_style_bg_color(prev, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
         }
+        if (prev_label) {
+            lv_obj_set_style_text_color(prev_label, lv_color_hex(0xFFFFFF), 0);
+        }
     }
     
     selected_ir_index = index;
     lv_obj_t *cur = lv_obj_get_child(list, selected_ir_index);
     if(cur) {
+        lv_obj_t *cur_label = lv_obj_get_child(cur, 0);
         // If the currently selected item is the Delete Remote management option,
         // highlight it with a lighter red instead of the default gray.
-        if (showing_commands && selected_ir_index >= signal_count && selected_ir_index == signal_count + 2) {
+        if (showing_commands && !in_universals_mode && selected_ir_index >= signal_count && selected_ir_index == signal_count + 2) {
             lv_obj_set_style_bg_color(cur, lv_color_hex(0xB22222), LV_PART_MAIN);
+            if (cur_label) {
+                lv_obj_set_style_text_color(cur_label, lv_color_hex(0xFFFFFF), 0);
+            }
         } else {
-            lv_obj_set_style_bg_color(cur, lv_color_hex(0x555555), LV_PART_MAIN);
+            uint8_t theme = settings_get_menu_theme(&G_Settings);
+            if (theme >= (sizeof(ir_theme_accent_colors) / sizeof(ir_theme_accent_colors[0]))) {
+                theme = 0;
+            }
+            lv_color_t accent = lv_color_hex(ir_theme_accent_colors[theme]);
+            lv_obj_set_style_bg_color(cur, accent, LV_PART_MAIN);
+            if (cur_label) {
+                if (theme == 3) {
+                    lv_obj_set_style_text_color(cur_label, lv_color_hex(0x000000), 0);
+                } else {
+                    lv_obj_set_style_text_color(cur_label, lv_color_hex(0xFFFFFF), 0);
+                }
+            }
         }
         lv_obj_scroll_to_view(cur, LV_ANIM_OFF);
     }
@@ -1984,51 +1991,66 @@ void infrared_view_input_cb(InputEvent *event) {
 // open selected IR file and list commands
 static void file_event_open(int idx) {
     if (in_universals_mode) {
+        
         // clear previous unique names
         for (size_t i = 0; i < uni_command_count; i++) free(uni_command_names[i]);
         free(uni_command_names);
         uni_command_names = NULL;
         uni_command_count = 0;
-        // build full file path
-        char path[256];
-        size_t base_len = strlen(current_dir);
-        if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
-        memcpy(path, current_dir, base_len);
-        path[base_len] = '\0';
-        if (base_len + 1 < sizeof(path)) strcat(path, "/");
-        strcat(path, ir_file_paths[idx]);
-        // remember for transmit
-        strncpy(current_universal_file, path, sizeof(current_universal_file) - 1);
-        current_universal_file[sizeof(current_universal_file) - 1] = '\0';
-        printf("scanning universal file: %s\n", current_universal_file);
-        // scan file for unique command names
-        bool susp = false; bool did = ir_sd_begin(&susp);
-        FILE *f = fopen(path, "r"); if (!f) { if (did) ir_sd_end(susp); return; }
-        char buf[256], last[256] = "";
-        while (fgets(buf, sizeof(buf), f)) {
-            char *s = buf;
-            while (*s && isspace((unsigned char)*s)) s++;
-            if (*s == '#' || *s == '\0') continue;
-            if (strncmp(s, "name:", 5) == 0) {
-                char *v = s + 5; while (*v && isspace((unsigned char)*v)) v++;
-                char *e = v + strlen(v) - 1; while (e > v && isspace((unsigned char)*e)) *e-- = '\0';
-                if (strcmp(v, last) != 0) {
-                    bool dup = false;
-                    for (size_t j = 0; j < uni_command_count; j++) {
-                        if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
+        // Check if this is TURNHISTVOFF.ir - use universal IR system
+        if (strcmp(ir_file_paths[idx], "TURNHISTVOFF.ir") == 0) {
+            // Set up for universal IR transmission
+            strcpy(current_universal_file, "TURNHISTVOFF");
+            printf("Using universal IR system for TURNHISTVOFF\n");
+            
+            // Create a single command entry for universal transmission
+            uni_command_names = malloc(sizeof(*uni_command_names));
+            if (uni_command_names) {
+                uni_command_names[0] = strdup("Power Off");
+                uni_command_count = 1;
+            }
+        } else {
+            // build full file path for regular universal files
+            char path[256];
+            size_t base_len = strlen(current_dir);
+            if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
+            memcpy(path, current_dir, base_len);
+            path[base_len] = '\0';
+            if (base_len + 1 < sizeof(path)) strcat(path, "/");
+            strcat(path, ir_file_paths[idx]);
+            // remember for transmit
+            strncpy(current_universal_file, path, sizeof(current_universal_file) - 1);
+            current_universal_file[sizeof(current_universal_file) - 1] = '\0';
+            printf("scanning universal file: %s\n", current_universal_file);
+            // scan file for unique command names
+            bool susp = false; bool did = ir_sd_begin(&susp);
+            FILE *f = fopen(path, "r"); if (!f) { if (did) ir_sd_end(susp); return; }
+            char buf[256], last[256] = "";
+            while (fgets(buf, sizeof(buf), f)) {
+                char *s = buf;
+                while (*s && isspace((unsigned char)*s)) s++;
+                if (*s == '#' || *s == '\0') continue;
+                if (strncmp(s, "name:", 5) == 0) {
+                    char *v = s + 5; while (*v && isspace((unsigned char)*v)) v++;
+                    char *e = v + strlen(v) - 1; while (e > v && isspace((unsigned char)*e)) *e-- = '\0';
+                    if (strcmp(v, last) != 0) {
+                        bool dup = false;
+                        for (size_t j = 0; j < uni_command_count; j++) {
+                            if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
+                        }
+                        if (!dup) {
+                            uni_command_names = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
+                            uni_command_names[uni_command_count] = strdup(v);
+                            uni_command_count++;
+                        }
+                        strcpy(last, v);
                     }
-                    if (!dup) {
-                        uni_command_names = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
-                        uni_command_names[uni_command_count] = strdup(v);
-                        uni_command_count++;
-                    }
-                    strcpy(last, v);
                 }
             }
+            fclose(f);
+            if (did) ir_sd_end(susp);
+            printf("found %zu unique commands\n", uni_command_count);
         }
-        fclose(f);
-        if (did) ir_sd_end(susp);
-        printf("found %zu unique commands\n", uni_command_count);
         // show unique commands
         lv_obj_clean(list);
         showing_commands = true;
@@ -2048,9 +2070,6 @@ static void file_event_open(int idx) {
             }
             lv_obj_add_event_cb(btn, command_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         }
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-        add_encoder_back_btn();
-#endif
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
         add_encoder_back_btn();
 #endif
@@ -2178,11 +2197,6 @@ static void command_event_execute(int idx) {
 
         transmitting_popup = popup_create_container(lv_scr_act(), 200, 60);
         lv_obj_center(transmitting_popup);
-        // override to keep exact original style
-        lv_obj_set_style_bg_color(transmitting_popup, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_border_width(transmitting_popup, 2, 0);
-        lv_obj_set_style_border_color(transmitting_popup, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_radius(transmitting_popup, 5, 0);
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *label = lv_label_create(transmitting_popup);
@@ -2219,6 +2233,10 @@ static void command_event_execute(int idx) {
 static void file_event_cb(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     file_event_open(idx);
+}
+
+static void placeholder_event_cb(lv_event_t *e) {
+    // No-op for placeholder row
 }
 
 static void command_event_cb(lv_event_t *e) {
@@ -2311,11 +2329,6 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
     }
 
     lv_obj_center(popup);
-    // keep exact original styling
-    lv_obj_set_style_bg_color(popup, lv_color_hex(0x2E2E2E), 0);
-    lv_obj_set_style_border_color(popup, lv_color_hex(0x555555), 0);
-    lv_obj_set_style_border_width(popup, 2, 0);
-    lv_obj_set_style_radius(popup, 10, 0);
 
     // compute responsive button sizes/positions to avoid overlap on small screens
     lv_coord_t pw = lv_obj_get_width(popup);
@@ -2767,12 +2780,19 @@ void update_signal_preview_selection(void)
     if (!save_btn || !cancel_btn) return;
     
     // Update button styles based on selection
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    if (theme >= (sizeof(ir_theme_accent_colors) / sizeof(ir_theme_accent_colors[0]))) theme = 0;
+    lv_color_t accent = lv_color_hex(ir_theme_accent_colors[theme]);
+
     if (preview_selected_option == 0) {
-        // Save selected - white background, black text
-        lv_obj_set_style_bg_color(save_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(save_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+        // Save selected - theme accent background
+        lv_obj_set_style_bg_color(save_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(save_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *save_label = lv_obj_get_child(save_btn, 0);
-        if (save_label) lv_obj_set_style_text_color(save_label, lv_color_hex(0x000000), 0);
+        if (save_label) {
+            if (theme == 3) lv_obj_set_style_text_color(save_label, lv_color_hex(0x000000), 0);
+            else lv_obj_set_style_text_color(save_label, lv_color_hex(0xFFFFFF), 0);
+        }
         
         // Cancel unselected - dark background, white text
         lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -2780,11 +2800,14 @@ void update_signal_preview_selection(void)
         lv_obj_t *cancel_label = lv_obj_get_child(cancel_btn, 0);
         if (cancel_label) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xFFFFFF), 0);
     } else {
-        // Cancel selected - white background, black text
-        lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+        // Cancel selected - theme accent background
+        lv_obj_set_style_bg_color(cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *cancel_label = lv_obj_get_child(cancel_btn, 0);
-        if (cancel_label) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+        if (cancel_label) {
+            if (theme == 3) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+            else lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xFFFFFF), 0);
+        }
         
         // Save unselected - dark background, white text
         lv_obj_set_style_bg_color(save_btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -2799,11 +2822,17 @@ void update_learning_popup_selection(void)
 {
     if (!learning_cancel_btn) return;
     if (preview_selected_option == 1) {
-        // Cancel selected - white background, black text
-        lv_obj_set_style_bg_color(learning_cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(learning_cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+        // Cancel selected - theme accent background
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        if (theme >= (sizeof(ir_theme_accent_colors) / sizeof(ir_theme_accent_colors[0]))) theme = 0;
+        lv_color_t accent = lv_color_hex(ir_theme_accent_colors[theme]);
+        lv_obj_set_style_bg_color(learning_cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(learning_cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *cancel_label = lv_obj_get_child(learning_cancel_btn, 0);
-        if (cancel_label) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+        if (cancel_label) {
+            if (theme == 3) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+            else lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xFFFFFF), 0);
+        }
     } else {
         // Cancel unselected - dark background, white text
         lv_obj_set_style_bg_color(learning_cancel_btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -2820,11 +2849,17 @@ void update_easy_learn_popup_selection(void)
     
     // Update Cancel button
     if (easy_learn_selected_option == 0) {
-        // Cancel selected - white background, black text
-        lv_obj_set_style_bg_color(easy_learn_cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(easy_learn_cancel_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+        // Cancel selected - theme accent background
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        if (theme >= (sizeof(ir_theme_accent_colors) / sizeof(ir_theme_accent_colors[0]))) theme = 0;
+        lv_color_t accent = lv_color_hex(ir_theme_accent_colors[theme]);
+        lv_obj_set_style_bg_color(easy_learn_cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(easy_learn_cancel_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *cancel_label = lv_obj_get_child(easy_learn_cancel_btn, 0);
-        if (cancel_label) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+        if (cancel_label) {
+            if (theme == 3) lv_obj_set_style_text_color(cancel_label, lv_color_hex(0x000000), 0);
+            else lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xFFFFFF), 0);
+        }
     } else {
         // Cancel unselected - dark background, white text
         lv_obj_set_style_bg_color(easy_learn_cancel_btn, lv_color_hex(0x555555), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -2835,11 +2870,17 @@ void update_easy_learn_popup_selection(void)
     
     // Update Skip button
     if (easy_learn_selected_option == 1) {
-        // Skip selected - white background, black text
-        lv_obj_set_style_bg_color(easy_learn_skip_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_color(easy_learn_skip_btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+        // Skip selected - theme accent background
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        if (theme >= (sizeof(ir_theme_accent_colors) / sizeof(ir_theme_accent_colors[0]))) theme = 0;
+        lv_color_t accent = lv_color_hex(ir_theme_accent_colors[theme]);
+        lv_obj_set_style_bg_color(easy_learn_skip_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(easy_learn_skip_btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *skip_label = lv_obj_get_child(easy_learn_skip_btn, 0);
-        if (skip_label) lv_obj_set_style_text_color(skip_label, lv_color_hex(0x000000), 0);
+        if (skip_label) {
+            if (theme == 3) lv_obj_set_style_text_color(skip_label, lv_color_hex(0x000000), 0);
+            else lv_obj_set_style_text_color(skip_label, lv_color_hex(0xFFFFFF), 0);
+        }
     } else {
         // Skip unselected - dark background, white text
         lv_obj_set_style_bg_color(easy_learn_skip_btn, lv_color_hex(0x555555), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -3065,16 +3106,6 @@ void create_easy_learn_popup(void)
 
 void create_signal_preview_popup(void)
 {
-    // Initialize popup style if not already done
-    if (!popup_style_initialized) {
-        lv_style_init(&popup_style);
-        lv_style_set_bg_color(&popup_style, lv_color_hex(0x222222));
-        lv_style_set_border_color(&popup_style, lv_color_hex(0xFFFFFF));
-        lv_style_set_border_width(&popup_style, 1);
-        lv_style_set_radius(&popup_style, 8);
-        popup_style_initialized = true;
-    }
-    
     // Create popup container responsively (works for both landscape and vertical)
     lv_coord_t scr_w = LV_HOR_RES;
     lv_coord_t scr_h = LV_VER_RES;
@@ -3086,7 +3117,6 @@ void create_signal_preview_popup(void)
     if (base_h < 120) base_h = 120;
     signal_preview_popup = popup_create_container(lv_scr_act(), base_w, base_h);
     lv_obj_center(signal_preview_popup);
-    lv_obj_add_style(signal_preview_popup, &popup_style, 0);
     
     // Remove scrollbars and ensure content fits
     lv_obj_set_scrollbar_mode(signal_preview_popup, LV_SCROLLBAR_MODE_OFF);
@@ -3109,7 +3139,7 @@ void create_signal_preview_popup(void)
     cancel_btn = popup_add_styled_button(signal_preview_popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
-    lv_obj_t *title = popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);
+    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);
     
     // Protocol info (use popup helpers for consistent layout)
     lv_coord_t popup_w = lv_obj_get_width(signal_preview_popup);
@@ -3256,23 +3286,7 @@ static void save_learned_signal(const char *signal_name) {
 
 
 
-// RMT RX callback function
-static bool ir_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx) {
-    BaseType_t high_task_wakeup = pdFALSE;
-    QueueHandle_t receive_queue = (QueueHandle_t)user_ctx;
-
-    if (!edata || !receive_queue) return false;
-
-    rx_event_copy_t copy;
-    copy.num_symbols = edata->num_symbols;
-    if (copy.num_symbols > IR_RX_MAX_SYMBOLS) copy.num_symbols = IR_RX_MAX_SYMBOLS;
-    if (copy.num_symbols > 0) {
-        memcpy(copy.symbols, edata->received_symbols, copy.num_symbols * sizeof(rmt_symbol_word_t));
-    }
-
-    xQueueSendFromISR(receive_queue, &copy, &high_task_wakeup);
-    return high_task_wakeup == pdTRUE;
-}
+// RMT RX callback function - Removed, using infrared_manager's callback
 
 static void ir_learning_task(void *arg) {
     ESP_LOGI(TAG, "IR learning task started");
@@ -3280,7 +3294,17 @@ static void ir_learning_task(void *arg) {
     // Reset learning cancel flag
     ir_learning_cancel = false;
     
-    // Check if RMT channel is available (should be initialized by view_create)
+    // Check if RMT channel is available (should be initialized by view_create or init)
+    // Ensure manager is initialized
+    if (!infrared_manager_rx_init()) {
+        ESP_LOGE(TAG, "Failed to init infrared manager RX");
+        lv_async_call(cleanup_learning_popup, NULL);
+        ir_learning_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    rmt_channel_handle_t rx_channel = infrared_manager_get_rx_channel();
     if (!rx_channel) {
         ESP_LOGE(TAG, "RMT RX channel not initialized");
         lv_async_call(cleanup_learning_popup, NULL);
@@ -3290,7 +3314,8 @@ static void ir_learning_task(void *arg) {
     }
     
     // Check if RX queue is available
-    if (!ir_rx_queue) {
+    QueueHandle_t rx_queue = infrared_manager_get_rx_queue();
+    if (!rx_queue) {
         ESP_LOGE(TAG, "RX queue not initialized");
         lv_async_call(cleanup_learning_popup, NULL);
         ir_learning_task_handle = NULL;
@@ -3327,6 +3352,7 @@ static void ir_learning_task(void *arg) {
         ESP_LOGI(TAG, "Starting IR receive operation...");
         
         // Check if channel is still valid before trying to receive
+        rx_channel = infrared_manager_get_rx_channel();
         if (!rx_channel) {
             ESP_LOGE(TAG, "RMT RX channel is NULL");
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -3346,8 +3372,8 @@ static void ir_learning_task(void *arg) {
         // Wait for IR signal with timeout (inspired by Arduino IRremote timeout handling)
         TickType_t timeout_ticks = pdMS_TO_TICKS(1000);  // 1 second timeout per attempt
         
-        rx_event_copy_t rx_copy = {0};
-        if (xQueueReceive(ir_rx_queue, &rx_copy, timeout_ticks) == pdTRUE && rx_copy.num_symbols > 0) {
+        infrared_rx_event_t rx_copy = {0};
+        if (xQueueReceive(rx_queue, &rx_copy, timeout_ticks) == pdTRUE && rx_copy.num_symbols > 0) {
             // Data received, process it
             ESP_LOGI(TAG, "IR signal received: %u symbols", (unsigned)rx_copy.num_symbols);
 

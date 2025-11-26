@@ -11,6 +11,8 @@ Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution
 - [Installation Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Installation)
 - [Features Overview](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Features)
 - [Commands](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Commands)
+- [Chameleon Ultra Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Chameleon-Ultra-Guide)
+- [Karma Attack Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Karma-Attack-Guide)
 - [Troubleshooting](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Troubleshooting)
 - [Board-Specific Guide](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Board%E2%80%90Specific%E2%80%90Guide)
 - [Rave Mode](https://github.com/jaylikesbunda/Ghost_ESP/wiki/Rave-Mode)
@@ -25,6 +27,7 @@ Welcome to the official wiki for GhostESP Firmware, a powerful firmware solution
 
 GhostESP firmware is actively developed with regular updates. Current version in development (Revival) includes:
 
+- **Chameleon Ultra Integration** - Complete NFC/RFID tool control with MIFARE Classic attacks
 - **Dual ESP32 communication** with WebUI control
 - **Power saving mode** for up to 5X battery life on supported devices
 - **Infrared (IR) support** with FlipperZero file compatibility

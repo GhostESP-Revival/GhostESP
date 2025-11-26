@@ -21,12 +21,12 @@ void simulateCommand(const char *commandString);
 QueueHandle_tt commandQueue;
 
 typedef struct {
-  char command[1024];
+  char command[256];
 } SerialCommand;
 
 // Command history structures
 #define MAX_HISTORY_SIZE 10
-#define MAX_COMMAND_LENGTH 1024
+#define MAX_COMMAND_LENGTH 256
 
 typedef struct {
   char commands[MAX_HISTORY_SIZE][MAX_COMMAND_LENGTH];

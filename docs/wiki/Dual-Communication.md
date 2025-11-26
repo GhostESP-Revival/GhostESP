@@ -53,7 +53,7 @@ Use the **Dual Comm** tab for:
 Default pins are TX: GPIO 6, RX: GPIO 7 on base ESP32 models they are 17 and 16. To change them:
 
 ```bash
-commsetpins 4 5
+commsetpins NUM NUM
 ```
 
 Pin changes are saved and you can't change them while connected.
@@ -88,8 +88,13 @@ Device names are auto-generated like `ESP_A1B2C3` based on MAC address.
 
 ## Technical Details
 
-- **Protocol**: Custom UART at 921,600 baud
-- **Auto-discovery**: Every 2 seconds
-- **Master/slave**: Device with "larger" name becomes master but you can send and recieve commands from both devices
-- **No encryption**: Commands sent in plain text
-- **Physical access required**: Need wire connections 
+- **Protocol**: Custom UART (initialized at 115,200 baud) 
+- **Auto-discovery**: Every 3 seconds
+- **Master/slave**: Device with "larger" name becomes master but you can send and receive commands from both devices
+- **Checksum**: CRC-8 is preferred and negotiated between peers with a legacy XOR fallback
+- **Auto-reconnect / ping**: The manager sends periodic pings and expects pongs; on link timeout the connection is considered lost and discovery restarts automatically
+- **Physical access required**: Needs wired connections
+
+## Notes for developers
+
+- `MAX_CMD_LEN` is 32; packet payload size is constrained by `COMM_PACKET_SIZE` (64 bytes). Responses include an optional `[seq|flags]` header to help assemble lines reliably on the receiving side. 

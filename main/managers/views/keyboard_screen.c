@@ -25,7 +25,7 @@ static KeyboardSubmitCallback submit_callback = NULL;
 static bool is_caps = true;
 static bool is_symbols_mode = false;
 static bool is_capslock = false;
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
 static lv_obj_t *encoder_cont = NULL;
 static lv_obj_t *encoder_labels[50];
 static const char *encoder_alpha_items[41] = {
@@ -51,7 +51,46 @@ static int encoder_offset_x = 0;
 static bool encoder_sym_mode = false;
 static bool encoder_uppercase = true;
 #endif
+
 static char placeholder[64] = "Enter text...";
+
+static bool styles_inited = false;
+static lv_style_t style_key_btn;
+static lv_style_t style_key_label;
+// temporarily override rounded corners during initial build to avoid mask cost
+static int saved_key_radius = 3;
+static int saved_input_label_radius = 5;
+static bool radius_override_active = false;
+// btnmatrix-based keyboard to avoid per-key object creation
+static lv_obj_t *key_matrix = NULL;
+static const char *btn_map[64];
+static uint8_t btn_widths[64];
+static int btn_map_len = 0;
+static int shift_btn_id = -1;
+static int pressed_btn_id = -1;
+
+static void key_matrix_event_cb(lv_event_t *e);
+static void build_key_matrix(void);
+
+// cache for key button objects to avoid invalid parent during label create
+static lv_obj_t *key_btns[5][KEYBOARD_COLUMNS];
+
+static void init_keyboard_styles(void) {
+    if (styles_inited) return;
+    lv_style_init(&style_key_btn);
+    lv_style_set_bg_color(&style_key_btn, lv_color_hex(0x7B1FA2));
+    lv_style_set_bg_opa(&style_key_btn, LV_OPA_COVER);
+    lv_style_set_border_color(&style_key_btn, lv_color_hex(0x444444));
+    lv_style_set_border_width(&style_key_btn, 1);
+    lv_style_set_radius(&style_key_btn, 3);
+
+    lv_style_init(&style_key_label);
+    lv_style_set_text_color(&style_key_label, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&style_key_label, &lv_font_montserrat_14);
+
+    styles_inited = true;
+}
+
 
 static const char *keys[][10] = {
     {"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"},
@@ -85,11 +124,18 @@ static void ensure_valid_cursor(void);
 static lv_obj_t *get_key_button_at(int row, int col);
 static void apply_selection_highlight(void);
 static void activate_selected_key(void);
+static void keyboard_build_step(lv_timer_t *t);
+static void hide_all_key_buttons(void);
+static void reveal_row(int row);
 
 static lv_obj_t *pressed_key_btn = NULL;
 static lv_obj_t *selected_key_btn = NULL;
 static int cursor_row = 0;
 static int cursor_col = 0;
+static lv_timer_t *keyboard_build_timer = NULL;
+static int keyboard_build_row = 0;
+static int keyboard_build_col = 0;
+static int keyboard_build_phase = 0; // 0=create buttons, 1=create labels
 
 static bool is_shift_key(const char *key) {
     return strcmp(key, "SHIFT") == 0;
@@ -151,22 +197,68 @@ static const int *get_current_row_lengths(void) {
     return is_symbols_mode ? symbols_row_lengths : row_lengths;
 }
 
+static void hide_all_key_buttons(void) {
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    if (!root) return;
+    uint32_t child_count = lv_obj_get_child_cnt(root);
+    for (uint32_t i = 1; i < child_count; i++) {
+        lv_obj_t *child = lv_obj_get_child(root, i);
+        if (child) {
+            lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
+}
+
+static void reveal_row(int row) {
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    if (!root || row < 0 || row >= num_rows) return;
+    const int *row_lens = get_current_row_lengths();
+    int offset = 0;
+    for (int r = 0; r < row; r++) offset += max_row_lengths[r];
+    for (int c = 0; c < max_row_lengths[row]; c++) {
+        int child_idx = 1 + offset + c;
+        uint32_t cnt = lv_obj_get_child_cnt(root);
+        if ((uint32_t)child_idx >= cnt) continue;
+        lv_obj_t *key_btn = lv_obj_get_child(root, child_idx);
+        if (!key_btn) continue;
+        if (c < row_lens[row]) {
+            lv_obj_clear_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
+}
+
 static lv_obj_t* create_key_button(lv_obj_t *parent, int x, int y, int w, int h, const char *label_text) {
-    lv_obj_t *btn = lv_btn_create(parent);
+    init_keyboard_styles();
+    lv_obj_t *btn = lv_obj_create(parent);
+    if (!btn) return NULL;
     lv_obj_remove_style_all(btn);
     lv_obj_set_size(btn, w, h);
     lv_obj_set_pos(btn, x, y);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x7B1FA2), 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(btn, lv_color_hex(0x444444), 0);
-    lv_obj_set_style_border_width(btn, 1, 0);
-    lv_obj_set_style_radius(btn, 3, 0);
+    lv_obj_add_style(btn, &style_key_btn, 0);
 
-    lv_obj_t *label = lv_label_create(btn);
-    lv_label_set_text(label, label_text);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-    lv_obj_center(label);
+    // try to reuse an existing label child if present to avoid repeated allocations
+    lv_obj_t *label = lv_obj_get_child(btn, 0);
+    if (!label) {
+        label = lv_label_create(btn);
+        if (label) {
+            lv_obj_add_style(label, &style_key_label, 0);
+            lv_obj_center(label);
+        }
+    } else {
+        // ensure style and centering are applied when reusing
+        lv_obj_add_style(label, &style_key_label, 0);
+        lv_obj_center(label);
+    }
+
+    if (label) {
+        // keys array contains static string literals; use static set to avoid allocations
+        if (label_text) lv_label_set_text_static(label, label_text);
+        else lv_label_set_text_static(label, "");
+    }
     return btn;
 }
 
@@ -201,7 +293,7 @@ static void add_char_to_buffer(char c) {
     if (is_caps && !is_capslock) {
         is_caps = false; // Reset to lowercase after any key press unless capslock is on
         update_key_labels(); // Update key labels to reflect the change
-        #ifdef CONFIG_USE_ENCODER
+        #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_uppercase = (is_capslock || is_caps);
         if (encoder_cont && !encoder_sym_mode) {
             for (int j = 0; j < encoder_item_count; j++) {
@@ -231,8 +323,6 @@ static void remove_char_from_buffer() {
     }
 }
 
-
-
 static void update_input_label() {
     if (input_label) {
         if (input_len == 0) {
@@ -244,6 +334,13 @@ static void update_input_label() {
 }
 
 static void update_key_labels() {
+#if defined(CONFIG_USE_TOUCHSCREEN)
+    // touch build uses btnmatrix; rebuild its map/texts
+    if (key_matrix) {
+        build_key_matrix();
+        return;
+    }
+#endif
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (!root) return;
 
@@ -281,95 +378,47 @@ static void update_key_labels() {
     }
 #endif
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
-    apply_selection_highlight();
+    if (!keyboard_build_timer) apply_selection_highlight();
 #endif
 }
 
 static void recreate_keyboard_buttons() {
+#if defined(CONFIG_USE_TOUCHSCREEN)
+    if (!root) return;
+    // For touch builds, just rebuild the btnmatrix map instead of recreating objects
+    build_key_matrix();
+    return;
+#endif
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (!root) return;
 
-    // Remove all existing key buttons (skip input_label at index 0)
-    uint32_t child_count = lv_obj_get_child_cnt(root);
-    for (int i = child_count - 1; i >= 1; i--) {
-        lv_obj_t *child = lv_obj_get_child(root, i);
-        if (child && child != input_label) {
-            lv_obj_del(child);
+    if (keyboard_build_timer) {
+        lv_timer_del(keyboard_build_timer);
+        keyboard_build_timer = NULL;
+    }
+    // hide the root during incremental rebuild to avoid heavy draw churn
+    lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+    // reset build state and key button cache for rebuild
+    for (int rr = 0; rr < num_rows; rr++) {
+        for (int cc = 0; cc < KEYBOARD_COLUMNS; cc++) {
+            key_btns[rr][cc] = NULL;
         }
     }
-
-    int screen_width = LV_HOR_RES;
+    keyboard_build_phase = 0;
+    hide_all_key_buttons();
+    keyboard_build_row = 0;
+    keyboard_build_col = 0;
+    keyboard_build_timer = lv_timer_create(keyboard_build_step, 10, NULL);
+#else
+    if (keyboard_build_timer) {
+        lv_timer_del(keyboard_build_timer);
+        keyboard_build_timer = NULL;
+    }
+    lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     int screen_height = LV_VER_RES;
     int status_bar_height = 20;
     int display_height = 40;
     int padding = 5;
-    int keys_start_y = status_bar_height + display_height + padding * 2;
-    int keys_area_height = screen_height - keys_start_y;
-    int key_height = (keys_area_height / num_rows) - 4;
-    int key_y = keys_start_y;
-
-    for (int r = 0; r < num_rows; r++) {
-        const char *(*current_keys)[10] = get_current_keys();
-        const int *row_lens = get_current_row_lengths();
-        int current_row_length = max_row_lengths[r];
-        for (int c = 0; c < current_row_length; c++) {
-            int key_x, key_w;
-            get_key_position(r, c, &key_x, &key_w, is_symbols_mode);
-            const char *label_text = "";
-            if (c < row_lens[r]) {
-                label_text = get_key_label(current_keys[r][c], is_caps, is_symbols_mode);
-            }
-            lv_obj_t *key_btn = create_key_button(root, key_x, key_y, key_w - 2, key_height, label_text);
-
-            // Style SHIFT key
-            if (c < row_lens[r] && is_shift_key(current_keys[r][c])) {
-                lv_obj_t *key_label = lv_obj_get_child(key_btn, 0);
-                style_shift_key(key_btn, key_label, is_capslock, is_caps);
-            }
-            // Hide unused keys
-            if (c >= row_lens[r]) {
-                lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
-        key_y += key_height + 2;
-    }
-#endif
-#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
-    apply_selection_highlight();
-#endif
-}
-
-static void keyboard_create() {
-    is_caps = true; // Start in caps mode
-    is_symbols_mode = false;
-    input_len = 0;
-    memset(input_buffer, 0, sizeof(input_buffer));
-
-    int screen_width = LV_HOR_RES;
-    int screen_height = LV_VER_RES;
-    int status_bar_height = 20;
-
-    root = lv_obj_create(lv_scr_act());
-    keyboard_view.root = root;
-    lv_obj_remove_style_all(root);
-    lv_obj_set_size(root, screen_width, screen_height);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), 0);
-    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
-
-    int padding = 5;
-    int display_height = 40;
-    input_label = lv_label_create(root);
-    lv_obj_set_size(input_label, screen_width - 2 * padding, display_height - 2 * padding);
-    lv_obj_set_style_bg_color(input_label, lv_color_hex(0x1E1E1E), 0);
-    lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_pad_all(input_label, padding, 0);
-    lv_obj_set_style_radius(input_label, 5, 0);
-    lv_obj_set_pos(input_label, padding, status_bar_height + padding);
-    lv_label_set_long_mode(input_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    update_input_label();
-
-#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
@@ -382,7 +431,7 @@ static void keyboard_create() {
     }
 
     for (int r = 0; r < num_rows; r++) {
-        int total_key_width = screen_width - (padding * 2);
+        int total_key_width = LV_HOR_RES - (padding * 2);
         int current_row_length = max_row_lengths[r];
         int key_width = total_key_width / current_row_length;
         
@@ -413,55 +462,222 @@ static void keyboard_create() {
                 }
             }
             
-            lv_obj_t *key_btn = lv_btn_create(root);
-            lv_obj_remove_style_all(key_btn);
             int key_x, key_w;
             get_key_position(r, c, &key_x, &key_w, is_symbols_mode);
-            lv_obj_set_size(key_btn, key_w - 2, key_height);
-            lv_obj_set_pos(key_btn, key_x, key_y);
-            
-            lv_obj_set_style_bg_color(key_btn, lv_color_hex(0x7B1FA2), 0);
-            lv_obj_set_style_bg_opa(key_btn, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_color(key_btn, lv_color_hex(0x444444), 0);
-            lv_obj_set_style_border_width(key_btn, 1, 0);
-            lv_obj_set_style_radius(key_btn, 3, 0);
-
-            lv_obj_t *key_label = lv_label_create(key_btn);
-            const char *(*current_keys)[KEYBOARD_COLUMNS] = is_symbols_mode ? symbols : keys;
-            if (c < row_lens[r]) {
-                const char* key_text = current_keys[r][c];
-                if (strcmp(key_text, "SHIFT") == 0) {
-                    lv_label_set_text(key_label, LV_SYMBOL_UP);
-                } else if (!is_symbols_mode && strlen(key_text) == 1) {
-                    char new_text[2];
-                    if (isalpha((unsigned char)key_text[0])) {
-                        new_text[0] = is_caps ? toupper(key_text[0]) : tolower(key_text[0]);
+            lv_obj_t *key_btn = create_key_button(root, key_x, key_y, key_w - 2, key_height, "");
+            if (key_btn) {
+                lv_obj_t *key_label = lv_obj_get_child(key_btn, 0);
+                const char *(*current_keys)[KEYBOARD_COLUMNS] = is_symbols_mode ? symbols : keys;
+                if (c < row_lens[r]) {
+                    const char* key_text = current_keys[r][c];
+                    if (strcmp(key_text, "SHIFT") == 0) {
+                        lv_label_set_text(key_label, LV_SYMBOL_UP);
+                    } else if (!is_symbols_mode && strlen(key_text) == 1) {
+                        char new_text[2];
+                        if (isalpha((unsigned char)key_text[0])) {
+                            new_text[0] = is_caps ? toupper(key_text[0]) : tolower(key_text[0]);
+                        } else {
+                            new_text[0] = key_text[0];
+                        }
+                        new_text[1] = '\0';
+                        lv_label_set_text(key_label, new_text);
                     } else {
-                        new_text[0] = key_text[0];
+                        lv_label_set_text(key_label, key_text);
                     }
-                    new_text[1] = '\0';
-                    lv_label_set_text(key_label, new_text);
                 } else {
-                    lv_label_set_text(key_label, key_text);
+                    lv_label_set_text(key_label, "");
+                    lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
                 }
-            } else {
-                lv_label_set_text(key_label, "");
-                lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
             }
-            lv_obj_set_style_text_color(key_label, lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_text_font(key_label, &lv_font_montserrat_14, 0);
-            lv_obj_center(key_label);
-            
             key_x += current_key_width;
         }
         key_y += key_height + 2;
     }
-    cursor_row = 0;
-    cursor_col = 0;
-#elif defined(CONFIG_USE_ENCODER)
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(root);
+#endif
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    if (!keyboard_build_timer) {
+        apply_selection_highlight();
+    }
+#endif
+}
+
+static void keyboard_build_step(lv_timer_t *t) {
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    if (!root || !lv_obj_is_valid(root)) { lv_timer_del(t); keyboard_build_timer = NULL; return; }
+    int screen_height = LV_VER_RES;
+    int status_bar_height = 20;
+    int display_height = 40;
+    int padding = 5;
+    int keys_start_y = status_bar_height + display_height + padding * 2;
+    int keys_area_height = screen_height - keys_start_y;
+    int key_height = (keys_area_height / num_rows) - 4;
+    int built = 0;
+    const int batch = 1;
+    // timing for profiling heavy steps
+    int64_t t0 = esp_timer_get_time();
+    while (built < batch && keyboard_build_row < num_rows) {
+        int r = keyboard_build_row;
+        int key_y = keys_start_y + r * (key_height + 2);
+        const char *(*current_keys)[10] = get_current_keys();
+        const int *row_lens = get_current_row_lengths();
+        int c = keyboard_build_col;
+        int key_x, key_w;
+        get_key_position(r, c, &key_x, &key_w, is_symbols_mode);
+        lv_obj_t *key_btn = key_btns[r][c];
+        if (key_btn && !lv_obj_is_valid(key_btn)) key_btn = NULL;
+        if (key_btn && lv_obj_get_parent(key_btn) != root) key_btn = NULL;
+        if (keyboard_build_phase == 0) {
+            // phase 0: create buttons only (no labels yet)
+            if (!key_btn) {
+                key_btn = lv_obj_create(root);
+                if (!key_btn) break;
+                lv_obj_remove_style_all(key_btn);
+                lv_obj_add_style(key_btn, &style_key_btn, 0);
+                key_btns[r][c] = key_btn;
+            }
+            lv_obj_set_size(key_btn, key_w - 2, key_height);
+            lv_obj_set_pos(key_btn, key_x, key_y);
+            lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            // phase 1: attach/create labels and set text
+            if (!key_btn) {
+                // Should have been created in phase 0, but create defensively
+                key_btn = lv_obj_create(root);
+                if (!key_btn) break;
+                lv_obj_remove_style_all(key_btn);
+                lv_obj_add_style(key_btn, &style_key_btn, 0);
+                lv_obj_set_size(key_btn, key_w - 2, key_height);
+                lv_obj_set_pos(key_btn, key_x, key_y);
+                lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
+                key_btns[r][c] = key_btn;
+            }
+            if (!lv_obj_is_valid(key_btn) || lv_obj_get_parent(key_btn) != root) {
+                // parent chain changed; skip this item safely
+                built++;
+                keyboard_build_col++;
+                if (keyboard_build_col >= max_row_lengths[r]) { keyboard_build_col = 0; keyboard_build_row++; }
+                continue;
+            }
+            lv_obj_t *key_label = lv_obj_get_child(key_btn, 0);
+            if (!key_label) {
+                key_label = lv_label_create(key_btn);
+                if (key_label) {
+                    lv_obj_add_style(key_label, &style_key_label, 0);
+                    lv_obj_center(key_label);
+                }
+            }
+            if (key_label) {
+                if (c < row_lens[r]) {
+                    const char* key_text = current_keys[r][c];
+                    lv_label_set_text(key_label, get_key_label(key_text, is_caps, is_symbols_mode));
+                    if (is_shift_key(key_text)) {
+                        style_shift_key(key_btn, key_label, is_capslock, is_caps);
+                    }
+                } else {
+                    lv_label_set_text(key_label, "");
+                    lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+        }
+        built++;
+        keyboard_build_col++;
+        if (keyboard_build_col >= max_row_lengths[r]) {
+            keyboard_build_col = 0;
+            // defer reveal until after build completes (root is hidden anyway)
+            keyboard_build_row++;
+        }
+    }
+    if (keyboard_build_row >= num_rows) {
+        if (keyboard_build_phase == 0) {
+            // move to phase 1: create labels
+            keyboard_build_phase = 1;
+            keyboard_build_row = 0;
+            keyboard_build_col = 0;
+        } else {
+            // finished both phases
+            lv_timer_del(t);
+            keyboard_build_timer = NULL;
+            cursor_row = 0;
+            cursor_col = 0;
+            apply_selection_highlight();
+            // unhide root after build completes
+            if (root) lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
+            // restore radii after initial paint to re-enable rounded corners
+            if (radius_override_active) {
+                lv_style_set_radius(&style_key_btn, saved_key_radius);
+                if (input_label) lv_obj_set_style_radius(input_label, saved_input_label_radius, 0);
+                radius_override_active = false;
+            }
+            lv_obj_invalidate(root);
+            int64_t dt = esp_timer_get_time() - t0;
+            if (dt > 5000) {
+                ESP_LOGW(TAG, "keyboard_build total took %lld us", dt);
+            }
+        }
+    }
+#else
+    lv_timer_del(t);
+    keyboard_build_timer = NULL;
+#endif
+}
+
+static void keyboard_create() {
+    is_caps = true; // Start in caps mode
+    is_symbols_mode = false;
+    input_len = 0;
+    memset(input_buffer, 0, sizeof(input_buffer));
+
+    int screen_height = LV_VER_RES;
+    int status_bar_height = 20;
+
+    root = lv_obj_create(lv_scr_act());
+    keyboard_view.root = root;
+    lv_obj_remove_style_all(root);
+    lv_obj_set_size(root, LV_HOR_RES, screen_height);
+    lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+
+    int padding = 5;
+    int display_height = 40;
+    input_label = lv_label_create(root);
+    lv_obj_set_size(input_label, LV_HOR_RES - 2 * padding, display_height - 2 * padding);
+    lv_obj_set_style_bg_color(input_label, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_pad_all(input_label, padding, 0);
+    lv_obj_set_style_radius(input_label, 5, 0);
+    lv_obj_set_pos(input_label, padding, status_bar_height + padding);
+    lv_label_set_long_mode(input_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    update_input_label();
+
+    // ensure styles are initialized so we can temporarily zero radius
+    init_keyboard_styles();
+    // hide root while building to avoid heavy invalidation churn
+    lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+    // zero out radii during build to bypass rounded-rect mask paths
+    saved_key_radius = 3;
+    saved_input_label_radius = 5;
+    lv_style_set_radius(&style_key_btn, 0);
+    lv_obj_set_style_radius(input_label, 0, 0);
+    radius_override_active = true;
+
+    // reset build state and key button cache
+    for (int rr = 0; rr < num_rows; rr++) {
+        for (int cc = 0; cc < KEYBOARD_COLUMNS; cc++) {
+            key_btns[rr][cc] = NULL;
+        }
+    }
+    keyboard_build_phase = 0;
+
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
+    // use a single btnmatrix to render the keyboard for touch/joystick builds
+    recreate_keyboard_buttons();
+#elif defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
     encoder_cont = lv_obj_create(root);
     lv_obj_remove_style_all(encoder_cont);
-    lv_obj_set_size(encoder_cont, screen_width, display_height);
+    lv_obj_set_size(encoder_cont, LV_HOR_RES, display_height);
     lv_obj_set_pos(encoder_cont, 0, status_bar_height + display_height + padding);
     lv_obj_set_style_bg_opa(encoder_cont, LV_OPA_TRANSP, 0);
     // initialize encoder items and metrics
@@ -469,13 +685,13 @@ static void keyboard_create() {
     encoder_item_count = encoder_alpha_count;
     encoder_sym_mode = false;
     encoder_sel_idx = 0;
-    encoder_screen_width = screen_width;
+    encoder_screen_width = LV_HOR_RES;
     encoder_item_spacing = display_height;
-    encoder_offset_x = (screen_width / 2) - (encoder_item_spacing / 2);
+    encoder_offset_x = (encoder_screen_width / 2) - (encoder_item_spacing / 2);
     lv_obj_set_scroll_dir(encoder_cont, LV_DIR_LEFT | LV_DIR_RIGHT);
     lv_obj_set_scrollbar_mode(encoder_cont, LV_SCROLLBAR_MODE_OFF);
     // pad right to allow last items to center
-    lv_obj_set_style_pad_right(encoder_cont, screen_width, 0);
+    lv_obj_set_style_pad_right(encoder_cont, encoder_screen_width, 0);
     // create and position each item label (centered, avoid clipping)
     for(int i = 0; i < encoder_item_count; i++) {
         encoder_labels[i] = lv_label_create(encoder_cont);
@@ -499,21 +715,47 @@ static void keyboard_create() {
             encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2,
             (display_height - lbl_h) / 2);
     }
+    // ensure encoder builds unhide the root and restore radii
+    if (radius_override_active) {
+        lv_style_set_radius(&style_key_btn, saved_key_radius);
+        if (input_label) lv_obj_set_style_radius(input_label, saved_input_label_radius, 0);
+        radius_override_active = false;
+    }
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
+#else
+    // non-touch, non-encoder devices (e.g., cardputer keyboard): unhide and restore radii
+    if (radius_override_active) {
+        lv_style_set_radius(&style_key_btn, saved_key_radius);
+        if (input_label) lv_obj_set_style_radius(input_label, saved_input_label_radius, 0);
+        radius_override_active = false;
+    }
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
 #endif
     
     display_manager_add_status_bar("Keyboard");
 
-    update_key_labels();
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
-    apply_selection_highlight();
+    if (!keyboard_build_timer) {
+        update_key_labels();
+        apply_selection_highlight();
+    }
+#else
+    update_key_labels();
 #endif
 }
 
 static void keyboard_destroy() {
     if (keyboard_view.root) {
+        if (keyboard_build_timer) {
+            lv_timer_del(keyboard_build_timer);
+            keyboard_build_timer = NULL;
+        }
         lv_obj_del(keyboard_view.root);
         keyboard_view.root = NULL;
         root = NULL;
+        key_matrix = NULL;
+        shift_btn_id = -1;
+        pressed_btn_id = -1;
         input_label = NULL;
         submit_callback = NULL;
         input_len = 0;
@@ -521,7 +763,7 @@ static void keyboard_destroy() {
         is_symbols_mode = false;
         is_caps = true;
         is_capslock = false;
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_cont = NULL;
         encoder_item_count = 0;
         encoder_screen_width = 0;
@@ -535,8 +777,9 @@ static void keyboard_destroy() {
 }
 
 static void handle_hardware_button_press_keyboard(InputEvent *event) {
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
     if (event->type == INPUT_TYPE_ENCODER) {
+        if (!encoder_cont) return;
         int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;
@@ -607,10 +850,11 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 submit_text();
             } else {
                 char c = sel[0];
-                if (!encoder_sym_mode && isalpha((unsigned char)c) && !encoder_uppercase) {
-                    c = (char)tolower((unsigned char)c);
+                if (!encoder_sym_mode && isalpha((unsigned char)c)) {
+                    c = encoder_uppercase ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
                 }
-                add_char_to_buffer(c);
+                // bypass global is_caps so encoder "Aa" accurately controls case
+                add_char_to_buffer_raw(c);
             }
         }
         return;
@@ -641,20 +885,34 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_PR) {
         int touch_x = event->data.touch_data.point.x;
         int touch_y = event->data.touch_data.point.y;
+        ESP_LOGD(TAG, "touch PR x=%d y=%d", touch_x, touch_y);
         
         int screen_width = LV_HOR_RES;
         int screen_height = LV_VER_RES;
         int status_bar_height = 20;
-        
         int display_height = 40;
         int padding = 5;
-        int keys_area_y = status_bar_height + display_height + padding;
+        int keys_start_y = status_bar_height + display_height + padding * 2;
 
-        if (touch_y < keys_area_y) return;
-
-        int key_height = (screen_height - keys_area_y - 15) / num_rows;
-        
-        int row = (touch_y - keys_area_y) / key_height;
+        int row = -1;
+        int km_x = 0, km_y = 0, km_w = 0, km_h = 0;
+        if (key_matrix) {
+            km_x = lv_obj_get_x(key_matrix);
+            km_y = lv_obj_get_y(key_matrix);
+            km_w = lv_obj_get_width(key_matrix);
+            km_h = lv_obj_get_height(key_matrix);
+            if (touch_y < km_y || touch_y >= km_y + km_h || touch_x < km_x || touch_x >= km_x + km_w) return;
+            int row_h = km_h / num_rows;
+            if (row_h <= 0) row_h = 1;
+            row = (touch_y - km_y) / row_h;
+            if (row < 0) row = 0;
+            if (row >= num_rows) row = num_rows - 1;
+        } else {
+            if (touch_y < keys_start_y) return;
+            int keys_area_height = screen_height - keys_start_y - padding;
+            int key_height = keys_area_height / num_rows; if (key_height <= 0) key_height = 1;
+            row = (touch_y - keys_start_y) / key_height;
+        }
 
         if (row >= 0 && row < num_rows) {
             const char *(*current_keys)[10] = is_symbols_mode ? symbols : keys;
@@ -664,29 +922,56 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             
             // calculate which column was touched considering variable widths
             int col = -1;
-            int current_x = 0;
-            for (int c = 0; c < current_row_lengths[row]; c++) {
-                int key_x, key_w;
-                get_key_position(row, c, &key_x, &key_w, is_symbols_mode);
-                if (touch_x >= key_x && touch_x < key_x + key_w) {
-                    col = c;
-                    break;
+            if (key_matrix) {
+                // match btnmatrix width logic: width units per button (SHIFT/DEL/space -> 2 units)
+                int total_key_width = km_w;
+                int units_sum = 0;
+                for (int c = 0; c < current_row_lengths[row]; c++) {
+                    const char *src = current_keys[row][c];
+                    int w = 1;
+                    if (!is_symbols_mode && (strcmp(src, "SHIFT") == 0 || strcmp(src, "DEL") == 0 || strcmp(src, " ") == 0)) w = 2;
+                    units_sum += w;
+                }
+                if (units_sum < 1) units_sum = 1;
+                int unit_w = total_key_width / units_sum;
+                int x0 = km_x;
+                int x = x0;
+                for (int c = 0; c < current_row_lengths[row]; c++) {
+                    const char *src = current_keys[row][c];
+                    int w = 1;
+                    if (!is_symbols_mode && (strcmp(src, "SHIFT") == 0 || strcmp(src, "DEL") == 0 || strcmp(src, " ") == 0)) w = 2;
+                    int key_w = w * unit_w;
+                    int key_x = x;
+                    if (touch_x >= key_x && touch_x < key_x + key_w) { col = c; break; }
+                    x += key_w;
+                }
+            } else {
+                for (int c = 0; c < current_row_lengths[row]; c++) {
+                    int key_x, key_w;
+                    get_key_position(row, c, &key_x, &key_w, is_symbols_mode);
+                    if (touch_x >= key_x && touch_x < key_x + key_w) {
+                        col = c;
+                        break;
+                    }
                 }
             }
 
+            ESP_LOGD(TAG, "touch row=%d col=%d (sym=%d caps=%d capslock=%d)", row, col, (int)is_symbols_mode, (int)is_caps, (int)is_capslock);
             if (col >= 0) {
-                // Find the key button object
-                int key_index = 0;
-                for (int rr = 0; rr < num_rows; rr++) {
-                    for (int cc = 0; cc < max_row_lengths[rr]; cc++) {
-                        if (rr == row && cc == col) {
-                            int child_idx = 1 + key_index;
-                            pressed_key_btn = lv_obj_get_child(root, child_idx);
-                            if (pressed_key_btn) {
-                                lv_obj_set_style_bg_color(pressed_key_btn, lv_color_hex(0xFF9800), 0); // Orange highlight
+                if (!key_matrix) {
+                    // Find the key button object (legacy per-key objects)
+                    int key_index = 0;
+                    for (int rr = 0; rr < num_rows; rr++) {
+                        for (int cc = 0; cc < max_row_lengths[rr]; cc++) {
+                            if (rr == row && cc == col) {
+                                int child_idx = 1 + key_index;
+                                pressed_key_btn = lv_obj_get_child(root, child_idx);
+                                if (pressed_key_btn) {
+                                    lv_obj_set_style_bg_color(pressed_key_btn, lv_color_hex(0xFF9800), 0); // Orange highlight
+                                }
                             }
+                            key_index++;
                         }
-                        key_index++;
                     }
                 }
                 const char* key = current_keys[row][col];
@@ -699,6 +984,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                         is_caps = true;
                     }
                     update_key_labels();
+                    ESP_LOGD(TAG, "shift toggled: caps=%d capslock=%d", (int)is_caps, (int)is_capslock);
                 } else if (strcmp(key, "SYM") == 0) {
                     /* Switching to symbols mode rebuilds the keyboard and deletes existing key buttons.
                      * Clear any stored pointer to the previously pressed key to avoid accessing
@@ -729,6 +1015,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                         adjusted_char = is_caps ? toupper(adjusted_char) : tolower(adjusted_char);
                     }
                     add_char_to_buffer(adjusted_char);
+                    ESP_LOGD(TAG, "char added: %c", adjusted_char);
                 }
             }
         }
@@ -794,6 +1081,157 @@ View keyboard_view = {
     .name = "Keyboard Screen",
     .get_hardwareinput_callback = get_keyboard_callback
 };
+
+static void key_matrix_event_cb(lv_event_t *e) {
+#if defined(CONFIG_USE_TOUCHSCREEN)
+    lv_obj_t *m = lv_event_get_target(e);
+    if (!m) return;
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+    int id = lv_btnmatrix_get_selected_btn(m);
+    if (id < 0) return;
+    const char *txt = lv_btnmatrix_get_btn_text(m, id);
+    if (!txt) return;
+    if (strcmp(txt, LV_SYMBOL_UP) == 0 || strcmp(txt, "SHIFT") == 0) {
+        if (is_caps) {
+            is_capslock = !is_capslock;
+            is_caps = is_capslock;
+        } else {
+            is_caps = true;
+        }
+        build_key_matrix();
+    } else if (strcmp(txt, "SYM") == 0) {
+        is_symbols_mode = true;
+        build_key_matrix();
+    } else if (strcmp(txt, "ABC") == 0) {
+        is_symbols_mode = false;
+        build_key_matrix();
+    } else if (strcmp(txt, "Exit") == 0) {
+        if (keyboard_return_view) display_manager_switch_view(keyboard_return_view);
+        else display_manager_switch_view(&options_menu_view);
+    } else if (strcmp(txt, "Done") == 0) {
+        submit_text();
+    } else if (strcmp(txt, LV_SYMBOL_BACKSPACE) == 0 || strcmp(txt, "DEL") == 0) {
+        remove_char_from_buffer();
+    } else if (strcmp(txt, " ") == 0) {
+        add_char_to_buffer(' ');
+    } else if (strlen(txt) == 1) {
+        char c = txt[0];
+        if (!is_symbols_mode && isalpha((unsigned char)c)) {
+            c = (is_capslock || is_caps) ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+        }
+        add_char_to_buffer_raw(c);
+        if (is_caps && !is_capslock) {
+            is_caps = false;
+            build_key_matrix();
+        }
+    }
+#else
+    (void)e;
+#endif
+}
+
+static void build_key_matrix(void) {
+#if defined(CONFIG_USE_TOUCHSCREEN)
+    if (!root) return;
+    int screen_width = LV_HOR_RES;
+    int screen_height = LV_VER_RES;
+    int status_bar_height = 20;
+    int padding = 5;
+    int display_height = 40;
+    int keys_start_y = status_bar_height + display_height + padding * 2;
+    int keys_area_height = screen_height - keys_start_y - padding;
+
+    const char *(*current_keys)[10] = get_current_keys();
+    const int *row_lens = get_current_row_lengths();
+
+    static char map_text_storage[64][8];
+    int map_idx = 0;
+    int btn_idx = 0;
+    shift_btn_id = -1;
+    for (int r = 0; r < num_rows; r++) {
+        for (int c = 0; c < row_lens[r]; c++) {
+            const char *src = current_keys[r][c];
+            const char *label = src;
+            if (is_shift_key(src)) label = LV_SYMBOL_UP;
+            else if (is_del_key(src)) label = LV_SYMBOL_BACKSPACE;
+            else if (!is_symbols_mode && is_alpha_key(src)) {
+                char ch = is_caps ? (char)toupper((unsigned char)src[0]) : (char)tolower((unsigned char)src[0]);
+                map_text_storage[btn_idx][0] = ch;
+                map_text_storage[btn_idx][1] = '\0';
+                label = map_text_storage[btn_idx];
+            }
+            if (label == src) {
+                size_t n = strlen(label);
+                if (n > sizeof(map_text_storage[0]) - 1) n = sizeof(map_text_storage[0]) - 1;
+                memcpy(map_text_storage[btn_idx], label, n);
+                map_text_storage[btn_idx][n] = '\0';
+                label = map_text_storage[btn_idx];
+            }
+            btn_map[map_idx++] = label;
+            if (is_shift_key(src)) shift_btn_id = btn_idx;
+            btn_idx++;
+        }
+        if (r < num_rows - 1) {
+            btn_map[map_idx++] = "\n";
+        }
+    }
+    btn_map[map_idx] = "";
+    btn_map_len = map_idx;
+
+    if (!key_matrix) {
+        key_matrix = lv_btnmatrix_create(root);
+        lv_obj_remove_style_all(key_matrix);
+        lv_obj_set_pos(key_matrix, padding, keys_start_y);
+        lv_obj_set_size(key_matrix, screen_width - 2 * padding, keys_area_height);
+        lv_obj_set_style_bg_opa(key_matrix, LV_OPA_TRANSP, 0);
+        lv_obj_add_style(key_matrix, &style_key_btn, LV_PART_ITEMS);
+        lv_obj_add_style(key_matrix, &style_key_label, LV_PART_ITEMS);
+        lv_obj_add_event_cb(key_matrix, key_matrix_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    } else {
+        lv_obj_set_pos(key_matrix, padding, keys_start_y);
+        lv_obj_set_size(key_matrix, screen_width - 2 * padding, keys_area_height);
+    }
+
+    lv_btnmatrix_set_map(key_matrix, btn_map);
+
+    int id = 0;
+    for (int r = 0; r < num_rows; r++) {
+        for (int c = 0; c < row_lens[r]; c++) {
+            const char *src = current_keys[r][c];
+            int w = 1;
+            if (!is_symbols_mode) {
+                if (strcmp(src, "SHIFT") == 0 || strcmp(src, "DEL") == 0 || strcmp(src, " ") == 0) w = 2;
+            }
+            lv_btnmatrix_set_btn_width(key_matrix, id, w);
+            id++;
+        }
+    }
+
+    if (shift_btn_id >= 0) {
+        lv_btnmatrix_set_btn_ctrl(key_matrix, shift_btn_id, LV_BTNMATRIX_CTRL_CHECKABLE | LV_BTNMATRIX_CTRL_CLICK_TRIG);
+        if (is_caps || is_capslock) lv_btnmatrix_set_btn_ctrl(key_matrix, shift_btn_id, LV_BTNMATRIX_CTRL_CHECKED);
+        else lv_btnmatrix_clear_btn_ctrl(key_matrix, shift_btn_id, LV_BTNMATRIX_CTRL_CHECKED);
+    }
+
+    if (is_capslock) {
+        lv_obj_set_style_bg_color(key_matrix, lv_color_hex(0x00BFFF), LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(key_matrix, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_CHECKED);
+    } else if (is_caps) {
+        lv_obj_set_style_bg_color(key_matrix, lv_color_hex(0xFFD600), LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(key_matrix, lv_color_hex(0x000000), LV_PART_ITEMS | LV_STATE_CHECKED);
+    } else {
+        lv_obj_set_style_bg_color(key_matrix, lv_color_hex(0x7B1FA2), LV_PART_ITEMS | LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(key_matrix, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_DEFAULT);
+    }
+
+    if (radius_override_active) {
+        lv_style_set_radius(&style_key_btn, saved_key_radius);
+        if (input_label) lv_obj_set_style_radius(input_label, saved_input_label_radius, 0);
+        radius_override_active = false;
+    }
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
+#endif
+}
 
 static void get_key_position(int row, int col, int *x, int *width, bool symbols_mode) {
     int screen_width = LV_HOR_RES;
@@ -864,6 +1302,9 @@ static lv_obj_t *get_key_button_at(int row, int col) {
 
 static void apply_selection_highlight(void) {
     if (!root) return;
+#if defined(CONFIG_USE_TOUCHSCREEN)
+    if (key_matrix) return; // btnmatrix handles its own visuals on touch builds
+#endif
     ensure_valid_cursor();
     // reset all key borders to default
     int key_index = 0;

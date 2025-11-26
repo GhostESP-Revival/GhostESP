@@ -427,7 +427,6 @@
 
         .settings-section {
             flex: 1 1 calc(50% - 20px);
-            border: 2px solid var(--border-color);
             padding: 20px;
             border-radius: 30px;
             position: relative;
@@ -796,7 +795,6 @@
         /* Settings Section Styles */
         .settings-section {
             background: rgba(10, 10, 15, 0.0);
-            border: 2px solid var(--border-color);
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
@@ -811,12 +809,23 @@
             background: none;
             -webkit-text-fill-color: var(--primary-color);
         }
-
-        .settings-section label {
-            color: var(--primary-color);
-            font-weight: 500;
-            margin-bottom: 8px;
-            display: block;
+        
+        /* No-card variant to avoid double card effect (card inside card) */
+        .settings-section.no-card {
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        /* Remove outer card and titles for Dual Comm sections */
+        #DualComm > .settings-section:first-of-type,
+        #DualComm .settings-grid > .settings-section:first-of-type {
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        #DualComm > .settings-section:first-of-type > h2,
+        #DualComm .settings-grid > .settings-section:first-of-type > h2 {
+            display: none;
         }
 
         .input-group {
@@ -924,8 +933,6 @@
 
         /* Terminal Styling */
         .terminal-container {
-            background: rgba(10, 10, 15, 0.95);
-            border: 2px solid var(--border-color);
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
@@ -937,80 +944,134 @@
             flex-direction: column;
         }
 
+        /* Dual Comm Terminal Specific Styles */
+        .dual-comm-terminal {
+            display: flex;
+            flex-direction: column;
+            min-height: 500px;
+            max-height: 700px;
+            height: auto;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .terminal-header h2 {
+            margin: 0;
+            font-size: 1.4rem;
+        }
+
+        .terminal-description {
+            text-align: center;
+            color: var(--text-secondary);
+            margin: 0 0 16px 0;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
         .terminal-output {
             flex: 1;
-            background-color: rgba(0, 0, 0, 0.7);
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.6));
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 18px;
+            margin: 0 0 16px 0;
             font-family: var(--font-mono);
             color: var(--text-primary);
             white-space: pre-wrap;
             word-wrap: break-word;
-            font-size: 14px;
-            line-height: 1.4;
+            font-size: 13px;
+            line-height: 1.6;
             overflow-y: auto;
             overflow-x: hidden;
+            min-height: 300px;
+            max-height: 450px;
             scrollbar-width: thin;
-            scrollbar-color: var(--primary-color) var(--background-color);
+            scrollbar-color: rgba(255, 255, 255, 0.3) rgba(255, 255, 255, 0.05);
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
         }
 
         .terminal-output::-webkit-scrollbar {
-            width: 8px;
+            width: 6px;
         }
 
         .terminal-output::-webkit-scrollbar-track {
-            background: var(--background-color);
-            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
         }
 
         .terminal-output::-webkit-scrollbar-thumb {
-            background: var(--primary-color);
-            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
         }
 
-        .terminal-input-container {
+        .terminal-output::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+                .terminal-input-container {
             display: flex;
-            gap: 10px;
+            gap: 12px;
             margin-top: auto;
-            padding-top: 15px;
-            border-top: 1px solid var(--border-color);
+            padding-top: 0;
+            border-top: none;
         }
 
         .terminal-input-container input {
             flex: 1;
-            background-color: rgba(0, 0, 0, 0.5);
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            padding: 12px 15px;
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.5));
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 14px 18px;
             color: var(--text-primary);
             font-family: var(--font-mono);
             font-size: 14px;
             transition: all 0.3s ease;
         }
 
+        .terminal-input-container input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 13px;
+        }
+
         .terminal-input-container input:focus {
             outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
-            background-color: rgba(0, 0, 0, 0.7);
+            border-color: rgba(255, 255, 255, 0.35);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.7));
         }
 
         .terminal-input-container button {
-            min-width: 100px;
+            min-width: 90px;
             margin: 0;
-            padding: 12px 20px;
+            padding: 14px 24px;
             font-size: 14px;
-            background: rgba(255, 255, 255, 0.1);
+            font-weight: 600;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.08));
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
             transition: all 0.3s ease;
+            width: auto;            /* override global button width */
+            max-width: none;        /* ensure no inherited max-width */
         }
 
         .terminal-input-container button:hover {
-            background: var(--primary-color);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85));
             color: var(--background-color);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .terminal-input-container button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
         }
 
         @media (max-width: 768px) {
@@ -1019,89 +1080,154 @@
                 min-height: 300px;
             }
 
+            .dual-comm-terminal {
+                min-height: 400px;
+                max-height: 600px;
+            }
+
+            .terminal-output {
+                min-height: 250px;
+                max-height: 350px;
+                font-size: 12px;
+                padding: 14px;
+            }
+
             .terminal-input-container {
-                flex-direction: column;
                 gap: 8px;
             }
 
+            .terminal-input-container input {
+                font-size: 13px;
+                padding: 12px 14px;
+            }
+
             .terminal-input-container button {
-                width: 100%;
+                font-size: 13px;
+                padding: 12px 18px;
+                min-width: 70px;
+            }
+
+            .terminal-header h2 {
+                font-size: 1.2rem;
+            }
+
+            .comm-state-container {
+                padding: 16px;
+                gap: 16px;
+            }
+
+            .comm-state-display {
+                font-size: 1em;
             }
         }
 
         @media (max-width: 480px) {
-            .terminal-container {
-                padding: 10px;
-                height: calc(100vh - 120px);
+            .terminal-input-container {
+                gap: 10px;
             }
 
-            .terminal-output {
-                font-size: 12px;
-                padding: 10px;
+            .terminal-input-container input::placeholder {
+                font-size: 11px;
             }
-
-            .terminal-input-container input,
-            .terminal-input-container button {
-                font-size: 12px;
-                padding: 10px 15px;
-            }
+            /* Ensure send button stays compact on mobile */
+            .terminal-input-container button { width: auto; min-width: 70px; }
         }
 
-        /* Quick Commands Styling */
+        /* Quick Commands Styling - Modern Card Grid */
         .quick-commands-container {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
             margin-bottom: 20px;
         }
 
         .command-category {
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+            border: none; /* removed white border around quick command cards */
+            border-radius: 12px;
             overflow: hidden;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .command-category:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+            border-color: transparent;
         }
 
         .category-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 15px;
-            background: rgba(255, 255, 255, 0.05);
+            padding: 14px 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
             cursor: pointer;
-            transition: background-color 0.3s ease;
+            transition: all 0.3s ease;
             user-select: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
 
         .category-header:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
         }
 
         .category-header span:first-child {
-            font-weight: 500;
-            color: var(--text-primary);
+            font-weight: 600;
+            color: var(--primary-color);
+            font-size: 0.95em;
+            letter-spacing: 0.02em;
         }
 
         .category-arrow {
             color: var(--text-secondary);
-            font-size: 0.8em;
-            transition: transform 0.3s ease;
+            font-size: 0.75em;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0.7;
         }
 
         .category-content {
             display: none;
-            padding: 15px;
-            background: rgba(0, 0, 0, 0.1);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.15);
         }
 
         .category-content.show {
-            display: block;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .category-content button {
-            margin: 5px 5px 5px 0;
-            display: inline-block;
+            flex: 0 1 auto;
+            margin: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85em;
+            padding: 8px 14px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+        }
+
+        .category-content button:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.25);
+            transform: translateY(-1px);
         }
 
         .category-header.expanded .category-arrow {
@@ -1109,14 +1235,18 @@
         }
 
         @media (max-width: 768px) {
+            .quick-commands-container {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
             .category-content {
                 padding: 10px;
             }
             
             .category-content button {
-                margin: 3px 3px 3px 0;
                 font-size: 0.8em;
-                padding: 6px 12px;
+                padding: 7px 12px;
             }
         }
 
@@ -1125,15 +1255,108 @@
             flex-wrap: wrap;
             gap: 20px;
             margin-top: 15px;
-            margin-bottom: 15px; /* Add space before action buttons */
+            margin-bottom: 15px;
         }
 
         .pin-group {
             flex: 1;
-            min-width: calc(50% - 10px); /* Aim for two groups side-by-side */
-            background: rgba(0, 0, 0, 0.2);
-            padding: 15px;
-            border-radius: 8px;
+            min-width: calc(50% - 10px);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+            padding: 18px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .pin-group:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+        }
+
+        /* Modern Connection State Indicator */
+        .comm-state-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .comm-state-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .comm-state-label {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .comm-state-display {
+            font-weight: 700;
+            color: var(--primary-color);
+            font-size: 1.1em;
+            letter-spacing: 0.02em;
+        }
+
+        .comm-state-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #666;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .comm-state-indicator.connected {
+            background-color: var(--ios-green);
+            box-shadow: 0 0 12px rgba(52, 199, 89, 0.6), 0 0 4px rgba(52, 199, 89, 0.8);
+        }
+
+        .comm-state-indicator.connected::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: rgba(52, 199, 89, 0.2);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0.6;
+            }
+            50% {
+                transform: translate(-50%, -50%) scale(1.5);
+                opacity: 0;
+            }
+        }
+
+        .comm-state-indicator.disconnected {
+            background-color: #ff3b30;
+        }
+
+        .comm-state-indicator.discovering {
+            background-color: #ff9500;
+            animation: blink 1.5s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
         }
 
         .settings-section h3 { /* Style h3 within settings sections */
@@ -1408,7 +1631,7 @@
     <div class="container">
         <div class="page-title">
             <h1 class="title-text">GhostESP: Revival</h1>
-            <span class="version-badge">v1.8 dev</span>
+            <span class="version-badge">v1.8.1</span>
         </div>
         <!-- Tab Navigation -->
         <div class="tab">
@@ -1998,9 +2221,12 @@
         
         <!-- Terminal Tab Content -->
         <div id="Terminal" class="tabcontent">
-            <div class="settings-section terminal-container">
-                <h2>Device Terminal</h2>
-                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 10px;">
+            <div class="settings-section terminal-container dual-comm-terminal">
+                <div class="terminal-header">
+                    <h2>Device Terminal</h2>
+                    <button class="small" onclick="clearTerminal()" style="margin: 0;">Clear</button>
+                </div>
+                <p class="terminal-description" style="text-align: center; color: var(--text-secondary); margin-bottom: 10px;">
                     <strong>Note:</strong> Running Wi-Fi commands (e.g., <code>scanap</code>, <code>connect</code>, <code>startportal</code>) will disconnect you from this web interface.
                 </p>
                 <div id="terminalOutput" class="terminal-output"></div>
@@ -2015,13 +2241,14 @@
         <div id="DualComm" class="tabcontent">
             <!-- Connection State -->
             <div class="settings-section">
-                <h2>Connection State</h2>
-                <div style="display: flex; justify-content: center; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span id="comm-state-display" style="font-weight: bold; color: var(--primary-color); font-size: 1.2em;">Unknown</span>
-                        <div id="comm-state-indicator" style="width: 12px; height: 12px; border-radius: 50%; background-color: #666;"></div>
+                <h2>Connection Status</h2>
+                <div class="comm-state-container">
+                    <div class="comm-state-info">
+                        <span class="comm-state-label">Status:</span>
+                        <span id="comm-state-display" class="comm-state-display">Unknown</span>
+                        <div id="comm-state-indicator" class="comm-state-indicator"></div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div>
                         <button class="small" onclick="disconnectFromPeer()">Disconnect</button>
                     </div>
                 </div>
@@ -2042,16 +2269,16 @@
                                 <label for="comm-rx-pin">RX Pin:</label>
                                 <input type="number" id="comm-rx-pin" min="0" max="48" placeholder="7">
                             </div>
-                            <button class="update-comm-pins-btn small">Update Pins</button>
+                            <div class="action-buttons">
+                                <button class="update-comm-pins-btn small">Update Pins</button>
+                                <button class="refresh-comm-pins-btn small">Refresh Current Values</button>
+                            </div>
+
+                            <p style="font-size: 0.9em; color: var(--text-secondary); margin-top: 10px;">
+                                <strong>Note:</strong> You will need to disconnect from any connected peer or discovery to update pins. Default pins are TX:17, RX:16 on ESP32, TX:6, RX:7 on other models. Make sure both devices use the same pin configuration for communication.
+                            </p>
                         </div>
                     </div>
-                    <div class="action-buttons">
-                        <button class="refresh-comm-pins-btn small">Refresh Current Values</button>
-                    </div>
-                    <p style="font-size: 0.9em; color: var(--text-secondary); margin-top: 10px;">
-                        <strong>Note:</strong> You will need to disconnect from any connected peer or discovery to update pins Default pins are TX:17, RX:16 on ESP32, TX:6, RX:7 on other models.
-                        Make sure both devices use the same pin configuration for communication.
-                    </p>
                 </div>
 
                 <!-- Quick Commands -->
@@ -2147,14 +2374,17 @@
             </div>
 
             <!-- Dual Communication Terminal -->
-            <div class="settings-section terminal-container">
-                <h2>Dual Communication Terminal</h2>
-                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 10px;">
-                    <strong>Commands sent to connected peer device</strong> - Type commands like <code>scanap</code>, <code>attack -d</code>, <code>beaconspam -r</code>
+            <div class="settings-section dual-comm-terminal">
+                <div class="terminal-header">
+                    <h2>Terminal</h2>
+                    <button class="small" onclick="clearCommTerminal()" style="margin: 0;">Clear</button>
+                </div>
+                <p class="terminal-description">
+                    Send commands to connected peer device
                 </p>
                 <div id="commTerminalOutput" class="terminal-output"></div>
                 <div class="terminal-input-container">
-                    <input type="text" id="commTerminalInput" placeholder="Enter command to send to peer...">
+                    <input type="text" id="commTerminalInput" placeholder="Type command (e.g., scanap, attack -d, beaconspam -r)..." autocomplete="off">
                     <button onclick="sendCommTerminalCommand()">Send</button>
                 </div>
             </div>
@@ -2169,6 +2399,8 @@
         let navigationStack = [];     // Keeps track of the navigation path
         let logOffset = 0;
         const termOutput = document.getElementById('terminalOutput');
+        const COMM_STATUS_POLL_INTERVAL_MS = 1000;
+        const COMM_LOG_POLL_INTERVAL_MS = 500;
 
         async function uploadFile() {
             const fileInput = document.getElementById('sdcard-upload');
@@ -2467,17 +2699,21 @@
             if (tabName === "SDCard") {
                 fetchSDCardData();
             } else if (tabName === "DualComm") {
-                // Initialize terminal content baseline to avoid showing historical logs
+                lastProcessedLineCount = 0;
+                lastLogLine = null;
+                clearCommTerminal(); // Start with clean terminal
                 fetch('/api/logs')
                     .then(response => response.text())
                     .then(logs => {
-                        lastTerminalContent = logs;
+                        const lines = logs.split(/\r?\n/).filter(line => line.trim().length > 0);
+                        lastProcessedLineCount = lines.length;
+                        lastLogLine = lines.length ? lines[lines.length - 1] : null;
                     })
-                    .catch(error => console.error('Error initializing terminal baseline:', error));
-                
-                startCommStatusPolling();
-                addCommTerminalMessage('Dual Communication tab activated');
-                clearCommTerminal(); // Start with clean terminal
+                    .catch(error => console.error('Error initializing terminal baseline:', error))
+                    .finally(() => {
+                        startCommStatusPolling();
+                        addCommTerminalMessage('Dual Communication tab activated');
+                    });
             } else if (tabName === "Settings") {
                 showSettingsHome();
             } else if (tabName === "Help") {
@@ -3025,7 +3261,7 @@
                         }
                         input.value = '';
                     })
-                    .catch(error => {
+                        .catch(error => {
                         console.error('Error:', error);
                         const termOutput = document.getElementById('terminalOutput');
                         termOutput.innerText += '\nError executing command: ' + error.message;
@@ -3049,9 +3285,18 @@
         // Start polling for terminal updates
         updateTerminal();
 
+        // Clear button for the normal terminal
+        function clearTerminal() {
+            const termOutput = document.getElementById('terminalOutput');
+            termOutput.innerText = 'Device Terminal ready...';
+        }
+
         // Dual Communication JavaScript Functions
         let commStatusInterval = null;
+        let commLogInterval = null;
         let commTerminalMessages = [];
+        let lastLogLine = null;
+        let lastProcessedLineCount = 0;
 
         // Function to update dual communication status
         function updateCommStatus() {
@@ -3178,12 +3423,9 @@
         // Function to add message to dual communication terminal
         function addCommTerminalMessage(message) {
             commTerminalMessages.push(message);
-            
-            // Keep only last 100 messages
-            if (commTerminalMessages.length > 100) {
-                commTerminalMessages = commTerminalMessages.slice(-100);
+            if (commTerminalMessages.length > 500) {
+                commTerminalMessages = commTerminalMessages.slice(-500);
             }
-            
             updateCommTerminalDisplay();
         }
 
@@ -3208,44 +3450,76 @@
             if (commStatusInterval) {
                 clearInterval(commStatusInterval);
             }
-            updateCommStatus(); // Initial update
-            commStatusInterval = setInterval(() => {
-                updateCommStatus();
-                updateCommLogFromTerminal();
-            }, 2000); // Update every 2 seconds
+            if (commLogInterval) {
+                clearInterval(commLogInterval);
+            }
+            updateCommStatus();
+            updateCommLogFromTerminal();
+            commStatusInterval = setInterval(updateCommStatus, COMM_STATUS_POLL_INTERVAL_MS);
+            commLogInterval = setInterval(updateCommLogFromTerminal, COMM_LOG_POLL_INTERVAL_MS);
         }
 
         // Function to check terminal logs for dual comm responses
-        let lastTerminalContent = '';
         function updateCommLogFromTerminal() {
             fetch('/api/logs')
                 .then(response => response.text())
                 .then(logs => {
-                    if (logs !== lastTerminalContent) {
-                        // Find new ESP Comm responses
-                        const newContent = logs.substring(lastTerminalContent.length);
-                        const lines = newContent.split('\n');
-                        
-                        lines.forEach(line => {
-                            if (line.includes('ESP Comm Response:')) {
-                                // Extract the response part
-                                const responseText = line.replace(/^.*ESP Comm Response:\s*/, '').trim();
-                                if (responseText) {
-                                    addCommTerminalMessage(responseText);
-                                }
-                            } else if (line.includes('Discovered peer:')) {
-                                addCommTerminalMessage(line.trim());
-                            } else if (line.includes('Handshake complete')) {
-                                addCommTerminalMessage(line.trim());
-                            } else if (line.includes('Connecting to peer:')) {
-                                addCommTerminalMessage(line.trim());
-                            } else if (line.includes('Sent command:')) {
-                                addCommTerminalMessage(line.trim());
-                            }
-                        });
-                        
-                        lastTerminalContent = logs;
+                    const lines = logs.split(/\r?\n/).filter(line => line.trim().length > 0);
+                    if (lines.length === 0) {
+                        lastProcessedLineCount = 0;
+                        lastLogLine = null;
+                        return;
                     }
+
+                    let startIndex = 0;
+                    let resetBeforeAppend = false;
+
+                    if (lines.length < lastProcessedLineCount) {
+                        resetBeforeAppend = true;
+                    } else {
+                        startIndex = lastProcessedLineCount;
+                        if (lastLogLine !== null) {
+                            const lastIdx = lines.lastIndexOf(lastLogLine);
+                            if (lastIdx !== -1 && lastIdx + 1 > startIndex) {
+                                startIndex = lastIdx + 1;
+                            }
+                        }
+                    }
+
+                    if (startIndex < 0 || startIndex > lines.length) {
+                        startIndex = lines.length;
+                    }
+
+                    const newLines = lines.slice(startIndex);
+                    if (newLines.length === 0) {
+                        lastProcessedLineCount = lines.length;
+                        lastLogLine = lines[lines.length - 1];
+                        return;
+                    }
+
+                    if (resetBeforeAppend) {
+                        commTerminalMessages = [];
+                    }
+
+                    newLines.forEach(line => {
+                        if (line.includes('ESP Comm Response:')) {
+                            const responseText = line.replace(/^.*ESP Comm Response:\s*/, '').trim();
+                            if (responseText) {
+                                addCommTerminalMessage(responseText);
+                            }
+                        } else if (line.includes('Discovered peer:')) {
+                            addCommTerminalMessage(line.trim());
+                        } else if (line.includes('Handshake complete')) {
+                            addCommTerminalMessage(line.trim());
+                        } else if (line.includes('Connecting to peer:')) {
+                            addCommTerminalMessage(line.trim());
+                        } else if (line.includes('Sent command:')) {
+                            addCommTerminalMessage(line.trim());
+                        }
+                    });
+
+                    lastProcessedLineCount = lines.length;
+                    lastLogLine = lines[lines.length - 1];
                 })
                 .catch(error => {
                     console.error('Error fetching terminal logs for dual comm:', error);
@@ -3257,6 +3531,10 @@
             if (commStatusInterval) {
                 clearInterval(commStatusInterval);
                 commStatusInterval = null;
+            }
+            if (commLogInterval) {
+                clearInterval(commLogInterval);
+                commLogInterval = null;
             }
         }
 

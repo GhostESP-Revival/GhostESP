@@ -5,14 +5,18 @@
 #include "managers/views/app_gallery_screen.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "managers/views/clock_screen.h"
 #include "managers/views/settings_screen.h"
+#include "core/esp_comm_manager.h"
 #ifdef CONFIG_HAS_NFC
 #include "managers/views/nfc_view.h"
 #endif
 #if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
 #endif
+
+LV_IMG_DECLARE(dualcomm);
 
 static const char *TAG = "MainMenu";
 
@@ -32,8 +36,9 @@ static int touch_start_x;
 static int touch_start_y;
 static bool touch_started = false;
 static bool is_animating = false;
-static const int SWIPE_THRESHOLD = 50;
-static const int TAP_THRESHOLD = 10; // Add a threshold for tap detection
+// touch gesture thresholds
+#define SWIPE_THRESHOLD 50
+#define TAP_THRESHOLD 10 // Add a threshold for tap detection
 static MenuLayoutType current_layout = MENU_LAYOUT_CAROUSEL;
 
 // Grid layout variables
@@ -64,31 +69,80 @@ typedef struct {
 // Define colors as compile-time constants
 menu_item_t menu_items[] = {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    {"BLE", &bluetooth, 0},
+    {"BLE", &bluetooth, 0, {{0}}},
 #endif
-    {"WiFi", &wifi, 1}, // applies to all boards
+    {"WiFi", &wifi, 1, {{0}}}, // applies to all boards
 #ifdef CONFIG_HAS_GPS
-    {"GPS", &Map, 2},
+    {"GPS", &Map, 2, {{0}}},
 #endif
 #if CONFIG_HAS_INFRARED
-    {"Infrared", &infrared, 0}, // main infrared icon
+    {"Infrared", &infrared, 0, {{0}}}, // main infrared icon
 #endif
 #ifdef CONFIG_HAS_NFC
-    {"NFC", &nfc_icon, 2},
+    {"NFC", &nfc_icon, 2, {{0}}},
 #endif
-    {"Apps", &GESPAppGallery, 3}, // applies to all boards
+    {"Apps", &GESPAppGallery, 3, {{0}}}, // applies to all boards
 #ifdef CONFIG_HAS_RTC_CLOCK
-    {"Clock", &clock_icon, 4},
+    {"Clock", &clock_icon, 4, {{0}}},
 #endif
-    {"Settings", &settings_icon, 5} // applies to all boards
+    {"Dual Comm", &dualcomm, 1, {{0}}},
+    {"Settings", &settings_icon, 5, {{0}}}, // applies to all boards
 };
 
 static int num_items = sizeof(menu_items) / sizeof(menu_items[0]);
 lv_obj_t *current_item_obj = NULL;
+// track slide direction for carousel reuse callback
+static bool carousel_next_slide_left = false;
 
 // Add navigation button objects at file scope
 static lv_obj_t *left_nav_btn = NULL;
 static lv_obj_t *right_nav_btn = NULL;
+
+typedef struct {
+    lv_obj_t *card;
+    lv_obj_t *icon;
+    lv_obj_t *label;
+    const lv_img_dsc_t *icon_src;
+    const char *label_text;
+    lv_color_t border_color;
+    bool icon_recolor_enabled;
+    int item_index;
+} carousel_card_cache_t;
+
+static carousel_card_cache_t carousel_cache = {0};
+
+static int get_total_menu_items(void) {
+    return (int)(sizeof(menu_items) / sizeof(menu_items[0]));
+}
+
+static int get_dual_comm_menu_index(void) {
+    int total = get_total_menu_items();
+    for (int i = 0; i < total; ++i) {
+        if (strcmp(menu_items[i].name, "Dual Comm") == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int visible_index_to_menu_index(int visible_index, bool dual_comm_connected) {
+    int dual_index = get_dual_comm_menu_index();
+    if (dual_index < 0 || dual_comm_connected) {
+        return visible_index;
+    }
+    if (visible_index < dual_index) {
+        return visible_index;
+    }
+    return visible_index + 1;
+}
+
+static bool colors_equal(lv_color_t a, lv_color_t b) {
+#if LV_COLOR_DEPTH == 32
+    return a.full == b.full;
+#else
+    return lv_color_to16(a) == lv_color_to16(b);
+#endif
+}
 
 static void init_menu_colors(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -110,39 +164,152 @@ static void init_menu_colors(void) {
         {0xFF4500,0xFF8C00,0xFFD700,0xFF1493,0x8B008B,0x2E0854}, // Sunset
         {0x556B2F,0x6B8E23,0x228B22,0x2E8B57,0x8FBC8F,0x8B4513}  // Forest
     };
-    for (int i = 0; i < num_items; i++) { 
-        // bug here - we used to assume that the index of each menu item never changes. By removing options we dont need their index can change
-        // perhaps this could be fixed by adding an enabled bool for each menu item, and only drawing the menu icon if enabled
-        menu_items[i].border_color = lv_color_hex(palettes[theme][menu_items[i].palette_index]);
+    const int palette_count = (int)(sizeof(palettes) / sizeof(palettes[0]));
+    const int palette_len = (int)(sizeof(palettes[0]) / sizeof(palettes[0][0]));
+    int theme_index = (int)theme;
+    if (theme_index < 0 || theme_index >= palette_count) {
+        theme_index = 0;
+    }
+
+    bool connected = esp_comm_manager_is_connected();
+    for (int visible = 0; visible < num_items; visible++) {
+        int menu_index = visible_index_to_menu_index(visible, connected);
+        int slot = menu_items[menu_index].palette_index;
+        if (slot < 0 || slot >= palette_len) {
+            slot = 0;
+        }
+        menu_items[menu_index].border_color = lv_color_hex(palettes[theme_index][slot]);
     }
 }
 
 // Animation callback wrapper
 static void anim_set_x(void *obj, int32_t v) {
-    lv_obj_set_x((lv_obj_t *)obj, (lv_coord_t)v);
+    lv_obj_t *o = (lv_obj_t *)obj;
+    /* avoid redundant calls: only update when position actually changed */
+    lv_coord_t curr_x = lv_obj_get_x(o);
+    if (curr_x == (lv_coord_t)v) return;
+    lv_obj_set_x(o, (lv_coord_t)v);
 }
 
 // Add this helper at file scope if not present:
 static void fade_out_ready_cb(lv_anim_t *a) {
+    // default behavior: delete object when animation completes
     lv_obj_del((lv_obj_t *)a->var);
+}
+
+// forward declarations needed by carousel_fade_out_ready_cb
+static void anim_set_opa(void *obj, int32_t v);
+static void fade_in_ready_cb(lv_anim_t *a);
+
+// ready callback used when we fade out the persistent carousel card.
+// It updates the card contents and starts the slide+fade-in animations.
+static void carousel_fade_out_ready_cb(lv_anim_t *a) {
+    lv_obj_t *obj = (lv_obj_t *)a->var;
+    int start_x = carousel_next_slide_left ? LV_HOR_RES : -LV_HOR_RES;
+
+    carousel_cache.card = obj;
+    bool connected = esp_comm_manager_is_connected();
+    int menu_index = visible_index_to_menu_index(selected_item_index, connected);
+
+    lv_color_t new_border = menu_items[menu_index].border_color;
+    bool border_changed = !colors_equal(carousel_cache.border_color, new_border);
+    if (border_changed) {
+        lv_obj_set_style_border_color(obj, new_border, LV_PART_MAIN);
+        carousel_cache.border_color = new_border;
+    }
+
+    // child 0 is expected to be the icon image
+    lv_obj_t *icon = carousel_cache.icon;
+    if (!icon) {
+        icon = lv_obj_get_child(obj, 0);
+        carousel_cache.icon = icon;
+    }
+    if (icon) {
+        const lv_img_dsc_t *new_icon = menu_items[menu_index].icon;
+        if (carousel_cache.icon_src != new_icon) {
+            lv_img_set_src(icon, new_icon);
+        }
+        carousel_cache.icon_src = new_icon;
+
+        bool wants_recolor = strcmp(menu_items[menu_index].name, "Clock") != 0;
+        if (wants_recolor) {
+            if (!carousel_cache.icon_recolor_enabled || border_changed) {
+                lv_obj_set_style_img_recolor(icon, new_border, 0);
+                lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+            }
+        } else if (carousel_cache.icon_recolor_enabled) {
+            lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
+        }
+        carousel_cache.icon_recolor_enabled = wants_recolor;
+    }
+
+    // child 1 (if present) is the label
+    lv_obj_t *label = carousel_cache.label;
+    if (!label) {
+        label = lv_obj_get_child(obj, 1);
+        carousel_cache.label = label;
+    }
+    const char *new_label = menu_items[menu_index].name;
+    if (label && carousel_cache.label_text != new_label) {
+        lv_label_set_text(label, new_label);
+    }
+    carousel_cache.label_text = new_label;
+    carousel_cache.item_index = selected_item_index;
+
+    // position off-screen at start_x then animate into center
+    lv_obj_set_x(obj, start_x);
+    lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
+
+    lv_anim_t anim_in;
+    lv_anim_init(&anim_in);
+    lv_anim_set_var(&anim_in, obj);
+    lv_anim_set_values(&anim_in, start_x, 0);
+    lv_anim_set_time(&anim_in, ANIM_DURATION);
+    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&anim_in, anim_set_x);
+    lv_anim_start(&anim_in);
+
+    lv_anim_t fade_in;
+    lv_anim_init(&fade_in);
+    lv_anim_set_var(&fade_in, obj);
+    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&fade_in, ANIM_DURATION);
+    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
+    lv_anim_set_ready_cb(&fade_in, fade_in_ready_cb);
+    lv_anim_start(&fade_in);
 }
 
 static void fade_in_ready_cb(lv_anim_t *a) {
     is_animating = false;
 }
 
+// forward declarations used by carousel_fade_out_ready_cb
+static void anim_set_opa(void *obj, int32_t v);
+static void fade_in_ready_cb(lv_anim_t *a);
+
 static void anim_set_opa(void *obj, int32_t v) {
-    lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
+    lv_obj_t *o = (lv_obj_t *)obj;
+    /* read current opacity and skip update when identical to reduce paint churn */
+    lv_opa_t curr = lv_obj_get_style_opa(o, 0);
+    if (curr == (lv_opa_t)v) return;
+    lv_obj_set_style_opa(o, v, 0);
 }
 
 static void anim_set_scale(void *obj, int32_t v) {
-    lv_obj_set_style_transform_zoom((lv_obj_t *)obj, v, 0);
+    lv_obj_t *o = (lv_obj_t *)obj;
+    /* avoid redundant zoom updates */
+    lv_coord_t curr = lv_obj_get_style_transform_zoom(o, 0);
+    if (curr == (lv_coord_t)v) return;
+    lv_obj_set_style_transform_zoom(o, v, 0);
 }
 
 static void anim_set_bg_color(void *obj, int32_t v) {
-    // v is a 24-bit RGB value
-    lv_color_t color = lv_color_hex(v);
-    lv_obj_set_style_bg_color((lv_obj_t *)obj, color, LV_PART_MAIN);
+    /* v is a 24-bit RGB value. Only change bg color if different to avoid extra repaints */
+    lv_obj_t *o = (lv_obj_t *)obj;
+    lv_color_t new_color = lv_color_hex(v);
+    lv_color_t curr_color = lv_obj_get_style_bg_color(o, LV_PART_MAIN);
+    if (colors_equal(curr_color, new_color)) return;
+    lv_obj_set_style_bg_color(o, new_color, LV_PART_MAIN);
 }
 
 // Timer callback to restore button color
@@ -204,8 +371,9 @@ static void animate_button_click(lv_obj_t *btn) {
 // rebuild the single-item carousel card when selection changes
 static void update_menu_item(bool slide_left) {
     static lv_obj_t *prev_item_obj = NULL;
+    carousel_next_slide_left = slide_left;
     is_animating = true; // Set flag to block input during animation
-    // Animate out old item if it exists
+    // If there is an existing card, animate it out and reuse it in the ready-cb
     if (current_item_obj) {
         prev_item_obj = current_item_obj;
         // Slide out
@@ -217,12 +385,11 @@ static void update_menu_item(bool slide_left) {
         lv_anim_set_time(&anim_out, ANIM_DURATION);
         lv_anim_set_path_cb(&anim_out, lv_anim_path_ease_in_out);
         lv_anim_set_exec_cb(&anim_out, anim_set_x);
-        if (!menu_item_selected) { // Only delete if not selecting
-            lv_anim_set_ready_cb(&anim_out, fade_out_ready_cb);
-        }
+        // When slide-out finishes, update the same object and animate it back in
+        lv_anim_set_ready_cb(&anim_out, carousel_fade_out_ready_cb);
         lv_anim_start(&anim_out);
 
-        // Fade out
+        // Fade out (keep object, we'll reuse it)
         lv_anim_t fade_out;
         lv_anim_init(&fade_out);
         lv_anim_set_var(&fade_out, prev_item_obj);
@@ -230,18 +397,26 @@ static void update_menu_item(bool slide_left) {
         lv_anim_set_time(&fade_out, ANIM_DURATION);
         lv_anim_set_exec_cb(&fade_out, anim_set_opa);
         lv_anim_start(&fade_out);
+
+        return; // update will be completed in carousel_fade_out_ready_cb
     }
 
-    // Create new item (off-screen, transparent)
+    // First time: create persistent carousel card, icon and label
     current_item_obj = lv_btn_create(menu_container);
+    carousel_cache.card = current_item_obj;
+    bool connected = esp_comm_manager_is_connected();
+    int menu_index = visible_index_to_menu_index(selected_item_index, connected);
+
     lv_obj_set_style_bg_color(current_item_obj, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_item_obj, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_item_obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_border_width(current_item_obj, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(current_item_obj, menu_items[selected_item_index].border_color, LV_PART_MAIN);
+    lv_obj_set_style_border_color(current_item_obj, menu_items[menu_index].border_color, LV_PART_MAIN);
     lv_obj_set_style_radius(current_item_obj, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_item_obj, false, 0);
+    carousel_cache.border_color = menu_items[menu_index].border_color;
+    carousel_cache.item_index = selected_item_index;
 
     int btn_size = LV_MIN(LV_HOR_RES, LV_VER_RES) * 0.6;
     if (LV_HOR_RES <= 128 && LV_VER_RES <= 128) {
@@ -249,63 +424,43 @@ static void update_menu_item(bool slide_left) {
     }
     lv_obj_set_size(current_item_obj, btn_size, btn_size);
 
-    // Start new item off-screen (opposite direction of swipe)
-    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
+    // initial state already visible
     lv_obj_align(current_item_obj, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_opa(current_item_obj, LV_OPA_TRANSP, 0); // Start transparent
 
+    // icon
     lv_obj_t *icon = lv_img_create(current_item_obj);
-    lv_img_set_src(icon, menu_items[selected_item_index].icon);
-
+    lv_img_set_src(icon, menu_items[menu_index].icon);
+    carousel_cache.icon = icon;
+    carousel_cache.icon_src = menu_items[menu_index].icon;
     const int icon_size = 50;
     lv_obj_set_size(icon, icon_size, icon_size);
     lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
     lv_img_set_antialias(icon, false);
-    if (strcmp(menu_items[selected_item_index].name,"Clock")) {
-        lv_obj_set_style_img_recolor(icon, menu_items[selected_item_index].border_color, 0);
+    bool recolor_enabled = strcmp(menu_items[menu_index].name, "Clock") != 0;
+    if (recolor_enabled) {
+        lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
     }
-    lv_obj_set_style_clip_corner(icon, false, 0);
-
+    carousel_cache.icon_recolor_enabled = recolor_enabled;
     int icon_x_offset = -3;
     int icon_y_offset = -5;
     int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
     int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
     lv_obj_set_pos(icon, x_pos, y_pos);
-    lv_coord_t img_width = menu_items[selected_item_index].icon->header.w;
-    lv_coord_t img_height = menu_items[selected_item_index].icon->header.h;
-    ESP_LOGD(TAG, "Button size: %d x %d, Set Icon size: %d x %d, Original: %d x %d, Pos: %d, %d\n",
-           btn_size, btn_size, icon_size, icon_size, img_width, img_height, x_pos, y_pos);
 
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
-        lv_label_set_text(label, menu_items[selected_item_index].name);
+        lv_label_set_text(label, menu_items[menu_index].name);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
+        carousel_cache.label = label;
     }
 
-    // Animate in new item (slide and fade)
-    lv_anim_t anim_in;
-    lv_anim_init(&anim_in);
-    lv_anim_set_var(&anim_in, current_item_obj);
-    lv_anim_set_values(&anim_in, start_x, 0);
-    lv_anim_set_time(&anim_in, ANIM_DURATION);
-    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
-    lv_anim_set_exec_cb(&anim_in, anim_set_x);
-    lv_anim_start(&anim_in);
+    carousel_cache.label_text = menu_items[menu_index].name;
 
-    lv_anim_t fade_in;
-    lv_anim_init(&fade_in);
-    lv_anim_set_var(&fade_in, current_item_obj);
-    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_time(&fade_in, ANIM_DURATION);
-    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
-    lv_anim_set_ready_cb(&fade_in, fade_in_ready_cb);
-    lv_anim_start(&fade_in);
-
-    // Ensure the new item is fully opaque at the end
-    lv_obj_set_style_opa(current_item_obj, LV_OPA_COVER, 0); // Always fully opaque
+    // initial state already visible
+    is_animating = false;
 }
 
 // move selection vertically for list and grid layouts; direction: -1 up, +1 down
@@ -390,42 +545,64 @@ static void menu_item_event_handler(InputEvent *event) {
             int dy = data->point.y - touch_start_y;
             touch_started = false;
 
-            // Check if touch was on navigation buttons
-            if (left_nav_btn && right_nav_btn) {
-                lv_area_t left_area, right_area;
-                lv_obj_get_coords(left_nav_btn, &left_area);
-                lv_obj_get_coords(right_nav_btn, &right_area);
-
-                // Check if touch point is within left button bounds
-                if (data->point.x >= left_area.x1 && data->point.x <= left_area.x2 &&
-                    data->point.y >= left_area.y1 && data->point.y <= left_area.y2) {
-                    ESP_LOGI(TAG, "Left navigation button touched");
-                    animate_nav_button_press(left_nav_btn);
-                    select_menu_item(selected_item_index - 1, true);
-                    return;
-                }
-
-                // Check if touch point is within right button bounds
-                if (data->point.x >= right_area.x1 && data->point.x <= right_area.x2 &&
-                    data->point.y >= right_area.y1 && data->point.y <= right_area.y2) {
-                    ESP_LOGI(TAG, "Right navigation button touched");
-                    animate_nav_button_press(right_nav_btn);
-                    select_menu_item(selected_item_index + 1, false);
-                    return;
-                }
-            }
+            // NOTE: nav button hit-tests were here previously, but that caused
+            // accidental taps when a swipe ended over the nav button. We now
+            // handle swipes first and perform stricter nav hit-tests below
+            // (require both press and release inside the button and minimal movement).
 
             // Handle different layout types
             if (current_layout == MENU_LAYOUT_CAROUSEL) {
+                // Prioritize swipe detection for carousel; if a horizontal
+                // swipe is detected, act on it and return immediately so a
+                // release-over-button doesn't trigger it.
                 if (abs(dx) > SWIPE_THRESHOLD && abs(dx) > abs(dy)) { // Swipe detected
                     if (dx < 0) {
                         select_menu_item(selected_item_index + 1, true);
                     } else {
                         select_menu_item(selected_item_index - 1, false);
                     }
-                } else if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) { // Tap detected
-                    handle_menu_item_selection(selected_item_index);
+                    return;
                 }
+
+                // If the touch both started and ended inside a nav button and
+                // the movement was small, treat it as a nav tap. Checking this
+                // here prevents the carousel tap handler from capturing nav
+                // button presses.
+                if (left_nav_btn && right_nav_btn) {
+                    lv_area_t left_area, right_area;
+                    lv_obj_get_coords(left_nav_btn, &left_area);
+                    lv_obj_get_coords(right_nav_btn, &right_area);
+
+                    bool start_in_left = (touch_start_x >= left_area.x1 && touch_start_x <= left_area.x2 &&
+                                           touch_start_y >= left_area.y1 && touch_start_y <= left_area.y2);
+                    bool end_in_left = (data->point.x >= left_area.x1 && data->point.x <= left_area.x2 &&
+                                        data->point.y >= left_area.y1 && data->point.y <= left_area.y2);
+                    if (start_in_left && end_in_left && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
+                        ESP_LOGI(TAG, "Left navigation button tapped (press+release inside)");
+                        animate_nav_button_press(left_nav_btn);
+                        select_menu_item(selected_item_index - 1, true);
+                        return;
+                    }
+
+                    bool start_in_right = (touch_start_x >= right_area.x1 && touch_start_x <= right_area.x2 &&
+                                            touch_start_y >= right_area.y1 && touch_start_y <= right_area.y2);
+                    bool end_in_right = (data->point.x >= right_area.x1 && data->point.x <= right_area.x2 &&
+                                         data->point.y >= right_area.y1 && data->point.y <= right_area.y2);
+                    if (start_in_right && end_in_right && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
+                        ESP_LOGI(TAG, "Right navigation button tapped (press+release inside)");
+                        animate_nav_button_press(right_nav_btn);
+                        select_menu_item(selected_item_index + 1, false);
+                        return;
+                    }
+                }
+
+                // If not a nav tap, treat a very small movement as a carousel tap
+                if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) { // Tap detected
+                    handle_menu_item_selection(selected_item_index);
+                    return;
+                }
+                // fallthrough: small movement or non-horizontal movement - continue
+                // to layout-specific hit-tests below
             } else if (current_layout == MENU_LAYOUT_GRID) {
                 // For grid layout, check if tap was on a grid button
                 if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
@@ -479,6 +656,10 @@ static void menu_item_event_handler(InputEvent *event) {
                         }
                     }
                 }
+
+            // nav buttons handled earlier for the carousel case; for other
+            // layouts they will be considered as part of layout-specific hit-
+            // tests or are intentionally ignored.
             }
         }
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
@@ -539,6 +720,7 @@ static void select_menu_item(int index, bool slide_left) {
 
     // Update selection for different layouts
     if (current_layout == MENU_LAYOUT_CAROUSEL) {
+        if (index == selected_item_index && current_item_obj) return;
         selected_item_index = index;
         update_menu_item(slide_left);
     } else if (current_layout == MENU_LAYOUT_GRID) {
@@ -563,7 +745,9 @@ static void select_menu_item(int index, bool slide_left) {
             // Remove highlight from previous selection
             if (selected_item_index >= 0 && selected_item_index < num_items && grid_cards[selected_item_index]) {
                 // Reset to original styling
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[selected_item_index].border_color, LV_PART_MAIN);
+                bool connected = esp_comm_manager_is_connected();
+                int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
+                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[menu_index_prev].border_color, LV_PART_MAIN);
                 lv_obj_set_style_border_width(grid_cards[selected_item_index], 2, LV_PART_MAIN); // Reset to original width
                 lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
                 lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0x000000), LV_PART_MAIN);
@@ -576,7 +760,8 @@ static void select_menu_item(int index, bool slide_left) {
                 // For non-touch devices, make highlight more prominent
 #ifdef CONFIG_USE_TOUCHSCREEN
                 // Touch devices: keep original border color
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[selected_item_index].border_color, LV_PART_MAIN);
+                int menu_index_new = visible_index_to_menu_index(selected_item_index, esp_comm_manager_is_connected());
+                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[menu_index_new].border_color, LV_PART_MAIN);
                 lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
 #else
                 // Non-touch devices: use prominent white border and larger shadow
@@ -594,7 +779,9 @@ static void select_menu_item(int index, bool slide_left) {
         if (list_buttons) {
             if (selected_item_index >= 0 && selected_item_index < num_items && list_buttons[selected_item_index]) {
                 lv_obj_t *old_btn = list_buttons[selected_item_index];
-                lv_obj_set_style_border_color(old_btn, menu_items[selected_item_index].border_color, LV_PART_MAIN);
+                bool connected = esp_comm_manager_is_connected();
+                int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
+                lv_obj_set_style_border_color(old_btn, menu_items[menu_index_prev].border_color, LV_PART_MAIN);
                 lv_obj_set_style_border_width(old_btn, 2, LV_PART_MAIN);
             }
             selected_item_index = index;
@@ -638,11 +825,14 @@ static void handle_menu_item_selection(int item_index) {
 #ifdef CONFIG_HAS_RTC_CLOCK
         {"Clock", 0, &clock_view},
 #endif
-        {"Settings", OT_Settings, &options_menu_view}
+        {"Settings", OT_Settings, &options_menu_view},
+        {"Dual Comm", OT_DualComm, &options_menu_view}
     };
 
     const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);
-    const char *name = menu_items[item_index].name;
+    bool connected = esp_comm_manager_is_connected();
+    int menu_index = visible_index_to_menu_index(item_index, connected);
+    const char *name = menu_items[menu_index].name;
     const View *target_view = NULL;
     EOptionsMenuType target_type = 0;
     for (int i = 0; i < num_actions; ++i) {
@@ -742,7 +932,9 @@ static void create_grid_menu(void) {
     int w_remainder = screen_width - total_inner_w;   // add to last col width
     int h_remainder = (avail_height) - total_inner_h; // add to last row height
 
+    bool connected = esp_comm_manager_is_connected();
     for (int i = 0; i < num_items; i++) {
+        int menu_index = visible_index_to_menu_index(i, connected);
         // Create card
         grid_cards[i] = lv_btn_create(grid_cards_container);
 
@@ -766,13 +958,13 @@ static void create_grid_menu(void) {
         lv_obj_set_style_shadow_color(grid_cards[i], lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(grid_cards[i], LV_OPA_50, LV_PART_MAIN);
         lv_obj_set_style_border_width(grid_cards[i], 2, LV_PART_MAIN);
-        lv_obj_set_style_border_color(grid_cards[i], menu_items[i].border_color, LV_PART_MAIN);
+        lv_obj_set_style_border_color(grid_cards[i], menu_items[menu_index].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(grid_cards[i], 15, LV_PART_MAIN);
         lv_obj_set_style_pad_all(grid_cards[i], 0, LV_PART_MAIN);
 
         // Add icon (dynamic sizing to fit with label below)
         lv_obj_t *icon = lv_img_create(grid_cards[i]);
-        lv_img_set_src(icon, menu_items[i].icon);
+        lv_img_set_src(icon, menu_items[menu_index].icon);
         // Dynamic label reserve to ensure text fits without pushing icon off-screen
         int reserved_for_label = (ch <= 50 ? 14 : 20);
         int avail_w = (int)(cw * 0.78f);
@@ -781,15 +973,15 @@ static void create_grid_menu(void) {
         lv_img_set_antialias(icon, false);
 
         // Color icons according to theme like other layouts
-        if (strcmp(menu_items[i].name, "Clock")) {
-            lv_obj_set_style_img_recolor(icon, menu_items[i].border_color, 0);
+        if (strcmp(menu_items[menu_index].name, "Clock")) {
+            lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
             lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         }
         lv_obj_set_style_clip_corner(icon, false, 0);
 
         // Scale icon using zoom to fit into available area
-        lv_coord_t img_w = menu_items[i].icon->header.w;
-        lv_coord_t img_h = menu_items[i].icon->header.h;
+        lv_coord_t img_w = menu_items[menu_index].icon->header.w;
+        lv_coord_t img_h = menu_items[menu_index].icon->header.h;
         int zoom_w = (img_w > 0) ? (avail_w * 256) / img_w : 256;
         int zoom_h = (img_h > 0) ? (avail_h * 256) / img_h : 256;
         int zoom = LV_MIN(zoom_w, zoom_h);
@@ -806,7 +998,7 @@ static void create_grid_menu(void) {
 
         // Add label
         lv_obj_t *label = lv_label_create(grid_cards[i]);
-        lv_label_set_text(label, menu_items[i].name);
+        lv_label_set_text(label, menu_items[menu_index].name);
         // smaller font on small tiles
         const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
         lv_obj_set_style_text_font(label, lbl_font, 0);
@@ -843,13 +1035,13 @@ static void create_grid_menu(void) {
 }
 
 static void create_list_menu(void) {
-    int button_height = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 36 : 48;
+    int button_height = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 32 : 44;
     int icon_target = button_height <= 38 ? 20 : 26;
 
     lv_obj_set_flex_flow(menu_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(menu_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(menu_container, LV_HOR_RES > 200 ? 16 : 10, 0);
-    lv_obj_set_style_pad_row(menu_container, 10, 0);
+    lv_obj_set_style_pad_row(menu_container, 6, 0);
     lv_obj_set_scroll_dir(menu_container, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_AUTO);
 
@@ -864,7 +1056,9 @@ static void create_list_menu(void) {
         return;
     }
 
+    bool connected = esp_comm_manager_is_connected();
     for (int i = 0; i < num_items; i++) {
+        int menu_index = visible_index_to_menu_index(i, connected);
         lv_obj_t *btn = lv_btn_create(menu_container);
         list_buttons[i] = btn;
         lv_obj_set_width(btn, LV_PCT(100));
@@ -873,9 +1067,9 @@ static void create_list_menu(void) {
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
         lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, menu_items[i].border_color, LV_PART_MAIN);
+        lv_obj_set_style_border_color(btn, menu_items[menu_index].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(btn, 10, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, 12, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 6, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(btn, lv_color_hex(0x000000), LV_PART_MAIN);
@@ -883,14 +1077,14 @@ static void create_list_menu(void) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
         lv_obj_t *icon = lv_img_create(btn);
-        lv_img_set_src(icon, menu_items[i].icon);
+        lv_img_set_src(icon, menu_items[menu_index].icon);
         lv_img_set_antialias(icon, false);
-        if (strcmp(menu_items[i].name, "Clock") != 0) {
-            lv_obj_set_style_img_recolor(icon, menu_items[i].border_color, 0);
+        if (strcmp(menu_items[menu_index].name, "Clock") != 0) {
+            lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
             lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         }
-        lv_coord_t img_w = menu_items[i].icon->header.w;
-        lv_coord_t img_h = menu_items[i].icon->header.h;
+        lv_coord_t img_w = menu_items[menu_index].icon->header.w;
+        lv_coord_t img_h = menu_items[menu_index].icon->header.h;
         int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
         int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
         int zoom = LV_MIN(zoom_w, zoom_h);
@@ -899,7 +1093,7 @@ static void create_list_menu(void) {
         lv_img_set_zoom(icon, zoom);
 
         lv_obj_t *label = lv_label_create(btn);
-        lv_label_set_text(label, menu_items[i].name);
+        lv_label_set_text(label, menu_items[menu_index].name);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
@@ -914,11 +1108,63 @@ static void create_list_menu(void) {
 }
 
 
+static void cleanup_layout_arrays(void) {
+    if (grid_buttons) {
+        free(grid_buttons);
+        grid_buttons = NULL;
+    }
+    if (grid_cards) {
+        free(grid_cards);
+        grid_cards = NULL;
+    }
+    if (list_buttons) {
+        free(list_buttons);
+        list_buttons = NULL;
+    }
+    current_item_obj = NULL;
+    carousel_cache = (carousel_card_cache_t){0};
+    grid_cards_container = NULL;
+}
+
+static lv_timer_t *menu_refresh_timer = NULL;
+static bool was_dual_comm_connected = false;
+
+static void menu_refresh_timer_cb(lv_timer_t *t) {
+    bool connected = esp_comm_manager_is_connected();
+    if (connected != was_dual_comm_connected) {
+        was_dual_comm_connected = connected;
+        
+        cleanup_layout_arrays();
+        if (menu_container && lv_obj_is_valid(menu_container)) {
+            lv_obj_clean(menu_container);
+        }
+        
+        int total_menu_items = (int)(sizeof(menu_items) / sizeof(menu_items[0]));
+        num_items = connected ? total_menu_items : (total_menu_items - 1);
+        if (selected_item_index >= num_items) selected_item_index = num_items - 1;
+        
+        init_menu_colors();
+        
+        if (current_layout == MENU_LAYOUT_GRID) create_grid_menu();
+        else if (current_layout == MENU_LAYOUT_GRID_CARDS) create_grid_menu();
+        else if (current_layout == MENU_LAYOUT_LIST) create_list_menu();
+        else update_menu_item(false);
+    }
+}
+
 /**
  * @brief Creates the main menu screen view.
  */
 void main_menu_create(void) {
     display_manager_fill_screen(lv_color_hex(0x121212));
+    int total_menu_items = (int)(sizeof(menu_items) / sizeof(menu_items[0]));
+    bool dual_comm_connected = esp_comm_manager_is_connected();
+    was_dual_comm_connected = dual_comm_connected;
+    
+    if (!menu_refresh_timer) {
+        menu_refresh_timer = lv_timer_create(menu_refresh_timer_cb, 1000, NULL);
+    }
+    num_items = dual_comm_connected ? total_menu_items : (total_menu_items - 1);
     init_menu_colors(); // Initialize colors at runtime
 
     // Set current layout from settings (0 = Normal/Carousel, 1 = Grid)
@@ -1038,6 +1284,9 @@ void main_menu_create(void) {
         lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
         
         ESP_LOGI(TAG, "Navigation buttons created - size: %d, margin: %d", btn_size, btn_margin);
+        // ensure nav buttons are above other screen content (e.g., scrollable menu_container)
+        lv_obj_move_foreground(left_nav_btn);
+        lv_obj_move_foreground(right_nav_btn);
     }
 
     display_manager_add_status_bar(LV_HOR_RES > 128 ? "Main Menu" : "");
@@ -1060,10 +1309,14 @@ void main_menu_create(void) {
     if (left_nav_btn) {
         lv_coord_t old_y = lv_obj_get_y(left_nav_btn);
         lv_obj_set_y(left_nav_btn, old_y + status_bar_height / 2);
+        // ensure nav button remains on top after repositioning
+        lv_obj_move_foreground(left_nav_btn);
     }
     if (right_nav_btn) {
         lv_coord_t old_y = lv_obj_get_y(right_nav_btn);
         lv_obj_set_y(right_nav_btn, old_y + status_bar_height / 2);
+        // ensure nav button remains on top after repositioning
+        lv_obj_move_foreground(right_nav_btn);
     }
 }
 
@@ -1071,32 +1324,20 @@ void main_menu_create(void) {
  * @brief Destroys the main menu screen view.
  */
 void main_menu_destroy(void) {
+    if (menu_refresh_timer) {
+        lv_timer_del(menu_refresh_timer);
+        menu_refresh_timer = NULL;
+    }
+
     if (menu_container) {
         lv_obj_clean(menu_container);
         lv_obj_del(menu_container);
         menu_container = NULL;
         main_menu_view.root = NULL;
-        current_item_obj = NULL;
-        // Children (including Grid container/buttons) are deleted with parent
-        grid_cards_container = NULL;
+        // arrays cleaned up below via helper
     }
 
-    // Clean up grid layout
-    if (grid_buttons) {
-        free(grid_buttons);
-        grid_buttons = NULL;
-    }
-
-    // Clean up Grid layout array; container already deleted with parent
-    if (grid_cards) {
-        free(grid_cards);
-        grid_cards = NULL;
-    }
-
-    if (list_buttons) {
-        free(list_buttons);
-        list_buttons = NULL;
-    }
+    cleanup_layout_arrays();
 
     // Clean up navigation buttons
     if (left_nav_btn) {

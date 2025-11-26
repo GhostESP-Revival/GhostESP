@@ -109,7 +109,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
   settings->broadcast_speed = 5;
-  settings->menu_theme = 0;
+  // default to the 'Bright' palette (index 3)
+  settings->menu_theme = 3;
   strcpy(settings->ap_ssid, "GhostNet");
   strcpy(settings->ap_password, "GhostNet");
   settings->rgb_speed = 15;
@@ -142,7 +143,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->third_control_enabled = false;
   settings->terminal_text_color = 0x00FF00;
   settings->invert_colors = false;
-  settings->web_auth_enabled = true;
+  settings->web_auth_enabled = false;
 #ifdef CONFIG_IDF_TARGET_ESP32
   settings->esp_comm_tx_pin = 17;
   settings->esp_comm_rx_pin = 16;

@@ -45,6 +45,8 @@ jobs:
           - { name: "CYD2432S028R",    idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",       zip_name: "CYD2432S028R.zip" }
           - { name: "Waveshare_LCD",   idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",     zip_name: "Waveshare_LCD.zip" }
           - { name: "Crowtech_LCD",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",      zip_name: "Crowtech_LCD.zip" }
+          - { name: "Sunton_LCD",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",        zip_name: "Sunton_LCD.zip" }
+          - { name: "JC3248W535EN_LCD", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",       zip_name: "JC3248W535EN_LCD.zip" }
           - { name: "Flipper_JCMK_GPS", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",    zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",              zip_name: "LilyGo-T-Deck.zip" }
           - { name: "TEmbedC1101",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",        zip_name: "LilyGo-TEmbedC1101.zip" }

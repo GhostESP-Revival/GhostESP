@@ -1,5 +1,8 @@
 #include "managers/ap_manager.h"
-#include "managers/ghost_esp_site.h"
+#include "managers/ghost_esp_site_gz.h"
+#define GHOST_SITE_PAYLOAD ghost_site_html_gz
+#define GHOST_SITE_PAYLOAD_SIZE ghost_site_html_gz_size
+#define GHOST_SITE_IS_GZ 1
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
 #include "sdkconfig.h"
@@ -23,11 +26,22 @@
 #include "mbedtls/base64.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
 #include "managers/status_display_manager.h"
+#include "core/utils.h"
+#include "managers/auth_digest.h"
+
+static esp_err_t respond_with_site(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html");
+#if GHOST_SITE_IS_GZ
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+#endif
+    return httpd_resp_send(req, (const char *)GHOST_SITE_PAYLOAD, GHOST_SITE_PAYLOAD_SIZE);
+}
 
 // Forward declarations
 static esp_err_t http_get_handler(httpd_req_t *req);
@@ -58,6 +72,68 @@ static esp_err_t teardown_mdns(void);
 #define AP_MANAGER_BUFFER_SIZE (1024)   // 1 KB buffer size for reading chunks
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
 #define SERIAL_BUFFER_SIZE 528          // Size of serial buffer
+#define AUTH_MAX_HDR_LEN 512            // max size for Authorization header (increased for Digest)
+#define AUTH_MAX_DECODE_LEN 256         // max decoded credential length
+
+// simple global backoff state (very small memory footprint)
+static uint8_t auth_fail_count = 0;
+static uint32_t auth_last_fail_ts = 0; // seconds since epoch of last fail
+
+static int constant_time_eq(const unsigned char *a, const unsigned char *b, size_t len) {
+    unsigned char diff = 0;
+    for (size_t i = 0; i < len; ++i) diff |= a[i] ^ b[i];
+    return diff == 0;
+}
+
+static void str_lower_inplace(char *s) {
+    for (; *s; ++s) *s = (char)tolower((unsigned char)*s);
+}
+
+// parse key from Digest header: looks for key=\"value\" or key=value, copies into out
+static void parse_digest_param(const char *hdr, const char *key, char *out, size_t out_len) {
+    out[0] = '\0';
+    if (!hdr || !key) return;
+    const char *p = hdr;
+    size_t keylen = strlen(key);
+
+    while ((p = strstr(p, key)) != NULL) {
+        // ensure key is a standalone token (preceded by start/comma/space) and followed by optional spaces then '='
+        if (p != hdr) {
+            char prev = *(p - 1);
+            if (prev != '"' && prev != ',' && !isspace((unsigned char)prev)) {
+                p = p + 1; // skip this match (it's inside another token)
+                continue;
+            }
+        }
+        const char *q = p + keylen;
+        // skip spaces
+        while (*q && isspace((unsigned char)*q)) q++;
+        if (*q != '=') {
+            p = p + 1; // not a key=value occurrence
+            continue;
+        }
+        q++; // skip '='
+        while (*q && isspace((unsigned char)*q)) q++;
+
+        // value can be quoted or unquoted
+        if (*q == '"') {
+            q++;
+            size_t i = 0;
+            while (*q && *q != '"' && i + 1 < out_len) {
+                out[i++] = *q++;
+            }
+            out[i] = '\0';
+            return;
+        } else {
+            size_t i = 0;
+            while (*q && *q != ',' && !isspace((unsigned char)*q) && i + 1 < out_len) {
+                out[i++] = *q++;
+            }
+            out[i] = '\0';
+            return;
+        }
+    }
+}
 
 static char *log_buffer = NULL; // dynamically allocated at runtime
 static size_t log_buffer_index = 0;
@@ -512,13 +588,17 @@ esp_err_t ap_manager_init(void) {
     // Check if AP is disabled in settings
     if (!settings_get_ap_enabled(&G_Settings)) {
         glog("Access Point disabled in settings, skipping AP initialization\n");
+        log_heap_status(TAG, "ap_init_disabled_pre_logbuf");
         
         // Initialize log buffer and mutex even when AP is disabled
+        ESP_LOGI(TAG, "Allocating log buffer: %d bytes", MAX_LOG_BUFFER_SIZE);
         log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
         if(!log_buffer){
             ESP_LOGE(TAG, "failed to alloc log buffer");
+            log_heap_status(TAG, "ap_logbuf_alloc_fail");
             return ESP_ERR_NO_MEM;
         }
+        log_heap_status(TAG, "ap_init_disabled_post_logbuf");
 
         log_mutex = xSemaphoreCreateRecursiveMutex();
         if (!log_mutex) {
@@ -531,6 +611,7 @@ esp_err_t ap_manager_init(void) {
         if(log_buffer){
             memset(log_buffer, 0, MAX_LOG_BUFFER_SIZE);
         }
+        log_heap_status(TAG, "ap_init_disabled_complete");
         
         return ESP_OK;
     }
@@ -546,7 +627,7 @@ esp_err_t ap_manager_init(void) {
             return ret;
         }
 
-        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
         if (!netif) {
             netif = esp_netif_create_default_wifi_ap();
             if (netif == NULL) {
@@ -556,6 +637,17 @@ esp_err_t ap_manager_init(void) {
         }
     } else if (ret == ESP_OK) {
         glog("Wi-Fi already initialized, skipping Wi-Fi init.\n");
+        // Ensure our static AP netif handle is set (and exists)
+        if (!netif) {
+            netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        }
+        if (!netif) {
+            netif = esp_netif_create_default_wifi_ap();
+            if (!netif) {
+                glog("Failed to create default Wi-Fi AP when Wi-Fi already initialized\n");
+                return ESP_FAIL;
+            }
+        }
     } else {
         glog("esp_wifi_get_mode failed: %s\n", esp_err_to_name(ret));
         return ret;
@@ -580,7 +672,11 @@ esp_err_t ap_manager_init(void) {
             {
                 .channel = 6,
                 .max_connection = 4,
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+                .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+#else
                 .authmode = WIFI_AUTH_WPA2_PSK,
+#endif
                 .beacon_interval = 100,
             },
     };
@@ -646,11 +742,14 @@ esp_err_t ap_manager_init(void) {
         return ret;
     }
 
+    log_heap_status(TAG, "ap_init_pre_httpd");
     ret = start_http_server();
     if (ret != ESP_OK) {
         glog("Error starting HTTP server\n");
+        log_heap_status(TAG, "ap_httpd_start_fail");
         return ret;
     }
+    log_heap_status(TAG, "ap_init_post_httpd");
 
     esp_wifi_set_ps(WIFI_PS_NONE);
 
@@ -662,11 +761,15 @@ esp_err_t ap_manager_init(void) {
     }
 
     // Initialize log buffer and mutex
+    log_heap_status(TAG, "ap_init_enabled_pre_logbuf");
+    ESP_LOGI(TAG, "Allocating log buffer: %d bytes", MAX_LOG_BUFFER_SIZE);
     log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
     if(!log_buffer){
         ESP_LOGE(TAG, "failed to alloc log buffer");
+        log_heap_status(TAG, "ap_logbuf_alloc_fail");
         return ESP_ERR_NO_MEM;
     }
+    log_heap_status(TAG, "ap_init_enabled_post_logbuf");
 
     log_mutex = xSemaphoreCreateRecursiveMutex();
     if (!log_mutex) {
@@ -680,6 +783,7 @@ esp_err_t ap_manager_init(void) {
         memset(log_buffer, 0, MAX_LOG_BUFFER_SIZE);
     }
 
+    log_heap_status(TAG, "ap_init_complete");
     return ESP_OK;
 }
 
@@ -689,6 +793,25 @@ void ap_manager_deinit(void) {
     
     stop_http_server();
     reset_server_config();
+
+    {
+        esp_err_t err_reg = esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
+        if (err_reg != ESP_OK && err_reg != ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to unregister WIFI_EVENT handler: %s", esp_err_to_name(err_reg));
+        }
+    }
+    {
+        esp_err_t err_reg = esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
+        if (err_reg != ESP_OK && err_reg != ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to unregister IP_EVENT_AP_STAIPASSIGNED handler: %s", esp_err_to_name(err_reg));
+        }
+    }
+    {
+        esp_err_t err_reg = esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
+        if (err_reg != ESP_OK && err_reg != ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to unregister IP_EVENT_STA_GOT_IP handler: %s", esp_err_to_name(err_reg));
+        }
+    }
     
     esp_wifi_stop();
     esp_wifi_deinit();
@@ -706,8 +829,9 @@ void ap_manager_deinit(void) {
     }
 
     if (log_mutex) {
-        vSemaphoreDelete(log_mutex);
+        SemaphoreHandle_t mutex_to_delete = log_mutex;
         log_mutex = NULL;
+        vSemaphoreDelete(mutex_to_delete);
     }
     
     ESP_LOGI(TAG, "AP Manager deinitialized successfully");
@@ -783,14 +907,27 @@ esp_err_t ap_manager_start_services() {
         return ret;
     }
 
-    // Start mDNS
-    ret = setup_mdns();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to setup mDNS");
-        return ret;
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
+
+    if (server != NULL) {
+        ESP_LOGI(TAG, "HTTP server already running; skipping restart");
+        status_display_show_status("AP Services On");
+        return ESP_OK;
+    }
+
+    if (mdns_freed) {
+        ret = setup_mdns();
+        if (ret != ESP_OK) {
+            return ret;
+        }
     }
 
     // Start HTTPD server
+    if (config_loaded) {
+        reset_server_config();
+    }
     ret = load_server_config();
     if (ret != ESP_OK) {
         glog("Error loading server config\n");
@@ -809,8 +946,15 @@ esp_err_t ap_manager_start_services() {
 }
 
 void ap_manager_stop_services() {
+    log_heap_status(TAG, "ap_stop_pre");
     wifi_mode_t wifi_mode;
     esp_err_t err = esp_wifi_get_mode(&wifi_mode);
+
+    esp_err_t http_ret = stop_http_server();
+    if (http_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop HTTP server: %s", esp_err_to_name(http_ret));
+    }
+    reset_server_config();
 
     {
         esp_err_t err_reg = esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
@@ -841,14 +985,10 @@ void ap_manager_stop_services() {
         glog("Failed to get Wi-Fi mode, error: %d\n", err);
     }
 
-    esp_err_t ret = stop_http_server();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to stop HTTP server: %s", esp_err_to_name(ret));
-    }
-
     vTaskDelay(pdMS_TO_TICKS(100));
 
     teardown_mdns();
+    log_heap_status(TAG, "ap_stop_post");
     status_display_show_status("AP Services Off");
 }
 
@@ -857,71 +997,164 @@ static esp_err_t http_get_handler(httpd_req_t *req) {
     printf("Received HTTP GET request: %s\n", req->uri);
 
     if (!settings_get_web_auth_enabled(&G_Settings)) {
-        httpd_resp_set_type(req, "text/html");
-        return httpd_resp_send(req, (const char *)ghost_site_html,
-                               ghost_site_html_size);
+        return respond_with_site(req);
     }
 
-    char auth_buffer[128];
+    char auth_buffer[AUTH_MAX_HDR_LEN] = {0};
 
-    size_t auth_len = httpd_req_get_hdr_value_len(req, "Authorization");
-
-    if (auth_len == 0) {
-        httpd_resp_set_status(req, "401 Unauthorized");
-        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Protected Area\"");
-        httpd_resp_sendstr(req, "Authentication required");
-        return ESP_OK;
+    // global backoff check
+    if (auth_fail_count > 0) {
+        uint32_t now = (uint32_t)time(NULL);
+        uint32_t elapsed = now - auth_last_fail_ts;
+        uint8_t capped = auth_fail_count > 6 ? 6 : auth_fail_count;
+        uint32_t wait_s = (1u << capped); // exponential backoff in seconds
+        if (elapsed < wait_s) {
+            httpd_resp_set_status(req, "429 Too Many Requests");
+            httpd_resp_sendstr(req, "Too many authentication attempts, try later");
+            return ESP_OK;
+        }
     }
 
+    // attempt session cookie first
+    const FSettings *settings_local = &G_Settings;
+    const char *expected_password_local = settings_get_ap_password(settings_local);
+    if (!expected_password_local || strlen(expected_password_local) == 0) expected_password_local = "GhostNet";
 
-    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_buffer, sizeof(auth_buffer)) == ESP_OK) {
-        if (strncmp(auth_buffer, "Basic ", 6) == 0) {
-            char *credentials = auth_buffer + 6;
-            size_t decoded_len;
-
-            size_t input_len = strlen(credentials);
-            size_t decoded_max_len = (input_len * 3) / 4 + 1;
-            char *decoded = (char *)malloc(decoded_max_len);
-
-            if (decoded) {
-                int ret = mbedtls_base64_decode((unsigned char *)decoded, decoded_max_len,
-                                                &decoded_len, (const unsigned char *)credentials,
-                                                input_len);
-                if (ret == 0) {
-                    decoded[decoded_len] = '\0';
-
-
-                    const FSettings *settings = &G_Settings;
-                    const char *expected_username = settings_get_ap_ssid(settings);
-                    const char *expected_password = settings_get_ap_password(settings);
-
-                    // use "GhostNet" if settings are empty or invalid (should fix the issue reported about not being able to login)
-                    if (expected_username == NULL || strlen(expected_username) == 0) {
-                        expected_username = "GhostNet";
-                    }
-                    if (expected_password == NULL || strlen(expected_password) < 8) {
-                        expected_password = "GhostNet";
-                    }
-
-                    char expected_creds[128];
-                    snprintf(expected_creds, sizeof(expected_creds), "%s:%s",
-                             expected_username, expected_password);
-
-
-                    if (strcmp(decoded, expected_creds) == 0) {
-                        httpd_resp_set_type(req, "text/html");
-                        return httpd_resp_send(req, (const char *)ghost_site_html,
-                                               ghost_site_html_size);
+    size_t cookie_len = httpd_req_get_hdr_value_len(req, "Cookie");
+    if (cookie_len > 0 && cookie_len < 512) {
+        char cookie_buf[512];
+        if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
+            char *sess_pos = strstr(cookie_buf, "session=");
+            if (sess_pos) {
+                sess_pos += strlen("session=");
+                char session_token[256] = {0};
+                size_t si = 0;
+                while (*sess_pos && *sess_pos != ';' && si + 1 < sizeof(session_token)) {
+                    session_token[si++] = *sess_pos++;
+                }
+                session_token[si] = '\0';
+                if (si > 0) {
+                    if (validate_stateless_nonce(expected_password_local, strlen(expected_password_local), session_token, 300) == 0) {
+                        // valid session cookie -> serve page
+                        return respond_with_site(req);
                     }
                 }
-                free(decoded);
             }
         }
     }
 
+    size_t auth_len = httpd_req_get_hdr_value_len(req, "Authorization");
 
+    if (auth_len == 0 || auth_len >= AUTH_MAX_HDR_LEN) {
+        // send Digest challenge
+        const FSettings *settings = &G_Settings;
+        const char *pwd = settings_get_ap_password(settings);
+        if (!pwd || strlen(pwd) == 0) pwd = "GhostNet";
+        char nonce[128] = {0};
+        if (generate_stateless_nonce(pwd, strlen(pwd), nonce, sizeof(nonce)) != 0) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "Authentication error");
+            return ESP_OK;
+        }
+        char www[256];
+        snprintf(www, sizeof(www), "Digest realm=\"Protected Area\", qop=\"auth\", nonce=\"%s\", algorithm=MD5", nonce);
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_hdr(req, "WWW-Authenticate", www);
+        httpd_resp_sendstr(req, "Authentication required");
+        return ESP_OK;
+    }
+
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_buffer, sizeof(auth_buffer)) == ESP_OK) {
+        ESP_LOGI(TAG, "Authorization header: %s", auth_buffer);
+        if (strncmp(auth_buffer, "Digest ", 7) == 0) {
+            char *fields = auth_buffer + 7;
+            char username[64] = {0};
+            char realm[64] = {0};
+            char nonce_hdr[128] = {0};
+            char uri_hdr[128] = {0};
+            char response[64] = {0};
+            char cnonce[64] = {0};
+            char nc[16] = {0};
+            char qop[16] = {0};
+
+            parse_digest_param(fields, "username", username, sizeof(username));
+            parse_digest_param(fields, "realm", realm, sizeof(realm));
+            parse_digest_param(fields, "nonce", nonce_hdr, sizeof(nonce_hdr));
+            parse_digest_param(fields, "uri", uri_hdr, sizeof(uri_hdr));
+            parse_digest_param(fields, "response", response, sizeof(response));
+            parse_digest_param(fields, "cnonce", cnonce, sizeof(cnonce));
+            parse_digest_param(fields, "nc", nc, sizeof(nc));
+            parse_digest_param(fields, "qop", qop, sizeof(qop));
+
+            ESP_LOGI(TAG, "Digest parsed: user='%s' realm='%s' nonce(len)=%d uri='%s' response(len)=%d qop='%s' nc='%s' cnonce='%s'",
+                    username, realm, (int)strlen(nonce_hdr), uri_hdr, (int)strlen(response), qop, nc, cnonce);
+
+            const FSettings *settings = &G_Settings;
+            const char *expected_username = settings_get_ap_ssid(settings);
+            const char *expected_password = settings_get_ap_password(settings);
+            if (expected_username == NULL || strlen(expected_username) == 0) expected_username = "GhostNet";
+            if (expected_password == NULL || strlen(expected_password) < 8) expected_password = "GhostNet";
+
+            // quick username check
+            if (strcmp(username, expected_username) != 0) {
+                ESP_LOGW(TAG, "Digest username mismatch: got '%s' expected '%s'", username, expected_username);
+                goto digest_fail;
+            }
+
+            // validate nonce
+            int nv = validate_stateless_nonce(expected_password, strlen(expected_password), nonce_hdr, 300);
+            if (nv != 0) {
+                // stale nonce -> ask client to retry with new nonce
+                char newnonce[128] = {0};
+                generate_stateless_nonce(expected_password, strlen(expected_password), newnonce, sizeof(newnonce));
+                char www[256];
+                snprintf(www, sizeof(www), "Digest realm=\"Protected Area\", qop=\"auth\", nonce=\"%s\", algorithm=MD5, stale=\"true\"", newnonce);
+                httpd_resp_set_status(req, "401 Unauthorized");
+                httpd_resp_set_hdr(req, "WWW-Authenticate", www);
+                httpd_resp_sendstr(req, "Stale nonce");
+                return ESP_OK;
+            }
+
+            char expected_resp[33] = {0};
+            if (compute_digest_response(expected_username, realm, expected_password, "GET", uri_hdr, nonce_hdr, cnonce, nc, qop, expected_resp, sizeof(expected_resp)) != 0) {
+                ESP_LOGE(TAG, "Failed to compute expected digest response");
+                goto digest_fail;
+            }
+
+            // normalize to lowercase before constant-time compare
+            str_lower_inplace(response);
+            // expected_resp is already lowercase
+            if (strlen(response) == strlen(expected_resp) && constant_time_eq((const unsigned char *)response, (const unsigned char *)expected_resp, strlen(expected_resp))) {
+                // success
+                auth_fail_count = 0;
+                auth_last_fail_ts = 0;
+                memset(auth_buffer, 0, sizeof(auth_buffer));
+                // issue short-lived stateless session cookie (Max-Age=300s)
+                char session_token[128] = {0};
+                if (generate_stateless_nonce(expected_password, strlen(expected_password), session_token, sizeof(session_token)) == 0) {
+                    char cookie[256];
+                    snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=300", session_token);
+                    httpd_resp_set_hdr(req, "Set-Cookie", cookie);
+                }
+                return respond_with_site(req);
+            }
+        }
+    }
+
+digest_fail:
+    auth_fail_count = auth_fail_count < 255 ? auth_fail_count + 1 : 255;
+    auth_last_fail_ts = (uint32_t)time(NULL);
+    memset(auth_buffer, 0, sizeof(auth_buffer));
+    // issue new Digest challenge
+    const FSettings *settings = &G_Settings;
+    const char *pwd = settings_get_ap_password(settings);
+    if (!pwd || strlen(pwd) == 0) pwd = "GhostNet";
+    char nonce2[128] = {0};
+    generate_stateless_nonce(pwd, strlen(pwd), nonce2, sizeof(nonce2));
+    char www2[256];
+    snprintf(www2, sizeof(www2), "Digest realm=\"Protected Area\", qop=\"auth\", nonce=\"%s\", algorithm=MD5", nonce2);
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Protected Area\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", www2);
     httpd_resp_sendstr(req, "Invalid credentials");
     return ESP_OK;
 }
@@ -1494,7 +1727,7 @@ static esp_err_t load_server_config(void) {
     server_config.server_port = 80;
     server_config.ctrl_port = 32768;
     server_config.max_uri_handlers = 60;
-    server_config.stack_size = 8192;
+    server_config.stack_size = 6144;
     server_config.recv_wait_timeout = 10;
     server_config.send_wait_timeout = 10;
 
@@ -1545,13 +1778,20 @@ static esp_err_t start_http_server(void) {
         return ESP_OK;
     }
 
-    esp_err_t ret = httpd_start(&server, &server_config);
-    if (ret == ESP_ERR_HTTPD_TASK && server_config.stack_size > 4096) {
-        server_config.stack_size = 4096;
+    esp_err_t ret = ESP_FAIL;
+    for (int attempt = 0; attempt < 3; attempt++) {
         ret = httpd_start(&server, &server_config);
+        if (ret == ESP_ERR_HTTPD_TASK && server_config.stack_size > 4096) {
+            server_config.stack_size = 4096;
+            ret = httpd_start(&server, &server_config);
+        }
+        if (ret == ESP_OK) {
+            break;
+        }
+        ESP_LOGE(TAG, "Failed to start HTTP server (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
         return ret;
     }
 

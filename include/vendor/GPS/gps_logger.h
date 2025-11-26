@@ -55,6 +55,7 @@ int get_next_csv_file_index(const char *base_name);
 esp_err_t csv_file_open(const char *base_file_name);
 esp_err_t csv_write_data_to_buffer(wardriving_data_t *data);
 esp_err_t csv_flush_buffer_to_file();
+bool csv_buffer_has_pending_data(void);
 void csv_file_close();
 
 // New helper functions

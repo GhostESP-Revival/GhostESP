@@ -730,6 +730,9 @@ esp_err_t rgb_manager_deinit(RGBManager_t *rgb_manager) {
   } else {
     // Clear the LED strip and deinitialize
     led_strip_clear(rgb_manager->strip);
+    led_strip_refresh(rgb_manager->strip);
+    led_strip_del(rgb_manager->strip);
+    rgb_manager->strip = NULL;
     ESP_LOGI(TAG, "RGBManager deinitialized (LED strip)\n");
     status_display_show_status("RGB Strip Off");
   }

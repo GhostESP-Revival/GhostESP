@@ -51,6 +51,8 @@ int get_next_csv_file_index(const char *base_name);
 
 int get_next_file_index(const char *dir_path, const char *base_name, const char *extension);
 
+void log_heap_status(const char *tag, const char *event);
+
 #define WRAP_MESSAGE(msg) wrap_message(msg, __FILE__, __LINE__)
 
 #endif // SERIAL_MANAGER_H

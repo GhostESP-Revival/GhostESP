@@ -11,6 +11,9 @@
  */
 void glog(const char *fmt, ...);
 
+void glog_set_defer(int on);
+void glog_flush_deferred(void);
+
 #endif /* GLOG_H */
 
 

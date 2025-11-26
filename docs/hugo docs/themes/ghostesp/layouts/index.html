@@ -1,0 +1,62 @@
+{{ define "main" }}
+{{ $versionConfig := .Site.Params.versioning }}
+{{ if $versionConfig }}
+  {{ $defaultVersion := default "latest" $versionConfig.default }}
+  {{ $targetPage := .Site.GetPage "section" $defaultVersion }}
+  {{ if not $targetPage }}
+    {{ range $versionConfig.options }}
+      {{ if not $targetPage }}
+        {{ with $.Site.GetPage "section" .id }}
+          {{ $targetPage = . }}
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+  {{ if $targetPage }}
+    {{ $dest := $targetPage.RelPermalink }}
+    <meta http-equiv="refresh" content="0; url={{ $dest }}">
+    <link rel="canonical" href="{{ $dest }}">
+    <div class="doc doc--redirect">
+      <h1>{{ .Site.Title }}</h1>
+      <p>Redirecting to the latest firmware docs…</p>
+      <p><a class="doc__card" href="{{ $dest }}">Skip waiting &rarr;</a></p>
+    </div>
+  {{ else }}
+    <div class="doc">
+      <h1>{{ .Site.Title }}</h1>
+      {{ with .Site.Params.subtitle }}<p>{{ . }}</p>{{ end }}
+      {{ .Content }}
+      <div class="doc__cards">
+        {{ range .Site.Sections.ByWeight }}
+          <a class="doc__card" href="{{ .RelPermalink }}">
+            <h2>{{ .Title }}</h2>
+            {{ if .Params.description }}
+              <p>{{ .Params.description }}</p>
+            {{ else if .Summary }}
+              <p>{{ .Summary | plainify | truncate 160 }}</p>
+            {{ end }}
+          </a>
+        {{ end }}
+      </div>
+    </div>
+  {{ end }}
+{{ else }}
+  <div class="doc">
+    <h1>{{ .Site.Title }}</h1>
+    {{ with .Site.Params.subtitle }}<p>{{ . }}</p>{{ end }}
+    {{ .Content }}
+    <div class="doc__cards">
+      {{ range .Site.Sections.ByWeight }}
+        <a class="doc__card" href="{{ .RelPermalink }}">
+          <h2>{{ .Title }}</h2>
+          {{ if .Params.description }}
+            <p>{{ .Params.description }}</p>
+          {{ else if .Summary }}
+            <p>{{ .Summary | plainify | truncate 160 }}</p>
+          {{ end }}
+        </a>
+      {{ end }}
+    </div>
+  </div>
+{{ end }}
+{{ end }}

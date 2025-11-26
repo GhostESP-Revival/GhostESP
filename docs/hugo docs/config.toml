@@ -1,0 +1,56 @@
+baseURL = "/"
+title = "GhostESP Documentation"
+theme = "ghostesp"
+defaultContentLanguage = "en"
+canonifyURLs = false
+enableRobotsTXT = true
+
+[params]
+  subtitle = ""
+
+[params.versioning]
+  default = "latest"
+
+[[params.versioning.options]]
+  id = "latest"
+  name = "Latest"
+
+[[params.versioning.options]]
+  id = "v1.8.1"
+  name = "v1.8.1"
+
+
+[[params.versioning.options]]
+  id = "v1.8"
+  name = "v1.8"
+
+
+[outputs]
+  home = ["HTML", "JSON"]
+  section = ["HTML", "JSON"]
+  page = ["HTML"]
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+
+[[menu.sidebar]]
+  name = "Overview"
+  url = "/latest/"
+  weight = 1
+
+[[menu.sidebar]]
+  name = "Getting Started"
+  url = "/latest/getting-started/"
+  weight = 2
+
+[[menu.sidebar]]
+  name = "Hardware Setup"
+  url = "/latest/hardware/"
+  weight = 3
+
+[[menu.sidebar]]
+  name = "Firmware"
+  url = "/latest/firmware/"
+  weight = 4

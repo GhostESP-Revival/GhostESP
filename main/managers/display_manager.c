@@ -26,6 +26,8 @@
 #include "core/serial_manager.h"
 #include "managers/wifi_manager.h"
 #include "driver/i2c.h"
+#include "soc/soc_caps.h"
+#include "io_manager/i2c_bus_lock.h"
 
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
@@ -242,6 +244,50 @@ void set_backlight_brightness(uint8_t percentage); // forward declaration
 #ifdef CONFIG_USE_CARDPUTER
 #define _batAdcCh ADC_CHANNEL_9 //sar adc1 channel 9 - ADC1_GPIO10_CHANNEL;
 
+#define CARDPUTER_SOC_TABLE_SIZE 11
+typedef struct {
+    int mv;
+    uint8_t percent;
+} cardputer_soc_point_t;
+
+static const cardputer_soc_point_t s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE] = {
+    {3200, 0},
+    {3300, 3},
+    {3400, 8},
+    {3500, 15},
+    {3600, 30},
+    {3700, 45},
+    {3800, 60},
+    {3900, 75},
+    {4000, 88},
+    {4100, 96},
+    {4200, 100},
+};
+
+static uint8_t cardputer_voltage_to_percent(int mv) {
+    if (mv <= s_cardputer_soc_table[0].mv) {
+        return s_cardputer_soc_table[0].percent;
+    }
+    if (mv >= s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].mv) {
+        return s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].percent;
+    }
+
+    for (int i = 1; i < CARDPUTER_SOC_TABLE_SIZE; i++) {
+        if (mv <= s_cardputer_soc_table[i].mv) {
+            const cardputer_soc_point_t *low = &s_cardputer_soc_table[i - 1];
+            const cardputer_soc_point_t *high = &s_cardputer_soc_table[i];
+            int range_mv = high->mv - low->mv;
+            if (range_mv <= 0) {
+                return high->percent;
+            }
+            int range_percent = high->percent - low->percent;
+            int offset_mv = mv - low->mv;
+            return (uint8_t)(low->percent + (range_percent * offset_mv) / range_mv);
+        }
+    }
+    return s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].percent;
+}
+
 #elif CONFIG_USE_TDECK
 #define _batAdcCh ADC1_GPIO4_CHANNEL
 #elif CONFIG_USE_TDISPLAY_S3
@@ -256,6 +302,11 @@ bool _isCharging = false;
 
 // track previous battery millivolt for charging detection
 static int last_mv = 0;
+
+#ifdef CONFIG_USE_CARDPUTER
+static int s_filtered_mv = -1;
+static int s_display_percent = -1;
+#endif
 
 // threshold to ignore ADC noise
 #define CHARGE_THRESH_MV 15
@@ -292,18 +343,34 @@ int getBattery() {
 
     // raw ADC → calibrated millivolt
     int raw = 0;
-    ESP_ERROR_CHECK(adc_oneshot_read(handle, _batAdcCh, &raw));
+    esp_err_t ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
+
+    // Check for invalid ADC readings
+    if (raw < 0 || raw > 4095) {
+        ESP_LOGW(TAG, "Invalid ADC reading: %d", raw);
+        return -1;
+    }
 
     int mv = 0;
     if (cali_handle) {
         if (adc_cali_raw_to_voltage(cali_handle, raw, &mv) != ESP_OK) {
             ESP_LOGE(TAG, "Calibration raw_to_voltage failed");
-            mv = raw;  // fallback to raw
+            mv = raw * 3300 / 4095;  // fallback to raw count
         }
     } else {
         // rough estimate if no calibration
         mv = raw * 3300 / 4095;
     }
+
+#ifdef CONFIG_USE_CARDPUTER
+    // Cardputer divides the battery voltage roughly in half with a resistor divider.
+    // Scale the measured voltage back up to actual battery voltage.
+    mv = (mv * 2);
+#endif
 
     // -- charging detection by comparing to last reading --
     if (last_mv != 0) {
@@ -313,12 +380,60 @@ int getBattery() {
     }
     last_mv = mv;
 
-    ESP_LOGI(TAG, "Battery ADC mV: %d", mv);
+    ESP_LOGD(TAG, "Battery ADC raw: %d, mV: %d", raw, mv);
 
-    // percentage between 3300 and 4150 mV
-    percent = (mv - 3300) * 100 / (float)(4150 - 3350);
+    // Check for unrealistic voltage values
+    if (mv < 2500 || mv > 5000) {
+        ESP_LOGW(TAG, "Battery voltage out of range: %d mV", mv);
+        return -1;
+    }
 
-    return (percent < 0) ? 0 : (percent >= 100) ? 100 : percent;
+    int mv_for_percent = mv;
+
+#ifdef CONFIG_USE_CARDPUTER
+    if (s_filtered_mv < 0) {
+        s_filtered_mv = mv;
+    } else {
+        // Faster exponential smoothing to follow charging curve without sudden jumps
+        s_filtered_mv = (s_filtered_mv * 7 + mv) / 8;
+    }
+    mv_for_percent = s_filtered_mv;
+#endif
+
+    // Map measured voltage to a percentage
+#ifdef CONFIG_USE_CARDPUTER
+    percent = cardputer_voltage_to_percent(mv_for_percent);
+#else
+    const int min_mv = 3300;
+    const int max_mv = 4200;
+    if (mv_for_percent <= min_mv) {
+        percent = 0;
+    } else if (mv_for_percent >= max_mv) {
+        percent = 100;
+    } else {
+        percent = (uint8_t)(((mv_for_percent - min_mv) * 100) / (max_mv - min_mv));
+    }
+#endif
+
+#ifdef CONFIG_USE_CARDPUTER
+    if (s_display_percent < 0) {
+        s_display_percent = percent;
+    } else {
+        int diff = percent - s_display_percent;
+        int threshold = _isCharging ? 4 : 3;
+        if (diff >= threshold) {
+            s_display_percent++;
+        } else if (diff <= -threshold) {
+            s_display_percent--;
+        }
+        if (s_display_percent < 0) s_display_percent = 0;
+        if (s_display_percent > 100) s_display_percent = 100;
+    }
+    percent = (uint8_t)s_display_percent;
+#endif
+
+    ESP_LOGD(TAG, "Battery percentage: %d%%", percent);
+    return percent;
 }
 bool isCharging() { return _isCharging; }
 
@@ -373,9 +488,19 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
     result = true;
 #elif defined(CONFIG_HAS_BATTERY_ADC)
     // Fallback to ADC
-    *percentage = (uint8_t)getBattery();
-    *is_charging = isCharging();
-    result = true;
+    int battery_percent = getBattery();
+    if (battery_percent >= 0) {
+        *percentage = (uint8_t)battery_percent;
+        *is_charging = isCharging();
+        result = true;
+    } else {
+        ESP_LOGW(TAG, "ADC battery read failed, using cached values if available");
+        if (last_valid_cache) {
+            *percentage = last_pct_cache;
+            *is_charging = last_chg_cache;
+            result = true;
+        }
+    }
 #endif
     ESP_LOGD(TAG, "get_battery_info %d%%, Charging: %d", *percentage, *is_charging);
 
@@ -461,6 +586,17 @@ void display_manager_fade_in(lv_obj_t *obj) {
   lv_anim_start(&anim);
 }
 
+// recursively set radius for obj and its children (used to avoid mask draws during heavy transitions)
+static void set_radius_recursive(lv_obj_t *obj, lv_coord_t r) {
+  if (!obj) return;
+  lv_obj_set_style_radius(obj, r, 0);
+  uint32_t cnt = lv_obj_get_child_cnt(obj);
+  for (uint32_t i = 0; i < cnt; i++) {
+    lv_obj_t *c = lv_obj_get_child(obj, i);
+    if (c) set_radius_recursive(c, r);
+  }
+}
+
 void fade_out_ready_cb(lv_anim_t *anim) {
   display_manager_destroy_current_view();
 
@@ -474,8 +610,30 @@ void fade_out_ready_cb(lv_anim_t *anim) {
     }
 
     new_view->create();
-    display_manager_fade_in(new_view->root);
-    display_manager_fade_in(status_bar);
+
+    // Avoid running the per-tick fade animation for specific heavy views
+    // because the opacity animation forces heavy draw work (masks/labels)
+    // and can starve the LVGL tick/watchdog during the fade-in.
+    if (new_view->name && strcmp(new_view->name, "Keyboard Screen") == 0) {
+      if (new_view->root) {
+        // make fully opaque immediately
+        lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
+        // temporarily remove rounded radii to avoid expensive mask draws
+        set_radius_recursive(new_view->root, 0);
+      }
+      if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
+    } else if (new_view->name && strcmp(new_view->name, "Options Screen") == 0 && SelectedMenuType == OT_DualComm) {
+      if (new_view->root) {
+        // For the large Dual Comm options list, skip fade-in to keep
+        // LVGL's tick task lightweight.
+        lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
+        set_radius_recursive(new_view->root, 0);
+      }
+      if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
+    } else {
+      display_manager_fade_in(new_view->root);
+      display_manager_fade_in(status_bar);
+    }
   }
 }
 
@@ -670,11 +828,22 @@ static const uint32_t theme_palettes[15][6] = {
     };
 
 void display_manager_add_status_bar(const char *CurrentMenuName) {
-    if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
-        lv_label_set_text(mainlabel, CurrentMenuName);
-        lv_obj_move_foreground(status_bar);
-        lv_obj_invalidate(status_bar);
-        return;
+    const char *label_text = CurrentMenuName ? CurrentMenuName : "";
+    if (status_bar && lv_obj_is_valid(status_bar)) {
+        if (mainlabel && lv_obj_is_valid(mainlabel)) {
+            lv_label_set_text(mainlabel, label_text);
+            lv_obj_move_foreground(status_bar);
+            lv_obj_invalidate(status_bar);
+            return;
+        }
+        lv_obj_t *old_bar = status_bar;
+        status_bar = NULL;
+        mainlabel = NULL;
+        wifi_label = NULL;
+        bt_label = NULL;
+        sd_label = NULL;
+        battery_label = NULL;
+        lv_obj_del(old_bar);
     }
     status_bar = lv_obj_create(lv_scr_act());
   lv_obj_set_size(status_bar, LV_HOR_RES, 20);
@@ -698,7 +867,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_align(left_container, LV_ALIGN_LEFT_MID, 5, 0);
   // fill left container
   mainlabel = lv_label_create(left_container);
-  lv_label_set_text(mainlabel, CurrentMenuName);
+  lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, lv_color_hex(0x999999), 0);
   lv_obj_set_style_text_font(mainlabel, &lv_font_montserrat_14, 0);
 
@@ -796,6 +965,12 @@ void apply_power_management_config(bool power_save_enabled) {
 
 void display_manager_init(void) {
 
+  static bool lvgl_lock_registered = false;
+  if (!lvgl_lock_registered) {
+    lvgl_i2c_locking(i2c_bus_get_lock_handle());
+    lvgl_lock_registered = true;
+  }
+
   esp_pm_config_esp32_t pm_cfg = {
     .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
     .min_freq_mhz = 80,
@@ -886,8 +1061,7 @@ set_keyboard_brightness(0xFF); // Set to 100% brightness
   /* width * 8 gives ~8 lines of buffer which balances responsiveness and RAM use */
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
-  static lv_color_t buf2[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
+  static lv_color_t buf1[CONFIG_TFT_WIDTH * 3] __attribute__((aligned(4)));
 #else
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
   static lv_color_t buf2[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
@@ -906,13 +1080,16 @@ set_keyboard_brightness(0xFF); // Set to 100% brightness
 #endif
 
   static lv_disp_draw_buf_t disp_buf;
-/* Initialize draw buffer: prefer single-buffer on cardputer and ESP32-C5 */
+/* Initialize draw buffer: prefer single-buffer on cardputer, ESP32, and ESP32-C5 */
 #if defined(CONFIG_USE_CARDPUTER)
   /* single buffer mode: small buffer for low-memory cardputer */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 2);
 #elif defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32S2)
-  /* single buffer mode: use width * 8 for responsive drawing without excessive RAM */
+  /* single buffer mode: use width * 5 for responsive drawing without excessive RAM */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+  /* single buffer mode: use width * 3 for ESP32 to save DRAM */
+  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 3);
 #else
   /* default: double buffer for smoother drawing */
   lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
@@ -986,6 +1163,17 @@ set_keyboard_brightness(0xFF); // Set to 100% brightness
 #endif
 
 #ifdef CONFIG_USE_ENCODER
+#ifdef CONFIG_USE_IO_EXPANDER
+    // Encoder on IO expander - use virtual pin numbers (P05=5, P06=6, P07=7)
+    // These are IO expander pins, not ESP32 GPIOs
+    encoder_init(&g_encoder,
+                 5,  // P05 = encoder A on IO expander
+                 6,  // P06 = encoder B on IO expander  
+                 false,  // pullups handled by TCA9535
+                 ENCODER_LATCH_FOUR3);
+    joystick_init(&enc_button, 7, 500 /*hold ms*/, false); // P07 = encoder button
+#else
+    // Direct GPIO encoder (TEmbed C1101)
     encoder_init(&g_encoder,
                  CONFIG_ENCODER_INA,
                  CONFIG_ENCODER_INB,
@@ -994,8 +1182,13 @@ set_keyboard_brightness(0xFF); // Set to 100% brightness
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
 
-    // initialize IO6 exit button
-    joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    // GPIO 6 exit button is TEmbed C1101 only
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
+        joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
+    }
+#endif
+#endif
 #endif
 // initialize wake button interrupt
 #ifdef CONFIG_IS_S3TWATCH
@@ -1097,6 +1290,8 @@ void display_manager_destroy_current_view(void) {
 }
 
 View *display_manager_get_current_view(void) { return dm.current_view; }
+
+bool display_manager_is_available(void) { return display_manager_init_success; }
 
 void display_manager_fill_screen(lv_color_t color) {
   static lv_style_t style;
@@ -1301,7 +1496,7 @@ void hardware_input_task(void *pvParameters) {
     /* direction events */
     int8_t dir = encoder_get_direction(&g_encoder);
     if (dir) {
-        // treat an encoder turn as “touch”
+        // treat an encoder turn as "touch"
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed) {
           set_backlight_brightness(100);
@@ -1317,9 +1512,9 @@ void hardware_input_task(void *pvParameters) {
         }
     }
 
-    /* push-switch -> treat like “button” */
+    /* push-switch -> treat like "button" */
     if (joystick_just_pressed(&enc_button)) {
-        // treat an encoder click as “touch”
+        // treat an encoder click as "touch"
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed) {
           set_backlight_brightness(100);
@@ -1336,30 +1531,31 @@ void hardware_input_task(void *pvParameters) {
     }
 #endif
 
-#ifdef CONFIG_USE_ENCODER
-    // check IO6 exit button
-    if (joystick_just_pressed(&exit_button)) {
-        last_touch_time = xTaskGetTickCount();
-        if (is_backlight_dimmed) {
-          set_backlight_brightness(100);
-          is_backlight_dimmed = false;
-        } else {
-          InputEvent ev = {
-              .type = INPUT_TYPE_EXIT_BUTTON,
-              .data.exit_pressed = true
-          };
-          xQueueSend(input_queue, &ev, 0);
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
+        // check IO6 exit button (TEmbed C1101 only)
+        if (joystick_just_pressed(&exit_button)) {
+            last_touch_time = xTaskGetTickCount();
+            if (is_backlight_dimmed) {
+              set_backlight_brightness(100);
+              is_backlight_dimmed = false;
+            } else {
+              InputEvent ev = {
+                  .type = INPUT_TYPE_EXIT_BUTTON,
+                  .data.exit_pressed = true
+              };
+              xQueueSend(input_queue, &ev, 0);
+            }
         }
-    }
 
-    // Check for 7-second hold to enter deep sleep
-    if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
+        // Check for 7-second hold to enter deep sleep
+        if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
         uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
         if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
             ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
 
-            // Pull IO15 low before sleep
+            // Pull IO15 low before sleep (TEmbed C1101 power control)
             gpio_set_level(15, 0);
             ESP_LOGI("DeepSleep", "IO15 pulled low");
 
@@ -1388,15 +1584,20 @@ void hardware_input_task(void *pvParameters) {
             io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
             gpio_config(&io_conf);
 
-            // Configure IO6 as wake source for a new press using EXT0
-            esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0); // Wake on low level (button press)
+#if SOC_PM_SUPPORT_EXT0_WAKEUP
+            esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0);
+#elif SOC_PM_SUPPORT_EXT1_WAKEUP
+            esp_err_t ret = esp_sleep_enable_ext1_wakeup_io(1ULL << GPIO_NUM_6, ESP_EXT1_WAKEUP_ALL_LOW);
+#else
+            esp_err_t ret = ESP_ERR_NOT_SUPPORTED;
+#endif
             if (ret != ESP_OK) {
                 ESP_LOGE("DeepSleep", "Failed to configure wake-up source: %s", esp_err_to_name(ret));
                 exit_button.deep_sleep_triggered = false;
                 gpio_set_level(15, 1); // Restore IO15 high
                 return;
             }
-            ESP_LOGI("DeepSleep", "Wake-up source configured for new button press using EXT0");
+            ESP_LOGI("DeepSleep", "Wake-up source configured for new button press");
 
             ESP_LOGI("DeepSleep", "Entering deep sleep now...");
             vTaskDelay(pdMS_TO_TICKS(200)); // Give time for log to print
@@ -1408,9 +1609,10 @@ void hardware_input_task(void *pvParameters) {
             // Enter deep sleep
             esp_deep_sleep_start();
         }
-    } else {
-        // Reset deep sleep trigger when button is released
-        exit_button.deep_sleep_triggered = false;
+        } else {
+            // Reset deep sleep trigger when button is released
+            exit_button.deep_sleep_triggered = false;
+        }
     }
 #endif
 
