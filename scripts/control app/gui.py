@@ -2289,6 +2289,30 @@ class ESP32ControlGUI(QMainWindow):
             if hasattr(self, 'flash_console'):
                 if process.returncode == 0:
                     self.flash_console.append("idf.py build finished successfully.")
+                    # Create merged binary after successful build
+                    self.flash_console.append("\nCreating merged binary...")
+                    merge_cmd = ["idf.py", "merge-bin", "-o", "merged-binary.bin"]
+                    merge_process = subprocess.Popen(
+                        merge_cmd,
+                        cwd=project_root,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True
+                    )
+                    for line in merge_process.stdout:
+                        self.flash_console.append(line.rstrip())
+                        self.flash_console.ensureCursorVisible()
+                        QApplication.processEvents()
+                    merge_process.wait()
+                    if merge_process.returncode == 0:
+                        merged_bin_path = os.path.join(project_root, "build", "merged-binary.bin")
+                        if os.path.exists(merged_bin_path):
+                            self.flash_console.append(f"Merged binary created: {merged_bin_path}")
+                        else:
+                            self.flash_console.append("Warning: Merged binary command succeeded but file not found.")
+                    else:
+                        self.flash_console.append("Warning: Failed to create merged binary, but build succeeded.")
                 else:
                     self.flash_console.append("idf.py build exited with errors.")
         except Exception as e:
