@@ -341,7 +341,6 @@ static void process_html_line(const char* line) {
     if (strstr(line, "[IR/BEGIN]") != NULL) {
         ir_capture_state = IR_STATE_CAPTURING;
         ir_capture_pos = 0;
-        glog("IR capture started\n");
         return;
     }
 
@@ -356,8 +355,29 @@ static void process_html_line(const char* line) {
             memset(&sig, 0, sizeof(sig));
             if (infrared_manager_parse_buffer_single(ir_capture_buffer, &sig)) {
                 bool ok = infrared_manager_transmit(&sig);
+                glog("IR: send %s\n", ok ? "OK" : "FAIL");
+                if (sig.is_raw) {
+                    if (sig.payload.raw.timings && sig.payload.raw.timings_size > 0) {
+                        glog("IR: signal raw len=%u freq=%luHz duty=%.2f\n",
+                             (unsigned)sig.payload.raw.timings_size,
+                             (unsigned long)sig.payload.raw.frequency,
+                             (double)sig.payload.raw.duty_cycle);
+                    }
+                } else {
+                    const char *proto = sig.payload.message.protocol;
+                    if (proto && proto[0] != '\0') {
+                        uint32_t addr = sig.payload.message.address;
+                        uint32_t cmd = sig.payload.message.command;
+                        if (sig.name[0] != '\0') {
+                            glog("IR: signal [%s] protocol=%s addr=0x%08lX cmd=0x%08lX\n",
+                                 sig.name, proto, (unsigned long)addr, (unsigned long)cmd);
+                        } else {
+                            glog("IR: signal protocol=%s addr=0x%08lX cmd=0x%08lX\n",
+                                 proto, (unsigned long)addr, (unsigned long)cmd);
+                        }
+                    }
+                }
                 infrared_manager_free_signal(&sig);
-                glog("IR inline transmit %s\n", ok ? "OK" : "FAIL");
             } else {
                 glog("IR inline parse failed\n");
             }

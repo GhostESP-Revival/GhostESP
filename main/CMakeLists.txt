@@ -3,6 +3,35 @@ file(GLOB_RECURSE app_sources
     "${CMAKE_SOURCE_DIR}/main/core/esp_comm_manager.c"
     "${CMAKE_SOURCE_DIR}/main/core/universal_ir.c"
 )
+# Exclude all Flipper NFC parser sources from the glob so we can whitelist only
+# the parsers that are actually wired into the compat layer.
+list(FILTER app_sources EXCLUDE REGEX "managers/nfc/flipper_parsers/.*\\.c")
+# Explicitly add hooked-up Flipper parsers
+list(APPEND app_sources
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/smartrider.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/aime.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/csc.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/washcity.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/metromoney.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/bip.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/charliecard.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/disney_infinity.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/hi.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/hid.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/hworld.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/kazan.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/microel.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/mizip.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/plantain.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/saflok.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/skylanders.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/social_moscow.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/troika.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/two_cities.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/umarsh.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona_online.c"
+)
 # Explicitly include infrared view implementation
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
@@ -57,8 +86,6 @@ if("${IDF_TARGET}" STREQUAL "esp32c5" OR "${IDF_TARGET}" STREQUAL "esp32c6")
     list(APPEND required_components ieee802154)
     # Add Zigbee manager source
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/zigbee_manager.c")
-    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_nfc_compat.c")
-    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/smartrider.c")
 endif()
 
 if(CONFIG_HAS_NFC)

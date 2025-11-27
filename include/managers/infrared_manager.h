@@ -68,6 +68,10 @@ bool infrared_manager_rx_init(void);
 void infrared_manager_rx_deinit(void);
 // Returns true if signal received, false on timeout (timeout_ms < 0 for infinite)
 bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms);
+bool infrared_manager_rx_is_initialized(void);
+void infrared_manager_rx_suspend(void);
+void infrared_manager_rx_resume(void);
+void infrared_manager_rx_cancel(void);
 
 #define IR_RX_MAX_SYMBOLS 128
 typedef struct {

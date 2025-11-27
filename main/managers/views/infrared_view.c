@@ -202,18 +202,18 @@ static volatile bool universal_transmit_cancel = false;
 static char current_remote_path[256] = "";
 static char current_remote_name[64] = "";
 
-// override weak hook from infrared_manager to free rmt rx channel for tx, then restore it
+// override weak hook from infrared_manager to temporarily suspend RX during TX
 void infrared_rx_pause_for_tx(bool pause) {
 #ifdef CONFIG_HAS_INFRARED_RX
+    if (!infrared_manager_rx_is_initialized()) {
+        return;
+    }
     if (pause) {
-        infrared_manager_rx_deinit();
-        ESP_LOGI(TAG, "paused RMT RX (deinit) for TX");
+        infrared_manager_rx_suspend();
+        ESP_LOGI(TAG, "paused RMT RX (suspend) for TX");
     } else {
-        if (infrared_manager_rx_init()) {
-            ESP_LOGI(TAG, "resumed RMT RX after TX (init)");
-        } else {
-            ESP_LOGE(TAG, "failed to resume RMT RX after TX");
-        }
+        infrared_manager_rx_resume();
+        ESP_LOGI(TAG, "resumed RMT RX after TX (resume)");
     }
 #else
     (void)pause;

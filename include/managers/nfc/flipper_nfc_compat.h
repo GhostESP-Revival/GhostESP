@@ -48,9 +48,55 @@ void furi_string_reset(FuriString* str);
 void furi_string_printf(FuriString* str, const char* fmt, ...);
 void furi_string_cat_printf(FuriString* str, const char* fmt, ...);
 const char* furi_string_get_cstr(const FuriString* str);
+void furi_string_set_str(FuriString* str, const char* cstr);
+void furi_string_cat(FuriString* dst, const FuriString* src);
+void furi_string_cat_str(FuriString* dst, const char* cstr);
+FuriString* furi_string_alloc_set_str(const char* cstr);
+void furi_string_push_back(FuriString* str, char c);
+char furi_string_get_char(const FuriString* str, size_t index);
 
 // bit_lib shim
 uint64_t bit_lib_bytes_to_num_le(const uint8_t* bytes, size_t len);
+uint64_t bit_lib_bytes_to_num_be(const uint8_t* bytes, size_t len);
+void bit_lib_num_to_bytes_be(uint64_t value, size_t len, uint8_t* out);
+uint64_t bit_lib_bytes_to_num_bcd(const uint8_t* bytes, size_t len, bool* is_bcd);
+uint8_t bit_lib_get_bits(const uint8_t* data, size_t position, uint8_t length);
+uint32_t bit_lib_get_bits_32(const uint8_t* data, size_t position, uint8_t length);
+uint64_t bit_lib_get_bits_64(const uint8_t* data, size_t position, uint8_t length);
+
+#define REVERSE_BYTES_U32(x) __builtin_bswap32(x)
+
+// --------------------------------------------------------------------------
+// Datetime / Locale shims
+// --------------------------------------------------------------------------
+
+typedef struct {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+} DateTime;
+
+uint32_t datetime_datetime_to_timestamp(const DateTime* dt);
+void datetime_timestamp_to_datetime(uint32_t ts, DateTime* dt);
+
+typedef enum {
+    LocaleDateFormatDMY = 0,
+    LocaleDateFormatMDY,
+    LocaleDateFormatYMD,
+} LocaleDateFormat;
+
+typedef enum {
+    LocaleTimeFormat24h = 0,
+    LocaleTimeFormat12h,
+} LocaleTimeFormat;
+
+LocaleDateFormat locale_get_date_format(void);
+LocaleTimeFormat locale_get_time_format(void);
+void locale_format_date(FuriString* out, const DateTime* dt, LocaleDateFormat fmt, const char* sep);
+void locale_format_time(FuriString* out, const DateTime* dt, LocaleTimeFormat fmt, bool with_seconds);
 
 // --------------------------------------------------------------------------
 // NFC / Device Shims
@@ -92,6 +138,7 @@ typedef enum {
     MfClassicErrorNotPresent,
     MfClassicErrorProtocol,
     MfClassicErrorAuth,
+    MfClassicErrorPartialRead,
 } MfClassicError;
 
 typedef struct {
@@ -122,7 +169,14 @@ typedef struct {
     uint8_t block_read_mask[32]; // 256 bits indicating valid blocks
     // Helper to track known keys for sector trailer emulation if needed
     MfClassicDeviceKeys keys; 
+    uint8_t uid[10];
+    uint8_t uid_len;
 } MfClassicData;
+
+// Minimal auth context placeholder used by Flipper poller APIs
+typedef struct {
+    uint8_t reserved[16];
+} MfClassicAuthContext;
 
 MfClassicData* mf_classic_alloc(void);
 void mf_classic_free(MfClassicData* data);
@@ -131,6 +185,8 @@ size_t mf_classic_get_total_sectors_num(MfClassicType type);
 uint8_t mf_classic_get_first_block_num_of_sector(uint8_t sector);
 bool mf_classic_is_block_read(const MfClassicData* data, uint8_t block);
 const MfClassicSectorTrailer* mf_classic_get_sector_trailer_by_sector(const MfClassicData* data, uint8_t sector);
+const uint8_t* mf_classic_get_uid(const MfClassicData* data, size_t* uid_len);
+bool mf_classic_is_card_read(const MfClassicData* data);
 
 // Poller stubs (GhostESP does not use these for parsing, but plugins reference them)
 MfClassicError mf_classic_poller_sync_detect_type(Nfc* nfc, MfClassicType* type);

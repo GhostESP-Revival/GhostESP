@@ -603,6 +603,22 @@ static bool cu_try_known_keys_first(MFC_TYPE t, int target_sector, uint8_t auth_
     return false;
 }
 
+static void cu_try_find_complementary_user_key(MFC_TYPE t, int sector, uint8_t auth_blk,
+                                               bool usedB_cur, const uint8_t *user_keys,
+                                               int user_count) {
+    if (!user_keys || user_count <= 0) return;
+    if (cu_sector_key_known(sector, !usedB_cur)) return;
+    for (int i = 0; i < user_count; ++i) {
+        if (cu_call_should_cancel() || cu_call_should_skip_dict()) break;
+        const uint8_t *key = &user_keys[i * 6];
+        if (cu_mf1_auth_one_block(auth_blk, !usedB_cur, key)) {
+            cu_mfc_cache_record_sector_key(sector, !usedB_cur, key);
+            break;
+        }
+        if ((i & 0x3F) == 0) vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
 static bool cu_sector_key_known(int sector, bool key_b) {
     int sectors = mfc_sector_count(g_cu_mfc_cache.type); if (sectors == 0) sectors = 16;
     if (sector < 0 || sector >= sectors) return false;
@@ -618,6 +634,21 @@ static bool cu_sector_any_key_known(int sector) {
     return cu_sector_key_known(sector, false) || cu_sector_key_known(sector, true);
 }
 
+static uint8_t cu_auth_target_block(MFC_TYPE t, int sector) {
+    int first = mfc_first_block_of_sector(t, sector);
+    int blocks = mfc_blocks_in_sector(t, sector);
+    int target = first;
+    if (sector == 0) {
+        target = first + 1;
+    }
+    int trailer = first + blocks - 1;
+    if (target == trailer) {
+        target = (blocks >= 2) ? first : trailer;
+        if (sector == 0 && target == first) target = first + 1;
+    }
+    return (uint8_t)target;
+}
+
 static void cu_read_sector_blocks(MFC_TYPE t, int sector) {
     int first = mfc_first_block_of_sector(t, sector);
     int blocks = mfc_blocks_in_sector(t, sector);
@@ -625,6 +656,7 @@ static void cu_read_sector_blocks(MFC_TYPE t, int sector) {
     uint8_t trailer[16]; bool have_trailer = false;
     /* cache-fill UI handled at higher level to avoid flicker between sectors */
     for (int b = 0; b < blocks; ++b) {
+
         uint8_t outb[16];
         uint8_t blk = (uint8_t)(first + b);
         // Choose known key for this sector; prefer A if available
@@ -645,15 +677,16 @@ static void cu_read_sector_blocks(MFC_TYPE t, int sector) {
     if (have_trailer) {
         uint8_t key_a[6]; memcpy(key_a, trailer, 6);
         uint8_t key_b[6]; memcpy(key_b, trailer + 10, 6);
-        int auth_blk = first;
-        if (sector == 0) auth_blk = first + 1;
-        if (cu_mf1_auth_one_block((uint8_t)auth_blk, false, key_a)) {
-            cu_mfc_cache_record_sector_key(sector, false, key_a);
-            cu_key_reuse_sweep(t, false, key_a, sector);
-        }
-        if (cu_mf1_auth_one_block((uint8_t)auth_blk, true,  key_b)) {
-            cu_mfc_cache_record_sector_key(sector, true,  key_b);
-            cu_key_reuse_sweep(t, true, key_b, sector);
+        int verify_blk = cu_auth_target_block(t, sector);
+        if (verify_blk >= 0 && verify_blk < g_cu_mfc_cache.total_blocks) {
+            if (cu_mf1_auth_one_block((uint8_t)verify_blk, false, key_a)) {
+                cu_mfc_cache_record_sector_key(sector, false, key_a);
+                cu_key_reuse_sweep(t, false, key_a, sector);
+            }
+            if (cu_mf1_auth_one_block((uint8_t)verify_blk, true, key_b)) {
+                cu_mfc_cache_record_sector_key(sector, true, key_b);
+                cu_key_reuse_sweep(t, true, key_b, sector);
+            }
         }
     }
 }
@@ -662,18 +695,19 @@ static void cu_key_reuse_sweep(MFC_TYPE t, bool use_key_b, const uint8_t key[6],
     if (!key) return;
     if (cu_sweep_already(use_key_b, key)) return;
     cu_sweep_mark(use_key_b, key);
+
     int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
     for (int s = 0; s < sectors; ++s) {
         if (cu_call_should_cancel()) break;
         if (s == current_sector) continue;
         if (cu_sector_key_known(s, use_key_b)) continue;
-        int auth_blk = mfc_first_block_of_sector(t, s);
-        if (s == 0) auth_blk = auth_blk + 1;
+        int auth_blk = cu_auth_target_block(t, s);
         if (cu_mf1_auth_one_block((uint8_t)auth_blk, use_key_b, key)) {
             cu_mfc_cache_record_sector_key(s, use_key_b, key);
             cu_call_on_phase(s, mfc_first_block_of_sector(t, s), use_key_b, 0);
             cu_read_sector_blocks(t, s);
         }
+
         if ((s & 0x3) == 0) vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -2277,13 +2311,21 @@ bool chameleon_manager_has_cached_card_dump(void) {
 char *chameleon_manager_build_cached_details(void) {
     if (g_cu_mfc_cache.valid) {
         size_t cap = 512; size_t len = 0; char *out = (char*)malloc(cap); if (!out) return NULL; out[0] = '\0';
+        char *plugin_text = NULL;
         MFC_TYPE t = g_cu_mfc_cache.type; int sectors = mfc_sector_count(t); if (sectors == 0) sectors = 16;
 
         // Try Flipper parsers first (heap allocation to avoid stack overflow)
         MfClassicData* flipper_data = (MfClassicData*)calloc(1, sizeof(MfClassicData));
         if (!flipper_data) goto skip_flipper_parse;
+
         flipper_data->type = (t == MFC_4K) ? MfClassicType4k : (t == MFC_MINI) ? MfClassicTypeMini : MfClassicType1k;
-        
+        if (g_cu_mfc_cache.uid_len > 0) {
+            uint8_t ulen = g_cu_mfc_cache.uid_len;
+            if (ulen > sizeof(flipper_data->uid)) ulen = (uint8_t)sizeof(flipper_data->uid);
+            flipper_data->uid_len = ulen;
+            memcpy(flipper_data->uid, g_cu_mfc_cache.uid, ulen);
+        }
+
         // Copy blocks
         if (g_cu_mfc_cache.blocks && g_cu_mfc_cache.known_bits) {
             int max_blocks = g_cu_mfc_cache.total_blocks;
@@ -2304,9 +2346,8 @@ char *chameleon_manager_build_cached_details(void) {
                 if (haveA && g_cu_mfc_cache.key_a) {
                     memcpy(flipper_data->block[trailer_idx].data, &g_cu_mfc_cache.key_a[s * 6], 6);
                 } else {
-                    memset(flipper_data->block[trailer_idx].data, 0xFF, 6);
+                    memcpy(flipper_data->block[trailer_idx].data, &g_cu_mfc_cache.blocks[trailer_idx * 16], 6);
                 }
-                // Access bits default
                 flipper_data->block[trailer_idx].data[6] = 0xFF;
                 flipper_data->block[trailer_idx].data[7] = 0x07;
                 flipper_data->block[trailer_idx].data[8] = 0x80;
@@ -2314,59 +2355,57 @@ char *chameleon_manager_build_cached_details(void) {
                 if (haveB && g_cu_mfc_cache.key_b) {
                     memcpy(flipper_data->block[trailer_idx].data + 10, &g_cu_mfc_cache.key_b[s * 6], 6);
                 } else {
-                    memset(flipper_data->block[trailer_idx].data + 10, 0xFF, 6);
+                    memcpy(flipper_data->block[trailer_idx].data + 10, &g_cu_mfc_cache.blocks[trailer_idx * 16 + 10], 6);
                 }
-                // Mark trailer as read so plugin sees it
                 flipper_data->block_read_mask[trailer_idx / 8] |= (1 << (trailer_idx % 8));
             }
         }
 
-        char* plugin_text = flipper_nfc_try_parse_mfclassic_from_cache(flipper_data);
+        plugin_text = flipper_nfc_try_parse_mfclassic_from_cache(flipper_data);
         free(flipper_data); // Done with flipper_data
         flipper_data = NULL;
-        
-        if (plugin_text) {
-            if (!cu_details_append(&out, &cap, &len, "%s\n", plugin_text)) { free(plugin_text); free(out); return NULL; }
-            free(plugin_text);
-        }
 
 skip_flipper_parse:
         // Header like PN532
-        if (!cu_details_append(&out, &cap, &len, "Card: %s | UID:", cu_mfc_type_str(t))) { free(out); return NULL; }
+        if (!cu_details_append(&out, &cap, &len, "Card: %s | UID:", cu_mfc_type_str(t))) goto fail_out;
 
         for (uint8_t i = 0; i < g_cu_mfc_cache.uid_len; ++i) {
-            if (!cu_details_append(&out, &cap, &len, " %02X", g_cu_mfc_cache.uid[i])) { free(out); return NULL; }
+            if (!cu_details_append(&out, &cap, &len, " %02X", g_cu_mfc_cache.uid[i])) goto fail_out;
         }
         if (!cu_details_append(&out, &cap, &len, "\nATQA: %02X %02X | SAK: %02X\n",
                                (g_cu_mfc_cache.atqa >> 8) & 0xFF,
                                g_cu_mfc_cache.atqa & 0xFF,
-                               g_cu_mfc_cache.sak)) { free(out); return NULL; }
+                               g_cu_mfc_cache.sak)) goto fail_out;
         // Key and sector counts
         int found_a = 0, found_b = 0, readable = 0;
         for (int s = 0; s < sectors; ++s) {
             if (g_cu_mfc_cache.key_a_valid && cu_bitset_test(g_cu_mfc_cache.key_a_valid, s)) found_a++;
             if (g_cu_mfc_cache.key_b_valid && cu_bitset_test(g_cu_mfc_cache.key_b_valid, s)) found_b++;
+
             // Consider sector readable if any data block (non-trailer) is known
             int first = mfc_first_block_of_sector(t, s); int blocks = mfc_blocks_in_sector(t, s); if (blocks <= 1) continue;
             bool any_known = false;
             for (int b = 0; b < blocks - 1 && !any_known; ++b) {
-                int absb = first + b; if (g_cu_mfc_cache.known_bits && cu_bitset_test(g_cu_mfc_cache.known_bits, absb)) any_known = true;
+                int absb = first + b;
+                if (g_cu_mfc_cache.known_bits && cu_bitset_test(g_cu_mfc_cache.known_bits, absb)) any_known = true;
             }
             if (any_known) readable++;
         }
         int keys_total = sectors * 2;
-        if (!cu_details_append(&out, &cap, &len, "Keys %d/%d | Sectors %d/%d\n", found_a + found_b, keys_total, readable, sectors)) { free(out); return NULL; }
+        if (!cu_details_append(&out, &cap, &len, "Keys %d/%d | Sectors %d/%d\n", found_a + found_b, keys_total, readable, sectors)) goto fail_out;
         // Try to locate and summarize NDEF from data blocks (same approach as PN532)
         for (int s = 0; s < sectors; ++s) {
             if (s == 16 && sectors > 16) continue; // skip MAD2 on 4K
             int first = mfc_first_block_of_sector(t, s);
             int blocks = mfc_blocks_in_sector(t, s);
+
             int data_blocks = blocks - 1; if (data_blocks <= 0) continue;
             size_t sec_bytes = (size_t)data_blocks * 16;
             uint8_t *sec_buf = (uint8_t*)malloc(sec_bytes);
             if (!sec_buf) break;
             size_t woff = 0;
             for (int b = 0; b < data_blocks; ++b) {
+
                 int absb = first + b;
                 if (g_cu_mfc_cache.known_bits && cu_bitset_test(g_cu_mfc_cache.known_bits, absb)) memcpy(sec_buf + woff, &g_cu_mfc_cache.blocks[absb * 16], 16);
                 else memset(sec_buf + woff, 0, 16);
@@ -2374,6 +2413,7 @@ skip_flipper_parse:
             }
             size_t off = 0, mlen = 0;
             if (ntag_t2_find_ndef(sec_buf, sec_bytes, &off, &mlen) && off < sec_bytes && mlen > 0) {
+
                 // Build contiguous window across subsequent sectors to cover full message
                 size_t need = off + mlen; size_t have = sec_bytes; int ss = s + 1;
                 while (have < need && ss < sectors) {
@@ -2391,6 +2431,7 @@ skip_flipper_parse:
                         int f2 = mfc_first_block_of_sector(t, s2);
                         int bl2 = mfc_blocks_in_sector(t, s2);
                         for (int b2 = 0; b2 < bl2 - 1 && cat_off < total_cap; ++b2) {
+
                             int absb2 = f2 + b2;
                             if (g_cu_mfc_cache.known_bits && cu_bitset_test(g_cu_mfc_cache.known_bits, absb2)) memcpy(cat + cat_off, &g_cu_mfc_cache.blocks[absb2 * 16], 16);
                             else memset(cat + cat_off, 0, 16);
@@ -2399,27 +2440,46 @@ skip_flipper_parse:
                     }
                     char *ndef_text = ndef_build_details_from_message(cat + off, mlen, g_cu_mfc_cache.uid, g_cu_mfc_cache.uid_len, cu_mfc_type_str(t));
                     if (ndef_text) {
+
                         // Extract and append first record single-line summary
                         const char *p = strstr(ndef_text, "\nR"); if (!p) { if (ndef_text[0] == 'R') p = ndef_text; } else { p++; }
                         if (p && p[0] == 'R') {
                             const char *colon = strchr(p, ':'); const char *start = NULL; if (colon) { start = colon + 1; if (*start == ' ') start++; }
                             if (start) {
+
                                 const char *end = strchr(start, '\n'); size_t linelen = end ? (size_t)(end - start) : strlen(start);
-                                if (!cu_details_append(&out, &cap, &len, "NDEF: ")) { free(ndef_text); free(cat); free(sec_buf); free(out); return NULL; }
+                                if (!cu_details_append(&out, &cap, &len, "NDEF: ")) { free(ndef_text); free(cat); free(sec_buf); goto fail_out; }
                                 if (linelen + 2 > cap - len) { size_t used = len; size_t newcap = (cap * 2) + linelen + 256; char *n = (char*)realloc(out, newcap); if (n) { out = n; cap = newcap; len = used; } }
                                 size_t to_copy = (linelen < cap - len - 1) ? linelen : cap - len - 1; memcpy(out + len, start, to_copy); len += to_copy; out[len++] = '\n'; out[len] = '\0';
                             }
                         }
                         free(ndef_text); free(cat); free(sec_buf);
-                        return out; // same behavior as PN532: return after first found message
+                        goto finalize_out; // same behavior as PN532: return after first found message
                     }
                     free(cat);
                 }
             }
             free(sec_buf);
         }
+
+finalize_out:
+        if (plugin_text) {
+            if (!cu_details_append(&out, &cap, &len, "\n%s", plugin_text)) goto fail_out;
+            free(plugin_text);
+            plugin_text = NULL;
+        }
         return out;
+
+fail_out:
+        if (plugin_text) {
+            free(plugin_text);
+        }
+        if (out) {
+            free(out);
+        }
+        return NULL;
     }
+
     if (g_last_ntag_dump.valid) {
         uint8_t *buf = NULL;
         size_t mem_len = 0;
@@ -3166,8 +3226,7 @@ bool chameleon_manager_mf1_read_classic_with_dict(bool skip_dict){
         if (cu_call_should_cancel()) break;
         if (cu_sector_any_key_known(s)) continue;
         int first = mfc_first_block_of_sector(t, s);
-        int blocks_in_sector = mfc_blocks_in_sector(t, s);
-        uint8_t auth_blk = (uint8_t)(first + blocks_in_sector - 1); // use trailer block for probing/auth
+        uint8_t auth_blk = cu_auth_target_block(t, s);
         bool authed = false; bool usedB = false; const uint8_t *used_key = NULL;
 
         int def_count = (int)(sizeof(CU_DEFAULT_KEYS) / 6);
@@ -3261,9 +3320,13 @@ bool chameleon_manager_mf1_read_classic_with_dict(bool skip_dict){
             if (!cache_mode_on) { cu_call_on_cache_mode(true); cache_mode_on = true; }
             cu_call_on_phase(s, first, usedB, 0);
             cu_read_sector_blocks(t, s);
+            if (!skip_dict && user_loaded && user_count > 0) {
+                cu_try_find_complementary_user_key(t, s, auth_blk, usedB, user_keys, user_count);
+            }
             if (used_key) {
                 cu_key_reuse_sweep(t, usedB, used_key, s);
             }
+
             if (tried > 0 && total_attempts != tried) cu_progress(tried, total_attempts);
             int final_total = (tried > 0) ? tried : total_attempts;
             cu_progress(final_total, final_total);

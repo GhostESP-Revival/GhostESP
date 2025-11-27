@@ -3,20 +3,46 @@
 ## Revival v1.9
 
 - Added IR CLI support
+- Added Flipper Zero NFC parser compatibility layer with support for:
+  - Aime
+  - CSC Service Works
+  - WashCity (Verified working)
+  - Metromoney
+  - Bip
+  - CharlieCard
+  - Disney Infinity (Verified working)
+  - HI!
+  - HID PACS (Verified working)
+  - H World
+  - Kazan
+  - Microel
+  - MiZIP
+  - Plantain
+  - Saflok (Verified working)
+  - Skylanders (Verified working)
+  - SmartRider (Verified working)
+  - Social Moscow
+  - Troika
+  - Two Cities
+  - Umarsh
+  - Zolotaya Korona
+  - Zolotaya Korona Online
 - Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
 - Refactors to NFC logic to make more maintainable
 - After scanning, NFC popup title now specifies the tag type
 - Added dualcomm display menu when connected to a peer with split view terminal showing normal/peer response logs
 - IR and NFC display views and popups now properly use active set UI theme
 - Main menu app colors are now consistent across devices
-- Added Flipper NFC parser compatibility layer and SmartRider card support
 - Avoid redundant PN532 Mifare Classic reads for a minor speed up
 - Apps menu now follows main menu theme, controls and layout
 - Reorganised the settings menu and adjusted styling
+- Fixed an issue that would cause MFC dictionary attack to not try all possible keys
 - Fixed BLE scanning not being reliable
 - Added AirTag RSSI update logging so existing tags report RSSI changes every few seconds
 - Add vendor board support and images to documentation - @tototo31
 - Added detectors for Apple, Samsung, Google, Tile, Axon, Taser, and Flock devices - @tototo31
+- Fixed an issue that would cause Chameleon Ultra to recover less keys than a PN532
+- Route evil portal HTML requests through the UART HTML buffer when active instead of the SD-backed file handler.
 
 
 

@@ -114,11 +114,36 @@ toc: true
 - **`ir list [path]`** — List `.ir` files (default: `/mnt/ghostesp/infrared/remotes`).
 - **`ir show <path|remote_index>`** — Parse and display signals from an IR file. After `ir list`, you can pass a numeric remote index.
 - **`ir send <path|remote_index> [button_index]`** — Transmit a signal from a file. Use `remote_index` from `ir list` and optional `button_index` from `ir show`.
-- **`ir universals list`** — List built-in universal signals.
-- **`ir universals send <index>`** — Transmit a universal signal.
+- **`ir universals list [-all]`** — List universal IR files and, with `-all`, all built‑in universal signals.
+- **`ir universals send <index>`** — Transmit a built‑in universal signal by index (see `ir universals list -all`).
+- **`ir universals sendall <file|TURNHISTVOFF> <button_name> [delay_ms]`** — Transmit all signals for a named button from a universal file or the built‑in TURNHISTVOFF set; can be stopped with `stop`.
 - **`ir rx [timeout]`** — Wait up to `timeout` seconds (default 60) for a single IR signal, print it (decoded or RAW), then stop.
 - **`ir learn [path]`** — Wait for a signal (10s). Without `path`, auto-create a new `.ir` file under `/mnt/ghostesp/infrared/remotes`; with `path`, append the learned signal to that file.
-- **`ir inline`** — Display help for sending inline IR data via serial markers (`[IR/BEGIN]` ... `[IR/CLOSE]`).
+- **`[IR/BEGIN]` / `[IR/CLOSE]` (UART IR envelope)**
+  - **Usage:** Send `[IR/BEGIN]`, then a single IR message body, then `[IR/CLOSE]` on the same UART stream to trigger a one‑off transmit.
+  - **Body format (`.ir` text block):** Same fields as a standard `.ir` file entry (for example: name, type, protocol, address, command).
+  - **Body format (JSON):** Single JSON object carrying the same information as a `.ir` entry (parsed signal fields or raw timing data).
+  - **Examples:**
+
+    ```text
+    [IR/BEGIN]
+    name=Power
+    type=parsed
+    protocol=NEC
+    addr=0x0000FFFF
+    cmd=0x0000E718
+    [IR/CLOSE]
+    ```
+
+    ```json
+    [IR/BEGIN]
+    {"name":"Power","type":"parsed","protocol":"NEC","addr":"0x0000FFFF","cmd":"0x0000E718"}
+    [IR/CLOSE]
+    ```
+
+  - **CLI response on success:** `IR: send OK`, followed by a compact summary:
+    - Parsed: `IR: signal [Name] protocol=NEC addr=0x0000FFFF cmd=0x0000E718`
+    - Raw: `IR: signal raw len=N freq=38000Hz duty=0.33`
 
 ## GPS
 

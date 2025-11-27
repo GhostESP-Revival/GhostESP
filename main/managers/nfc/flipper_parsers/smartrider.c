@@ -276,8 +276,8 @@ static bool smartrider_parse(const NfcDevice* device, FuriString* parsed_data) {
 
     furi_string_printf(
         parsed_data,
-        "\e#SmartRider\nBalance: $%lu.%02lu\nConcession: %s\nSerial: %s%s\n"
-        "Total Cost: $%u.%02u\nAuto-Load: $%u.%02u/$%u.%02u\n\e#Tag On/Off History\n",
+        "SmartRider\nBalance: $%lu.%02lu\nConcession: %s\nSerial: %s%s\n"
+        "Total Cost: $%u.%02u\nAuto-Load: $%u.%02u/$%u.%02u\nTag On/Off History\n",
         sr_data.balance / 100,
         sr_data.balance % 100,
         get_concession_type(sr_data.token),

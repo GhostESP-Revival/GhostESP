@@ -195,7 +195,7 @@ Ghost ESP turns your ESP32 into a powerful, cheap and helpful wireless testing t
 
 ---
 
-## Acknowledgments
+## Credits
 
 Special thanks to:
 
@@ -250,13 +250,37 @@ Special thanks to:
         <img src="https://github.com/WillyJL.png" width="80" height="80" style="border-radius: 50%;" alt="WillyJL"/><br/>
         <b>WillyJL</b>
       </a><br/>
-      <sub>Flipper BLE Spam code</sub>
+      <sub>Core Flipper Firmware functionality and BLE Spam code</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/flipperdevices/flipperzero-firmware">
+        <img src="https://github.com/flipperdevices.png" width="80" height="80" style="border-radius: 50%;" alt="flipperdevices"/><br/>
+        <b>Flipper Zero firmware</b>
+      </a><br/>
+      <sub>Core IR &amp; NFC implementation (flipperdevices/flipperzero-firmware &amp; contributors)</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Garag">
+        <img src="https://github.com/Garag.png" width="80" height="80" style="border-radius: 50%;" alt="Garag"/><br/>
+        <b>Garag</b>
+      </a><br/>
+      <sub>Core NFC library</sub>
+    </td>
+    <td align="center">
+      <!-- Empty cell for symmetry -->
+    </td>
+    <td align="center">
+      <!-- Empty cell for symmetry -->
     </td>
     <td align="center">
       <!-- Empty cell for symmetry -->
     </td>
   </tr>
 </table>
+
+> Portions of the IR and NFC functionality are adapted from the open-source Flipper Zero firmware by flipperdevices and its community contributors.
 
 ---
 

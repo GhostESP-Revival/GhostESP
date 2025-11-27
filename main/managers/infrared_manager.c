@@ -30,6 +30,20 @@
 
 static const char *TAG_IR_MANAGER = "infrared_manager";
 
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+static bool ir_mgr_io24_configured = false;
+
+static void infrared_manager_io24_ensure_configured(void) {
+    if (!ir_mgr_io24_configured && strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+        gpio_reset_pin(GPIO_NUM_24);
+        gpio_set_direction(GPIO_NUM_24, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_24, 0);
+        ir_mgr_io24_configured = true;
+        ESP_LOGI(TAG_IR_MANAGER, "IO24 configured for poltergeist template");
+    }
+}
+#endif
+
 /* optional hook provided by infrared_view.c to pause RX while TX allocates a channel */
 __attribute__((weak)) void infrared_rx_pause_for_tx(bool pause) { (void)pause; }
 
@@ -42,6 +56,9 @@ bool infrared_manager_init(void) {
         gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
         ESP_LOGI(TAG_IR_MANAGER, "IR LED pin initialized: %d", CONFIG_INFRARED_LED_PIN);
     }
+#endif
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    infrared_manager_io24_ensure_configured();
 #endif
     return ok;
 }
@@ -376,15 +393,16 @@ static bool parse_tlv_list(const uint8_t *buf, size_t buf_len, infrared_signal_t
     return false;
 }
 
-static bool parse_ir_file(const char *buf, const char *path, infrared_signal_t **signals, size_t *count) {
-    char *dup = strdup(buf);
-    if (!dup) return false;
+static bool parse_ir_file(char *buf, const char *path, infrared_signal_t **signals, size_t *count) {
+
     infrared_signal_t *list = NULL;
     size_t list_count = 0, list_capacity = 0;
     infrared_signal_t current;
+
     bool in_block = false;
     char *saveptr;
-    char *line = strtok_r(dup, "\r\n", &saveptr);
+    char *line = strtok_r(buf, "\r\n", &saveptr);
+
     while (line) {
         char *s = line;
         while (*s && isspace((unsigned char)*s)) s++;
@@ -402,7 +420,8 @@ static bool parse_ir_file(const char *buf, const char *path, infrared_signal_t *
                 if (list_count == list_capacity) {
                     size_t new_cap = list_capacity ? list_capacity * 2 : 4;
                     infrared_signal_t *tmp = realloc(list, new_cap * sizeof(infrared_signal_t));
-                    if (!tmp) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); free(dup); return false; }
+                    if (!tmp) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); return false; }
+
                     list = tmp; list_capacity = new_cap;
                 }
                 list[list_count++] = current;
@@ -421,8 +440,9 @@ static bool parse_ir_file(const char *buf, const char *path, infrared_signal_t *
                 size_t data_count = 0; const char *p2 = value;
                 while (*p2) { while (*p2 && isspace((unsigned char)*p2)) p2++; if (!*p2) break; data_count++; while (*p2 && !isspace((unsigned char)*p2)) p2++; }
                 uint32_t *timings = malloc(sizeof(uint32_t) * data_count);
-                if (!timings) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); free(dup); return false; }
+                if (!timings) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); return false; }
                 size_t idx2 = 0; p2 = value; char *endptr;
+
                 while (*p2) { while (*p2 && isspace((unsigned char)*p2)) p2++; if (!*p2) break; unsigned long v = strtoul(p2, &endptr, 10); timings[idx2++] = (uint32_t)v; p2 = endptr; }
                 current.payload.raw.timings = timings; current.payload.raw.timings_size = data_count;
             }
@@ -432,10 +452,12 @@ static bool parse_ir_file(const char *buf, const char *path, infrared_signal_t *
                 current.payload.message.protocol[sizeof(current.payload.message.protocol) - 1] = '\0';
             } else if (strcmp(key, "address") == 0) {
                 uint32_t addr = 0; const char *p2 = value; char *endptr; uint8_t shift = 0;
+
                 while (*p2) { while (*p2 && isspace((unsigned char)*p2)) p2++; if (!*p2) break; unsigned long b = strtoul(p2, &endptr, 16); addr |= (uint32_t)(b & 0xFF) << shift; shift += 8; p2 = endptr; }
                 current.payload.message.address = addr;
             } else if (strcmp(key, "command") == 0) {
                 uint32_t cmd = 0; const char *p2 = value; char *endptr; uint8_t shift = 0;
+
                 while (*p2) { while (*p2 && isspace((unsigned char)*p2)) p2++; if (!*p2) break; unsigned long b = strtoul(p2, &endptr, 16); cmd |= (uint32_t)(b & 0xFF) << shift; shift += 8; p2 = endptr; }
                 current.payload.message.command = cmd;
             }
@@ -446,12 +468,11 @@ static bool parse_ir_file(const char *buf, const char *path, infrared_signal_t *
         if (list_count == list_capacity) {
             size_t new_cap = list_capacity ? list_capacity * 2 : 4;
             infrared_signal_t *tmp = realloc(list, new_cap * sizeof(infrared_signal_t));
-            if (!tmp) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); free(dup); return false; }
+            if (!tmp) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); return false; }
             list = tmp; list_capacity = new_cap;
         }
         list[list_count++] = current;
     }
-    free(dup);
     if (list_count == 0) { free_signal_array(list, list_count); infrared_manager_free_signal(&current); return false; }
     *signals = list; *count = list_count;
     return true;
@@ -465,6 +486,7 @@ bool infrared_manager_read_list(const char *path, infrared_signal_t **signals, s
         free(buf);
         if (ok) return true;
     }
+
     uint8_t *binbuf = NULL; size_t binlen = 0;
     if (read_file_binary(path, &binbuf, &binlen)) {
         bool ok = parse_tlv_list(binbuf, binlen, signals, count);
@@ -515,9 +537,6 @@ static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(cons
 static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty) {
     size_t item_count = (count + 1) / 2;
     size_t block_symbols = item_count < 48 ? 48 : item_count;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (block_symbols > 96) block_symbols = 96; // leave room for RX on c5
-#endif
     if (block_symbols % 2) block_symbols++;
 
     static rmt_channel_handle_t tx_chan = NULL;
@@ -570,18 +589,7 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
     }
 
     esp_err_t err = rmt_transmit(tx_chan, copy_encoder, symbols, item_count * sizeof(rmt_symbol_word_t), &(rmt_transmit_config_t){.loop_count = 0});
-    if (err == ESP_OK) err = rmt_tx_wait_all_done(tx_chan, pdMS_TO_TICKS(1000));
-
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    // on ESP32-C5, explicitly destroy the static tx handle after transmit so
-    // the hardware resource is returned to the pool and RX can be recreated.
-    if (tx_chan) {
-        rmt_disable(tx_chan);
-        rmt_del_channel(tx_chan);
-        tx_chan = NULL;
-        chan_symbols = 0;
-    }
-#endif
+    if (err == ESP_OK) err = rmt_tx_wait_all_done(tx_chan, -1);
 
     heap_caps_free(symbols);
     return err == ESP_OK;
@@ -590,6 +598,14 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
 bool infrared_manager_transmit(const infrared_signal_t *signal) {
     if (!signal) return false;
     ESP_LOGI(TAG_IR_MANAGER, "transmitting IR signal (name: %s)", signal->name);
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    infrared_manager_io24_ensure_configured();
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+        gpio_set_level(GPIO_NUM_24, 1);
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+#endif
+
 #ifdef CONFIG_HAS_INFRARED
     gpio_set_level(CONFIG_INFRARED_LED_PIN, 1);
 #endif
@@ -650,6 +666,12 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
 #ifdef CONFIG_HAS_INFRARED
     gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
 #endif
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+        gpio_set_level(GPIO_NUM_24, 0);
+    }
+#endif
+
     rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
     ESP_LOGI(TAG_IR_MANAGER, "ir signal transmission complete (name: %s, status: %s)", signal->name, ok ? "OK" : "FAIL");
     return ok;
@@ -770,6 +792,8 @@ bool infrared_manager_parse_buffer_single(const char *buf, infrared_signal_t *si
 static rmt_channel_handle_t ir_mgr_rx_channel = NULL;
 static QueueHandle_t ir_mgr_rx_queue = NULL;
 static InfraredDecoderContext *ir_mgr_decoder = NULL;
+static bool ir_mgr_rx_enabled = false;
+static volatile bool ir_mgr_rx_cancel = false;
 
 rmt_channel_handle_t infrared_manager_get_rx_channel(void) {
     return ir_mgr_rx_channel;
@@ -792,6 +816,10 @@ static bool ir_mgr_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
 
 bool infrared_manager_rx_init(void) {
     if (ir_mgr_rx_channel) return true; // already initialized
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    infrared_manager_io24_ensure_configured();
+#endif
 
     rmt_rx_channel_config_t rx_config = {
         .gpio_num = CONFIG_INFRARED_RX_PIN,
@@ -832,6 +860,8 @@ bool infrared_manager_rx_init(void) {
 
     ir_mgr_decoder = infrared_decoder_alloc();
     infrared_decoder_reset(ir_mgr_decoder);
+    ir_mgr_rx_enabled = true;
+    ir_mgr_rx_cancel = false;
     
     return true;
 }
@@ -849,6 +879,31 @@ void infrared_manager_rx_deinit(void) {
     if (ir_mgr_decoder) {
         infrared_decoder_free(ir_mgr_decoder);
         ir_mgr_decoder = NULL;
+    }
+    ir_mgr_rx_enabled = false;
+    ir_mgr_rx_cancel = false;
+}
+
+void infrared_manager_rx_cancel(void) {
+    ir_mgr_rx_cancel = true;
+}
+
+bool infrared_manager_rx_is_initialized(void) {
+    return ir_mgr_rx_channel != NULL;
+}
+
+void infrared_manager_rx_suspend(void) {
+    if (ir_mgr_rx_channel && ir_mgr_rx_enabled) {
+        rmt_disable(ir_mgr_rx_channel);
+        ir_mgr_rx_enabled = false;
+    }
+}
+
+void infrared_manager_rx_resume(void) {
+    if (ir_mgr_rx_channel && !ir_mgr_rx_enabled) {
+        if (rmt_enable(ir_mgr_rx_channel) == ESP_OK) {
+            ir_mgr_rx_enabled = true;
+        }
     }
 }
 
@@ -871,6 +926,12 @@ bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms) {
     };
 
     while (true) {
+        if (ir_mgr_rx_cancel) {
+            ir_mgr_rx_cancel = false;
+            ESP_LOGI(TAG_IR_MANAGER, "IR RX cancelled");
+            return false;
+        }
+
         if (deadline_us >= 0) {
             int64_t now_us = esp_timer_get_time();
             if (now_us >= deadline_us) {
@@ -892,9 +953,16 @@ bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms) {
 
         esp_err_t ret = rmt_receive(ir_mgr_rx_channel, ir_raw_symbols, sizeof(ir_raw_symbols), &receive_config);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG_IR_MANAGER, "rmt_receive failed: %d", (int)ret);
             if (ret == ESP_ERR_INVALID_STATE) {
-                return false;
+                // RX channel fell out of a valid state; fully reinit and keep listening
+                ESP_LOGD(TAG_IR_MANAGER, "rmt_receive invalid state, reinitializing RX");
+                infrared_manager_rx_deinit();
+                if (!infrared_manager_rx_init()) {
+                    ESP_LOGE(TAG_IR_MANAGER, "failed to reinit RMT RX channel after invalid state");
+                    return false;
+                }
+            } else {
+                ESP_LOGE(TAG_IR_MANAGER, "rmt_receive failed: %d", (int)ret);
             }
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
@@ -1045,4 +1113,5 @@ bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms) {
 bool infrared_manager_rx_init(void) { return false; }
 void infrared_manager_rx_deinit(void) {}
 bool infrared_manager_rx_receive(infrared_signal_t *signal, int timeout_ms) { return false; }
+void infrared_manager_rx_cancel(void) {}
 #endif

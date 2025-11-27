@@ -744,50 +744,68 @@ static bool mfc_auth_with_user_interleaved(pn532_io_handle_t io, uint8_t block,
     const int total = (g_user_key_count > 0) ? (g_user_key_count * 2) : 1;
     int step = 0;
     if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
+    bool have_key_a = false;
+    bool have_key_b = false;
+    bool found_any = false;
+    bool first_used_b = false;
+    const uint8_t *first_key = NULL;
     // Debug: entering user dict for this block
     ESP_LOGI("MFC", "User dict: entering for blk=%u with %d keys (cached=%d)", 
              (unsigned)block, g_user_key_count, g_user_dict_cached_for_scan ? 1 : 0);
     for (int i = 0; i < g_user_key_count; ++i) {
-        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
         const uint8_t *k = &g_user_keys[i*6];
-        // Per-key attempt logs for sector 0 safe auth block (blk=1)
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: try blk=%u A idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-        }
-        esp_err_t erra = mfc_auth_block(io, block, false, k, uid, uid_len);
-        if (erra == ESP_OK) {
-            ESP_LOGI("MFC", "User dict: success blk=%u key=A idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-            if (out_used_key_b) *out_used_key_b = false;
-            if (out_key) *out_key = k;
-            mfc_record_working_key(k, false);
-            return true;
-        }
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: A fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)erra);
+        // Attempt Key A unless we already have one
+        if (!have_key_a) {
+            if (block == 1) {
+                ESP_LOGD("MFC", "User dict: try blk=%u A idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+            }
+            esp_err_t erra = mfc_auth_block(io, block, false, k, uid, uid_len);
+            if (erra == ESP_OK) {
+                ESP_LOGI("MFC", "User dict: success blk=%u key=A idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+                have_key_a = true;
+                if (!found_any) {
+                    found_any = true;
+                    first_used_b = false;
+                    first_key = k;
+                }
+                mfc_record_working_key(k, false);
+            } else if (block == 1) {
+                ESP_LOGD("MFC", "User dict: A fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)erra);
+            }
         }
         if (g_prog_cb) g_prog_cb(++step, total, g_prog_user);
-        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: try blk=%u B idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-        }
-        esp_err_t errb = mfc_auth_block(io, block, true, k, uid, uid_len);
-        if (errb == ESP_OK) {
-            ESP_LOGI("MFC", "User dict: success blk=%u key=B idx=%d key=%02X%02X%02X%02X%02X%02X",
-                    (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
-            if (out_used_key_b) *out_used_key_b = true;
-            if (out_key) *out_key = k;
-            mfc_record_working_key(k, true);
-            return true;
-        }
-        if (block == 1) {
-            ESP_LOGD("MFC", "User dict: B fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)errb);
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+        // Attempt Key B unless we already have one
+        if (!have_key_b) {
+            if (block == 1) {
+                ESP_LOGD("MFC", "User dict: try blk=%u B idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+            }
+            esp_err_t errb = mfc_auth_block(io, block, true, k, uid, uid_len);
+            if (errb == ESP_OK) {
+                ESP_LOGI("MFC", "User dict: success blk=%u key=B idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, i+1, k[0],k[1],k[2],k[3],k[4],k[5]);
+                have_key_b = true;
+                if (!found_any) {
+                    found_any = true;
+                    first_used_b = true;
+                    first_key = k;
+                }
+                mfc_record_working_key(k, true);
+            } else if (block == 1) {
+                ESP_LOGD("MFC", "User dict: B fail blk=%u idx=%d err=%d", (unsigned)block, i+1, (int)errb);
+            }
         }
         if (g_prog_cb) g_prog_cb(++step, total, g_prog_user);
     }
-    return false;
+    if (found_any) {
+        if (out_used_key_b) *out_used_key_b = first_used_b;
+        if (out_key) *out_key = first_key;
+    }
+    return found_any;
 }
 
 // Attempt to discover the complementary key type for this sector using only the user dictionary
@@ -1787,6 +1805,11 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
                 flipper_data->block_read_mask[b / 8] |= (1 << (b % 8));
             }
         }
+    }
+    // Copy UID into Flipper-style view for plugins that rely on mf_classic_get_uid
+    if (g_mfc_uid_len > 0 && g_mfc_uid_len <= sizeof(flipper_data->uid)) {
+        flipper_data->uid_len = g_mfc_uid_len;
+        memcpy(flipper_data->uid, g_mfc_uid, g_mfc_uid_len);
     }
     // Copy keys (important for SmartRider which checks sector 0 key)
     // We put them in the trailer blocks of MfClassicData because that's where flipper expects them
