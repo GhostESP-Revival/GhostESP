@@ -198,12 +198,32 @@ jobs:
           idf.py clean
           idf.py build
 
+      - name: Create Merged Binary
+        run: |
+          . ~/esp-idf/export.sh
+          MERGED_BIN_NAME="ghost_esp_${{ github.event.inputs.board_type }}_${{ github.event.inputs.display_type }}-merged-gesp.bin"
+          idf.py merge-bin -o "$MERGED_BIN_NAME" || {
+            echo "Warning: Failed to create merged binary, but build succeeded"
+          }
+          if [ -f "build/$MERGED_BIN_NAME" ]; then
+            echo "Merged binary created: $MERGED_BIN_NAME"
+          else
+            echo "Warning: Merged binary was not created"
+          fi
+
       - name: Package Artifacts into ZIP
         run: |
           ZIP_FILE="ghost_esp_${{ github.event.inputs.board_type }}_${{ github.event.inputs.display_type }}.zip"
           mkdir -p artifacts
           cp build/partition_table/partition-table.bin artifacts/
           cp build/*.bin artifacts/
+          # Copy merged binary if it exists
+          MERGED_BIN_NAME="ghost_esp_${{ github.event.inputs.board_type }}_${{ github.event.inputs.display_type }}-merged-gesp.bin"
+          if [ -f "build/$MERGED_BIN_NAME" ]; then
+            cp "build/$MERGED_BIN_NAME" artifacts/ || {
+              echo "Warning: Failed to copy merged binary"
+            }
+          fi
           cd artifacts
           zip "../$ZIP_FILE" ./*
           cd ..
