@@ -950,6 +950,48 @@ void handle_ble_scan_cmd(int argc, char **argv) {
         return;
     }
 
+    if (argc > 1 && strcmp(argv[1], "-apple") == 0) {
+        glog("Starting Apple Device Detector.\n");
+        ble_start_apple_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-samsung") == 0) {
+        glog("Starting Samsung Device Detector.\n");
+        ble_start_samsung_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-google") == 0) {
+        glog("Starting Google Device Detector.\n");
+        ble_start_google_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-tile") == 0) {
+        glog("Starting Tile Tracker Detector.\n");
+        ble_start_tile_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-axon") == 0) {
+        glog("Starting Axon Camera Detector.\n");
+        ble_start_axon_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-taser") == 0) {
+        glog("Starting Taser Device Detector.\n");
+        ble_start_taser_detector();
+        return;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "-flock") == 0) {
+        glog("Starting Flock Device Detector.\n");
+        ble_start_flock_detector();
+        return;
+    }
+
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
         glog("Stopping BLE Scan.\n");
         ble_stop();
@@ -957,6 +999,19 @@ void handle_ble_scan_cmd(int argc, char **argv) {
     }
 
     glog("Invalid Command Syntax.\n");
+    glog("Usage: blescan [-f|-ds|-a|-r|-apple|-samsung|-google|-tile|-axon|-taser|-flock|-s]\n");
+    glog("  -f      : Find Flippers\n");
+    glog("  -ds     : BLE Spam Detector\n");
+    glog("  -a      : AirTag Scanner\n");
+    glog("  -r      : Raw BLE Scanner\n");
+    glog("  -apple  : Apple Device Detector\n");
+    glog("  -samsung: Samsung Device Detector\n");
+    glog("  -google : Google Device Detector\n");
+    glog("  -tile   : Tile Tracker Detector\n");
+    glog("  -axon   : Axon Camera Detector\n");
+    glog("  -taser  : Taser Device Detector\n");
+    glog("  -flock  : Flock Device Detector\n");
+    glog("  -s      : Stop BLE Scan\n");
 }
 
 #endif

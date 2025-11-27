@@ -47,6 +47,20 @@ Discover nearby BLE devices and gather information about them.
 - While scanning, RSSI for already discovered AirTags is logged every few seconds to help you see proximity changes over time.
 - Use **List AirTags** to see discovered devices, or **Select AirTag** to prepare for spoofing.
 
+### BLE Device Detectors
+- **UI**: Menu → Bluetooth → Detectors → [Detector]
+- **CLI**: `blescan -apple|-samsung|-google|-tile|-axon|-taser|-flock`
+- Runs brand- and device-specific detectors that watch for vendor beacons and trackers, logging MAC address, name (when available), device type, and RSSI.
+
+**Available detectors:**
+- **Apple Device Detector** (`blescan -apple`) — Detects nearby Apple Continuity / Find My devices (AirPods, iPhones, iPads, Macs, Apple TV, HomePod, AirTags, etc.).
+- **Samsung Device Detector** (`blescan -samsung`) — Detects Samsung phones, watches, and accessories using Samsung BLE services.
+- **Google Device Detector** (`blescan -google`) — Detects Google / Android gear (Pixel phones and buds, Nest devices, Eddystone / Fast Pair style beacons).
+- **Tile Tracker Detector** (`blescan -tile`) — Detects Tile BLE trackers and compatible tags.
+- **Axon Camera Detector** (`blescan -axon`) — Detects Axon body cameras using known vendor MAC prefixes.
+- **Taser Device Detector** (`blescan -taser`) — Detects Taser devices using known vendor MAC prefixes.
+- **Flock Device Detector** (`blescan -flock`) — Detects Flock-style ALPR / camera devices using their manufacturer identifier.
+
 ### BLE Skimmer Detection
 - **UI**: Menu → Bluetooth → BLE Skimmer Detect
 - **CLI**: `capture -skimmer`
