@@ -5,6 +5,7 @@
 #include "disp_driver.h"
 #include "disp_spi.h"
 #include "esp_lcd_backlight.h"
+#include "esp_log.h"
 #include "sdkconfig.h"
 
 void *disp_driver_init(void)
@@ -50,6 +51,11 @@ void *disp_driver_init(void)
     // We still use menuconfig for these settings
     // It will be set up during runtime in the future
 #if (defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH) || defined(CONFIG_LV_DISP_BACKLIGHT_PWM))
+    // Validate backlight GPIO before using it
+    if (CONFIG_LV_DISP_PIN_BCKL < 0 || CONFIG_LV_DISP_PIN_BCKL >= 50) {
+        ESP_LOGW("disp_driver", "Invalid backlight GPIO (%d), skipping backlight init", CONFIG_LV_DISP_PIN_BCKL);
+        return NULL;
+    }
     const disp_backlight_config_t bckl_config = {
         .gpio_num = CONFIG_LV_DISP_PIN_BCKL,
 #if defined CONFIG_LV_DISP_BACKLIGHT_PWM

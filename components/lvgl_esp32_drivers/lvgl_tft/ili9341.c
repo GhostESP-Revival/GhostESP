@@ -116,26 +116,36 @@ void ili9341_init(void)
 #endif
 
 	//Initialize non-SPI GPIOs
+	// Validate DC pin before using it
+	if (ILI9341_DC >= 0 && ILI9341_DC < 50) {
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5,0,0)
-    gpio_pad_select_gpio(ILI9341_DC);
+		gpio_pad_select_gpio(ILI9341_DC);
 #else
-    esp_rom_gpio_pad_select_gpio(ILI9341_DC);
+		esp_rom_gpio_pad_select_gpio(ILI9341_DC);
 #endif
-	gpio_set_direction(ILI9341_DC, GPIO_MODE_OUTPUT);
+		gpio_set_direction(ILI9341_DC, GPIO_MODE_OUTPUT);
+	} else {
+		ESP_LOGW(TAG, "Invalid DC GPIO (%d), skipping DC pin configuration", ILI9341_DC);
+	}
 
 #if ILI9341_USE_RST
+	// Validate RST pin before using it
+	if (ILI9341_RST >= 0 && ILI9341_RST < 50) {
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5,0,0)
-    gpio_pad_select_gpio(ILI9341_RST);
+		gpio_pad_select_gpio(ILI9341_RST);
 #else
-    esp_rom_gpio_pad_select_gpio(ILI9341_RST);
+		esp_rom_gpio_pad_select_gpio(ILI9341_RST);
 #endif
-	gpio_set_direction(ILI9341_RST, GPIO_MODE_OUTPUT);
+		gpio_set_direction(ILI9341_RST, GPIO_MODE_OUTPUT);
 
-	//Reset the display
-	gpio_set_level(ILI9341_RST, 0);
-	vTaskDelay(100 / portTICK_PERIOD_MS);
-	gpio_set_level(ILI9341_RST, 1);
-	vTaskDelay(100 / portTICK_PERIOD_MS);
+		//Reset the display
+		gpio_set_level(ILI9341_RST, 0);
+		vTaskDelay(100 / portTICK_PERIOD_MS);
+		gpio_set_level(ILI9341_RST, 1);
+		vTaskDelay(100 / portTICK_PERIOD_MS);
+	} else {
+		ESP_LOGW(TAG, "Invalid RST GPIO (%d), skipping RST pin configuration", ILI9341_RST);
+	}
 #endif
 
 	ESP_LOGI(TAG, "Initialization.");
@@ -209,21 +219,27 @@ void ili9341_sleep_out()
 static void ili9341_send_cmd(uint8_t cmd)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ILI9341_DC, 0);	 /*Command mode*/
+    if (ILI9341_DC >= 0 && ILI9341_DC < 50) {
+        gpio_set_level(ILI9341_DC, 0);	 /*Command mode*/
+    }
     disp_spi_send_data(&cmd, 1);
 }
 
 static void ili9341_send_data(void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ILI9341_DC, 1);	 /*Data mode*/
+    if (ILI9341_DC >= 0 && ILI9341_DC < 50) {
+        gpio_set_level(ILI9341_DC, 1);	 /*Data mode*/
+    }
     disp_spi_send_data(data, length);
 }
 
 static void ili9341_send_color(void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ILI9341_DC, 1);   /*Data mode*/
+    if (ILI9341_DC >= 0 && ILI9341_DC < 50) {
+        gpio_set_level(ILI9341_DC, 1);   /*Data mode*/
+    }
     disp_spi_send_colors(data, length);
 }
 

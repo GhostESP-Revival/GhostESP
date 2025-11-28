@@ -983,32 +983,38 @@ void display_manager_init(void) {
 
   apply_power_management_config(settings_get_power_save_enabled(&G_Settings));
 
-  // Configure LEDC timer for backlight
-  ledc_timer_config_t ledc_timer = {
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .duty_resolution = LEDC_TIMER_10_BIT,
-      .timer_num = BACKLIGHT_TIMER,
-      .freq_hz = 5000, // 5 kHz
-      .clk_cfg = LEDC_USE_RC_FAST_CLK, // Use stable APB clock for reliable PWM 
-  };
-  ledc_timer_config(&ledc_timer);
-
-  // Configure LEDC channel for backlight
-  ledc_channel_config_t ledc_channel = {
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .channel = LEDC_CHANNEL_0,
-      .timer_sel = BACKLIGHT_TIMER,
-      .intr_type = LEDC_INTR_DISABLE,
+  // Configure LEDC timer for backlight (only if backlight pin is configured)
 #ifdef CONFIG_USE_TDISPLAY_S3
-      .gpio_num = I80_BUS_BL_GPIO, // Use I80 backlight pin for TDisplay S3
+  int backlight_gpio = I80_BUS_BL_GPIO;
 #else
-      .gpio_num = CONFIG_LV_DISP_PIN_BCKL,
+  int backlight_gpio = CONFIG_LV_DISP_PIN_BCKL;
 #endif
-      .duty = 0, // Set initial duty to 0
-      .hpoint = 0,
-      .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
-  };
-  ledc_channel_config(&ledc_channel);
+  // ESP32-C3 has GPIOs 0-21, but use 50 as safe upper bound for all chips
+  if (backlight_gpio >= 0 && backlight_gpio < 50) {
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_10_BIT,
+        .timer_num = BACKLIGHT_TIMER,
+        .freq_hz = 5000, // 5 kHz
+        .clk_cfg = LEDC_USE_RC_FAST_CLK, // Use stable APB clock for reliable PWM 
+    };
+    ledc_timer_config(&ledc_timer);
+
+    // Configure LEDC channel for backlight
+    ledc_channel_config_t ledc_channel = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0,
+        .timer_sel = BACKLIGHT_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = backlight_gpio,
+        .duty = 0, // Set initial duty to 0
+        .hpoint = 0,
+        .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
+    };
+    ledc_channel_config(&ledc_channel);
+  } else {
+    ESP_LOGW(TAG, "Backlight GPIO not configured (value: %d), skipping LEDC setup", backlight_gpio);
+  }
 
 #ifdef CONFIG_USE_TDECK
 set_keyboard_brightness(0xFF); // Set to 100% brightness
@@ -1330,16 +1336,25 @@ void set_backlight_brightness(uint8_t percentage) {
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     ESP_LOGI(TAG, "TDisplay S3 backlight: %d%% (LEDC PWM)", percentage);
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
-    uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    // Only update LEDC if backlight GPIO is valid
+    int backlight_gpio = CONFIG_LV_DISP_PIN_BCKL;
+    if (backlight_gpio >= 0 && backlight_gpio < 50) {  // Valid GPIO range check
+      uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
+      ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+      ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    } else {
+      ESP_LOGW(TAG, "Invalid backlight GPIO (%d), skipping LEDC update", backlight_gpio);
+    }
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH)
     // ----- switch mode -----
     // make sure the pin is configured as a GPIO output
-
-    gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
-    gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+    if (CONFIG_LV_DISP_PIN_BCKL >= 0 && CONFIG_LV_DISP_PIN_BCKL < 50) {  // Valid GPIO range check
+      gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
+      gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
+      gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+    } else {
+      ESP_LOGW(TAG, "Invalid backlight GPIO (%d), skipping GPIO operations", CONFIG_LV_DISP_PIN_BCKL);
+    }
 #else
 # error "Either CONFIG_LV_DISP_BACKLIGHT_PWM or CONFIG_LV_DISP_BACKLIGHT_SWITCH must be set"
 #endif
