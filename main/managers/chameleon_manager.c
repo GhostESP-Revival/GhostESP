@@ -6,6 +6,7 @@
 #include "managers/chameleon_manager.h"
 #include "managers/nfc/mifare_attack.h"
 #include "managers/ble_manager.h"
+
 #ifdef CONFIG_NFC_CHAMELEON
 #include "host/ble_hs.h"
 #include "host/ble_hs_id.h"
@@ -30,6 +31,7 @@
 #include "managers/nfc/mifare_classic.h"
 #include "managers/nfc/ndef.h"
 #include "managers/nfc/flipper_nfc_compat.h"
+#include "managers/nfc/desfire.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1456,12 +1458,17 @@ bool chameleon_manager_scan_hf(void) {
                         uint16_t atqa = (atqa_hi << 8) | atqa_lo;
                         if (atqa == 0x0044 && sak == 0x00) {
                             // This is likely an NTAG card - ATQA 0x0044 and SAK 0x00 are NTAG characteristics
-                            snprintf(g_last_hf_scan.tag_type, sizeof(g_last_hf_scan.tag_type), 
-                                    "NTAG (ATQA:%02X%02X SAK:%02X)", atqa_hi, atqa_lo, sak);
+                            snprintf(g_last_hf_scan.tag_type, sizeof(g_last_hf_scan.tag_type),
+                                     "NTAG (ATQA:%02X%02X SAK:%02X)", atqa_hi, atqa_lo, sak);
+                        } else if (desfire_is_desfire_candidate(atqa, sak)) {
+                            // Keep this label short enough for the 32-byte tag_type buffer
+                            snprintf(g_last_hf_scan.tag_type, sizeof(g_last_hf_scan.tag_type),
+                                     "MIFARE DESFire");
                         } else {
-                            snprintf(g_last_hf_scan.tag_type, sizeof(g_last_hf_scan.tag_type), 
-                                    "HF-14A (ATQA:%02X%02X SAK:%02X)", atqa_hi, atqa_lo, sak);
+                            snprintf(g_last_hf_scan.tag_type, sizeof(g_last_hf_scan.tag_type),
+                                     "HF-14A (ATQA:%02X%02X SAK:%02X)", atqa_hi, atqa_lo, sak);
                         }
+                        
                         g_last_hf_scan.timestamp = time(NULL);
 
                         bool details_refreshed = false;
@@ -2027,7 +2034,12 @@ bool chameleon_manager_mf1_detect_support(void) {
             
             if ((g_last_response.status == STATUS_SUCCESS || g_last_response.status == 0x00) && g_last_response.data_size >= 1) {
                 uint8_t support = g_last_response.data[0];
-                const char* support_str = support ? "Supported" : "Not Supported";
+                const char* support_str;
+                if (support) {
+                    support_str = "Supported";
+                } else {
+                    support_str = "Not Supported";
+                }
                 printf("MIFARE Classic Support: %s\n", support_str);
                 TERMINAL_VIEW_ADD_TEXT("MIFARE Classic Support: %s\n", support_str);
                 return true;
@@ -2174,6 +2186,7 @@ bool chameleon_manager_scan_hidprox(void) {
                     printf("%02X ", g_last_response.data[i]);
                 }
                 printf("\n");
+                
                 TERMINAL_VIEW_ADD_TEXT("\n");
                 
                 return true;
@@ -2518,6 +2531,14 @@ fail_out:
         return text;
     }
     if (g_last_hf_scan.valid) {
+        if (desfire_is_desfire_candidate(g_last_hf_scan.atqa, g_last_hf_scan.sak)) {
+            return desfire_build_details_summary(NULL,
+                                                 g_last_hf_scan.uid,
+                                                 g_last_hf_scan.uid_size,
+                                                 g_last_hf_scan.atqa,
+                                                 g_last_hf_scan.sak);
+        }
+
         size_t cap = 256;
         char *text = (char*)malloc(cap);
         if (!text) return NULL;
@@ -2532,6 +2553,85 @@ fail_out:
         return text;
     }
     return NULL;
+}
+
+static bool cu_desfire_get_version(desfire_version_t *out) {
+    if (!out) return false;
+    if (!g_last_hf_scan.valid) return false;
+    if (!desfire_is_desfire_candidate(g_last_hf_scan.atqa, g_last_hf_scan.sak)) return false;
+    if (!chameleon_manager_is_ready()) return false;
+
+    if (g_cached_hw_mode != HW_MODE_READER) {
+        uint8_t mode = HW_MODE_READER;
+        if (!send_command(CMD_CHANGE_DEVICE_MODE, &mode, 1)) return false;
+        if (xSemaphoreTake(g_response_sem, pdMS_TO_TICKS(3000)) != pdTRUE ||
+            !g_response_received ||
+            g_last_response.status != STATUS_SUCCESS) {
+            return false;
+        }
+        g_cached_hw_mode = HW_MODE_READER;
+    }
+
+    if (g_last_hf_scan.uid_size > 0 && g_last_hf_scan.uid_size <= 10) {
+        uint8_t ac_buf[11];
+        ac_buf[0] = g_last_hf_scan.uid_size;
+        memcpy(&ac_buf[1], g_last_hf_scan.uid, g_last_hf_scan.uid_size);
+        g_response_received = false;
+        (void)send_command(CMD_HF14A_SET_ANTI_COLL_DATA, ac_buf, (size_t)g_last_hf_scan.uid_size + 1);
+        (void)xSemaphoreTake(g_response_sem, pdMS_TO_TICKS(500));
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    uint8_t cmd = 0x60;
+    size_t total = 0;
+
+    for (int frame = 0; frame < 3 && total < DESFIRE_PICC_VERSION_MAX; ++frame) {
+        g_response_received = false;
+        if (!cu_send_hf14a_raw(&cmd, 1,
+                               true,
+                               true,
+                               true,
+                               true,
+                               true,
+                               false,
+                               1500,
+                               0)) {
+            return false;
+        }
+        if (xSemaphoreTake(g_response_sem, pdMS_TO_TICKS(3000)) != pdTRUE) {
+            return false;
+        }
+        if (!g_response_received ||
+            g_last_response.command != CMD_HF14A_RAW ||
+            !(g_last_response.status == STATUS_SUCCESS || g_last_response.status == STATUS_HF_TAG_OK) ||
+            g_last_response.data_size == 0) {
+            return false;
+        }
+
+        uint8_t copy_len = g_last_response.data_size;
+        if (frame == 0 && copy_len < 7) {
+            return false;
+        }
+        if ((size_t)copy_len > (DESFIRE_PICC_VERSION_MAX - total)) {
+            copy_len = (uint8_t)(DESFIRE_PICC_VERSION_MAX - total);
+        }
+        if (copy_len == 0) {
+            break;
+        }
+
+        memcpy(out->picc_version + total, g_last_response.data, copy_len);
+        total += copy_len;
+
+        cmd = 0xAF;
+    }
+
+    if (total < 7) {
+        return false;
+    }
+
+    out->picc_version_len = (uint8_t)total;
+    return true;
 }
 
 bool chameleon_manager_save_last_hf_scan(const char* filename) {
@@ -2551,6 +2651,8 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
             if (i + 1 < g_last_hf_scan.uid_size) up += snprintf(uid_part + up, sizeof(uid_part) - up, "-");
         }
         const char *prefix = NULL; int pages_total = 0;
+        bool is_desfire = desfire_is_desfire_candidate(g_last_hf_scan.atqa, g_last_hf_scan.sak);
+
         // Classic quick map
         if (g_last_hf_scan.sak == 0x08) { prefix = "Classic1K"; }
         else if (g_last_hf_scan.sak == 0x18) { prefix = "Classic4K"; }
@@ -2568,9 +2670,9 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
             }
         }
         if (!prefix) {
-            // Fallback: HF-14A
-            prefix = "HF14A";
+            prefix = is_desfire ? "DESFire" : "HF14A";
         }
+
         snprintf(file_path, sizeof(file_path), "/mnt/ghostesp/nfc/%s_%s.nfc", prefix, uid_part);
     } else {
         snprintf(file_path, sizeof(file_path), "/mnt/ghostesp/nfc/%s", filename);
@@ -2580,8 +2682,9 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
     
     // Flipper-format minimal header (same style as PN532 saves) — stream to disk to reduce RAM
     bool is_classic = (g_last_hf_scan.sak == 0x08 || g_last_hf_scan.sak == 0x18 || g_last_hf_scan.sak == 0x09);
+    bool is_desfire = desfire_is_desfire_candidate(g_last_hf_scan.atqa, g_last_hf_scan.sak);
     const char *ntag_type = NULL; int pages_total = 0;
-    if (!is_classic) {
+    if (!is_classic && !is_desfire) {
         if (strstr(g_last_hf_scan.tag_type, "NTAG213")) { ntag_type = "NTAG213"; pages_total = 45; }
         else if (strstr(g_last_hf_scan.tag_type, "NTAG215")) { ntag_type = "NTAG215"; pages_total = 135; }
         else if (strstr(g_last_hf_scan.tag_type, "NTAG216")) { ntag_type = "NTAG216"; pages_total = 231; }
@@ -2627,8 +2730,12 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
         if (sd_card_write_file(file_path, line, (size_t)n) != ESP_OK) { glog("Save failed: cannot create %s\n", file_path); if (did_mount) sd_card_unmount_after_flush(display_was_suspended); return false; }
         n = snprintf(line, sizeof(line), "Version: 4\n");
         sd_card_append_file(file_path, line, (size_t)n);
-        n = snprintf(line, sizeof(line), "Device type: %s\n", is_classic ? "Mifare Classic" : "NTAG/Ultralight");
+        const char *device_type = is_desfire ? "Mifare DESFire" :
+                                  is_classic ? "Mifare Classic" :
+                                               "NTAG/Ultralight";
+        n = snprintf(line, sizeof(line), "Device type: %s\n", device_type);
         sd_card_append_file(file_path, line, (size_t)n);
+
         // UID
         n = snprintf(line, sizeof(line), "UID:");
         sd_card_append_file(file_path, line, (size_t)n);
@@ -2643,14 +2750,26 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
         sd_card_append_file(file_path, line, (size_t)n);
         n = snprintf(line, sizeof(line), "SAK: %02X\n", g_last_hf_scan.sak);
         sd_card_append_file(file_path, line, (size_t)n);
-        n = snprintf(line, sizeof(line), "Data format version: 2\n");
-        sd_card_append_file(file_path, line, (size_t)n);
-        // NTAG meta so Saved parser can read it
-        if (!is_classic) {
-            n = snprintf(line, sizeof(line), "NTAG/Ultralight type: %s\n", ntag_type);
+        if (is_desfire) {
+            desfire_version_t ver;
+            if (cu_desfire_get_version(&ver) && ver.picc_version_len > 0) {
+                char picc_line[128];
+                if (desfire_build_picc_version_line(&ver, picc_line, sizeof(picc_line))) {
+                    n = snprintf(line, sizeof(line), "%s\n", picc_line);
+                    sd_card_append_file(file_path, line, (size_t)n);
+                }
+            }
+        }
+        if (!is_desfire) {
+            n = snprintf(line, sizeof(line), "Data format version: 2\n");
             sd_card_append_file(file_path, line, (size_t)n);
-            n = snprintf(line, sizeof(line), "Pages total: %d\nPages read: 0\n", pages_total);
-            sd_card_append_file(file_path, line, (size_t)n);
+            // NTAG meta so Saved parser can read it
+            if (!is_classic) {
+                n = snprintf(line, sizeof(line), "NTAG/Ultralight type: %s\n", ntag_type);
+                sd_card_append_file(file_path, line, (size_t)n);
+                n = snprintf(line, sizeof(line), "Pages total: %d\nPages read: 0\n", pages_total);
+                sd_card_append_file(file_path, line, (size_t)n);
+            }
         }
     }
 

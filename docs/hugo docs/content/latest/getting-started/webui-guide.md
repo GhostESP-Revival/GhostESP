@@ -6,7 +6,7 @@ weight: 35
 
 The GhostNet WebUI is a browser-based control panel for managing GhostESP settings and controlling certain features. It runs on the device's built-in access point and is accessible from any device on the same network.
 
-> **Note**: Wi-Fi and BLE commands cannot be run directly through the WebUI because the device's radio is in use hosting the access point. When you launch those commands from the device or serial CLI, the GhostNet AP is paused until the radio work finishes. Use [Dual Communication]({{< relref "dual-communication.md" >}}) to run them remotely without losing the AP.
+> **Note**: Wi-Fi and BLE commands cannot be run directly through the WebUI because the device's radio is in use hosting the access point. When you launch those commands from the device or serial CLI, the GhostNet AP is paused until the radio work finishes. Use [GhostLink]({{< relref "dual-communication.md" >}}) to run them remotely without losing the AP.
 
 ## Connecting to the WebUI
 
@@ -72,7 +72,7 @@ Access built-in documentation for features and commands:
 
 - **Wi-Fi**: Scanning and attack commands
 - **BLE**: Bluetooth Low Energy operations
-- **Communication**: Dual communication setup
+- **Communication**: GhostLink dual communication setup
 - **SD Card**: SD card operations
 - **LED / RGB**: LED and RGB lighting
 - **GPS**: GPS functionality
@@ -84,23 +84,23 @@ Access built-in documentation for features and commands:
 - **Beacon**: Beacon spam options
 - **Attack**: Attack command reference
 
-### Dual Comm
+### GhostLink
 
-Manage dual communication with a paired ESP32 device:
+Manage a GhostLink connection between a paired ESP32 device:
 
 - View connection status
 - Send commands to the paired device
-- Monitor dual communication link health
+- Monitor GhostLink link health
 
 ## Important Limitations
 
-### Wi-Fi and BLE Commands Require Dual Communication
+### Wi-Fi and BLE Commands Require GhostLink
 
 The WebUI cannot directly run Wi-Fi or BLE commands (e.g., `scanap`, `karma start`, `blescan`). These commands require the device's radio hardware, which conflicts with hosting the Wi-Fi access point.
 
 **To run Wi-Fi or BLE commands from the WebUI:**
 
-1. Set up [Dual Communication]({{< relref "dual-communication.md" >}}) with two ESP32 devices wired together.
+1. Set up [GhostLink]({{< relref "dual-communication.md" >}}) with two ESP32 devices wired together.
 2. One device hosts the access point (runs WebUI).
 3. The other device performs attacks/scans.
 4. Send commands through the WebUI using `commsend <command>`.
@@ -152,7 +152,7 @@ The WebUI cannot directly run Wi-Fi or BLE commands (e.g., `scanap`, `karma star
 
 ### Wi-Fi commands don't work
 
-- **"Command not available"**: You need dual communication. See [Dual Communication]({{< relref "dual-communication.md" >}}) for setup.
+- **"Command not available"**: You need GhostLink. See [GhostLink]({{< relref "dual-communication.md" >}}) for setup.
 - **Command times out**: Verify the second device is wired correctly and powered on.
 
 ### File manager is slow
@@ -162,6 +162,6 @@ The WebUI cannot directly run Wi-Fi or BLE commands (e.g., `scanap`, `karma star
 
 ## Next Steps
 
-- Set up [Dual Communication]({{< relref "dual-communication.md" >}}) to run Wi-Fi and BLE attacks from the WebUI.
+- Set up [GhostLink]({{< relref "dual-communication.md" >}}) to run Wi-Fi and BLE attacks from the WebUI.
 - Explore the [Command Line Reference]({{< relref "command-line-reference.md" >}}) for available commands.
 - Review [Wi-Fi Basics]({{< relref "../wifi/basics.md" >}}) to learn about attacks and scanning.

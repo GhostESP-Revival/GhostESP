@@ -56,6 +56,7 @@ static const char* nfc_get_detected_title(void);
 // always needed for parsing .nfc files and displaying details, even without PN532
 #include "managers/nfc/ntag_t2.h"
 #include "managers/nfc/write_ntag.h"
+#include "managers/nfc/desfire.h"
 
 // UI hook from MIFARE Classic layer to indicate sector/block/key phase
 // (implementation declared later after static variables are defined)
@@ -414,6 +415,7 @@ static void layout_popup_buttons_row(lv_obj_t *popup, lv_obj_t **btns, int count
 static void update_saved_buttons_layout(void);
 static void update_saved_buttons_layout(void);
 static char* build_mfc_details_from_file(const char *path, char **out_title);
+static char* build_desfire_details_from_file(const char *path, char **out_title);
 static void saved_rename_cb(lv_event_t *e);
 static void saved_delete_cb(lv_event_t *e);
 static void saved_rename_keyboard_callback(const char *name);
@@ -755,6 +757,31 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
         return;
     }
 
+    // Try DESFire summary (Type 4) when ATQA/SAK look like DESFire
+    if (desfire_is_desfire_candidate(g_atqa, g_sak)) {
+        desfire_version_t ver;
+        bool have_ver = desfire_get_version(io, &ver);
+        const desfire_version_t *ver_ptr = have_ver ? &ver : NULL;
+        char *text = desfire_build_details_summary(ver_ptr, uid, uid_len, g_atqa, g_sak);
+        if (!text) {
+            return;
+        }
+        ndef_details_result_t *res = (ndef_details_result_t*)malloc(sizeof(*res));
+        if (!res) {
+            free(text);
+            return;
+        }
+        res->text = text;
+        res->text_len = strlen(text);
+        res->session = nfc_scan_session;
+        if (display_manager_is_available()) lv_async_call(nfc_set_details_async, res);
+        else {
+            if (res->text) free(res->text);
+            free(res);
+        }
+        return;
+    }
+
     // Otherwise try NTAG/Ultralight (Type 2)
     uint8_t *mem = NULL; size_t mem_len = 0; NTAG2XX_MODEL model = NTAG2XX_UNKNOWN;
     if (!ntag_t2_read_user_memory(io, &mem, &mem_len, &model)) {
@@ -895,7 +922,11 @@ static void nfc_set_cu_scan_async(void *ptr) {
         lv_label_set_text(nfc_type_label, "Type: ISO14443A");
     }
     if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
-        lv_label_set_text(nfc_title_label, "NFC Tag");
+        const char *title = "NFC Tag";
+        if (desfire_is_desfire_candidate(r->atqa, r->sak)) {
+            title = desfire_model_str(DESFIRE_MODEL_UNKNOWN);
+        }
+        lv_label_set_text(nfc_title_label, title);
         lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
     }
     // Reveal buttons: More and Save
@@ -1884,6 +1915,42 @@ static bool write_flipper_nfc_file(void) {
             return false;
         }
         ESP_LOGI(TAG, "Mifare Classic file saved");
+        return true;
+    }
+
+    if (desfire_is_desfire_candidate(g_atqa, g_sak)) {
+        snprintf(path, sizeof(path), "%s/Desfire_%s.nfc", dir, uid_part);
+
+        desfire_version_t ver;
+        bool have_ver = desfire_get_version(g_pn532, &ver);
+
+        char buf[512];
+        int pos = 0;
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "Filetype: Flipper NFC device\n");
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "Version: 4\n");
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "Device type: Mifare DESFire\n");
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "UID:");
+        for (uint8_t i = 0; i < g_uid_len && pos < (int)sizeof(buf) - 4; ++i) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, " %02X", g_uid[i]);
+        }
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+                        "ATQA: %02X %02X\nSAK: %02X\n",
+                        (g_atqa >> 8) & 0xFF, g_atqa & 0xFF, g_sak);
+
+        if (have_ver && ver.picc_version_len > 0) {
+            char line[128];
+            if (desfire_build_picc_version_line(&ver, line, sizeof(line))) {
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s\n", line);
+            }
+        }
+
+        if (sd_card_write_file(path, buf, (size_t)pos) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to write DESFire header: %s", path);
+            return false;
+        }
+        ESP_LOGI(TAG, "Mifare DESFire header saved: %s", path);
+        if (did) nfc_sd_end(susp);
         return true;
     }
 
@@ -3642,6 +3709,64 @@ static char* build_mfc_details_from_file(const char *path, char **out_title) {
 }
 #endif
 
+static char* build_desfire_details_from_file(const char *path, char **out_title) {
+    if (out_title) *out_title = NULL;
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+    char line[256];
+    bool is_desfire = false;
+    uint8_t uid[10] = {0};
+    int uid_len = 0;
+    unsigned atqa_hi = 0, atqa_lo = 0;
+    unsigned sak = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Device type:", 12) == 0 && strstr(line, "Mifare DESFire")) {
+            is_desfire = true;
+        } else if (strncmp(line, "UID:", 4) == 0) {
+            const char *p = line + 4;
+            int consumed = 0;
+            unsigned b = 0;
+            while (*p && uid_len < (int)sizeof(uid)) {
+                while (*p == ' ') ++p;
+                if (!*p || *p == '\n' || *p == '\r') break;
+                if (sscanf(p, " %2x%n", &b, &consumed) == 1) {
+                    uid[uid_len++] = (uint8_t)b;
+                    p += consumed;
+                } else {
+                    break;
+                }
+            }
+        } else if (strncmp(line, "ATQA:", 5) == 0) {
+            sscanf(line + 5, " %2x %2x", &atqa_hi, &atqa_lo);
+        } else if (strncmp(line, "SAK:", 4) == 0) {
+            sscanf(line + 4, " %2x", &sak);
+        }
+    }
+    fclose(f);
+
+    if (!is_desfire) return NULL;
+
+    uint16_t atqa = (uint16_t)(((atqa_hi & 0xFFu) << 8) | (atqa_lo & 0xFFu));
+    char *text = desfire_build_details_summary(NULL,
+                                               (uid_len > 0) ? uid : NULL,
+                                               (uint8_t)uid_len,
+                                               atqa,
+                                               (uint8_t)sak);
+    if (!text) return NULL;
+
+    if (out_title) {
+        const char *label = desfire_model_str(DESFIRE_MODEL_UNKNOWN);
+        *out_title = strdup(label);
+        if (!*out_title) {
+            free(text);
+            return NULL;
+        }
+    }
+
+    return text;
+}
+
 static void create_nfc_write_popup(const char *path) {
     if (!root) return;
     // Load image
@@ -3649,7 +3774,23 @@ static void create_nfc_write_popup(const char *path) {
     memset(&g_write_image, 0, sizeof(g_write_image));
     // jit sd mount only for somethingsomething template via nfc_sd_begin()
     bool susp_rd = false; bool did_rd = nfc_sd_begin(&susp_rd);
-    g_write_image_valid = ntag_file_load(path, &g_write_image);
+    bool is_desfire = false;
+    FILE *fh = fopen(path, "r");
+    if (fh) {
+        char hdr[192];
+        while (fgets(hdr, sizeof(hdr), fh)) {
+            if (strncmp(hdr, "Device type:", 12) == 0 && strstr(hdr, "Mifare DESFire")) {
+                is_desfire = true;
+                break;
+            }
+        }
+        fclose(fh);
+    }
+    if (!is_desfire) {
+        g_write_image_valid = ntag_file_load(path, &g_write_image);
+    } else {
+        g_write_image_valid = false;
+    }
     if (did_rd) nfc_sd_end(susp_rd);
     strncpy(g_write_image_path, path, sizeof(g_write_image_path) - 1);
     g_write_image_path[sizeof(g_write_image_path) - 1] = '\0';
@@ -3907,10 +4048,11 @@ static void create_saved_details_popup(const char *path) {
     if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
     saved_details_parsed_view = false;
 
-    // parse file and show details (supports NTAG and MIFARE Classic)
+    // parse file and show details (supports MIFARE Classic, DESFire, and NTAG)
     bool susp_load = false; bool did_load = nfc_sd_begin(&susp_load);
     char *title = NULL;
     char *mfc_det = NULL;
+    char *df_det = NULL;
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
     mfc_det = build_mfc_details_from_file(path, &title);
 #endif
@@ -3923,24 +4065,35 @@ static void create_saved_details_popup(const char *path) {
         }
         free(mfc_det);
     } else {
-        // Always allow NTAG file parsing, even without PN532
-        ntag_file_image_t img; memset(&img, 0, sizeof(img));
-        bool ok = ntag_file_load(path, &img);
-        if (ok) {
-            const char *label = ntag_t2_model_str(img.model);
-            lv_label_set_text(saved_title_label, label);
-            char *det = build_compact_write_details(&img);
-            if (det) {
-                if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
-                saved_details_text = det;
-            } else {
-                if (saved_details_text) { free(saved_details_text); }
-                saved_details_text = strdup("File parsed");
-            }
-            ntag_file_free(&img);
-        } else {
+        df_det = build_desfire_details_from_file(path, &title);
+        if (df_det) {
+            if (title) { lv_label_set_text(saved_title_label, title); free(title); title = NULL; }
             if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
-            saved_details_text = strdup("Failed to parse .nfc file");
+            saved_details_text = strdup(df_det);
+            if (!saved_details_text) {
+                lv_label_set_text(saved_details_label, df_det);
+            }
+            free(df_det);
+        } else {
+            // Always allow NTAG file parsing, even without PN532
+            ntag_file_image_t img; memset(&img, 0, sizeof(img));
+            bool ok = ntag_file_load(path, &img);
+            if (ok) {
+                const char *label = ntag_t2_model_str(img.model);
+                lv_label_set_text(saved_title_label, label);
+                char *det = build_compact_write_details(&img);
+                if (det) {
+                    if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                    saved_details_text = det;
+                } else {
+                    if (saved_details_text) { free(saved_details_text); }
+                    saved_details_text = strdup("File parsed");
+                }
+                ntag_file_free(&img);
+            } else {
+                if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                saved_details_text = strdup("Failed to parse .nfc file");
+            }
         }
     }
     if (did_load) nfc_sd_end(susp_load);

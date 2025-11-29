@@ -1159,6 +1159,7 @@ static const char *idle_anim_to_name(IdleAnimation anim) {
         case IDLE_ANIM_GAME_OF_LIFE: return "life";
         case IDLE_ANIM_GHOST: return "ghost";
         case IDLE_ANIM_STARFIELD: return "starfield";
+        case IDLE_ANIM_HUD: return "hud";
         default: return "unknown";
     }
 }
@@ -1175,6 +1176,10 @@ static bool parse_idle_anim_arg(const char *arg, IdleAnimation *out) {
     }
     if (strcmp(arg, "2") == 0 || strcmp(arg, "starfield") == 0 || strcmp(arg, "startfield") == 0) {
         *out = IDLE_ANIM_STARFIELD;
+        return true;
+    }
+    if (strcmp(arg, "3") == 0 || strcmp(arg, "hud") == 0 || strcmp(arg, "stats") == 0) {
+        *out = IDLE_ANIM_HUD;
         return true;
     }
     return false;
@@ -1202,13 +1207,14 @@ void handle_status_idle_cmd(int argc, char **argv) {
         glog("  0 - life      (Game of Life)\n");
         glog("  1 - ghost     (Ghost sprite)\n");
         glog("  2 - starfield (Starfield effect)\n");
+        glog("  3 - hud       (System HUD)\n");
         status_display_show_status("Idle Anim List");
         return;
     }
 
     if (strcmp(argv[1], "set") == 0) {
         if (argc < 3) {
-            glog("Usage: statusidle set <life|ghost|starfield|0|1|2>\n");
+            glog("Usage: statusidle set <life|ghost|starfield|hud|0|1|2|3>\n");
             return;
         }
         IdleAnimation anim;
@@ -1224,7 +1230,7 @@ void handle_status_idle_cmd(int argc, char **argv) {
         return;
     }
 
-    glog("Usage: statusidle [list|set <life|ghost|starfield|0|1|2>]\n");
+    glog("Usage: statusidle [list|set <life|ghost|starfield|hud|0|1|2|3>]\n");
 }
 #endif
 

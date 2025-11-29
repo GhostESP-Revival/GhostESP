@@ -1363,6 +1363,7 @@ void set_backlight_brightness(uint8_t percentage) {
 
 #ifdef CONFIG_USE_TDECK
     // Synchronize keyboard backlight with screen backlight
+    // ...
     set_keyboard_brightness(percentage == max_brightness ? 0xFF : 0x00);
 #endif
 

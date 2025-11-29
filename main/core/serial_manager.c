@@ -19,7 +19,7 @@
 #include <string.h>
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
-    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define JTAG_SUPPORTED 1
 #else
 #define JTAG_SUPPORTED 0

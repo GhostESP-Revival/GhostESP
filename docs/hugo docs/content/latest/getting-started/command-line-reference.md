@@ -86,7 +86,7 @@ toc: true
 - **`evilportal -c <sethtmlstr|clear>`** — Manage the Evil Portal HTML buffer (`-c sethtmlstr` to capture inbound HTML, `-c clear` to revert to defaults).
 - **`webauth on|off`** — Require or disable web UI login.
 
-## Dual Communication
+## GhostLink (Dual Communication)
 
 - **`commdiscovery`** — Enter UART discovery mode, broadcasting handshake frames until peers reply (run before `commconnect`).
 - **`commconnect <peer_name>`** — Connect to a discovered peer (after `commdiscovery`).

@@ -134,7 +134,7 @@ Spoof Apple AirTags and other Find My devices to broadcast their location. This 
 
 ## Troubleshooting
 
-- **Attacks not working**: Check that your device has Bluetooth enabled and sufficient free memory. The AP pauses during attacks—if you need the web UI during testing, stop BLE first or use Dual Communication.
+- **Attacks not working**: Check that your device has Bluetooth enabled and sufficient free memory. The AP pauses during attacks—if you need the web UI during testing, stop BLE first or use GhostLink.
 - **No AirTags found**: Move closer to Apple devices with Find My enabled or try scanning again.
 - **Spoofing doesn't appear on Apple devices**: Ensure you've selected a valid AirTag before starting spoofing. Try stopping and restarting the spoof.
 - **Bluetooth not supported**: Ensure you're using a device other than ESP32-S2, which does not have Bluetooth support.

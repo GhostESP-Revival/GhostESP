@@ -90,7 +90,6 @@ static void stop_all_operations(void);
 static bool terminal_is_near_bottom(void);
 
 // Additional function predefs
-static void append_to_display_buffer(const char *data, size_t len);
 static void recalc_layout_if_needed(void);
 static void terminal_canvas_draw_event(lv_event_t *e);
 static void terminal_canvas_size_event(lv_event_t *e);
@@ -102,8 +101,6 @@ static char *term_ring = NULL;
 static size_t term_wcount = 0; // total bytes written
 static size_t term_rcount = 0; // consumption baseline for overflow tracking
 static portMUX_TYPE term_ring_mux = portMUX_INITIALIZER_UNLOCKED;
-static char *terminal_viewer_buf = NULL;
-static size_t terminal_display_len = 0;
 static char *terminal_incoming_buf = NULL;
 static size_t dropped_bytes_total = 0;
 static size_t dropped_bytes_notified = 0;
@@ -146,7 +143,7 @@ static void *terminal_alloc_buffer(size_t size) {
 }
 
 static bool ensure_terminal_buffers(void) {
-  if (term_ring && terminal_viewer_buf && terminal_incoming_buf) {
+  if (term_ring && terminal_incoming_buf) {
     return true;
   }
 
@@ -157,15 +154,6 @@ static bool ensure_terminal_buffers(void) {
       return false;
     }
     memset(term_ring, 0, MAX_TEXT_LENGTH);
-  }
-
-  if (!terminal_viewer_buf) {
-    terminal_viewer_buf = terminal_alloc_buffer(MAX_TEXT_LENGTH + 1);
-    if (!terminal_viewer_buf) {
-      ESP_LOGE(TAG, "Failed to allocate terminal viewer buffer");
-      return false;
-    }
-    terminal_viewer_buf[0] = '\0';
   }
 
   if (!terminal_incoming_buf) {
@@ -238,9 +226,7 @@ static void clear_message_queue(void) {
   term_rcount = 0;
   memset(term_ring, 0, MAX_TEXT_LENGTH);
   portEXIT_CRITICAL(&term_ring_mux);
-  terminal_viewer_buf[0] = '\0';
   terminal_incoming_buf[0] = '\0';
-  terminal_display_len = 0;
   dropped_bytes_total = 0;
   dropped_bytes_notified = 0;
   last_displayed_wcount = 0;
@@ -261,37 +247,6 @@ static void clear_message_queue(void) {
 
 static void clear_pre_init_message_queue(void) {
   // no-op with ring buffer
-}
-
-static void append_to_display_buffer(const char *data, size_t len) {
-  if (!data || len == 0) return;
-  if (!ensure_terminal_buffers()) return;
-
-  const size_t max_payload = MAX_TEXT_LENGTH - 1;
-  size_t copy_len = len;
-  if (copy_len > max_payload) {
-    data += copy_len - max_payload;
-    copy_len = max_payload;
-  }
-
-  if (terminal_display_len > max_payload) {
-    terminal_display_len = max_payload;
-  }
-
-  size_t needed = terminal_display_len + copy_len;
-  if (needed > max_payload) {
-    size_t overflow = needed - max_payload;
-    if (overflow >= terminal_display_len) {
-      terminal_display_len = 0;
-    } else {
-      memmove(terminal_viewer_buf, terminal_viewer_buf + overflow, terminal_display_len - overflow);
-      terminal_display_len -= overflow;
-    }
-  }
-
-  memcpy(terminal_viewer_buf + terminal_display_len, data, copy_len);
-  terminal_display_len += copy_len;
-  terminal_viewer_buf[terminal_display_len] = '\0';
 }
 
 static void update_terminal_label(const char *text) { (void)text; (void)terminal_label; }

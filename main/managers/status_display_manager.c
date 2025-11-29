@@ -12,11 +12,15 @@
 #include "driver/i2c.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "i2c_bus_lock.h"
 #include "managers/settings_manager.h"
+#include "managers/sd_card_manager.h"
+#include "managers/ap_manager.h"
 
 static esp_err_t status_display_send(uint8_t control, const uint8_t *data, size_t len);
 
@@ -167,6 +171,21 @@ static void status_display_flush(void) {
     }
 }
 
+static bool hud_get_wifi_ssid(char *out, size_t len)
+{
+    if (!out || len == 0) return false;
+    wifi_ap_record_t ap;
+    memset(&ap, 0, sizeof(ap));
+    esp_err_t err = esp_wifi_sta_get_ap_info(&ap);
+    if (err != ESP_OK) return false;
+    size_t slen = strnlen((const char *)ap.ssid, sizeof(ap.ssid));
+    if (slen == 0) return false;
+    if (slen >= len) slen = len - 1;
+    memcpy(out, ap.ssid, slen);
+    out[slen] = '\0';
+    return true;
+}
+
 static void status_display_clear_buffer(void) {
     memset(s_buffer, 0, sizeof(s_buffer));
 }
@@ -188,6 +207,35 @@ static void status_display_draw_char(int x, int y, char c) {
             // scale vertically by drawing multiple rows per bit
             for (int sy = 0; sy < SCALE_Y; ++sy) {
                 status_display_plot_pixel(x + col, y + row * SCALE_Y + sy, on);
+            }
+        }
+    }
+}
+
+static void status_display_plot_pixel_rot90_right(int x, int y, bool on)
+{
+    int ry = x;
+    int rx = 127 - y;
+    if (ry < 0 || ry >= 64) return;
+    if (rx < 0 || rx >= 128) return;
+    status_display_plot_pixel(rx, ry, on);
+}
+
+static void status_display_draw_char_rot90_right(int x, int y, char c)
+{
+    if (c < 32 || c > 126) c = ' ';
+    const uint8_t *glyph = font_5x7[(int)c - 32];
+    const int w = 5;
+    const int h = 7;
+    for (int col = 0; col < w; ++col) {
+        uint8_t column = glyph[col];
+        for (int row = 0; row < h; ++row) {
+            bool on = (column >> row) & 0x01;
+            if (!on) continue;
+            int X = x + (h - 1 - row);
+            int Y = y + col * SCALE_Y;
+            for (int sy = 0; sy < SCALE_Y; ++sy) {
+                status_display_plot_pixel(X, Y + sy, true);
             }
         }
     }
@@ -248,6 +296,166 @@ static void draw_sprite_msb(int x, int y, const uint8_t *bits, int w, int h, boo
     }
 }
 
+typedef struct {
+    int ram_used_pct;
+    int ram_free_kb;
+    int ram_total_kb;
+    int cpu_used_pct; // based on internal (non-PSRAM) heap usage
+    bool sd_ok;
+} HudStats;
+
+static void hud_collect_stats(HudStats *out)
+{
+    if (!out) return;
+    // overall 8-bit heap (may include PSRAM depending on config)
+    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    size_t total_bytes = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+    out->ram_free_kb = (int)(free_bytes / 1024);
+    out->ram_total_kb = (int)(total_bytes / 1024);
+    int used_pct = 0;
+    if (total_bytes > 0 && free_bytes <= total_bytes) {
+        used_pct = (int)(((total_bytes - free_bytes) * 100) / total_bytes);
+    }
+    if (used_pct < 0) used_pct = 0;
+    if (used_pct > 100) used_pct = 100;
+    out->ram_used_pct = used_pct;
+
+    // "CPU" meter based on internal (non-PSRAM) heap usage
+    size_t ifree_bytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t itotal_bytes = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    int cpu_pct = 0;
+    if (itotal_bytes > 0 && ifree_bytes <= itotal_bytes) {
+        cpu_pct = (int)(((itotal_bytes - ifree_bytes) * 100) / itotal_bytes);
+    }
+    if (cpu_pct < 0) cpu_pct = 0;
+    if (cpu_pct > 100) cpu_pct = 100;
+    out->cpu_used_pct = cpu_pct;
+
+    // SD status (mounted or not)
+    out->sd_ok = sd_card_manager.is_initialized;
+}
+
+static int hud_get_webui_sta_count(bool *ap_enabled, bool *server_running)
+{
+    if (ap_enabled) {
+        *ap_enabled = settings_get_ap_enabled(&G_Settings);
+    }
+    bool srv = false;
+    ap_manager_get_status(&srv, NULL, NULL);
+    if (server_running) {
+        *server_running = srv;
+    }
+    if (!srv) return 0;
+
+    wifi_sta_list_t sta_list;
+    memset(&sta_list, 0, sizeof(sta_list));
+    if (esp_wifi_ap_get_sta_list(&sta_list) != ESP_OK) {
+        return 0;
+    }
+    return sta_list.num;
+}
+
+static void draw_hline(int x0, int x1, int y)
+{
+    if (y < 0 || y >= 64) return;
+    if (x0 > x1) { int tmp = x0; x0 = x1; x1 = tmp; }
+    if (x1 < 0 || x0 >= 128) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 > 127) x1 = 127;
+    for (int x = x0; x <= x1; ++x) status_display_plot_pixel(x, y, true);
+}
+
+static void draw_vline(int x, int y0, int y1)
+{
+    if (x < 0 || x >= 128) return;
+    if (y0 > y1) { int tmp = y0; y0 = y1; y1 = tmp; }
+    if (y1 < 0 || y0 >= 64) return;
+    if (y0 < 0) y0 = 0;
+    if (y1 > 63) y1 = 63;
+    for (int y = y0; y <= y1; ++y) status_display_plot_pixel(x, y, true);
+}
+
+static void draw_bar(int x, int y, int w, int h, int pct)
+{
+    if (w <= 0 || h <= 0) return;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    int filled = (w * pct) / 100;
+    for (int yy = 0; yy < h; ++yy) {
+        for (int xx = 0; xx < w; ++xx) {
+            bool on = (yy == 0 || yy == h - 1 || xx == 0 || xx == w - 1 || xx < filled);
+            if (on) status_display_plot_pixel(x + xx, y + yy, true);
+        }
+    }
+}
+
+static void status_display_draw_hud(TickType_t now, int phase)
+{
+    HudStats stats;
+    hud_collect_stats(&stats);
+
+    char buf[32];
+    uint32_t hud_phase = (uint32_t)phase;
+    uint32_t top_mode = (hud_phase / 8U) % 3U; // rotate every few frames: 0=AP,1=SD,2=WebUI
+
+    if (top_mode == 0) {
+        char ssid[20];
+        if (hud_get_wifi_ssid(ssid, sizeof(ssid))) {
+            snprintf(buf, sizeof(buf), "AP  %.16s", ssid);
+        } else {
+            snprintf(buf, sizeof(buf), "AP Not connected");
+        }
+    } else if (top_mode == 1) {
+        if (!stats.sd_ok) {
+            snprintf(buf, sizeof(buf), "SD FAIL");
+        } else {
+            snprintf(buf, sizeof(buf), "SD OK");
+        }
+    } else {
+        bool ap_enabled = false;
+        bool server_running = false;
+        int sta_count = hud_get_webui_sta_count(&ap_enabled, &server_running);
+        if (!ap_enabled) {
+            snprintf(buf, sizeof(buf), "WebUI: OFF");
+        } else if (!server_running) {
+            snprintf(buf, sizeof(buf), "WebUI: STOP");
+        } else {
+            snprintf(buf, sizeof(buf), "WebUI: %d STA", sta_count);
+        }
+    }
+    status_display_draw_text(2, 2, buf);
+
+    snprintf(buf, sizeof(buf), "RAM %3d%%",
+             stats.ram_used_pct);
+    status_display_draw_text(2, 18, buf);
+
+    snprintf(buf, sizeof(buf), "CPU %3d%%", stats.cpu_used_pct);
+    status_display_draw_text(2, 34, buf);
+    // CPU bar just above the bottom edge
+    draw_bar(8, 56, 112, 5, stats.cpu_used_pct);
+
+    // Vertical scrolling "GhostESP: Revival" text along the right edge, rotated
+    const char *vert = "GhostESP: Revival";
+    int len = (int)strlen(vert);
+    int char_h = 5 * SCALE_Y;
+    int letter_gap = 1;
+    int seq_gap = char_h / 2;
+    int step = char_h + letter_gap;
+    int total_h = len * step + seq_gap;
+    if (total_h <= 0) return;
+    int base_x = 127 - 6;    // leave a small margin from the right edge
+    int scroll = (phase * 2) % total_h;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        int start = -scroll + repeat * total_h;
+        for (int i = 0; i < len; ++i) {
+            int y = start + i * step;
+            if (y > 63) break;
+            if (y + char_h < 0) continue;
+            status_display_draw_char_rot90_right(base_x, y, vert[i]);
+        }
+    }
+}
+
 // draw an idle animation frame (a moving dot on the bottom row) - unused
 // static void status_display_draw_idle_frame(void) {
 //     if (!s_ready) return;
@@ -282,6 +490,8 @@ static void status_display_anim_task(void *arg) {
         }
         if (now < s_next_anim_allowed_tick) continue;
         s_next_anim_allowed_tick = now + ANIM_INTERVAL_TICKS;
+
+        s_anim_frame++;
 
         IdleAnimation anim = settings_get_status_idle_animation(&G_Settings);
 
@@ -450,16 +660,16 @@ static void status_display_anim_task(void *arg) {
                         status_display_plot_pixel(px, py, true);
                     }
                 }
+            } else if (anim == IDLE_ANIM_HUD) {
+                int phase = s_anim_frame;
+                status_display_draw_hud(now, phase);
             } else {
                 bool flip = (s_ghost_dir < 0);
-                // vertical float: sine-like using a small lookup via s_anim_frame
-                // amplitude 6px, base line near bottom
                 int base_y = 64 - GHOST_H - 6;
                 if (base_y < 0) base_y = 0;
-                int phase = s_anim_frame & 0x1F; // 0..31
-                // cheap triangle wave: 0..6..0..-6..0
+                int phase = s_anim_frame & 0x1F;
                 int tri = phase < 16 ? phase : (32 - phase);
-                int y_offset = tri - 8; // -8..7 approx
+                int y_offset = tri - 8;
                 if (y_offset < -6) y_offset = -6;
                 if (y_offset > 6) y_offset = 6;
                 int y = base_y + y_offset;

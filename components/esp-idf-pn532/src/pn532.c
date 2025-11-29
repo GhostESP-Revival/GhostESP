@@ -15,7 +15,7 @@
  
  static const char TAG[] = "PN532";
  static bool s_quiet = false;
- static int s_indata_wait_ms = 20;  // default
+ static int s_indata_wait_ms = 50;  // default
  static int s_thru_wait_ms = 100;   // default
  static int s_inlist_wait_ms = 40; // default for in_list
  

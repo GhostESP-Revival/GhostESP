@@ -1,4 +1,4 @@
-# Dual Communication
+# GhostLink (Dual Communication)
 
 Connect two ESP32 devices with wires to control one from the other. Since ESP32s only have one radio, this allows you to have full control and functionality remotely while one still hosts the AP continously for control.
 
@@ -42,7 +42,7 @@ commsend capture -probe
 
 ## Web Interface
 
-Use the **Dual Comm** tab for:
+Use the **GhostLink** tab for:
 - Connection status with visual indicator
 - Quick command buttons organized by category
 - Terminal to send custom commands

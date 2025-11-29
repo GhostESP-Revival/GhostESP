@@ -120,7 +120,6 @@ menu "Ghost ESP Options"
     config WITH_STATUS_DISPLAY
         bool "Enable Status Display"
         default n
-        depends on WITH_SCREEN
         help
             Enable the secondary status display that shares the IO expander I2C bus.
 

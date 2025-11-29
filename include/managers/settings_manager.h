@@ -20,7 +20,8 @@ typedef enum {
 typedef enum {
   IDLE_ANIM_GAME_OF_LIFE = 0,
   IDLE_ANIM_GHOST = 1,
-  IDLE_ANIM_STARFIELD = 2
+  IDLE_ANIM_STARFIELD = 2,
+  IDLE_ANIM_HUD = 3
 } IdleAnimation;
 #endif
 

@@ -9,7 +9,7 @@
 #include <stdbool.h>
 
 #define GLOG_BUF_SIZE 512
-#define GLOG_DEFER_MAX 16
+#define GLOG_DEFER_MAX 8
 
 static SemaphoreHandle_t s_glog_mutex;
 static volatile int s_glog_defer = 0;

@@ -85,7 +85,7 @@ menu_item_t menu_items[] = {
 #ifdef CONFIG_HAS_RTC_CLOCK
     {"Clock", &clock_icon, 4, {{0}}},
 #endif
-    {"Dual Comm", &dualcomm, 1, {{0}}},
+    {"GhostLink", &dualcomm, 1, {{0}}},
     {"Settings", &settings_icon, 5, {{0}}}, // applies to all boards
 };
 
@@ -118,7 +118,7 @@ static int get_total_menu_items(void) {
 static int get_dual_comm_menu_index(void) {
     int total = get_total_menu_items();
     for (int i = 0; i < total; ++i) {
-        if (strcmp(menu_items[i].name, "Dual Comm") == 0) {
+        if (strcmp(menu_items[i].name, "GhostLink") == 0) {
             return i;
         }
     }
@@ -826,7 +826,7 @@ static void handle_menu_item_selection(int item_index) {
         {"Clock", 0, &clock_view},
 #endif
         {"Settings", OT_Settings, &options_menu_view},
-        {"Dual Comm", OT_DualComm, &options_menu_view}
+        {"GhostLink", OT_DualComm, &options_menu_view}
     };
 
     const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);

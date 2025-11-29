@@ -1,8 +1,3 @@
-/**
- * @file flipper_nfc_compat.c
- * @brief Implementation of Flipper Zero compatibility layer
- */
-
 #include "managers/nfc/flipper_nfc_compat.h"
 
 static const char* TAG = "FlipperCompat";

@@ -1631,7 +1631,7 @@
     <div class="container">
         <div class="page-title">
             <h1 class="title-text">GhostESP: Revival</h1>
-            <span class="version-badge">v1.8.1</span>
+            <span class="version-badge">v1.9dev</span>
         </div>
         <!-- Tab Navigation -->
         <div class="tab">
@@ -1639,7 +1639,7 @@
             <button class="tablinks" onclick="openTab(event, 'Help')">Help</button>
             <button class="tablinks" onclick="openTab(event, 'SDCard')">SD Card</button>
             <button class="tablinks" onclick="openTab(event, 'Terminal')">Terminal</button>
-            <button class="tablinks" onclick="openTab(event, 'DualComm')">Dual Comm</button>
+            <button class="tablinks" onclick="openTab(event, 'DualComm')">GhostLink</button>
         </div>
         <!-- Settings Tab Content -->
         <div id="Settings" class="tabcontent show">
@@ -2712,7 +2712,7 @@
                     .catch(error => console.error('Error initializing terminal baseline:', error))
                     .finally(() => {
                         startCommStatusPolling();
-                        addCommTerminalMessage('Dual Communication tab activated');
+                        addCommTerminalMessage('GhostLink tab activated');
                     });
             } else if (tabName === "Settings") {
                 showSettingsHome();
@@ -2995,8 +2995,8 @@
         // Load settings on window load
         window.onload = function() {
             loadSettings();
-            // Initialize dual comm terminal with welcome message
-            addCommTerminalMessage('Dual Communication Terminal ready - Switch to Dual Comm tab to start using');
+            // Initialize GhostLink terminal with welcome message
+            addCommTerminalMessage('GhostLink Terminal ready - Switch to the GhostLink tab to start using');
         };
 
         function openSettingsPage(pageId) {
@@ -3437,12 +3437,12 @@
             terminalOutput.scrollTop = terminalOutput.scrollHeight;
         }
 
-        // Function to clear dual communication terminal
+        // Function to clear GhostLink terminal
         function clearCommTerminal() {
             commTerminalMessages = [];
             updateCommTerminalDisplay();
             const terminalOutput = document.getElementById('commTerminalOutput');
-            terminalOutput.textContent = 'Dual Communication Terminal ready...';
+            terminalOutput.textContent = 'GhostLink Terminal ready...';
         }
 
         // Function to start dual comm status polling

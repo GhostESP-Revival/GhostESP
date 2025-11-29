@@ -1,10 +1,10 @@
 ---
-title: "Dual Communication"
-description: "Connect two ESP32 devices to control one remotely while maintaining continuous AP hosting."
+title: "GhostLink"
+description: "GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting."
 weight: 30
 ---
 
-Connect two ESP32 devices with wires to enable remote control. This allows one device to host the access point continuously while the other performs attacks or scans, all controllable from the web interface.
+GhostLink is GhostESP's dual communication link between two ESP32 devices. It lets one device host the access point continuously while the other performs attacks or scans, all controllable from the web interface.
 
 ## Prerequisites
 
@@ -64,12 +64,12 @@ Device names are auto-generated based on MAC address (format: `ESP_XXXXXX`).
 
 ## On-screen UI
 
-When Dual Comm is active (peer discovered and connected), the Options menu exposes a dedicated Dual Comm section with submenus for session control, scanning, WiFi, attacks, capture, tools, BLE, and GPS. These entries open a split-view terminal so you can see what the local device is doing and how the remote peer responds at the same time.
+When GhostLink is active (peer discovered and connected), the Options menu exposes a dedicated GhostLink section with submenus for session control, scanning, WiFi, attacks, capture, tools, BLE, and GPS. These entries open a split-view terminal so you can see what the local device is doing and how the remote peer responds at the same time.
 
 - Left side: normal terminal logs from the local device (status messages, WiFi scans, attacks, etc.).
-- Right side: Dual Comm-focused messages and responses from the remote peer (discovery status, handshake/connect messages, and `commsend` command output).
+- Right side: GhostLink-focused messages and responses from the remote peer (discovery status, handshake/connect messages, and `commsend` command output).
 
-Any Dual Comm menu item that sends a `commsend ...` command automatically opens this split terminal view. Launching the generic Terminal app from the Apps menu still shows the standard single-column terminal with all logs combined.
+Any GhostLink menu item that sends a `commsend ...` command automatically opens this split terminal view. Launching the generic Terminal app from the Apps menu still shows the standard single-column terminal with all logs combined.
 
 ## Troubleshooting
 

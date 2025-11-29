@@ -2020,7 +2020,7 @@ void ble_start_airtag_scanner(void) {
     disc_params.window = 0x30; // full window to increase listen time
     disc_params.filter_policy = 0; // accept all
     disc_params.limited = 0;
-    disc_params.passive = 1; // passive scanning (listen only, don't ask for more info)
+    disc_params.passive = 0; // active scanning (send scan requests to match Arduino/NimBLE behavior)
     disc_params.filter_duplicates = 0; // deliver duplicates
     disc_params.disable_observer_mode = 0;
 
