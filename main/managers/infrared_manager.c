@@ -30,6 +30,10 @@
 
 static const char *TAG_IR_MANAGER = "infrared_manager";
 
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+static uint32_t s_poltergeist_io24_hold_refcount = 0;
+#endif
+
 /* optional hook provided by infrared_view.c to pause RX while TX allocates a channel */
 __attribute__((weak)) void infrared_rx_pause_for_tx(bool pause) { (void)pause; }
 
@@ -588,15 +592,40 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
     return err == ESP_OK;
 }
 
-bool infrared_manager_transmit(const infrared_signal_t *signal) {
-    if (!signal) return false;
-    ESP_LOGI(TAG_IR_MANAGER, "transmitting IR signal (name: %s)", signal->name);
+void infrared_manager_poltergeist_hold_io24_begin(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
+    if (s_poltergeist_io24_hold_refcount == 0) {
         gpio_reset_pin(24);
         gpio_set_direction(24, GPIO_MODE_OUTPUT);
         gpio_set_level(24, 1);
         vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    s_poltergeist_io24_hold_refcount++;
+#endif
+}
+
+void infrared_manager_poltergeist_hold_io24_end(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
+    if (s_poltergeist_io24_hold_refcount == 0) return;
+    s_poltergeist_io24_hold_refcount--;
+    if (s_poltergeist_io24_hold_refcount == 0) {
+        gpio_set_level(24, 0);
+    }
+#endif
+}
+
+bool infrared_manager_transmit(const infrared_signal_t *signal) {
+    if (!signal) return false;
+    ESP_LOGI(TAG_IR_MANAGER, "transmitting IR signal (name: %s)", signal->name);
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    bool poltergeist_local_hold = false;
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+        if (s_poltergeist_io24_hold_refcount == 0) {
+            infrared_manager_poltergeist_hold_io24_begin();
+            poltergeist_local_hold = true;
+        }
     }
 #endif
 
@@ -661,8 +690,8 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
     gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
 #endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_set_level(24, 0);
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0 && poltergeist_local_hold) {
+        infrared_manager_poltergeist_hold_io24_end();
     }
 #endif
 

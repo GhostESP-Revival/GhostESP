@@ -292,7 +292,7 @@ static const char *textcolor_options[] = {"Green", "White", "Red", "Blue", "Yell
 static const uint32_t textcolor_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
 static const char *menu_layout_options[] = {"Normal", "Grid", "List"};
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-static const char *idle_animation_options[] = {"Game of Life", "Ghost", "Starfield", "HUD"};
+static const char *idle_animation_options[] = {"Game of Life", "Ghost", "Starfield", "HUD", "Matrix"};
 #endif
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *idle_delay_options[] = {"Never", "5s", "10s", "30s"};
@@ -344,7 +344,7 @@ static SettingsItem settings_items[] = {
     {"Navigation Buttons", SETTING_NAV_BUTTONS, bool_options, 2, 1},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0},
     #ifdef CONFIG_WITH_STATUS_DISPLAY
-    {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 4, 0},
+    {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 5, 0},
     {"Idle Anim Delay", SETTING_IDLE_ANIM_DELAY, idle_delay_options, 4, 0},
     #endif
     #ifdef CONFIG_USE_ENCODER

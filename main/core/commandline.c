@@ -1160,6 +1160,7 @@ static const char *idle_anim_to_name(IdleAnimation anim) {
         case IDLE_ANIM_GHOST: return "ghost";
         case IDLE_ANIM_STARFIELD: return "starfield";
         case IDLE_ANIM_HUD: return "hud";
+        case IDLE_ANIM_MATRIX: return "matrix";
         default: return "unknown";
     }
 }
@@ -1180,6 +1181,10 @@ static bool parse_idle_anim_arg(const char *arg, IdleAnimation *out) {
     }
     if (strcmp(arg, "3") == 0 || strcmp(arg, "hud") == 0 || strcmp(arg, "stats") == 0) {
         *out = IDLE_ANIM_HUD;
+        return true;
+    }
+    if (strcmp(arg, "4") == 0 || strcmp(arg, "matrix") == 0 || strcmp(arg, "rain") == 0 || strcmp(arg, "code") == 0) {
+        *out = IDLE_ANIM_MATRIX;
         return true;
     }
     return false;
@@ -1208,13 +1213,14 @@ void handle_status_idle_cmd(int argc, char **argv) {
         glog("  1 - ghost     (Ghost sprite)\n");
         glog("  2 - starfield (Starfield effect)\n");
         glog("  3 - hud       (System HUD)\n");
+        glog("  4 - matrix    (Matrix code rain)\n");
         status_display_show_status("Idle Anim List");
         return;
     }
 
     if (strcmp(argv[1], "set") == 0) {
         if (argc < 3) {
-            glog("Usage: statusidle set <life|ghost|starfield|hud|0|1|2|3>\n");
+            glog("Usage: statusidle set <life|ghost|starfield|hud|matrix|0|1|2|3|4>\n");
             return;
         }
         IdleAnimation anim;
@@ -1230,7 +1236,7 @@ void handle_status_idle_cmd(int argc, char **argv) {
         return;
     }
 
-    glog("Usage: statusidle [list|set <life|ghost|starfield|hud|0|1|2|3>]\n");
+    glog("Usage: statusidle [list|set <life|ghost|starfield|hud|matrix|0|1|2|3|4>]\n");
 }
 #endif
 
@@ -3633,6 +3639,7 @@ static void ir_universal_send_task(void *arg) {
     IrUniversalSendArgs *args = (IrUniversalSendArgs *)arg;
     bool use_builtin = args->use_builtin;
     uint32_t delay_ms = args->delay_ms ? args->delay_ms : 150;
+
     char path[256];
     char button[64];
     path[0] = '\0';
@@ -3646,9 +3653,18 @@ static void ir_universal_send_task(void *arg) {
 
     g_ir_universal_send_cancel = false;
 
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    bool poltergeist_held = false;
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
+        infrared_manager_poltergeist_hold_io24_begin();
+        poltergeist_held = true;
+    }
+#endif
+
     if (use_builtin) {
         size_t total = universal_ir_get_signal_count();
         size_t sent = 0;
+
         if (total == 0) {
             glog("IR: no built-in universal signals.\n");
         } else {
@@ -3663,7 +3679,6 @@ static void ir_universal_send_task(void *arg) {
                 glog("IR: universal sendall %s [builtin %d]\n", button, (int)i);
                 bool ok = infrared_manager_transmit(&sig);
                 glog("IR: universal sendall %s -> %s\n", button, ok ? "OK" : "FAIL");
-                infrared_manager_free_signal(&sig);
                 sent++;
                 vTaskDelay(pdMS_TO_TICKS(delay_ms));
             }
@@ -3671,6 +3686,7 @@ static void ir_universal_send_task(void *arg) {
                 glog("IR: no builtin signals named '%s'\n", button);
             }
         }
+
     } else {
         infrared_signal_t *signals = NULL;
         size_t count = 0;
@@ -3702,6 +3718,12 @@ static void ir_universal_send_task(void *arg) {
     } else {
         glog("IR: universal sendall finished.\n");
     }
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (poltergeist_held) {
+        infrared_manager_poltergeist_hold_io24_end();
+    }
+#endif
 
     g_ir_universal_send_task = NULL;
     vTaskDelete(NULL);

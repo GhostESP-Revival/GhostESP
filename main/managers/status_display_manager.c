@@ -12,15 +12,12 @@
 #include "driver/i2c.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_wifi.h"
-#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "i2c_bus_lock.h"
 #include "managers/settings_manager.h"
-#include "managers/sd_card_manager.h"
-#include "managers/ap_manager.h"
+#include "managers/status_display_animations.h"
 
 static esp_err_t status_display_send(uint8_t control, const uint8_t *data, size_t len);
 
@@ -51,52 +48,10 @@ static const int SCALE_Y = 2; // simple vertical scaling factor
 static TimerHandle_t s_idle_timer;
 static TickType_t s_last_update_tick;
 static const TickType_t ANIM_INTERVAL_TICKS = pdMS_TO_TICKS(150);
-
-static bool status_idle_delay_elapsed(TickType_t now)
-{
-    uint32_t timeout_ms = settings_get_status_idle_timeout_ms(&G_Settings);
-    if (timeout_ms == 0 || timeout_ms == UINT32_MAX) {
-        return false; // never start
-    }
-    TickType_t required = pdMS_TO_TICKS(timeout_ms);
-    return (now - s_last_update_tick) >= required;
-}
 static int s_anim_frame;
 static TaskHandle_t s_anim_task;
 static TickType_t s_next_anim_allowed_tick;
 // static int s_i2c_error_streak; // unused
-
-// conway's life state
-#define LIFE_COLS 32
-#define LIFE_ROWS 16
-#define LIFE_CELL_SIZE 4
-static uint8_t s_life_grid[LIFE_ROWS][LIFE_COLS];
-static uint8_t s_life_next[LIFE_ROWS][LIFE_COLS];
-static bool s_life_active;
-
-#define STAR_COUNT 96
-typedef struct {
-    int x;
-    int y;
-    int dx;
-    int dy;
-    uint8_t trail;
-} Star;
-static Star s_stars[STAR_COUNT];
-static bool s_starfield_inited;
-// ghost sprite (24x30), 1bpp, row-major MSB-first
-static const int GHOST_W = 24;
-static const int GHOST_H = 30;
-static const uint8_t ghostidle_bits[] = {
-    0x00, 0x3f, 0x00, 0x00, 0xc0, 0xc0, 0x01, 0x00, 0x20, 0x02, 0x00, 0x10, 0x02, 0x00, 0x10, 0x02,
-    0x00, 0x08, 0x02, 0x0c, 0xc8, 0x02, 0x0c, 0xc8, 0x04, 0x1c, 0xc8, 0x04, 0x00, 0x08, 0x04, 0x01,
-    0x88, 0x04, 0x03, 0x88, 0x04, 0x00, 0x08, 0x04, 0x1c, 0x0e, 0x04, 0x62, 0x31, 0x08, 0x82, 0x41,
-    0x08, 0x0c, 0x02, 0x08, 0x30, 0x0c, 0x10, 0x40, 0x30, 0x10, 0x00, 0x10, 0x10, 0x00, 0x10, 0x10,
-    0x00, 0x20, 0x20, 0x00, 0x40, 0x20, 0x01, 0x80, 0x4e, 0x06, 0x00, 0xf1, 0xf0, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, 0x80
-};
-static int s_ghost_x;
-static int s_ghost_dir = 1; // 1:right, -1:left
 
 static const uint8_t font_5x7[][5] = {
     {0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x5f,0x00,0x00}, {0x00,0x07,0x00,0x07,0x00},
@@ -169,21 +124,6 @@ static void status_display_flush(void) {
         const uint8_t *chunk = &s_buffer[page * 128];
         if (status_display_send(STATUS_DATA, chunk, 128) != ESP_OK) return;
     }
-}
-
-static bool hud_get_wifi_ssid(char *out, size_t len)
-{
-    if (!out || len == 0) return false;
-    wifi_ap_record_t ap;
-    memset(&ap, 0, sizeof(ap));
-    esp_err_t err = esp_wifi_sta_get_ap_info(&ap);
-    if (err != ESP_OK) return false;
-    size_t slen = strnlen((const char *)ap.ssid, sizeof(ap.ssid));
-    if (slen == 0) return false;
-    if (slen >= len) slen = len - 1;
-    memcpy(out, ap.ssid, slen);
-    out[slen] = '\0';
-    return true;
 }
 
 static void status_display_clear_buffer(void) {
@@ -279,197 +219,45 @@ static void status_display_render(const char *line_one, const char *line_two) {
     xSemaphoreGive(s_mutex);
 }
 
-static void draw_sprite_msb(int x, int y, const uint8_t *bits, int w, int h, bool flip_h)
+static void anim_clear(void *user)
 {
-    // bits are packed MSB-first per byte, row-major left-to-right
-    int bytes_per_row = (w + 7) / 8;
-    for (int row = 0; row < h; ++row) {
-        const uint8_t *rowptr = bits + row * bytes_per_row;
-        for (int col = 0; col < w; ++col) {
-            int byte_idx = col >> 3;
-            int bit_idx = 7 - (col & 7);
-            bool on = ((rowptr[byte_idx] >> bit_idx) & 1) != 0;
-            if (!on) continue;
-            int draw_x = flip_h ? (x + (w - 1 - col)) : (x + col);
-            status_display_plot_pixel(draw_x, y + row, true);
-        }
-    }
+    (void)user;
+    status_display_clear_buffer();
 }
 
-typedef struct {
-    int ram_used_pct;
-    int ram_free_kb;
-    int ram_total_kb;
-    int cpu_used_pct; // based on internal (non-PSRAM) heap usage
-    bool sd_ok;
-} HudStats;
-
-static void hud_collect_stats(HudStats *out)
+static void anim_flush(void *user)
 {
-    if (!out) return;
-    // overall 8-bit heap (may include PSRAM depending on config)
-    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    size_t total_bytes = heap_caps_get_total_size(MALLOC_CAP_8BIT);
-    out->ram_free_kb = (int)(free_bytes / 1024);
-    out->ram_total_kb = (int)(total_bytes / 1024);
-    int used_pct = 0;
-    if (total_bytes > 0 && free_bytes <= total_bytes) {
-        used_pct = (int)(((total_bytes - free_bytes) * 100) / total_bytes);
-    }
-    if (used_pct < 0) used_pct = 0;
-    if (used_pct > 100) used_pct = 100;
-    out->ram_used_pct = used_pct;
-
-    // "CPU" meter based on internal (non-PSRAM) heap usage
-    size_t ifree_bytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t itotal_bytes = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    int cpu_pct = 0;
-    if (itotal_bytes > 0 && ifree_bytes <= itotal_bytes) {
-        cpu_pct = (int)(((itotal_bytes - ifree_bytes) * 100) / itotal_bytes);
-    }
-    if (cpu_pct < 0) cpu_pct = 0;
-    if (cpu_pct > 100) cpu_pct = 100;
-    out->cpu_used_pct = cpu_pct;
-
-    // SD status (mounted or not)
-    out->sd_ok = sd_card_manager.is_initialized;
+    (void)user;
+    status_display_flush();
 }
 
-static int hud_get_webui_sta_count(bool *ap_enabled, bool *server_running)
+static void anim_plot_pixel(void *user, int x, int y, bool on)
 {
-    if (ap_enabled) {
-        *ap_enabled = settings_get_ap_enabled(&G_Settings);
-    }
-    bool srv = false;
-    ap_manager_get_status(&srv, NULL, NULL);
-    if (server_running) {
-        *server_running = srv;
-    }
-    if (!srv) return 0;
-
-    wifi_sta_list_t sta_list;
-    memset(&sta_list, 0, sizeof(sta_list));
-    if (esp_wifi_ap_get_sta_list(&sta_list) != ESP_OK) {
-        return 0;
-    }
-    return sta_list.num;
+    (void)user;
+    status_display_plot_pixel(x, y, on);
 }
 
-static void draw_hline(int x0, int x1, int y)
+static void anim_draw_text(void *user, int x, int y, const char *text)
 {
-    if (y < 0 || y >= 64) return;
-    if (x0 > x1) { int tmp = x0; x0 = x1; x1 = tmp; }
-    if (x1 < 0 || x0 >= 128) return;
-    if (x0 < 0) x0 = 0;
-    if (x1 > 127) x1 = 127;
-    for (int x = x0; x <= x1; ++x) status_display_plot_pixel(x, y, true);
+    (void)user;
+    status_display_draw_text(x, y, text);
 }
 
-static void draw_vline(int x, int y0, int y1)
+static void anim_draw_char_rot90_right(void *user, int x, int y, char c)
 {
-    if (x < 0 || x >= 128) return;
-    if (y0 > y1) { int tmp = y0; y0 = y1; y1 = tmp; }
-    if (y1 < 0 || y0 >= 64) return;
-    if (y0 < 0) y0 = 0;
-    if (y1 > 63) y1 = 63;
-    for (int y = y0; y <= y1; ++y) status_display_plot_pixel(x, y, true);
+    (void)user;
+    status_display_draw_char_rot90_right(x, y, c);
 }
 
-static void draw_bar(int x, int y, int w, int h, int pct)
+static bool status_idle_delay_elapsed(TickType_t now)
 {
-    if (w <= 0 || h <= 0) return;
-    if (pct < 0) pct = 0;
-    if (pct > 100) pct = 100;
-    int filled = (w * pct) / 100;
-    for (int yy = 0; yy < h; ++yy) {
-        for (int xx = 0; xx < w; ++xx) {
-            bool on = (yy == 0 || yy == h - 1 || xx == 0 || xx == w - 1 || xx < filled);
-            if (on) status_display_plot_pixel(x + xx, y + yy, true);
-        }
+    uint32_t timeout_ms = settings_get_status_idle_timeout_ms(&G_Settings);
+    if (timeout_ms == 0 || timeout_ms == UINT32_MAX) {
+        return false;
     }
+    TickType_t required = pdMS_TO_TICKS(timeout_ms);
+    return (now - s_last_update_tick) >= required;
 }
-
-static void status_display_draw_hud(TickType_t now, int phase)
-{
-    HudStats stats;
-    hud_collect_stats(&stats);
-
-    char buf[32];
-    uint32_t hud_phase = (uint32_t)phase;
-    uint32_t top_mode = (hud_phase / 8U) % 3U; // rotate every few frames: 0=AP,1=SD,2=WebUI
-
-    if (top_mode == 0) {
-        char ssid[20];
-        if (hud_get_wifi_ssid(ssid, sizeof(ssid))) {
-            snprintf(buf, sizeof(buf), "AP  %.16s", ssid);
-        } else {
-            snprintf(buf, sizeof(buf), "AP Not connected");
-        }
-    } else if (top_mode == 1) {
-        if (!stats.sd_ok) {
-            snprintf(buf, sizeof(buf), "SD FAIL");
-        } else {
-            snprintf(buf, sizeof(buf), "SD OK");
-        }
-    } else {
-        bool ap_enabled = false;
-        bool server_running = false;
-        int sta_count = hud_get_webui_sta_count(&ap_enabled, &server_running);
-        if (!ap_enabled) {
-            snprintf(buf, sizeof(buf), "WebUI: OFF");
-        } else if (!server_running) {
-            snprintf(buf, sizeof(buf), "WebUI: STOP");
-        } else {
-            snprintf(buf, sizeof(buf), "WebUI: %d STA", sta_count);
-        }
-    }
-    status_display_draw_text(2, 2, buf);
-
-    snprintf(buf, sizeof(buf), "RAM %3d%%",
-             stats.ram_used_pct);
-    status_display_draw_text(2, 18, buf);
-
-    snprintf(buf, sizeof(buf), "CPU %3d%%", stats.cpu_used_pct);
-    status_display_draw_text(2, 34, buf);
-    // CPU bar just above the bottom edge
-    draw_bar(8, 56, 112, 5, stats.cpu_used_pct);
-
-    // Vertical scrolling "GhostESP: Revival" text along the right edge, rotated
-    const char *vert = "GhostESP: Revival";
-    int len = (int)strlen(vert);
-    int char_h = 5 * SCALE_Y;
-    int letter_gap = 1;
-    int seq_gap = char_h / 2;
-    int step = char_h + letter_gap;
-    int total_h = len * step + seq_gap;
-    if (total_h <= 0) return;
-    int base_x = 127 - 6;    // leave a small margin from the right edge
-    int scroll = (phase * 2) % total_h;
-    for (int repeat = 0; repeat < 2; ++repeat) {
-        int start = -scroll + repeat * total_h;
-        for (int i = 0; i < len; ++i) {
-            int y = start + i * step;
-            if (y > 63) break;
-            if (y + char_h < 0) continue;
-            status_display_draw_char_rot90_right(base_x, y, vert[i]);
-        }
-    }
-}
-
-// draw an idle animation frame (a moving dot on the bottom row) - unused
-// static void status_display_draw_idle_frame(void) {
-//     if (!s_ready) return;
-//     if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
-//     // preserve current lines while drawing animation
-//     status_display_render_locked(s_line1, s_line2);
-//     // draw dot at bottom row
-//     int y = 64 - 2; // near bottom
-//     int range = 120; // travel range
-//     int x = 4 + (s_anim_frame % range);
-//     status_display_plot_pixel(x, y, true);
-//     status_display_flush();
-//     xSemaphoreGive(s_mutex);
-// }
 
 static void status_display_idle_timer_cb(TimerHandle_t t) {
     (void)t;
@@ -485,7 +273,7 @@ static void status_display_anim_task(void *arg) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         TickType_t now = xTaskGetTickCount();
         if (!status_idle_delay_elapsed(now)) {
-            s_life_active = false;
+            status_display_animations_reset();
             continue;
         }
         if (now < s_next_anim_allowed_tick) continue;
@@ -495,186 +283,23 @@ static void status_display_anim_task(void *arg) {
 
         IdleAnimation anim = settings_get_status_idle_animation(&G_Settings);
 
-        if (anim == IDLE_ANIM_GAME_OF_LIFE) {
-            if (!s_life_active) {
-                uint32_t seed = (uint32_t)now;
-                seed ^= (uint32_t)((uintptr_t)&now);
-                seed = seed * 1664525u + 1013904223u;
-                for (int r = 0; r < LIFE_ROWS; ++r) {
-                    for (int c = 0; c < LIFE_COLS; ++c) {
-                        seed = seed * 1664525u + 1013904223u;
-                        s_life_grid[r][c] = (seed >> 28) & 1;
-                    }
-                }
-                s_life_active = true;
-            } else {
-                bool any_alive = false;
-                bool any_change = false;
-                for (int r = 0; r < LIFE_ROWS; ++r) {
-                    for (int c = 0; c < LIFE_COLS; ++c) {
-                        int live_neighbors = 0;
-                        for (int dr = -1; dr <= 1; ++dr) {
-                            for (int dc = -1; dc <= 1; ++dc) {
-                                if (dr == 0 && dc == 0) continue;
-                                int rr = (r + dr + LIFE_ROWS) % LIFE_ROWS;
-                                int cc = (c + dc + LIFE_COLS) % LIFE_COLS;
-                                live_neighbors += s_life_grid[rr][cc] ? 1 : 0;
-                            }
-                        }
-                        if (s_life_grid[r][c]) {
-                            s_life_next[r][c] = (live_neighbors == 2 || live_neighbors == 3) ? 1 : 0;
-                        } else {
-                            s_life_next[r][c] = (live_neighbors == 3) ? 1 : 0;
-                        }
-                        if (s_life_next[r][c]) {
-                            any_alive = true;
-                        }
-                        if (s_life_next[r][c] != s_life_grid[r][c]) {
-                            any_change = true;
-                        }
-                    }
-                }
-                if (!any_alive || !any_change) {
-                    s_life_active = false;
-                } else {
-                    for (int r = 0; r < LIFE_ROWS; ++r) memcpy(s_life_grid[r], s_life_next[r], LIFE_COLS);
-                }
-            }
-        } else if (anim == IDLE_ANIM_STARFIELD) {
-            if (!s_starfield_inited) {
-                uint32_t seed = (uint32_t)now ^ (uint32_t)((uintptr_t)&now);
-                for (int i = 0; i < STAR_COUNT; ++i) {
-                    seed = seed * 1664525u + 1013904223u;
-                    int cx = 64;
-                    int cy = 32;
-                    int jitter_x = ((int)(seed & 0x0F)) - 8;
-                    seed = seed * 1664525u + 1013904223u;
-                    int jitter_y = ((int)(seed & 0x0F)) - 8;
-                    s_stars[i].x = cx + jitter_x;
-                    s_stars[i].y = cy + jitter_y;
-
-                    int dx = 0;
-                    int dy = 0;
-                    int mag2 = 0;
-                    do {
-                        seed = seed * 1664525u + 1013904223u;
-                        dx = (int)(((seed >> 28) & 0x07) - 3);
-                        seed = seed * 1664525u + 1013904223u;
-                        dy = (int)(((seed >> 28) & 0x07) - 3);
-                        mag2 = dx * dx + dy * dy;
-                    } while (mag2 < 2 || mag2 > 18);
-
-                    int vx = s_stars[i].x - cx;
-                    int vy = s_stars[i].y - cy;
-                    if (vx * dx + vy * dy <= 0) {
-                        dx = -dx;
-                        dy = -dy;
-                    }
-
-                    s_stars[i].dx = dx;
-                    s_stars[i].dy = dy;
-
-                    seed = seed * 1664525u + 1013904223u;
-                    s_stars[i].trail = (uint8_t)(5 + (seed % 3));
-                }
-                s_starfield_inited = true;
-            } else {
-                for (int i = 0; i < STAR_COUNT; ++i) {
-                    s_stars[i].x += s_stars[i].dx;
-                    s_stars[i].y += s_stars[i].dy;
-                    if (s_stars[i].x < 0 || s_stars[i].x >= 128 ||
-                        s_stars[i].y < 0 || s_stars[i].y >= 64) {
-                        uint32_t seed = (uint32_t)now ^ (uint32_t)((uintptr_t)&s_stars[i]);
-                        seed = seed * 1664525u + 1013904223u;
-                        int cx = 64;
-                        int cy = 32;
-                        int jitter_x = ((int)(seed & 0x0F)) - 8;
-                        seed = seed * 1664525u + 1013904223u;
-                        int jitter_y = ((int)(seed & 0x0F)) - 8;
-                        s_stars[i].x = cx + jitter_x;
-                        s_stars[i].y = cy + jitter_y;
-
-                        int dx = 0;
-                        int dy = 0;
-                        int mag2 = 0;
-                        do {
-                            seed = seed * 1664525u + 1013904223u;
-                            dx = (int)(((seed >> 28) & 0x07) - 3);
-                            seed = seed * 1664525u + 1013904223u;
-                            dy = (int)(((seed >> 28) & 0x07) - 3);
-                            mag2 = dx * dx + dy * dy;
-                        } while (mag2 < 2 || mag2 > 18);
-
-                        int vx = s_stars[i].x - cx;
-                        int vy = s_stars[i].y - cy;
-                        if (vx * dx + vy * dy <= 0) {
-                            dx = -dx;
-                            dy = -dy;
-                        }
-
-                        s_stars[i].dx = dx;
-                        s_stars[i].dy = dy;
-
-                        seed = seed * 1664525u + 1013904223u;
-                        s_stars[i].trail = (uint8_t)(5 + (seed % 3));
-                    }
-                }
-            }
-        } else {
-            // ghost sprite horizontal walk with gentle vertical float
-            int speed = 4; // pixels per tick
-            if (s_ghost_dir > 0) {
-                s_ghost_x += speed;
-                if (s_ghost_x + GHOST_W >= 128) { s_ghost_x = 128 - GHOST_W; s_ghost_dir = -1; }
-            } else {
-                s_ghost_x -= speed;
-                if (s_ghost_x <= 0) { s_ghost_x = 0; s_ghost_dir = 1; }
-            }
-        }
-
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            StatusAnimGfx gfx = {
+                .clear = anim_clear,
+                .flush = anim_flush,
+                .plot_pixel = anim_plot_pixel,
+                .draw_text = anim_draw_text,
+                .draw_char_rot90_right = anim_draw_char_rot90_right,
+                .width = 128,
+                .height = 64,
+                .scale_y = SCALE_Y,
+                .font_char_width = 5,
+                .font_char_height = 7,
+                .user = NULL,
+            };
+
             status_display_clear_buffer();
-            if (anim == IDLE_ANIM_GAME_OF_LIFE) {
-                for (int r = 0; r < LIFE_ROWS; ++r) {
-                    for (int c = 0; c < LIFE_COLS; ++c) {
-                        if (!s_life_grid[r][c]) continue;
-                        int sx = c * LIFE_CELL_SIZE;
-                        int sy = r * LIFE_CELL_SIZE;
-                        for (int yy = 0; yy < LIFE_CELL_SIZE; ++yy) {
-                            for (int xx = 0; xx < LIFE_CELL_SIZE; ++xx) {
-                                status_display_plot_pixel(sx + xx, sy + yy, true);
-                            }
-                        }
-                    }
-                }
-            } else if (anim == IDLE_ANIM_STARFIELD) {
-                for (int i = 0; i < STAR_COUNT; ++i) {
-                    int x = s_stars[i].x;
-                    int y = s_stars[i].y;
-                    int dx = s_stars[i].dx;
-                    int dy = s_stars[i].dy;
-                    int len = s_stars[i].trail;
-                    for (int t = 0; t < len; ++t) {
-                        int px = x - dx * t;
-                        int py = y - dy * t;
-                        status_display_plot_pixel(px, py, true);
-                    }
-                }
-            } else if (anim == IDLE_ANIM_HUD) {
-                int phase = s_anim_frame;
-                status_display_draw_hud(now, phase);
-            } else {
-                bool flip = (s_ghost_dir < 0);
-                int base_y = 64 - GHOST_H - 6;
-                if (base_y < 0) base_y = 0;
-                int phase = s_anim_frame & 0x1F;
-                int tri = phase < 16 ? phase : (32 - phase);
-                int y_offset = tri - 8;
-                if (y_offset < -6) y_offset = -6;
-                if (y_offset > 6) y_offset = 6;
-                int y = base_y + y_offset;
-                draw_sprite_msb(s_ghost_x, y, ghostidle_bits, GHOST_W, GHOST_H, flip);
-            }
+            status_display_animations_step(anim, now, s_anim_frame, &gfx);
             status_display_flush();
             xSemaphoreGive(s_mutex);
         }
@@ -787,8 +412,6 @@ void status_display_init(void) {
     }
     // create animation worker task
     s_next_anim_allowed_tick = 0;
-    s_ghost_x = 0;
-    s_ghost_dir = 1;
     if (s_anim_task == NULL) {
         xTaskCreate(status_display_anim_task, "status_anim", 2048, NULL, tskIDLE_PRIORITY + 1, &s_anim_task);
     }
@@ -814,7 +437,7 @@ void status_display_set_lines(const char *line_one, const char *line_two) {
     status_display_render(s_line1, s_line2);
     // reset idle timer
     s_last_update_tick = xTaskGetTickCount();
-    s_life_active = false;
+    status_display_animations_reset();
 }
 
 void status_display_show_attack(const char *attack_name, const char *target) {

@@ -27,6 +27,7 @@
   - Umarsh
   - Zolotaya Korona
   - Zolotaya Korona Online
+- Added support for the RabbitLabs Poltergeist board
 - Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
 - Refactors to NFC logic to make more maintainable
 - After scanning, NFC popup title now specifies the tag type
@@ -44,7 +45,7 @@
 - Fixed an issue that would cause Chameleon Ultra to recover less keys than a PN532
 - Route evil portal HTML requests through the UART HTML buffer when active instead of the SD-backed file handler.
 - Added 'Invert Encoder' setting to display UI for configs with encoders
-- Added 'Starfield' and 'HUD' idle animation for the status display
+- Added 'Starfield', 'Matrix' and 'HUD' idle animations for the status display
 - Added CLI commands for changing the status display animations
 - Reset AirTag and Flipper discovery lists at the start of scans to avoid stale entries
 - Removed Flappy Ghost app and related build/docs references

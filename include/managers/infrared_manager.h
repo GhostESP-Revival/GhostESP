@@ -55,6 +55,10 @@ void infrared_manager_free_list(infrared_signal_t *signals, size_t count);
  */
 bool infrared_manager_transmit(const infrared_signal_t *signal);
 
+// Optional poltergeist helper: keep IO24 asserted across a batch of transmits
+void infrared_manager_poltergeist_hold_io24_begin(void);
+void infrared_manager_poltergeist_hold_io24_end(void);
+
 // Background task support (static allocation to avoid heap usage)
 #define INFRARED_MANAGER_TASK_STACK_SIZE 512
 bool infrared_manager_start_background_task(TaskFunction_t fn, void *arg);
