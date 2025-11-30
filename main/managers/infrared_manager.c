@@ -528,6 +528,7 @@ static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(cons
 static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty) {
     size_t item_count = (count + 1) / 2;
     size_t block_symbols = item_count < 48 ? 48 : item_count;
+
     if (block_symbols % 2) block_symbols++;
 
     static rmt_channel_handle_t tx_chan = NULL;
@@ -555,10 +556,11 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
             .flags = {.with_dma = false, .invert_out = false}
 #else
-            .flags = {.with_dma = true, .invert_out = false}
+            .flags = {.with_dma = false, .invert_out = false}
 #endif
         };
         if (rmt_new_tx_channel(&cfg, &tx_chan) != ESP_OK) return false;
+
         if (rmt_enable(tx_chan) != ESP_OK) return false;
         chan_symbols = block_symbols;
     }
@@ -764,6 +766,51 @@ bool infrared_manager_parse_buffer_single(const char *buf, infrared_signal_t *si
                      p2 = endptr;
                 }
                 signal->payload.message.command = cmd;
+            } else if (strcmp(key, "frequency") == 0) {
+                if (signal->is_raw) {
+                    signal->payload.raw.frequency = (uint32_t)strtoul(value, NULL, 10);
+                }
+            } else if (strcmp(key, "duty_cycle") == 0) {
+                if (signal->is_raw) {
+                    signal->payload.raw.duty_cycle = strtof(value, NULL);
+                }
+            } else if (strcmp(key, "data") == 0) {
+                if (signal->is_raw && !signal->payload.raw.timings) {
+                    size_t data_count = 0;
+                    const char *p2 = value;
+                    while (*p2) {
+                        while (*p2 && isspace((unsigned char)*p2)) p2++;
+                        if (!*p2) break;
+                        data_count++;
+                        while (*p2 && !isspace((unsigned char)*p2)) p2++;
+                    }
+                    if (data_count > 0) {
+                        uint32_t *timings = malloc(sizeof(uint32_t) * data_count);
+                        if (!timings) {
+                            free(dup);
+                            return false;
+                        }
+                        size_t idx2 = 0;
+                        p2 = value;
+                        char *endptr;
+                        while (*p2 && idx2 < data_count) {
+                            while (*p2 && isspace((unsigned char)*p2)) p2++;
+                            if (!*p2) break;
+                            unsigned long v = strtoul(p2, &endptr, 10);
+                            if (p2 == endptr) break;
+                            timings[idx2++] = (uint32_t)v;
+                            p2 = endptr;
+                        }
+                        if (idx2 == data_count) {
+                            signal->payload.raw.timings = timings;
+                            signal->payload.raw.timings_size = data_count;
+                        } else {
+                            free(timings);
+                            free(dup);
+                            return false;
+                        }
+                    }
+                }
             } 
         }
         line = strtok_r(NULL, "\r\n", &saveptr);
@@ -771,7 +818,7 @@ bool infrared_manager_parse_buffer_single(const char *buf, infrared_signal_t *si
     free(dup);
     // Valid if we have at least a protocol (parsed) or timings (raw)
     if (signal->is_raw) {
-        return (signal->payload.raw.timings != NULL);
+        return (signal->payload.raw.timings != NULL && signal->payload.raw.timings_size > 0);
     } else {
         return (strlen(signal->payload.message.protocol) > 0);
     }
