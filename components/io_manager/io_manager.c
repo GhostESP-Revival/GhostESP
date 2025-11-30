@@ -473,19 +473,29 @@ static esp_err_t tca9535_read_inputs(uint8_t *port0, uint8_t *port1)
         return ESP_ERR_INVALID_STATE;
     }
 
+    // acquire mutex with timeout to prevent deadlock
     if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
     esp_err_t ret = ESP_FAIL;
-    bool global_locked = i2c_bus_lock(g_config.i2c_port, 60);
-    if (!global_locked) {
-        xSemaphoreGive(g_i2c_mutex);
-        ESP_LOGW(TAG, "failed to lock shared i2c bus for input read");
-        return ESP_ERR_TIMEOUT;
-    }
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    if (cmd) {
+    
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+        bool global_locked = i2c_bus_lock(g_config.i2c_port, 60);
+        if (!global_locked) {
+            ret = ESP_ERR_TIMEOUT;
+            continue;
+        }
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        if (!cmd) {
+            ret = ESP_ERR_NO_MEM;
+            i2c_bus_unlock(g_config.i2c_port);
+            break;
+        }
+        
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (g_config.i2c_addr << 1) | I2C_MASTER_WRITE, true);
         i2c_master_write_byte(cmd, TCA9535_INPUT_PORT0, true);
@@ -494,12 +504,18 @@ static esp_err_t tca9535_read_inputs(uint8_t *port0, uint8_t *port1)
         i2c_master_read_byte(cmd, port0, I2C_MASTER_ACK);
         i2c_master_read_byte(cmd, port1, I2C_MASTER_NACK);
         i2c_master_stop(cmd);
+        
         ret = i2c_master_cmd_begin(g_config.i2c_port, cmd, pdMS_TO_TICKS(50));
         i2c_cmd_link_delete(cmd);
-    } else {
-        ret = ESP_ERR_NO_MEM;
+        i2c_bus_unlock(g_config.i2c_port);
+        
+        if (ret == ESP_OK) {
+            break;
+        }
     }
-    i2c_bus_unlock(g_config.i2c_port);
+    if (ret == ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "failed to lock shared i2c bus for input read");
+    }
 
     xSemaphoreGive(g_i2c_mutex);
     return ret;
