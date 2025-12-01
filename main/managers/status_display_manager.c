@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
 #include "i2c_bus_lock.h"
 #include "managers/settings_manager.h"
 #include "managers/status_display_animations.h"
@@ -44,6 +45,8 @@ static uint8_t s_buffer[128 * 8];
 static char s_line1[24];
 static char s_line2[24];
 static const int SCALE_Y = 2; // simple vertical scaling factor
+static TickType_t s_next_flush_allowed_tick;
+static const TickType_t STATUS_DISPLAY_MIN_FLUSH_INTERVAL_TICKS = pdMS_TO_TICKS(200);
 // idle animation settings
 static TimerHandle_t s_idle_timer;
 static TickType_t s_last_update_tick;
@@ -118,11 +121,22 @@ static esp_err_t status_display_write_command(uint8_t command) {
 }
 
 static void status_display_flush(void) {
+#if defined(CONFIG_USE_IO_EXPANDER)
+    TickType_t now = xTaskGetTickCount();
+    if (now < s_next_flush_allowed_tick) {
+        return;
+    }
+    s_next_flush_allowed_tick = now + STATUS_DISPLAY_MIN_FLUSH_INTERVAL_TICKS;
+#endif
     for (uint8_t page = 0; page < 8; ++page) {
         uint8_t setup[] = { (uint8_t)(0xB0 | page), 0x00, 0x10 };
         if (status_display_send(STATUS_CMD, setup, sizeof(setup)) != ESP_OK) return;
         const uint8_t *chunk = &s_buffer[page * 128];
         if (status_display_send(STATUS_DATA, chunk, 128) != ESP_OK) return;
+#if defined(CONFIG_USE_IO_EXPANDER)
+        // brief pause lets other IO expander clients grab the bus between 1kB bursts
+        vTaskDelay(pdMS_TO_TICKS(5));
+#endif
     }
 }
 
