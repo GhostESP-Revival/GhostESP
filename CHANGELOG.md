@@ -1,6 +1,7 @@
 # Ghost ESP Changelog
 
 ## Revival v1.9
+### Added
 
 - Added IR CLI support
 - Added Flipper Zero NFC parser compatibility layer with support for:
@@ -28,31 +29,39 @@
   - Zolotaya Korona
   - Zolotaya Korona Online
 - Added support for the RabbitLabs Poltergeist board
-- Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
-- Refactors to NFC logic to make more maintainable
-- After scanning, NFC popup title now specifies the tag type
 - Added dualcomm display menu when connected to a peer with split view terminal showing normal/peer response logs
-- IR and NFC display views and popups now properly use active set UI theme
-- Main menu app colors are now consistent across devices
-- Avoid redundant PN532 Mifare Classic reads for a minor speed up
-- Apps menu now follows main menu theme, controls and layout
-- Reorganised the settings menu and adjusted styling
-- Fixed an issue that would cause MFC dictionary attack to not try all possible keys
-- Fixed BLE scanning not being reliable
 - Added AirTag RSSI update logging so existing tags report RSSI changes every few seconds
-- Switched AirTag scanner to active BLE scanning for more reliable AirTag detection
-- Add vendor board support and images to documentation - @tototo31
-- Fixed an issue that would cause Chameleon Ultra to recover less keys than a PN532
-- Route evil portal HTML requests through the UART HTML buffer when active instead of the SD-backed file handler.
 - Added 'Invert Encoder' setting to display UI for configs with encoders
 - Added 'Starfield', 'Matrix' and 'HUD' idle animations for the status display
 - Added CLI commands for changing the status display animations
-- Reset AirTag and Flipper discovery lists at the start of scans to avoid stale entries
-- Removed Flappy Ghost app and related build/docs references
 - Added JTAG support for ESP32C5
-- Removed unused buffer to save 8KB ram
 - Added basic Mifare Desfire detection
+
+### Changed
+
+- Refactors to NFC logic to make more maintainable
+- After scanning, NFC popup title now specifies the tag type
+- IR and NFC display views and popups now properly use active set UI theme
+- Avoid redundant PN532 Mifare Classic reads for a minor speed up
+- Reorganised the settings menu and adjusted styling
+- Add vendor board support and images to documentation - @tototo31
+- Removed Flappy Ghost app and related build/docs references
+- Removed unused buffer to save 8KB ram
 - Renamed Dual Comm UI and documentation branding to GhostLink
+- Minor keyboard view logic and styling refactor
+
+### Fixed
+
+- Switched AirTag scanner to active BLE scanning for more reliable AirTag detection
+- Apps menu now follows main menu theme, controls and layout
+- Main menu app colors are now consistent across devices
+- Route evil portal HTML requests through the UART HTML buffer when active instead of the SD-backed file handler.
+- Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
+- Fixed an issue that would cause MFC dictionary attack to not try all possible keys
+- Fixed BLE scanning not being reliable
+- Fixed an issue that would cause Chameleon Ultra to recover less keys than a PN532
+- Fixed IR send failing with long raw signals
+- Fixed a crash when entering SYM menu on keyboard view - @dagnazty
 
 ## Revival v1.8.1
 

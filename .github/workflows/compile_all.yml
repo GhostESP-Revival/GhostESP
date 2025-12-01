@@ -56,6 +56,7 @@ jobs:
           - { name: "RabbitLabs_Minion", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.minion", zip_name: "RabbitLabs_Minion.zip" }
           - { name: "Lolin_S3_Pro", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro", zip_name: "Lolin_S3_Pro.zip" }
           - { name: "Cardputer ADV", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv", zip_name: "CardputerADV.zip" }
+          - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist", zip_name: "Poltergeist.zip" }
     steps:
       - uses: actions/checkout@v4
       

@@ -45,8 +45,10 @@ static uint8_t s_buffer[128 * 8];
 static char s_line1[24];
 static char s_line2[24];
 static const int SCALE_Y = 2; // simple vertical scaling factor
+#if defined(CONFIG_USE_IO_EXPANDER)
 static TickType_t s_next_flush_allowed_tick;
 static const TickType_t STATUS_DISPLAY_MIN_FLUSH_INTERVAL_TICKS = pdMS_TO_TICKS(200);
+#endif
 // idle animation settings
 static TimerHandle_t s_idle_timer;
 static TickType_t s_last_update_tick;
@@ -164,15 +166,6 @@ static void status_display_draw_char(int x, int y, char c) {
             }
         }
     }
-}
-
-static void status_display_plot_pixel_rot90_right(int x, int y, bool on)
-{
-    int ry = x;
-    int rx = 127 - y;
-    if (ry < 0 || ry >= 64) return;
-    if (rx < 0 || rx >= 128) return;
-    status_display_plot_pixel(rx, ry, on);
 }
 
 static void status_display_draw_char_rot90_right(int x, int y, char c)
