@@ -100,6 +100,19 @@ jobs:
           fi
           echo "Local bootloader found at $BOOTLOADER_PATH."
 
+      - name: Create Merged Binary
+        run: |
+          . ~/esp-idf/export.sh
+          MERGED_BIN_NAME="${{ matrix.target.name }}-merged-gesp.bin"
+          idf.py merge-bin -o "$MERGED_BIN_NAME" || {
+            echo "Warning: Failed to create merged binary, but build succeeded"
+          }
+          if [ -f "build/$MERGED_BIN_NAME" ]; then
+            echo "Merged binary created: $MERGED_BIN_NAME"
+          else
+            echo "Warning: Merged binary was not created"
+          fi
+
       - name: Package Artifacts into ZIP
         run: |
           ARTIFACT_DIR="packaged_artifacts_${{ matrix.target.name }}" # Unique dir per target
@@ -111,6 +124,13 @@ jobs:
           cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/bootloader.bin" || { echo "Failed to copy bootloader"; exit 1; }
            # Copy app binary
           cp build/*.bin "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to copy app binary"; exit 1; }
+          # Copy merged binary if it exists
+          MERGED_BIN_NAME="${{ matrix.target.name }}-merged-gesp.bin"
+          if [ -f "build/$MERGED_BIN_NAME" ]; then
+            cp "build/$MERGED_BIN_NAME" "$ARTIFACT_DIR/" || {
+              echo "Warning: Failed to copy merged binary"
+            }
+          fi
 
           echo "Contents of $ARTIFACT_DIR:"
           ls -l "$ARTIFACT_DIR"

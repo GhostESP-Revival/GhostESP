@@ -194,6 +194,7 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             f"{home}/esp/esp-idf-v5.4.1",
             f"{home}/esp/v5.5/esp-idf",
             f"{home}/esp/v5.4.1/esp-idf",
+            f"{home}/esp/v5.5.1/esp-idf",
             os.path.join(script_dir, "esp-idf-v5.5"),
             os.path.join(script_dir, "esp-idf-v5.4.1"),
             os.path.join(script_dir, "esp-idf")
@@ -228,6 +229,7 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             if os.path.exists(base_path):
                 try:
                     for item in os.listdir(base_path):
+                        # Check for esp-idf-* pattern (e.g., esp-idf-v5.5.1)
                         if item.startswith("esp-idf-"):
                             full_path = os.path.join(base_path, item)
                             export_script = "export.bat" if os.name == 'nt' else "export.sh"
@@ -238,6 +240,20 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
                                     return full_path
                                 else:
                                     print("skipping detected ESP-IDF path per user choice")
+                        # Check for ~/esp/{version}/esp-idf pattern (e.g., ~/esp/v5.5.1/esp-idf)
+                        elif os.path.isdir(os.path.join(base_path, item)):
+                            # Look for esp-idf subdirectory inside version folders
+                            version_dir = os.path.join(base_path, item)
+                            esp_idf_path = os.path.join(version_dir, "esp-idf")
+                            if os.path.isdir(esp_idf_path):
+                                export_script = "export.bat" if os.name == 'nt' else "export.sh"
+                                if os.path.exists(os.path.join(esp_idf_path, export_script)):
+                                    print(f"Found ESP-IDF at: {esp_idf_path}")
+                                    choice = input("Use this ESP-IDF path? [y/n]: ").strip().lower()
+                                    if choice not in ['n', 'no']:
+                                        return esp_idf_path
+                                    else:
+                                        print("skipping detected ESP-IDF path per user choice")
                 except (PermissionError, OSError):
                     continue
     
@@ -679,17 +695,41 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
         print(f"ERROR: Failed to copy build artifacts: {e}")
         return False
     
+    # Merge binaries using idf.py merge-bin (uses flash_args for correct offsets)
+    # Note: Merged binary is copied to local_builds but NOT included in ZIP
+    print("Creating merged binary...")
+    merged_bin_name = target['name'] + "-merged-gesp.bin"
+    merged_bin_path = os.path.join("build", merged_bin_name)
+    
+    # Use idf.py merge-bin which automatically reads offsets from flash_args
+    if not run_idf_command(['idf.py', 'merge-bin', '-o', merged_bin_name], env, cmd_prefix):
+        print("WARNING: Failed to create merged binary, but build succeeded")
+        # Don't fail the build if merge-bin fails, as the individual binaries are still available
+    else:
+        # Copy merged binary to artifact directory (but exclude from ZIP)
+        if os.path.exists(merged_bin_path):
+            try:
+                shutil.copy2(merged_bin_path, os.path.join(artifact_dir, merged_bin_name))
+                print(f"Merged binary created: {os.path.join(artifact_dir, merged_bin_name)} (not included in ZIP)")
+            except Exception as e:
+                print(f"WARNING: Failed to copy merged binary to artifact directory: {e}")
+        else:
+            print("WARNING: Merged binary was not created in build directory")
+    
     print(f"Contents of {artifact_dir}:")
     for item in os.listdir(artifact_dir):
         print(f"  {item}")
     
-    # Create ZIP file
+    # Create ZIP file (excluding merged binary)
     zip_path = os.path.join("local_builds", target['zip_name'])
     print(f"Creating ZIP file: {zip_path}")
     
     try:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for item in os.listdir(artifact_dir):
+                # Exclude merged binary from ZIP
+                if item.endswith("-merged-gesp.bin"):
+                    continue
                 item_path = os.path.join(artifact_dir, item)
                 zipf.write(item_path, item)
         
@@ -698,52 +738,7 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
     except Exception as e:
         print(f"ERROR: Failed to create ZIP file: {e}")
         return False
-
-# --- Merge binaries using esptool.py merge_bin ---
-    merged_bin_path = os.path.join("local_builds", target['name'] + "-merged-gesp.bin")
-    bootloader_bin = os.path.join("build", "bootloader", "bootloader.bin")
-    partition_bin = os.path.join("build", "partition_table", "partition-table.bin")
-    firmware_bin = None
-    for bin_file in build_dir.glob("*.bin"):
-        if bin_file.name not in ["bootloader.bin", "partition-table.bin"]:
-            firmware_bin = str(bin_file)
-            break
-
-    if firmware_bin:
-        # Determine offsets (adjust if needed for your project)
-        boot_offset = "0x1000" if target['idf_target'] in ["esp32", "esp32s2"] else "0x0"
-        partition_offset = "0x8000"
-        firmware_offset = "0x10000"
-        import sys
-        merge_cmd = [
-            sys.executable, "-m", "esptool", 
-            "--chip", target['idf_target'],
-            "merge-bin",
-            "-o", merged_bin_path,
-            "--flash-mode", "dio",
-            "--flash-freq", "40m",
-            "--flash-size", "4MB",
-            boot_offset, bootloader_bin,
-            partition_offset, partition_bin,
-            firmware_offset, firmware_bin
-        ]
-        print(f"Merging binaries with: {' '.join(merge_cmd)}")
-        try:
-            result = subprocess.run(merge_cmd, check=True, capture_output=True, text=True)
-            print("esptool.py merge_bin output:")
-            print(result.stdout)
-            if os.path.exists(merged_bin_path):
-                print(f"Merged binary created: {merged_bin_path}")
-            else:
-                print("ERROR: Merged binary was not created.")
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: esptool.py merge_bin failed: {e}")
-            print(e.stdout)
-            print(e.stderr)
-            return False
-    else:
-        print("ERROR: Firmware binary not found for merging.")
-        return
+    
     return True
 
 def main():
