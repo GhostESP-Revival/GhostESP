@@ -129,7 +129,7 @@ void set_game_settings(int height) {
     settings.flap_strength = -10.0f;
     settings.pipe_gap_ratio = 0.3f; // 30% of screen height
     settings.bird_size = 32;
-    settings.score_font = &lv_font_montserrat_16;
+    settings.score_font = &lv_font_montserrat_14;
     settings.ground_height = (int)(height * 0.1f); // 10% of screen height
     break;
   case SCREEN_SIZE_LARGE:
@@ -139,7 +139,7 @@ void set_game_settings(int height) {
     settings.flap_strength = -12.0f;
     settings.pipe_gap_ratio = 0.35f; // 35% of screen height
     settings.bird_size = 40;
-    settings.score_font = &lv_font_montserrat_24;
+    settings.score_font = &lv_font_montserrat_14;
     settings.ground_height = (int)(height * 0.1f); // 10% of screen height
     break;
   }

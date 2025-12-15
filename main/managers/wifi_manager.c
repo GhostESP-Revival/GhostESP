@@ -664,6 +664,7 @@ static void reverse_mac(const uint8_t *src, uint8_t *dst) {
     }
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     // Focus on Management frames like the example, can be changed back to WIFI_PKT_DATA if needed
     if (type != WIFI_PKT_MGMT) {
@@ -775,6 +776,7 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
        // printf("DEBUG: Filtered packet - Station MAC already seen.\n");
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 esp_err_t stream_data_to_client(httpd_req_t *req, const char *url, const char *content_type) {
     httpd_resp_set_hdr(req, "Connection", "close");
@@ -1531,7 +1533,10 @@ void wifi_manager_clear_scan_results(void) {
     }
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
+    // Note: Callback function comparisons are only valid when callbacks are available
+    // For ESP32-P4, this entire function is replaced with a stub
     if (callback == wifi_eapol_scan_callback) {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
         ESP_ERROR_CHECK(esp_wifi_start());
@@ -1599,6 +1604,15 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     TERMINAL_VIEW_ADD_TEXT("Filter: %s\n", filter_desc);
     status_display_show_status("Monitor Started");
 }
+#else
+void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
+    (void)callback;
+    glog("WiFi monitor mode not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
+
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_manager_stop_monitor_mode() {
     wifi_mode_t mode = WIFI_MODE_NULL;
     esp_err_t wifi_status = esp_wifi_get_mode(&mode);
@@ -1623,7 +1637,14 @@ void wifi_manager_stop_monitor_mode() {
 
     // NOTE: Stopping the PineAP timer (channel_hop_timer) is handled by stop_pineap_detection() in callbacks.c
 }
+#else
+void wifi_manager_stop_monitor_mode() {
+    glog("WiFi monitor mode not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_manager_init(void) {
 
     // --- Memory check before WiFi init ---
@@ -1724,7 +1745,14 @@ void wifi_manager_init(void) {
         printf("Failed to initialize global CA certificate store: %s\n", esp_err_to_name(ret));
     }
 }
+#else
+void wifi_manager_init(void) {
+    glog("WiFi manager not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_manager_configure_sta_from_settings(void) {
     // Configure STA with saved credentials for boot-time connection
     const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
@@ -1763,7 +1791,13 @@ void wifi_manager_configure_sta_from_settings(void) {
         printf("No saved WiFi credentials found\n");
     }
 }
+#else
+void wifi_manager_configure_sta_from_settings(void) {
+    glog("WiFi STA configuration not supported on ESP32-P4\n");
+}
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_manager_start_scan() {
     log_heap_status(TAG, "scan_start_pre");
     // Free any previous selections or scan buffers before starting a fresh scan
@@ -1836,6 +1870,12 @@ void wifi_manager_start_scan() {
     esp_wifi_stop();
     ap_manager_start_services();
 }
+#else
+void wifi_manager_start_scan() {
+    glog("WiFi scan not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 // Stop scanning for networks
 void wifi_manager_stop_scan() {
@@ -4065,6 +4105,7 @@ static bool bssid_already_listed(const uint8_t *bssid) {
     }
     return false;
 }
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) return;
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
@@ -4186,6 +4227,7 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         live_last_printed_index++;
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 void wifi_manager_start_live_ap_scan(void) {
     ap_manager_stop_services();
@@ -6074,6 +6116,7 @@ void wifi_manager_sae_flood_help(void) {
 /**
  * SAE monitoring callback to handle commit/confirm responses and anti-clogging tokens
  */
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) return;
     
@@ -6167,9 +6210,11 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         ESP_LOGI("SAE_RX", "confirm status=%u", (unsigned)status_code);
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 /**
  * Inject SAE confirm frame after successful commit exchange
  */
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool karma_running = false;
 static TaskHandle_t karma_task_handle = NULL;
 
@@ -6179,7 +6224,6 @@ static int karma_ssid_count = 0;
 static int karma_ssid_index = 0;
 static uint32_t last_ssid_change_time = 0;
 static bool karma_ssid_manual_mode = false;
-
 
 // Helper to add SSID to cache if not present
 static void karma_add_ssid(const char *ssid) {
@@ -6211,7 +6255,9 @@ void wifi_manager_set_karma_ssid_list(const char **ssids, int count) {
     karma_ssid_index = 0;
     karma_ssid_manual_mode = true;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // Helper function to send a probe response to a station
 static void karma_send_probe_response(const uint8_t *sta_mac, const char *ssid) {
     uint8_t resp[128] = {0};
@@ -6266,7 +6312,9 @@ static void karma_send_probe_response(const uint8_t *sta_mac, const char *ssid) 
             sta_mac[0], sta_mac[1], sta_mac[2], sta_mac[3], sta_mac[4], sta_mac[5], ssid, esp_err_to_name(err));
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static void karma_probe_request_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) return;
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
@@ -6297,7 +6345,9 @@ static void karma_probe_request_callback(void *buf, wifi_promiscuous_pkt_type_t 
         ssid_offset += payload[ssid_offset + 1] + 2;
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static void karma_start_portal_for_ssid(const char *ssid) {
     // Use the default portal, SSID as AP name, open AP (no password)
     if (!karma_portal_active) {
@@ -6388,6 +6438,7 @@ static void karma_task(void *param) {
     TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
     vTaskDelete(NULL);
 }
+
 void wifi_manager_start_karma(void) {
     if (karma_running) {
         printf("Karma attack already running\n");
@@ -6414,3 +6465,4 @@ void wifi_manager_stop_karma(void) {
     karma_ssid_manual_mode = false;
     // Task will clean up itself
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)

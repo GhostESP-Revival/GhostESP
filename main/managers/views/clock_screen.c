@@ -62,7 +62,7 @@ void clock_create(void) {
 
     time_label = lv_label_create(content);
     lv_label_set_text(time_label, "00:00:00");
-    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(time_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_align(time_label, LV_ALIGN_CENTER, 0, -15);
     date_label = lv_label_create(content);

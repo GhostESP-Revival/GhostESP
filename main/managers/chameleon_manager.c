@@ -7,7 +7,7 @@
 #include "managers/nfc/mifare_attack.h"
 #include "managers/ble_manager.h"
 
-#ifdef CONFIG_NFC_CHAMELEON
+#if defined(CONFIG_NFC_CHAMELEON) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "host/ble_hs.h"
 #include "host/ble_hs_id.h"
 #include "host/ble_uuid.h"
@@ -84,11 +84,14 @@ static bool g_is_initialized = false;
 static bool g_device_found = false;
 static bool g_is_connected = false;
 static bool g_scanning = false;
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static struct ble_gap_disc_desc g_discovered_device;
+#endif
 
 static bool g_cu_backdoor_checked = false;
 static bool g_cu_backdoor_enabled = false;
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_tx_char_handle = 0;
 static uint16_t g_rx_char_handle = 0;
@@ -104,13 +107,16 @@ bool g_pin_required = false;
 // Track current device HW mode to avoid redundant mode switches
 static uint8_t g_cached_hw_mode = 0xFF; // unknown
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool g_ap_was_running = false;
 static bool g_wifi_was_running = false;
 static wifi_mode_t g_prev_wifi_mode = WIFI_MODE_NULL;
+#endif
 
 static bool g_cu_nfc_dir_ready = false;
 
 static void chameleon_suspend_ap(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     bool server_running = false;
     ap_manager_get_status(&server_running, NULL, NULL);
     wifi_mode_t _cur_mode = WIFI_MODE_NULL;
@@ -138,9 +144,16 @@ static void chameleon_suspend_ap(void) {
             g_wifi_was_running = false;
         }
     }
+#else
+    // ESP32-P4 doesn't have WiFi
+    g_ap_was_running = false;
+    g_wifi_was_running = false;
+    g_prev_wifi_mode = WIFI_MODE_NULL;
+#endif
 }
 
 static void chameleon_resume_ap(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (g_ap_was_running) {
         ESP_LOGI(TAG, "Restoring GhostNet AP services after Chameleon session");
         printf("Restoring GhostNet AP...\n");
@@ -176,9 +189,23 @@ static void chameleon_resume_ap(void) {
         g_prev_wifi_mode = WIFI_MODE_NULL;
         g_wifi_was_running = false;
     }
+#else
+    // ESP32-P4 doesn't have WiFi
+    ESP_LOGI(TAG, "WiFi resume not needed on ESP32-P4");
+#endif
 }
 
 // Chameleon Ultra command constants (from official protocol documentation)
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+// Forward declarations
+static void chameleon_ble_scan_callback(struct ble_gap_event *event, size_t len);
+static int chameleon_gap_event_handler(struct ble_gap_event *event, void *arg);
+static int chameleon_service_discovery_cb(uint16_t conn_handle, const struct ble_gatt_error *error, const struct ble_gatt_svc *service, void *arg);
+static int chameleon_char_discovery_cb(uint16_t conn_handle, const struct ble_gatt_error *error, const struct ble_gatt_chr *chr, void *arg);
+static int chameleon_notification_cb(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg);
+static bool send_command(uint16_t cmd, uint8_t *data, size_t data_len);
+static bool wait_for_cmd_data(uint16_t cmd, size_t min_len, uint32_t timeout_ms);
+static uint8_t calculate_lrc(const uint8_t *data, size_t length);
 // Basic device commands (1000-1099)
 #define CMD_GET_APP_VERSION     1000  // 0x03E8 - Get firmware version
 #define CMD_CHANGE_DEVICE_MODE  1001  // 0x03E9 - Change device mode
@@ -721,9 +748,11 @@ static uint32_t g_cached_details_session = 0;
 // Service: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
 // TX: 6E400002-B5A3-F393-E0A9-E50E24DCCA9E  (write to this)
 // RX: 6E400003-B5A3-F393-E0A9-E50E24DCCA9E  (notifications from this)
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static const ble_uuid128_t g_service_uuid = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E);
 static const ble_uuid128_t g_tx_char_uuid = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x02, 0x00, 0x40, 0x6E);
 static const ble_uuid128_t g_rx_char_uuid = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x03, 0x00, 0x40, 0x6E);
+#endif
 
 // Response structure
 typedef struct {
@@ -763,7 +792,9 @@ static void cu_try_magic_backdoor_once(void) {
         ESP_LOGI(TAG, "Magic backdoor likely enabled");
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // Forward declarations
 static void chameleon_ble_scan_callback(struct ble_gap_event *event, size_t len);
 static int chameleon_gap_event_handler(struct ble_gap_event *event, void *arg);
@@ -773,6 +804,7 @@ static int chameleon_notification_cb(uint16_t conn_handle, uint16_t attr_handle,
 static bool send_command(uint16_t cmd, uint8_t *data, size_t data_len);
 static bool wait_for_cmd_data(uint16_t cmd, size_t min_len, uint32_t timeout_ms);
 static uint8_t calculate_lrc(const uint8_t *data, size_t length);
+#endif
 static void start_service_discovery(void);
 static int chameleon_sm_io_cb(uint16_t conn_handle, const struct ble_sm_io *io, void *arg);
 
@@ -3615,8 +3647,10 @@ bool chameleon_manager_enable_mfkey32_mode(void) {
     TERMINAL_VIEW_ADD_TEXT("MFKey32 mode not implemented\n");
         return false;
     }
-    
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
+
 bool chameleon_manager_collect_nonces(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (!g_is_connected) {
         printf("Not connected to Chameleon Ultra\n");
         TERMINAL_VIEW_ADD_TEXT("Not connected to Chameleon Ultra\n");
@@ -3627,6 +3661,9 @@ bool chameleon_manager_collect_nonces(void) {
     printf("Nonce collection not implemented in simplified version\n");
     TERMINAL_VIEW_ADD_TEXT("Nonce collection not implemented\n");
         return false;
-    }
-
+#else
+    // ESP32-P4 doesn't have BLE
+    return false;
 #endif
+}
+#endif // CONFIG_NFC_CHAMELEON

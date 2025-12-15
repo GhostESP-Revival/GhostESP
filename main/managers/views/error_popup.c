@@ -63,7 +63,7 @@ void error_popup_create(const char *message) {
 
     int popup_width = LV_HOR_RES * 0.8;
     int padding = (LV_HOR_RES <= 128) ? 5 : 10;
-    const lv_font_t *font = (LV_HOR_RES <= 128) ? &lv_font_montserrat_8 : &lv_font_montserrat_12;
+    const lv_font_t *font = &lv_font_montserrat_14;
     lv_obj_set_style_pad_all(error_popup_root, padding, 0);
     lv_obj_set_width(error_popup_root, popup_width);
     // container height and alignment will be set after label size is calculated
@@ -168,7 +168,7 @@ void error_popup_create_persistent(const char *message) {
 
     int popup_width = LV_HOR_RES * 0.8;
     int padding = (LV_HOR_RES <= 128) ? 5 : 10;
-    const lv_font_t *font = (LV_HOR_RES <= 128) ? &lv_font_montserrat_8 : &lv_font_montserrat_12;
+    const lv_font_t *font = &lv_font_montserrat_14;
     lv_obj_set_style_pad_all(error_popup_root, padding, 0);
     lv_obj_set_width(error_popup_root, popup_width);
 

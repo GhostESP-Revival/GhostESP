@@ -6,13 +6,15 @@
 #include "esp_sntp.h"
 #include "managers/ap_manager.h"
 #include "sdkconfig.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "managers/ble_manager.h"
 #endif
 #include "managers/dial_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "managers/wifi_manager.h"
+#endif
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
@@ -54,11 +56,13 @@
 
 static const char *TAG = "Commandline";
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 #define MAX_WIFI_CHANNEL 165
 #else
 #define MAX_WIFI_CHANNEL 13
+#endif
 #endif
 #endif
 
@@ -76,7 +80,7 @@ TaskHandle_t gps_info_task_handle = NULL;
 
 // Forward declarations for command handlers
 void cmd_wifi_scan_stop(int argc, char **argv);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_list_airtags_cmd(int argc, char **argv);
 void handle_select_airtag(int argc, char **argv);
 void handle_spoof_airtag(int argc, char **argv);
@@ -179,6 +183,7 @@ void handle_unknown_command(const char *cmd) {
 }
 
 void cmd_wifi_scan_start(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1) {
         if (strcmp(argv[1], "-stop") == 0) {
             cmd_wifi_scan_stop(argc, argv);
@@ -196,9 +201,14 @@ void cmd_wifi_scan_start(int argc, char **argv) {
     }
     wifi_manager_print_scan_results_with_oui();
     status_display_show_status("Scan Started");
+#else
+    glog("WiFi scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void cmd_wifi_scan_stop(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     // Properly stop any ongoing WiFi scan
     wifi_manager_stop_scan();
 
@@ -211,6 +221,10 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     // Reset WiFi to a good state
     esp_wifi_stop();
     esp_wifi_start();
+#else
+    glog("WiFi scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 
     glog("WiFi scan stopped.\n");
     status_display_show_status("Scan Stopped");
@@ -466,12 +480,18 @@ static void log_set_confirmation(const SettingDescriptor *d, const FSettings *s)
 }
 
 void cmd_wifi_scan_results(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     glog("WiFi scan results displaying with OUI matching.\n");
     wifi_manager_print_scan_results_with_oui();
     status_display_show_status("Showing Results");
+#else
+    glog("WiFi scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_list(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1 && strcmp(argv[1], "-a") == 0) {
         cmd_wifi_scan_results(argc, argv);
         return;
@@ -480,18 +500,18 @@ void handle_list(int argc, char **argv) {
         glog("Listed Stations...\n");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
-    else if (argc > 1 && strcmp(argv[1], "-airtags") == 0) {
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (argc > 1 && strcmp(argv[1], "-airtags") == 0) {
         ble_list_airtags();
         return;
     }
 #endif
-    else {
-        glog("Usage: list -a (for Wi-Fi scan results)\n");
-    }
+    glog("Usage: list -a (for Wi-Fi scan results)\n");
 }
 
 void handle_beaconspam(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1 && strcmp(argv[1], "-r") == 0) {
         glog("Starting Random beacon spam...\n");
         wifi_manager_start_beacon(NULL);
@@ -521,20 +541,35 @@ void handle_beaconspam(int argc, char **argv) {
         glog("Usage: beaconspam -r (for Beacon Spam Random)\n");
         status_display_show_status("Beacon Usage");
     }
+#else
+    glog("WiFi beacon spam not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_stop_spam(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_stop_beacon();
     glog("Beacon Spam Stopped...\n");
     status_display_show_status("Beacon Stopped");
+#else
+    glog("WiFi beacon spam not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_sta_scan(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_start_station_scan();
     status_display_show_status("Station Scan");
+#else
+    glog("WiFi station scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_attack_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1) {
         if (strcmp(argv[1], "-d") == 0) {
             glog("Deauthentication starting...\n");
@@ -560,9 +595,14 @@ void handle_attack_cmd(int argc, char **argv) {
     }
     glog("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
     status_display_show_status("Attack Usage");
+#else
+    glog("WiFi attacks not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_sae_flood_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc < 2) {
         glog("Usage: saeflood <password>\n");
         return;
@@ -570,26 +610,45 @@ void handle_sae_flood_cmd(int argc, char **argv) {
     glog("Starting SAE flood attack...\n");
     wifi_manager_start_sae_flood(argv[1]);
     status_display_show_status("SAE Flood On");
+#else
+    glog("WiFi SAE flood not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_stop_sae_flood_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     glog("Stopping SAE flood attack...\n");
     wifi_manager_stop_sae_flood();
     status_display_show_status("SAE Flood Off");
+#else
+    glog("WiFi SAE flood not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_sae_flood_help_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_sae_flood_help();
     status_display_show_status("SAE Help");
+#else
+    glog("WiFi SAE flood help not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_stop_deauth(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_stop_deauth();
     wifi_manager_stop_deauth_station();
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
     glog("Deauth/EAPOL/SAE attacks stopped...\n");
     status_display_show_status("Attacks Off");
+#else
+    glog("WiFi attacks not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_select_cmd(int argc, char **argv) {
@@ -598,6 +657,7 @@ void handle_select_cmd(int argc, char **argv) {
         return;
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(argv[1], "-a") == 0) {
         char *input = argv[2];
         char *comma = strchr(input, ',');
@@ -641,8 +701,10 @@ void handle_select_cmd(int argc, char **argv) {
         } else {
             glog("Error: is not a valid number.\n");
         }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
-    } else if (strcmp(argv[1], "-airtag") == 0) {
+    }
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (argc == 3 && strcmp(argv[1], "-airtag") == 0) {
         char *endptr;
         int num = (int)strtol(argv[2], &endptr, 10);
         if (*endptr == '\0') {
@@ -650,10 +712,22 @@ void handle_select_cmd(int argc, char **argv) {
         } else {
             glog("Error: '%s' is not a valid number.\n", argv[2]);
         }
+        return;
+    }
 #endif
-    } else {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (argc == 3 && strcmp(argv[1], "-a") != 0 && strcmp(argv[1], "-s") != 0
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        && strcmp(argv[1], "-airtag") != 0
+#endif
+        ) {
         glog("Invalid option. Usage: select -a <number[,number,...]> or select -s <number>\n");
     }
+#else
+    if (argc == 3) {
+        glog("Invalid option. WiFi selection not supported on ESP32-P4\n");
+    }
+#endif
 }
 
 void discover_task(void *pvParameter) {
@@ -689,8 +763,10 @@ void handle_stop_flipper(int argc, char **argv) {
         g_ir_universal_send_cancel = true;
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_stop_deauth();
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     ble_stop();
     ble_stop_ble_spam();
 #endif
@@ -712,12 +788,14 @@ void handle_stop_flipper(int argc, char **argv) {
         gps_info_task_handle = NULL;
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_stop_monitor_mode();  // Stop any active monitoring
     wifi_manager_stop_deauth_station();
     wifi_manager_stop_deauth();
     wifi_manager_stop_dhcpstarve();
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     // ensure zigbee capture is stopped when using generic stop
     zigbee_manager_stop_capture();
@@ -810,6 +888,7 @@ void handle_mem_cmd(int argc, char **argv) {
 }
 
 void handle_wifi_connection(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     const char *ssid;
     const char *password;
     if (argc == 1) {
@@ -913,10 +992,15 @@ void handle_wifi_connection(int argc, char **argv) {
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "pool.ntp.org");
     sntp_init();
+#else
+    glog("WiFi connection not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_wifi_disconnect(int argc, char **argv)
 {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_set_manual_disconnect(true);
     esp_err_t err = esp_wifi_disconnect();
     if (err == ESP_OK) {
@@ -930,9 +1014,13 @@ void handle_wifi_disconnect(int argc, char **argv)
         vTaskDelete(VisualizerHandle);
         VisualizerHandle = NULL;
     }
+#else
+    glog("WiFi disconnect not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 void handle_ble_scan_cmd(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "-f") == 0) {
@@ -1011,7 +1099,12 @@ void handle_start_portal(int argc, char **argv) {
     char log_buf[256];
     snprintf(log_buf, sizeof(log_buf), "Starting portal with AP_SSID: %s, PSK: %s, Domain: %s\n", ap_ssid, (strlen(psk) > 0 ? psk : "<Open>"), domain ? domain : "(default)");
     TERMINAL_VIEW_ADD_TEXT(log_buf);
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_start_evil_portal(final_url_or_path, NULL, psk, ap_ssid, domain);
+#else
+    glog("WiFi evil portal not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 bool ip_str_to_bytes(const char *ip_str, uint8_t *ip_bytes) {
@@ -1161,9 +1254,14 @@ void handle_tp_link_test(int argc, char **argv) {
 }
 
 void handle_ip_lookup(int argc, char **argv) {
-        glog("Starting IP lookup...\n");
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+    glog("Starting IP lookup...\n");
     wifi_manager_start_ip_lookup();
     status_display_show_status("IP Lookup");
+#else
+    glog("WiFi IP lookup not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
@@ -1293,6 +1391,7 @@ void handle_capture_scan(int argc, char **argv) {
         return;
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(capturetype, "-probe") == 0) {
         glog("Starting probe request\npacket capture...\n");
         int err = pcap_file_open("probescan", PCAP_CAPTURE_WIFI);
@@ -1343,6 +1442,7 @@ void handle_capture_scan(int argc, char **argv) {
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
         status_display_show_status("Capture Raw");
     }
+#endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     if (strcmp(capturetype, "-802154") == 0) {
@@ -1364,6 +1464,7 @@ void handle_capture_scan(int argc, char **argv) {
     }
 #endif
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(capturetype, "-eapol") == 0) {
         glog("Starting EAPOL\npacket capture...\n");
         int err = pcap_file_open("eapolscan", PCAP_CAPTURE_WIFI);
@@ -1404,11 +1505,14 @@ void handle_capture_scan(int argc, char **argv) {
         wifi_manager_start_monitor_mode(wifi_wps_detection_callback);
         status_display_show_status("Capture WPS");
     }
+#endif
 
     if (strcmp(capturetype, "-stop") == 0) {
         glog("Stopping packet capture...\n");
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
         wifi_manager_stop_monitor_mode();
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         ble_stop();
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -1417,7 +1521,7 @@ void handle_capture_scan(int argc, char **argv) {
         pcap_file_close();
         status_display_show_status("Capture Stop");
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(capturetype, "-ble") == 0) {
         printf("Starting BLE packet capture...\n");
         TERMINAL_VIEW_ADD_TEXT("Starting BLE packet capture...\n");
@@ -1446,9 +1550,14 @@ void handle_capture_scan(int argc, char **argv) {
 }
 
 void stop_portal(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_stop_evil_portal();
     glog("Stopping evil portal...\n");
     status_display_show_status("Portal Stop");
+#else
+    glog("WiFi portal not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_reboot(int argc, char **argv) {
@@ -1466,6 +1575,7 @@ void handle_startwd(int argc, char **argv) {
         }
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (stop_flag) {
         stop_wardriving();
         gps_manager_deinit(&g_gpsManager);
@@ -1488,6 +1598,10 @@ void handle_startwd(int argc, char **argv) {
         glog("Wardriving started.\n");
         status_display_show_status("Wardrive Start");
     }
+#else
+    glog("WiFi wardriving not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_timezone_cmd(int argc, char **argv) {
@@ -1506,6 +1620,7 @@ void handle_timezone_cmd(int argc, char **argv) {
 }
 
 void handle_scan_ports(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc < 2) {
         glog("Usage:\n");
         glog("  scanports local\n");
@@ -1578,15 +1693,25 @@ void handle_scan_ports(int argc, char **argv) {
     glog("Scanning %s udp ports %d-%d...\n", target_ip, start_port, end_port);
     scan_ip_udp_port_range(target_ip, start_port, end_port);
     status_display_show_status("Ports Custom");
+#else
+    glog("WiFi port scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_scan_arp(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     glog("Starting ARP scan on local network...\n");
     wifi_manager_arp_scan_subnet();
     status_display_show_status("ARP Scan");
+#else
+    glog("WiFi ARP scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_scan_ssh(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc < 2) {
         glog("Usage: scanssh <IP>\n");
         status_display_show_status("SSH Usage");
@@ -1608,6 +1733,10 @@ void handle_scan_ssh(int argc, char **argv) {
         glog("No SSH services found.\n");
         status_display_show_status("SSH None");
     }
+#else
+    glog("WiFi SSH scanning not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_crash(int argc, char **argv) {
@@ -1749,7 +1878,7 @@ void handle_help(int argc, char **argv) {
         return;
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(category, "ble") == 0) {
         glog("\nBLE Commands:\n\n");
         glog("blescan\n");
@@ -2106,7 +2235,7 @@ void handle_capture(int argc, char **argv) {
         status_display_show_status("Capture Usage");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(argv[1], "-ble") == 0) {
         glog("Starting BLE packet capture...\n");
         ble_start_capture();
@@ -2151,7 +2280,7 @@ void handle_gps_info(int argc, char **argv) {
 }
 
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_ble_wardriving(int argc, char **argv) {
     bool stop_flag = false;
 
@@ -2195,6 +2324,7 @@ void handle_ble_wardriving(int argc, char **argv) {
 #endif
 
 void handle_pineap_detection(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
         glog("Stopping PineAP detection...\n");
         stop_pineap_detection();
@@ -2216,10 +2346,15 @@ void handle_pineap_detection(int argc, char **argv) {
 
     glog("Monitoring for Pineapples\n");
     status_display_show_status("PineAP Watch");
+#else
+    glog("WiFi PineAP detection not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 
 void handle_apcred(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc < 2) {
         glog("Usage: apcred <ssid> <password>\n");
         glog("       apcred -r (reset to defaults)\n");
@@ -2302,6 +2437,10 @@ void handle_apcred(int argc, char **argv) {
 
     glog("AP credentials updated - SSID: %s, Password: %s\n", saved_ssid, saved_password);
     status_display_show_status("AP Updated");
+#else
+    glog("AP credentials not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 }
 
 void handle_rgb_mode(int argc, char **argv) {
@@ -3149,6 +3288,7 @@ void handle_sd_cmd(int argc, char **argv) {
 }
 
 void handle_congestion_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     wifi_manager_start_scan();
     status_display_show_status("Congest Scan");
 
@@ -3229,6 +3369,10 @@ void handle_congestion_cmd(int argc, char **argv) {
     free(channels);
     free(counts);
     glog("%s", footer);
+#else
+    glog("WiFi congestion analysis not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 // Forward declaration for the new print function
@@ -3253,6 +3397,7 @@ void handle_scanall(int argc, char **argv) {
     glog("Starting combined scan (%d sec AP, %d sec STA)...\n", ap_scan_seconds, sta_scan_seconds);
     status_display_show_status("ScanAll Start");
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     // 1. Perform AP Scan
     glog("--- Starting AP Scan (%d seconds) ---\n", ap_scan_seconds);
     wifi_manager_start_scan_with_time(ap_scan_seconds);
@@ -3274,6 +3419,10 @@ void handle_scanall(int argc, char **argv) {
 
     ap_manager_start_services();
     status_display_show_status("ScanAll Done");
+#else
+    glog("WiFi scanall not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 static int get_next_sweep_file_index(void) {
@@ -3289,6 +3438,7 @@ static int get_next_sweep_file_index(void) {
     return next;
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static const char* sweep_get_auth_str(wifi_auth_mode_t auth) {
     switch (auth) {
         case WIFI_AUTH_OPEN: return "Open";
@@ -3345,8 +3495,10 @@ static void sweep_write_csv_escaped(FILE *f, const char *str) {
         fputs(str, f);
     }
 }
+#endif
 
 void handle_sweep_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     int wifi_seconds = 10;
     int ble_seconds = 10;
     
@@ -3465,7 +3617,7 @@ void handle_sweep_cmd(int argc, char **argv) {
         }
     }
     
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     // --- BLE Scans ---
     glog("\n--- Phase 3: BLE Flipper Scan (%ds) ---\n", ble_seconds);
     
@@ -3573,9 +3725,13 @@ void handle_sweep_cmd(int argc, char **argv) {
     glog("WiFi: %d APs, %d stations | Security: %d open, %d weak, %d secure\n", 
          ap_cnt, station_count, open_networks, weak_networks, secure_networks);
     status_display_show_status("Sweep Done");
+#else
+    glog("WiFi sweep not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_list_airtags_cmd(int argc, char **argv) {
     ble_list_airtags();
     status_display_show_status("List AirTags");
@@ -3583,7 +3739,7 @@ void handle_list_airtags_cmd(int argc, char **argv) {
 #endif
 
 // Select AirTag handler
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_select_airtag(int argc, char **argv) {
     if (argc != 2) {
         glog("Usage: selectairtag <number>\n");
@@ -3604,7 +3760,7 @@ void handle_select_airtag(int argc, char **argv) {
 #endif
 
 // Spoof AirTag handler
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_spoof_airtag(int argc, char **argv) {
     ble_start_spoofing_selected_airtag();
     status_display_show_status("AirTag Spoof");
@@ -3612,7 +3768,7 @@ void handle_spoof_airtag(int argc, char **argv) {
 #endif
 
 // Stop Spoof handler
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_stop_spoof(int argc, char **argv) {
     ble_stop_spoofing();
     status_display_show_status("Spoof Stop");
@@ -3620,7 +3776,7 @@ void handle_stop_spoof(int argc, char **argv) {
 #endif
 
 // Handlers for Flipper commands
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_list_flippers_cmd(int argc, char **argv) {
     ble_list_flippers();
     status_display_show_status("List Flipper");
@@ -3677,6 +3833,7 @@ void handle_track_gatt_cmd(int argc, char **argv) {
 #endif
 
 // New beacon list command handlers
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_beaconadd(int argc, char **argv) {
     if (argc != 2) {
         glog("Usage: beaconadd <SSID>\n");
@@ -3731,6 +3888,37 @@ void handle_dhcpstarve_cmd(int argc, char **argv) {
         status_display_show_status("DHCP Usage");
     }
 }
+#else
+void handle_beaconadd(int argc, char **argv) {
+    glog("WiFi beacon management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+
+void handle_beaconremove(int argc, char **argv) {
+    glog("WiFi beacon management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+
+void handle_beaconclear(int argc, char **argv) {
+    glog("WiFi beacon management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+
+void handle_beaconshow(int argc, char **argv) {
+    glog("WiFi beacon management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+
+void handle_beaconspamlist(int argc, char **argv) {
+    glog("WiFi beacon management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+
+void handle_dhcpstarve_cmd(int argc, char **argv) {
+    glog("WiFi DHCP starve not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+}
+#endif
 #if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv) {
     if (argc != 2) {
@@ -3750,6 +3938,7 @@ void handle_setcountry(int argc, char **argv) {
 #endif
 
 void handle_listen_probes_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc > 1 && strcmp(argv[1], "stop") == 0) {
         wifi_manager_stop_monitor_mode();
         pcap_file_close();
@@ -3795,13 +3984,23 @@ void handle_listen_probes_cmd(int argc, char **argv) {
         glog("SD card not available; probe PCAP disabled.\n");
         status_display_show_status("SD Missing");
     }
+#else
+    glog("WiFi probe listening not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+    return;
+#endif
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (channel_hopping) {
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
     } else {
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
     }
+#else
+    glog("WiFi probe listening not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_web_auth_cmd(int argc, char **argv) {
@@ -5385,7 +5584,7 @@ void register_commands() {
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     register_command("blescan", handle_ble_scan_cmd);
     register_command("blewardriving", handle_ble_wardriving);
     register_command("listairtags", handle_list_airtags_cmd);
@@ -5412,7 +5611,7 @@ void register_commands() {
     register_command("scanall", handle_scanall);
     register_command("sweep", handle_sweep_cmd);
     register_command("timezone", handle_timezone_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     register_command("listflippers", handle_list_flippers_cmd);
     register_command("selectflipper", handle_select_flipper_cmd);
     register_command("listgatt", handle_list_gatt_cmd);
@@ -5431,7 +5630,7 @@ void register_commands() {
     register_command("setcountry", handle_setcountry);
 #endif
     register_command("webauth", handle_web_auth_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     register_command("blespam", handle_ble_spam_cmd);
 #endif
     register_command("setrgbmode", handle_set_rgb_mode_cmd);
@@ -5453,7 +5652,7 @@ void register_commands() {
     glog("Registered Commands\n");
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 void handle_ble_spam_cmd(int argc, char **argv) {
     if (argc > 1) {
         if (strcmp(argv[1], "-apple") == 0) {
@@ -5520,6 +5719,7 @@ void handle_evilportal(int argc, char **argv) {
         return;
     }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (strcmp(argv[2], "sethtmlstr") == 0) {
         wifi_manager_set_html_from_uart();
         glog("HTML buffer mode enabled for evil portal\n");
@@ -5529,6 +5729,10 @@ void handle_evilportal(int argc, char **argv) {
     } else {
         glog("Error: Unknown command '%s'\n", argv[2]);
     }
+#else
+    glog("WiFi HTML buffer management not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_set_rgb_mode_cmd(int argc, char **argv) {
@@ -5553,6 +5757,7 @@ void handle_set_rgb_mode_cmd(int argc, char **argv) {
 }
 
 void handle_karma_cmd(int argc, char **argv) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     if (argc < 2) {
         printf("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
         TERMINAL_VIEW_ADD_TEXT("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
@@ -5584,6 +5789,10 @@ void handle_karma_cmd(int argc, char **argv) {
         printf("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
         TERMINAL_VIEW_ADD_TEXT("Usage: karma <start|stop> [ssid1 ssid2 ...]\n");
     }
+#else
+    glog("WiFi karma attack not supported on ESP32-P4\n");
+    status_display_show_status("Not Supported");
+#endif
 }
 
 void handle_set_neopixel_brightness_cmd(int argc, char **argv) {

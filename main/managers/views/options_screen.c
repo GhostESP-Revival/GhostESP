@@ -553,7 +553,7 @@ static void decorate_settings_row_with_arrows(lv_obj_t *btn) {
     lv_obj_set_style_pad_left(btn, 8, 0);
     lv_obj_set_style_pad_right(btn, 8, 0);
 
-    const lv_font_t *font = (button_height_global <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *font = &lv_font_montserrat_14;
     lv_obj_set_style_text_font(left, font, 0);
     lv_obj_set_style_text_font(right, font, 0);
     
@@ -1888,7 +1888,7 @@ void option_event_cb(lv_event_t *e) {
             simulateCommand("commsend scanssh");
             view_switched = true;
         } else if (strcmp(Selected_Option, "Start AirTag Scanner") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1898,7 +1898,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "List AirTags") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1908,7 +1908,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Select AirTag") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             set_number_pad_mode(NP_MODE_AIRTAG_REMOTE);
             display_manager_switch_view(&number_pad_view);
             view_switched = true;
@@ -1916,7 +1916,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Spoof Selected AirTag") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1926,7 +1926,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Stop Spoofing") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1936,7 +1936,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Find Flippers") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1946,7 +1946,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "List Flippers") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1956,7 +1956,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Select Flipper") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             set_number_pad_mode(NP_MODE_FLIPPER_REMOTE);
             display_manager_switch_view(&number_pad_view);
             view_switched = true;
@@ -1964,7 +1964,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Raw BLE Scanner") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1974,7 +1974,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Skimmer Detect") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1984,7 +1984,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Spam - Apple") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -1994,7 +1994,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Spam - Microsoft") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -2004,7 +2004,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Spam - Samsung") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -2014,7 +2014,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Spam - Google") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -2024,7 +2024,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "BLE Spam - Random") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -2034,7 +2034,7 @@ void option_event_cb(lv_event_t *e) {
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
         } else if (strcmp(Selected_Option, "Stop BLE Spam") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend blespam -s");
@@ -2048,7 +2048,7 @@ void option_event_cb(lv_event_t *e) {
             simulateCommand("commsend gpsinfo");
             view_switched = true;
         } else if (strcmp(Selected_Option, "BLE Wardriving") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
             terminal_set_return_view(&options_menu_view);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend blewardriving");
@@ -2368,7 +2368,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Start AirTag Scanner") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blescan -a");
@@ -2380,7 +2380,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Find Flippers") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blescan -f");
@@ -2390,7 +2390,7 @@ display_manager_switch_view(&terminal_view);
         
 #endif
     } else if (strcmp(Selected_Option, "List Flippers") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("listflippers");
@@ -2400,7 +2400,7 @@ display_manager_switch_view(&terminal_view);
         
 #endif
     } else if (strcmp(Selected_Option, "Select Flipper") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
          set_number_pad_mode(NP_MODE_FLIPPER);
          display_manager_switch_view(&number_pad_view);
          view_switched = true;
@@ -2409,7 +2409,7 @@ display_manager_switch_view(&terminal_view);
 
 #endif
     } else if (strcmp(Selected_Option, "List AirTags") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("listairtags");
@@ -2419,7 +2419,7 @@ display_manager_switch_view(&terminal_view);
 
 #endif
     } else if (strcmp(Selected_Option, "Select AirTag") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         set_number_pad_mode(NP_MODE_AIRTAG);
         display_manager_switch_view(&number_pad_view);
         view_switched = true;
@@ -2430,7 +2430,7 @@ display_manager_switch_view(&terminal_view);
     }
 
      else if (strcmp(Selected_Option, "Spoof Selected AirTag") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("spoofairtag");
@@ -2442,7 +2442,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Stop Spoofing") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("stopspoof");
@@ -2470,7 +2470,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Raw BLE Scanner") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blescan -r");
@@ -2482,7 +2482,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Skimmer Detect") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("capture -skimmer");
@@ -2494,7 +2494,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Start GATT Scan") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blescan -g");
@@ -2505,7 +2505,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "List GATT Devices") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("listgatt");
@@ -2516,7 +2516,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Select GATT Device") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         set_number_pad_mode(NP_MODE_GATT);
         display_manager_switch_view(&number_pad_view);
         view_switched = true;
@@ -2526,7 +2526,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Enumerate Services") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("enumgatt");
@@ -2537,7 +2537,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Track Device") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("trackgatt");
@@ -2555,7 +2555,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Wardriving") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blewardriving");
@@ -2647,7 +2647,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Spam - Apple") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -apple");
@@ -2658,7 +2658,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Spam - Microsoft") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -ms");
@@ -2669,7 +2669,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Spam - Samsung") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -samsung");
@@ -2680,7 +2680,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Spam - Google") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -google");
@@ -2691,7 +2691,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "BLE Spam - Random") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -random");
@@ -2702,7 +2702,7 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Stop BLE Spam") == 0) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("blespam -s");

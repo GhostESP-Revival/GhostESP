@@ -84,16 +84,8 @@ void music_visualizer_view_create() {
   const lv_font_t *track_label_font;
   const lv_font_t *artist_label_font;
 
-  if (LV_HOR_RES <= 128) {
-    track_label_font = &lv_font_montserrat_12;
-    artist_label_font = &lv_font_montserrat_10;
-  } else if (LV_HOR_RES <= 240) {
-    track_label_font = &lv_font_montserrat_16;
-    artist_label_font = &lv_font_montserrat_12;
-  } else {
-    track_label_font = &lv_font_montserrat_24;
-    artist_label_font = &lv_font_montserrat_16;
-  }
+  track_label_font = &lv_font_montserrat_14;
+  artist_label_font = &lv_font_montserrat_14;
 
   int label_x_offset = LV_HOR_RES / 12;
   int label_y_offset = LV_VER_RES / 8;

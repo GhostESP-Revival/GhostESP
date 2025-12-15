@@ -796,7 +796,7 @@ static void status_update_cb(lv_timer_t *timer) {
   if (is_backlight_off) return; // Skip updates when backlight is off
 
   bool HasBluetooth;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
   HasBluetooth = true;
 #else
   HasBluetooth = false;
@@ -892,29 +892,29 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   sd_label = lv_label_create(right_container);
   lv_label_set_text(sd_label, LV_SYMBOL_SD_CARD);
   lv_obj_set_style_text_color(sd_label, lv_color_hex(0xCCCCCC), 0);
-  lv_obj_set_style_text_font(sd_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(sd_label, &lv_font_montserrat_14, 0);
   lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
   // add ble status to right container
   bt_label = lv_label_create(right_container);
   lv_label_set_text(bt_label, LV_SYMBOL_BLUETOOTH);
   lv_obj_set_style_text_color(bt_label, lv_color_hex(0xCCCCCC), 0);
-  lv_obj_set_style_text_font(bt_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(bt_label, &lv_font_montserrat_14, 0);
   lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
   // add wifi status to right container
   wifi_label = lv_label_create(right_container);
   lv_label_set_text(wifi_label, LV_SYMBOL_WIFI);
   lv_obj_set_style_text_color(wifi_label, lv_color_hex(0xCCCCCC), 0);
-  lv_obj_set_style_text_font(wifi_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(wifi_label, &lv_font_montserrat_14, 0);
   lv_obj_add_flag(wifi_label, LV_OBJ_FLAG_HIDDEN);
   // add battery status to right container
   battery_label = lv_label_create(right_container);
   lv_label_set_text(battery_label, "");
   lv_obj_set_style_text_color(battery_label, lv_color_hex(0xCCCCCC), 0);
-  lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_14, 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
   bool HasBluetooth;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
   HasBluetooth = true;
 #else
   HasBluetooth = false;

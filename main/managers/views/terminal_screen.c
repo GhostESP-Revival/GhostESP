@@ -730,7 +730,7 @@ void terminal_view_create(void) {
     lv_obj_set_style_border_width(terminal_canvas, 0, 0);
     // Match previous label style
     lv_obj_set_style_text_color(terminal_canvas, lv_color_hex(settings_get_terminal_text_color(&G_Settings)), 0);
-    lv_obj_set_style_text_font(terminal_canvas, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(terminal_canvas, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_draw_event, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
     lv_obj_add_event_cb(terminal_scroller, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);

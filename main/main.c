@@ -8,7 +8,7 @@
 #include "managers/settings_manager.h"
 #include "managers/wifi_manager.h"
 #include "core/esp_comm_manager.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "managers/ble_manager.h"
 #endif
 #include <esp_log.h>
@@ -73,8 +73,10 @@ void app_main(void) {
 
 
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     // MEASURE_INIT_RAM("BLE Manager", ble_init());
 #endif
 

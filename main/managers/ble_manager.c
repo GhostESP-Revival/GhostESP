@@ -5,7 +5,7 @@
 #include <string.h>
 #include <esp_wifi.h>
 #include "esp_heap_caps.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "core/callbacks.h"
 #include "esp_random.h"
 #include "host/ble_gap.h"
@@ -98,7 +98,7 @@ static SemaphoreHandle_t nimble_host_exit_sem = NULL;
 static uint32_t ble_pcap_packet_count = 0;
 static uint32_t ble_pcap_event_total_count = 0;
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool ble_ap_suspended = false;
 static bool ble_wifi_suspended = false;
 static wifi_mode_t ble_prev_wifi_mode = WIFI_MODE_NULL;
@@ -1848,7 +1848,7 @@ esp_err_t ble_unregister_handler(ble_data_handler_t handler) {
 }
 
 void ble_init(void) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     // --- pre-init ram check ---
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

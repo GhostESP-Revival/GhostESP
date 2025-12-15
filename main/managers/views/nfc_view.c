@@ -1110,7 +1110,7 @@ static void init_styles(void) {
 }
 
 static const lv_font_t* get_menu_font(void) {
-    return (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
+    return &lv_font_montserrat_14;
 }
 
 static void vertically_center_label(lv_obj_t *label, lv_obj_t *btn) {
@@ -2111,11 +2111,11 @@ static void create_nfc_scan_popup(void) {
     nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
     // Fonts
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
+    const lv_font_t *title_font = &lv_font_montserrat_14;
     nfc_title_label = popup_create_title_label(nfc_scan_popup, "Scanning NFC...", title_font, 22);
 
     // Placeholder fields (UID / Type)
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
     nfc_uid_label = popup_create_body_label(nfc_scan_popup, "UID: -- -- -- -- -- -- -- --", 0, false, body_font, 40);
     if (nfc_uid_label) lv_obj_set_style_text_color(nfc_uid_label, lv_color_hex(0xCCCCCC), 0);
 
@@ -2445,7 +2445,7 @@ static void nfc_update_details_scroll_layout(void) {
 
 static void nfc_show_details_view(bool show) {
     if (!nfc_scan_popup || !lv_obj_is_valid(nfc_scan_popup)) return;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
     if (show) {
         // Hide summary fields
         if (nfc_uid_label) lv_obj_add_flag(nfc_uid_label, LV_OBJ_FLAG_HIDDEN);
@@ -2968,8 +2968,8 @@ static void create_keys_popup(void) {
     }
     keys_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
 
     keys_title_label = popup_create_title_label(keys_popup, "User MFC Keys", title_font, 10);
 
@@ -3274,8 +3274,8 @@ static void create_cu_popup(void) {
     }
     cu_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
 
     cu_title_label = popup_create_title_label(cu_popup, "Chameleon Ultra", title_font, 10);
     cu_details_label = popup_create_body_label(cu_popup, "", LV_HOR_RES - 50, true, body_font, 26);
@@ -3799,8 +3799,8 @@ static void create_nfc_write_popup(const char *path) {
     }
     nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
 
     const char *nfc_write_title_text = g_write_image_valid ? "Write Tag" :
     #ifdef CONFIG_NFC_PN532
@@ -4011,8 +4011,8 @@ static void create_saved_details_popup(const char *path) {
     }
     saved_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = &lv_font_montserrat_14;
+    const lv_font_t *body_font = &lv_font_montserrat_14;
 
     saved_title_label = popup_create_title_label(saved_popup, "Saved Tag", title_font, 10);
 

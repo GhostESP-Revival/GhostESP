@@ -1,9 +1,11 @@
 #include "core/callbacks.h"
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "esp_wifi.h"
+#include "managers/wifi_manager.h"
+#endif
 #include "managers/gps_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/views/terminal_screen.h"
-#include "managers/wifi_manager.h"
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -16,12 +18,16 @@
 #include <esp_timer.h>  // For esp_timer_get_time
 #include "freertos/task.h"
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // prototypes for static inline helpers
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
 static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8_t target_channel);
+#endif
 
 #define STORE_STR_ATTR __attribute__((section(".rodata.str")))
 #define STORE_DATA_ATTR __attribute__((section(".rodata.data")))
+
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #define WPS_OUI 0x0050f204
 #define TAG "WIFI_MONITOR"
 #define WPS_CONF_METHODS_PBC 0x0080
@@ -62,7 +68,8 @@ static void trim_trailing(char *str);
 static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2);
 static bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt);
 static pineap_network_t *find_or_create_network(const uint8_t *bssid);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 #endif
 
 // handshake pairing and limited beacon emission for eapol capture
@@ -138,6 +145,7 @@ static beacon_limiter_t beacon_limits[BEACON_LIMIT_MAX];
 static uint8_t beacon_limit_count = 0;
 static uint8_t beacon_limit_insert = 0;
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // probe request dedupe to keep files small
 #define PROBE_DEDUPE_MAX 64
 typedef struct {
@@ -173,7 +181,9 @@ static bool probe_should_emit(const uint8_t *src, uint32_t ssid_hash, uint64_t n
     ne->last_ms = now_ms;
     return true;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text) {
     for (uint8_t i = 0; i < beacon_limit_count; i++) {
         if (mac_equal(beacon_limits[i].bssid, bssid)) {
@@ -201,6 +211,7 @@ static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text)
     beacon_limits[idx].saw_nonempty_ssid = ssid_has_text;
     return true;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 // queued writer to avoid heavy work in promiscuous callback
 typedef struct {
@@ -283,6 +294,7 @@ void cleanup_pcap_queue(void) {
     }
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static const char *suspicious_names[] STORE_DATA_ATTR = {
     "HC-03", "HC-05", "HC-06",  "HC-08",    "BT-HC05", "JDY-31",
     "AT-09", "HM-10", "CC41-A", "MLT-BT05", "SPP-CA",  "FFD0"};
@@ -291,7 +303,9 @@ wps_network_t detected_wps_networks[MAX_WPS_NETWORKS];
 int detected_network_count = 0;
 esp_timer_handle_t stop_timer;
 int should_store_wps = 1;
+#endif
 gps_t *gps = NULL;
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 typedef struct {
     uint8_t bssid[6];
     time_t detection_time;
@@ -300,7 +314,9 @@ typedef struct {
 
 static blacklisted_ap_t blacklist[MAX_PINEAP_NETWORKS];
 static int blacklist_count = 0;
+#endif
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool is_blacklisted(const uint8_t *bssid) {
     for (int i = 0; i < blacklist_count; i++) {
         if (memcmp(blacklist[i].bssid, bssid, 6) == 0) {
@@ -466,12 +482,14 @@ void start_wardriving(void) {
 void stop_wardriving(void) {
     stop_wardrive_channel_hopping();
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 #define IRAM_PRINTF(fmt, ...) do { \
     static const char flash_fmt[] STORE_STR_ATTR = fmt; \
     esp_rom_printf(flash_fmt, ##__VA_ARGS__); \
 } while(0)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void log_pineap_detection(void *arg) {
     pineap_log_data_t *log_data = (pineap_log_data_t *)arg;
     pineap_network_t *network = log_data->network;
@@ -585,7 +603,9 @@ static bool is_valid_unique_ssid(const char *new_ssid, pineap_network_t *network
 
     return true;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!pineap_detection_active || type != WIFI_PKT_MGMT)
         return;
@@ -695,6 +715,7 @@ static void trim_trailing(char *str) {
         i--;
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,
                        void *event_data) {
@@ -707,6 +728,7 @@ void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int
     }
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2) {
     for (int i = 0; i < 6; i++) {
         if (bssid1[i] != bssid2[i]) {
@@ -725,7 +747,9 @@ bool is_network_duplicate(const char *ssid, const uint8_t *bssid) {
     }
     return false;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void get_frame_type_and_subtype(const wifi_promiscuous_pkt_t *pkt, uint8_t *frame_type,
                                 uint8_t *frame_subtype) {
     if (pkt->rx_ctrl.sig_len < 24) {
@@ -739,7 +763,9 @@ void get_frame_type_and_subtype(const wifi_promiscuous_pkt_t *pkt, uint8_t *fram
     *frame_type = (frame_ctrl[0] & 0x0C) >> 2;
     *frame_subtype = (frame_ctrl[0] & 0xF0) >> 4;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt) {
     uint8_t frame_type, frame_subtype;
     get_frame_type_and_subtype(pkt, &frame_type, &frame_subtype);
@@ -773,7 +799,9 @@ bool is_eapol_response(const wifi_promiscuous_pkt_t *pkt) {
 
     return false;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 bool is_pwn_response(const wifi_promiscuous_pkt_t *pkt) {
     const uint8_t *frame = pkt->payload;
 
@@ -783,7 +811,9 @@ bool is_pwn_response(const wifi_promiscuous_pkt_t *pkt) {
 
     return false;
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     
@@ -1249,8 +1279,9 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         index += (2 + ie_len);
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 // Forward declare the struct and callback before use
 struct ble_hs_adv_field;
 static int ble_hs_adv_parse_fields_cb(const struct ble_hs_adv_field *field, void *arg);
@@ -1314,8 +1345,8 @@ static int ble_hs_adv_parse_fields_cb(const struct ble_hs_adv_field *field, void
 }
 #endif
 
-// wrap for esp32s2
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+// wrap for esp32s2 and esp32p4
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 static const int suspicious_names_count = sizeof(suspicious_names) / sizeof(suspicious_names[0]);
 void ble_skimmer_scan_callback(struct ble_gap_event *event, void *arg) {
@@ -1409,6 +1440,7 @@ static uint32_t packets_filtered_out = 0;
 static uint32_t packets_processed = 0;
 
 // Early filtering helper - checks basic packet validity
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type) {
     total_packets_received++;
     
@@ -1451,13 +1483,14 @@ static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promi
 static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8_t target_channel) {
     return (target_channel == 0) || (pkt->rx_ctrl.channel == target_channel);
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // Flag indicating whether to save probe PCAP data to SD (disable UART fallback if false)
 bool g_listen_probes_save_to_sd = false;
 
 static char last_probe_log[128] = {0};
 static uint64_t last_probe_log_time_ms = 0;
-
 void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     // Early filtering for management frames only
     if (type != WIFI_PKT_MGMT) return;
@@ -1525,3 +1558,4 @@ void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     // Print to console and display
     glog("%s\n", log_msg);
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4) - closes guard from line 816
