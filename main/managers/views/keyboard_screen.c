@@ -714,7 +714,7 @@ static void keyboard_create() {
         }
         if(i == encoder_sel_idx) {
             lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_text_font(encoder_labels[i], &lv_font_montserrat_24, 0);
+            lv_obj_set_style_text_font(encoder_labels[i], &lv_font_montserrat_14, 0);
         } else {
             lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(0x888888), 0);
             lv_obj_set_style_text_font(encoder_labels[i], &lv_font_montserrat_14, 0);
@@ -799,7 +799,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             lv_obj_set_style_text_font(encoder_labels[prev], &lv_font_montserrat_14, 0);
         }
         lv_obj_set_style_text_color(encoder_labels[encoder_sel_idx], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_font(encoder_labels[encoder_sel_idx], &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(encoder_labels[encoder_sel_idx], &lv_font_montserrat_14, 0);
         if (event->data.encoder.button) {
             const char *sel = encoder_items[encoder_sel_idx];
             if(strcmp(sel, "Aa") == 0) {
@@ -828,7 +828,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                     lv_label_set_text(encoder_labels[i], encoder_items[i]);
                     bool sel_i = (i == encoder_sel_idx);
                     lv_obj_set_style_text_color(encoder_labels[i], sel_i ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x888888), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_24 : &lv_font_montserrat_14, 0);
+                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_14 : &lv_font_montserrat_14, 0);
                     int lbl_w = lv_obj_get_width(encoder_labels[i]);
                     int enc_h = lv_obj_get_height(encoder_cont);
                     lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);
@@ -846,7 +846,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                     lv_label_set_text(encoder_labels[i], encoder_items[i]);
                     bool sel_i = (i == encoder_sel_idx);
                     lv_obj_set_style_text_color(encoder_labels[i], sel_i ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x888888), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_24 : &lv_font_montserrat_14, 0);
+                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_14 : &lv_font_montserrat_14, 0);
                     int lbl_w = lv_obj_get_width(encoder_labels[i]);
                     int enc_h = lv_obj_get_height(encoder_cont);
                     lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);

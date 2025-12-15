@@ -121,7 +121,7 @@ static void number_pad_create() {
     lv_obj_set_style_outline_width(root, 0, 0);     // Remove outline
     
 
-    const lv_font_t *font = (screen_height >= 240) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+    const lv_font_t *font = &lv_font_montserrat_14;
     int padding = 10;
     int display_height = (screen_height >= 240) ? 40 : 30;
 

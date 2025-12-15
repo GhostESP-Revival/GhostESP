@@ -1,0 +1,106 @@
+#
+# Automatically generated file. DO NOT EDIT.
+# Espressif IoT Development Framework (ESP-IDF) Project Configuration
+# ESP32-P4 Target Configuration
+#
+# This is a template configuration file for ESP32-P4.
+# When you run 'idf.py set-target esp32p4', ESP-IDF will generate a complete
+# sdkconfig file. This file provides the target setting and Ghost ESP specific options.
+
+# Target Configuration
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_IDF_TARGET_ESP32P4=y
+CONFIG_IDF_TARGET_ARCH_RISCV=y
+CONFIG_IDF_TARGET_ARCH="riscv"
+CONFIG_IDF_FIRMWARE_CHIP_ID=0x0012
+
+# Build type
+CONFIG_APP_BUILD_TYPE_APP_2NDBOOT=y
+CONFIG_APP_BUILD_GENERATE_BINARIES=y
+CONFIG_APP_BUILD_BOOTLOADER=y
+CONFIG_APP_BUILD_USE_FLASH_SECTIONS=y
+
+# Partition Table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+CONFIG_PARTITION_TABLE_MD5=y
+
+# Compiler options
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2
+
+# Serial flasher config
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHMODE="dio"
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ="80m"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
+
+# Note: ESP32-P4 does not have built-in WiFi/BT
+# ESP-IDF's Kconfig will automatically disable unsupported features
+# based on SOC capabilities
+
+# Ghost ESP Options
+CONFIG_BUILD_CONFIG_TEMPLATE="default.esp32p4"
+
+# LED Options
+# CONFIG_USE_NEOPIXEL is not set
+CONFIG_NUM_LEDS=0
+CONFIG_RED_RGB_PIN=-1
+CONFIG_GREEN_RGB_PIN=-1
+CONFIG_BLUE_RGB_PIN=-1
+
+# Display Options
+# CONFIG_WITH_SCREEN is not set
+# CONFIG_USE_TOUCHSCREEN is not set
+# CONFIG_USE_JOYSTICK is not set
+# CONFIG_USE_CARDPUTER is not set
+# CONFIG_IS_GHOST_BOARD is not set
+# CONFIG_USE_7_INCHER is not set
+# CONFIG_Waveshare_LCD is not set
+# CONFIG_Crowtech_LCD is not set
+# CONFIG_Sunton_LCD is not set
+# CONFIG_USE_ILI9341_2 is not set
+
+# GPS Configuration
+# CONFIG_HAS_GPS is not set
+
+# SPI and MMC Configuration
+CONFIG_USING_SPI=y
+# CONFIG_USING_MMC is not set
+# CONFIG_USING_MMC_1_BIT is not set
+CONFIG_SD_SPI_CS_PIN=5
+CONFIG_SD_SPI_CLK_PIN=14
+CONFIG_SD_SPI_MISO_PIN=9
+CONFIG_SD_SPI_MOSI_PIN=23
+
+# NFC Options
+# CONFIG_NFC_PN532 is not set
+CONFIG_NFC_CHAMELEON=y
+CONFIG_HAS_NFC=y
+
+# Misc Options
+# CONFIG_USE_TDECK is not set
+# CONFIG_USE_CARDPUTER_ADV is not set
+# CONFIG_USE_TDISPLAY_S3 is not set
+# CONFIG_USE_HW_KB is not set
+CONFIG_USE_USB_KEYBOARD=y
+CONFIG_USB_KBD_DMINUS_PIN=19
+CONFIG_USB_KBD_DPLUS_PIN=20
+# CONFIG_HAS_BATTERY is not set
+# CONFIG_HAS_BATTERY_ADC is not set
+# CONFIG_HAS_FUEL_GAUGE is not set
+# CONFIG_HAS_RTC_CLOCK is not set
+# CONFIG_WITH_ETHERNET is not set
+# CONFIG_IS_S3TWATCH is not set
+# CONFIG_HAS_INFRARED is not set
+# CONFIG_USE_ENCODER is not set
+
+# Note: ESP32-P4 does not have built-in WiFi/BT, but can work with external
+# WiFi/BT chips via SDIO/SPI. Configure those separately if needed.
+# The code should handle this gracefully with conditional compilation.

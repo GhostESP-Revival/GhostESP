@@ -191,16 +191,11 @@ static void update_welcome_btn_focus(void) {
 #define USABLE_W LV_HOR_RES
 
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_12;
-    if (LV_VER_RES <= 280) return &lv_font_montserrat_14;
-    return &lv_font_montserrat_16;
+    return &lv_font_montserrat_14;
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 200) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    return &lv_font_montserrat_14;
 }
 
 static void show_welcome_screen(void) {

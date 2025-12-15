@@ -818,7 +818,7 @@ static void dazzler_event_cb(lv_event_t *e) {
     dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(dazzler_popup);
     
-    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", &lv_font_montserrat_16, 15);
+    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", &lv_font_montserrat_14, 15);
     (void)title;
     
     lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, &lv_font_montserrat_14, 45);
@@ -2484,7 +2484,7 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         }
     }
 
-    lv_obj_t *title_label = popup_create_title_label(popup, config->title, &lv_font_montserrat_16, 20);
+    lv_obj_t *title_label = popup_create_title_label(popup, config->title, &lv_font_montserrat_14, 20);
     (void)title_label;
 
     instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, &lv_font_montserrat_14, 60);
@@ -3256,7 +3256,7 @@ void create_signal_preview_popup(void)
     cancel_btn = popup_add_styled_button(signal_preview_popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
-    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);
+    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_14, 10);
     
     // Protocol info (use popup helpers for consistent layout)
     lv_coord_t popup_w = lv_obj_get_width(signal_preview_popup);

@@ -15,7 +15,9 @@
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include <esp_wifi.h>
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "core/glog.h"
@@ -54,8 +56,10 @@ static esp_err_t api_esp_comm_status_handler(httpd_req_t *req);
 static esp_err_t api_esp_comm_control_handler(httpd_req_t *req);
 static esp_err_t api_esp_comm_send_handler(httpd_req_t *req);
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                           void *event_data);
+#endif
 
 static esp_err_t load_server_config(void);
 static esp_err_t start_http_server(void);
@@ -565,6 +569,7 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
 }
 
 esp_err_t ap_manager_init(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     esp_err_t ret;
     wifi_mode_t mode;
 
@@ -785,10 +790,16 @@ esp_err_t ap_manager_init(void) {
 
     log_heap_status(TAG, "ap_init_complete");
     return ESP_OK;
+#else
+    // ESP32-P4 doesn't have WiFi, so AP manager is not available
+    glog("Access Point not supported on ESP32-P4 (no built-in WiFi)\n");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 // Deinitialize and stop the servers
 void ap_manager_deinit(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     ESP_LOGI(TAG, "Deinitializing AP Manager");
     
     stop_http_server();
@@ -835,6 +846,10 @@ void ap_manager_deinit(void) {
     }
     
     ESP_LOGI(TAG, "AP Manager deinitialized successfully");
+#else
+    // ESP32-P4 doesn't have WiFi
+    ESP_LOGI(TAG, "AP Manager not available on ESP32-P4");
+#endif
 }
 
 void ap_manager_add_log(const char *log_message) {
@@ -882,6 +897,7 @@ void ap_manager_add_log(const char *log_message) {
 }
 
 esp_err_t ap_manager_start_services() {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     esp_err_t ret;
 
     // if ap is disabled or power saving is on, do not start ap services.
@@ -943,9 +959,15 @@ esp_err_t ap_manager_start_services() {
 
     status_display_show_status("AP Services On");
     return ESP_OK;
+#else
+    glog("AP services not supported on ESP32-P4 (no built-in WiFi)\n");
+    status_display_show_status("Not Supported");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 void ap_manager_stop_services() {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     log_heap_status(TAG, "ap_stop_pre");
     wifi_mode_t wifi_mode;
     esp_err_t err = esp_wifi_get_mode(&wifi_mode);
@@ -990,6 +1012,10 @@ void ap_manager_stop_services() {
     teardown_mdns();
     log_heap_status(TAG, "ap_stop_post");
     status_display_show_status("AP Services Off");
+#else
+    // ESP32-P4 doesn't have WiFi
+    ESP_LOGI(TAG, "AP services not available on ESP32-P4");
+#endif
 }
 
 // Handler for GET requests (serves the HTML page)
@@ -1655,6 +1681,7 @@ static esp_err_t api_esp_comm_send_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 // Event handler for Wi-Fi events
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                           void *event_data) {
@@ -1711,6 +1738,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         }
     }
 }
+#endif // !defined(CONFIG_IDF_TARGET_ESP32P4)
 
 static esp_err_t load_server_config(void) {
     if (config_loaded) {
@@ -1839,6 +1867,7 @@ static bool is_config_loaded(void) {
 }
 
 esp_err_t ap_manager_reload_config(void) {
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
     ESP_LOGI(TAG, "Reloading server configuration and mDNS");
     
     esp_err_t ret = stop_http_server();
@@ -1870,6 +1899,10 @@ esp_err_t ap_manager_reload_config(void) {
     
     ESP_LOGI(TAG, "Server configuration and mDNS reloaded successfully");
     return ESP_OK;
+#else
+    ESP_LOGI(TAG, "AP manager reload not supported on ESP32-P4");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 void ap_manager_get_status(bool *server_running, bool *config_loaded_status, int *handler_count_status) {

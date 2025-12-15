@@ -129,7 +129,9 @@ Ghost ESP turns your ESP32 into a powerful, cheap and helpful wireless testing t
 
 - **ESP32 C6**
 
-> **Note:** Feature availability may vary by model.
+- **ESP32 P4**
+
+> **Note:** Feature availability may vary by model. ESP32-P4 does not have built-in WiFi/BT but can work with external WiFi/BT chips via SDIO/SPI.
 
 ---
 

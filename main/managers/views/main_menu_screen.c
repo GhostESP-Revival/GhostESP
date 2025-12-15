@@ -74,7 +74,7 @@ typedef struct {
 
 // Define colors as compile-time constants
 menu_item_t menu_items[] = {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
     {"BLE", &bluetooth, 0, {{0}}},
 #endif
     {"WiFi", &wifi, 1, {{0}}}, // applies to all boards
@@ -428,7 +428,7 @@ static void update_menu_item(bool slide_left) {
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
         lv_label_set_text(label, menu_items[menu_index].name);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         carousel_cache.label = label;
@@ -849,7 +849,7 @@ static void handle_menu_item_selection(int item_index) {
     } menu_action_t;
 
     static const menu_action_t menu_actions[] = {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         {"BLE", OT_Bluetooth, &options_menu_view},
 #endif
         {"WiFi", OT_Wifi, &options_menu_view},
@@ -1029,7 +1029,7 @@ static void create_grid_menu(void) {
         lv_obj_t *label = lv_label_create(grid_cards[i]);
         lv_label_set_text(label, menu_items[menu_index].name);
         // smaller font on small tiles
-        const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+        const lv_font_t *lbl_font = &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         // Center label within the card and ensure proper centering of text
@@ -1127,7 +1127,7 @@ static void create_list_menu(void) {
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, menu_items[menu_index].name);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-        const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+        const lv_font_t *lbl_font = &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_flex_grow(label, 1);
@@ -1279,7 +1279,7 @@ void main_menu_create(void) {
         lv_obj_t *left_label = lv_label_create(left_nav_btn);
         lv_label_set_text(left_label, "<");
         // increase arrow size for better visibility
-        lv_obj_set_style_text_font(left_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         }
@@ -1302,7 +1302,7 @@ void main_menu_create(void) {
         lv_obj_t *right_label = lv_label_create(right_nav_btn);
         lv_label_set_text(right_label, ">");
         // increase arrow size for better visibility
-        lv_obj_set_style_text_font(right_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         }

@@ -179,7 +179,7 @@ static void update_app_item(bool slide_left) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
     }
@@ -303,7 +303,7 @@ static void create_apps_grid_menu(void) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
-        const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+        const lv_font_t *lbl_font = &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
 
@@ -375,7 +375,7 @@ static void create_apps_list_menu(void) {
         }
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-        const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+        const lv_font_t *lbl_font = &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
 
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
@@ -460,7 +460,7 @@ static void create_apps_list_menu(void) {
 
         lv_obj_t *left_label = lv_label_create(left_nav_btn);
         lv_label_set_text(left_label, "<");
-        lv_obj_set_style_text_font(left_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         }
@@ -478,7 +478,7 @@ static void create_apps_list_menu(void) {
 
         lv_obj_t *right_label = lv_label_create(right_nav_btn);
         lv_label_set_text(right_label, ">");
-        lv_obj_set_style_text_font(right_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         }

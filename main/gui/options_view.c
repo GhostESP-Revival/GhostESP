@@ -33,7 +33,7 @@ static inline lv_style_t *get_zebra_style(options_view_t *ov, int idx) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
-    return (ov->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    return &lv_font_montserrat_14;
 }
 
 static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
