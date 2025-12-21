@@ -1,0 +1,65 @@
+# sanzx_board configuration
+CONFIG_IDF_TARGET="esp32s3"
+
+# Microcontroller settings
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
+# Buttons
+CONFIG_USE_JOYSTICK=y
+CONFIG_L_BTN=39
+CONFIG_R_BTN=38
+CONFIG_U_BTN=41
+CONFIG_D_BTN=40
+CONFIG_C_BTN=0
+
+# Display Configuration
+CONFIG_WITH_SCREEN=y
+CONFIG_TFT_WIDTH=170
+CONFIG_TFT_HEIGHT=320
+
+# LVGL Driver settings
+CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789=y
+CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI=y
+CONFIG_LV_PREDEFINED_DISPLAY_NONE=y
+
+# Pin Assignments
+CONFIG_LV_DISP_SPI_MOSI=11
+CONFIG_LV_DISP_SPI_CLK=12
+CONFIG_LV_DISPLAY_USE_SPI_CS=y
+CONFIG_LV_DISP_SPI_CS=10
+CONFIG_LV_DISPLAY_USE_DC=y
+CONFIG_LV_DISP_PIN_DC=9
+CONFIG_LV_DISP_USE_RST=y
+CONFIG_LV_DISP_PIN_RST=13
+
+# MISO is -1, so we disable it
+CONFIG_LV_DISPLAY_USE_SPI_MISO=n
+CONFIG_LV_DISP_SPI_MISO=-1
+
+# Backlight
+CONFIG_LV_DISP_BACKLIGHT_SWITCH=y
+CONFIG_LV_BACKLIGHT_ACTIVE_LVL=y
+CONFIG_LV_DISP_PIN_BCKL=14
+
+# Orientation (assuming portrait based on 170x320)
+CONFIG_LV_DISPLAY_ORIENTATION_PORTRAIT=y
+CONFIG_LV_DISPLAY_ORIENTATION=0
+
+# Custom SPI Clock Divider if needed (optional)
+CONFIG_LV_TFT_USE_CUSTOM_SPI_CLK_DIVIDER=y
+CONFIG_LV_TFT_SPI_CLK_DIVIDER_2=y
+CONFIG_LV_TFT_CUSTOM_SPI_CLK_DIVIDER=2
+
+# ST7789 Specifics
+# User mentioned 170x320. Standard ST7789 is often 240x320.
+# 170x320 is likely a specific panel (like T-Display S3 or similar but with different pins).
+# We might need offsets. For now, assuming standard alignment.
+# If offsets are needed, we can enable CONFIG_LV_TFT_DISPLAY_OFFSETS and set X/Y.
+# Typically 170 width on 240 controller means offset x = (240-170)/2 = 35 or start at 0 or 35.
+# Let's set offset enabled just in case user needs to tweak it later, or default to 35 if common.
+# However, user didn't specify offsets. I will leave offsets disabled for now.
+
+# Other standard settings
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_16_SWAP=y
