@@ -1899,17 +1899,19 @@ void wifi_manager_list_stations() {
             strncpy(ap_vendor, "Unknown", sizeof(ap_vendor) - 1);
         }
 
-        printf("[%d] Station MAC: %s\n", i, sta_mac_str);
-        printf("     Station Vendor: %s\n", sta_vendor);
-        printf("     Associated AP: %s\n", sanitized_ssid);
-        printf("     AP BSSID: %s\n", ap_mac_str);
-        printf("     AP Vendor: %s\n", ap_vendor);
+        printf("[%d]\n", i);
+        printf("%s\n", sta_mac_str);
+        printf("%s\n", sta_vendor);
+        printf("AP: %s\n", sanitized_ssid);
+        printf("%s\n", ap_mac_str);
+        printf("%s\n", ap_vendor);
 
-        TERMINAL_VIEW_ADD_TEXT("[%d] Station MAC: %s\n", i, sta_mac_str);
-        TERMINAL_VIEW_ADD_TEXT("     Station Vendor: %s\n", sta_vendor);
-        TERMINAL_VIEW_ADD_TEXT("     Associated AP: %s\n", sanitized_ssid);
-        TERMINAL_VIEW_ADD_TEXT("     AP BSSID: %s\n", ap_mac_str);
-        TERMINAL_VIEW_ADD_TEXT("     AP Vendor: %s\n", ap_vendor);
+        TERMINAL_VIEW_ADD_TEXT("[%d]\n", i);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", sta_mac_str);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", sta_vendor);
+        TERMINAL_VIEW_ADD_TEXT("AP: %s\n", sanitized_ssid);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", ap_mac_str);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", ap_vendor);
     }
 }
 
@@ -2226,12 +2228,12 @@ void wifi_manager_select_ap(int index) {
     char sanitized_ssid[33];
     sanitize_ssid_and_check_hidden(selected_ap.ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
-    printf("Selected Access Point: SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
+    printf("Selected AP:\n%s\n%02X:%02X:%02X:%02X:%02X:%02X\n",
            sanitized_ssid, selected_ap.bssid[0], selected_ap.bssid[1], selected_ap.bssid[2],
            selected_ap.bssid[3], selected_ap.bssid[4], selected_ap.bssid[5]);
 
     TERMINAL_VIEW_ADD_TEXT(
-        "Selected Access Point: SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n", sanitized_ssid,
+        "Selected AP:\n%s\n%02X:%02X:%02X:%02X:%02X:%02X\n", sanitized_ssid,
         selected_ap.bssid[0], selected_ap.bssid[1], selected_ap.bssid[2], selected_ap.bssid[3],
         selected_ap.bssid[4], selected_ap.bssid[5]);
 
@@ -2294,17 +2296,17 @@ void wifi_manager_select_multiple_aps(int *indices, int count) {
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(selected_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
-        printf("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s\n",
-               i, sanitized_ssid,
+        printf("[%d]%s\n%s\n%02X:%02X:%02X:%02X:%02X:%02X\n",
+               i, (i == 0) ? " (Primary)" : "",
+               sanitized_ssid,
                selected_aps[i].bssid[0], selected_aps[i].bssid[1], selected_aps[i].bssid[2],
-               selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5],
-               (i == 0) ? " (Primary)" : "");
+               selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5]);
 
-        TERMINAL_VIEW_ADD_TEXT("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s\n",
-               i, sanitized_ssid,
+        TERMINAL_VIEW_ADD_TEXT("[%d]%s\n%s\n%02X:%02X:%02X:%02X:%02X:%02X\n",
+               i, (i == 0) ? " (Primary)" : "",
+               sanitized_ssid,
                selected_aps[i].bssid[0], selected_aps[i].bssid[1], selected_aps[i].bssid[2],
-               selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5],
-               (i == 0) ? " (Primary)" : "");
+               selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5]);
     }
 
     printf("Multiple APs selected successfully. Primary AP: %s\n", 
@@ -2348,14 +2350,14 @@ void wifi_manager_select_station(int index) {
             break;
         }
     }
-    printf("Selected Station %d: Station MAC: %02X:%02X:%02X:%02X:%02X:%02X\n    -> AP SSID: %s\n    -> AP BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
+    printf("Station [%d]\n%02X:%02X:%02X:%02X:%02X:%02X\nAP: %s\n%02X:%02X:%02X:%02X:%02X:%02X\n",
            index,
            selected_station.station_mac[0], selected_station.station_mac[1], selected_station.station_mac[2],
            selected_station.station_mac[3], selected_station.station_mac[4], selected_station.station_mac[5],
            sanitized_ssid,
            selected_station.ap_bssid[0], selected_station.ap_bssid[1], selected_station.ap_bssid[2],
            selected_station.ap_bssid[3], selected_station.ap_bssid[4], selected_station.ap_bssid[5]);
-    TERMINAL_VIEW_ADD_TEXT("Selected Station %d: Station MAC: %02X:%02X:%02X:%02X:%02X:%02X\n    -> AP SSID: %s\n    -> AP BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
+    TERMINAL_VIEW_ADD_TEXT("Station [%d]\n%02X:%02X:%02X:%02X:%02X:%02X\nAP: %s\n%02X:%02X:%02X:%02X:%02X:%02X\n",
            index,
            selected_station.station_mac[0], selected_station.station_mac[1], selected_station.station_mac[2],
            selected_station.station_mac[3], selected_station.station_mac[4], selected_station.station_mac[5],
@@ -3820,19 +3822,19 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
     char vendor[64] = {0};
     bool has_vendor = ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
 
-    printf("[%u] SSID: %s,\n"
-           "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
-           "     RSSI: %d,\n"
-           "     Channel: %d,\n",
+    printf("[%u]\n"
+           "%s\n"
+           "%02X:%02X:%02X:%02X:%02X:%02X\n"
+           "RSSI: %d | Ch: %d\n",
            idx,
            sanitized_ssid,
            rec->bssid[0], rec->bssid[1], rec->bssid[2], rec->bssid[3], rec->bssid[4], rec->bssid[5],
            rec->rssi,
            rec->primary);
-    TERMINAL_VIEW_ADD_TEXT("[%u] SSID: %s,\n"
-                           "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
-                           "     RSSI: %d,\n"
-                           "     Channel: %d,\n",
+    TERMINAL_VIEW_ADD_TEXT("[%u]\n"
+                           "%s\n"
+                           "%02X:%02X:%02X:%02X:%02X:%02X\n"
+                           "RSSI: %d | Ch: %d\n",
                            idx,
                            sanitized_ssid,
                            rec->bssid[0], rec->bssid[1], rec->bssid[2], rec->bssid[3], rec->bssid[4], rec->bssid[5],
@@ -3843,8 +3845,8 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
     if (include_security) {
         int ch = rec->primary;
         const char *band_str = (ch > 14) ? "5GHz" : "2.4GHz";
-        printf("     Band: %s,\n", band_str);
-        TERMINAL_VIEW_ADD_TEXT("     Band: %s,\n", band_str);
+        printf("Band: %s\n", band_str);
+        TERMINAL_VIEW_ADD_TEXT("Band: %s\n", band_str);
 
         const char *auth_str = "Unknown";
         const char *pmf_str = NULL;
@@ -3854,26 +3856,26 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
             case WIFI_AUTH_WPA_PSK: auth_str = "WPA"; break;
             case WIFI_AUTH_WPA2_PSK: auth_str = "WPA2"; break;
             case WIFI_AUTH_WPA_WPA2_PSK: auth_str = "WPA/WPA2"; break;
-            case WIFI_AUTH_WPA2_ENTERPRISE: auth_str = "WPA2-Enterprise"; break;
-            case WIFI_AUTH_WPA3_PSK: auth_str = "WPA3"; pmf_str = "Required"; break;
-            case WIFI_AUTH_WPA2_WPA3_PSK: auth_str = "WPA2/WPA3"; pmf_str = "Required (WPA3)"; break;
+            case WIFI_AUTH_WPA2_ENTERPRISE: auth_str = "WPA2-Ent"; break;
+            case WIFI_AUTH_WPA3_PSK: auth_str = "WPA3"; pmf_str = "PMF"; break;
+            case WIFI_AUTH_WPA2_WPA3_PSK: auth_str = "WPA2/3"; pmf_str = "PMF"; break;
             case WIFI_AUTH_WAPI_PSK: auth_str = "WAPI"; break;
-            case WIFI_AUTH_WPA3_ENTERPRISE: auth_str = "WPA3-Enterprise"; pmf_str = "Required"; break;
+            case WIFI_AUTH_WPA3_ENTERPRISE: auth_str = "WPA3-Ent"; pmf_str = "PMF"; break;
             default: auth_str = "Unknown"; break;
         }
         if (pmf_str) {
-            printf("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
-            TERMINAL_VIEW_ADD_TEXT("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
+            printf("Security: %s | %s\n", auth_str, pmf_str);
+            TERMINAL_VIEW_ADD_TEXT("Security: %s | %s\n", auth_str, pmf_str);
         } else {
-            printf("     Security: %s\n", auth_str);
-            TERMINAL_VIEW_ADD_TEXT("     Security: %s\n", auth_str);
+            printf("Security: %s\n", auth_str);
+            TERMINAL_VIEW_ADD_TEXT("Security: %s\n", auth_str);
         }
     }
 #endif
 
     if (has_vendor) {
-        printf("     Vendor: %s\n", vendor);
-        TERMINAL_VIEW_ADD_TEXT("     Vendor: %s\n", vendor);
+        printf("Vendor: %s\n", vendor);
+        TERMINAL_VIEW_ADD_TEXT("Vendor: %s\n", vendor);
     }
 }
 void wifi_manager_print_scan_results_with_oui() {
@@ -3896,10 +3898,10 @@ void wifi_manager_print_scan_results_with_oui() {
         char vendor[64] = {0};
         bool has_vendor = ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
 
-        glog("[%u] SSID: %s,\n"
-             "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
-             "     RSSI: %d,\n"
-             "     Channel: %d,\n",
+        glog("[%u]\n"
+             "%s\n"
+             "%02X:%02X:%02X:%02X:%02X:%02X\n"
+             "RSSI: %d | Ch: %d\n",
              i, sanitized_ssid, 
              scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
              scanned_aps[i].bssid[2], scanned_aps[i].bssid[3],
@@ -3911,7 +3913,7 @@ void wifi_manager_print_scan_results_with_oui() {
         {
             int ch = scanned_aps[i].primary;
             const char *band_str = (ch > 14) ? "5GHz" : "2.4GHz";
-            glog("     Band: %s,\n", band_str);
+            glog("Band: %s\n", band_str);
             
             const char *auth_str = "Unknown";
             const char *pmf_str = NULL;
@@ -3933,22 +3935,22 @@ void wifi_manager_print_scan_results_with_oui() {
                     auth_str = "WPA/WPA2";
                     break;
                 case WIFI_AUTH_WPA2_ENTERPRISE:
-                    auth_str = "WPA2-Enterprise";
+                    auth_str = "WPA2-Ent";
                     break;
                 case WIFI_AUTH_WPA3_PSK:
                     auth_str = "WPA3";
-                    pmf_str = "Required";
+                    pmf_str = "PMF";
                     break;
                 case WIFI_AUTH_WPA2_WPA3_PSK:
-                    auth_str = "WPA2/WPA3";
-                    pmf_str = "Required (WPA3)";
+                    auth_str = "WPA2/3";
+                    pmf_str = "PMF";
                     break;
                 case WIFI_AUTH_WAPI_PSK:
                     auth_str = "WAPI";
                     break;
                 case WIFI_AUTH_WPA3_ENTERPRISE:
-                    auth_str = "WPA3-Enterprise";
-                    pmf_str = "Required";
+                    auth_str = "WPA3-Ent";
+                    pmf_str = "PMF";
                     break;
                 default:
                     auth_str = "Unknown";
@@ -3956,14 +3958,14 @@ void wifi_manager_print_scan_results_with_oui() {
             }
             
             if (pmf_str) {
-                glog("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
+                glog("Security: %s | %s\n", auth_str, pmf_str);
             } else {
-                glog("     Security: %s\n", auth_str);
+                glog("Security: %s\n", auth_str);
             }
         }
 #endif
         if (has_vendor) {
-            glog("     Vendor: %s\n", vendor);
+            glog("Vendor: %s\n", vendor);
         }
     }
 }
