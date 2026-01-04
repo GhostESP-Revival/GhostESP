@@ -703,11 +703,11 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
         (void)ouis_lookup_vendor(ap_mac_str, ap_vendor, sizeof(ap_vendor));
 
         glog("New Station:\n"
-             "     STA: %s\n"
-             "     STA Vendor: %s\n"
-             "     Associated AP: %s\n"
-             "     AP BSSID: %s\n"
-             "     AP Vendor: %s\n",
+             "STA: %s\n"
+             "Vendor: %s\n"
+             "AP: %s\n"
+             "BSSID: %s\n"
+             "Vendor: %s\n",
              station_mac_str,
              station_vendor,
              ssid_str,
@@ -1755,7 +1755,7 @@ void wifi_manager_start_scan() {
         .show_hidden = true,
         .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}};
 
-    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
+    rgb_manager_set_color(&rgb_manager, -1, 128, 0, 255, false);
 
     printf("WiFi Scan started\n");
     #ifdef CONFIG_IDF_TARGET_ESP32C5
@@ -1900,18 +1900,18 @@ void wifi_manager_list_stations() {
         }
 
         printf("[%d]\n", i);
-        printf("%s\n", sta_mac_str);
-        printf("%s\n", sta_vendor);
+        printf("STA: %s\n", sta_mac_str);
+        printf("Vendor: %s\n", sta_vendor);
         printf("AP: %s\n", sanitized_ssid);
-        printf("%s\n", ap_mac_str);
-        printf("%s\n", ap_vendor);
+        printf("BSSID: %s\n", ap_mac_str);
+        printf("Vendor: %s\n", ap_vendor);
 
         TERMINAL_VIEW_ADD_TEXT("[%d]\n", i);
-        TERMINAL_VIEW_ADD_TEXT("%s\n", sta_mac_str);
-        TERMINAL_VIEW_ADD_TEXT("%s\n", sta_vendor);
+        TERMINAL_VIEW_ADD_TEXT("STA: %s\n", sta_mac_str);
+        TERMINAL_VIEW_ADD_TEXT("Vendor: %s\n", sta_vendor);
         TERMINAL_VIEW_ADD_TEXT("AP: %s\n", sanitized_ssid);
-        TERMINAL_VIEW_ADD_TEXT("%s\n", ap_mac_str);
-        TERMINAL_VIEW_ADD_TEXT("%s\n", ap_vendor);
+        TERMINAL_VIEW_ADD_TEXT("BSSID: %s\n", ap_mac_str);
+        TERMINAL_VIEW_ADD_TEXT("Vendor: %s\n", ap_vendor);
     }
 }
 
@@ -3824,7 +3824,7 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
 
     printf("[%u]\n"
            "%s\n"
-           "%02X:%02X:%02X:%02X:%02X:%02X\n"
+           "BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n"
            "RSSI: %d | Ch: %d\n",
            idx,
            sanitized_ssid,
@@ -3833,7 +3833,7 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
            rec->primary);
     TERMINAL_VIEW_ADD_TEXT("[%u]\n"
                            "%s\n"
-                           "%02X:%02X:%02X:%02X:%02X:%02X\n"
+                           "BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n"
                            "RSSI: %d | Ch: %d\n",
                            idx,
                            sanitized_ssid,
@@ -3900,7 +3900,7 @@ void wifi_manager_print_scan_results_with_oui() {
 
         glog("[%u]\n"
              "%s\n"
-             "%02X:%02X:%02X:%02X:%02X:%02X\n"
+             "BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n"
              "RSSI: %d | Ch: %d\n",
              i, sanitized_ssid, 
              scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
@@ -4525,7 +4525,7 @@ void wifi_manager_start_scan_with_time(int seconds) {
         .show_hidden = true
     };
 
-    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
+    rgb_manager_set_color(&rgb_manager, -1, 128, 0, 255, false);
 
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
