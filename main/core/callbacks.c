@@ -1320,7 +1320,6 @@ void wifi_pwn_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
 
-    // minimal validation: don't drop on RSSI for handshake capture
     if (type == WIFI_PKT_MISC) return;
     if (pkt->rx_ctrl.sig_len < 24) return;
 
@@ -1329,17 +1328,20 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         int len = pkt->rx_ctrl.sig_len;
 
         uint16_t fc = frame[0] | (frame[1] << 8);
-        uint8_t dtype = (fc >> 2) & 0x3;      // 2 = data
         uint8_t dsub = (fc >> 4) & 0xF;
-        bool qos = (dtype == 0x2) && ((dsub & 0x8) != 0);
+        bool qos = (dsub & 0x8) != 0;
         bool to_ds = (fc >> 8) & 0x1;
         bool from_ds = (fc >> 9) & 0x1;
 
         size_t hdr_len = 24;
         if (to_ds && from_ds) hdr_len = 30;
         if (qos) hdr_len += 2;
-        if (len < (int)(hdr_len + 8)) return;
 
+        // always write data frames to pcap first, then check for EAPOL
+        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+
+        // check if this is an EAPOL frame for handshake tracking
+        if (len < (int)(hdr_len + 8)) return;
         const uint8_t *llc = frame + hdr_len;
         if (llc[0] != 0xAA || llc[1] != 0xAA || llc[2] != 0x03) return;
         uint16_t ethertype = (llc[6] << 8) | llc[7];
@@ -1349,11 +1351,7 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         if (len < (int)(hdr_len + 8 + 17)) return;
 
         uint8_t key_desc_type = eapol[4];
-        if (key_desc_type != 2) {
-            // still write eapol payloads
-            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
-            return;
-        }
+        if (key_desc_type != 2) return;
 
         uint16_t key_info = (eapol[5] << 8) | eapol[6];
         bool has_mic = (key_info & 0x0100) != 0;
@@ -1361,34 +1359,27 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         bool is_install = (key_info & 0x0040) != 0;
         bool is_ack = (key_info & 0x0080) != 0;
 
-        // addresses
-        const uint8_t *addr1 = frame + 4;  // DA
-        const uint8_t *addr2 = frame + 10; // SA
-        const uint8_t *ap_mac = NULL;
-        const uint8_t *sta_mac = NULL;
-
-        if (is_ack) {
-            ap_mac = addr2;
-            sta_mac = addr1;
-        } else {
-            ap_mac = addr1;
-            sta_mac = addr2;
-        }
+        const uint8_t *addr1 = frame + 4;
+        const uint8_t *addr2 = frame + 10;
+        const uint8_t *ap_mac = is_ack ? addr2 : addr1;
+        const uint8_t *sta_mac = is_ack ? addr1 : addr2;
 
         uint64_t replay = 0;
         for (int i = 0; i < 8; i++) replay = (replay << 8) | eapol[9 + i];
 
-        if (is_pairwise && has_mic) {
-            // derive msg type: AP frames with MIC: M3, STA frames with MIC: M2/M4 (install bit is set on M3)
+        if (is_pairwise) {
             uint8_t msg = 0;
-            if (is_ack && is_install) msg = 3;          // AP->STA, MIC, Install => M3
-            else if (!is_ack && !is_install) msg = 2;    // STA->AP, MIC, no Install => M2
-            else if (!is_ack && is_install) msg = 4;     // STA->AP, MIC, Install (rare) => treat as M4
-            else msg = 0;                                // unknown/edge
-            process_eapol_candidate_pair(ap_mac, sta_mac, replay, is_ack, msg);
+            if (!has_mic && is_ack && !is_install) {
+                msg = 1;  // M1: AP->STA, no MIC, no Install
+            } else if (has_mic) {
+                if (is_ack && is_install) msg = 3;        // M3
+                else if (!is_ack && !is_install) msg = 2; // M2
+                else if (!is_ack && is_install) msg = 4;  // M4
+            }
+            if (msg > 0) {
+                process_eapol_candidate_pair(ap_mac, sta_mac, replay, is_ack, msg);
+            }
         }
-
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
         return;
     }
 

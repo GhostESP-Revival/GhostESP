@@ -90,8 +90,9 @@ static volatile bool gatt_enum_in_progress = false;
 
 static const char *TAG_BLE = "BLE_MANAGER";
 static int airTagCount = 0;
-static bool ble_initialized = false;
+static volatile bool ble_initialized = false;
 static volatile bool ble_stack_ready = false;
+static volatile bool airtag_scanner_active = false;
 
 static esp_timer_handle_t flush_timer = NULL;
 static TaskHandle_t nimble_host_task_handle = NULL;
@@ -116,6 +117,7 @@ static void ble_resume_networking(void);
 static void parse_device_name(const uint8_t *data, size_t len, char *name_buf, size_t name_buf_len);
 static const char *detect_flipper_type_from_adv(const uint8_t *data, size_t len);
 static int ble_gap_event_general(struct ble_gap_event *event, void *arg);
+static bool wait_for_ble_ready(void);
 
 typedef struct {
     ble_data_handler_t handler;
@@ -1068,10 +1070,12 @@ void ble_stop_skimmer_detection(void) {
     pcap_file_close();           // Close the file after final flush
 
     /* final capture summary */
-    glog("BLE capture summary: captured=%lu filtered=%lu total=%lu\n",
-         (unsigned long)ble_pcap_packet_count,
-         (unsigned long)((ble_pcap_event_total_count > ble_pcap_packet_count) ? (ble_pcap_event_total_count - ble_pcap_packet_count) : 0),
-         (unsigned long)ble_pcap_event_total_count);
+    if (!pcap_is_wireshark_mode()) {
+        glog("BLE capture summary: captured=%lu filtered=%lu total=%lu\n",
+             (unsigned long)ble_pcap_packet_count,
+             (unsigned long)((ble_pcap_event_total_count > ble_pcap_packet_count) ? (ble_pcap_event_total_count - ble_pcap_packet_count) : 0),
+             (unsigned long)ble_pcap_event_total_count);
+    }
     /* reset counters for next capture */
     ble_pcap_packet_count = 0;
     ble_pcap_event_total_count = 0;
@@ -1079,10 +1083,14 @@ void ble_stop_skimmer_detection(void) {
     int rc = ble_gap_disc_cancel();
 
     if (rc == 0) {
-        glog("BLE skimmer detection stopped successfully.\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE skimmer detection stopped successfully.\n");
+        }
         status_display_show_status("Skimmer Stopped");
     } else {
-        glog("Error stopping BLE skimmer detection: %d\n", rc);
+        if (!pcap_is_wireshark_mode()) {
+            glog("Error stopping BLE skimmer detection: %d\n", rc);
+        }
         status_display_show_status("Skimmer Stop Fail");
     }
 }
@@ -1343,6 +1351,10 @@ void detect_ble_spam_callback(struct ble_gap_event *event, size_t length) {
 }
 
 void airtag_scanner_callback(struct ble_gap_event *event, size_t len) {
+    if (!airtag_scanner_active) {
+        return;
+    }
+    
     if (event->type == BLE_GAP_EVENT_DISC) {
         if (!event->disc.data || event->disc.length_data < 4) {
             return;
@@ -1477,8 +1489,20 @@ void ble_start_spoofing_selected_airtag(void) {
     }
 
     // Stop current activities (scanning, advertising) before starting new advertisement
-    ble_stop(); // Stop scanning, etc.
-    // vTaskDelay(pdMS_TO_TICKS(100)); // Short delay to allow stopping
+    if (ble_initialized) {
+        ble_stop();
+    }
+    
+    // Reinitialize BLE for advertising
+    if (!ble_initialized) {
+        ble_init();
+    }
+    
+    if (!wait_for_ble_ready()) {
+        ESP_LOGE(TAG_BLE, "BLE stack not ready for AirTag spoofing");
+        TERMINAL_VIEW_ADD_TEXT("Error: BLE not ready for spoofing\n");
+        return;
+    }
 
     AirTagDevice *tag_to_spoof = &discovered_airtags[selected_airtag_index];
 
@@ -1515,14 +1539,13 @@ void ble_start_spoofing_selected_airtag(void) {
             fields.mfg_data = &tag_to_spoof->payload[2];
             fields.mfg_data_len = tag_to_spoof->payload_len - 2;
             glog("Warning: Using raw payload data for advertisement.\n");
-         } else {
-             return; // No data to advertise
-         }
+        } else {
+            return; // No data to advertise
+        }
     } else {
-         fields.mfg_data = mfg_data_start;
-         fields.mfg_data_len = mfg_data_len;
+        fields.mfg_data = mfg_data_start;
+        fields.mfg_data_len = mfg_data_len;
     }
-
 
     ESP_LOGI(TAG_BLE, "Preparing spoof adv: captured_len=%zu mfg_len=%zu mfg_ptr=%p",
              tag_to_spoof->payload_len, mfg_data_len, (void*)mfg_data_start);
@@ -1530,32 +1553,55 @@ void ble_start_spoofing_selected_airtag(void) {
     uint8_t adv_buf[31];
     size_t adv_len = 0;
 
-    adv_buf[adv_len++] = 0x02;
-    adv_buf[adv_len++] = 0x01;
-    adv_buf[adv_len++] = 0x1A;
+    // Build proper BLE advertisement format
+    // Start with flags
+    adv_buf[adv_len++] = 0x02;  // Length
+    adv_buf[adv_len++] = 0x01;  // Type: Flags
+    adv_buf[adv_len++] = 0x1A;  // Data: General Discoverable + BR/EDR Not Supported
 
+    // Add manufacturer data if available
     if (mfg_data_start && mfg_data_len > 0) {
         size_t space = sizeof(adv_buf) - adv_len;
-        if (space >= 2) {
-            size_t copy_len = mfg_data_len;
-            if (copy_len > space - 2) copy_len = space - 2;
-            adv_buf[adv_len++] = (uint8_t)(copy_len + 1);
-            adv_buf[adv_len++] = 0xFF;
-            memcpy(&adv_buf[adv_len], mfg_data_start, copy_len);
-            adv_len += copy_len;
-            if (copy_len < mfg_data_len) {
-                ESP_LOGW(TAG_BLE, "Truncated manufacturer data from %zu to %zu bytes", mfg_data_len, copy_len);
-            }
+        size_t max_mfg_len = space - 2; // Reserve space for length and type bytes
+        
+        if (max_mfg_len < 3) {
+            ESP_LOGE(TAG_BLE, "Not enough space for manufacturer data");
+            return;
         }
+        
+        size_t copy_len = mfg_data_len;
+        if (copy_len > max_mfg_len) {
+            copy_len = max_mfg_len;
+            ESP_LOGW(TAG_BLE, "Truncated manufacturer data from %zu to %zu bytes", mfg_data_len, copy_len);
+        }
+        
+        adv_buf[adv_len++] = (uint8_t)(copy_len + 1); // Length (type + data)
+        adv_buf[adv_len++] = 0xFF; // Type: Manufacturer Specific Data
+        memcpy(&adv_buf[adv_len], mfg_data_start, copy_len);
+        adv_len += copy_len;
     } else if (tag_to_spoof->payload_len > 2) {
+        // Fallback: use raw payload starting from byte 2 (skip first byte which might be length)
         size_t space = sizeof(adv_buf) - adv_len;
-        size_t use = tag_to_spoof->payload_len - 2;
-        if (use > space - 2) use = space - 2;
-        adv_buf[adv_len++] = (uint8_t)(use + 1);
-        adv_buf[adv_len++] = 0xFF;
+        size_t max_mfg_len = space - 2;
+        
+        if (max_mfg_len < 3) {
+            ESP_LOGE(TAG_BLE, "Not enough space for manufacturer data from raw payload");
+            return;
+        }
+        
+        size_t use = tag_to_spoof->payload_len - 2; // Skip first 2 bytes
+        if (use > max_mfg_len) {
+            use = max_mfg_len;
+            ESP_LOGW(TAG_BLE, "Truncated raw payload from %zu to %zu bytes", tag_to_spoof->payload_len - 2, use);
+        }
+        
+        adv_buf[adv_len++] = (uint8_t)(use + 1); // Length (type + data)
+        adv_buf[adv_len++] = 0xFF; // Type: Manufacturer Specific Data
         memcpy(&adv_buf[adv_len], &tag_to_spoof->payload[2], use);
         adv_len += use;
-        ESP_LOGI(TAG_BLE, "Using raw payload slice for manufacturer data, used=%zu", use);
+    } else {
+        ESP_LOGE(TAG_BLE, "No valid data to advertise");
+        return;
     }
 
     size_t dump_len = adv_len < 16 ? adv_len : 16;
@@ -1984,7 +2030,9 @@ void ble_deinit(void) {
 }
 
 void ble_stop(void) {
+    ESP_LOGI(TAG_BLE, "ble_stop called, ble_initialized=%d", ble_initialized);
     if (!ble_initialized) {
+        ESP_LOGW(TAG_BLE, "ble_stop: BLE not initialized, skipping");
         return;
     }
 
@@ -2005,19 +2053,23 @@ void ble_stop(void) {
     }
 
     rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false);
+    airtag_scanner_active = false;
     ble_unregister_handler(ble_findtheflippers_callback);
     ble_unregister_handler(airtag_scanner_callback);
     ble_unregister_handler(ble_print_raw_packet_callback);
     ble_unregister_handler(ble_pcap_callback);
+    ble_unregister_handler(ble_skimmer_scan_callback);
     ble_unregister_handler(detect_ble_spam_callback);
     pcap_flush_buffer_to_file(); // Final flush
     pcap_file_close();           // Close the file after final flush
 
     /* final capture summary */
-    glog("BLE capture summary: captured=%lu filtered=%lu total=%lu\n",
-         (unsigned long)ble_pcap_packet_count,
-         (unsigned long)((ble_pcap_event_total_count > ble_pcap_packet_count) ? (ble_pcap_event_total_count - ble_pcap_packet_count) : 0),
-         (unsigned long)ble_pcap_event_total_count);
+    if (!pcap_is_wireshark_mode()) {
+        glog("BLE capture summary: captured=%lu filtered=%lu total=%lu\n",
+             (unsigned long)ble_pcap_packet_count,
+             (unsigned long)((ble_pcap_event_total_count > ble_pcap_packet_count) ? (ble_pcap_event_total_count - ble_pcap_packet_count) : 0),
+             (unsigned long)ble_pcap_event_total_count);
+    }
     /* reset counters for next capture */
     ble_pcap_packet_count = 0;
     ble_pcap_event_total_count = 0;
@@ -2029,27 +2081,39 @@ void ble_stop(void) {
 
     switch (rc) {
     case 0:
-        glog("BLE scan stopped successfully.\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE scan stopped successfully.\n");
+        }
         status_display_show_status("BLE Stopped");
         break;
     case BLE_HS_EBUSY:
-        glog("BLE scan is busy\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE scan is busy\n");
+        }
         status_display_show_status("BLE Busy");
         break;
     case BLE_HS_ETIMEOUT:
-        glog("BLE operation timed out.\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE operation timed out.\n");
+        }
         status_display_show_status("BLE Timeout");
         break;
     case BLE_HS_ENOTCONN:
-        glog("BLE not connected.\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE not connected.\n");
+        }
         status_display_show_status("BLE No Conn");
         break;
     case BLE_HS_EINVAL:
-        glog("BLE invalid parameter.\n");
+        if (!pcap_is_wireshark_mode()) {
+            glog("BLE invalid parameter.\n");
+        }
         status_display_show_status("BLE Invalid");
         break;
     default:
-        glog("Error stopping BLE scan: %d\n", rc);
+        if (!pcap_is_wireshark_mode()) {
+            glog("Error stopping BLE scan: %d\n", rc);
+        }
         status_display_show_status("BLE Stop Fail");
     }
 
@@ -2057,12 +2121,15 @@ void ble_stop(void) {
 }
 
 void ble_start_blespam_detector(void) {
-    if (!ble_initialized) {
-        ble_init();
+    // Register the skimmer detection callback
+    esp_err_t err = ble_register_handler(detect_ble_spam_callback);
+    if (err != ESP_OK) {
+        ESP_LOGE("BLE", "Failed to register skimmer detection callback");
+        return;
     }
 
+    // Start BLE scanning
     ble_start_scanning();
-    ble_register_handler(detect_ble_spam_callback);
 }
 
 void ble_start_raw_ble_packetscan(void) {
@@ -2077,6 +2144,7 @@ void ble_start_airtag_scanner(void) {
     discovered_airtag_count = 0;
     selected_airtag_index = -1;
     airTagCount = 0;
+    airtag_scanner_active = true;
 
     if (!ble_initialized) {
         ble_init();
@@ -2127,52 +2195,36 @@ static void ble_pcap_callback(struct ble_gap_event *event, size_t len) {
     size_t hci_len = 0;
 
     if (event->type == BLE_GAP_EVENT_DISC) {
-        // [1] HCI packet type (0x04 for HCI Event)
-        hci_buffer[0] = 0x04;
+        hci_buffer[0] = 0x04; // HCI packet type (HCI Event)
+        hci_buffer[1] = 0x3E; // HCI Event Code (LE Meta Event)
 
-        // [2] HCI Event Code (0x3E for LE Meta Event)
-        hci_buffer[1] = 0x3E;
-
-        // [3] Calculate total parameter length
-        uint8_t param_len = 10 + event->disc.length_data; // 1 (subevent) + 1 (num reports) + 1
-                                                          // (event type) + 1 (addr type) + 6 (addr)
+        uint8_t param_len = 10 + event->disc.length_data;
         hci_buffer[2] = param_len;
 
-        // [4] LE Meta Subevent (0x02 for LE Advertising Report)
-        hci_buffer[3] = 0x02;
-
-        // [5] Number of reports
-        hci_buffer[4] = 0x01;
-
-        // [6] Event type (ADV_IND = 0x00)
-        hci_buffer[5] = 0x00;
-
-        // [7] Address type
+        hci_buffer[3] = 0x02; // LE Meta Subevent (LE Advertising Report)
+        hci_buffer[4] = 0x01; // Number of reports
+        hci_buffer[5] = 0x00; // Event type (ADV_IND)
         hci_buffer[6] = event->disc.addr.type;
-
-        // [8] Address (6 bytes)
         memcpy(&hci_buffer[7], event->disc.addr.val, 6);
-
-        // [9] Data length
         hci_buffer[13] = event->disc.length_data;
 
-        // [10] Data
         if (event->disc.length_data > 0) {
             memcpy(&hci_buffer[14], event->disc.data, event->disc.length_data);
         }
 
-        // [11] RSSI
         hci_buffer[14 + event->disc.length_data] = (uint8_t)event->disc.rssi;
 
-        hci_len = 15 + event->disc.length_data; // Total length
+        hci_len = 15 + event->disc.length_data;
 
         /* keep a lightweight counter and occasionally report a summary */
 
         ble_pcap_packet_count++;
         if ((ble_pcap_packet_count % 50) == 0) {
             uint32_t filtered = ble_pcap_event_total_count - ble_pcap_packet_count;
-            glog("BLE: %lu packets captured, %lu filtered (total events %lu)\n",
-                 (unsigned long)ble_pcap_packet_count, (unsigned long)filtered, (unsigned long)ble_pcap_event_total_count);
+            if (!pcap_is_wireshark_mode()) {
+                glog("BLE: %lu packets captured, %lu filtered (total events %lu)\n",
+                     (unsigned long)ble_pcap_packet_count, (unsigned long)filtered, (unsigned long)ble_pcap_event_total_count);
+            }
         }
 
         pcap_write_packet_to_buffer(hci_buffer, hci_len, PCAP_CAPTURE_BLUETOOTH);
@@ -2216,6 +2268,41 @@ void ble_start_capture(void) {
 
     ble_start_scanning();
     status_display_show_status("BLE Capture On");
+}
+
+void ble_start_capture_wireshark(void) {
+    if (!ble_initialized) {
+        ble_init();
+    }
+
+    if (!wait_for_ble_ready()) {
+        ESP_LOGE(TAG_BLE, "BLE stack not ready");
+        return;
+    }
+
+    /* reset counters for a fresh capture session */
+    ble_pcap_packet_count = 0;
+    ble_pcap_event_total_count = 0;
+
+    if (flush_timer != NULL) {
+        esp_timer_stop(flush_timer);
+        esp_timer_delete(flush_timer);
+        flush_timer = NULL;
+    }
+
+    /* Register BLE handler to emit HCI packets into the PCAP buffer */
+    ble_register_handler(ble_pcap_callback);
+
+    /* Flush more frequently for better live capture latency */
+    esp_timer_create_args_t timer_args = {.callback = (esp_timer_cb_t)pcap_flush_buffer_to_file,
+                                          .name = "pcap_flush"};
+
+    if (esp_timer_create(&timer_args, &flush_timer) == ESP_OK) {
+        esp_timer_start_periodic(flush_timer, 200000);
+    }
+
+    ble_start_scanning();
+    status_display_show_status("BLE Wireshark");
 }
 
 void ble_start_skimmer_detection(void) {
@@ -2283,11 +2370,19 @@ int ble_get_gatt_device_data(int index, uint8_t *mac, int8_t *rssi, char *name, 
 }
 
 void ble_start_tracking_selected_flipper(void) {
-    // Stop any ongoing scan
+    // Check if BLE is properly initialized before proceeding
+    if (!ble_initialized || !ble_stack_ready) {
+        glog("Error: BLE stack not initialized. Cannot start Flipper tracking.\n");
+        return;
+    }
+
+    // Stop any existing scan
     ble_gap_disc_cancel();
-    // Re-register callback (ensuring no duplicates)
-    ble_unregister_handler(ble_findtheflippers_callback);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Register Flipper callback for tracking
     ble_register_handler(ble_findtheflippers_callback);
+
     struct ble_gap_disc_params params = {0};
     params.itvl = BLE_HCI_SCAN_ITVL_DEF;
     params.window = BLE_HCI_SCAN_WINDOW_DEF;
@@ -2303,6 +2398,7 @@ void ble_start_tracking_selected_flipper(void) {
         glog("Error starting tracker; rc=%d\n", rc);
     }
 }
+
 void ble_select_flipper(int index) {
     if (index < 0 || index >= discovered_flipper_count) {
         glog("Error: Invalid Flipper index %d. Use 'listflippers' to see valid indices.\n", index);
@@ -2310,12 +2406,15 @@ void ble_select_flipper(int index) {
         return;
     }
 
+    if (!ble_initialized) {
+        ble_init();
+    }
+
     selected_flipper_index = index;
     char mac[18];
     format_mac_address(discovered_flippers[index].addr.val, mac, sizeof(mac), false);
 
     glog("Selected Flipper at index %d: MAC %s\n", index, mac);
-    // Start continuous tracking scan without duplicate filtering
     ble_start_tracking_selected_flipper();
     glog("Started tracking Flipper %d...\n", index);
 }

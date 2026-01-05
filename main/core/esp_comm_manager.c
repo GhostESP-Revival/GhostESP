@@ -1037,17 +1037,16 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
 
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        desired_uart = UART_NUM_0;
-        /* if caller passed default placeholders, switch to U0 default pins */
+        desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
-            resolved_tx = U0TXD_GPIO_NUM;
-            resolved_rx = U0RXD_GPIO_NUM;
+            resolved_tx = GPIO_NUM_13;
+            resolved_rx = GPIO_NUM_14;
         }
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
-            resolved_tx = GPIO_NUM_1;
-            resolved_rx = GPIO_NUM_2;
+            resolved_tx = GPIO_NUM_9;
+            resolved_rx = GPIO_NUM_10;
         }
     } else {
         desired_uart = UART_NUM_1;

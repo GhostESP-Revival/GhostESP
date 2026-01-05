@@ -182,6 +182,13 @@ void wifi_manager_list_stations();
 // Start station scanning with channel hopping
 void wifi_manager_start_station_scan();
 
+// Wireshark capture channel hopping
+void wifi_manager_start_wireshark_channel_hop(void);
+void wifi_manager_stop_wireshark_channel_hop(void);
+
+// Set fixed channel for Wireshark capture
+esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel);
+
 void wifi_manager_start_deauth();
 
 void wifi_manager_stop_deauth();

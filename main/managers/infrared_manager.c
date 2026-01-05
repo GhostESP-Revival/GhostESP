@@ -558,27 +558,33 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
             .mem_block_symbols = hw_symbols,
             .resolution_hz = 1000000,
             .trans_queue_depth = 1,
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
             .flags = {.with_dma = false, .invert_out = false}
-#else
-            .flags = {.with_dma = false, .invert_out = false}
-#endif
         };
-        if (rmt_new_tx_channel(&cfg, &tx_chan) != ESP_OK) return false;
+        if (rmt_new_tx_channel(&cfg, &tx_chan) != ESP_OK) {
+            return false;
+        }
 
-        if (rmt_enable(tx_chan) != ESP_OK) return false;
+        if (rmt_enable(tx_chan) != ESP_OK) {
+            return false;
+        }
         chan_symbols = hw_symbols;
     }
 
     if (!copy_encoder) {
-        if (rmt_new_copy_encoder(&(rmt_copy_encoder_config_t) {}, &copy_encoder) != ESP_OK) return false;
+        if (rmt_new_copy_encoder(&(rmt_copy_encoder_config_t) {}, &copy_encoder) != ESP_OK) {
+            return false;
+        }
     }
 
     rmt_carrier_config_t carrier = {.frequency_hz = freq, .duty_cycle = duty, .flags.polarity_active_low = false};
-    if (rmt_apply_carrier(tx_chan, &carrier) != ESP_OK) return false;
+    if (rmt_apply_carrier(tx_chan, &carrier) != ESP_OK) {
+        return false;
+    }
 
     rmt_symbol_word_t *symbols = heap_caps_malloc(item_count * sizeof(rmt_symbol_word_t), MALLOC_CAP_DMA);
-    if (!symbols) return false;
+    if (!symbols) {
+        return false;
+    }
     for (size_t i = 0; i < item_count; i++) {
         symbols[i].level0 = 1;
         symbols[i].duration0 = timings[2 * i];
@@ -590,6 +596,18 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
     if (err == ESP_OK) err = rmt_tx_wait_all_done(tx_chan, -1);
 
     heap_caps_free(symbols);
+
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+    rmt_disable(tx_chan);
+    rmt_del_channel(tx_chan);
+    tx_chan = NULL;
+    chan_symbols = 0;
+    if (copy_encoder) {
+        rmt_del_encoder(copy_encoder);
+        copy_encoder = NULL;
+    }
+#endif
+
     return err == ESP_OK;
 }
 

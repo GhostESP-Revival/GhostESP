@@ -3,6 +3,6 @@
 
 #define GHOSTESP_NAME "GhostESP"
 #define GHOSTESP_FLAVOR "Revival"
-#define GHOSTESP_VERSION "v1.9.1"
+#define GHOSTESP_VERSION "v1.9.2"
 
 #endif

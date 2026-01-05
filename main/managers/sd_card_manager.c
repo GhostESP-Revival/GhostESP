@@ -488,6 +488,8 @@ esp_err_t sd_card_init(void) {
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
   host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
 #endif
   /* select spi host slot for target */
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
@@ -655,6 +657,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
   host.slot = SPI2_HOST;
+  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
 #endif
 
   spi_bus_config_t bus_config; memset(&bus_config, 0, sizeof(spi_bus_config_t));

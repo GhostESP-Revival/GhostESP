@@ -6,9 +6,18 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "esp_wifi.h"
+#include "esp_netif.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+#define DIAL_HTTP_BUFFER_SIZE 512
+#define DIAL_RESPONSE_BUFFER_SIZE 512
+#define DIAL_MIN_FREE_HEAP_FOR_HTTPS 25000
 
 static const char *TAG = "DIALManager";
 
@@ -308,14 +317,21 @@ esp_err_t send_command(const char *command, const char *video_id,
   }
   ESP_LOGI(TAG, "Body Parameters: %s", body_params);
 
+  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  if (free_heap < DIAL_MIN_FREE_HEAP_FOR_HTTPS) {
+    ESP_LOGE(TAG, "Insufficient heap for HTTPS: %u bytes free, need %d", free_heap, DIAL_MIN_FREE_HEAP_FOR_HTTPS);
+    free(url_params);
+    free(body_params);
+    goto cleanup;
+  }
+
   response_buffer_t resp_buf = {
-      .buffer = malloc(1524), .buffer_len = 0, .buffer_size = 1524};
+      .buffer = malloc(DIAL_RESPONSE_BUFFER_SIZE), .buffer_len = 0, .buffer_size = DIAL_RESPONSE_BUFFER_SIZE};
   if (!resp_buf.buffer) {
     ESP_LOGE(TAG, "Failed to allocate memory for response buffer.");
     goto cleanup;
   }
 
-  // Configure HTTP client
   esp_http_client_config_t config = {
       .url = "https://www.youtube.com/api/lounge/bc/bind",
       .timeout_ms = 5000,
@@ -323,6 +339,8 @@ esp_err_t send_command(const char *command, const char *video_id,
       .transport_type = HTTP_TRANSPORT_OVER_SSL,
       .event_handler = _http_event_handler,
       .user_data = &resp_buf,
+      .buffer_size = DIAL_HTTP_BUFFER_SIZE,
+      .buffer_size_tx = DIAL_HTTP_BUFFER_SIZE,
   };
   esp_http_client_handle_t client = esp_http_client_init(&config);
 
@@ -429,8 +447,21 @@ esp_err_t bind_session_id(Device *device) {
       encoded_name, encoded_loungeIdToken, encoded_UUID, encoded_zx, 1);
   ESP_LOGI(TAG, "Constructed URL: %s?%s", "https://www.youtube.com/api/lounge/bc/bind", url_params);
 
+  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  if (free_heap < DIAL_MIN_FREE_HEAP_FOR_HTTPS) {
+    ESP_LOGE(TAG, "Insufficient heap for HTTPS: %u bytes free, need %d", free_heap, DIAL_MIN_FREE_HEAP_FOR_HTTPS);
+    printf("    [-] Insufficient memory for HTTPS (need %dKB, have %uKB)\n", 
+           DIAL_MIN_FREE_HEAP_FOR_HTTPS/1024, free_heap/1024);
+    free(encoded_loungeIdToken);
+    free(encoded_UUID);
+    free(encoded_zx);
+    free(encoded_name);
+    free(zx);
+    return ESP_ERR_NO_MEM;
+  }
+
   response_buffer_t resp_buf = {
-      .buffer = malloc(1524), .buffer_len = 0, .buffer_size = 1524};
+      .buffer = malloc(DIAL_RESPONSE_BUFFER_SIZE), .buffer_len = 0, .buffer_size = DIAL_RESPONSE_BUFFER_SIZE};
   if (resp_buf.buffer == NULL) {
     ESP_LOGE(TAG, "Failed to allocate memory for response buffer");
     return ESP_FAIL;
@@ -443,6 +474,8 @@ esp_err_t bind_session_id(Device *device) {
       .transport_type = HTTP_TRANSPORT_OVER_SSL,
       .event_handler = _http_event_handler,
       .user_data = &resp_buf,
+      .buffer_size = DIAL_HTTP_BUFFER_SIZE,
+      .buffer_size_tx = DIAL_HTTP_BUFFER_SIZE,
   };
   esp_http_client_handle_t client = esp_http_client_init(&config);
 
@@ -569,14 +602,19 @@ char *extract_token_from_json(const char *json_response) {
 }
 
 char *get_youtube_token(const char *screen_id) {
+  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  if (free_heap < DIAL_MIN_FREE_HEAP_FOR_HTTPS) {
+    ESP_LOGE(TAG, "Insufficient heap for HTTPS: %u bytes free, need %d", free_heap, DIAL_MIN_FREE_HEAP_FOR_HTTPS);
+    return NULL;
+  }
+
   response_buffer_t resp_buf = {
-      .buffer = malloc(1024), .buffer_len = 0, .buffer_size = 1024};
+      .buffer = malloc(DIAL_RESPONSE_BUFFER_SIZE), .buffer_len = 0, .buffer_size = DIAL_RESPONSE_BUFFER_SIZE};
   if (resp_buf.buffer == NULL) {
     ESP_LOGE(TAG, "Failed to allocate memory for response buffer");
     return NULL;
   }
 
-  // Configure HTTP client
   esp_http_client_config_t config = {
       .url =
           "https://www.youtube.com/api/lounge/pairing/get_lounge_token_batch",
@@ -586,6 +624,8 @@ char *get_youtube_token(const char *screen_id) {
       .transport_type = HTTP_TRANSPORT_OVER_SSL,
       .event_handler = _http_event_handler,
       .user_data = &resp_buf,
+      .buffer_size = DIAL_HTTP_BUFFER_SIZE,
+      .buffer_size_tx = DIAL_HTTP_BUFFER_SIZE,
   };
 
   esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -746,6 +786,22 @@ bool fetch_screen_id_with_retries(const char *applicationUrl, Device *device,
 }
 
 char *g_app_url = NULL;
+char *g_friendly_name = NULL;
+
+static char *extract_friendly_name(const char *xml) {
+  const char *start = strstr(xml, "<friendlyName>");
+  if (!start) return NULL;
+  start += 14;
+  const char *end = strstr(start, "</friendlyName>");
+  if (!end) return NULL;
+  size_t len = end - start;
+  char *name = malloc(len + 1);
+  if (name) {
+    memcpy(name, start, len);
+    name[len] = '\0';
+  }
+  return name;
+}
 
 esp_err_t _http_event_header_handler(esp_http_client_event_t *evt) {
   switch (evt->event_id) {
@@ -811,6 +867,20 @@ char *get_dial_application_url(const char *location_url) {
     esp_http_client_cleanup(client);
     free(path);
     return NULL;
+  }
+
+  int content_len = esp_http_client_get_content_length(client);
+  if (content_len > 0 && content_len < 4096) {
+    char *body = malloc(content_len + 1);
+    if (body) {
+      int read_len = esp_http_client_read(client, body, content_len);
+      if (read_len > 0) {
+        body[read_len] = '\0';
+        if (g_friendly_name) free(g_friendly_name);
+        g_friendly_name = extract_friendly_name(body);
+      }
+      free(body);
+    }
   }
 
   if (g_app_url != NULL) {
@@ -942,13 +1012,13 @@ esp_err_t check_app_status(DIALManager *manager, DIALAppType app,
   ESP_LOGI(TAG, "HTTP status code: %d", status_code);
 
   if (status_code == 200) {
-    char *response_body = malloc(1024);
+    char *response_body = malloc(DIAL_RESPONSE_BUFFER_SIZE);
     if(!response_body){
       ESP_LOGE(TAG, "malloc failed");
       esp_http_client_cleanup(http_client);
       return ESP_ERR_NO_MEM;
     }
-    int content_len = esp_http_client_read(http_client, response_body, 1023);
+    int content_len = esp_http_client_read(http_client, response_body, DIAL_RESPONSE_BUFFER_SIZE - 1);
     if (content_len >= 0) {
       response_body[content_len] = '\0'; // Null-terminate the response body
 
@@ -1045,95 +1115,262 @@ bool launch_app(DIALManager *manager, DIALAppType app, const char *appUrl) {
   return false;
 }
 
-const char *pick_random_yt_video() {
+static bool test_tcp_connect(const char *ip, uint16_t port) {
+  struct sockaddr_in dest_addr;
+  dest_addr.sin_family = AF_INET;
+  dest_addr.sin_port = htons(port);
+  inet_pton(AF_INET, ip, &dest_addr.sin_addr);
 
+  int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+  if (sock < 0) {
+    printf("    [-] Socket create failed\n");
+    return false;
+  }
+
+  struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+  int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+  close(sock);
+
+  if (err != 0) {
+    printf("    [-] TCP connect to %s:%u failed: %d\n", ip, port, errno);
+    return false;
+  }
+  printf("    [+] TCP connect to %s:%u OK\n", ip, port);
+  return true;
+}
+
+bool launch_youtube_with_video(DIALManager *manager, const char *appUrl, const char *video_id) {
+  if (!manager || !appUrl || !video_id) {
+    return false;
+  }
+
+  char ip[64];
+  uint16_t port = 0;
+  if (extract_ip_and_port(appUrl, ip, &port) != ESP_OK) {
+    printf("    [-] Failed to parse URL\n");
+    return false;
+  }
+
+  if (!test_tcp_connect(ip, port)) {
+    return false;
+  }
+
+  char url[256];
+  snprintf(url, sizeof(url), "%s/YouTube", appUrl);
+
+  char post_body[128];
+  snprintf(post_body, sizeof(post_body), "v=%s", video_id);
+
+  printf("    [*] POST %s\n", url);
+
+  esp_http_client_config_t config = {
+      .url = url,
+      .method = HTTP_METHOD_POST,
+      .timeout_ms = 10000,
+      .transport_type = HTTP_TRANSPORT_OVER_TCP,
+  };
+  esp_http_client_handle_t http_client = esp_http_client_init(&config);
+  if (!http_client) {
+    ESP_LOGE(TAG, "Failed to init HTTP client");
+    return false;
+  }
+
+  esp_http_client_set_header(http_client, "Content-Type", "text/plain; charset=utf-8");
+  esp_http_client_set_header(http_client, "Origin", "https://www.youtube.com");
+  esp_http_client_set_post_field(http_client, post_body, strlen(post_body));
+
+  esp_err_t err = esp_http_client_perform(http_client);
+  if (err == ESP_OK) {
+    int status_code = esp_http_client_get_status_code(http_client);
+    printf("    [*] Response: %d\n", status_code);
+    if (status_code == 201 || status_code == 200) {
+      ESP_LOGI(TAG, "Successfully launched YouTube with video: %s", video_id);
+      esp_http_client_cleanup(http_client);
+      return true;
+    } else {
+      ESP_LOGE(TAG, "Failed to launch YouTube. HTTP Response Code: %d", status_code);
+    }
+  } else {
+    ESP_LOGE(TAG, "Failed to send launch request. Error: %s", esp_err_to_name(err));
+  }
+
+  esp_http_client_cleanup(http_client);
+  return false;
+}
+
+const char *pick_random_yt_video() {
   const char *yt_urls[] = {
-      "dQw4w9WgXcQ", // Video 1
-      "qWNQUvIk954", // Video 2
-      "ZZujisNZuw0", // Video 3
-      "rfXJ6xM1JnE"  // Video 4
+      "dQw4w9WgXcQ", // Rick Astley - Never Gonna Give You Up
+      "oHg5SJYRHA0", // RickRoll'D
+      "xvFZjo5PgG0", // Stick Bug
+      "djV11Xbc914", // A-ha - Take On Me
+      "fC7oUOUEEi4", // Toto - Africa
+      "y6120QOlsfU", // Darude - Sandstorm
+      "kJQP7kiw5Fk", // Luis Fonsi - Despacito
+      "9bZkp7q19f0", // PSY - Gangnam Style
+      "3JZ_D3ELwOQ", // Michael Jackson - Smooth Criminal
+      "QH2-TGUlwu4", // Nyan Cat
+      "wZZ7oFKsKzY", // He-Man HEYYEYAAEYAAAEYAEYAA
+      "L_jWHffIx5E", // Smash Mouth - All Star
+      "hTWKbfoikeg", // Nirvana - Smells Like Teen Spirit
+      "btPJPFnesV4", // Eye of the Tiger
+      "fJ9rUzIMcZQ", // Queen - Bohemian Rhapsody
+      "YQHsXMglC9A", // Adele - Hello
+      "CevxZvSJLk8", // Katy Perry - Roar
+      "JGwWNGJdvx8", // Ed Sheeran - Shape of You
+      "RgKAFK5djSk", // Wiz Khalifa - See You Again
+      "09R8_2nJtjg", // Maroon 5 - Sugar
+      "lp-EO5I60KA", // Eminem - Lose Yourself
+      "hT_nvWreIhg", // OneRepublic - Counting Stars
+      "OPf0YbXqDm0", // Mark Ronson - Uptown Funk
+      "pRpeEdMmmQ0", // Shakira - Waka Waka
+      "2Vv-BfVoq4g", // Perfect - Ed Sheeran
+      "60ItHLz5WEA", // Alan Walker - Faded
+      "Zi_XLOBDo_Y", // Michael Jackson - Billie Jean
   };
 
   int num_videos = sizeof(yt_urls) / sizeof(yt_urls[0]);
-
-  uint32_t random_number = esp_random();
-
-  int random_index = random_number % num_videos;
-
-  return yt_urls[random_index];
+  return yt_urls[esp_random() % num_videos];
 }
 
-void explore_network(DIALManager *manager) {
-  printf("\n[*] Starting network exploration...\n");
+typedef struct {
+  char ip[64];
+  uint16_t port;
+  char *app_url;
+  char *friendly_name;
+} dial_target_t;
 
-  for (int attempt = 0; attempt < 5; ++attempt) {
-    Device *devices = (Device *)malloc(sizeof(Device) * 10);
-    size_t device_count = 0;
+void explore_network(DIALManager *manager, bool cast_all) {
+  printf("\n[*] Starting DIAL discovery%s...\n", cast_all ? " (all devices)" : "");
 
-    printf("\n[+] Scan attempt %d/5\n", attempt + 1);
-    printf("    Discovering DIAL-enabled devices...\n");
+  Device *devices = (Device *)malloc(sizeof(Device) * 10);
+  if (!devices) {
+    printf("    [-] Memory allocation failed\n");
+    return;
+  }
+  size_t device_count = 0;
 
-    ESP_LOGI(TAG, "Discovering devices... (Attempt %d/%d)", attempt + 1, 5);
-    if (dial_client_discover_devices(manager->client, devices, 10,
-                                     &device_count) != ESP_OK ||
-        device_count == 0) {
-      ESP_LOGW(TAG, "No devices discovered. Retrying...");
-      printf("    [-] No devices found. Retrying...\n");
-      vTaskDelay(500 / portTICK_PERIOD_MS);
+  printf("    Discovering DIAL-enabled devices...\n");
+  if (dial_client_discover_devices(manager->client, devices, 10,
+                                   &device_count) != ESP_OK ||
+      device_count == 0) {
+    printf("    [-] No devices found\n");
+  }
+
+  if (device_count == 0) {
+    printf("\n[-] No DIAL devices found\n\n");
+    free(devices);
+    return;
+  }
+
+  printf("    [+] Found %zu device(s)!\n", device_count);
+
+  dial_target_t *targets = calloc(device_count, sizeof(dial_target_t));
+  if (!targets) {
+    printf("    [-] Memory allocation failed\n");
+    free(devices);
+    return;
+  }
+
+  esp_netif_ip_info_t sta_ip_info;
+  esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  bool has_sta_ip = (sta_netif && esp_netif_get_ip_info(sta_netif, &sta_ip_info) == ESP_OK &&
+                     sta_ip_info.ip.addr != 0);
+  
+  char sta_subnet[16] = {0};
+  if (has_sta_ip) {
+    uint32_t subnet = sta_ip_info.ip.addr & sta_ip_info.netmask.addr;
+    snprintf(sta_subnet, sizeof(sta_subnet), "%lu.%lu.%lu.", 
+             (subnet) & 0xFF, (subnet >> 8) & 0xFF, (subnet >> 16) & 0xFF);
+    printf("[*] STA subnet: %s0/24, switching to STA-only for routing\n", sta_subnet);
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+  }
+
+  size_t valid_targets = 0;
+
+  printf("[*] Fetching Application-URLs...\n");
+  for (size_t i = 0; i < device_count; ++i) {
+    Device *device = &devices[i];
+
+    if (extract_ip_and_port(device->location, targets[valid_targets].ip, 
+                            &targets[valid_targets].port) != ESP_OK) {
       continue;
     }
 
-    printf("    [+] Found %d device(s)!\n", device_count);
+    targets[valid_targets].app_url = get_dial_application_url(device->location);
+    targets[valid_targets].friendly_name = g_friendly_name ? strdup(g_friendly_name) : NULL;
+    if (g_friendly_name) { free(g_friendly_name); g_friendly_name = NULL; }
 
-    for (size_t i = 0; i < device_count; ++i) {
-      Device *device = &devices[i];
-      ESP_LOGI(TAG, "Discovered Device: %s (Location: %s)",
-               device->uniqueServiceName, device->location);
-
-      char *appUrl = get_dial_application_url(device->location);
-      if (appUrl == NULL) {
-        printf("    [-] Failed to get application URL\n");
+    if (targets[valid_targets].app_url) {
+      size_t len = strlen(targets[valid_targets].app_url);
+      if (len > 0 && targets[valid_targets].app_url[len-1] == '/') {
+        targets[valid_targets].app_url[len-1] = '\0';
+      }
+    } else {
+      targets[valid_targets].app_url = malloc(128);
+      if (!targets[valid_targets].app_url) {
+        free(targets[valid_targets].friendly_name);
         continue;
       }
-      printf("    [+] Got application URL\n");
-
-      if (check_app_status(manager, APP_YOUTUBE, appUrl, device) != ESP_OK) {
-        printf("    [*] YouTube app not running, attempting launch...\n");
-        ESP_LOGI(TAG, "YouTube app is not running. Launching the app...");
-        if (!launch_app(manager, APP_YOUTUBE, appUrl)) {
-          ESP_LOGE(TAG, "Failed to launch YouTube app.");
-          printf("    [-] Failed to launch YouTube app\n");
-          continue;
-        }
-        printf("    [+] YouTube app launched successfully\n");
-      } else {
-        printf("    [+] YouTube app already running\n");
-      }
-
-      printf("    [*] Fetching screen ID...\n");
-      if (!fetch_screen_id_with_retries(appUrl, device, manager)) {
-        ESP_LOGE(TAG, "Failed to fetch Screen ID.");
-        printf("    [-] Failed to fetch screen ID\n");
-        continue;
-      }
-      printf("    [+] Got screen ID: %s\n", device->screenID);
-
-      const char *yt_url = pick_random_yt_video();
-      printf("    [*] Selected video ID: %s\n", yt_url);
-
-      printf("    [*] Sending video command...\n");
-      if (send_command("setVideo", yt_url, device) == ESP_OK) {
-        ESP_LOGI(TAG, "YouTube video command sent successfully.");
-        printf("    [+] Video command sent successfully!\n");
-      } else {
-        ESP_LOGE(TAG, "Failed to send YouTube command.");
-        printf("    [-] Failed to send video command\n");
-      }
+      snprintf(targets[valid_targets].app_url, 128, "http://%s:%u/apps", 
+               targets[valid_targets].ip, targets[valid_targets].port);
     }
 
-    free(devices);
-    printf("\n[+] Network exploration complete!\n\n");
-    break;
+    bool duplicate = false;
+    for (size_t j = 0; j < valid_targets; ++j) {
+      if (strcmp(targets[j].app_url, targets[valid_targets].app_url) == 0) {
+        duplicate = true;
+        free(targets[valid_targets].app_url);
+        free(targets[valid_targets].friendly_name);
+        targets[valid_targets].app_url = NULL;
+        targets[valid_targets].friendly_name = NULL;
+        break;
+      }
+    }
+    if (duplicate) continue;
+
+    const char *name = targets[valid_targets].friendly_name ? targets[valid_targets].friendly_name : "Unknown";
+    printf("    [+] %s (%s)\n", name, targets[valid_targets].app_url);
+    valid_targets++;
+  }
+
+  free(devices);
+
+  if (valid_targets == 0) {
+    printf("\n[-] No valid DIAL targets\n\n");
+    free(targets);
+    return;
+  }
+
+  size_t success_count = 0;
+  for (size_t i = 0; i < valid_targets; ++i) {
+    const char *video_id = pick_random_yt_video();
+    const char *name = targets[i].friendly_name ? targets[i].friendly_name : targets[i].ip;
+    printf("    [*] Launching on %s (video: %s)\n", name, video_id);
+
+    if (launch_youtube_with_video(manager, targets[i].app_url, video_id)) {
+      printf("    [+] Success!\n");
+      success_count++;
+      if (!cast_all) break;
+    } else {
+      printf("    [-] Failed\n");
+    }
+  }
+
+  for (size_t i = 0; i < valid_targets; ++i) {
+    free(targets[i].app_url);
+    free(targets[i].friendly_name);
+  }
+  free(targets);
+
+  if (success_count > 0) {
+    printf("\n[+] DIAL cast complete! (%zu/%zu devices)\n\n", success_count, valid_targets);
+  } else {
+    printf("\n[-] DIAL cast failed\n\n");
   }
 }
 

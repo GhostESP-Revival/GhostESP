@@ -37,6 +37,24 @@ static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 
+int serial_manager_write_bytes(const void *data, size_t len) {
+  if (data == NULL || len == 0) {
+    return 0;
+  }
+
+  int written = 0;
+
+  if (!s_uart_disabled) {
+    written = uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
+  }
+
+#if JTAG_SUPPORTED
+  usb_serial_jtag_write_bytes((const uint8_t *)data, (uint32_t)len, 0);
+#endif
+
+  return written;
+}
+
 // Cursor position tracking
 static int cursor_position = 0;
 
@@ -487,12 +505,10 @@ void serial_task(void *pvParameter) {
     }
     int length = 0;
 
-#ifndef CONFIG_USE_IO_EXPANDER
     // Read data from the main UART (if not disabled)
     if (!s_uart_disabled) {
       length = uart_read_bytes(UART_NUM, data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
     }
-#endif
 
 #if JTAG_SUPPORTED
     if (length <= 0) {
@@ -725,15 +741,9 @@ void serial_task(void *pvParameter) {
 
 // Initialize the SerialManager
 void serial_manager_init() {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-    s_uart_disabled = true;
-  }
-#endif
-#ifndef CONFIG_USE_IO_EXPANDER
   // UART configuration for main UART
   const uart_config_t uart_config = {
-      .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+      .baud_rate = CONFIG_CONSOLE_UART_BAUDRATE,
       .data_bits = UART_DATA_8_BITS,
       .parity = UART_PARITY_DISABLE,
       .stop_bits = UART_STOP_BITS_1,
@@ -745,7 +755,6 @@ void serial_manager_init() {
     uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
     ESP_LOGI("SerialManager", "UART installed: RX buffer=%d bytes", BUF_SIZE * 2);
   }
-#endif
 
 #if JTAG_SUPPORTED
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
@@ -781,9 +790,8 @@ void serial_manager_deinit() {
 #if JTAG_SUPPORTED
   usb_serial_jtag_driver_uninstall();
 #endif
-#ifndef CONFIG_USE_IO_EXPANDER
   uart_driver_delete(UART_NUM);
-#endif
+
   if (commandQueue) {
     vQueueDelete(commandQueue);
     commandQueue = NULL;
@@ -792,11 +800,7 @@ void serial_manager_deinit() {
 }
 
 int serial_manager_get_uart_num() {
-#ifdef CONFIG_USE_IO_EXPANDER
-    return -1; // No UART in use when IO expander is configured
-#else
     return (int)UART_NUM;
-#endif
 }
 
 int handle_serial_command(const char *input) {

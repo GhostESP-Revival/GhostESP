@@ -1,6 +1,24 @@
 # Ghost ESP Changelog
 
+## Revival v1.9.2
 
+- Added Wireshark dongle mode for real-time PCAP streaming over USB/UART
+- Added "No portal files found" placeholder for evil portal when SD folder is empty
+- Optimized evil portal listing memory usage
+- Added T-Deck keyboard shift, symbol key support with key repeat functionality
+- Rewrote DIAL functionality to remove the need for HTTPS, decrease ram usage and increase reliability
+- Fixed RGB LED error spam on devices without LEDs configured
+- Fix EAPOL capture channel lock by stopping ALL hopping timers before capture
+- Improved reliability of PCAP capture to SD card
+- Fixed regression when using C5 with RGB + IR 
+- Added ADC battery reading for the LilyGo T-Deck
+- Fixed inverted touch scrolling in main menu list layout
+- Fixed not being able to scroll up in options menus on some configs
+- Fixed apps menu always opening top app instead of tapped app
+- Disable light sleep in power saving mode on the T-Deck
+- Added the back button to the terminal view on the T-Display S3 Touch
+- Updated NimBLE config options to mirror the TEmbedC1101 for improved BLE reliability during certain tasks like AirTag detection
+- Misc small fixes
 
 ## Revival v1.9.1
 

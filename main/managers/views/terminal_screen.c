@@ -685,7 +685,9 @@ void terminal_view_create(void) {
     bool show_input_bar = false;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
-    if (LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) {
+    // Show back button on larger screens and T-Display S3 (320x170)
+    if ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
+        (LV_HOR_RES == 320 && LV_VER_RES == 170)) {
         show_back_btn = true;
         back_button_height = BUTTON_SIZE + BUTTON_PADDING * 2;
     }
@@ -944,7 +946,9 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
       }
     }
 
-    if (LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) {
+    // Handle back button touch on larger screens and T-Display S3
+    if ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
+        (LV_HOR_RES == 320 && LV_VER_RES == 170)) {
       int button_y_min = LV_VER_RES - (BUTTON_SIZE + BUTTON_PADDING * 2);
       int button_y_max = LV_VER_RES - BUTTON_PADDING;
       

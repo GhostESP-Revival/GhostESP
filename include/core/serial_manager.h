@@ -4,6 +4,7 @@
 #define SERIAL_MANAGER_H
 
 #include <esp_types.h>
+#include <stddef.h>
 #include <managers/display_manager.h>
 
 void serial_manager_init();
@@ -11,6 +12,8 @@ void serial_manager_init();
 void serial_manager_deinit();
 
 int serial_manager_get_uart_num();
+
+int serial_manager_write_bytes(const void *data, size_t len);
 
 void serial_task(void *pvParameter);
 
