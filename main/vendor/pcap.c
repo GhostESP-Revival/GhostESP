@@ -1,6 +1,7 @@
 #include "vendor/pcap.h"
 #include "core/utils.h"
 #include "core/glog.h"
+#include "core/serial_manager.h"
 #include "core/callbacks.h"
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -22,13 +23,16 @@ static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len);
 static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
                                          size_t max_len);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
+static esp_err_t _pcap_flush_wireshark_stream_nolock();
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static volatile pcap_capture_type_t s_capture_type = PCAP_CAPTURE_WIFI;
+static volatile pcap_mode_t s_pcap_mode = PCAP_MODE_FILE;
 static uint8_t pcap_buffer[PCAP_BUFFER_SIZE];
 static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
+static volatile bool s_capture_active = false;
 
 typedef struct {
   uint8_t packet_type; // HCI packet type (1 byte)
@@ -68,20 +72,25 @@ esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type) {
                                  .network = dlt};
 
   if (f == NULL) {
-    const char *mark_begin = "[BUF/BEGIN]";
-    const size_t mark_begin_len = strlen(mark_begin);
-    const char *mark_close = "[BUF/CLOSE]";
-    const size_t mark_close_len = strlen(mark_close);
+    if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+      serial_manager_write_bytes((const void *)&header, sizeof(header));
+      return ESP_OK;
+    } else {
+      const char *mark_begin = "[BUF/BEGIN]";
+      const size_t mark_begin_len = strlen(mark_begin);
+      const char *mark_close = "[BUF/CLOSE]";
+      const size_t mark_close_len = strlen(mark_close);
 
-    glog_set_defer(1);
-    uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
-    uart_write_bytes(UART_NUM_0, (const char *)&header, sizeof(header));
-    uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-    const char newline = '\n';
-    uart_write_bytes(UART_NUM_0, &newline, 1);
-    glog_set_defer(0);
-    glog_flush_deferred();
-    return ESP_OK;
+      glog_set_defer(1);
+      uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
+      uart_write_bytes(UART_NUM_0, (const char *)&header, sizeof(header));
+      uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
+      const char newline = '\n';
+      uart_write_bytes(UART_NUM_0, &newline, 1);
+      glog_set_defer(0);
+      glog_flush_deferred();
+      return ESP_OK;
+    }
   } else {
     size_t written = fwrite(&header, 1, sizeof(header), f);
     if (written == sizeof(header)) {
@@ -130,6 +139,9 @@ esp_err_t pcap_file_open(const char *base_file_name,
     return ESP_ERR_TIMEOUT;
   }
 
+  buffer_offset = 0;
+  s_capture_active = false;
+
   if (sd_card_exists("/mnt/ghostesp/pcaps")) {
     get_next_pcap_file_name(file_name, base_file_name);
     pcap_file = fopen(file_name, "wb");
@@ -171,6 +183,7 @@ esp_err_t pcap_file_open(const char *base_file_name,
     }
   }
 
+  s_capture_active = true;
   xSemaphoreGive(pcap_mutex);
   return ESP_OK;
 }
@@ -396,7 +409,7 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
 
   size_t actual_length;
   size_t header_length = 0;
-  uint8_t bt_h4_header[4];
+  uint8_t bt_h4_header[1];
   int is_bt = 0;
 
   if (capture_type == PCAP_CAPTURE_WIFI) {
@@ -410,14 +423,11 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   } else if (capture_type == PCAP_CAPTURE_BLUETOOTH) {
     const uint8_t *raw_packet = (const uint8_t *)packet;
 
-    /* prepare H4 header (direction + hci packet type + reserved) */
-    bt_h4_header[0] = 0x00; /* direction: host to controller */
-    bt_h4_header[1] = raw_packet[0];
-    bt_h4_header[2] = 0x00;
-    bt_h4_header[3] = 0x00;
+    /* prepare standard H4 header: single packet indicator byte */
+    bt_h4_header[0] = raw_packet[0];
 
     /* total length includes the H4 header */
-    actual_length = length + sizeof(bt_h4_header);
+    actual_length = (length - 1) + sizeof(bt_h4_header);
     header_length = 0;
     is_bt = 1;
   } else {
@@ -500,18 +510,22 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
 
   // Write packet data
   if (is_bt) {
-    /* write h4 header then the raw packet payload (without extra allocation) */
+    /* write H4 header then the raw packet payload (without extra allocation) */
     memcpy(pcap_buffer + buffer_offset, bt_h4_header, sizeof(bt_h4_header));
     buffer_offset += sizeof(bt_h4_header);
-    memcpy(pcap_buffer + buffer_offset, packet, length);
-    buffer_offset += length;
+    memcpy(pcap_buffer + buffer_offset, ((const uint8_t *)packet) + 1, length - 1);
+    buffer_offset += (length - 1);
   } else {
     memcpy(pcap_buffer + buffer_offset, packet, actual_length);
     buffer_offset += actual_length;
   }
 
   if (pcap_file == NULL) {
-    _pcap_flush_buffer_to_file_nolock();
+    if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+      _pcap_flush_wireshark_stream_nolock();
+    } else {
+      _pcap_flush_buffer_to_file_nolock();
+    }
   }
   /* if we had allocated a temporary BT buffer earlier it would have been
      pointed to by `packet` (only in the fallback malloc path). Free it now
@@ -529,12 +543,56 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   return ESP_OK;
 }
 
+esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
+  esp_err_t init_ret = pcap_init();
+  if (init_ret != ESP_OK) {
+    ESP_LOGE(PCAP_TAG, "Failed to initialize PCAP");
+    return init_ret;
+  }
+
+  if (pcap_mutex == NULL) {
+    ESP_LOGE(PCAP_TAG, "pcap_mutex is NULL in pcap_wireshark_start");
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    ESP_LOGE(PCAP_TAG, "Failed to take mutex in pcap_wireshark_start");
+    return ESP_ERR_TIMEOUT;
+  }
+
+  s_pcap_mode = PCAP_MODE_WIRESHARK;
+  s_capture_type = capture_type;
+  pcap_file = NULL;
+  buffer_offset = 0;
+
+  esp_err_t ret = pcap_write_global_header(NULL, capture_type);
+  if (ret != ESP_OK) {
+    ESP_LOGE(PCAP_TAG, "Failed to write PCAP global header for Wireshark");
+    xSemaphoreGive(pcap_mutex);
+    return ret;
+  }
+
+  s_capture_active = true;
+  xSemaphoreGive(pcap_mutex);
+  return ESP_OK;
+}
+
+static esp_err_t _pcap_flush_wireshark_stream_nolock() {
+  if (buffer_offset > 0) {
+    serial_manager_write_bytes((const void *)pcap_buffer, buffer_offset);
+    buffer_offset = 0;
+  }
+  return ESP_OK;
+}
+
 static esp_err_t _pcap_flush_buffer_to_file_nolock() {
   if (buffer_offset > 0) {
     if (pcap_file) { // If file is open, write to file
       size_t written = fwrite(pcap_buffer, 1, buffer_offset, pcap_file);
       if (written < buffer_offset) {
         ESP_LOGE(PCAP_TAG, "Failed to write buffered data to PCAP file.");
+      } else {
+        fflush(pcap_file);
       }
     } else { // If no file, try JIT mount for somethingsomething, else UART
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -599,29 +657,61 @@ esp_err_t pcap_flush_buffer_to_file() {
     return ESP_OK;
   }
   if (xSemaphoreTake(pcap_mutex, portMAX_DELAY)) {
-    _pcap_flush_buffer_to_file_nolock();
+    if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+      _pcap_flush_wireshark_stream_nolock();
+    } else {
+      _pcap_flush_buffer_to_file_nolock();
+    }
     xSemaphoreGive(pcap_mutex);
   }
   return ESP_OK;
 }
 
 bool pcap_is_capturing(void) {
-  return pcap_file != NULL;
+  return s_capture_active || pcap_file != NULL || s_pcap_mode == PCAP_MODE_WIRESHARK;
+}
+
+bool pcap_is_wireshark_mode(void) {
+  return s_pcap_mode == PCAP_MODE_WIRESHARK;
 }
 
 void pcap_file_close() {
-  if (pcap_file != NULL) {
-    if (xSemaphoreTake(pcap_mutex, portMAX_DELAY) == pdTRUE) {
-      if (buffer_offset > 0) {
-        ESP_LOGI(PCAP_TAG, "Flushing remaining buffer before closing file.");
-        _pcap_flush_buffer_to_file_nolock();
-      }
+  if (pcap_mutex == NULL) {
+    return;
+  }
 
+  if (xSemaphoreTake(pcap_mutex, portMAX_DELAY) == pdTRUE) {
+    if (buffer_offset > 0) {
+      ESP_LOGI(PCAP_TAG, "Flushing remaining buffer before closing.");
+      _pcap_flush_buffer_to_file_nolock();
+    }
+
+    if (pcap_file != NULL) {
       fclose(pcap_file);
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
-      xSemaphoreGive(pcap_mutex);
     }
-    cleanup_pcap_queue();
+
+    s_capture_active = false;
+    xSemaphoreGive(pcap_mutex);
   }
+  cleanup_pcap_queue();
+}
+
+void pcap_wireshark_stop(void) {
+  if (pcap_mutex == NULL) {
+    return;
+  }
+  
+  if (xSemaphoreTake(pcap_mutex, portMAX_DELAY) == pdTRUE) {
+    if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+      if (buffer_offset > 0) {
+        _pcap_flush_wireshark_stream_nolock();
+      }
+      s_pcap_mode = PCAP_MODE_FILE;
+    }
+    s_capture_active = false;
+    xSemaphoreGive(pcap_mutex);
+  }
+  cleanup_pcap_queue();
 }

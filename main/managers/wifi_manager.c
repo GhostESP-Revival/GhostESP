@@ -3,6 +3,7 @@
 #include "managers/wifi_manager.h"
 #include "core/callbacks.h"  // For callback function declarations
 #include "core/ouis.h"       // For OUI vendor lookup
+#include "vendor/pcap.h"     // For pcap_is_wireshark_mode()
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h" // Add include for heap stats
@@ -56,6 +57,15 @@
 // Defines for Station Scan Channel Hopping
 #define SCANSTA_CHANNEL_HOP_INTERVAL_MS 250 // Hop channel every 250ms
 #define SCANSTA_MAX_WIFI_CHANNEL 13         // Scan channels 1-13
+
+// Defines for Wireshark channel validation
+#if !defined(MAX_WIFI_CHANNEL)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define MAX_WIFI_CHANNEL 165
+#else
+#define MAX_WIFI_CHANNEL 13
+#endif
+#endif
 
 #define MAX_DEVICES 255
 #define CHUNK_SIZE 4096
@@ -336,6 +346,14 @@ static inline void stream_buf_unlock(void) {
 static esp_timer_handle_t scansta_channel_hop_timer = NULL;
 static uint8_t scansta_current_channel = 1;
 static bool scansta_hopping_active = false;
+
+// Wireshark Capture Channel Hopping Globals
+static esp_timer_handle_t wireshark_channel_hop_timer = NULL;
+static size_t wireshark_channel_index = 0;
+static bool wireshark_hopping_active = false;
+#define WIRESHARK_CHANNEL_HOP_INTERVAL_MS 150
+static uint8_t wireshark_channels[50];
+static size_t wireshark_channels_count = 0;
 
 // Dynamic list of channels discovered during AP scan (used for station scanning)
 static int *scansta_channel_list = NULL;
@@ -1477,17 +1495,33 @@ void wifi_manager_clear_scan_results(void) {
 }
 
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    // for EAPOL, stop ALL hopping and lock to selected AP channel
     if (callback == wifi_eapol_scan_callback) {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-        ESP_ERROR_CHECK(esp_wifi_start());
-        // lock to selected AP channel if available
-        extern wifi_ap_record_t selected_ap; // declared elsewhere in this module
-        if (selected_ap.ssid[0] != '\0' && selected_ap.primary > 0) {
-            esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
+        // Stop any existing channel hopping first
+        if (scansta_hopping_active) {
+            stop_scansta_channel_hopping();
         }
-    } else {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        if (live_ap_hopping_active) {
+            stop_live_ap_channel_hopping();
+        }
+        if (wireshark_hopping_active) {
+            wifi_manager_stop_wireshark_channel_hop();
+        }
+        
+        extern wifi_ap_record_t selected_ap;
+        if (selected_ap.ssid[0] != '\0' && selected_ap.primary > 0) {
+            esp_err_t ch_err = esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
+            if (ch_err == ESP_OK) {
+                printf("EAPOL: locked to channel %d (hopping stopped)\n", selected_ap.primary);
+            } else {
+                printf("EAPOL: failed to set channel %d: %s\n", selected_ap.primary, esp_err_to_name(ch_err));
+            }
+        } else {
+            printf("EAPOL: no AP selected, channel hopping disabled\n");
+        }
     }
 
     // Set hardware-level promiscuous filter based on callback type
@@ -1501,8 +1535,8 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
         // Management frames only
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
     } else if (callback == wifi_eapol_scan_callback) {
-        // capture both mgmt and data for eapol + context frames
-        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
+        // capture mgmt, data, and ctrl for full handshake context
+        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_CTRL;
     } else if (callback == sae_monitor_callback) {
         // Management frames for SAE
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
@@ -1515,6 +1549,15 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+
+    // Verify current channel for EAPOL
+    if (callback == wifi_eapol_scan_callback) {
+        uint8_t ch_primary = 0; wifi_second_chan_t ch_second = WIFI_SECOND_CHAN_NONE;
+        esp_err_t get_err = esp_wifi_get_channel(&ch_primary, &ch_second);
+        if (get_err == ESP_OK) {
+            printf("EAPOL: current channel verified as %u\n", ch_primary);
+        }
+    }
 
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(callback));
 
@@ -1534,14 +1577,16 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     else if (filter.filter_mask == WIFI_PROMIS_FILTER_MASK_DATA) filter_desc = "data";
     else if (filter.filter_mask == (WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA)) filter_desc = "mgmt+data";
 
-    printf("WiFi capture started.\n");
-    TERMINAL_VIEW_ADD_TEXT("WiFi capture started.\n");
-    printf("Type: %s\n", cap_desc);
-    TERMINAL_VIEW_ADD_TEXT("Type: %s\n", cap_desc);
-    printf("Channel: %u\n", (unsigned)ch_primary);
-    TERMINAL_VIEW_ADD_TEXT("Channel: %u\n", (unsigned)ch_primary);
-    printf("Filter: %s\n", filter_desc);
-    TERMINAL_VIEW_ADD_TEXT("Filter: %s\n", filter_desc);
+    if (!pcap_is_wireshark_mode()) {
+        printf("WiFi capture started.\n");
+        TERMINAL_VIEW_ADD_TEXT("WiFi capture started.\n");
+        printf("Type: %s\n", cap_desc);
+        TERMINAL_VIEW_ADD_TEXT("Type: %s\n", cap_desc);
+        printf("Channel: %u\n", (unsigned)ch_primary);
+        TERMINAL_VIEW_ADD_TEXT("Channel: %u\n", (unsigned)ch_primary);
+        printf("Filter: %s\n", filter_desc);
+        TERMINAL_VIEW_ADD_TEXT("Filter: %s\n", filter_desc);
+    }
     status_display_show_status("Monitor Started");
 }
 void wifi_manager_stop_monitor_mode() {
@@ -1559,9 +1604,15 @@ void wifi_manager_stop_monitor_mode() {
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
     status_display_show_status("Monitor Stopped");
 
-    // Stop the station scan channel hopping timer if it's active
+    // Stop ALL channel hopping timers
     if (scansta_hopping_active) {
         stop_scansta_channel_hopping();
+    }
+    if (live_ap_hopping_active) {
+        stop_live_ap_channel_hopping();
+    }
+    if (wireshark_hopping_active) {
+        wifi_manager_stop_wireshark_channel_hop();
     }
 
     // NOTE: Stopping the PineAP timer (channel_hop_timer) is handled by stop_pineap_detection() in callbacks.c
@@ -4603,6 +4654,182 @@ static void stop_scansta_channel_hopping(void) {
         scansta_hopping_active = false;
         ESP_LOGI(TAG, "Station Scan Channel Hopping Stopped.");
     }
+}
+
+// Build country-appropriate channel list for Wireshark
+static void wifi_manager_build_wireshark_channels(void) {
+    wireshark_channels_count = 0;
+    
+    // get current wifi country configuration
+    wifi_country_t country;
+    esp_err_t ret = esp_wifi_get_country(&country);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "wifi country not set, using default channels");
+        // 2.4ghz: channels 1, 6, 11 (common worldwide)
+        wireshark_channels[wireshark_channels_count++] = 1;
+        wireshark_channels[wireshark_channels_count++] = 6;
+        wireshark_channels[wireshark_channels_count++] = 11;
+        
+        #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        // 5ghz: common unii-1 channels
+        wireshark_channels[wireshark_channels_count++] = 36;
+        wireshark_channels[wireshark_channels_count++] = 40;
+        wireshark_channels[wireshark_channels_count++] = 44;
+        wireshark_channels[wireshark_channels_count++] = 48;
+        #endif
+        
+        ESP_LOGI(TAG, "using %d default channels", wireshark_channels_count);
+        return;
+    }
+    
+    // build channel list based on country regulations
+    // 2.4ghz band: channels 1-14 (varies by country)
+    uint8_t max_24ghz_channel = country.nchan;
+    if (max_24ghz_channel > 14) max_24ghz_channel = 14;
+    
+    // add 2.4ghz channels (prioritize 1, 6, 11 for non-overlapping)
+    for (uint8_t ch = 1; ch <= max_24ghz_channel; ch++) {
+        if (ch == 1 || ch == 6 || ch == 11) {
+            wireshark_channels[wireshark_channels_count++] = ch;
+        }
+    }
+    
+    // add overlapping 2.4ghz channels if needed
+    for (uint8_t ch = 2; ch <= max_24ghz_channel; ch++) {
+        if (ch != 1 && ch != 6 && ch != 11 && wireshark_channels_count < 50) {
+            wireshark_channels[wireshark_channels_count++] = ch;
+        }
+    }
+    
+    #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    // 5ghz band support for esp32-c5/c6
+    if (strcmp(country.cc, "US") == 0 || strcmp(country.cc, "CA") == 0) {
+        // north america: all bands allowed
+        uint8_t us_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165};
+        for (int i = 0; i < sizeof(us_5ghz) && wireshark_channels_count < 50; i++) {
+            wireshark_channels[wireshark_channels_count++] = us_5ghz[i];
+        }
+    } else if (strcmp(country.cc, "JP") == 0) {
+        // japan: all bands with restrictions
+        uint8_t jp_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140};
+        for (int i = 0; i < sizeof(jp_5ghz) && wireshark_channels_count < 50; i++) {
+            wireshark_channels[wireshark_channels_count++] = jp_5ghz[i];
+        }
+    } else if (strcmp(country.cc, "CN") == 0) {
+        // china: limited 5ghz
+        uint8_t cn_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161, 165};
+        for (int i = 0; i < sizeof(cn_5ghz) && wireshark_channels_count < 50; i++) {
+            wireshark_channels[wireshark_channels_count++] = cn_5ghz[i];
+        }
+    } else if (strcmp(country.cc, "EU") == 0 || strcmp(country.cc, "GB") == 0 || 
+               strcmp(country.cc, "DE") == 0 || strcmp(country.cc, "FR") == 0) {
+        // europe: unii-1 and unii-2
+        uint8_t eu_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140};
+        for (int i = 0; i < sizeof(eu_5ghz) && wireshark_channels_count < 50; i++) {
+            wireshark_channels[wireshark_channels_count++] = eu_5ghz[i];
+        }
+    } else {
+        // default: unii-1 only (most permissive worldwide)
+        uint8_t default_5ghz[] = {36, 40, 44, 48};
+        for (int i = 0; i < sizeof(default_5ghz) && wireshark_channels_count < 50; i++) {
+            wireshark_channels[wireshark_channels_count++] = default_5ghz[i];
+        }
+    }
+    #endif
+    
+    ESP_LOGI(TAG, "country %s: using %d channels for Wireshark", country.cc, wireshark_channels_count);
+}
+
+// Wireshark Capture Channel Hopping Callback
+static void wireshark_channel_hop_timer_callback(void *arg) {
+    if (!wireshark_hopping_active) return;
+    wireshark_channel_index = (wireshark_channel_index + 1) % wireshark_channels_count;
+    uint8_t channel = wireshark_channels[wireshark_channel_index];
+    
+    // determine if 5ghz or 2.4ghz
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+    
+    #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    if (channel > 14) {
+        // 5ghz channel - use ht40
+        second = WIFI_SECOND_CHAN_ABOVE;
+    }
+    #endif
+    
+    esp_wifi_set_channel(channel, second);
+}
+
+void wifi_manager_start_wireshark_channel_hop(void) {
+    if (wireshark_channel_hop_timer != NULL) {
+        esp_timer_stop(wireshark_channel_hop_timer);
+        esp_timer_delete(wireshark_channel_hop_timer);
+        wireshark_channel_hop_timer = NULL;
+    }
+
+    // build country-appropriate channel list
+    wifi_manager_build_wireshark_channels();
+    if (wireshark_channels_count == 0) {
+        ESP_LOGE(TAG, "No channels available for Wireshark hopping");
+        return;
+    }
+
+    wireshark_channel_index = 0;
+    esp_wifi_set_channel(wireshark_channels[wireshark_channel_index], WIFI_SECOND_CHAN_NONE);
+
+    esp_timer_create_args_t timer_args = {
+        .callback = wireshark_channel_hop_timer_callback,
+        .name = "wireshark_hop"
+    };
+
+    esp_err_t err = esp_timer_create(&timer_args, &wireshark_channel_hop_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create Wireshark channel hop timer");
+        return;
+    }
+
+    err = esp_timer_start_periodic(wireshark_channel_hop_timer, WIRESHARK_CHANNEL_HOP_INTERVAL_MS * 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start Wireshark channel hop timer");
+        esp_timer_delete(wireshark_channel_hop_timer);
+        wireshark_channel_hop_timer = NULL;
+        return;
+    }
+
+    wireshark_hopping_active = true;
+    ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", wireshark_channels_count);
+}
+
+void wifi_manager_stop_wireshark_channel_hop(void) {
+    if (wireshark_channel_hop_timer) {
+        esp_timer_stop(wireshark_channel_hop_timer);
+        esp_timer_delete(wireshark_channel_hop_timer);
+        wireshark_channel_hop_timer = NULL;
+        wireshark_hopping_active = false;
+        ESP_LOGI(TAG, "Wireshark Channel Hopping Stopped.");
+    }
+}
+
+esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
+    // Validate channel range based on target
+    uint8_t max_channel = MAX_WIFI_CHANNEL;
+    
+    if (channel < 1 || channel > max_channel) {
+        ESP_LOGE(TAG, "Invalid channel %d. Must be between 1 and %d", channel, max_channel);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Stop any existing channel hopping
+    wifi_manager_stop_wireshark_channel_hop();
+    
+    // Set the fixed channel
+    esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set channel %d: %s", channel, esp_err_to_name(err));
+        return err;
+    }
+    
+    ESP_LOGI(TAG, "Wireshark capture locked to channel %d", channel);
+    return ESP_OK;
 }
 
 // Function to specifically start station scanning with channel hopping

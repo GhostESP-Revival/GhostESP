@@ -29,7 +29,9 @@ const char *get_app_path(DIALAppType app);
 
 bool launch_app(DIALManager *manager, DIALAppType app, const char *appUrl);
 
-void explore_network(DIALManager *manager);
+bool launch_youtube_with_video(DIALManager *manager, const char *appUrl, const char *video_id);
+
+void explore_network(DIALManager *manager, bool cast_all);
 
 char *get_dial_application_url(const char *location_url);
 

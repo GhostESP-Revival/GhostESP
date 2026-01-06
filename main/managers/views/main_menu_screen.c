@@ -313,12 +313,15 @@ static void animate_nav_button_press(lv_obj_t *btn) {
 
 static void button_click_anim_cb(lv_anim_t *a) {
     if (pending_view_to_switch) {
-        if (pending_view_to_switch == &options_menu_view)
+        if (pending_view_to_switch == &options_menu_view) {
             SelectedMenuType = pending_menu_type;
+            ESP_LOGI(TAG, "button_click_anim_cb: Set SelectedMenuType=%d for options menu", SelectedMenuType);
+        }
         display_manager_switch_view((View *)pending_view_to_switch);
         pending_view_to_switch = NULL;
     }
 }
+
 static void animate_button_click(lv_obj_t *btn) {
     // Animate opacity down and back up
     int anim_duration = ANIM_DURATION / 8; // Half duration for click effect - divide by 8 for faster click effect
@@ -538,7 +541,7 @@ static void menu_item_event_handler(InputEvent *event) {
                         }
                     } else if (current_layout == MENU_LAYOUT_LIST) {
                         if (menu_container) {
-                            lv_obj_scroll_by_bounded(menu_container, 0, -dy, LV_ANIM_OFF);
+                            lv_obj_scroll_by_bounded(menu_container, 0, dy, LV_ANIM_OFF);
                         }
                     } else if (current_layout == MENU_LAYOUT_GRID) {
                         if (grid_buttons && grid_buttons[0]) {
@@ -677,7 +680,7 @@ static void menu_item_event_handler(InputEvent *event) {
                 // Handle vertical swipe for list scrolling
                 if (abs(dy) > SWIPE_THRESHOLD && abs(dy) > abs(dx)) {
                     if (menu_container) {
-                        lv_obj_scroll_by_bounded(menu_container, 0, -dy, LV_ANIM_OFF);
+                        lv_obj_scroll_by_bounded(menu_container, 0, dy, LV_ANIM_OFF);
                     }
                     return;
                 }
@@ -905,8 +908,10 @@ static void handle_menu_item_selection(int item_index) {
     if (anim_target) {
         animate_button_click(anim_target);
     } else {
+        ESP_LOGI(TAG, "No animation target found for menu item selection");
         if (pending_view_to_switch == &options_menu_view) {
             SelectedMenuType = pending_menu_type;
+            ESP_LOGI(TAG, "handle_menu_item_selection: Set SelectedMenuType=%d for options menu (no animation)", SelectedMenuType);
         }
         display_manager_switch_view((View *)pending_view_to_switch);
         pending_view_to_switch = NULL;

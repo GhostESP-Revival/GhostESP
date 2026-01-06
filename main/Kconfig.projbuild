@@ -310,11 +310,11 @@ menu "Ghost ESP Options"
                 Enable ADC battery readings
                 
         config ADC_BATTERY_PIN
-            int "Pin for reading ADC measurements - Unused atm."
+            int "Pin for reading ADC measurements"
             default -1
             depends on HAS_BATTERY_ADC
             help
-                Set ADC battery pin - Unused atm.
+                Set ADC battery pin (GPIO4 for T-Deck, GPIO10 for Cardputer)
 
         config HAS_FUEL_GAUGE
             bool "Enable Fuel Gauge Support"

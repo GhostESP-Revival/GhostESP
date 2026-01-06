@@ -96,6 +96,11 @@ void rgb_manager_power_transition_begin(void);
 
 void rgb_manager_power_transition_end(void);
 
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+void rgb_manager_rmt_release(void);
+void rgb_manager_rmt_reacquire(void);
+#endif
+
 extern RGBManager_t rgb_manager;
 
 TaskHandle_t rgb_effect_task_handle;

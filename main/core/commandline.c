@@ -711,16 +711,15 @@ void handle_select_cmd(int argc, char **argv) {
     }
 }
 
+static bool g_dial_cast_all = false;
+
 void discover_task(void *pvParameter) {
     DIALClient client;
     DIALManager manager;
 
     if (dial_client_init(&client) == ESP_OK) {
-
         dial_manager_init(&manager, &client);
-
-        explore_network(&manager);
-
+        explore_network(&manager, g_dial_cast_all);
         dial_client_deinit(&client);
     } else {
         glog("Failed to init DIAL client.\n");
@@ -822,14 +821,13 @@ void handle_stop_flipper(int argc, char **argv) {
 }
 
 void handle_dial_command(int argc, char **argv) {
-    // Usage: dial [device_name]
-    if (argc > 2) {
-        glog("Usage: %s [device_name]\n", argv[0]);
-        return;
-    }
-    // If a device name is provided, set it before discovery
-    if (argc == 2) {
-        dial_manager_set_device_name(argv[1]);
+    g_dial_cast_all = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "all") == 0 || strcmp(argv[i], "-a") == 0) {
+            g_dial_cast_all = true;
+        } else {
+            dial_manager_set_device_name(argv[i]);
+        }
     }
     xTaskCreate(&discover_task, "discover_task", DISCOVER_TASK_STACK, NULL, 5, NULL);
 }
@@ -1362,7 +1360,7 @@ void handle_status_idle_cmd(int argc, char **argv) {
 #endif
 
 void handle_capture_scan(int argc, char **argv) {
-    if (argc < 2 || argc > 3) {
+    if (argc < 2 || argc > 4) {
         glog("Error: Incorrect number of arguments.\n");
         status_display_show_status("Capture Usage");
         return;
@@ -1374,6 +1372,21 @@ void handle_capture_scan(int argc, char **argv) {
         glog("Error: Capture Type cannot be empty.\n");
         status_display_show_status("Capture Empty");
         return;
+    }
+    
+    // Parse channel parameter if present
+    uint8_t fixed_channel = 0;
+    bool use_fixed_channel = false;
+    
+    if (argc >= 4 && strcmp(argv[2], "-c") == 0) {
+        fixed_channel = atoi(argv[3]);
+        use_fixed_channel = true;
+        
+        if (fixed_channel < 1 || fixed_channel > MAX_WIFI_CHANNEL) {
+            glog("Error: Invalid channel %d. Must be between 1 and %d\n", fixed_channel, MAX_WIFI_CHANNEL);
+            status_display_show_status("Invalid Channel");
+            return;
+        }
     }
 
     if (strcmp(capturetype, "-probe") == 0) {
@@ -1488,8 +1501,43 @@ void handle_capture_scan(int argc, char **argv) {
         status_display_show_status("Capture WPS");
     }
 
+    if (strcmp(capturetype, "-wireshark") == 0) {
+        status_display_show_status("Wireshark WiFi");
+        int err = pcap_wireshark_start(PCAP_CAPTURE_WIFI);
+        if (err != ESP_OK) {
+            status_display_show_status("Wireshark Err");
+            return;
+        }
+        wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
+        
+        if (use_fixed_channel) {
+            err = wifi_manager_set_wireshark_fixed_channel(fixed_channel);
+            if (err != ESP_OK) {
+                glog("Error: Failed to set fixed channel %d\n", fixed_channel);
+                status_display_show_status("Channel Err");
+                return;
+            }
+            glog("Wireshark capture locked to channel %d\n", fixed_channel);
+        } else {
+            wifi_manager_start_wireshark_channel_hop();
+        }
+    }
+
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    if (strcmp(capturetype, "-wiresharkble") == 0) {
+        status_display_show_status("Wireshark BLE");
+        int err = pcap_wireshark_start(PCAP_CAPTURE_BLUETOOTH);
+        if (err != ESP_OK) {
+            status_display_show_status("Wireshark Err");
+            return;
+        }
+        ble_start_capture_wireshark();
+    }
+#endif
+
     if (strcmp(capturetype, "-stop") == 0) {
         glog("Stopping packet capture...\n");
+        wifi_manager_stop_wireshark_channel_hop();
         wifi_manager_stop_monitor_mode();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
         ble_stop();
@@ -1498,6 +1546,7 @@ void handle_capture_scan(int argc, char **argv) {
         zigbee_manager_stop_capture();
 #endif
         pcap_file_close();
+        pcap_wireshark_stop();
         status_display_show_status("Capture Stop");
     }
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -3925,16 +3974,19 @@ void handle_help(int argc, char **argv) {
         glog("    Description: Start a WiFi Capture (Requires SD Card or Flipper)\n");
         glog("    Usage: capture [OPTION]\n");
         glog("    Arguments:\n");
-        glog("        -probe   : Start Capturing Probe Packets\n");
-        glog("        -beacon  : Start Capturing Beacon Packets\n");
-        glog("        -deauth   : Start Capturing Deauth Packets\n");
-        glog("        -raw   :   Start Capturing Raw Packets\n");
-        glog("        -wps   :   Start Capturing WPS Packets and there Auth Type\n");
-        glog("        -pwn   :   Start Capturing Pwnagotchi Packets\n");
+        glog("        -probe     : Start Capturing Probe Packets\n");
+        glog("        -beacon    : Start Capturing Beacon Packets\n");
+        glog("        -deauth    : Start Capturing Deauth Packets\n");
+        glog("        -raw       : Start Capturing Raw Packets\n");
+        glog("        -wps       : Start Capturing WPS Packets and there Auth Type\n");
+        glog("        -pwn       : Start Capturing Pwnagotchi Packets\n");
+        glog("        -wireshark : Stream raw PCAP to USB/UART for Wireshark\n");
+        glog("                    Usage: capture -wireshark [-c <channel>]\n");
+        glog("                    -c <channel>: Lock to specific channel (1-%d)\n", MAX_WIFI_CHANNEL);
         #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        glog("        -802154:   Start Capturing IEEE 802.15.4 Packets [C5/C6]\n");
+        glog("        -802154    : Start Capturing IEEE 802.15.4 Packets [C5/C6]\n");
         #endif
-        glog("        -stop   : Stops the active capture\n\n");
+        glog("        -stop      : Stops the active capture\n\n");
         glog("capture\n");
         glog("    Start a WiFi packet capture.\n");
         glog("    Usage: capture [OPTION]\n");

@@ -1030,7 +1030,7 @@ static void universal_transmit_task(void *arg) {
                 else if (strncmp(s, "data:",5)==0) {
                     char *p=s+5; size_t cnt=0; char *t=p;
                     while(*t){while(*t&&isspace((unsigned char)*t))t++;if(!*t)break;cnt++;while(*t&&!isspace((unsigned char)*t))t++;}
-                    uint32_t *arr=malloc(cnt*sizeof(uint32_t)); size_t ii=0; char *endp;
+                    uint32_t *arr=heap_caps_malloc(cnt*sizeof(uint32_t), MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM); size_t ii=0; char *endp;
                     while(*p){while(*p&&isspace((unsigned char)*p))p++;if(!*p)break;arr[ii++]=strtoul(p,&endp,10);p=endp;}
                     sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt;
                 }
@@ -2329,7 +2329,10 @@ static void command_event_execute(int idx) {
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(label);
 
-        UniversalTransmitArgs_t *args = malloc(sizeof(UniversalTransmitArgs_t));
+        UniversalTransmitArgs_t *args = heap_caps_malloc(sizeof(UniversalTransmitArgs_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!args) {
+            args = heap_caps_malloc(sizeof(UniversalTransmitArgs_t), MALLOC_CAP_DEFAULT);
+        }
         if (!args) {
             printf("Failed to allocate args for universal transmit task\n");
             cleanup_transmit_popup(NULL);
@@ -2339,12 +2342,25 @@ static void command_event_execute(int idx) {
         args->path[sizeof(args->path)-1] = '\0';
         strncpy(args->command, uni_command_names[idx], sizeof(args->command)-1);
         args->command[sizeof(args->command)-1] = '\0';
-        if (xTaskCreate(universal_transmit_task, "uni_tx_task", 4096, args, tskIDLE_PRIORITY + 1, &universal_task_handle) != pdPASS) {
-            printf("universals job task create failed\n");
-            cleanup_transmit_popup(NULL);
-            free(args);
-            universal_task_handle = NULL;
-            return;
+#if CONFIG_SPIRAM
+        static StaticTask_t s_uni_tx_tcb;
+        static StackType_t *s_uni_tx_stack = NULL;
+        if (!s_uni_tx_stack) {
+            s_uni_tx_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (s_uni_tx_stack) {
+            universal_task_handle = xTaskCreateStatic(universal_transmit_task, "uni_tx_task", 4096, args, tskIDLE_PRIORITY + 1, s_uni_tx_stack, &s_uni_tx_tcb);
+        }
+        if (!universal_task_handle)
+#endif
+        {
+            if (xTaskCreate(universal_transmit_task, "uni_tx_task", 4096, args, tskIDLE_PRIORITY + 1, &universal_task_handle) != pdPASS) {
+                printf("universals job task create failed\n");
+                cleanup_transmit_popup(NULL);
+                heap_caps_free(args);
+                universal_task_handle = NULL;
+                return;
+            }
         }
         printf("universals job task created\n");
         return;

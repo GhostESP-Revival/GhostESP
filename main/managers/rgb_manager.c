@@ -316,7 +316,7 @@ esp_err_t rgb_manager_init(RGBManager_t *rgb_manager, gpio_num_t pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,   // Portable default clock source
         .resolution_hz = 5 * 1000 * 1000, // 5 MHz resolution
 #ifdef CONFIG_IDF_TARGET_ESP32C5
-        .mem_block_symbols = 96,
+        .mem_block_symbols = 48, // Use 1 channel's worth to leave room for IR TX
 #endif
 #if SOC_RMT_SUPPORT_DMA
         .flags.with_dma = 1               // Use DMA to reduce flicker under load
@@ -571,8 +571,7 @@ esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
     // Handle single pin LED strip using RMT
 
     if (!rgb_manager->strip) {
-      ESP_LOGE(TAG, "LED strip handle is NULL");
-      return ESP_ERR_INVALID_STATE; // Not initialized
+      return ESP_OK; // No LED strip configured - silently ignore
     }
 
     if (pulse && rgb_manager->num_leds <= 1) {
@@ -871,6 +870,42 @@ void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms) {
 
   rgb_manager_set_color(rgb_manager, target, 0, 0, 0, false);
 }
+
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+static gpio_num_t s_saved_rgb_pin = GPIO_NUM_NC;
+static int s_saved_num_leds = 0;
+static led_pixel_format_t s_saved_pixel_format = LED_PIXEL_FORMAT_GRB;
+
+void rgb_manager_rmt_release(void) {
+  if (rgb_manager.is_separate_pins || !rgb_manager.strip) return;
+  s_saved_rgb_pin = rgb_manager.pin;
+  s_saved_num_leds = rgb_manager.num_leds;
+  led_strip_clear(rgb_manager.strip);
+  led_strip_refresh(rgb_manager.strip);
+  led_strip_del(rgb_manager.strip);
+  rgb_manager.strip = NULL;
+}
+
+void rgb_manager_rmt_reacquire(void) {
+  if (rgb_manager.is_separate_pins || rgb_manager.strip || s_saved_rgb_pin == GPIO_NUM_NC) return;
+  led_strip_config_t strip_config = {
+    .strip_gpio_num = s_saved_rgb_pin,
+    .max_leds = s_saved_num_leds,
+    .led_pixel_format = s_saved_pixel_format,
+    .led_model = LED_MODEL_WS2812,
+    .flags.invert_out = 0
+  };
+  led_strip_rmt_config_t rmt_config = {
+    .clk_src = RMT_CLK_SRC_DEFAULT,
+    .resolution_hz = 5 * 1000 * 1000,
+    .mem_block_symbols = 48,
+    .flags.with_dma = 0
+  };
+  if (led_strip_new_rmt_device(&strip_config, &rmt_config, &rgb_manager.strip) == ESP_OK) {
+    led_strip_clear(rgb_manager.strip);
+  }
+}
+#endif
 
 // Deinitialize the RGB LED manager
 esp_err_t rgb_manager_deinit(RGBManager_t *rgb_manager) {

@@ -720,7 +720,37 @@ void apps_menu_event_handler(InputEvent *event) {
             }
 
             if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
-                handle_app_item_selection(selected_app_index);
+                // Check which app button was actually tapped
+                if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
+                    for (int i = 0; i < num_apps; i++) {
+                        if (apps_list_buttons[i]) {
+                            lv_area_t btn_area;
+                            lv_obj_get_coords(apps_list_buttons[i], &btn_area);
+                            if (data->point.x >= btn_area.x1 && data->point.x <= btn_area.x2 &&
+                                data->point.y >= btn_area.y1 && data->point.y <= btn_area.y2) {
+                                select_app_item(i, false);
+                                handle_app_item_selection(i);
+                                return;
+                            }
+                        }
+                    }
+                } else if (apps_layout == APPS_LAYOUT_GRID_CARDS && apps_grid_cards) {
+                    for (int i = 0; i < num_apps; i++) {
+                        if (apps_grid_cards[i]) {
+                            lv_area_t card_area;
+                            lv_obj_get_coords(apps_grid_cards[i], &card_area);
+                            if (data->point.x >= card_area.x1 && data->point.x <= card_area.x2 &&
+                                data->point.y >= card_area.y1 && data->point.y <= card_area.y2) {
+                                select_app_item(i, false);
+                                handle_app_item_selection(i);
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    // Carousel layout - use current selection
+                    handle_app_item_selection(selected_app_index);
+                }
                 return;
             }
         }

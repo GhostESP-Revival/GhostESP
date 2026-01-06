@@ -37,6 +37,24 @@ static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 
+int serial_manager_write_bytes(const void *data, size_t len) {
+  if (data == NULL || len == 0) {
+    return 0;
+  }
+
+  int written = 0;
+
+  if (!s_uart_disabled) {
+    written = uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
+  }
+
+#if JTAG_SUPPORTED
+  usb_serial_jtag_write_bytes((const uint8_t *)data, (uint32_t)len, 0);
+#endif
+
+  return written;
+}
+
 // Cursor position tracking
 static int cursor_position = 0;
 
