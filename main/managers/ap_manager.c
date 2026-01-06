@@ -1066,11 +1066,10 @@ void ap_manager_stop_services() {
     if (err == ESP_OK) {
         if (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_STA ||
             wifi_mode == WIFI_MODE_APSTA) {
-            glog("Stopping Wi-Fi...\n");
             ESP_ERROR_CHECK(esp_wifi_stop());
         }
     } else {
-        glog("Failed to get Wi-Fi mode, error: %d\n", err);
+        ESP_LOGE(TAG, "Failed to get Wi-Fi mode, error: %d", err);
     }
 
     vTaskDelay(pdMS_TO_TICKS(100));

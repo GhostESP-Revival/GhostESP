@@ -2030,9 +2030,7 @@ void ble_deinit(void) {
 }
 
 void ble_stop(void) {
-    ESP_LOGI(TAG_BLE, "ble_stop called, ble_initialized=%d", ble_initialized);
     if (!ble_initialized) {
-        ESP_LOGW(TAG_BLE, "ble_stop: BLE not initialized, skipping");
         return;
     }
 
