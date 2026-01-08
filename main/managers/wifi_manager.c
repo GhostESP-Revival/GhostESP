@@ -1806,7 +1806,7 @@ void wifi_manager_start_scan() {
         .show_hidden = true,
         .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}};
 
-    rgb_manager_set_color(&rgb_manager, -1, 128, 0, 255, false);
+    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
     printf("WiFi Scan started\n");
     #ifdef CONFIG_IDF_TARGET_ESP32C5
@@ -4576,7 +4576,7 @@ void wifi_manager_start_scan_with_time(int seconds) {
         .show_hidden = true
     };
 
-    rgb_manager_set_color(&rgb_manager, -1, 128, 0, 255, false);
+    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);

@@ -267,6 +267,7 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     esp_wifi_stop();
     esp_wifi_start();
 
+    glog("WiFi scan stopped.\n");
     status_display_show_status("Scan Stopped");
 }
 
@@ -805,6 +806,7 @@ void handle_stop_flipper(int argc, char **argv) {
 #endif
     // ensure pcap is properly flushed and closed
     pcap_file_close();
+    glog("All activities stopped.\n");
     status_display_show_status("All Stopped");
 
     // kill any feature tasks we spawned that may still be around
