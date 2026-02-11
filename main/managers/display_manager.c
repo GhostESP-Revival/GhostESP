@@ -24,6 +24,7 @@
 #include "driver/ledc.h"
 #include <limits.h> // for UINT32_MAX
 #include "managers/ap_manager.h"
+#include "managers/wifi_manager.h"
 #include "core/serial_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/rgb_manager.h"
@@ -65,49 +66,10 @@ QueueHandle_tt input_queue = NULL;
 static volatile bool g_low_i2c_mode = false;
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
-// Background polling to avoid blocking LVGL timer with I2C operations
-static TaskHandle_t battery_poll_task_handle = NULL;
+// Background polling logic moved to get_battery_info (lazy loading)
 static volatile uint8_t g_cached_batt_percent = 0;
 static volatile bool g_cached_batt_charging = false;
 static volatile bool g_cached_batt_valid = false;
-static void battery_poll_task(void *arg) {
-  fuel_gauge_data_t fg;
-  uint8_t last_pct = 0xFF;
-  bool last_chg = false;
-  int stable = 0;
-  uint32_t delay_ms = 2000;
-  for (;;) {
-    // In low-I2C mode, pause polling to avoid I2C contention
-    if (g_low_i2c_mode) {
-      vTaskDelay(pdMS_TO_TICKS(5000));
-      continue;
-    }
-    if (fuel_gauge_manager_get_data(&fg)) {
-      g_cached_batt_percent = (uint8_t)fg.percentage;
-      g_cached_batt_charging = fg.is_charging;
-      g_cached_batt_valid = true;
-      if (last_pct == g_cached_batt_percent && last_chg == g_cached_batt_charging) {
-        if (stable < 6) stable++;
-      } else {
-        stable = 0;
-      }
-      last_pct = g_cached_batt_percent;
-      last_chg = g_cached_batt_charging;
-    }
-    if (!g_cached_batt_valid) {
-      delay_ms = 2000;
-    } else if (g_cached_batt_charging) {
-      delay_ms = 1000;
-    } else if (stable >= 6) {
-      delay_ms = 15000;
-    } else if (stable >= 3) {
-      delay_ms = 5000;
-    } else {
-      delay_ms = 2000;
-    }
-    vTaskDelay(pdMS_TO_TICKS(delay_ms));
-  }
-}
 #endif
 
 #ifdef CONFIG_HAS_RTC_CLOCK
@@ -205,6 +167,8 @@ static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
 static TaskHandle_t input_task_handle = NULL;
 static lv_timer_t *status_update_timer = NULL;
+static lv_timer_t *rainbow_timer = NULL;
+static uint16_t rainbow_hue = 0;
 static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
 static bool is_backlight_dimmed = false;
@@ -528,7 +492,8 @@ int getBattery() {
     ESP_LOGD(TAG, "Battery ADC raw: %d, mV: %d", raw, mv);
 
     // Check for unrealistic voltage values
-    if (mv < 2500 || mv > 5000) {
+    // Lower threshold allows for very dead batteries (down to ~2.0V)
+    if (mv < 2000 || mv > 5000) {
         ESP_LOGW(TAG, "Battery voltage out of range: %d mV", mv);
         return -1;
     }
@@ -647,7 +612,19 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
     }
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
-    // Use cached fuel gauge values updated by background task (non-blocking)
+    // Lazy poll on UI thread with rate limiting (every 5s)
+    static int64_t last_poll_time = 0;
+    int64_t now = esp_timer_get_time() / 1000;
+    if (!g_cached_batt_valid || (now - last_poll_time > 5000)) {
+        fuel_gauge_data_t fg;
+        if (fuel_gauge_manager_get_data(&fg)) {
+            g_cached_batt_percent = (uint8_t)fg.percentage;
+            g_cached_batt_charging = fg.is_charging;
+            g_cached_batt_valid = true;
+            last_poll_time = now;
+        }
+    }
+
     if (g_cached_batt_valid) {
         *percentage = g_cached_batt_percent;
         *is_charging = g_cached_batt_charging;
@@ -704,7 +681,7 @@ void fade_in_cb(void *obj, int32_t v) {
   }
 }
 
-void rainbow_effect_cb(lv_timer_t *timer) {
+static void rainbow_effect_cb(lv_timer_t *timer) {
   if (!status_bar || !lv_obj_is_valid(status_bar)) {
     return;
   }
@@ -732,6 +709,22 @@ void rainbow_effect_cb(lv_timer_t *timer) {
   }
 
   lv_obj_invalidate(status_bar);
+}
+
+void display_manager_set_rainbow_mode(bool enable) {
+  if (enable) {
+    if (rainbow_timer == NULL) {
+      rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
+      rainbow_hue = 0;
+    }
+  } else {
+    if (rainbow_timer != NULL) {
+      lv_timer_del(rainbow_timer);
+      rainbow_timer = NULL;
+      // Reset status bar color when leaving rainbow mode
+      display_manager_update_status_bar_color();
+    }
+  }
 }
 
 
@@ -1145,11 +1138,13 @@ void apply_power_management_config(bool power_save_enabled) {
   ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s", power_save_enabled ? "enabled" : "disabled");
 #endif
 
-  // control ap based on power save mode
-  if (power_save_enabled) {
-    ap_manager_stop_services();
-  } else {
-    ap_manager_start_services();
+  // control ap based on power save mode and AP enabled setting
+  if (!wifi_manager_is_evil_portal_active()) {
+    if (power_save_enabled) {
+      ap_manager_stop_services();
+    } else if (settings_get_ap_enabled(&G_Settings)) {
+      ap_manager_start_services();
+    }
   }
 }
 
@@ -1362,15 +1357,20 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
 #ifdef CONFIG_HAS_BATTERY
   axp2101_init();
-  pcf8563_init(I2C_NUM_1, 0x51);
+#endif
+
+#ifdef CONFIG_HAS_RTC_CLOCK
+  rtc_chip_type_t chip_type = (rtc_chip_type_t)CONFIG_RTC_CHIP_TYPE;
+  const char* chip_names[] = {"PCF8563", "DS1307", "DS3231"};
+  rtc_init(CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS, chip_type);
+  ESP_LOGI(TAG, "RTC initialized: %s on I2C port %d at address 0x%02X (SDA: %d, SCL: %d)", 
+           chip_names[CONFIG_RTC_CHIP_TYPE], CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS, 
+           CONFIG_RTC_I2C_SDA_PIN, CONFIG_RTC_I2C_SCL_PIN);
 #endif
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
   if (fuel_gauge_manager_init()) {
     ESP_LOGI(TAG, "Fuel gauge manager initialized successfully");
-    if (battery_poll_task_handle == NULL) {
-      xTaskCreate(battery_poll_task, "battery_poll", 4096, NULL, 5, &battery_poll_task_handle);
-    }
   } else {
     ESP_LOGW(TAG, "Failed to initialize fuel gauge manager");
   }
@@ -1400,6 +1400,16 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     // GPIO 6 exit button is TEmbed C1101 only
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
         joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
+    }
+    
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        ESP_LOGI(TAG, "Initializing TSC2007 touch driver for The Banshee");
+        // Register touch driver with LVGL
+        static lv_indev_drv_t indev_drv;
+        lv_indev_drv_init(&indev_drv);
+        indev_drv.type = LV_INDEV_TYPE_POINTER;
+        indev_drv.read_cb = touch_driver_read;
+        lv_indev_drv_register(&indev_drv);
     }
 #endif
 #endif
@@ -1551,12 +1561,11 @@ void set_backlight_brightness(uint8_t percentage) {
     // Clamp to user setting
     uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
 
-    //if (percentage > max_brightness) percentage = max_brightness;
+    // if (percentage > max_brightness) percentage = max_brightness;
 
     //scale percent by max_brightness
     percentage = (percentage * max_brightness) / 100;
     if (percentage > 100) percentage = 100;
-    if (percentage < 0) percentage = 0;
 
 #ifdef CONFIG_USE_TDISPLAY_S3
     // TDisplay S3 backlight now uses LEDC for PWM control
@@ -1621,13 +1630,15 @@ void set_backlight_brightness(uint8_t percentage) {
         if (terminal_update_timer) lv_timer_pause(terminal_update_timer);
         if (clock_timer)           lv_timer_pause(clock_timer);
         {
-            wifi_config_t cfg;
-            if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
-                original_beacon_interval = cfg.ap.beacon_interval;
-                cfg.ap.beacon_interval = 1000;
-                esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+            if (!wifi_manager_is_evil_portal_active()) {
+                wifi_config_t cfg;
+                if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
+                    original_beacon_interval = cfg.ap.beacon_interval;
+                    cfg.ap.beacon_interval = 1000;
+                    esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+                }
+                esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
             }
-            esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
         }
         esp_light_sleep_start();
 
@@ -1648,11 +1659,13 @@ void set_backlight_brightness(uint8_t percentage) {
         if (terminal_update_timer) lv_timer_resume(terminal_update_timer);
         if (clock_timer)           lv_timer_resume(clock_timer);
         {
-            esp_wifi_set_ps(WIFI_PS_NONE);
-            wifi_config_t cfg;
-            if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
-                cfg.ap.beacon_interval = original_beacon_interval;
-                esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+            if (!wifi_manager_is_evil_portal_active()) {
+                esp_wifi_set_ps(WIFI_PS_NONE);
+                wifi_config_t cfg;
+                if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
+                    cfg.ap.beacon_interval = original_beacon_interval;
+                    esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+                }
             }
         }
     }
@@ -1731,6 +1744,8 @@ static char tdeck_raw_to_char(int col, int row, bool shift, bool symbol) {
 }
 #endif
 
+
+
 void hardware_input_task(void *pvParameters) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
 
@@ -1739,8 +1754,9 @@ void hardware_input_task(void *pvParameters) {
   uint16_t calData[5] = {339, 3470, 237, 3438, 2};
   bool touch_active = false;
   int screen_width = LV_HOR_RES;
-  int screen_height = LV_VER_RES;
+#ifdef CONFIG_IS_S3TWATCH
   bool was_woken_by_interrupt = false; // New flag for S3T-Watch
+#endif
 #ifdef CONFIG_USE_TDECK
   static uint8_t last_tdeck_key = 0;
   static uint32_t last_tdeck_key_ms = 0;
@@ -1879,6 +1895,7 @@ void hardware_input_task(void *pvParameters) {
     }
 #endif
 
+
 // Check for wake interrupt when dimmed
 #ifdef CONFIG_IS_S3TWATCH
     if (is_backlight_dimmed && xSemaphoreTake(wake_up_sem, 0) == pdTRUE) {
@@ -2000,7 +2017,7 @@ void hardware_input_task(void *pvParameters) {
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
             esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0);
 #elif SOC_PM_SUPPORT_EXT1_WAKEUP
-            esp_err_t ret = esp_sleep_enable_ext1_wakeup_io(1ULL << GPIO_NUM_6, ESP_EXT1_WAKEUP_ALL_LOW);
+            esp_err_t ret = esp_sleep_enable_ext1_wakeup_io(1ULL << GPIO_NUM_6, ESP_EXT1_WAKEUP_ANY_LOW);
 #else
             esp_err_t ret = ESP_ERR_NOT_SUPPORTED;
 #endif
@@ -2213,7 +2230,17 @@ void hardware_input_task(void *pvParameters) {
 #endif
  #endif
 
+    bool enable_touch_polling = false;
 #ifdef CONFIG_USE_TOUCHSCREEN
+    enable_touch_polling = true;
+#endif
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        enable_touch_polling = true;
+    }
+#endif
+
+    if (enable_touch_polling) {
 
 #ifdef CONFIG_JC3248W535EN_LCD
     touch_driver_read_axs15231b(&touch_driver, &touch_data);
@@ -2262,7 +2289,7 @@ void hardware_input_task(void *pvParameters) {
       touch_active = false;
     }
 
-#endif
+    } // enable_touch_polling
 
     // backlight dim logic
     uint32_t current_timeout = G_Settings.display_timeout_ms;

@@ -16,7 +16,6 @@ banned_words.json
 /logs
 sdkconfig.old
 dependencies.lock
-dependencies.lock
 sdkconfig.default
 idf55.ps1
 /scripts/site/node_modules
@@ -25,12 +24,11 @@ scripts/site/package-lock.json
 scripts/site/package.json
 scripts/site/rollup.config.mjs
 /.cache
-dependencies.lock
 .venv
 ghost-control-venv
 __pycache__
 *.pyc
 local_builds
-dependencies.lock
 venv
-/docs/banshee-docs
+
+

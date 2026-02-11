@@ -4,6 +4,7 @@
 #include "managers/rgb_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
+#include "managers/status_display_manager.h"
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -997,6 +998,17 @@ void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int
     case GPS_UPDATE:
         gps = (gps_t *)event_data;
         gps_try_sync_time_from_fix(gps);
+        
+        // Add status display messages for GPS fix status
+        if (gps->valid && gps->fix >= GPS_FIX_GPS && gps->fix_mode >= GPS_MODE_2D) {
+            if (gps->fix_mode == GPS_MODE_3D) {
+                status_display_show_status("GPS 3D Lock");
+            } else {
+                status_display_show_status("GPS 2D Lock");
+            }
+        } else if (gps->valid && gps->fix == GPS_FIX_INVALID) {
+            status_display_show_status("GPS No Fix");
+        }
         break;
     default:
         break;

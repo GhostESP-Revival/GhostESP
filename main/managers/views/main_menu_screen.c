@@ -12,14 +12,22 @@
 #include "managers/views/clock_screen.h"
 #include "managers/views/settings_screen.h"
 #include "core/esp_comm_manager.h"
+#include "managers/status_display_manager.h"
 #ifdef CONFIG_HAS_NFC
 #include "managers/views/nfc_view.h"
 #endif
 #if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
 #endif
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+#include "managers/views/badusb_view.h"
+#endif
+#ifdef CONFIG_HAS_ACCELEROMETER
+#include "managers/views/accelerometer_screen.h"
+#endif
 
 LV_IMG_DECLARE(dualcomm);
+LV_IMG_DECLARE(accelerometer_icon);
 
 static const char *TAG = "MainMenu";
 
@@ -74,10 +82,10 @@ typedef struct {
 
 // Define colors as compile-time constants
 menu_item_t menu_items[] = {
+    {"WiFi", &wifi, 1, {{0}}}, // applies to all boards
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     {"BLE", &bluetooth, 0, {{0}}},
 #endif
-    {"WiFi", &wifi, 1, {{0}}}, // applies to all boards
 #ifdef CONFIG_HAS_GPS
     {"GPS", &Map, 2, {{0}}},
 #endif
@@ -87,9 +95,18 @@ menu_item_t menu_items[] = {
 #ifdef CONFIG_HAS_NFC
     {"NFC", &nfc_icon, 2, {{0}}},
 #endif
-    {"Apps", &GESPAppGallery, 3, {{0}}}, // applies to all boards
-    {"Clock", &clock_icon, 4, {{0}}},
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+    {"BadUSB", &usb, 3, {{0}}},
+#endif
     {"GhostLink", &dualcomm, 1, {{0}}},
+    {"Clock", &clock_icon, 4, {{0}}},
+#ifdef CONFIG_HAS_COMPASS
+    {"Compass", &compass, 2, {{0}}},
+#endif
+#ifdef CONFIG_HAS_ACCELEROMETER
+    {"Accelerometer", &accelerometer_icon, 4, {{0}}},
+#endif
+    {"Apps", &GESPAppGallery, 3, {{0}}}, // applies to all boards
     {"Settings", &settings_icon, 5, {{0}}}, // applies to all boards
 };
 
@@ -208,7 +225,7 @@ static void carousel_fade_out_ready_cb(lv_anim_t *a) {
         }
         carousel_cache.icon_src = new_icon;
 
-        bool wants_recolor = strcmp(menu_items[menu_index].name, "Clock") != 0;
+        bool wants_recolor = true;
         if (wants_recolor) {
             if (!carousel_cache.icon_recolor_enabled || border_changed) {
                 lv_obj_set_style_img_recolor(icon, new_border, 0);
@@ -416,7 +433,7 @@ static void update_menu_item(bool slide_left) {
     lv_obj_set_size(icon, icon_size, icon_size);
     lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
     lv_img_set_antialias(icon, false);
-    bool recolor_enabled = strcmp(menu_items[menu_index].name, "Clock") != 0;
+    bool recolor_enabled = true;
     if (recolor_enabled) {
         lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -757,7 +774,7 @@ void handle_hardware_button_press(int ButtonPressed) {
 /**
  * @brief Selects a menu item and updates the display.
  */
-static void select_menu_item(int index, bool slide_left) {
+void select_menu_item(int index, bool slide_left) {
     if (is_animating) return; // Block input during animation
     if (index < 0) index = num_items - 1;
     if (index >= num_items) index = 0;
@@ -801,20 +818,13 @@ static void select_menu_item(int index, bool slide_left) {
             // Highlight new selection
             selected_item_index = index;
             if (grid_cards[selected_item_index]) {
-                // For non-touch devices, make highlight more prominent
-#ifdef CONFIG_USE_TOUCHSCREEN
-                // Touch devices: keep original border color
-                int menu_index_new = visible_index_to_menu_index(selected_item_index, esp_comm_manager_is_connected());
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[menu_index_new].border_color, LV_PART_MAIN);
-                lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
-#else
-                // Non-touch devices: use prominent white border and larger shadow
+                // Always use prominent white border and larger shadow
                 lv_obj_set_style_border_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
                 lv_obj_set_style_border_width(grid_cards[selected_item_index], 4, LV_PART_MAIN);
                 lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 16, LV_PART_MAIN);
                 lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
                 lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
-#endif
+                
                 // Ensure selected card is visible (handle pagination) without animation
                 lv_obj_scroll_to_view(grid_cards[selected_item_index], LV_ANIM_OFF);
             }
@@ -859,6 +869,12 @@ static void handle_menu_item_selection(int item_index) {
 #ifdef CONFIG_HAS_GPS
         {"GPS", OT_GPS, &options_menu_view},
 #endif
+#ifdef CONFIG_HAS_COMPASS
+        {"Compass", 0, &compass_view},
+#endif
+#ifdef CONFIG_HAS_ACCELEROMETER
+        {"Accelerometer", 0, &accelerometer_view},
+#endif
 #if CONFIG_HAS_INFRARED
         {"Infrared", 0, &infrared_view},
 #endif
@@ -868,7 +884,10 @@ static void handle_menu_item_selection(int item_index) {
         {"Apps", 0, &apps_menu_view},
         {"Clock", 0, &clock_view},
         {"Settings", OT_Settings, &options_menu_view},
-        {"GhostLink", OT_DualComm, &options_menu_view}
+        {"GhostLink", OT_DualComm, &options_menu_view},
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+        {"BadUSB", 0, &badusb_view},
+#endif
     };
 
     const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);
@@ -880,6 +899,35 @@ static void handle_menu_item_selection(int item_index) {
     for (int i = 0; i < num_actions; ++i) {
         if (strcmp(name, menu_actions[i].name) == 0) {
             ESP_LOGI(TAG, "%s selected\n", menu_actions[i].name);
+            
+            // Add status display messages for menu navigation
+            if (strcmp(menu_actions[i].name, "WiFi") == 0) {
+                status_display_show_status("WiFi Menu");
+            } else if (strcmp(menu_actions[i].name, "BLE") == 0) {
+                status_display_show_status("BLE Menu");
+            } else if (strcmp(menu_actions[i].name, "GPS") == 0) {
+                status_display_show_status("GPS Menu");
+            } else if (strcmp(menu_actions[i].name, "Compass") == 0) {
+                status_display_show_status("Compass");
+            } else if (strcmp(menu_actions[i].name, "Infrared") == 0) {
+                status_display_show_status("Infrared Menu");
+            } else if (strcmp(menu_actions[i].name, "NFC") == 0) {
+                status_display_show_status("NFC Menu");
+            } else if (strcmp(menu_actions[i].name, "Apps") == 0) {
+                status_display_show_status("Apps Menu");
+            } else if (strcmp(menu_actions[i].name, "Clock") == 0) {
+                status_display_show_status("Clock");
+            } else if (strcmp(menu_actions[i].name, "Settings") == 0) {
+                status_display_show_status("Settings");
+            } else if (strcmp(menu_actions[i].name, "GhostLink") == 0) {
+                status_display_show_status("GhostLink");
+            } else if (strcmp(menu_actions[i].name, "BadUSB") == 0) {
+                status_display_show_status("BadUSB");
+            } else if (strcmp(menu_actions[i].name, "Accelerometer") == 0) {
+                status_display_show_status("Accelerometer");
+            }
+
+            
             target_view = menu_actions[i].view;
             target_type = menu_actions[i].type;
             break;
@@ -1007,10 +1055,8 @@ static void create_grid_menu(void) {
         lv_img_set_antialias(icon, false);
 
         // Color icons according to theme like other layouts
-        if (strcmp(menu_items[menu_index].name, "Clock")) {
-            lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
-            lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-        }
+        lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         lv_obj_set_style_clip_corner(icon, false, 0);
 
         // Scale icon using zoom to fit into available area
@@ -1050,20 +1096,15 @@ static void create_grid_menu(void) {
     int selected_menu_index = visible_index_to_menu_index(selected_item_index, connected);
 
     // Highlight selected card
+    // Highlight selected card
     if (grid_cards[selected_item_index]) {
-        // For non-touch devices, make highlight more prominent
-#ifdef CONFIG_USE_TOUCHSCREEN
-        // Touch devices: keep original border color
-        lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[selected_menu_index].border_color, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
-#else
-        // Non-touch devices: use prominent white border and larger shadow
+        // Always use prominent white border and larger shadow
         lv_obj_set_style_border_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_border_width(grid_cards[selected_item_index], 4, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 16, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
-#endif
+
         lv_obj_scroll_to_view(grid_cards[selected_item_index], LV_ANIM_OFF);
     }
 
@@ -1116,10 +1157,8 @@ static void create_list_menu(void) {
         lv_obj_t *icon = lv_img_create(btn);
         lv_img_set_src(icon, menu_items[menu_index].icon);
         lv_img_set_antialias(icon, false);
-        if (strcmp(menu_items[menu_index].name, "Clock") != 0) {
-            lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
-            lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-        }
+        lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         lv_coord_t img_w = menu_items[menu_index].icon->header.w;
         lv_coord_t img_h = menu_items[menu_index].icon->header.h;
         int zoom_w = (img_w > 0) ? (icon_target * 256) / img_w : 256;

@@ -6,6 +6,7 @@
 #include "core/screen_mirror.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
+#include "io_manager.h"
 
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
@@ -75,8 +76,9 @@ static int current_settings_category = -1;
  #define SETTINGS_ITEMS_COUNT_USB_HOST 0
 #endif
 
-#define SETTINGS_ITEMS_BASE_COUNT 14
-#define SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY (SETTINGS_ITEMS_BASE_COUNT + SETTINGS_ITEMS_COUNT_BACKLIGHT + SETTINGS_ITEMS_COUNT_STATUS + SETTINGS_ITEMS_COUNT_ENCODER + SETTINGS_ITEMS_COUNT_USB_HOST)
+#define SETTINGS_ITEMS_BASE_COUNT 15
+#define SETTINGS_ITEM_INDEX_I2C_SCAN (SETTINGS_ITEMS_BASE_COUNT + SETTINGS_ITEMS_COUNT_BACKLIGHT + SETTINGS_ITEMS_COUNT_STATUS + SETTINGS_ITEMS_COUNT_ENCODER + SETTINGS_ITEMS_COUNT_USB_HOST)
+#define SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY (SETTINGS_ITEM_INDEX_I2C_SCAN + 1)
 
 // Indices of settings for each category in the settings menu.
 // Each sub-array lists the indices of settings_items[] that belong to a category.
@@ -87,16 +89,50 @@ static int current_settings_category = -1;
 // Example: settings_category_indices[0] lists settings for category index 0.
 static int settings_category_indices[][20] = {
 #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
-        {1, 9, 2, 13, 4, 5, 11, 12,
+        {1, 9, 2, 14, 4, 5, 11, 12,
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+        15, 16,
+#endif
+        -1},
+        {6, 7, 8, 0, 10, 3, 13,
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
+        17,
+#elif defined(CONFIG_USE_ENCODER)
+        15,
+#endif
+#if CONFIG_IDF_TARGET_ESP32S3
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
+        18, 19,
+#elif defined(CONFIG_USE_ENCODER) || defined(CONFIG_WITH_STATUS_DISPLAY)
+        16, 17,
+#else
+        15, 16,
+#endif
+#else
+#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
+        18,
+#elif defined(CONFIG_USE_ENCODER)
+        16,
+#elif defined(CONFIG_WITH_STATUS_DISPLAY)
+        17,
+#else
+        15,
+#endif
+#endif
+        SETTINGS_ITEM_INDEX_I2C_SCAN,
+        SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY,
+        -1},
+#else
+        {1, 2, 13, 4, 5, 10, 11,
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         14, 15,
 #endif
         -1},
-        {6, 7, 8, 0, 10, 3,
+        {6, 7, 8, 0, 9, 3, 12,
 #if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
         16,
 #elif defined(CONFIG_USE_ENCODER)
-        14,
+        15,
 #endif
 #if CONFIG_IDF_TARGET_ESP32S3
 #if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
@@ -117,39 +153,7 @@ static int settings_category_indices[][20] = {
         14,
 #endif
 #endif
-        SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY,
-        -1},
-#else
-        {1, 2, 12, 4, 5, 10, 11,
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-        13, 14,
-#endif
-        -1},
-        {6, 7, 8, 0, 9, 3,
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        15,
-#elif defined(CONFIG_USE_ENCODER)
-        14,
-#endif
-#if CONFIG_IDF_TARGET_ESP32S3
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        16, 17,
-#elif defined(CONFIG_USE_ENCODER) || defined(CONFIG_WITH_STATUS_DISPLAY)
-        14, 15,
-#else
-        13, 14,
-#endif
-#else
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        16,
-#elif defined(CONFIG_USE_ENCODER)
-        14,
-#elif defined(CONFIG_WITH_STATUS_DISPLAY)
-        15,
-#else
-        13,
-#endif
-#endif
+        SETTINGS_ITEM_INDEX_I2C_SCAN,
         SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY,
         -1},
 #endif
@@ -306,6 +310,9 @@ static const char *dual_comm_wifi_options[] = {
     "Connect to WiFi",
     "Connect to saved WiFi",
     "Reset AP Credentials",
+    "Set AP Credentials",
+    "Enable AP",
+    "Disable AP",
     NULL
 };
 
@@ -398,7 +405,7 @@ typedef struct {
     int current_value;
 } SettingsItem;
 
-static const char *rgb_mode_options[] = {"Normal", "Rainbow", "Stealth"};
+static const char *rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", "Knight Rider", "Red", "Green", "Blue", "Yellow", "TWH Purple", "Cyan", "Orange", "White", "Pink"};
 static const char *timeout_options[] = {"5s", "10s", "30s", "60s", "Never"};
 static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest"};
 static const char *bool_options[] = {"Off", "On"};
@@ -413,41 +420,14 @@ static const char *idle_delay_options[] = {"Never", "5s", "10s", "30s"};
 #endif
 static const char *action_options[] = {"Press OK"};
 
-enum {
-    SETTING_RGB_MODE = 0,
-    SETTING_DISPLAY_TIMEOUT,
-    SETTING_MENU_THEME,
-    SETTING_THIRD_CONTROL,
-    SETTING_TERMINAL_COLOR,
-    SETTING_INVERT_COLORS,
-    SETTING_WEB_AUTH,
-    SETTING_WEBUI_AP_ONLY,
-    SETTING_AP_ENABLED,
-    SETTING_POWER_SAVE,
-    SETTING_MAX_BRIGHTNESS,
-    SETTING_NEOPIXEL_BRIGHTNESS,
-    SETTING_ZEBRA_MENUS,
-    SETTING_NAV_BUTTONS,
-    SETTING_MENU_LAYOUT,
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-    SETTING_IDLE_ANIMATION,
-    SETTING_IDLE_ANIM_DELAY,
-#endif
-#ifdef CONFIG_USE_ENCODER
-    SETTING_ENCODER_INVERT,
-#endif
-#if CONFIG_IDF_TARGET_ESP32S3
-    SETTING_USB_HOST_MODE,
-#endif
-    SETTING_RUN_SETUP_WIZARD,
-};
+// SettingsType enum moved to settings_manager.h
 
 static const char *brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
 };
 
 static SettingsItem settings_items[] = {
-    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 3, 0},
+    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 13, 0},
     {"Display Timeout", SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1},
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 15, 0},
     {"Third Control", SETTING_THIRD_CONTROL, bool_options, 2, 0},
@@ -462,6 +442,7 @@ static SettingsItem settings_items[] = {
     {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9}, // default 100%
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0},
     {"Navigation Buttons", SETTING_NAV_BUTTONS, bool_options, 2, 1},
+    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0},
     #ifdef CONFIG_WITH_STATUS_DISPLAY
     {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 9, 0},
@@ -474,6 +455,7 @@ static SettingsItem settings_items[] = {
     {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0},
     #endif
     {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0},
+    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0},
     {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1},
 };
 
@@ -674,6 +656,7 @@ static void ssh_scan_kb_cb(const char *text);
 static void dual_comm_connect_kb_cb(const char *text);
 static void dual_comm_send_kb_cb(const char *text);
 static void dual_comm_wifi_connect_kb_cb(const char *text);
+static void dual_comm_apcred_kb_cb(const char *text);
 static void dual_comm_karma_custom_ssids_cb(const char *text);
 static void dual_comm_dns_lookup_kb_cb(const char *text);
 static void dual_comm_traceroute_kb_cb(const char *text);
@@ -996,6 +979,9 @@ static void load_current_settings_values(void) {
             case SETTING_NAV_BUTTONS:
                 settings_items[i].current_value = settings_get_nav_buttons_enabled(&G_Settings) ? 1 : 0;
                 break;
+            case SETTING_AUTO_SAVE_SCANS:
+                settings_items[i].current_value = settings_get_auto_save_scans(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_MENU_LAYOUT:
             settings_items[i].current_value = settings_get_menu_layout(&G_Settings);
                 break;
@@ -1046,6 +1032,7 @@ static void apply_setting_change(int setting_index, int new_value) {
     switch (item->setting_type) {
         case SETTING_RGB_MODE:
             settings_set_rgb_mode(&G_Settings, new_value);
+            settings_restart_rgb_effect(); // Immediate visual update
             display_manager_update_status_bar_color();
             break;
         case SETTING_DISPLAY_TIMEOUT: {
@@ -1098,6 +1085,9 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_NAV_BUTTONS:
             settings_set_nav_buttons_enabled(&G_Settings, new_value == 1);
             break;
+        case SETTING_AUTO_SAVE_SCANS:
+            settings_set_auto_save_scans(&G_Settings, new_value == 1);
+            break;
         case SETTING_MENU_LAYOUT:
             settings_set_menu_layout(&G_Settings, new_value);
             // The layout change will take effect on next menu creation
@@ -1111,6 +1101,11 @@ static void apply_setting_change(int setting_index, int new_value) {
         #endif
         case SETTING_NEOPIXEL_BRIGHTNESS:
             settings_set_neopixel_max_brightness(&G_Settings, (uint8_t)((new_value + 1) * 10));
+            if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_NORMAL || 
+                settings_get_rgb_mode(&G_Settings) == RGB_MODE_STEALTH) {
+            } 
+            // Restarting the effect applies the new brightness
+            settings_restart_rgb_effect(); 
             break;
         #ifdef CONFIG_USE_ENCODER
         case SETTING_ENCODER_INVERT:
@@ -1144,8 +1139,15 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_RUN_SETUP_WIZARD:
             setup_wizard_reset_and_open();
             return;
+        case SETTING_I2C_SCAN:
+            terminal_set_return_view(&options_menu_view);
+            display_manager_switch_view(&terminal_view);
+            io_manager_scan_i2c();
+            return;
     }
-    settings_save(&G_Settings);
+    
+    // Save only the changed setting to NVS (Granular Save)
+    settings_persist_setting((SettingsType)item->setting_type);
 }
 
 static void change_current_row(bool increment)
@@ -1859,6 +1861,23 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend apcred -r");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Set AP Credentials") == 0) {
+            keyboard_view_set_submit_callback(dual_comm_apcred_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            keyboard_view_set_placeholder("\"SSID\" \"PASSWORD\"");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Enable AP") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend apenable on");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Disable AP") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend apenable off");
             view_switched = true;
         } else if (strcmp(Selected_Option, "Start Deauth Attack") == 0) {
             terminal_set_return_view(&options_menu_view);
@@ -3401,9 +3420,25 @@ static void dual_comm_karma_custom_ssids_cb(const char *input) {
     keyboard_view_set_submit_callback(NULL);
 }
 
+static void dual_comm_apcred_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter AP credentials");
+        return;
+    }
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "commsend apcred %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
 static void dual_comm_dns_lookup_kb_cb(const char *text) {
     if (!text || strlen(text) == 0) {
-        error_popup_create("Please enter a hostname");
+        error_popup_create("Enter a hostname (e.g., example.com)");
         return;
     }
 

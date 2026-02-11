@@ -303,9 +303,13 @@ Special thanks to:
 
 ---
 
-## Legal Disclaimer
+## Disclaimers
 
 Ghost ESP is intended solely for educational and ethical security research. Unauthorized or malicious use is illegal. Be sure to familiarize your local laws, and always obtain proper permissions before conducting any network tests.
+
+For guidelines on using the GhostESP name and logo, please see [BRAND GUIDELINES](BRAND_GUIDELINES.md).
+
+Interested in becoming an official partner? Email `partners@ghostesp.net`.
 
 ---
 

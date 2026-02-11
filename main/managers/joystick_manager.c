@@ -2,6 +2,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
+#include "sdkconfig.h"
 
 #ifdef CONFIG_USE_IO_EXPANDER
 #include "esp_log.h"
@@ -52,11 +54,22 @@ esp_err_t joystick_io_expander_init(void)
         .i2c_port = 0
     };
 
-    esp_err_t ret = io_manager_init(&config);
+    esp_err_t ret = ESP_FAIL;
+    int retries = 3;
+    while (retries > 0) {
+        ret = io_manager_init(&config);
+        if (ret == ESP_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "IO expander init failed (%s), retrying... (%d left)", esp_err_to_name(ret), retries - 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        retries--;
+    }
+
     if (ret == ESP_OK) {
         io_expander_initialized = true;
         ESP_LOGI(TAG, "IO expander initialized successfully");
-        
+
         // Debug: Check initial button states
         io_manager_debug_states();
     } else {

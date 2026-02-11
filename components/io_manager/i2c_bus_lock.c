@@ -35,7 +35,7 @@ static inline SemaphoreHandle_t get_mutex_for_port(int port)
     SemaphoreHandle_t *slot = &s_i2c_mutexes[port];
     if (*slot == NULL) {
         // lazy init; best-effort, caller tolerates NULL as no-op
-        SemaphoreHandle_t m = xSemaphoreCreateMutex();
+        SemaphoreHandle_t m = xSemaphoreCreateRecursiveMutex();
         if (m != NULL) {
             // benign race: if two tasks create, we keep the first stored
             if (*slot == NULL) {
@@ -54,7 +54,7 @@ bool i2c_bus_lock(int port, int timeout_ms)
     if (!mtx) return false; // locking not required or not available
     TickType_t fto = (timeout_ms <= 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
 #ifdef I2C_BUS_LOCK_HAS_FREERTOS
-    if (xSemaphoreTake(mtx, fto) == pdTRUE) return true;
+    if (xSemaphoreTakeRecursive(mtx, fto) == pdTRUE) return true;
 #else
     if (xSemaphoreTake(mtx, fto) == 1) return true;
 #endif
@@ -65,7 +65,7 @@ void i2c_bus_unlock(int port)
 {
     SemaphoreHandle_t mtx = get_mutex_for_port(port);
     if (!mtx) return;
-    xSemaphoreGive(mtx);
+    xSemaphoreGiveRecursive(mtx);
 }
 
 void *i2c_bus_get_lock_handle(void)

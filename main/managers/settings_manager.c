@@ -62,11 +62,20 @@ static const char *NVS_MENU_LAYOUT_KEY = "menu_layout";
 static const char *NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY = "neopixel_bright";
 static const char *NVS_RGB_LED_COUNT_KEY = "rgb_led_cnt";
 static const char *NVS_ENCODER_INVERT_KEY = "enc_inv";
+static const char *NVS_AUTO_SAVE_SCANS_KEY = "auto_save_sc";
 static const char *NVS_SETUP_COMPLETE_KEY = "setup_done";
 static const char *NVS_WIFI_COUNTRY_KEY = "wifi_country";
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *NVS_STATUS_IDLE_ANIM_KEY = "idle_anim"; // nvs keys must be <=15 chars
 static const char *NVS_STATUS_IDLE_TIMEOUT_KEY = "idle_to_ms";
+#endif
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+static const char *NVS_BADUSB_VID_KEY = "bu_vid";
+static const char *NVS_BADUSB_PID_KEY = "bu_pid";
+static const char *NVS_BADUSB_MFR_KEY = "bu_mfr";
+static const char *NVS_BADUSB_PROD_KEY = "bu_prod";
+static const char *NVS_BADUSB_RAND_KEY = "bu_rand";
+static const char *NVS_BADUSB_KB_KEY = "bu_kb_layout";
 #endif
 
 
@@ -167,11 +176,20 @@ void settings_set_defaults(FSettings *settings) {
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
   settings->rgb_led_count = CONFIG_NUM_LEDS;
+  settings->auto_save_scans = true;
   settings->setup_complete = false;
   settings->wifi_country = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
   settings->status_idle_timeout_ms = 5000; // default 5s
+#endif
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+  settings->badusb_vid = 0x1209;
+  settings->badusb_pid = 0x0001;
+  strcpy(settings->badusb_manufacturer, "USB Device");
+  strcpy(settings->badusb_product, "HID Keyboard");
+  settings->badusb_randomize = false;
+  settings->badusb_kb_layout = KB_LAYOUT_US;
 #endif
 }
 
@@ -481,6 +499,14 @@ void settings_load(FSettings *settings) {
     settings->nav_buttons_enabled = true; // Default to enabled if not found
   }
 
+  // Load Auto Save Scans
+  err = nvs_get_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->auto_save_scans = (bool)value_u8;
+  } else {
+    settings->auto_save_scans = true; // Default to enabled if not found
+  }
+
   // Load Menu Layout
   err = nvs_get_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -543,6 +569,26 @@ void settings_load(FSettings *settings) {
     settings->status_idle_timeout_ms = 5000; // default 5s
   }
 #endif
+
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+  err = nvs_get_u16(nvsHandle, NVS_BADUSB_VID_KEY, &value_u16);
+  if (err == ESP_OK) settings->badusb_vid = value_u16;
+
+  err = nvs_get_u16(nvsHandle, NVS_BADUSB_PID_KEY, &value_u16);
+  if (err == ESP_OK) settings->badusb_pid = value_u16;
+
+  str_size = sizeof(settings->badusb_manufacturer);
+  err = nvs_get_str(nvsHandle, NVS_BADUSB_MFR_KEY, settings->badusb_manufacturer, &str_size);
+
+  str_size = sizeof(settings->badusb_product);
+  err = nvs_get_str(nvsHandle, NVS_BADUSB_PROD_KEY, settings->badusb_product, &str_size);
+
+  err = nvs_get_u8(nvsHandle, NVS_BADUSB_RAND_KEY, &value_u8);
+  if (err == ESP_OK) settings->badusb_randomize = (bool)value_u8;
+
+  err = nvs_get_u8(nvsHandle, NVS_BADUSB_KB_KEY, &value_u8);
+  if (err == ESP_OK) settings->badusb_kb_layout = value_u8;
+#endif
 }
 
 static void update_rainbow_effect(const FSettings *settings) {
@@ -551,343 +597,214 @@ static void update_rainbow_effect(const FSettings *settings) {
 #endif
 
   if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
-    if (rainbow_timer == NULL) {
-      rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
-      rainbow_hue = 0;
-    }
+    display_manager_set_rainbow_mode(true);
   } else {
-    if (rainbow_timer != NULL) {
-      lv_timer_del(rainbow_timer);
-      rainbow_timer = NULL;
-      // Reset status bar color when leaving rainbow mode
-      display_manager_update_status_bar_color();
-    }
+    display_manager_set_rainbow_mode(false);
   }
 }
 
 
-void settings_save(const FSettings *settings) {
-  ESP_LOGI(TAG, "Starting settings save process");
-  ESP_LOGI(TAG, "Current display timeout: %lu ms",
-           settings->display_timeout_ms);
-  ESP_LOGI(TAG, "Current timezone: %s", settings->selected_timezone);
+void settings_restart_rgb_effect(void) {
+    ESP_LOGI(TAG, "Restarting RGB effect...");
+    
+    // 1. Signal any existing task to stop
+    // 1. Signal any existing task to stop
+    if (rgb_effect_task_handle != NULL) {
+        rgb_manager_signal_rainbow_exit();
+        vTaskDelay(pdMS_TO_TICKS(50));
 
-  esp_err_t err;
+        rgb_effect_task_handle = NULL;
+    }
+    
+    // Force cleanup of status bar rainbow effect if we are switching away from RAINBOW
+    // Use the *new* value directly from G_Settings to be sure.
+    if (settings_get_rgb_mode(&G_Settings) != RGB_MODE_RAINBOW) {
+        // We call update_rainbow_effect to ensure the timer is deleted
+        update_rainbow_effect(&G_Settings);
+        // And explicitly force the status bar color update just in case
+        display_manager_update_status_bar_color();
+    }
 
-  // Save RGB Mode
-  err = nvs_set_u8(nvsHandle, NVS_RGB_MODE_KEY, (uint8_t)settings->rgb_mode);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB Mode\n");
-  }
-
-  // Save Channel Delay
-  err = nvs_set_blob(nvsHandle, NVS_CHANNEL_DELAY_KEY, &settings->channel_delay,
-                     sizeof(settings->channel_delay));
-  if (err != ESP_OK) {
-    printf("Failed to save Channel Delay\n");
-  }
-
-  // Save Broadcast Speed
-  err = nvs_set_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY,
-                    settings->broadcast_speed);
-  if (err != ESP_OK) {
-    printf("Failed to save Broadcast Speed\n");
-  }
-
-  // Save AP SSID
-  err = nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, settings->ap_ssid);
-  if (err != ESP_OK) {
-    printf("Failed to save AP SSID\n");
-  }
-
-  // Save AP Password
-  err = nvs_set_str(nvsHandle, NVS_AP_PASSWORD_KEY, settings->ap_password);
-  if (err != ESP_OK) {
-    printf("Failed to save AP Password\n");
-  }
-
-  // Save RGB Speed
-  err = nvs_set_u8(nvsHandle, NVS_RGB_SPEED_KEY, settings->rgb_speed);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB Speed\n");
-  }
-
-  // Save RGB LED Count
-  err = nvs_set_u16(nvsHandle, NVS_RGB_LED_COUNT_KEY, settings->rgb_led_count);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB LED count\n");
-  }
-
-  // Save RTS Enabled
-  err = nvs_set_u8(nvsHandle, NVS_ENABLE_RTS_KEY, settings->rts_enabled);
-  if (err != ESP_OK) {
-    printf("Failed to save RTS Enabled\n");
-  }
-
-  // Save Third Control Enabled
-  err = nvs_set_u8(nvsHandle, NVS_THIRD_CTRL_KEY, settings->third_control_enabled);
-  if (err != ESP_OK) {
-    printf("Failed to save Third Control Enabled\n");
-  }
-
-  // Save Evil Portal settings
-  err = nvs_set_str(nvsHandle, NVS_PORTAL_URL_KEY, settings->portal_url);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal URL\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_PORTAL_SSID_KEY, settings->portal_ssid);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal SSID\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_PORTAL_PASSWORD_KEY,
-                    settings->portal_password);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal Password\n");
-  }
-
-  err =
-      nvs_set_str(nvsHandle, NVS_PORTAL_AP_SSID_KEY, settings->portal_ap_ssid);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal AP SSID\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_PORTAL_DOMAIN_KEY, settings->portal_domain);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal Domain\n");
-  }
-
-  err = nvs_set_u8(nvsHandle, NVS_PORTAL_OFFLINE_KEY,
-                   settings->portal_offline_mode);
-  if (err != ESP_OK) {
-    printf("Failed to save Portal Offline Mode\n");
-  }
-
-  // Save Power Printer settings
-  err = nvs_set_str(nvsHandle, NVS_PRINTER_IP_KEY, settings->printer_ip);
-  if (err != ESP_OK) {
-    printf("Failed to save Printer IP\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_PRINTER_TEXT_KEY, settings->printer_text);
-  if (err != ESP_OK) {
-    printf("Failed to save Printer Text\n");
-  }
-
-  err = nvs_set_u8(nvsHandle, NVS_PRINTER_FONT_SIZE_KEY,
-                   settings->printer_font_size);
-  if (err != ESP_OK) {
-    printf("Failed to save Printer Font Size\n");
-  }
-
-  err = nvs_set_u8(nvsHandle, NVS_PRINTER_ALIGNMENT_KEY,
-                   (uint8_t)settings->printer_alignment);
-  if (err != ESP_OK) {
-    printf("Failed to save Printer Alignment\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_FLAPPY_GHOST_NAME,
-                    settings->flappy_ghost_name);
-  if (err != ESP_OK) {
-    printf("Failed to save Flappy Ghost Name\n");
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, settings->selected_timezone);
-  if (err != ESP_OK) {
-    printf("Failed to Save Timezone String %s\n", esp_err_to_name(err));
-  }
-
-  err = nvs_set_str(nvsHandle, NVS_ACCENT_COLOR,
-                    settings->selected_hex_accent_color);
-  if (err != ESP_OK) {
-    printf("Failed to Save Hex Accent Color %s", esp_err_to_name(err));
-  }
-
-  err = nvs_set_u8(nvsHandle, NVS_GPS_RX_PIN, (uint8_t)settings->gps_rx_pin);
-  if (err != ESP_OK) {
-    printf("Failed to save Printer Alignment\n");
-  }
-
-  err = nvs_set_u32(nvsHandle, NVS_DISPLAY_TIMEOUT_KEY,
-                    settings->display_timeout_ms);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to save Display Timeout");
-  }
-
-  // Save Station SSID
-  err = nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid);
-  if (err != ESP_OK) {
-    printf("Failed to save STA SSID\n");
-  }
-
-  // Save Station Password
-  err = nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password);
-  if (err != ESP_OK) {
-    printf("Failed to save STA Password\n");
-  }
-
-  err = nvs_set_i32(nvsHandle, NVS_RGB_DATA_PIN_KEY, settings->rgb_data_pin);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB data pin\n");
-  }
-  err = nvs_set_i32(nvsHandle, NVS_RGB_RED_PIN_KEY, settings->rgb_red_pin);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB red pin\n");
-  }
-  err = nvs_set_i32(nvsHandle, NVS_RGB_GREEN_PIN_KEY, settings->rgb_green_pin);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB green pin\n");
-  }
-  err = nvs_set_i32(nvsHandle, NVS_RGB_BLUE_PIN_KEY, settings->rgb_blue_pin);
-  if (err != ESP_OK) {
-    printf("Failed to save RGB blue pin\n");
-  }
-  // Save Max Screen Brightness
-  err = nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, settings->max_screen_brightness);
-  if (err != ESP_OK) {
-    printf("Failed to save key '%s' (value=%u): %s (%d)\n",
-           NVS_MAX_SCREEN_BRIGHTNESS_KEY,
-           settings->max_screen_brightness,
-           esp_err_to_name(err), err);
-  }
-
-
-  // Save Max Screen Brightness
-  err = nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, settings->max_screen_brightness);
-  if (err != ESP_OK) {
-    printf("Failed to save key '%s' (value=%u): %s (%d)\n",
-           NVS_MAX_SCREEN_BRIGHTNESS_KEY,
-           settings->max_screen_brightness,
-           esp_err_to_name(err), err);
-  }
-  
-  // Clean up any existing rainbow task before starting a new one
-  if (rgb_effect_task_handle != NULL) {
-      // Signal the rainbow task to exit gracefully instead of forceful deletion
-      rgb_manager_signal_rainbow_exit();
-      
-      // Wait for the task to terminate gracefully (up to 500ms)
-      for (int i = 0; i < 50; i++) {
-          if (eTaskGetState(rgb_effect_task_handle) == eDeleted) {
-              break;
-          }
-          vTaskDelay(pdMS_TO_TICKS(10));
-      }
-      
-      // If task is still running after timeout, force delete as last resort
-      if (eTaskGetState(rgb_effect_task_handle) != eDeleted) {
-          ESP_LOGW(S_TAG, "Rainbow task did not exit gracefully, force deleting");
-          vTaskDelete(rgb_effect_task_handle);
-      }
-      
-      rgb_effect_task_handle = NULL;
-      ESP_LOGI(S_TAG, "Rainbow task cleanup completed");
-  }
-  
-  if (settings_get_rgb_mode(settings) == RGB_MODE_RAINBOW) {
-      // Rainbow: animated
+    // 4. Start new task based on mode
+    RGBMode mode = settings_get_rgb_mode(&G_Settings);
+    if (mode == RGB_MODE_RAINBOW) {
 #if RGB_EFFECT_USE_PINNED_API
-      xTaskCreatePinnedToCore(rainbow_task, "Rainbow Task", 3072, &rgb_manager,
-                              RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle,
-                              RGB_EFFECT_TASK_CORE);
+        xTaskCreatePinnedToCore(rainbow_task, "Rainbow Task", 3072, &rgb_manager,
+                                RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle,
+                                RGB_EFFECT_TASK_CORE);
 #else
-      xTaskCreate(rainbow_task, "Rainbow Task", 3072, &rgb_manager,
-                  RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle);
+        xTaskCreate(rainbow_task, "Rainbow Task", 3072, &rgb_manager,
+                    RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle);
 #endif
-  } else if (settings_get_rgb_mode(settings) == RGB_MODE_STEALTH) {
-      // Stealth: LEDs always off
-      rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false); // Turn off all LEDs
-  } else {
-      // Normal mode: LEDs off
-      rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false); // Turn off all LEDs
-  }
+    } else if (mode == RGB_MODE_KNIGHT_RIDER) {
+         xTaskCreate(knightrider_task, "Knight Rider Task", 3072, &rgb_manager,
+                    RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle);
+    } else if (mode == RGB_MODE_STEALTH) {
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    } else if (mode == RGB_MODE_RED) {
+        rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
+    } else if (mode == RGB_MODE_GREEN) {
+        rgb_manager_set_color(&rgb_manager, -1, 0, 255, 0, false);
+    } else if (mode == RGB_MODE_BLUE) {
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 255, false);
+    } else if (mode == RGB_MODE_YELLOW) {
+        rgb_manager_set_color(&rgb_manager, -1, 255, 255, 0, false);
+    } else if (mode == RGB_MODE_PURPLE) {
+        rgb_manager_set_color(&rgb_manager, -1, 115, 0, 225, false);
+    } else if (mode == RGB_MODE_CYAN) {
+        rgb_manager_set_color(&rgb_manager, -1, 0, 255, 255, false);
+    } else if (mode == RGB_MODE_ORANGE) {
+        rgb_manager_set_color(&rgb_manager, -1, 255, 165, 0, false);
+    } else if (mode == RGB_MODE_WHITE) {
+        rgb_manager_set_color(&rgb_manager, -1, 255, 255, 255, false);
+    } else if (mode == RGB_MODE_PINK) {
+        rgb_manager_set_color(&rgb_manager, -1, 255, 192, 203, false);
+    } else {
+        // Normal mode
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    }
 
+    update_rainbow_effect(&G_Settings); // Start/stop global timer for status bar if needed
+}
 
-  update_rainbow_effect(settings);
+void settings_persist_setting(SettingsType setting) {
+    esp_err_t err = ESP_OK;
+    const char *key = NULL;
 
-  // Commit all changes
-  err = nvs_commit(nvsHandle);
-  if (err != ESP_OK) {
-    printf("Failed to commit NVS changes\n");
-  } else {
-    printf("Settings saved to NVS.\n");
-  }
-
-  // Apply timezone change immediately
-  ESP_LOGI(TAG, "Applying timezone change: %s", settings->selected_timezone);
-  setenv("TZ", settings->selected_timezone, 1);
-  tzset();
-
-  // Update global settings immediately
-  ESP_LOGI(TAG, "Updating global settings");
-  ESP_LOGI(TAG, "Old display timeout: %lu ms", G_Settings.display_timeout_ms);
-  memcpy(&G_Settings, settings, sizeof(FSettings));
-  ESP_LOGI(TAG, "New display timeout: %lu ms", G_Settings.display_timeout_ms);
-
-  err = nvs_commit(nvsHandle);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to commit NVS changes: %s", esp_err_to_name(err));
-  } else {
-    ESP_LOGI(TAG, "Settings saved to NVS successfully");
-  }
-
-  err = nvs_set_u8(nvsHandle, NVS_MENU_THEME_KEY, settings->menu_theme);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save menu_theme: %s", esp_err_to_name(err));
-  err = nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save invert_colors: %s", esp_err_to_name(err));
-  err = nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, settings->terminal_text_color);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save terminal_text_color: %s", esp_err_to_name(err));
-  err = nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save web_auth_enabled: %s", esp_err_to_name(err));
-  err = nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save webui_restrict_to_ap: %s", esp_err_to_name(err));
-  err = nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, settings->ap_enabled);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save ap_enabled: %s", esp_err_to_name(err));
-  err = nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_save_enabled);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save power_save_enabled: %s", esp_err_to_name(err));
-  
-  err = nvs_set_i32(nvsHandle, NVS_ESP_COMM_TX_PIN_KEY, settings->esp_comm_tx_pin);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save esp_comm_tx_pin: %s", esp_err_to_name(err));
-  
-  err = nvs_set_i32(nvsHandle, NVS_ESP_COMM_RX_PIN_KEY, settings->esp_comm_rx_pin);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save esp_comm_rx_pin: %s", esp_err_to_name(err));
-  
-
-  err = nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, settings->zebra_menus_enabled);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save zebra_menus_enabled: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_INFRARED_EASY_MODE_KEY, settings->infrared_easy_mode);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save infrared_easy_mode: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save nav_buttons_enabled: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, settings->menu_layout);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save menu_layout: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY, settings->neopixel_max_brightness);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save neopixel_max_brightness: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_ENCODER_INVERT_KEY, settings->encoder_invert_direction);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save encoder_invert_direction: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_SETUP_COMPLETE_KEY, settings->setup_complete);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save setup_complete: %s", esp_err_to_name(err));
-
-  err = nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, settings->wifi_country);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save wifi_country: %s", esp_err_to_name(err));
-
+    switch (setting) {
+        case SETTING_RGB_MODE:
+            err = nvs_set_u8(nvsHandle, NVS_RGB_MODE_KEY, (uint8_t)G_Settings.rgb_mode);
+            key = NVS_RGB_MODE_KEY;
+            break;
+        case SETTING_DISPLAY_TIMEOUT:
+            err = nvs_set_u32(nvsHandle, NVS_DISPLAY_TIMEOUT_KEY, G_Settings.display_timeout_ms);
+            key = NVS_DISPLAY_TIMEOUT_KEY;
+            break;
+        case SETTING_MENU_THEME:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_THEME_KEY, G_Settings.menu_theme);
+            key = NVS_MENU_THEME_KEY;
+            break;
+        case SETTING_THIRD_CONTROL:
+            err = nvs_set_u8(nvsHandle, NVS_THIRD_CTRL_KEY, G_Settings.third_control_enabled);
+            key = NVS_THIRD_CTRL_KEY;
+            break;
+        case SETTING_TERMINAL_COLOR:
+            err = nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, G_Settings.terminal_text_color);
+            key = NVS_TERMINAL_TEXT_COLOR_KEY;
+            break;
+        case SETTING_INVERT_COLORS:
+            err = nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, G_Settings.invert_colors);
+            key = NVS_INVERT_COLORS_KEY;
+            break;
+        case SETTING_WEB_AUTH:
+            err = nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, G_Settings.web_auth_enabled);
+            key = NVS_WEB_AUTH_KEY;
+            break;
+        case SETTING_WEBUI_AP_ONLY:
+            err = nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, G_Settings.webui_restrict_to_ap);
+            key = NVS_WEBUI_AP_ONLY_KEY;
+            break;
+        case SETTING_AP_ENABLED:
+            err = nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, G_Settings.ap_enabled);
+            key = NVS_AP_ENABLED_KEY;
+            break;
+        case SETTING_POWER_SAVE:
+            err = nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, G_Settings.power_save_enabled);
+            key = NVS_POWER_SAVE_KEY;
+            break;
+        case SETTING_MAX_BRIGHTNESS:
+            err = nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, G_Settings.max_screen_brightness);
+            key = NVS_MAX_SCREEN_BRIGHTNESS_KEY;
+            break;
+        case SETTING_NEOPIXEL_BRIGHTNESS:
+            err = nvs_set_u8(nvsHandle, NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY, G_Settings.neopixel_max_brightness);
+            key = NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY;
+            break;
+        case SETTING_ZEBRA_MENUS:
+            err = nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, G_Settings.zebra_menus_enabled);
+            key = NVS_ZEBRA_MENUS_KEY;
+            break;
+        case SETTING_NAV_BUTTONS:
+            err = nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, G_Settings.nav_buttons_enabled);
+            key = NVS_NAV_BUTTONS_KEY;
+            break;
+        case SETTING_AUTO_SAVE_SCANS:
+            err = nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, G_Settings.auto_save_scans);
+            key = NVS_AUTO_SAVE_SCANS_KEY;
+            break;
+        case SETTING_MENU_LAYOUT:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, G_Settings.menu_layout);
+            key = NVS_MENU_LAYOUT_KEY;
+            break;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-  err = nvs_set_u8(nvsHandle, NVS_STATUS_IDLE_ANIM_KEY, (uint8_t)settings->status_idle_animation);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save status_idle_animation: %s", esp_err_to_name(err));
-  err = nvs_set_u32(nvsHandle, NVS_STATUS_IDLE_TIMEOUT_KEY, settings->status_idle_timeout_ms);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to save status_idle_timeout_ms: %s", esp_err_to_name(err));
+        case SETTING_IDLE_ANIMATION:
+            err = nvs_set_u8(nvsHandle, NVS_STATUS_IDLE_ANIM_KEY, (uint8_t)G_Settings.status_idle_animation);
+            key = NVS_STATUS_IDLE_ANIM_KEY;
+            break;
+        case SETTING_IDLE_ANIM_DELAY:
+            err = nvs_set_u32(nvsHandle, NVS_STATUS_IDLE_TIMEOUT_KEY, G_Settings.status_idle_timeout_ms);
+            key = NVS_STATUS_IDLE_TIMEOUT_KEY;
+            break;
 #endif
+#ifdef CONFIG_USE_ENCODER
+        case SETTING_ENCODER_INVERT:
+            err = nvs_set_u8(nvsHandle, NVS_ENCODER_INVERT_KEY, G_Settings.encoder_invert_direction);
+            key = NVS_ENCODER_INVERT_KEY;
+            break;
+#endif
+#if CONFIG_IDF_TARGET_ESP32S3
+        case SETTING_USB_HOST_MODE:
+             break;
+#endif
+        case SETTING_RUN_SETUP_WIZARD:
+        case SETTING_I2C_SCAN:
+             // Actions, not saved
+             return;
+        case SETTING_SETUP_COMPLETE:
+            err = nvs_set_u8(nvsHandle, NVS_SETUP_COMPLETE_KEY, G_Settings.setup_complete ? 1 : 0);
+            key = NVS_SETUP_COMPLETE_KEY;
+            break;
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+        case SETTING_BADUSB_VID:
+            err = nvs_set_u16(nvsHandle, NVS_BADUSB_VID_KEY, G_Settings.badusb_vid);
+            key = NVS_BADUSB_VID_KEY;
+            break;
+        case SETTING_BADUSB_PID:
+            err = nvs_set_u16(nvsHandle, NVS_BADUSB_PID_KEY, G_Settings.badusb_pid);
+            key = NVS_BADUSB_PID_KEY;
+            break;
+        case SETTING_BADUSB_MANUFACTURER:
+            err = nvs_set_str(nvsHandle, NVS_BADUSB_MFR_KEY, G_Settings.badusb_manufacturer);
+            key = NVS_BADUSB_MFR_KEY;
+            break;
+        case SETTING_BADUSB_PRODUCT:
+            err = nvs_set_str(nvsHandle, NVS_BADUSB_PROD_KEY, G_Settings.badusb_product);
+            key = NVS_BADUSB_PROD_KEY;
+            break;
+        case SETTING_BADUSB_RANDOMIZE:
+            err = nvs_set_u8(nvsHandle, NVS_BADUSB_RAND_KEY, G_Settings.badusb_randomize ? 1 : 0);
+            key = NVS_BADUSB_RAND_KEY;
+            break;
+        case SETTING_BADUSB_KB_LAYOUT:
+            err = nvs_set_u8(nvsHandle, NVS_BADUSB_KB_KEY, G_Settings.badusb_kb_layout);
+            key = NVS_BADUSB_KB_KEY;
+            break;
+#endif
+        default:
+            ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
+            return;
+    }
 
-  err = nvs_commit(nvsHandle);
-  if (err != ESP_OK) ESP_LOGE(S_TAG, "Failed to commit settings: %s", esp_err_to_name(err));
-
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set NVS val for %s: %s", key ? key : "unknown", esp_err_to_name(err));
+    } else if (key) {
+        err = nvs_commit(nvsHandle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to commit NVS for %s: %s", key, esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "Persisted setting %s", key);
+        }
+    }
 }
 
 // Core Settings Getters and Setters
@@ -946,13 +863,91 @@ const char *settings_get_timezone_str(const FSettings *settings) {
 void settings_set_accent_color_str(FSettings *settings, const char *Name) {
   strncpy(settings->selected_hex_accent_color, Name,
           sizeof(settings->selected_hex_accent_color) - 1);
-  settings
-      ->selected_hex_accent_color[sizeof(settings->selected_hex_accent_color) -
-                                  1] = '\0';
+  settings->selected_hex_accent_color[sizeof(settings->selected_hex_accent_color) - 1] = '\0';
 }
 
 const char *settings_get_accent_color_str(const FSettings *settings) {
   return settings->selected_hex_accent_color;
+}
+
+void settings_save(const FSettings *settings) {
+    if (!settings) return;
+
+    nvs_set_u8(nvsHandle, NVS_RGB_MODE_KEY, (uint8_t)settings->rgb_mode);
+    float ch_delay = settings->channel_delay;
+    nvs_set_blob(nvsHandle, NVS_CHANNEL_DELAY_KEY, &ch_delay, sizeof(ch_delay));
+    nvs_set_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY, settings->broadcast_speed);
+    nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, settings->ap_ssid);
+    nvs_set_str(nvsHandle, NVS_AP_PASSWORD_KEY, settings->ap_password);
+    nvs_set_u8(nvsHandle, NVS_RGB_SPEED_KEY, settings->rgb_speed);
+    nvs_set_u16(nvsHandle, NVS_RGB_LED_COUNT_KEY, settings->rgb_led_count);
+
+    nvs_set_str(nvsHandle, NVS_PORTAL_URL_KEY, settings->portal_url);
+    nvs_set_str(nvsHandle, NVS_PORTAL_SSID_KEY, settings->portal_ssid);
+    nvs_set_str(nvsHandle, NVS_PORTAL_PASSWORD_KEY, settings->portal_password);
+    nvs_set_str(nvsHandle, NVS_PORTAL_AP_SSID_KEY, settings->portal_ap_ssid);
+    nvs_set_str(nvsHandle, NVS_PORTAL_DOMAIN_KEY, settings->portal_domain);
+    nvs_set_u8(nvsHandle, NVS_PORTAL_OFFLINE_KEY, settings->portal_offline_mode ? 1 : 0);
+
+    nvs_set_str(nvsHandle, NVS_PRINTER_IP_KEY, settings->printer_ip);
+    nvs_set_str(nvsHandle, NVS_PRINTER_TEXT_KEY, settings->printer_text);
+    nvs_set_u8(nvsHandle, NVS_PRINTER_FONT_SIZE_KEY, settings->printer_font_size);
+    nvs_set_u8(nvsHandle, NVS_PRINTER_ALIGNMENT_KEY, (uint8_t)settings->printer_alignment);
+
+    nvs_set_str(nvsHandle, NVS_FLAPPY_GHOST_NAME, settings->flappy_ghost_name);
+    nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, settings->selected_timezone);
+    nvs_set_str(nvsHandle, NVS_ACCENT_COLOR, settings->selected_hex_accent_color);
+    nvs_set_u8(nvsHandle, NVS_GPS_RX_PIN, (uint8_t)settings->gps_rx_pin);
+    nvs_set_u32(nvsHandle, NVS_DISPLAY_TIMEOUT_KEY, settings->display_timeout_ms);
+    nvs_set_u8(nvsHandle, NVS_ENABLE_RTS_KEY, settings->rts_enabled ? 1 : 0);
+
+    nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid);
+    nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password);
+
+    nvs_set_i32(nvsHandle, NVS_RGB_DATA_PIN_KEY, settings->rgb_data_pin);
+    nvs_set_i32(nvsHandle, NVS_RGB_RED_PIN_KEY, settings->rgb_red_pin);
+    nvs_set_i32(nvsHandle, NVS_RGB_GREEN_PIN_KEY, settings->rgb_green_pin);
+    nvs_set_i32(nvsHandle, NVS_RGB_BLUE_PIN_KEY, settings->rgb_blue_pin);
+
+    nvs_set_u8(nvsHandle, NVS_THIRD_CTRL_KEY, settings->third_control_enabled ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MENU_THEME_KEY, settings->menu_theme);
+    nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, settings->terminal_text_color);
+    nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, settings->ap_enabled ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_save_enabled ? 1 : 0);
+    nvs_set_i32(nvsHandle, NVS_ESP_COMM_TX_PIN_KEY, settings->esp_comm_tx_pin);
+    nvs_set_i32(nvsHandle, NVS_ESP_COMM_RX_PIN_KEY, settings->esp_comm_rx_pin);
+    nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, settings->zebra_menus_enabled ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, settings->max_screen_brightness);
+    nvs_set_u8(nvsHandle, NVS_INFRARED_EASY_MODE_KEY, settings->infrared_easy_mode ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, settings->auto_save_scans ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, (uint8_t)settings->menu_layout);
+    nvs_set_u8(nvsHandle, NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY, settings->neopixel_max_brightness);
+    nvs_set_u8(nvsHandle, NVS_ENCODER_INVERT_KEY, settings->encoder_invert_direction ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_SETUP_COMPLETE_KEY, settings->setup_complete ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, settings->wifi_country);
+
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+    nvs_set_u8(nvsHandle, NVS_STATUS_IDLE_ANIM_KEY, (uint8_t)settings->status_idle_animation);
+    nvs_set_u32(nvsHandle, NVS_STATUS_IDLE_TIMEOUT_KEY, settings->status_idle_timeout_ms);
+#endif
+
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+    nvs_set_u16(nvsHandle, NVS_BADUSB_VID_KEY, settings->badusb_vid);
+    nvs_set_u16(nvsHandle, NVS_BADUSB_PID_KEY, settings->badusb_pid);
+    nvs_set_str(nvsHandle, NVS_BADUSB_MFR_KEY, settings->badusb_manufacturer);
+    nvs_set_str(nvsHandle, NVS_BADUSB_PROD_KEY, settings->badusb_product);
+    nvs_set_u8(nvsHandle, NVS_BADUSB_RAND_KEY, settings->badusb_randomize ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_BADUSB_KB_KEY, settings->badusb_kb_layout);
+#endif
+
+    esp_err_t err = nvs_commit(nvsHandle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit settings_save: %s", esp_err_to_name(err));
+    }
 }
 
 void settings_set_ap_ssid(FSettings *settings, const char *ssid) {
@@ -1329,6 +1324,14 @@ bool settings_get_nav_buttons_enabled(const FSettings *settings) {
     return settings->nav_buttons_enabled;
 }
 
+void settings_set_auto_save_scans(FSettings *settings, bool enabled) {
+    settings->auto_save_scans = enabled;
+}
+
+bool settings_get_auto_save_scans(const FSettings *settings) {
+    return settings->auto_save_scans;
+}
+
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
     settings->menu_layout = layout;
@@ -1387,5 +1390,55 @@ void settings_set_status_idle_timeout_ms(FSettings *settings, uint32_t timeout_m
 
 uint32_t settings_get_status_idle_timeout_ms(const FSettings *settings) {
   return settings->status_idle_timeout_ms;
+}
+#endif
+
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+void settings_set_badusb_vid(FSettings *settings, uint16_t vid) {
+  settings->badusb_vid = vid;
+}
+uint16_t settings_get_badusb_vid(const FSettings *settings) {
+  return settings->badusb_vid;
+}
+void settings_set_badusb_pid(FSettings *settings, uint16_t pid) {
+  settings->badusb_pid = pid;
+}
+uint16_t settings_get_badusb_pid(const FSettings *settings) {
+  return settings->badusb_pid;
+}
+void settings_set_badusb_manufacturer(FSettings *settings, const char *name) {
+  strncpy(settings->badusb_manufacturer, name, sizeof(settings->badusb_manufacturer) - 1);
+  settings->badusb_manufacturer[sizeof(settings->badusb_manufacturer) - 1] = '\0';
+}
+const char *settings_get_badusb_manufacturer(const FSettings *settings) {
+  return settings->badusb_manufacturer;
+}
+void settings_set_badusb_product(FSettings *settings, const char *name) {
+  strncpy(settings->badusb_product, name, sizeof(settings->badusb_product) - 1);
+  settings->badusb_product[sizeof(settings->badusb_product) - 1] = '\0';
+}
+const char *settings_get_badusb_product(const FSettings *settings) {
+  return settings->badusb_product;
+}
+void settings_set_badusb_randomize(FSettings *settings, bool enabled) {
+  settings->badusb_randomize = enabled;
+}
+bool settings_get_badusb_randomize(const FSettings *settings) {
+  return settings->badusb_randomize;
+}
+void settings_set_badusb_kb_layout(FSettings *settings, uint8_t layout) {
+  settings->badusb_kb_layout = layout;
+}
+uint8_t settings_get_badusb_kb_layout(const FSettings *settings) {
+  return settings->badusb_kb_layout;
+}
+
+void settings_reset_badusb_defaults(FSettings *settings) {
+  settings->badusb_vid = 0x1209;
+  settings->badusb_pid = 0x0001;
+  strcpy(settings->badusb_manufacturer, "USB Device");
+  strcpy(settings->badusb_product, "HID Keyboard");
+  settings->badusb_randomize = false;
+  settings->badusb_kb_layout = KB_LAYOUT_US;
 }
 #endif

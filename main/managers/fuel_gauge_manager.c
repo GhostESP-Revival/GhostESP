@@ -328,23 +328,21 @@ static esp_err_t fuel_gauge_i2c_init(void) {
     }
 
     ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
-    if (ret != ESP_OK) {
-        if (ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGI(TAG, "I2C driver already installed on port %d", I2C_MASTER_NUM);
-            return ESP_OK;
-        }
+    if (ret == ESP_OK) {
+        i2c_initialized_by_us = true;
+    } else if (ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
+        ESP_LOGI(TAG, "I2C driver already installed or busy on port %d", I2C_MASTER_NUM);
+        ret = ESP_OK; // Treat as success
+    } else {
         ESP_LOGE(TAG, "Failed to install I2C driver: %s", esp_err_to_name(ret));
-        return ret;
     }
 
-    i2c_initialized_by_us = true;
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock == NULL) {
         esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "fg_i2c", &fg_i2c_pm_lock);
     }
 #endif
-    ESP_LOGI(TAG, "I2C initialized successfully on port %d", I2C_MASTER_NUM);
-    return ESP_OK;
+    return ret;
 }
 
 bool fuel_gauge_manager_init(void) {
@@ -574,18 +572,15 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
 }
 
 int fuel_gauge_manager_get_percentage(void) {
-    fuel_gauge_data_t data;
-    return fuel_gauge_manager_get_data(&data) ? data.percentage : -1;
+    return (is_initialized && last_data.is_initialized) ? last_data.percentage : -1;
 }
 
 bool fuel_gauge_manager_is_charging(void) {
-    fuel_gauge_data_t data;
-    return fuel_gauge_manager_get_data(&data) ? data.is_charging : false;
+    return (is_initialized && last_data.is_initialized) ? last_data.is_charging : false;
 }
 
 uint16_t fuel_gauge_manager_get_voltage_mv(void) {
-    fuel_gauge_data_t data;
-    return fuel_gauge_manager_get_data(&data) ? data.voltage_mv : 0;
+    return (is_initialized && last_data.is_initialized) ? last_data.voltage_mv : 0;
 }
 
 esp_err_t fuel_gauge_manager_reset(void) {
@@ -626,6 +621,335 @@ void fuel_gauge_manager_deinit(void) {
     }
 }
 
+#elif defined(CONFIG_USE_MAX17048_FUEL_GAUGE)
+
+static const char *TAG = "MAX17048";
+
+#define MAX17048_I2C_ADDRESS     CONFIG_MAX17048_I2C_ADDRESS
+#define MAX17048_REG_VCELL       0x02
+#define MAX17048_REG_SOC         0x04
+#define MAX17048_REG_MODE        0x06
+#define MAX17048_REG_VERSION     0x08
+#define MAX17048_REG_CONFIG      0x0C
+#define MAX17048_REG_CRATE       0x16
+#define MAX17048_REG_STATUS      0x1A
+#define MAX17048_REG_CMD         0xFE
+
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+#define I2C_MASTER_NUM          I2C_NUM_0
+#else
+#define I2C_MASTER_NUM          I2C_NUM_0
+#endif
+#define I2C_MASTER_TIMEOUT_MS   250
+#define I2C_LOCK_TIMEOUT_MS     500
+
+static bool is_initialized = false;
+static bool i2c_initialized_by_us = false;
+static fuel_gauge_data_t last_data = {0};
+static volatile bool s_paused = false;
+
+#if CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t fg_i2c_pm_lock = NULL;
+#endif
+
+static uint16_t max17048_read_word(uint8_t reg) {
+    uint8_t data[2] = {0};
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
+#endif
+
+    uint16_t result = 0xFFFF;
+    for (int retry = 0; retry < 3; retry++) {
+        if (i2c_bus_lock(I2C_MASTER_NUM, I2C_LOCK_TIMEOUT_MS)) {
+            esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, MAX17048_I2C_ADDRESS,
+                                                         &reg, 1, data, 2,
+                                                         pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+            i2c_bus_unlock(I2C_MASTER_NUM);
+            if (ret == ESP_OK) {
+                result = (uint16_t)((data[0] << 8) | data[1]);
+                break;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
+#endif
+    return result;
+}
+
+static esp_err_t max17048_write_word(uint8_t reg, uint16_t data) {
+    uint8_t write_data[3];
+    write_data[0] = reg;
+    write_data[1] = (data >> 8) & 0xFF;
+    write_data[2] = data & 0xFF;
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
+#endif
+
+    esp_err_t ret = ESP_ERR_TIMEOUT;
+    for (int retry = 0; retry < 3; retry++) {
+        if (i2c_bus_lock(I2C_MASTER_NUM, I2C_LOCK_TIMEOUT_MS)) {
+            ret = i2c_master_write_to_device(I2C_MASTER_NUM, MAX17048_I2C_ADDRESS,
+                                              write_data, 3,
+                                              pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+            i2c_bus_unlock(I2C_MASTER_NUM);
+            if (ret == ESP_OK) break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
+#endif
+    return ret;
+}
+
+static esp_err_t fuel_gauge_i2c_init(void) {
+    // First try to install the driver to check if it's already installed
+    esp_err_t ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
+    if (ret == ESP_OK) {
+        // We installed it - now configure parameters
+        i2c_initialized_by_us = true;
+        i2c_config_t conf = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = CONFIG_MAX17048_I2C_SDA_PIN,
+            .scl_io_num = CONFIG_MAX17048_I2C_SCL_PIN,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 100000,
+            .clk_flags = 0,
+        };
+
+        ret = i2c_param_config(I2C_MASTER_NUM, &conf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure I2C parameters: %s", esp_err_to_name(ret));
+            i2c_driver_delete(I2C_MASTER_NUM);
+            i2c_initialized_by_us = false;
+            return ret;
+        }
+    } else if (ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
+        ESP_LOGI(TAG, "I2C driver already installed on port %d", I2C_MASTER_NUM);
+        i2c_initialized_by_us = false;
+        ret = ESP_OK; // Treat as success - use existing driver
+    } else {
+        ESP_LOGE(TAG, "Failed to install I2C driver: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+#if CONFIG_PM_ENABLE
+    if (fg_i2c_pm_lock == NULL) {
+        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "fg_i2c", &fg_i2c_pm_lock);
+    }
+#endif
+    return ret;
+}
+
+bool fuel_gauge_manager_init(void) {
+    if (is_initialized) {
+        return true;
+    }
+
+    ESP_LOGI(TAG, "Initializing MAX17048 fuel gauge");
+    ESP_LOGI(TAG, "Configuration: Address=0x%02X, SDA=%d, SCL=%d, I2C_PORT=%d",
+             MAX17048_I2C_ADDRESS, CONFIG_MAX17048_I2C_SDA_PIN, CONFIG_MAX17048_I2C_SCL_PIN, I2C_MASTER_NUM);
+
+    esp_err_t ret = fuel_gauge_i2c_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize I2C");
+        return false;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    uint16_t version = max17048_read_word(MAX17048_REG_VERSION);
+    if (version == 0xFFFF || (version & 0xFFF0) != 0x0010) {
+        // Retry once for MAX17048 which might be slow to wake
+        vTaskDelay(pdMS_TO_TICKS(50));
+        version = max17048_read_word(MAX17048_REG_VERSION);
+    }
+
+    if (version == 0xFFFF) {
+        ESP_LOGE(TAG, "Failed to communicate with MAX17048 - check wiring and I2C config");
+        // CLEANUP: If we installed the driver, remove it so others can use the port cleanly
+        if (i2c_initialized_by_us) {
+            i2c_driver_delete(I2C_MASTER_NUM);
+            i2c_initialized_by_us = false;
+        }
+        return false;
+    }
+
+    ESP_LOGI(TAG, "MAX17048 detected, version: 0x%04X", version);
+    
+    // Perform a full software reset to clear any stale ModelGauge data
+    max17048_write_word(MAX17048_REG_CMD, 0x5400);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Set RCOMP to standard LiPo value (0x97) to stabilize ModelGauge
+    // CONFIG register is at 0x0C. High byte is RCOMP.
+    uint16_t config_reg = max17048_read_word(MAX17048_REG_CONFIG);
+    if (config_reg != 0xFFFF) {
+        uint16_t new_config = (config_reg & 0x00FF) | 0x9700;
+        max17048_write_word(MAX17048_REG_CONFIG, new_config);
+        
+        // Verify write
+        uint16_t verify = max17048_read_word(MAX17048_REG_CONFIG);
+        if ((verify & 0xFF00) == 0x9700) {
+            ESP_LOGI(TAG, "RCOMP set successfully: 0x%04X", verify);
+        } else {
+            ESP_LOGW(TAG, "RCOMP write mismatch! Got: 0x%04X", verify);
+        }
+    }
+
+    // Quick start to update SOC immediately after reset/config
+    uint16_t current_mode = max17048_read_word(MAX17048_REG_MODE);
+    if (current_mode != 0xFFFF) {
+        max17048_write_word(MAX17048_REG_MODE, current_mode | 0x4000); // Set QuickStart bit
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    memset(&last_data, 0, sizeof(last_data));
+    last_data.is_initialized = true;
+    is_initialized = true;
+
+    ESP_LOGI(TAG, "MAX17048 fuel gauge initialized successfully");
+    return true;
+}
+
+void fuel_gauge_manager_set_paused(bool paused) {
+    s_paused = paused;
+}
+
+bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
+    if (!is_initialized || !data) {
+        return false;
+    }
+
+    if (s_paused) {
+        if (last_data.is_initialized) {
+            memcpy(data, &last_data, sizeof(fuel_gauge_data_t));
+            return true;
+        }
+        return false;
+    }
+
+    uint16_t vcell = max17048_read_word(MAX17048_REG_VCELL);
+    uint16_t soc_raw = max17048_read_word(MAX17048_REG_SOC);
+    uint16_t crate_raw = max17048_read_word(MAX17048_REG_CRATE);
+
+    if (vcell == 0xFFFF || soc_raw == 0xFFFF) {
+        if (last_data.is_initialized) {
+            memcpy(data, &last_data, sizeof(fuel_gauge_data_t));
+            return true;
+        }
+        return false;
+    }
+
+    // VCELL: 1 unit = 78.125uV.  (vcell * 78.125) / 1000 = mV
+    data->voltage_mv = (uint16_t)((float)vcell * 78.125f / 1000.0f);
+    
+    // SOC Jump detection: 
+    // If we read > 110%, it's likely an uninitialized/reset state (like 0xFE / 254%).
+    // If it's between 100-110%, it's just a full battery calibration offset; cap to 100.
+    uint8_t current_perc = (uint8_t)(soc_raw >> 8);
+    if (current_perc > 110) {
+        if (!last_data.is_initialized) {
+            // Hard fallback for first-run crazy data: force a QuickStart
+            ESP_LOGW(TAG, "Invalid initial SOC 0x%04X. Forcing QuickStart.", soc_raw);
+            uint16_t m = max17048_read_word(MAX17048_REG_MODE);
+            if (m != 0xFFFF) max17048_write_word(MAX17048_REG_MODE, m | 0x4000);
+            data->percentage = (data->voltage_mv > 3700) ? 50 : 0; 
+        } else {
+            ESP_LOGW(TAG, "SOC jump detected (0x%04X), ignoring glitch", soc_raw);
+            data->percentage = last_data.percentage;
+        }
+    } else {
+        // Capped valid range
+        uint8_t filtered_perc = (current_perc > 100) ? 100 : current_perc;
+        
+        // Glitch rejection: if last reading was high and this is 0, it's almost certainly an I2C error
+        if (last_data.is_initialized && last_data.percentage > 50 && filtered_perc == 0) {
+            ESP_LOGW(TAG, "SOC dropped from %d%% to 0%%, rejecting glitch", last_data.percentage);
+            data->percentage = last_data.percentage;
+        } else {
+            data->percentage = filtered_perc;
+        }
+        
+        // Logically verify SOC against voltage
+        // If voltage > 4.1V but SOC < 20%, the algorithm is clearly lost
+        if (data->voltage_mv > 4100 && data->percentage < 20) {
+            ESP_LOGW(TAG, "SOC/Voltage discrepancy (%d mV but %d%%). Triggering QuickStart.", 
+                     data->voltage_mv, data->percentage);
+            uint16_t m = max17048_read_word(MAX17048_REG_MODE);
+            if (m != 0xFFFF) max17048_write_word(MAX17048_REG_MODE, m | 0x4000);
+        }
+    }
+
+    // CRATE: charge/discharge rate in %/hr. 1 unit = 0.208 %/hr
+    int16_t signed_crate = (int16_t)crate_raw;
+    data->current_ma = (int16_t)((float)signed_crate * 0.208f); 
+    
+    // Charging detection refinement:
+    // If voltage is > 4.15V, we are likely charging even if signed_crate is negative (noise/ModelGauge error)
+    // unless it's a very large discharge.
+    bool voltage_high = (data->voltage_mv > 4150);
+    data->is_charging = (signed_crate > 2) || (voltage_high && signed_crate > -50);
+    
+    data->is_initialized = true;
+
+    // Log the raw and processed values for debugging
+    ESP_LOGD(TAG, "VCELL: %d (%d mV), SOC: 0x%04X (%d%%), CRATE: %d (%d %%/hr), charging: %s",
+             vcell, data->voltage_mv, soc_raw, data->percentage, 
+             signed_crate, (int)(signed_crate * 0.208f),
+             data->is_charging ? "YES" : "NO");
+
+    uint16_t config = max17048_read_word(MAX17048_REG_CONFIG);
+    uint16_t mode = max17048_read_word(MAX17048_REG_MODE);
+    ESP_LOGD(TAG, "CONFIG: 0x%04X, MODE: 0x%04X", config, mode);
+
+    // Update cache
+    memcpy(&last_data, data, sizeof(fuel_gauge_data_t));
+
+    return true;
+}
+
+int fuel_gauge_manager_get_percentage(void) {
+    return (is_initialized && last_data.is_initialized) ? last_data.percentage : -1;
+}
+
+bool fuel_gauge_manager_is_charging(void) {
+    return (is_initialized && last_data.is_initialized) ? last_data.is_charging : false;
+}
+
+uint16_t fuel_gauge_manager_get_voltage_mv(void) {
+    return (is_initialized && last_data.is_initialized) ? last_data.voltage_mv : 0;
+}
+
+esp_err_t fuel_gauge_manager_reset(void) {
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    // RESET command: write 0x5400 to CMD register (Note: high byte 0x54, low byte 0x00?
+    // Snippet says write(REG::CMD, 0x5400) which sends 0x54 then 0x00)
+    max17048_write_word(MAX17048_REG_CMD, 0x5400);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    is_initialized = false;
+    return fuel_gauge_manager_init() ? ESP_OK : ESP_FAIL;
+}
+
+void fuel_gauge_manager_deinit(void) {
+    if (is_initialized) {
+        if (i2c_initialized_by_us) {
+            i2c_driver_delete(I2C_MASTER_NUM);
+            i2c_initialized_by_us = false;
+        }
+        is_initialized = false;
+        memset(&last_data, 0, sizeof(last_data));
+    }
+}
+
 #else
 
 bool fuel_gauge_manager_init(void) { return false; }
@@ -635,5 +959,6 @@ bool fuel_gauge_manager_is_charging(void) { return false; }
 uint16_t fuel_gauge_manager_get_voltage_mv(void) { return 0; }
 void fuel_gauge_manager_deinit(void) {}
 void fuel_gauge_manager_set_paused(bool paused) { (void)paused; }
+esp_err_t fuel_gauge_manager_reset(void) { return ESP_ERR_NOT_SUPPORTED; }
 
 #endif

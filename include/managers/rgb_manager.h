@@ -56,6 +56,19 @@ esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,
                                 bool pulse);
 
 /**
+ * @brief Set the color of an LED with 12-bit precision (0-4095).
+ *
+ * @param rgb_manager Pointer to the RGB Manager
+ * @param led_idx Index of the LED (-1 for all)
+ * @param red Red component (0-4095)
+ * @param green Green component (0-4095)
+ * @param blue Blue component (0-4095)
+ * @param pulse Whether to pulse the color (not implemented for 12-bit yet)
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t rgb_manager_set_color_12bit(RGBManager_t *rgb_manager, int led_idx, uint16_t red, uint16_t green, uint16_t blue, bool pulse);
+
+/**
  * @brief Apply the rainbow effect to the LED strip
  * @param rgb_manager Pointer to the RGBManager_t structure
  * @param delay_ms Delay between hue shifts in milliseconds
@@ -65,6 +78,10 @@ void rgb_manager_rainbow_effect(RGBManager_t *rgb_manager, int delay_ms);
 void rgb_manager_policesiren_effect(RGBManager_t *rgb_manager, int delay_ms);
 
 void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms);
+
+void rgb_manager_knightrider_effect(RGBManager_t *rgb_manager, int delay_ms);
+
+void rgb_manager_apply_static_from_settings(void);
 
 /**
  * @brief Deinitialize the RGB LED manager
@@ -78,6 +95,8 @@ void rainbow_task(void *pvParameter);
 void police_task(void *pvParameter);
 
 void strobe_task(void *pvParameter);
+
+void knightrider_task(void *pvParameter);
 
 void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
                 uint8_t blue);

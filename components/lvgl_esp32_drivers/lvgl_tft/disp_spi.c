@@ -174,6 +174,7 @@ void disp_spi_remove_device()
 
     esp_err_t ret=spi_bus_remove_device(spi);
     assert(ret==ESP_OK);
+    spi = NULL;  // clear handle so it can be reinitialized during resume
 }
 
 void disp_spi_transaction(const uint8_t *data, size_t length,

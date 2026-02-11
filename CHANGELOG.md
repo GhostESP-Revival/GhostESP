@@ -1,5 +1,65 @@
 # Ghost ESP Changelog
 
+## Revival v1.9.3
+
+### Added
+- Added support for the Febris Pro board
+- Added support for a new upcoming board
+- Added GPIO interrupt-based IR RX approach for improved reliability
+- Added Knight Rider and Static RGB modes
+- Added 12-bit color precision pipeline for RGB
+- Added GhostLink display commands to enable/disable the on-device AP and change credentials
+- Added touch support for The Wired Hatter's Banshee
+- Added proper touch support to the Infrared view
+- Added MAX17048 fuel gauge support for The Wired Hatter's Banshee
+- Added external RTC support for saving time sync on The Wired Hatter's Banshee
+- Added new compass app for The Wired Hatter's Banshee
+- Added ADXL345 accelerometer app to The Wired Hatter's Banshee
+- Added touch control bar to the BadUSB view
+- Added BadUSB display and CLI support with built-in test script for:
+  - Cardputer
+  - Cardputer ADV
+  - TEmbedC1101
+  - The Wired Hatter's Banshee
+- Added more status display logs
+- Added git commit hash retrieval and logging at build time - @tototo31
+- Added helper for saving scan data to SD card with incremental file numbering
+- Added auto saving of scans for:
+  - AP scan
+  - Station scan
+  - Flipper scan
+  - Airtag scan
+  - BLE GATT scan
+
+### Changed
+- Set IR universal send RGB pulse brightness to 20% (reduced from 100%)
+- Only save changed setting to NVS when changing in settings menu to prevent hangs/crashes
+- Reduced the wait time when switching RGB modes
+- Refactored and optimised Rainbow and Knight Rider RGB modes
+- Show highlight border on all displays regardless of touch support
+- Updated main menu item order
+- Remove dependencies.lock file - @tototo31
+- Adjust battery voltage threshold to allow for very dead batteries - @tototo31
+- Replace "Ghost ESP Ready ;)" startup message with GHOST ESP ASCII and ghostcli help prompt
+- Refactored NFC and IR menus to use shared options_view helpers for consistent styling
+- Downgrade GPS errors to ESP_LOGW to prevent printing in terminal
+
+### Fixed
+- Issue where RGBs would stay lit after stopping a deauth attack
+- Potential crash when stopping wardriving - Thanks to @10Evansr for reporting with a fix
+- Issue where AP disable wouldn't work
+- Minor RGB issues on The Wired Hatter's Banshee
+- IR RX issues on The Wired Hatter's Banshee
+- Display hanging when going to save NFC tags on The Wired Hatter's Banshee
+- Crash on the TEmbedC1101 when processing large IR signals
+- Clock icon not recoloring based on theme
+- Country and timezone not properly persisting
+- Airtag rgb pulsing in silent rgb mode
+- Fixed incorrect speed conversion in NMEA GPS parser
+- Bumped NMEA queue size from 16→32 to fix the UART pattern queue overflow
+- Fixed issues with saving most settings to NVS
+- Fixed deauth reverse-direction frames using station MAC as BSSID instead of AP BSSID
+
 ## Revival v1.9.2
 
 - Added Wireshark dongle mode for real-time PCAP streaming over USB/UART

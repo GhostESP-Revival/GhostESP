@@ -6,6 +6,7 @@
 #include <time.h>
 #include "managers/settings_manager.h"
 #include "gui/lvgl_safe.h"
+#include "gui/theme_palette_api.h"
 #include "esp_log.h"
 
 static const char *TAG = "ClockScreens";
@@ -14,22 +15,112 @@ static lv_obj_t *clock_container;
 static lv_obj_t *time_label;
 static lv_obj_t *date_label;
 static lv_obj_t *year_label;
+static lv_obj_t *tz_label;
 lv_timer_t *clock_timer = NULL;
+
+// Get friendly timezone name
+static const char* get_friendly_timezone_name(const char *tz) {
+    if (!tz) return "Local";
+    
+    // Map common timezone strings to friendly names
+    if (strstr(tz, "UTC") || strstr(tz, "GMT")) return "UTC";
+    if (strstr(tz, "EST5EDT")) return "Eastern";
+    if (strstr(tz, "CST6CDT")) return "Central";
+    if (strstr(tz, "MST7MDT")) return "Mountain";
+    if (strstr(tz, "PST8PDT")) return "Pacific";
+    if (strstr(tz, "AWST-8")) return "Western Australia";
+    if (strstr(tz, "America/New_York")) return "Eastern";
+    if (strstr(tz, "America/Chicago")) return "Central";
+    if (strstr(tz, "America/Denver")) return "Mountain";
+    if (strstr(tz, "America/Los_Angeles")) return "Pacific";
+    if (strstr(tz, "Europe/London")) return "London";
+    if (strstr(tz, "Europe/Paris")) return "Paris";
+    if (strstr(tz, "Asia/Tokyo")) return "Tokyo";
+    if (strstr(tz, "Australia/Sydney")) return "Sydney";
+    
+    // Extract just the timezone abbreviation if it's a complex format
+    if (strstr(tz, "EST")) return "EST";
+    if (strstr(tz, "CST")) return "CST";
+    if (strstr(tz, "MST")) return "MST";
+    if (strstr(tz, "PST")) return "PST";
+    
+    // Return first part if it contains comma (POSIX format)
+    char *tz_copy = strdup(tz);
+    if (tz_copy) {
+        char *comma = strchr(tz_copy, ',');
+        if (comma) {
+            *comma = '\0';
+            const char *result = strdup(tz_copy);
+            free(tz_copy);
+            return result;
+        }
+        free(tz_copy);
+    }
+    
+    return tz;
+}
+
+// Check if timezone name needs to be freed (was dynamically allocated)
+static bool should_free_timezone(const char *friendly_tz, const char *original_tz) {
+    if (friendly_tz == original_tz) return false;
+    
+    // Check against static string literals
+    const char *static_names[] = {
+        "Local", "UTC", "Eastern", "Central", "Mountain", "Pacific",
+        "Western Australia", "London", "Paris", "Tokyo", "Sydney", "EST", "CST", "MST", "PST"
+    };
+    
+    for (int i = 0; i < sizeof(static_names) / sizeof(static_names[0]); i++) {
+        if (friendly_tz == static_names[i]) {
+            return false;
+        }
+    }
+    
+    return true;
+}
 
 static void digital_clock_cb(lv_timer_t *timer) {
     time_t now;
     struct tm timeinfo;
     time(&now);
     localtime_r(&now, &timeinfo);
-    char buf[16];
-    strftime(buf, sizeof(buf), "%H:%M:%S", &timeinfo);
+    
+    // 12-hour format with AM/PM
+    char buf[32];
+    int hour_12 = timeinfo.tm_hour;
+    const char *am_pm = "AM";
+    
+    if (hour_12 >= 12) {
+        am_pm = "PM";
+        if (hour_12 > 12) {
+            hour_12 -= 12;
+        }
+    } else if (hour_12 == 0) {
+        hour_12 = 12;
+    }
+    
+    snprintf(buf, sizeof(buf), "%d:%02d:%02d %s", hour_12, timeinfo.tm_min, timeinfo.tm_sec, am_pm);
     lv_label_set_text(time_label, buf);
+    
     char buf_date[32];
     strftime(buf_date, sizeof(buf_date), "%A, %B %d", &timeinfo);
     lv_label_set_text(date_label, buf_date);
+    
     char buf_year[8];
     strftime(buf_year, sizeof(buf_year), "%Y", &timeinfo);
     lv_label_set_text(year_label, buf_year);
+    
+    // Update timezone label with friendly name
+    const char *tz = settings_get_timezone_str(&G_Settings);
+    const char *friendly_tz = get_friendly_timezone_name(tz);
+    char tz_buf[32];
+    snprintf(tz_buf, sizeof(tz_buf), "TZ: %s", friendly_tz);
+    lv_label_set_text(tz_label, tz_buf);
+    
+    // Free memory if get_friendly_timezone_name allocated it
+    if (should_free_timezone(friendly_tz, tz)) {
+        free((void*)friendly_tz);
+    }
 }
 
 static void clock_event_handler(InputEvent *event) {
@@ -55,26 +146,40 @@ void clock_create(void) {
         setenv("TZ", tz, 1);
         tzset();
     }
+    
+    // Get current theme colors for text only
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    uint32_t accent_color = theme_palette_get_accent(theme);
+    
+    // Keep original background color
     display_manager_fill_screen(lv_color_hex(0x121212));
     clock_container = gui_screen_create_root(NULL, "Clock", lv_color_hex(0x121212), LV_OPA_COVER);
     clock_view.root = clock_container;
     lv_obj_t *content = gui_screen_create_content(clock_container, GUI_STATUS_BAR_HEIGHT);
 
     time_label = lv_label_create(content);
-    lv_label_set_text(time_label, "00:00:00");
+    lv_label_set_text(time_label, "12:00:00 AM");
     lv_obj_set_style_text_font(time_label, &lv_font_montserrat_40, 0);
-    lv_obj_set_style_text_color(time_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_align(time_label, LV_ALIGN_CENTER, 0, -15);
+    lv_obj_set_style_text_color(time_label, lv_color_hex(accent_color), 0);
+    lv_obj_align(time_label, LV_ALIGN_CENTER, 0, -25);
+    
     date_label = lv_label_create(content);
     lv_label_set_text(date_label, "Wednesday, January 01");
     lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(date_label, lv_color_hex(0xAAAAAA), 0);
-    lv_obj_align(date_label, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_set_style_text_color(date_label, lv_color_hex(accent_color), 0);
+    lv_obj_align(date_label, LV_ALIGN_CENTER, 0, 20);
+    
     year_label = lv_label_create(content);
     lv_label_set_text(year_label, "2025");
     lv_obj_set_style_text_font(year_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(year_label, lv_color_hex(0xAAAAAA), 0);
-    lv_obj_align(year_label, LV_ALIGN_CENTER, 0, 50);
+    lv_obj_set_style_text_color(year_label, lv_color_hex(accent_color), 0);
+    lv_obj_align(year_label, LV_ALIGN_CENTER, 0, 40);
+    
+    tz_label = lv_label_create(content);
+    lv_label_set_text(tz_label, "TZ: UTC");
+    lv_obj_set_style_text_font(tz_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(tz_label, lv_color_hex(accent_color), 0);
+    lv_obj_align(tz_label, LV_ALIGN_CENTER, 0, 60);
 
     clock_timer = lv_timer_create(digital_clock_cb, 1000, NULL);
     digital_clock_cb(NULL);

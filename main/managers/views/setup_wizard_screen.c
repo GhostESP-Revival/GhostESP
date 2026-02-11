@@ -8,6 +8,8 @@
 #include "esp_wifi.h"
 #include "gui/lvgl_safe.h"
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 static const char *TAG = "SetupWizard";
 
@@ -544,6 +546,9 @@ static void finish_setup(void) {
     settings_set_wifi_country(&G_Settings, (uint8_t)selected_country_index);
     apply_wifi_country(selected_country_index);
     settings_set_timezone_str(&G_Settings, timezone_values[temp_timezone]);
+    // Apply timezone immediately
+    setenv("TZ", timezone_values[temp_timezone], 1);
+    tzset();
     settings_set_display_timeout(&G_Settings, display_timeout_values[temp_display_timeout]);
     settings_set_menu_theme(&G_Settings, temp_theme);
     settings_set_menu_layout(&G_Settings, temp_menu_layout);

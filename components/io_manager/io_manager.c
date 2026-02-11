@@ -1,11 +1,13 @@
 #include "io_manager.h"
 #include "driver/i2c.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "i2c_bus_lock.h"
+#include <stdio.h>
 
 static const char *TAG = "IO_MANAGER";
 static bool g_i2c_driver_installed = false; // whether this module installed the I2C driver
@@ -574,4 +576,180 @@ static esp_err_t tca9535_write_port(uint8_t reg, uint8_t data)
 
     xSemaphoreGive(g_i2c_mutex);
     return ret;
+}
+
+esp_err_t i2c_write_reg8_direct(uint8_t addr, uint8_t reg, uint8_t val)
+{
+    bool locked = i2c_bus_lock(g_config.i2c_port, 50);
+    if (!locked) return ESP_ERR_TIMEOUT;
+
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) {
+        i2c_bus_unlock(g_config.i2c_port);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    i2c_master_write_byte(cmd, val, true);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(g_config.i2c_port, cmd, pdMS_TO_TICKS(50));
+    i2c_cmd_link_delete(cmd);
+    i2c_bus_unlock(g_config.i2c_port);
+    return ret;
+}
+
+esp_err_t i2c_read_reg8_direct(uint8_t addr, uint8_t reg, uint8_t *val)
+{
+    bool locked = i2c_bus_lock(g_config.i2c_port, 50);
+    if (!locked) return ESP_ERR_TIMEOUT;
+
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) {
+        i2c_bus_unlock(g_config.i2c_port);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_READ, true);
+    i2c_master_read_byte(cmd, val, I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(g_config.i2c_port, cmd, pdMS_TO_TICKS(50));
+    i2c_cmd_link_delete(cmd);
+    i2c_bus_unlock(g_config.i2c_port);
+    return ret;
+}
+
+static void scan_single_i2c_port(i2c_port_t port, int *device_count, uint8_t *found_addresses, int max_devices)
+{
+    char row_buf[64];
+    
+    // scan addresses 1-0x7E to match arduino
+    for (uint8_t row = 0; row < 0x8; row++) {
+        int pos = snprintf(row_buf, sizeof(row_buf), "%x | ", row);
+        for (uint8_t column = 0; column <= 0xf; column++) {
+            uint8_t addr_7bit = (row << 4) | column;
+            
+            // skip reserved addresses (0x00 and 0x7F)
+            if (addr_7bit == 0x00 || addr_7bit >= 0x7F) {
+                if (pos < (int)sizeof(row_buf) - 2) {
+                    row_buf[pos++] = ' ';
+                    row_buf[pos++] = ' ';
+                }
+                continue;
+            }
+
+            bool global_locked = i2c_bus_lock(port, 60);
+            if (!global_locked) {
+                if (pos < (int)sizeof(row_buf) - 2) {
+                    row_buf[pos++] = '?';
+                    row_buf[pos++] = ' ';
+                }
+                continue;
+            }
+
+            i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+            if (!cmd) {
+                i2c_bus_unlock(port);
+                if (pos < (int)sizeof(row_buf) - 2) {
+                    row_buf[pos++] = '!';
+                    row_buf[pos++] = ' ';
+                }
+                continue;
+            }
+
+            i2c_master_start(cmd);
+            i2c_master_write_byte(cmd, (addr_7bit << 1) | I2C_MASTER_WRITE, true);
+            i2c_master_stop(cmd);
+
+            esp_err_t ret = i2c_master_cmd_begin(port, cmd, pdMS_TO_TICKS(50));
+            i2c_cmd_link_delete(cmd);
+            i2c_bus_unlock(port);
+
+            if (ret == ESP_OK) {
+                if (pos < (int)sizeof(row_buf) - 2) {
+                    row_buf[pos++] = '#';
+                    row_buf[pos++] = ' ';
+                }
+                if (*device_count < max_devices) {
+                    found_addresses[*device_count] = addr_7bit;
+                    (*device_count)++;
+                }
+            } else {
+                if (pos < (int)sizeof(row_buf) - 2) {
+                    row_buf[pos++] = '-';
+                    row_buf[pos++] = ' ';
+                }
+            }
+
+            vTaskDelay(1);
+        }
+        row_buf[pos] = '\0';
+        printf("%s\n", row_buf);
+        vTaskDelay(1);
+    }
+}
+
+void io_manager_scan_i2c(void)
+{
+    if (!g_i2c_mutex) {
+        ESP_LOGE(TAG, "i2c not initialized");
+        printf("i2c not initialized\n");
+        return;
+    }
+
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(TAG, "failed to acquire i2c mutex for scan");
+        printf("failed to acquire i2c mutex\n");
+        return;
+    }
+
+    printf("\n=== i2c bus scan ===\n");
+    printf("SDA=%d SCL=%d | 100kHz | timeout=50ms\n", g_config.sda_pin, g_config.scl_pin);
+
+    int device_count = 0;
+    uint8_t found_addresses[120];
+    const int max_devices = sizeof(found_addresses) / sizeof(found_addresses[0]);
+    
+    // scan all available i2c ports (typically 0 and 1)
+    #ifdef I2C_NUM_1
+    i2c_port_t ports_to_scan[] = { I2C_NUM_0, I2C_NUM_1 };
+    #else
+    i2c_port_t ports_to_scan[] = { I2C_NUM_0 };
+    #endif
+    int num_ports = sizeof(ports_to_scan) / sizeof(ports_to_scan[0]);
+    
+    for (int i = 0; i < num_ports && device_count < max_devices; i++) {
+        i2c_port_t port = ports_to_scan[i];
+        
+        printf("\nscanning i2c port %d...\n", (int)port);
+        printf("  | 0 1 2 3 4 5 6 7 8 9 a b c d e f\n");
+        printf("--+--------------------------------\n");
+        
+        scan_single_i2c_port(port, &device_count, found_addresses, max_devices);
+        
+        printf("\n");
+    }
+
+    printf("found %d device(s) total\n", device_count);
+    
+    if (device_count > 0) {
+        printf("\ndetected devices:\n");
+        for (int i = 0; i < device_count; i++) {
+            printf("  - device at address 0x%02x\n", found_addresses[i]);
+            ESP_LOGI(TAG, "found i2c device at address 0x%02x", found_addresses[i]);
+        }
+    } else {
+        printf("no devices found\n");
+    }
+    
+    ESP_LOGI(TAG, "i2c scan complete, found %d devices", device_count);
+
+    xSemaphoreGive(g_i2c_mutex);
 }

@@ -61,8 +61,10 @@ if(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI AND NOT CONFIG_USE_TDISPLAY_S3)
 endif()
 
 # Add touch driver to compilation only if it is selected in menuconfig
-if(CONFIG_LV_TOUCH_CONTROLLER)
+# Add touch driver to compilation only if it is selected in menuconfig or for specific templates
+if(CONFIG_LV_TOUCH_CONTROLLER OR CONFIG_BUILD_CONFIG_TEMPLATE MATCHES "somethingsomething")
     list(APPEND SOURCES "lvgl_touch/touch_driver.c")
+    list(APPEND SOURCES "lvgl_touch/tsc2007.c")
     list(APPEND LVGL_INCLUDE_DIRS lvgl_touch)
 
     # Include only the source file of the selected
@@ -91,13 +93,13 @@ if(CONFIG_LV_TOUCH_CONTROLLER)
     endif()
 endif()
 
-if(CONFIG_LV_I2C)
+if(CONFIG_LV_I2C OR CONFIG_BUILD_CONFIG_TEMPLATE MATCHES "somethingsomething")
     list(APPEND SOURCES "lvgl_i2c/i2c_manager.c")
 endif()
 
 idf_component_register(SRCS ${SOURCES}
                        INCLUDE_DIRS ${LVGL_INCLUDE_DIRS}
-                       REQUIRES lvgl driver)
+                       REQUIRES lvgl driver io_manager)
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC "-DLV_LVGL_H_INCLUDE_SIMPLE")
 

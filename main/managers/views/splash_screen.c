@@ -39,10 +39,21 @@ void splash_create(void) {
   lv_label_set_text(label1, "GhostESP: Revival");
   lv_obj_set_style_text_color(label1, lv_color_hex(0xFFFFFF), 0);
   lv_obj_align_to(label1, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  
   lv_obj_t *label2 = lv_label_create(splash_screen);
   lv_label_set_text(label2, GHOSTESP_VERSION);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
   lv_obj_align_to(label2, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+  
+  lv_obj_t *label3 = lv_label_create(splash_screen);
+  // Special naming for somethingsomething template
+  const char *build_name = CONFIG_BUILD_CONFIG_TEMPLATE;
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    build_name = "The Banshee";
+  }
+  lv_label_set_text_fmt(label3, "%s", build_name);
+  lv_obj_set_style_text_color(label3, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align_to(label3, label2, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 
   lv_anim_t fade_anim;
   lv_anim_init(&fade_anim);

@@ -86,8 +86,12 @@ static void display_spi_resume_after_sd(void) {
   if (!s_display_spi_suspended_flag) {
     return;
   }
-  (void)lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
+  esp_err_t ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
                              SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
+  if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
+    return;
+  }
   disp_spi_add_device(TFT_SPI_HOST);
   /* resume lvgl refresh */
   lv_disp_t *disp = lv_disp_get_default();
@@ -615,7 +619,7 @@ esp_err_t sd_card_init(void) {
 
   if (gating_template) {
     sd_card_update_cached_stats();
-    sd_card_unmount();
+    sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
     if (display_was_suspended) {
       display_spi_resume_after_sd();
     }
@@ -716,6 +720,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   s_mount_type = MOUNT_SPI;
   sd_card_update_cached_stats();
   s_next_unmount_tick = xTaskGetTickCount() + pdMS_TO_TICKS(300);
+  status_display_show_status("SD Active");
   return ESP_OK;
 #else
   // For SDMMC, if not mounted try normal init path quickly
@@ -726,20 +731,38 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
 void sd_card_unmount_after_flush(bool display_was_suspended) {
   /* fuck it, unmount now so the display can safely resume without bus contention */
   if (sd_card_manager.is_initialized) {
-    sd_card_unmount();
+    sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
   }
   /* always attempt resume; it's idempotent and guards internally */
   display_spi_resume_after_sd();
 }
 
-void sd_card_unmount(void) {
+void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #ifdef CONFIG_IS_S3TWATCH
   if (s_virtual_storage_mounted) {
     unmount_virtual_storage();
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
-    status_display_show_status("SD Unmounted");
+    
+    // Show appropriate status based on context
+    switch (context) {
+      case SD_UNMOUNT_CONTEXT_JIT:
+        status_display_show_status("Virtual SD Idle");
+        break;
+      case SD_UNMOUNT_CONTEXT_USER:
+        status_display_show_status("Virtual SD Off");
+        break;
+      case SD_UNMOUNT_CONTEXT_ERROR:
+        status_display_show_status("Virtual SD Err");
+        break;
+      case SD_UNMOUNT_CONTEXT_SHUTDOWN:
+        // Don't show status during shutdown
+        break;
+      default:
+        status_display_show_status("Virtual SD Off");
+        break;
+    }
     return;
   }
 #endif
@@ -751,7 +774,25 @@ void sd_card_unmount(void) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
-    status_display_show_status("SD Unmounted");
+    
+    // Show appropriate status based on context
+    switch (context) {
+      case SD_UNMOUNT_CONTEXT_JIT:
+        status_display_show_status("SD Idle");
+        break;
+      case SD_UNMOUNT_CONTEXT_USER:
+        status_display_show_status("SD Unmounted");
+        break;
+      case SD_UNMOUNT_CONTEXT_ERROR:
+        status_display_show_status("SD Error");
+        break;
+      case SD_UNMOUNT_CONTEXT_SHUTDOWN:
+        // Don't show status during shutdown
+        break;
+      default:
+        status_display_show_status("SD Unmounted");
+        break;
+    }
   } else {
     status_display_show_status("SD Not Mounted");
   }
@@ -767,11 +808,33 @@ void sd_card_unmount(void) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
-    status_display_show_status("SD Unmounted");
+    
+    // Show appropriate status based on context
+    switch (context) {
+      case SD_UNMOUNT_CONTEXT_JIT:
+        status_display_show_status("SD Idle");
+        break;
+      case SD_UNMOUNT_CONTEXT_USER:
+        status_display_show_status("SD Unmounted");
+        break;
+      case SD_UNMOUNT_CONTEXT_ERROR:
+        status_display_show_status("SD Error");
+        break;
+      case SD_UNMOUNT_CONTEXT_SHUTDOWN:
+        // Don't show status during shutdown
+        break;
+      default:
+        status_display_show_status("SD Unmounted");
+        break;
+    }
   } else {
     status_display_show_status("SD Not Mounted");
   }
 #endif
+}
+
+void sd_card_unmount(void) {
+  sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_USER);
 }
 
 esp_err_t sd_card_append_file(const char *path, const void *data, size_t size) {
@@ -958,6 +1021,12 @@ esp_err_t sd_card_setup_directory_structure() {
 
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
   ret = ensure_sd_dir_exists(nfc_dir);
+  if (ret != ESP_OK) return ret;
+#endif
+
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+  const char *badusb_dir = "/mnt/ghostesp/badusb";
+  ret = ensure_sd_dir_exists(badusb_dir);
   if (ret != ESP_OK) return ret;
 #endif
 

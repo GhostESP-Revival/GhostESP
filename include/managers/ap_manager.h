@@ -16,6 +16,10 @@ void ap_manager_add_log(const char *log_message);
 // only indeded to be used after ap_manager_init has been called once
 void ap_manager_stop_services();
 
+// stops ap_manager httpd + mdns, but leaves esp_wifi running
+// only intended to be used after ap_manager_init has been called once
+void ap_manager_stop_services_keep_wifi(void);
+
 // only indeded to be used after ap_manager_init has been called once
 esp_err_t ap_manager_start_services();
 

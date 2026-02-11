@@ -312,12 +312,11 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
         // Only show warning if we have a truly valid fix
         if (gps->valid && gps->fix >= GPS_FIX_GPS && gps->fix_mode >= GPS_MODE_2D &&
             gps->sats_in_use >= 3 &&
-            gps->sats_in_use <= GPS_MAX_SATELLITES_IN_USE && // Should be ≤ 12
+            gps->sats_in_use <= GPS_MAX_SATELLITES_IN_USE &&
             rand() % 100 == 0) {
-            glog("Warning: GPS date is out of range despite good fix: %04d-%02d-%02d "
-                   "(Fix: %d, Mode: %d, Sats: %d)\n",
-                   gps_get_absolute_year(gps->date.year), gps->date.month, gps->date.day, gps->fix,
-                   gps->fix_mode, gps->sats_in_use);
+            ESP_LOGW(GPS_TAG, "Invalid date despite good fix: %04d-%02d-%02d (Fix:%d Mode:%d Sats:%d)",
+                     gps_get_absolute_year(gps->date.year), gps->date.month, gps->date.day, gps->fix,
+                     gps->fix_mode, gps->sats_in_use);
         }
         return ESP_OK;
     }
@@ -329,36 +328,25 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
     }
 
     if (gps->tim.hour > 23 || gps->tim.minute > 59 || gps->tim.second > 59) {
-        if (rand() % 20 == 0) {
-            glog("Warning: GPS time is invalid: %02d:%02d:%02d\n", gps->tim.hour, gps->tim.minute,
-                   gps->tim.second);
-        }
+        ESP_LOGW(GPS_TAG, "Invalid time: %02d:%02d:%02d", gps->tim.hour, gps->tim.minute,
+                 gps->tim.second);
         return ESP_OK;
     }
 
     if (gps->latitude < -90.0 || gps->latitude > 90.0 || gps->longitude < -180.0 ||
         gps->longitude > 180.0) {
-        if (rand() % 20 == 0) {
-            glog("GPS Error: Invalid location detected (Lat: %f, Lon: %f)\n", gps->latitude,
-                   gps->longitude);
-        }
+        ESP_LOGW(GPS_TAG, "Out-of-range coords: Lat=%f Lon=%f", gps->latitude, gps->longitude);
         return ESP_OK;
     }
 
     if (gps->speed < 0.0 || gps->speed > 340.0) {
-        if (rand() % 20 == 0) {
-            glog("Warning: GPS speed is out of range: %f m/s\n", gps->speed);
-        }
+        ESP_LOGW(GPS_TAG, "Out-of-range speed: %f m/s", gps->speed);
         return ESP_OK;
     }
 
     if (gps->dop_h < 0.0 || gps->dop_p < 0.0 || gps->dop_v < 0.0 || gps->dop_h > 50.0 ||
         gps->dop_p > 50.0 || gps->dop_v > 50.0) {
-        if (rand() % 20 == 0) {
-            glog("Warning: GPS DOP values are out of range: HDOP: %f, PDOP: %f, "
-                   "VDOP: %f\n",
-                   gps->dop_h, gps->dop_p, gps->dop_v);
-        }
+        ESP_LOGW(GPS_TAG, "Out-of-range DOP: H=%f P=%f V=%f", gps->dop_h, gps->dop_p, gps->dop_v);
         return ESP_OK;
     }
 

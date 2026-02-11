@@ -146,30 +146,24 @@ int get_next_file_index(const char *dir_path, const char *base_name,
 
   DIR *dir = opendir(dir_path);
   if (!dir) {
-    ESP_LOGE(TAG, "Failed to open directory %s", dir_path);
-    // If directory doesn't exist, first file will be index 0
-    return 0; 
+    return 0;
   }
 
+  size_t base_len = strlen(base_name);
   struct dirent *entry;
-  char format_string[64];
-  snprintf(format_string, sizeof(format_string), "%s_%%d.%s", base_name, extension);
 
   while ((entry = readdir(dir)) != NULL) {
-    // Check if the filename starts with the base name
-    if (strncmp(entry->d_name, base_name, strlen(base_name)) == 0) {
-      int index;
-      // Try to parse the index from the filename
-      if (sscanf(entry->d_name, format_string, &index) == 1) {
-        if (index > max_index) {
-          max_index = index;
-        }
-      }
-    }
+    if (strncmp(entry->d_name, base_name, base_len) != 0) continue;
+    const char *rest = entry->d_name + base_len;
+    if (*rest != '_') continue;
+    char *end = NULL;
+    int index = (int)strtol(rest + 1, &end, 10);
+    if (end == rest + 1 || *end != '.') continue;
+    if (strcmp(end + 1, extension) != 0) continue;
+    if (index > max_index) max_index = index;
   }
 
   closedir(dir);
-  // Return the next index (max found + 1). If none found, max_index is -1, so returns 0.
   return max_index + 1;
 }
 

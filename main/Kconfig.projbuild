@@ -296,6 +296,34 @@ menu "Ghost ESP Options"
             help
                 GPIO pin for USB D+ (keyboard). On ESP32-S3 this is normally GPIO20.
 
+        config HAS_BADUSB
+            bool "Enable BadUSB (HID Script Injection)"
+            default n
+            depends on IDF_TARGET_ESP32S3
+            help
+                Enable BadUSB support. Uses TinyUSB device mode to emulate a USB HID
+                keyboard and execute DuckyScript v1.0 payloads from the SD card.
+                Only available on ESP32-S3 which has USB OTG support.
+
+        config BADUSB_VSENSE_PIN
+            int "BadUSB VBUS Sense Pin (use -1 to disable)"
+            default -1
+            depends on HAS_BADUSB
+            help
+                GPIO pin to sense USB VBUS voltage. When set to a valid pin (>= 0),
+                BadUSB will wait for VBUS to go HIGH before executing a script,
+                allowing you to plug in the device after selecting a payload.
+                Set to -1 to disable and execute immediately.
+
+        config HAS_BADUSB_REMOTE
+            bool "Enable BadUSB Remote (display menu only, routes via GhostLink)"
+            default n
+            depends on IDF_TARGET_ESP32C5
+            help
+                Enable the BadUSB display menu on a C5 display controller that routes
+                commands to a paired S3 via GhostLink/commsend. The C5 does not execute
+                scripts itself - it only provides the UI.
+
         config HAS_BATTERY
             bool "Enable power saving"
             default n
@@ -356,12 +384,80 @@ menu "Ghost ESP Options"
             depends on USE_BQ27220_FUEL_GAUGE
             help
                 Design capacity of the battery in mAh (default 1300 for T-Embed CC1101).
+
+        config USE_MAX17048_FUEL_GAUGE
+            bool "Use MAX17048 Fuel Gauge"
+            default n
+            depends on HAS_FUEL_GAUGE
+            help
+                Enable support for MAX17048 fuel gauge via I2C.
+
+        config MAX17048_I2C_ADDRESS
+            hex "MAX17048 I2C Address"
+            default 0x36
+            depends on USE_MAX17048_FUEL_GAUGE
+            help
+                I2C address for MAX17048 fuel gauge (default 0x36).
+
+        config MAX17048_I2C_SDA_PIN
+            int "MAX17048 I2C SDA Pin"
+            default 6
+            depends on USE_MAX17048_FUEL_GAUGE
+            help
+                GPIO pin for MAX17048 I2C SDA line.
+
+        config MAX17048_I2C_SCL_PIN
+            int "MAX17048 I2C SCL Pin"
+            default 7
+            depends on USE_MAX17048_FUEL_GAUGE
+            help
+                GPIO pin for MAX17048 I2C SCL line.
     
         config HAS_RTC_CLOCK
             bool "Enable RTC Clock"
             default n
             help
                 Enable RTC Clock.
+
+        config RTC_I2C_SDA_PIN
+            int "RTC SDA Pin"
+            default 6
+            depends on HAS_RTC_CLOCK
+            help
+                Set the SDA pin for the RTC I2C communication.
+
+        config RTC_I2C_SCL_PIN
+            int "RTC SCL Pin"
+            default 7
+            depends on HAS_RTC_CLOCK
+            help
+                Set the SCL pin for the RTC I2C communication.
+
+        config RTC_I2C_ADDRESS
+            hex "RTC I2C Address"
+            default 0x68
+            depends on HAS_RTC_CLOCK
+            help
+                Set the I2C address for the RTC chip (e.g., 0x68 for DS1307/DS3231, 0x51 for PCF8563).
+
+        config RTC_I2C_PORT
+            int "RTC I2C Port"
+            range 0 1
+            default 0
+            depends on HAS_RTC_CLOCK
+            help
+                Select the I2C controller port used for the RTC.
+
+        config RTC_CHIP_TYPE
+            int "RTC Chip Type"
+            range 0 2
+            default 1
+            depends on HAS_RTC_CLOCK
+            help
+                Select the RTC chip type:
+                0 = PCF8563 (address 0x51)
+                1 = DS1307 (address 0x68) 
+                2 = DS3231 (address 0x68)
 
         config WITH_ETHERNET
             bool "Enable Ethernet Support"
@@ -635,6 +731,91 @@ menu "Ghost ESP Options"
 
     endmenu
     
+    endmenu
+    
+    menu "Compass Configuration"
+
+    config HAS_COMPASS
+        bool "Enable Compass App"
+        default n
+        help
+            Enable Compass application using QMC6309.
+
+    config COMPASS_I2C_ADDR
+        hex "QMC6309 I2C Address"
+        default 0x0D
+        depends on HAS_COMPASS
+        help
+            I2C address of the QMC6309 magnetometer.
+
+    config COMPASS_ON_EXPANDER
+        bool "Compass connected to IO Expander"
+        default y
+        depends on HAS_COMPASS
+        help
+            Set to true if the Compass is connected to the IO Expander pins (requiring bit-banged I2C).
+
+    config COMPASS_EXPANDER_ADDR
+        hex "Compass IO Expander Address"
+        default 0x7C
+        depends on COMPASS_ON_EXPANDER
+        help
+            I2C address of the IO Expander hosting the Compass.
+
+    config COMPASS_SCL_PIN_BIT
+        int "Compass SCL Pin Bit (Port 1)"
+        default 6
+        depends on COMPASS_ON_EXPANDER
+        help
+            Bit index (0-7) on Port 1 for SCL.
+
+    config COMPASS_SDA_PIN_BIT
+        int "Compass SDA Pin Bit (Port 1)"
+        default 7
+        depends on COMPASS_ON_EXPANDER
+        help
+            Bit index (0-7) on Port 1 for SDA.
+
+    config QMC6309_CALIB_X_OFFSET
+        int "X Offset"
+        default 0
+        depends on HAS_COMPASS
+
+    config QMC6309_CALIB_Y_OFFSET
+        int "Y Offset"
+        default 0
+        depends on HAS_COMPASS
+
+    config QMC6309_CALIB_Z_OFFSET
+        int "Z Offset"
+        default 0
+        depends on HAS_COMPASS
+
+    endmenu
+
+    menu "Accelerometer Configuration"
+
+    config HAS_ACCELEROMETER
+        bool "Enable Accelerometer App"
+        default n
+        help
+            Enable Accelerometer application using ADXL345.
+
+    config ACCEL_I2C_ADDR
+        hex "ADXL345 I2C Address"
+        default 0x53
+        depends on HAS_ACCELEROMETER
+        help
+            I2C address of the ADXL345 accelerometer (0x53 default, 0x1D if SDO high).
+
+    config ACCEL_I2C_PORT
+        int "Accelerometer I2C Port"
+        range 0 1
+        default 0
+        depends on HAS_ACCELEROMETER
+        help
+            Select the I2C controller port used for the accelerometer.
+
     endmenu
     
     menu "SPI and MMC Configuration"

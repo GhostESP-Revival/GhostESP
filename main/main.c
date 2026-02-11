@@ -1,13 +1,19 @@
 #include "core/commandline.h"
 #include "core/serial_manager.h"
 #include "core/system_manager.h"
+#include "core/ghostesp_version.h"
 #include "managers/ap_manager.h"
 #include "managers/display_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/wifi_manager.h"
+#include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
+#include "managers/status_display_manager.h"
+#include "vendor/drivers/pcf8563.h"
+#include <sys/time.h>
+#include <time.h>
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -21,6 +27,10 @@
 
 #ifdef CONFIG_WITH_ETHERNET
 #include "managers/ethernet_manager.h"
+#endif
+
+#ifdef CONFIG_HAS_BADUSB
+#include "managers/badusb_manager.h"
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
@@ -85,6 +95,9 @@ void app_main(void) {
 #endif
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     // MEASURE_INIT_RAM("BLE Manager", ble_init());
+#endif
+#ifdef CONFIG_HAS_BADUSB
+    MEASURE_INIT_RAM("BadUSB Manager", badusb_manager_init());
 #endif
 
 #ifdef CONFIG_USE_TDECK
@@ -157,6 +170,32 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing Settings");
     MEASURE_INIT_RAM("Settings init", settings_init(&G_Settings));
 
+    // Apply timezone from settings
+    const char *tz = settings_get_timezone_str(&G_Settings);
+    if (tz && strlen(tz) > 0) {
+        setenv("TZ", tz, 1);
+        tzset();
+        ESP_LOGI(TAG, "Timezone applied: %s", tz);
+    }
+
+    // Apply WiFi country from settings
+    uint8_t country_index = settings_get_wifi_country(&G_Settings);
+    const char *country_codes[] = {"US", "GB", "JP", "AU", "CN", "01"};
+    if (country_index < sizeof(country_codes) / sizeof(country_codes[0])) {
+        wifi_country_t wifi_country = {
+            .cc = {country_codes[country_index][0], country_codes[country_index][1], 0},
+            .schan = 1,
+            .nchan = (country_index == 2) ? 14 : (country_index == 0) ? 11 : 13,
+            .policy = WIFI_COUNTRY_POLICY_MANUAL
+        };
+        esp_err_t err = esp_wifi_set_country(&wifi_country);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set WiFi country: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "WiFi country applied: %s", country_codes[country_index]);
+        }
+    }
+
     ESP_LOGI(TAG, "Configuring WiFi STA from settings");
     MEASURE_INIT_RAM("WiFi STA Config", wifi_manager_configure_sta_from_settings());
 
@@ -167,6 +206,9 @@ void app_main(void) {
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
     usb_keyboard_manager_register_stream_handler();
+#ifdef CONFIG_HAS_BADUSB
+    badusb_manager_register_stream_handler();
+#endif
 
     ESP_LOGI(TAG, "Initializing AP Manager");
     MEASURE_INIT_RAM("AP Manager", ap_manager_init());
@@ -210,10 +252,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Presenting splash screen");
     MEASURE_INIT_RAM("Switch to splash view", display_manager_switch_view(&splash_view));
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
-        if (rainbow_timer == NULL) {
-            rainbow_timer = lv_timer_create(rainbow_effect_cb, 50, NULL);
-            rainbow_hue = 0;
-        }
+        display_manager_set_rainbow_mode(true);
     }
 #endif
 #ifdef CONFIG_WITH_STATUS_DISPLAY
@@ -260,16 +299,26 @@ void app_main(void) {
             initialized = (rgb_err == ESP_OK);
 #endif
         }
-        if (initialized && settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
+        RGBMode boot_mode = settings_get_rgb_mode(&G_Settings);
+        if (initialized && boot_mode == RGB_MODE_RAINBOW) {
             xTaskCreatePinnedToCore(rainbow_task, "Rainbow Task", 3072,
                                     &rgb_manager, RGB_EFFECT_TASK_PRIORITY,
                                     &rgb_effect_task_handle,
                                     RGB_EFFECT_TASK_CORE);
+        } else if (initialized && boot_mode == RGB_MODE_KNIGHT_RIDER) {
+            xTaskCreate(knightrider_task, "Knight Rider Task", 3072, &rgb_manager,
+                        RGB_EFFECT_TASK_PRIORITY, &rgb_effect_task_handle);
+        } else if (initialized && boot_mode >= RGB_MODE_RED && boot_mode <= RGB_MODE_PINK) {
+            // Restore saved static color at boot
+            rgb_manager_apply_static_from_settings();
         }
     }
 
     ESP_LOGI(TAG, "Build config used: %s", CONFIG_BUILD_CONFIG_TEMPLATE);
     printf("Build Name: %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
+    
+    ESP_LOGI(TAG, "Git branch: %s, commit: %s", GIT_BRANCH, GIT_COMMIT_HASH);
+    printf("Git branch: %s, commit: %s\n", GIT_BRANCH, GIT_COMMIT_HASH);
 
     size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
@@ -278,6 +327,45 @@ void app_main(void) {
     ESP_LOGI(TAG, "Free heap after init: %d / %d bytes (%.1f%% free)", (int)free_heap, (int)total_heap, percent_free);
     printf("Free heap after init: %d / %d bytes (%.1f%% free)\n", (int)free_heap, (int)total_heap, percent_free);
 
-    ESP_LOGI(TAG, "Ghost ESP INIT complete. Ghost ESP Ready ;)");
-    printf("Ghost ESP Ready ;)\n");
+#ifdef CONFIG_HAS_RTC_CLOCK
+    // Sync system time from RTC on boot
+    RTC_Date rtc_time;
+    if (rtc_get_datetime(&rtc_time) == ESP_OK) {
+        struct timeval tv = {0};
+        struct tm tm = {0};
+        
+        tm.tm_year = rtc_time.year - 1900;
+        tm.tm_mon = rtc_time.month - 1;
+        tm.tm_mday = rtc_time.day;
+        tm.tm_hour = rtc_time.hour;
+        tm.tm_min = rtc_time.minute;
+        tm.tm_sec = rtc_time.second;
+        
+        tv.tv_sec = mktime(&tm);
+        tv.tv_usec = 0;
+        
+        if (tv.tv_sec > 1600000000) { // Valid time (after Sept 2020)
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "System time synchronized from RTC: %04d-%02d-%02d %02d:%02d:%02d", 
+                     rtc_time.year, rtc_time.month, rtc_time.day, 
+                     rtc_time.hour, rtc_time.minute, rtc_time.second);
+            printf("System time restored from RTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
+                   rtc_time.year, rtc_time.month, rtc_time.day, 
+                   rtc_time.hour, rtc_time.minute, rtc_time.second);
+        } else {
+            ESP_LOGW(TAG, "RTC time invalid, keeping default time");
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to read time from RTC");
+    }
+#endif
+
+    ESP_LOGI(TAG, "Ghost ESP INIT complete.");
+    printf("    ####  #   #  ####   ####  #####   ####  ####  #####\n");
+    printf("   #      #   # #    #  #       #     #     #     #   #\n");
+    printf("   #  ### ##### #    #  ####    #     ####  ####  #####\n");
+    printf("   #   #  #   # #    #     #    #     #        #  #\n");
+    printf("    ####  #   #  ####   ####    #     ##### ####  #\n");
+    printf("\n");
+    printf("ghostcli> Type 'help' for available commands\n");
 }

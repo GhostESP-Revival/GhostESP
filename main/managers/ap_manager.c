@@ -678,13 +678,18 @@ esp_err_t ap_manager_init(void) {
         glog("Access Point disabled in settings, skipping AP initialization\n");
         log_heap_status(TAG, "ap_init_disabled_pre_logbuf");
         
-        // Initialize log buffer and mutex even when AP is disabled
-        ESP_LOGI(TAG, "Allocating log buffer: %d bytes", MAX_LOG_BUFFER_SIZE);
-        log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
+        // initialize log buffer and mutex even when ap is disabled
+        // use psram to save internal ram
+        ESP_LOGI(TAG, "Allocating log buffer: %d bytes (PSRAM)", MAX_LOG_BUFFER_SIZE);
+        log_buffer = heap_caps_malloc(MAX_LOG_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if(!log_buffer){
-            ESP_LOGE(TAG, "failed to alloc log buffer");
-            log_heap_status(TAG, "ap_logbuf_alloc_fail");
-            return ESP_ERR_NO_MEM;
+            ESP_LOGE(TAG, "failed to alloc log buffer in psram, trying internal ram");
+            log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
+            if(!log_buffer) {
+                ESP_LOGE(TAG, "failed to alloc log buffer");
+                log_heap_status(TAG, "ap_logbuf_alloc_fail");
+                return ESP_ERR_NO_MEM;
+            }
         }
         log_heap_status(TAG, "ap_init_disabled_post_logbuf");
 
@@ -848,14 +853,19 @@ esp_err_t ap_manager_init(void) {
         glog("Failed to get IP address\n");
     }
 
-    // Initialize log buffer and mutex
+    // initialize log buffer and mutex
+    // use psram to save internal ram
     log_heap_status(TAG, "ap_init_enabled_pre_logbuf");
-    ESP_LOGI(TAG, "Allocating log buffer: %d bytes", MAX_LOG_BUFFER_SIZE);
-    log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
+    ESP_LOGI(TAG, "Allocating log buffer: %d bytes (PSRAM)", MAX_LOG_BUFFER_SIZE);
+    log_buffer = heap_caps_malloc(MAX_LOG_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if(!log_buffer){
-        ESP_LOGE(TAG, "failed to alloc log buffer");
-        log_heap_status(TAG, "ap_logbuf_alloc_fail");
-        return ESP_ERR_NO_MEM;
+        ESP_LOGE(TAG, "failed to alloc log buffer in psram, trying internal ram");
+        log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
+        if(!log_buffer) {
+            ESP_LOGE(TAG, "failed to alloc log buffer");
+            log_heap_status(TAG, "ap_logbuf_alloc_fail");
+            return ESP_ERR_NO_MEM;
+        }
     }
     log_heap_status(TAG, "ap_init_enabled_post_logbuf");
 
@@ -1038,6 +1048,32 @@ void ap_manager_stop_services() {
     wifi_mode_t wifi_mode;
     esp_err_t err = esp_wifi_get_mode(&wifi_mode);
 
+    ap_manager_stop_services_keep_wifi();
+
+    if (err == ESP_OK) {
+        if (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_STA ||
+            wifi_mode == WIFI_MODE_APSTA) {
+            glog("Stopping Wi-Fi...\n");
+            esp_err_t stop_err = esp_wifi_stop();
+            if (stop_err != ESP_OK &&
+                stop_err != ESP_ERR_WIFI_NOT_INIT &&
+                stop_err != ESP_ERR_WIFI_NOT_STARTED) {
+                ESP_LOGE(TAG, "esp_wifi_stop failed: %s", esp_err_to_name(stop_err));
+            }
+        }
+    } else {
+        glog("Failed to get Wi-Fi mode, error: %d\n", err);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    log_heap_status(TAG, "ap_stop_post");
+    status_display_show_status("AP Services Off");
+}
+
+void ap_manager_stop_services_keep_wifi(void) {
+    log_heap_status(TAG, "ap_stop_pre");
+
     esp_err_t http_ret = stop_http_server();
     if (http_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop HTTP server: %s", esp_err_to_name(http_ret));
@@ -1063,21 +1099,7 @@ void ap_manager_stop_services() {
         }
     }
 
-    if (err == ESP_OK) {
-        if (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_STA ||
-            wifi_mode == WIFI_MODE_APSTA) {
-            glog("Stopping Wi-Fi...\n");
-            ESP_ERROR_CHECK(esp_wifi_stop());
-        }
-    } else {
-        glog("Failed to get Wi-Fi mode, error: %d\n", err);
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
-
     teardown_mdns();
-    log_heap_status(TAG, "ap_stop_post");
-    status_display_show_status("AP Services Off");
 }
 
 // Handler for GET requests (serves the HTML page)

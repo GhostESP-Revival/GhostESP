@@ -29,6 +29,7 @@
 #include "esp_bt.h"
 #include "managers/ap_manager.h"
 #include "managers/wifi_manager.h"
+#include "core/scan_saver.h"
 
 #define MAX_DEVICES 30
 #define MAX_HANDLERS 10
@@ -66,6 +67,8 @@ typedef enum {
     TRACKER_GENERIC_FINDMY,
 } TrackerType;
 
+static const char* tracker_type_to_string(TrackerType type);
+
 typedef struct {
     ble_uuid_any_t uuid;
     uint16_t start_handle;
@@ -93,6 +96,7 @@ static int airTagCount = 0;
 static volatile bool ble_initialized = false;
 static volatile bool ble_stack_ready = false;
 static volatile bool airtag_scanner_active = false;
+static volatile bool flipper_scan_active = false;
 
 static esp_timer_handle_t flush_timer = NULL;
 static TaskHandle_t nimble_host_task_handle = NULL;
@@ -1449,6 +1453,10 @@ void ble_list_airtags(void) {
         return;
     }
 
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "airtag_scan", "txt") == ESP_OK);
+    if (saving) scan_file_printf(&sf, "--- Discovered AirTags (%d) ---\n", discovered_airtag_count);
+
     for (int i = 0; i < discovered_airtag_count; i++) {
         char macAddress[18];
         format_mac_address(discovered_airtags[i].addr.val, macAddress, sizeof(macAddress), false);
@@ -1456,14 +1464,13 @@ void ble_list_airtags(void) {
         glog("Index: %d | MAC: %s | RSSI: %d dBm %s\n",
              i, macAddress, discovered_airtags[i].rssi,
              (i == selected_airtag_index) ? " (Selected)" : "");
-        // Optionally print payload too
-        // printf("  Payload (%zu bytes): ", discovered_airtags[i].payload_len);
-        // for(size_t j = 0; j < discovered_airtags[i].payload_len; j++) {
-        //     printf("%02X ", discovered_airtags[i].payload[j]);
-        // }
-        // printf("\n");
+        if (saving) {
+            scan_file_printf(&sf, "[%d] MAC: %s, RSSI: %d dBm\n",
+                             i, macAddress, discovered_airtags[i].rssi);
+        }
     }
     glog("-----------------------------\n");
+    if (saving) scan_file_close(&sf);
 }
 
 // Function to select an AirTag by index
@@ -1986,6 +1993,7 @@ void ble_start_find_flippers(void) {
     memset(discovered_flippers, 0, sizeof(discovered_flippers));
     discovered_flipper_count = 0;
     selected_flipper_index = -1;
+    flipper_scan_active = true;
 
     ESP_LOGI(TAG_BLE, "Find Flippers: registering handler and starting BLE scan");
     ble_register_handler(ble_findtheflippers_callback);
@@ -2053,6 +2061,35 @@ void ble_stop(void) {
     }
 
     rgb_manager_set_color(&rgb_manager, 0, 0, 0, 0, false);
+
+    if (flipper_scan_active && discovered_flipper_count > 0) {
+        scan_file_t sf = SCAN_FILE_INIT;
+        if (scan_file_open(&sf, "flipper_scan", "txt") == ESP_OK) {
+            scan_file_printf(&sf, "--- Discovered Flippers (%d) ---\n", discovered_flipper_count);
+            for (int i = 0; i < discovered_flipper_count; i++) {
+                char mac[18];
+                format_mac_address(discovered_flippers[i].addr.val, mac, sizeof(mac), false);
+                scan_file_printf(&sf, "[%d] MAC: %s, Name: %s, RSSI: %d dBm\n",
+                                 i, mac, discovered_flippers[i].name, discovered_flippers[i].rssi);
+            }
+            scan_file_close(&sf);
+        }
+    }
+    if (airtag_scanner_active && discovered_airtag_count > 0) {
+        scan_file_t sf = SCAN_FILE_INIT;
+        if (scan_file_open(&sf, "airtag_scan", "txt") == ESP_OK) {
+            scan_file_printf(&sf, "--- Discovered AirTags (%d) ---\n", discovered_airtag_count);
+            for (int i = 0; i < discovered_airtag_count; i++) {
+                char mac[18];
+                format_mac_address(discovered_airtags[i].addr.val, mac, sizeof(mac), false);
+                scan_file_printf(&sf, "[%d] MAC: %s, RSSI: %d dBm\n",
+                                 i, mac, discovered_airtags[i].rssi);
+            }
+            scan_file_close(&sf);
+        }
+    }
+
+    flipper_scan_active = false;
     airtag_scanner_active = false;
     ble_unregister_handler(ble_findtheflippers_callback);
     ble_unregister_handler(airtag_scanner_callback);
@@ -2325,6 +2362,10 @@ void ble_list_flippers(void) {
         return;
     }
 
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "flipper_scan", "txt") == ESP_OK);
+    if (saving) scan_file_printf(&sf, "--- Discovered Flippers (%d) ---\n", discovered_flipper_count);
+
     for (int i = 0; i < discovered_flipper_count; i++) {
         char mac[18];
         format_mac_address(discovered_flippers[i].addr.val, mac, sizeof(mac), false);
@@ -2332,7 +2373,12 @@ void ble_list_flippers(void) {
         glog("Index: %d | MAC: %s | RSSI: %d dBm%s\n",
              i, mac, discovered_flippers[i].rssi,
              (i == selected_flipper_index) ? " (Selected)" : "");
+        if (saving) {
+            scan_file_printf(&sf, "[%d] MAC: %s, Name: %s, RSSI: %d dBm\n",
+                             i, mac, discovered_flippers[i].name, discovered_flippers[i].rssi);
+        }
     }
+    if (saving) scan_file_close(&sf);
 }
 
 int ble_get_flipper_count(void) {
@@ -3165,6 +3211,10 @@ void ble_list_gatt_devices(void) {
         glog("No GATT devices discovered. Run 'blescan -g' first.\n");
         return;
     }
+
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "gatt_scan", "txt") == ESP_OK);
+    if (saving) scan_file_printf(&sf, "--- GATT Devices (%d) ---\n", discovered_gatt_device_count);
     
     for (int i = 0; i < discovered_gatt_device_count; i++) {
         GattDevice *dev = &discovered_gatt_devices[i];
@@ -3188,7 +3238,17 @@ void ble_list_gatt_devices(void) {
              mac, 
              dev->rssi,
              info);
+        if (saving) {
+            if (tracker_str) {
+                scan_file_printf(&sf, "[%d] %s (%s) %d dBm [%s]\n",
+                                 i, dev->name[0] ? dev->name : "<unknown>", mac, dev->rssi, tracker_str);
+            } else {
+                scan_file_printf(&sf, "[%d] %s (%s) %d dBm\n",
+                                 i, dev->name[0] ? dev->name : "<unknown>", mac, dev->rssi);
+            }
+        }
     }
+    if (saving) scan_file_close(&sf);
 }
 
 void ble_select_gatt_device(int index) {
@@ -3418,6 +3478,27 @@ void ble_stop_gatt_scan(void) {
     }
     gatt_enum_in_progress = false;
     
+    if (discovered_gatt_devices && discovered_gatt_device_count > 0) {
+        scan_file_t sf = SCAN_FILE_INIT;
+        if (scan_file_open(&sf, "gatt_scan", "txt") == ESP_OK) {
+            scan_file_printf(&sf, "--- GATT Devices (%d) ---\n", discovered_gatt_device_count);
+            for (int i = 0; i < discovered_gatt_device_count; i++) {
+                GattDevice *dev = &discovered_gatt_devices[i];
+                char mac[18];
+                format_mac_address(dev->addr.val, mac, sizeof(mac), false);
+                const char *tracker_str = tracker_type_to_string(dev->tracker_type);
+                if (tracker_str) {
+                    scan_file_printf(&sf, "[%d] %s (%s) %d dBm [%s]\n",
+                                     i, dev->name[0] ? dev->name : "<unknown>", mac, dev->rssi, tracker_str);
+                } else {
+                    scan_file_printf(&sf, "[%d] %s (%s) %d dBm\n",
+                                     i, dev->name[0] ? dev->name : "<unknown>", mac, dev->rssi);
+                }
+            }
+            scan_file_close(&sf);
+        }
+    }
+
     if (discovered_gatt_devices) {
         free(discovered_gatt_devices);
         discovered_gatt_devices = NULL;

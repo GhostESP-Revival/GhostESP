@@ -7,6 +7,7 @@
 #include "esp_sntp.h"
 #include "managers/ap_manager.h"
 #include "sdkconfig.h"
+#include "vendor/drivers/pcf8563.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -21,6 +22,10 @@
 #include "vendor/printer.h"
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #include "managers/zigbee_manager.h"
+#endif
+#ifdef CONFIG_HAS_BADUSB
+#include "managers/badusb_manager.h"
+#include "managers/badusb_builtin_script.h"
 #endif
 #ifdef CONFIG_WITH_ETHERNET
 #include "managers/ethernet_manager.h"
@@ -340,6 +345,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"web_auth", ST_BOOL, OFF(web_auth_enabled), "System", 0, 0, 0},
     {"rts_enabled", ST_BOOL, OFF(rts_enabled), "System", 0, 0, 0},
     {"third_ctrl", ST_BOOL, OFF(third_control_enabled), "System", 0, 0, 0},
+    {"auto_save_scans", ST_BOOL, OFF(auto_save_scans), "System", 0, 0, 0},
 
     {"flappy_name", ST_STRING, OFF(flappy_ghost_name), "Custom", 65, 0, 0},
     {"timezone", ST_STRING, OFF(selected_timezone), "Custom", 25, 0, 0},
@@ -751,6 +757,7 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_deauth();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     ble_stop();
+    ble_stop_gatt_scan();
     ble_stop_ble_spam();
 #endif
     if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
@@ -796,6 +803,7 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_dhcpstarve();
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
+    wifi_manager_stop_evil_portal();  // stop evil portal and flush credentials
     wifi_manager_stop_tracking();  // stop ap/sta rssi tracking
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     // ensure zigbee capture is stopped when using generic stop
@@ -814,10 +822,7 @@ void handle_stop_flipper(int argc, char **argv) {
         vTaskDelete(VisualizerHandle);
         VisualizerHandle = NULL;
     }
-    if (rgb_effect_task_handle != NULL) {
-        vTaskDelete(rgb_effect_task_handle);
-        rgb_effect_task_handle = NULL;
-    }
+    settings_restart_rgb_effect();
 }
 
 void handle_dial_command(int argc, char **argv) {
@@ -889,6 +894,35 @@ void handle_mem_cmd(int argc, char **argv) {
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
     dump_task_stacks();
 }
+
+#ifdef CONFIG_HAS_RTC_CLOCK
+// Time synchronization callback for SNTP
+static void sntp_time_sync_callback(struct timeval *tv) {
+    if (tv && tv->tv_sec > 1600000000) { // Valid time (after Sept 2020)
+        struct tm timeinfo;
+        struct tm utc_timeinfo;
+        
+        // Get local time for display
+        localtime_r(&tv->tv_sec, &timeinfo);
+        
+        // Save UTC time to RTC (not local time)
+        gmtime_r(&tv->tv_sec, &utc_timeinfo);
+        RTC_Date rtc_time;
+        rtc_time.year = utc_timeinfo.tm_year + 1900;
+        rtc_time.month = utc_timeinfo.tm_mon + 1;
+        rtc_time.day = utc_timeinfo.tm_mday;
+        rtc_time.hour = utc_timeinfo.tm_hour;
+        rtc_time.minute = utc_timeinfo.tm_min;
+        rtc_time.second = utc_timeinfo.tm_sec;
+        
+        if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+            ESP_LOGI("SNTP", "Time synchronized from NTP and UTC saved to RTC: %04d-%02d-%02d %02d:%02d:%02d", 
+                     rtc_time.year, rtc_time.month, rtc_time.day, 
+                     rtc_time.hour, rtc_time.minute, rtc_time.second);
+        }
+    }
+}
+#endif
 
 void handle_wifi_connection(int argc, char **argv) {
     const char *ssid;
@@ -993,6 +1027,12 @@ void handle_wifi_connection(int argc, char **argv) {
 
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "pool.ntp.org");
+    
+#ifdef CONFIG_HAS_RTC_CLOCK
+    // Set up time synchronization callback to save time to RTC
+    sntp_set_time_sync_notification_cb(sntp_time_sync_callback);
+#endif
+    
     sntp_init();
 }
 
@@ -2770,6 +2810,7 @@ void handle_eth_ntp_cmd(int argc, char **argv) {
     // Get the synchronized time
     time_t now;
     struct tm timeinfo;
+    struct tm utc_timeinfo;
     char strftime_buf[64];
     
     time(&now);
@@ -2778,6 +2819,26 @@ void handle_eth_ntp_cmd(int argc, char **argv) {
     
     glog("Time synchronized successfully!\n");
     glog("Current system time: %s\n", strftime_buf);
+    
+#ifdef CONFIG_HAS_RTC_CLOCK
+    // Save UTC time to RTC (not local time)
+    gmtime_r(&now, &utc_timeinfo);
+    RTC_Date rtc_time;
+    rtc_time.year = utc_timeinfo.tm_year + 1900;
+    rtc_time.month = utc_timeinfo.tm_mon + 1;
+    rtc_time.day = utc_timeinfo.tm_mday;
+    rtc_time.hour = utc_timeinfo.tm_hour;
+    rtc_time.minute = utc_timeinfo.tm_min;
+    rtc_time.second = utc_timeinfo.tm_sec;
+    
+    if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+        glog("UTC time saved to RTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
+             rtc_time.year, rtc_time.month, rtc_time.day, 
+             rtc_time.hour, rtc_time.minute, rtc_time.second);
+    } else {
+        glog("Failed to save time to RTC\n");
+    }
+#endif
     
     // Also show UTC time
     struct tm timeinfo_utc;
@@ -3417,6 +3478,28 @@ void handle_settime_cmd(int argc, char **argv) {
     
     glog("System time set successfully!\n");
     glog("Time: %s\n", strftime_buf);
+    
+#ifdef CONFIG_HAS_RTC_CLOCK
+    // Save UTC time to RTC (not local time)
+    struct tm utc_timeinfo;
+    gmtime_r(&timestamp, &utc_timeinfo);
+    RTC_Date rtc_time;
+    rtc_time.year = utc_timeinfo.tm_year + 1900;
+    rtc_time.month = utc_timeinfo.tm_mon + 1;
+    rtc_time.day = utc_timeinfo.tm_mday;
+    rtc_time.hour = utc_timeinfo.tm_hour;
+    rtc_time.minute = utc_timeinfo.tm_min;
+    rtc_time.second = utc_timeinfo.tm_sec;
+    
+    if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+        glog("UTC time saved to RTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
+             rtc_time.year, rtc_time.month, rtc_time.day, 
+             rtc_time.hour, rtc_time.minute, rtc_time.second);
+    } else {
+        glog("Failed to save time to RTC\n");
+    }
+#endif
+    
     status_display_show_status("Time Set OK");
 }
 
@@ -3455,12 +3538,12 @@ void handle_startwd(int argc, char **argv) {
 
     if (stop_flag) {
         stop_wardriving();
-        gps_manager_deinit(&g_gpsManager);
         wifi_manager_stop_monitor_mode();
         if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
             csv_flush_buffer_to_file();
         }
         csv_file_close();
+        gps_manager_deinit(&g_gpsManager);
         glog("Wardriving stopped.\n");
         status_display_show_status("Wardrive Stop");
     } else {
@@ -3851,7 +3934,7 @@ void handle_help(int argc, char **argv) {
 
     if (strcmp(category, "led") == 0) {
         glog("\nLED & RGB Commands:\n\n");
-        glog("rgbmode\n    Control LED effects (rainbow, police, strobe, off)\n    Usage: rgbmode <rainbow|police|strobe|off|color>\n\n");
+        glog("rgbmode\n    Control LED effects (rainbow, police, strobe, knight, off)\n    Usage: rgbmode <rainbow|police|strobe|knight|off|color>\n\n");
         glog("setrgbpins\n    Change RGB LED pins\n    Usage: setrgbpins <red> <green> <blue>\n           (use same value for all pins for single-pin LED strips)\n\n");
         glog("setrgbcount\n    Configure how many RGB LEDs are attached\n    Usage: setrgbcount <1-512>\n\n");
         glog("setneopixelbrightness\n    Set maximum neopixel brightness (percent)\n    Usage: setneopixelbrightness <0-100>\n\n");
@@ -4363,11 +4446,11 @@ void handle_ble_wardriving(int argc, char **argv) {
 
     if (stop_flag) {
         ble_stop();
-        gps_manager_deinit(&g_gpsManager);
         if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
             csv_flush_buffer_to_file();
         }
         csv_file_close();
+        gps_manager_deinit(&g_gpsManager);
         printf("BLE wardriving stopped.\n");
         TERMINAL_VIEW_ADD_TEXT("BLE wardriving stopped.\n");
         status_display_show_status("BLE Drive Off");
@@ -4506,18 +4589,18 @@ void handle_apcred(int argc, char **argv) {
 void handle_rgb_mode(int argc, char **argv) {
     static bool last_effect_is_rainbow = false;
     if (argc < 2) {
-        glog("Usage: rgbmode <rainbow|police|strobe|off|color>\n");
+        glog("Usage: rgbmode <rainbow|police|strobe|knight|off|color>\n");
         status_display_show_status("RGB Usage");
         return;
     }
 
     // Cancel any currently running LED effect task safely.
     if (rgb_effect_task_handle != NULL) {
-        if (last_effect_is_rainbow) {
-            rgb_manager_signal_rainbow_exit();
-            vTaskDelay(pdMS_TO_TICKS(50));
-            rgb_effect_task_handle = NULL;
-        } else {
+        rgb_manager_signal_rainbow_exit();
+        for (int i = 0; i < 20 && rgb_effect_task_handle != NULL; i++) {
+            vTaskDelay(pdMS_TO_TICKS(25));
+        }
+        if (rgb_effect_task_handle != NULL) {
             vTaskDelete(rgb_effect_task_handle);
             rgb_effect_task_handle = NULL;
         }
@@ -4556,6 +4639,16 @@ void handle_rgb_mode(int argc, char **argv) {
         last_effect_is_rainbow = false;
         glog("Strobe mode activated\n");
         status_display_show_status("RGB Strobe");
+    } else if (strcasecmp(argv[1], "knight") == 0) {
+        if (!(rgb_manager.is_separate_pins || rgb_manager.strip)) {
+            glog("RGB not initialized\n");
+            status_display_show_status("RGB Not Ready");
+            return;
+        }
+        xTaskCreate(knightrider_task, "knightrider_effect", 2048, &rgb_manager, 5, &rgb_effect_task_handle);
+        last_effect_is_rainbow = false;
+        glog("Knight Rider mode activated\n");
+        status_display_show_status("RGB Knight");
     } else if (strcasecmp(argv[1], "off") == 0) {
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
         if (!rgb_manager.is_separate_pins && rgb_manager.strip) {
@@ -4575,33 +4668,36 @@ void handle_rgb_mode(int argc, char **argv) {
             uint8_t r;
             uint8_t g;
             uint8_t b;
+            RGBMode mode;
         } color_t;
         static const color_t supported_colors[] = {
-            { "red",    255, 0,   0 },
-            { "green",  0,   255, 0 },
-            { "blue",   0,   0,   255 },
-            { "yellow", 255, 255, 0 },
-            { "purple", 128, 0,   128 },
-            { "cyan",   0,   255, 255 },
-            { "orange", 255, 165, 0 },
-            { "white",  255, 255, 255 },
-            { "pink",   255, 192, 203 }
+            { "red",         255, 0,   0,   RGB_MODE_RED },
+            { "green",       0,   255, 0,   RGB_MODE_GREEN },
+            { "blue",        0,   0,   255, RGB_MODE_BLUE },
+            { "yellow",      255, 255, 0,   RGB_MODE_YELLOW },
+            { "twh-purple",  115, 0,   225, RGB_MODE_PURPLE }, // #7300E1
+            { "cyan",        0,   255, 255, RGB_MODE_CYAN },
+            { "orange",      255, 165, 0,   RGB_MODE_ORANGE },
+            { "white",       255, 255, 255, RGB_MODE_WHITE },
+            { "pink",        255, 192, 203, RGB_MODE_PINK }
         };
         const int num_colors = sizeof(supported_colors) / sizeof(supported_colors[0]);
         int found = 0;
         uint8_t r, g, b;
+        RGBMode chosen_mode = RGB_MODE_NORMAL;
         for (int i = 0; i < num_colors; i++) {
             // Use case-insensitive compare.
             if (strcasecmp(argv[1], supported_colors[i].name) == 0) {
                 r = supported_colors[i].r;
                 g = supported_colors[i].g;
                 b = supported_colors[i].b;
+                chosen_mode = supported_colors[i].mode;
                 found = 1;
                 break;
             }
         }
         if (!found) {
-            glog("Unknown color '%s'. Supported colors: red, green, blue, yellow, purple, cyan, orange, white, pink.\n", argv[1]);
+            glog("Unknown color '%s'. Supported colors: red, green, blue, yellow, twh-purple, cyan, orange, white, pink.\n", argv[1]);
             status_display_show_status("Color Invalid");
             return;
         }
@@ -4610,6 +4706,9 @@ void handle_rgb_mode(int argc, char **argv) {
             rgb_manager_set_color(&rgb_manager, i, r, g, b, false);
         }
         led_strip_refresh(rgb_manager.strip);
+        // Persist selection so it remains active after other effects/off are toggled
+        settings_set_rgb_mode(&G_Settings, chosen_mode);
+        settings_save(&G_Settings);
         glog("Static color mode activated: %s\n", argv[1]);
         status_display_show_status("RGB Static");
     }
@@ -6437,6 +6536,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    web_auth          - Web authentication (true/false)\n");
         glog("    rts_enabled       - RTS enabled (true/false)\n");
         glog("    third_ctrl        - Third control enabled (true/false)\n");
+        glog("    auto_save_scans   - Auto save scan results to SD (true/false)\n");
         glog("  Custom Settings:\n");
         glog("    flappy_name       - Flappy Ghost name\n");
         glog("    timezone          - Selected timezone\n");
@@ -7104,6 +7204,185 @@ static void ir_rx_learn_task(void *arg) {
 
     g_ir_rx_learn_task = NULL;
     vTaskDelete(NULL);
+}
+
+static size_t badusb_join_args(char *out, size_t out_len, int argc, char **argv, int start_idx) {
+    if (!out || out_len == 0) return 0;
+    out[0] = '\0';
+    size_t used = 0;
+    for (int i = start_idx; i < argc; i++) {
+        const char *arg = argv[i] ? argv[i] : "";
+        size_t arg_len = strlen(arg);
+        if (used + arg_len + 1 >= out_len) break;
+        if (used > 0) {
+            out[used++] = ' ';
+        }
+        memcpy(out + used, arg, arg_len);
+        used += arg_len;
+        out[used] = '\0';
+    }
+    return used;
+}
+
+static void badusb_strip_quotes(char *text) {
+    if (!text) return;
+    size_t len = strlen(text);
+    if (len < 2) return;
+    if ((text[0] == '"' && text[len - 1] == '"') || (text[0] == '\'' && text[len - 1] == '\'')) {
+        memmove(text, text + 1, len - 2);
+        text[len - 2] = '\0';
+    }
+}
+
+void handle_badusb_cmd(int argc, char **argv) {
+#ifdef CONFIG_HAS_BADUSB
+    if (argc < 2) {
+        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout>\n");
+        glog("  badusb run <filename>  - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
+        glog("  badusb list            - List available scripts\n");
+        glog("  badusb stop            - Stop current execution\n");
+        glog("  badusb exec <size>     - Prepare to receive a script via stream\n");
+        glog("  badusb set_vid <hex>   - Set USB VID for next run\n");
+        glog("  badusb set_pid <hex>   - Set USB PID for next run\n");
+        glog("  badusb set_mfr <text>  - Set USB manufacturer for next run\n");
+        glog("  badusb set_prod <text> - Set USB product for next run\n");
+        glog("  badusb set_rand <0|1>  - Toggle USB detail randomization\n");
+        glog("  badusb set_layout <n>  - Set keyboard layout for next run\n");
+        return;
+    }
+
+    const char *sub = argv[1];
+
+    if (strcmp(sub, "list") == 0) {
+        char scripts[32][64];
+        int count = badusb_manager_list_scripts(scripts, 32);
+        if (count == 0) {
+            glog("No scripts found in /mnt/ghostesp/badusb/\n");
+        } else {
+            glog("BadUSB scripts (%d):\n", count);
+            for (int i = 0; i < count; i++) {
+                glog("  [%d] %s\n", i, scripts[i]);
+            }
+        }
+    } else if (strcmp(sub, "run") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb run <filename|builtin>\n");
+            return;
+        }
+        if (strcmp(argv[2], "builtin") == 0) {
+            char *buf = strdup(badusb_builtin_script);
+            if (buf) {
+                esp_err_t ret = badusb_manager_execute_buffer(buf, BADUSB_BUILTIN_SCRIPT_LEN);
+                if (ret != ESP_OK) {
+                    glog("BadUSB: Failed to execute built-in script\n");
+                }
+            } else {
+                glog("BadUSB: Out of memory\n");
+            }
+        } else {
+            char path[256];
+            snprintf(path, sizeof(path), "/mnt/ghostesp/badusb/%s", argv[2]);
+            esp_err_t ret = badusb_manager_execute_file(path);
+            if (ret != ESP_OK) {
+                glog("BadUSB: Failed to execute %s\n", argv[2]);
+            }
+        }
+    } else if (strcmp(sub, "exec") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb exec <size>\n");
+            return;
+        }
+        size_t size = (size_t)atoi(argv[2]);
+        esp_err_t ret = badusb_manager_prepare_receive(size);
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to prepare receive\n");
+        }
+    } else if (strcmp(sub, "stop") == 0) {
+        badusb_manager_stop();
+        glog("BadUSB: Stopped\n");
+    } else if (strcmp(sub, "set_vid") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_vid <hex>\n");
+            return;
+        }
+        uint16_t vid = (uint16_t)strtol(argv[2], NULL, 0);
+        settings_set_badusb_vid(&G_Settings, vid);
+        glog("BadUSB: VID set\n");
+    } else if (strcmp(sub, "set_pid") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_pid <hex>\n");
+            return;
+        }
+        uint16_t pid = (uint16_t)strtol(argv[2], NULL, 0);
+        settings_set_badusb_pid(&G_Settings, pid);
+        glog("BadUSB: PID set\n");
+    } else if (strcmp(sub, "set_mfr") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_mfr <text>\n");
+            return;
+        }
+        char value[64];
+        badusb_join_args(value, sizeof(value), argc, argv, 2);
+        badusb_strip_quotes(value);
+        settings_set_badusb_manufacturer(&G_Settings, value);
+        glog("BadUSB: Manufacturer set\n");
+    } else if (strcmp(sub, "set_prod") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_prod <text>\n");
+            return;
+        }
+        char value[64];
+        badusb_join_args(value, sizeof(value), argc, argv, 2);
+        badusb_strip_quotes(value);
+        settings_set_badusb_product(&G_Settings, value);
+        glog("BadUSB: Product set\n");
+    } else if (strcmp(sub, "set_rand") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_rand <0|1>\n");
+            return;
+        }
+        bool enabled = atoi(argv[2]) != 0;
+        settings_set_badusb_randomize(&G_Settings, enabled);
+        glog("BadUSB: Randomize set to %u\n", enabled ? 1 : 0);
+    } else if (strcmp(sub, "set_layout") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb set_layout <n>\n");
+            return;
+        }
+        uint8_t layout = (uint8_t)strtol(argv[2], NULL, 0);
+        settings_set_badusb_kb_layout(&G_Settings, layout);
+        glog("BadUSB: Layout set to %u\n", layout);
+    } else if (strcmp(sub, "status") == 0) {
+        // Status update from peer - forward to view
+#ifdef CONFIG_WITH_SCREEN
+        if (argc >= 3) {
+            extern void badusb_view_update_status(const char *status);
+            badusb_view_update_status(argv[2]);
+        }
+#endif
+    } else {
+        glog("Unknown badusb subcommand: %s\n", sub);
+    }
+#elif defined(CONFIG_HAS_BADUSB_REMOTE)
+    if (argc < 2) {
+        glog("BadUSB remote: no subcommand\n");
+        return;
+    }
+    const char *sub = argv[1];
+    if (strcmp(sub, "status") == 0) {
+        // Status update from S3 peer - forward to display view
+#ifdef CONFIG_WITH_SCREEN
+        if (argc >= 3) {
+            extern void badusb_view_update_status(const char *status);
+            badusb_view_update_status(argv[2]);
+        }
+#endif
+    } else {
+        glog("Unknown badusb subcommand: %s\n", sub);
+    }
+#else
+    glog("BadUSB not enabled on this build\n");
+#endif
 }
 
 void handle_ir_cmd(int argc, char **argv) {
@@ -7893,6 +8172,7 @@ void register_commands() {
 #ifdef CONFIG_HAS_INFRARED
     register_command("ir", handle_ir_cmd);
 #endif
+    register_command("badusb", handle_badusb_cmd);
 #ifdef CONFIG_WITH_ETHERNET
     register_command("ethup", handle_eth_up_cmd);
     register_command("ethdown", handle_eth_down_cmd);

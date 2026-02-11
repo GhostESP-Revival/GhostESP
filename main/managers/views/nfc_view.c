@@ -4,8 +4,11 @@
 #include "managers/views/keyboard_screen.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/options_view.h"
+#include "managers/status_display_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "managers/views/error_popup.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
 #include <string.h>
@@ -78,19 +81,9 @@ static const char *TAG = "NFCView";
 #define SCROLL_BTN_SIZE 40
 #define SCROLL_BTN_PADDING 5
 
-static lv_style_t style_menu_item;
-static lv_style_t style_menu_item_alt;
-static lv_style_t style_selected_item;
-static lv_style_t style_menu_label;
-static bool styles_initialized = false;
+static options_view_t *g_nfc_ov = NULL;
 
-// forward declarations for helpers used throughout this file
-static void init_styles(void);
-static lv_style_t *get_zebra_style(int idx);
-static const lv_font_t* get_menu_font(void);
-static void vertically_center_label(lv_obj_t *label, lv_obj_t *btn);
 void nfc_option_event_cb(lv_event_t *e);
-static void highlight_selected(void);
 void nfc_view_input_cb(InputEvent *event);
 
 static lv_obj_t *root = NULL;
@@ -475,6 +468,16 @@ void mfc_ui_set_phase(int sector, int first_block, bool key_b, int total_keys) {
     mfc_phase_first_block = first_block;
     mfc_phase_key_b = key_b;
     mfc_phase_total = total_keys;
+    
+    // Add detailed status messages for MFC dictionary attack phases
+    if (sector == 0 && first_block == 0) {
+        status_display_show_status("MFC Attack Start");
+    } else if (sector >= 0) {
+        char status_msg[32];
+        snprintf(status_msg, sizeof(status_msg), "MFC Sec %d Key %c", sector, key_b ? 'B' : 'A');
+        status_display_show_status(status_msg);
+    }
+    
     dict_prog_t *dp = nfc_dict_pool_alloc();
     if (dp) { dp->c = 0; dp->t = total_keys; dp->s = nfc_scan_session; lv_async_call(nfc_progress_update_async, dp); }
 }
@@ -488,6 +491,27 @@ static void mfc_dict_progress_cb(int current, int total, void *user) {
     static int last_percent = -1;
     if (percent == last_percent) return;
     last_percent = percent;
+    
+    // Add status display messages for NFC scanning phases
+    if (nfc_cache_fill_phase) {
+        status_display_show_status("NFC Reading...");
+    } else if (!nfc_details_visible && mfc_phase_total > 0) {
+        // Show progress milestones for dictionary attack
+        if (percent == 0) {
+            status_display_show_status("MFC Dict Start");
+        } else if (percent == 25) {
+            status_display_show_status("MFC 25%");
+        } else if (percent == 50) {
+            status_display_show_status("MFC 50%");
+        } else if (percent == 75) {
+            status_display_show_status("MFC 75%");
+        } else if (percent == 100) {
+            status_display_show_status("MFC Dict Done");
+        }
+    } else if (nfc_dict_skip_requested) {
+        status_display_show_status("NFC Basic Read");
+    }
+    
     dict_prog_t *dp = nfc_dict_pool_alloc();
     if (!dp) return;
     dp->c = current; dp->t = total; dp->s = nfc_scan_session;
@@ -662,6 +686,10 @@ static void nfc_set_details_async(void *ptr) {
     if (nfc_detected_title[0] == '\0') {
         snprintf(nfc_detected_title, sizeof(nfc_detected_title), "NFC Tag");
     }
+    
+    // Show success status when NFC scanning completes
+    status_display_show_status("NFC Scan Done");
+    
     // reset phase state and update summary labels to indicate completion
     mfc_phase_sector = -1;
     mfc_phase_first_block = -1;
@@ -721,6 +749,29 @@ static void nfc_set_details_async(void *ptr) {
 static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, uint8_t uid_len) {
     // Prefer MIFARE Classic summary if SAK indicates Classic
     if (mfc_is_classic_sak(g_sak)) {
+        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        // Early exit for Banshee: show basic info only to avoid NFC instability
+        // Commented out to allow MFC dict attack
+        // size_t cap = 256;
+        // ndef_details_result_t *res = (ndef_details_result_t*)malloc(sizeof(*res));
+        // if (!res) return;
+        // res->text = (char*)malloc(cap);
+        // if (!res->text) { free(res); return; }
+        // res->text_len = cap; res->session = nfc_scan_session;
+        // char *w = res->text;
+        // snprintf(w, cap, "MIFARE Classic\nUID:");
+        // size_t used = strlen(w); w += used; cap -= used;
+        // for (uint8_t i = 0; i < uid_len && cap > 3; ++i) {
+        //     int n = snprintf(w, cap, " %02X", uid[i]);
+        //     if (n > 0) { w += n; cap -= n; }
+        // }
+        // snprintf(w, cap, "\nATQA: %04X SAK: %02X", g_atqa, g_sak);
+        // // snprintf(w, cap, "\nATQA: %04X SAK: %02X\nNFC unstable on Banshee", g_atqa, g_sak);
+        // if (display_manager_is_available()) lv_async_call(nfc_set_details_async, res);
+        // else { if (res->text) free(res->text); free(res); }
+        // return;
+    }
+
         mfc_set_progress_callback(mfc_dict_progress_cb, NULL);
         if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) lv_label_set_text(nfc_title_label, "Bruteforcing keys... 0%");
         // Reduce I2C contention during PN532 scanning/bruteforce
@@ -1062,6 +1113,7 @@ static void nfc_scan_task(void *arg) {
             if (nfc_scan_cancel) break;
             g_uid_len = uid_len; memcpy(g_uid, uid + 1, uid_len); g_atqa = atqa; g_sak = sak; g_model = NTAG2XX_UNKNOWN;
             ESP_LOGI(TAGT, "scan_task: UID found, building details (len=%u)", uid_len);
+            status_display_show_status("NFC Tag Found");
             nfc_build_and_set_details(g_pn532, uid + 1, uid_len);
             break;
         }
@@ -1086,73 +1138,8 @@ static void nfc_scan_task(void *arg) {
 
 static void execute_selected(void) { /* no bottom status text in this view */ }
 
-static void init_styles(void) {
-    if (styles_initialized) return;
-    lv_style_init(&style_menu_item);
-    lv_style_set_bg_color(&style_menu_item, lv_color_hex(0x1E1E1E));
-    lv_style_set_bg_opa(&style_menu_item, LV_OPA_COVER);
-    lv_style_set_border_width(&style_menu_item, 0);
-    lv_style_set_radius(&style_menu_item, 0);
-
-    lv_style_init(&style_menu_item_alt);
-    lv_style_set_bg_color(&style_menu_item_alt, lv_color_hex(0x232323));
-    lv_style_set_bg_opa(&style_menu_item_alt, LV_OPA_COVER);
-    lv_style_set_border_width(&style_menu_item_alt, 0);
-    lv_style_set_radius(&style_menu_item_alt, 0);
-
-    lv_style_init(&style_selected_item);
-    lv_style_set_bg_color(&style_selected_item, lv_color_hex(0x3A3A3A));
-    lv_style_set_bg_opa(&style_selected_item, LV_OPA_COVER);
-    lv_style_set_border_width(&style_selected_item, 0);
-    lv_style_set_radius(&style_selected_item, 0);
-
-    styles_initialized = true;
-}
-
-static const lv_font_t* get_menu_font(void) {
-    return (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-}
-
-static void vertically_center_label(lv_obj_t *label, lv_obj_t *btn) {
-    if (!label) return;
-    lv_coord_t btn_h = lv_obj_get_height(btn ? btn : lv_obj_get_parent(label));
-    lv_coord_t label_h = lv_obj_get_height(label);
-    lv_coord_t btn_y_center_pad = (btn_h - label_h) / 2;
-    if (btn_y_center_pad < 0) btn_y_center_pad = 0;
-    lv_obj_set_style_pad_top(label, btn_y_center_pad, 0);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
-}
-
-static void update_selected_style_from_theme(void) {
-    uint8_t theme = settings_get_menu_theme(&G_Settings);
-    lv_color_t theme_bg = lv_color_hex(theme_palette_get_accent(theme));
-    lv_style_set_bg_color(&style_selected_item, theme_bg);
-    lv_style_set_bg_grad_dir(&style_selected_item, LV_GRAD_DIR_NONE);
-    lv_style_set_bg_grad_color(&style_selected_item, theme_bg);
-}
-
 static void highlight_selected(void) {
-    if (!menu_container) return;
-    for (int i = 0; i < num_items; ++i) {
-        lv_obj_t *child = lv_obj_get_child(menu_container, i);
-        if (!child) continue;
-        lv_obj_t *label = lv_obj_get_child(child, 0);
-        if (i == selected_index) {
-            uint8_t theme = settings_get_menu_theme(&G_Settings);
-            lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-            lv_obj_set_style_bg_color(child, accent, LV_PART_MAIN);
-            if (label) {
-                if (theme_palette_is_bright(theme)) lv_obj_set_style_text_color(label, lv_color_hex(0x000000), 0);
-                else lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-            }
-            lv_obj_scroll_to_view(child, LV_ANIM_OFF);
-        } else {
-            bool zebra = settings_get_zebra_menus_enabled(&G_Settings);
-            uint32_t base = zebra && (i % 2) ? 0x232323 : 0x1E1E1E;
-            lv_obj_set_style_bg_color(child, lv_color_hex(base), LV_PART_MAIN);
-            if (label) lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-        }
-    }
+    if (g_nfc_ov) options_view_set_selected(g_nfc_ov, selected_index);
 }
 
 // forward declare back_event_cb so it can be used before its definition
@@ -1545,69 +1532,55 @@ void nfc_view_input_cb(InputEvent *event) {
     }
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *d = &event->data.touch_data;
-        if (d->state == LV_INDEV_STATE_PR) return; // handle only on release
+        if (d->state == LV_INDEV_STATE_PR) return;
         int x = d->point.x;
         int y = d->point.y;
-        // check buttons
-        for (int i = 0; i < num_items; ++i) {
+        int cnt = g_nfc_ov ? options_view_get_item_count(g_nfc_ov) : 0;
+        for (int i = 0; i < cnt; ++i) {
             lv_obj_t *btn = lv_obj_get_child(menu_container, i);
             if (!btn) continue;
             lv_area_t a;
             lv_obj_get_coords(btn, &a);
             if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) {
                 selected_index = i;
-                highlight_selected();
+                if (g_nfc_ov) options_view_set_selected(g_nfc_ov, i);
                 lv_event_send(btn, LV_EVENT_CLICKED, NULL);
                 return;
             }
         }
-        // touch outside -> back
         if (in_write_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int btn = event->data.joystick_index;
-        if (btn == 2) { // up
-            selected_index = (selected_index - 1 + num_items) % num_items;
-            highlight_selected();
-        } else if (btn == 4) { // down
-            selected_index = (selected_index + 1) % num_items;
-            highlight_selected();
-        } else if (btn == 1) { // select
+        if (btn == 2) {
+            if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, -1); selected_index = options_view_get_selected(g_nfc_ov); }
+        } else if (btn == 4) {
+            if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, 1); selected_index = options_view_get_selected(g_nfc_ov); }
+        } else if (btn == 1) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_index);
-            if (selected_obj) {
-                lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
-            } else {
-                execute_selected();
-            }
-        } else if (btn == 0) { // back
+            if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
+        } else if (btn == 0) {
             if (in_write_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
             lv_obj_t *sel = lv_obj_get_child(menu_container, selected_index);
-            if (sel) {
-                lv_event_send(sel, LV_EVENT_CLICKED, NULL);
-            } else execute_selected();
+            if (sel) lv_event_send(sel, LV_EVENT_CLICKED, NULL);
         } else {
-            if (event->data.encoder.direction > 0)
-                selected_index = (selected_index + 1) % num_items;
-            else
-                selected_index = (selected_index - 1 + num_items) % num_items;
-            highlight_selected();
+            if (g_nfc_ov) {
+                options_view_move_selection(g_nfc_ov, event->data.encoder.direction > 0 ? 1 : -1);
+                selected_index = options_view_get_selected(g_nfc_ov);
+            }
         }
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         int kv = event->data.key_value;
-        if (kv == 13) { // Enter
+        if (kv == 13) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_index);
-            if (selected_obj) {
-                lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
-            } else execute_selected();
-        } else if (kv == 44 || kv == ',' || kv == 59 || kv == ';') { // up
-            selected_index = (selected_index - 1 + num_items) % num_items;
-            highlight_selected();
-        } else if (kv == 47 || kv == '/' || kv == 46 || kv == '.') { // down
-            selected_index = (selected_index + 1) % num_items;
-            highlight_selected();
-        } else if (kv == 29 || kv == '`') { // Esc
+            if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
+        } else if (kv == 44 || kv == ',' || kv == 59 || kv == ';') {
+            if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, -1); selected_index = options_view_get_selected(g_nfc_ov); }
+        } else if (kv == 47 || kv == '/' || kv == 46 || kv == '.') {
+            if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, 1); selected_index = options_view_get_selected(g_nfc_ov); }
+        } else if (kv == 29 || kv == '`') {
             if (in_write_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
         }
 #ifdef CONFIG_USE_ENCODER
@@ -1668,11 +1641,6 @@ static void scroll_nfc_down(lv_event_t *e) {
 static void back_event_cb(lv_event_t *e) {
     if (in_write_list || in_saved_list) back_to_root_menu();
     else display_manager_switch_view(&main_menu_view);
-}
-
-lv_style_t* get_zebra_style(int index) {
-    if (settings_get_zebra_menus_enabled(&G_Settings)) return (index % 2 == 0) ? &style_menu_item : &style_menu_item_alt;
-    return &style_menu_item;
 }
 
 void cleanup_nfc_scan_popup(void *obj) {
@@ -1751,6 +1719,7 @@ void cleanup_nfc_scan_popup(void *obj) {
 }
 
 static void nfc_scan_cancel_cb(lv_event_t *e) {
+    status_display_show_status("NFC Scan Canceled");
     cleanup_nfc_scan_popup(NULL);
 }
 
@@ -1786,6 +1755,7 @@ static void nfc_scan_more_cb(lv_event_t *e) {
     // If bruteforcing is active, treat More as Skip (basic read)
     if (!nfc_dict_skip_requested && mfc_phase_sector >= 0) {
         nfc_dict_skip_requested = true;
+        status_display_show_status("MFC Dict Skipped");
         if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
             lv_label_set_text(nfc_title_label, "Basic read (skipping dict) ...");
         }
@@ -1870,6 +1840,7 @@ static bool write_flipper_nfc_file(void) {
 #ifdef CONFIG_NFC_PN532
     if (g_uid_len == 0 || g_pn532 == NULL) {
         ESP_LOGW(TAG, "No NFC UID/driver to save");
+        if (did) nfc_sd_end(susp);
         return false;
     }
 
@@ -1891,9 +1862,11 @@ static bool write_flipper_nfc_file(void) {
         }
         if (!ok) {
             ESP_LOGE(TAG, "Failed to save Mifare Classic file");
+            if (did) nfc_sd_end(susp);
             return false;
         }
         ESP_LOGI(TAG, "Mifare Classic file saved");
+        if (did) nfc_sd_end(susp);
         return true;
     }
 
@@ -1926,6 +1899,7 @@ static bool write_flipper_nfc_file(void) {
 
         if (sd_card_write_file(path, buf, (size_t)pos) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to write DESFire header: %s", path);
+            if (did) nfc_sd_end(susp);
             return false;
         }
         ESP_LOGI(TAG, "Mifare DESFire header saved: %s", path);
@@ -1964,6 +1938,7 @@ static bool write_flipper_nfc_file(void) {
 
     if (sd_card_write_file(path, buf, (size_t)pos) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write header: %s", path);
+        if (did) nfc_sd_end(susp);
         return false;
     }
 
@@ -2039,6 +2014,7 @@ meta_fallback: ;
     char *pages = (char*)malloc(cap);
     if (!pages) {
         ESP_LOGE(TAG, "OOM building page dump");
+        if (did) nfc_sd_end(susp);
         return false;
     }
     int ppos = 0; int pages_read = 0;
@@ -2169,6 +2145,7 @@ static void create_nfc_scan_popup(void) {
         }
     }
     ESP_LOGI(TAG, "create_nfc_scan_popup: starting scan task");
+    status_display_show_status("NFC Scanning...");
     nfc_scan_cancel = false;
     mfc_set_progress_callback(mfc_dict_progress_cb, NULL);
     xTaskCreate(nfc_scan_task, "nfc_scan", 6144, NULL, 5, &nfc_scan_task_handle);
@@ -2208,6 +2185,13 @@ static void nfc_save_done_async(void *ptr) {
     }
     if (nfc_scan_save_btn && lv_obj_is_valid(nfc_scan_save_btn)) {
         lv_obj_clear_state(nfc_scan_save_btn, LV_STATE_DISABLED);
+    }
+    
+    // Add status display messages for NFC save result
+    if (ok) {
+        status_display_show_status("NFC Saved");
+    } else {
+        status_display_show_status("NFC Save Fail");
     }
 #ifdef CONFIG_NFC_PN532
     mfc_set_progress_callback(NULL, NULL);
@@ -2609,188 +2593,74 @@ static void nfc_file_item_cb(lv_event_t *e) {
 }
 
 static void back_to_root_menu(void) {
-    if (!root || !menu_container) return;
+    if (!root || !g_nfc_ov) return;
     in_write_list = false;
     in_saved_list = false;
     nfc_clear_write_list();
     saved_clear_list();
-    lv_obj_clean(menu_container);
+    options_view_clear(g_nfc_ov);
 
-    // rebuild Scan and Write rows (same as in create)
-    // Add Scan button
-    scan_btn = lv_list_add_btn(menu_container, NULL, "Scan");
-    lv_obj_set_height(scan_btn, button_height_global);
-    lv_obj_add_style(scan_btn, get_zebra_style(0), 0);
-    lv_obj_t *slabel = lv_obj_get_child(scan_btn, 0);
-    if (slabel) {
-        lv_obj_set_style_text_font(slabel, get_menu_font(), 0);
-        vertically_center_label(slabel, scan_btn);
-        lv_obj_add_style(slabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(scan_btn, (void *)"Scan");
-    lv_obj_add_event_cb(scan_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Scan");
-
-    // Add Saved button
-    lv_obj_t *saved_btn = lv_list_add_btn(menu_container, NULL, "Saved");
-    lv_obj_set_height(saved_btn, button_height_global);
-    lv_obj_add_style(saved_btn, get_zebra_style(1), 0);
-    lv_obj_t *svlabel = lv_obj_get_child(saved_btn, 0);
-    if (svlabel) {
-        lv_obj_set_style_text_font(svlabel, get_menu_font(), 0);
-        vertically_center_label(svlabel, saved_btn);
-        lv_obj_add_style(svlabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(saved_btn, (void *)"Saved");
-    lv_obj_add_event_cb(saved_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Saved");
-
-    // Add User Keys button
-    lv_obj_t *keys_btn = lv_list_add_btn(menu_container, NULL, "User Keys");
-    lv_obj_set_height(keys_btn, button_height_global);
-    lv_obj_add_style(keys_btn, get_zebra_style(2), 0);
-    lv_obj_t *klabel = lv_obj_get_child(keys_btn, 0);
-    if (klabel) {
-        lv_obj_set_style_text_font(klabel, get_menu_font(), 0);
-        vertically_center_label(klabel, keys_btn);
-        lv_obj_add_style(klabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(keys_btn, (void *)"User Keys");
-    lv_obj_add_event_cb(keys_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"User Keys");
-
-    // Add Chameleon Ultra button
+    scan_btn = options_view_add_item(g_nfc_ov, "Scan", nfc_option_event_cb, (void *)"Scan");
+    if (scan_btn) lv_obj_set_user_data(scan_btn, (void *)"Scan");
+    options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
+    options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
 #if defined(CONFIG_NFC_CHAMELEON)
-    lv_obj_t *cu_btn = lv_list_add_btn(menu_container, NULL, "Chameleon Ultra");
-    lv_obj_set_height(cu_btn, button_height_global);
-    lv_obj_add_style(cu_btn, get_zebra_style(3), 0);
-    lv_obj_t *culabel = lv_obj_get_child(cu_btn, 0);
-    if (culabel) {
-        lv_obj_set_style_text_font(culabel, get_menu_font(), 0);
-        vertically_center_label(culabel, cu_btn);
-        lv_obj_add_style(culabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(cu_btn, (void *)"Chameleon Ultra");
-    lv_obj_add_event_cb(cu_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Chameleon Ultra");
+    options_view_add_item(g_nfc_ov, "Chameleon Ultra", nfc_option_event_cb, (void *)"Chameleon Ultra");
 #endif
-
-    // Add Write button
-    emulate_btn = lv_list_add_btn(menu_container, NULL, "Write");
-    lv_obj_set_height(emulate_btn, button_height_global);
-    lv_obj_add_style(emulate_btn, get_zebra_style(4), 0);
-    lv_obj_t *elabel = lv_obj_get_child(emulate_btn, 0);
-    if (elabel) {
-        lv_obj_set_style_text_font(elabel, get_menu_font(), 0);
-        vertically_center_label(elabel, emulate_btn);
-        lv_obj_add_style(elabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(emulate_btn, (void *)"Write");
-    lv_obj_add_event_cb(emulate_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Write");
-
-    num_items = 5;
-
+    emulate_btn = options_view_add_item(g_nfc_ov, "Write", nfc_option_event_cb, (void *)"Write");
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-    // Ensure hardware back row exists on main menu (encoder/joystick builds)
-    lv_obj_t *back_row = lv_list_add_btn(menu_container, NULL, LV_SYMBOL_LEFT " Back");
-    if (back_row) {
-        lv_obj_set_height(back_row, button_height_global);
-        lv_obj_add_style(back_row, get_zebra_style(5), 0);
-        lv_obj_t *blabel = lv_obj_get_child(back_row, 0);
-        if (blabel) {
-            lv_obj_set_style_text_font(blabel, get_menu_font(), 0);
-            vertically_center_label(blabel, back_row);
-            lv_obj_add_style(blabel, &style_menu_label, 0);
-        }
-        lv_obj_set_user_data(back_row, (void *)"__BACK_OPTION__");
-        lv_obj_add_event_cb(back_row, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"__BACK_OPTION__");
-        num_items++;
-    }
+    options_view_add_back_row(g_nfc_ov, nfc_option_event_cb, (void *)"__BACK_OPTION__");
 #endif
-
+    num_items = options_view_get_item_count(g_nfc_ov);
     selected_index = 0;
-    highlight_selected();
+    options_view_set_selected(g_nfc_ov, 0);
 }
 
 static void nfc_enter_write_list(void) {
-    if (!menu_container) return;
+    if (!g_nfc_ov) return;
     in_write_list = true;
     nfc_clear_write_list();
-    lv_obj_clean(menu_container);
+    options_view_clear(g_nfc_ov);
 
-    // List files from /mnt/ghostesp/nfc/
     const char *dir = "/mnt/ghostesp/nfc";
     bool susp = false; bool did = nfc_sd_begin(&susp);
     DIR *d = opendir(dir);
     if (d) {
         struct dirent *de;
-        // First pass to count
         size_t count = 0;
         while ((de = readdir(d)) != NULL) {
             if (de->d_name[0] == '.') continue;
             if (has_nfc_ext(de->d_name)) count++;
         }
         rewinddir(d);
-        if (count > 0) {
-            nfc_file_paths = (char**)calloc(count, sizeof(char*));
-        }
+        if (count > 0) nfc_file_paths = (char**)calloc(count, sizeof(char*));
         size_t idx = 0;
         while ((de = readdir(d)) != NULL) {
             if (de->d_name[0] == '.') continue;
             if (!has_nfc_ext(de->d_name)) continue;
-            size_t need = strlen(dir) + 1 + strlen(de->d_name) + 1; // dir + '/' + name + NUL
+            size_t need = strlen(dir) + 1 + strlen(de->d_name) + 1;
             char *copy = (char*)malloc(need);
             if (!copy) continue;
             snprintf(copy, need, "%s/%s", dir, de->d_name);
             if (nfc_file_paths && idx < count) nfc_file_paths[idx++] = copy;
             ESP_LOGI(TAG, "nfc_enter_write_list: %s", copy);
-
-            lv_obj_t *row = lv_list_add_btn(menu_container, NULL, de->d_name);
-            lv_obj_set_height(row, button_height_global);
-            lv_obj_add_style(row, get_zebra_style((int)idx & 1), 0);
-            lv_obj_t *label = lv_obj_get_child(row, 0);
-            if (label) {
-                lv_obj_set_style_text_font(label, get_menu_font(), 0);
-                vertically_center_label(label, row);
-                lv_obj_add_style(label, &style_menu_label, 0);
-            }
-            lv_obj_add_event_cb(row, nfc_file_item_cb, LV_EVENT_CLICKED, copy);
+            options_view_add_item(g_nfc_ov, de->d_name, nfc_file_item_cb, copy);
         }
         nfc_file_count = idx;
         ESP_LOGI(TAG, "nfc_enter_write_list: %u .nfc files", (unsigned)nfc_file_count);
         closedir(d);
     }
 
-    // If no files, show a placeholder row
     if (nfc_file_count == 0) {
-        lv_obj_t *row = lv_list_add_btn(menu_container, NULL, "No .nfc files");
-        lv_obj_set_height(row, button_height_global);
-        lv_obj_add_style(row, get_zebra_style(0), 0);
-        lv_obj_t *label = lv_obj_get_child(row, 0);
-        if (label) {
-            lv_obj_set_style_text_font(label, get_menu_font(), 0);
-            vertically_center_label(label, row);
-            lv_obj_add_style(label, &style_menu_label, 0);
-        }
+        options_view_add_item(g_nfc_ov, "No .nfc files", NULL, NULL);
     }
 
-    // Hardware back row (like options screen)
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-    lv_obj_t *back_row = lv_list_add_btn(menu_container, NULL, LV_SYMBOL_LEFT " Back");
-    if (back_row) {
-        lv_obj_set_height(back_row, button_height_global);
-        lv_obj_add_style(back_row, get_zebra_style((int)(nfc_file_count + 1) & 1), 0);
-        lv_obj_t *blabel = lv_obj_get_child(back_row, 0);
-        if (blabel) {
-            lv_obj_set_style_text_font(blabel, get_menu_font(), 0);
-            vertically_center_label(blabel, back_row);
-            lv_obj_add_style(blabel, &style_menu_label, 0);
-        }
-        lv_obj_add_event_cb(back_row, back_event_cb, LV_EVENT_CLICKED, NULL);
-        num_items = (int)nfc_file_count + 2;
-    } else {
-        num_items = (int)nfc_file_count + 1;
-    }
+    options_view_add_back_row(g_nfc_ov, back_event_cb, NULL);
 #endif
-
+    num_items = options_view_get_item_count(g_nfc_ov);
     selected_index = 0;
-    highlight_selected();
+    options_view_set_selected(g_nfc_ov, 0);
     if (did) nfc_sd_end(susp);
 }
 
@@ -2810,10 +2680,10 @@ static void saved_file_item_cb(lv_event_t *e) {
 }
 
 static void saved_enter_list(void) {
-    if (!menu_container) return;
+    if (!g_nfc_ov) return;
     in_saved_list = true;
     saved_clear_list();
-    lv_obj_clean(menu_container);
+    options_view_clear(g_nfc_ov);
 
     const char *dir = "/mnt/ghostesp/nfc";
     bool susp = false; bool did = nfc_sd_begin(&susp);
@@ -2836,17 +2706,7 @@ static void saved_enter_list(void) {
             snprintf(copy, need, "%s/%s", dir, de->d_name);
             if (saved_file_paths && idx < count) saved_file_paths[idx++] = copy;
             ESP_LOGI(TAG, "saved_enter_list: %s", copy);
-
-            lv_obj_t *row = lv_list_add_btn(menu_container, NULL, de->d_name);
-            lv_obj_set_height(row, button_height_global);
-            lv_obj_add_style(row, get_zebra_style((int)idx & 1), 0);
-            lv_obj_t *label = lv_obj_get_child(row, 0);
-            if (label) {
-                lv_obj_set_style_text_font(label, get_menu_font(), 0);
-                vertically_center_label(label, row);
-                lv_obj_add_style(label, &style_menu_label, 0);
-            }
-            lv_obj_add_event_cb(row, saved_file_item_cb, LV_EVENT_CLICKED, copy);
+            options_view_add_item(g_nfc_ov, de->d_name, saved_file_item_cb, copy);
         }
         saved_file_count = idx;
         ESP_LOGI(TAG, "saved_enter_list: %u .nfc files", (unsigned)saved_file_count);
@@ -2854,37 +2714,15 @@ static void saved_enter_list(void) {
     }
 
     if (saved_file_count == 0) {
-        lv_obj_t *row = lv_list_add_btn(menu_container, NULL, "No .nfc files");
-        lv_obj_set_height(row, button_height_global);
-        lv_obj_add_style(row, get_zebra_style(0), 0);
-        lv_obj_t *label = lv_obj_get_child(row, 0);
-        if (label) {
-            lv_obj_set_style_text_font(label, get_menu_font(), 0);
-            vertically_center_label(label, row);
-            lv_obj_add_style(label, &style_menu_label, 0);
-        }
+        options_view_add_item(g_nfc_ov, "No .nfc files", NULL, NULL);
     }
 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-    lv_obj_t *back_row = lv_list_add_btn(menu_container, NULL, LV_SYMBOL_LEFT " Back");
-    if (back_row) {
-        lv_obj_set_height(back_row, button_height_global);
-        lv_obj_add_style(back_row, get_zebra_style((int)(saved_file_count + 1) & 1), 0);
-        lv_obj_t *blabel = lv_obj_get_child(back_row, 0);
-        if (blabel) {
-            lv_obj_set_style_text_font(blabel, get_menu_font(), 0);
-            vertically_center_label(blabel, back_row);
-            lv_obj_add_style(blabel, &style_menu_label, 0);
-        }
-        lv_obj_add_event_cb(back_row, back_event_cb, LV_EVENT_CLICKED, NULL);
-        num_items = (int)saved_file_count + 2;
-    } else {
-        num_items = (int)saved_file_count + 1;
-    }
+    options_view_add_back_row(g_nfc_ov, back_event_cb, NULL);
 #endif
-
+    num_items = options_view_get_item_count(g_nfc_ov);
     selected_index = 0;
-    highlight_selected();
+    options_view_set_selected(g_nfc_ov, 0);
     if (did) nfc_sd_end(susp);
 }
 
@@ -4176,6 +4014,13 @@ static void nfc_write_done_async(void *ptr) {
     if (g_write_image_valid) { ntag_file_free(&g_write_image); g_write_image_valid = false; }
     if (nfc_write_title_label && lv_obj_is_valid(nfc_write_title_label)) lv_label_set_text(nfc_write_title_label, ok ? "Write complete" : "Write failed");
     ESP_LOGI(TAG, "nfc_write_done: %s", ok ? "success" : "fail");
+    
+    // Add status display messages for NFC write result
+    if (ok) {
+        status_display_show_status("NFC Written");
+    } else {
+        status_display_show_status("NFC Write Fail");
+    }
 }
 
 static void nfc_write_task(void *arg) {
@@ -4218,6 +4063,7 @@ static void nfc_write_go_cb(lv_event_t *e) {
     nfc_write_cancel = false;
     nfc_write_in_progress = true;
     ESP_LOGI(TAG, "nfc_write_go: %s", g_write_image_path);
+    status_display_show_status("NFC Writing...");
     if (nfc_write_title_label && lv_obj_is_valid(nfc_write_title_label)) lv_label_set_text(nfc_write_title_label, "Present tag to write...");
 #ifdef CONFIG_NFC_PN532
     xTaskCreate(nfc_write_task, "nfc_write", 6144, NULL, 5, NULL);
@@ -4238,121 +4084,32 @@ void nfc_view_create(void) {
     lv_obj_set_style_border_width(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    init_styles();
+    g_nfc_ov = options_view_create(root, "NFC");
+    menu_container = options_view_get_list(g_nfc_ov);
 
-    int screen_width = LV_HOR_RES;
-    int screen_height = LV_VER_RES;
-    const int STATUS_BAR_HEIGHT = 20;
-    bool is_small_screen = (screen_width <= 240 || screen_height <= 240);
 #ifdef CONFIG_USE_TOUCHSCREEN
+    const int STATUS_BAR_HEIGHT = 20;
     const int BUTTON_AREA_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
-#else
-    const int BUTTON_AREA_HEIGHT = 0;
-#endif
-    int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
-
-    is_small_screen_global = is_small_screen;
-    button_height_global = is_small_screen ? 40 : 55;
-
-    menu_container = lv_list_create(root);
-    lv_obj_set_style_radius(menu_container, 0, LV_PART_MAIN);
-    lv_obj_set_size(menu_container, screen_width, container_height);
+    int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
+    lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
-    lv_obj_set_style_bg_color(menu_container, lv_color_hex(0x121212), 0);
-    lv_obj_set_style_pad_all(menu_container, 0, 0);
-    lv_obj_set_style_pad_top(menu_container, 0, 0);
-    lv_obj_set_style_pad_bottom(menu_container, 0, 0);
-    lv_obj_set_style_border_width(menu_container, 0, 0);
-    lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_OFF);
-
-    // Add Scan button
-    scan_btn = lv_list_add_btn(menu_container, NULL, "Scan");
-    lv_obj_set_height(scan_btn, button_height_global);
-    lv_obj_add_style(scan_btn, get_zebra_style(0), 0);
-    lv_obj_t *slabel = lv_obj_get_child(scan_btn, 0);
-    if (slabel) {
-        lv_obj_set_style_text_font(slabel, get_menu_font(), 0);
-        vertically_center_label(slabel, scan_btn);
-        lv_obj_add_style(slabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(scan_btn, (void *)"Scan");
-    lv_obj_add_event_cb(scan_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Scan");
-
-    // Add Saved button
-    lv_obj_t *saved_btn = lv_list_add_btn(menu_container, NULL, "Saved");
-    lv_obj_set_height(saved_btn, button_height_global);
-    lv_obj_add_style(saved_btn, get_zebra_style(1), 0);
-    lv_obj_t *svlabel = lv_obj_get_child(saved_btn, 0);
-    if (svlabel) {
-        lv_obj_set_style_text_font(svlabel, get_menu_font(), 0);
-        vertically_center_label(svlabel, saved_btn);
-        lv_obj_add_style(svlabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(saved_btn, (void *)"Saved");
-    lv_obj_add_event_cb(saved_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Saved");
-
-    // Add User Keys button
-    lv_obj_t *keys_btn = lv_list_add_btn(menu_container, NULL, "User Keys");
-    lv_obj_set_height(keys_btn, button_height_global);
-    lv_obj_add_style(keys_btn, get_zebra_style(2), 0);
-    lv_obj_t *klabel = lv_obj_get_child(keys_btn, 0);
-    if (klabel) {
-        lv_obj_set_style_text_font(klabel, get_menu_font(), 0);
-        vertically_center_label(klabel, keys_btn);
-        lv_obj_add_style(klabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(keys_btn, (void *)"User Keys");
-    lv_obj_add_event_cb(keys_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"User Keys");
-
-    // Add Chameleon Ultra button
-#if defined(CONFIG_NFC_CHAMELEON)
-    lv_obj_t *cu_btn = lv_list_add_btn(menu_container, NULL, "Chameleon Ultra");
-    lv_obj_set_height(cu_btn, button_height_global);
-    lv_obj_add_style(cu_btn, get_zebra_style(3), 0);
-    lv_obj_t *culabel = lv_obj_get_child(cu_btn, 0);
-    if (culabel) {
-        lv_obj_set_style_text_font(culabel, get_menu_font(), 0);
-        vertically_center_label(culabel, cu_btn);
-        lv_obj_add_style(culabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(cu_btn, (void *)"Chameleon Ultra");
-    lv_obj_add_event_cb(cu_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Chameleon Ultra");
 #endif
 
-    // Add Write button
-    emulate_btn = lv_list_add_btn(menu_container, NULL, "Write");
-    lv_obj_set_height(emulate_btn, button_height_global);
-    lv_obj_add_style(emulate_btn, get_zebra_style(4), 0);
-    lv_obj_t *elabel = lv_obj_get_child(emulate_btn, 0);
-    if (elabel) {
-        lv_obj_set_style_text_font(elabel, get_menu_font(), 0);
-        vertically_center_label(elabel, emulate_btn);
-        lv_obj_add_style(elabel, &style_menu_label, 0);
-    }
-    lv_obj_set_user_data(emulate_btn, (void *)"Write");
-    lv_obj_add_event_cb(emulate_btn, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"Write");
-
-    num_items = 5;
+    scan_btn = options_view_add_item(g_nfc_ov, "Scan", nfc_option_event_cb, (void *)"Scan");
+    if (scan_btn) lv_obj_set_user_data(scan_btn, (void *)"Scan");
+    options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
+    options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
+#if defined(CONFIG_NFC_CHAMELEON)
+    options_view_add_item(g_nfc_ov, "Chameleon Ultra", nfc_option_event_cb, (void *)"Chameleon Ultra");
+#endif
+    emulate_btn = options_view_add_item(g_nfc_ov, "Write", nfc_option_event_cb, (void *)"Write");
+    num_items = options_view_get_item_count(g_nfc_ov);
 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-    // Add Back option row for hardware users, mirroring options_screen behavior
-    lv_obj_t *back_row = lv_list_add_btn(menu_container, NULL, LV_SYMBOL_LEFT " Back");
-    if (back_row) {
-        lv_obj_set_height(back_row, button_height_global);
-        lv_obj_add_style(back_row, get_zebra_style(5), 0);
-        lv_obj_t *blabel = lv_obj_get_child(back_row, 0);
-        if (blabel) {
-            lv_obj_set_style_text_font(blabel, get_menu_font(), 0);
-            vertically_center_label(blabel, back_row);
-            lv_obj_add_style(blabel, &style_menu_label, 0);
-        }
-        lv_obj_set_user_data(back_row, (void *)"__BACK_OPTION__");
-        lv_obj_add_event_cb(back_row, nfc_option_event_cb, LV_EVENT_CLICKED, (void *)"__BACK_OPTION__");
-        num_items++;
-    }
+    options_view_add_back_row(g_nfc_ov, nfc_option_event_cb, (void *)"__BACK_OPTION__");
+    num_items = options_view_get_item_count(g_nfc_ov);
 #endif
 
-    // add touchscreen nav buttons + back button (same style as options_screen)
 #ifdef CONFIG_USE_TOUCHSCREEN
     scroll_up_btn = lv_btn_create(root);
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
@@ -4365,7 +4122,6 @@ void nfc_view_create(void) {
     lv_obj_t *up_label = lv_label_create(scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
     lv_obj_center(up_label);
-    /* hide scroll buttons until we know whether the list is scrollable */
     lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     scroll_down_btn = lv_btn_create(root);
@@ -4395,11 +4151,10 @@ void nfc_view_create(void) {
     lv_obj_center(back_label);
 #endif
 
-    highlight_selected();
+    selected_index = 0;
+    options_view_set_selected(g_nfc_ov, 0);
 
-    display_manager_add_status_bar("NFC");
 #ifdef CONFIG_USE_TOUCHSCREEN
-    /* reveal scroll buttons only if the menu is actually scrollable */
     if (menu_container && lv_obj_is_valid(menu_container)) {
         lv_coord_t scroll_bottom = lv_obj_get_scroll_bottom(menu_container);
         lv_coord_t scroll_top = lv_obj_get_scroll_top(menu_container);
@@ -4429,6 +4184,7 @@ void nfc_view_destroy(void) {
     saved_clear_list();
     in_saved_list = false;
 
+    if (g_nfc_ov) { options_view_destroy(g_nfc_ov); g_nfc_ov = NULL; }
     lvgl_obj_del_safe(&root);
     nfc_view.root = NULL;
     menu_container = NULL;

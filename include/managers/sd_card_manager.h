@@ -9,6 +9,14 @@
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
 
+// SD card unmount context types
+typedef enum {
+    SD_UNMOUNT_CONTEXT_USER = 0,    // User-initiated unmount
+    SD_UNMOUNT_CONTEXT_JIT,         // JIT unmount after operation
+    SD_UNMOUNT_CONTEXT_ERROR,       // Unmount due to error
+    SD_UNMOUNT_CONTEXT_SHUTDOWN     // System shutdown
+} sd_unmount_context_t;
+
 typedef struct {
   sdmmc_card_t *card;
   bool is_initialized;
@@ -29,7 +37,8 @@ typedef struct {
 extern sd_card_manager_t sd_card_manager;
 
 esp_err_t sd_card_init();
-void sd_card_unmount(void);
+void sd_card_unmount();
+void sd_card_unmount_with_context(sd_unmount_context_t context);
 esp_err_t sd_card_append_file(const char *path, const void *data, size_t size);
 esp_err_t sd_card_write_file(const char *path, const void *data, size_t size);
 esp_err_t sd_card_read_file(const char *path);

@@ -56,6 +56,9 @@ jobs:
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist", zip_name: "Poltergeist.zip" }
           - { name: "Banshee (C5)", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething", zip_name: "Banshee_C5.zip" }
           - { name: "Banshee (S3)", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2", zip_name: "Banshee_S3.zip" }
+          - { name: "FebrisPro", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.febrispro", zip_name: "FebrisPro.zip" }
+          - { name: "ACE C5", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5", zip_name: "ACE_C5.zip" }
+          - { name: "ACE S3", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3", zip_name: "ACE_S3.zip" }
     steps:
       - uses: actions/checkout@v4
 

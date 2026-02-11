@@ -1048,6 +1048,18 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_9;
             resolved_rx = GPIO_NUM_10;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Ace_S3") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            resolved_tx = GPIO_NUM_5;
+            resolved_rx = GPIO_NUM_4;
+        }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Ace_C5") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            resolved_tx = GPIO_NUM_6;
+            resolved_rx = GPIO_NUM_7;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }

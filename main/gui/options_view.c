@@ -228,6 +228,10 @@ void options_view_clear(options_view_t *ov) {
     ov->selected = -1;
 }
 
+int options_view_get_item_count(const options_view_t *ov) {
+    return ov ? ov->count : 0;
+}
+
 lv_obj_t *options_view_get_list(options_view_t *ov) {
     return ov ? ov->list : NULL;
 }

@@ -276,8 +276,10 @@ static void parse_rmc(esp_gps_t *esp_gps) {
       esp_gps->parent.longitude *= -1;
     }
     break;
-  case 7: /* Process ground speed in unit km/s */
-    esp_gps->parent.speed = strtof(esp_gps->item_str, NULL) * 1.852;
+  case 7: /* Process ground speed in knots, convert to m/s */
+    if (esp_gps->item_str[0]) {
+      esp_gps->parent.speed = strtof(esp_gps->item_str, NULL) * 0.51444f;
+    }
     break;
   case 8: /* Process true course over ground */
     esp_gps->parent.cog = strtof(esp_gps->item_str, NULL);
@@ -349,13 +351,15 @@ static void parse_vtg(esp_gps_t *esp_gps) {
   case 3: /* Process magnetic variation */
     esp_gps->parent.variation = strtof(esp_gps->item_str, NULL);
     break;
-  case 5: /* Process ground speed in unit m/s */
-    esp_gps->parent.speed =
-        strtof(esp_gps->item_str, NULL) * 1.852; // knots to km/s
+  case 5: /* Process ground speed in knots, convert to m/s */
+    if (esp_gps->item_str[0]) {
+      esp_gps->parent.speed = strtof(esp_gps->item_str, NULL) * 0.51444f;
+    }
     break;
-  case 7: /* Process ground speed in unit m/s */
-    esp_gps->parent.speed = strtof(esp_gps->item_str, NULL) / 3.6; // km/h to
-                                                                   // m/s
+  case 7: /* Process ground speed in km/h, convert to m/s */
+    if (esp_gps->item_str[0]) {
+      esp_gps->parent.speed = strtof(esp_gps->item_str, NULL) / 3.6f;
+    }
     break;
   default:
     break;

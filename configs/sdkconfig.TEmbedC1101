@@ -641,6 +641,8 @@ CONFIG_TFT_HEIGHT=170
 CONFIG_USE_USB_KEYBOARD=y
 CONFIG_USB_KBD_DMINUS_PIN=19
 CONFIG_USB_KBD_DPLUS_PIN=20
+CONFIG_HAS_BADUSB=y
+CONFIG_BADUSB_VSENSE_PIN=-1
 # CONFIG_HAS_BATTERY is not set
 # CONFIG_HAS_BATTERY_ADC is not set
 CONFIG_HAS_FUEL_GAUGE=y
@@ -649,6 +651,7 @@ CONFIG_BQ27220_I2C_ADDRESS=0x55
 CONFIG_BQ27220_I2C_SDA_PIN=8
 CONFIG_BQ27220_I2C_SCL_PIN=18
 CONFIG_BQ27220_DESIGN_CAPACITY=1300
+# CONFIG_USE_MAX17048_FUEL_GAUGE is not set
 # CONFIG_HAS_RTC_CLOCK is not set
 # CONFIG_WITH_ETHERNET is not set
 # CONFIG_IS_GHOST_BOARD is not set
@@ -689,6 +692,12 @@ CONFIG_NFC_RST_PIN=45
 #
 # end of NMEA Statement Support
 # end of GPS Configuration
+
+#
+# Compass Configuration
+#
+# CONFIG_HAS_COMPASS is not set
+# end of Compass Configuration
 
 #
 # SPI and MMC Configuration
@@ -1331,7 +1340,7 @@ CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=y
 #
 # Ethernet
 #
-CONFIG_ETH_ENABLED=n
+CONFIG_ETH_ENABLED=y
 CONFIG_ETH_USE_SPI_ETHERNET=y
 # CONFIG_ETH_SPI_ETHERNET_DM9051 is not set
 # CONFIG_ETH_SPI_ETHERNET_W5500 is not set
@@ -3134,11 +3143,104 @@ CONFIG_CU_DIAGNOSTICS_COLOR_ALWAYS=y
 # end of CMake Utilities
 
 #
+# ESP IO Expander
+#
+# CONFIG_IO_EXPANDER_ENABLE_GPIO_API_WRAPPER is not set
+# end of ESP IO Expander
+
+#
 # ESP LCD TOUCH
 #
 CONFIG_ESP_LCD_TOUCH_MAX_POINTS=5
 CONFIG_ESP_LCD_TOUCH_MAX_BUTTONS=1
 # end of ESP LCD TOUCH
+
+#
+# TinyUSB Stack
+#
+CONFIG_TINYUSB_DEBUG_LEVEL=1
+
+#
+# TinyUSB DCD
+#
+# CONFIG_TINYUSB_MODE_SLAVE is not set
+CONFIG_TINYUSB_MODE_DMA=y
+# end of TinyUSB DCD
+
+#
+# TinyUSB callbacks
+#
+# CONFIG_TINYUSB_SUSPEND_CALLBACK is not set
+# CONFIG_TINYUSB_RESUME_CALLBACK is not set
+# end of TinyUSB callbacks
+
+#
+# Descriptor configuration
+#
+
+#
+# You can provide your custom descriptors via tinyusb_driver_install()
+#
+CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
+CONFIG_TINYUSB_DESC_USE_DEFAULT_PID=y
+CONFIG_TINYUSB_DESC_BCD_DEVICE=0x0100
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="Espressif Systems"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="Espressif Device"
+CONFIG_TINYUSB_DESC_SERIAL_STRING="123456"
+# end of Descriptor configuration
+
+#
+# Mass Storage Class (MSC)
+#
+# CONFIG_TINYUSB_MSC_ENABLED is not set
+# end of Mass Storage Class (MSC)
+
+#
+# Communication Device Class (CDC)
+#
+# CONFIG_TINYUSB_CDC_ENABLED is not set
+# end of Communication Device Class (CDC)
+
+#
+# Musical Instrument Digital Interface (MIDI)
+#
+CONFIG_TINYUSB_MIDI_COUNT=0
+# end of Musical Instrument Digital Interface (MIDI)
+
+#
+# Human Interface Device Class (HID)
+#
+CONFIG_TINYUSB_HID_COUNT=1
+# end of Human Interface Device Class (HID)
+
+#
+# Device Firmware Upgrade (DFU)
+#
+# CONFIG_TINYUSB_DFU_MODE_DFU is not set
+# CONFIG_TINYUSB_DFU_MODE_DFU_RUNTIME is not set
+CONFIG_TINYUSB_DFU_MODE_NONE=y
+# end of Device Firmware Upgrade (DFU)
+
+#
+# Bluetooth Host Class (BTH)
+#
+# CONFIG_TINYUSB_BTH_ENABLED is not set
+# end of Bluetooth Host Class (BTH)
+
+#
+# Network driver (ECM/NCM/RNDIS)
+#
+# CONFIG_TINYUSB_NET_MODE_ECM_RNDIS is not set
+# CONFIG_TINYUSB_NET_MODE_NCM is not set
+CONFIG_TINYUSB_NET_MODE_NONE=y
+# end of Network driver (ECM/NCM/RNDIS)
+
+#
+# Vendor Specific Interface
+#
+CONFIG_TINYUSB_VENDOR_COUNT=0
+# end of Vendor Specific Interface
+# end of TinyUSB Stack
 
 #
 # USB-OTG

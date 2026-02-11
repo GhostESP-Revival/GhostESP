@@ -94,6 +94,13 @@ if(CONFIG_WITH_ETHERNET)
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/ethernet_manager.c")
 endif()
 
+# Add BadUSB manager and HID script parser when BadUSB is enabled (S3 only)
+if(CONFIG_HAS_BADUSB)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badusb_manager.c")
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/hid_script_parser.c")
+    list(APPEND required_components esp_tinyusb)
+endif()
+
 if(CONFIG_HAS_NFC)
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}

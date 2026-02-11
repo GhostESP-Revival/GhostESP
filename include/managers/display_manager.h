@@ -9,8 +9,10 @@
 typedef void *QueueHandle_tt;
 typedef void *SemaphoreHandle_tt; // Because Circular Includes are fun :)
 
-static lv_timer_t *rainbow_timer = NULL;
-static uint16_t rainbow_hue = 0;
+// static lv_timer_t *rainbow_timer = NULL; // Removed: moved to implementation file
+// static uint16_t rainbow_hue = 0; // Removed: moved to implementation file
+void display_manager_set_rainbow_mode(bool enable);
+
 
 typedef enum {
     INPUT_TYPE_TOUCH,
@@ -31,7 +33,7 @@ typedef struct {
   } data;
 } InputEvent;
 
-#define INPUT_QUEUE_LENGTH 10
+#define INPUT_QUEUE_LENGTH 32
 #define INPUT_ITEM_SIZE sizeof(int)
 extern QueueHandle_tt input_queue;
 
@@ -59,6 +61,8 @@ extern View options_menu_view;
 extern View terminal_view;
 extern View number_pad_view;
 extern View keyboard_view;
+extern View compass_view;
+extern View accelerometer_view;
 extern View *display_manager_previous_view;
 
 /* Function prototypes */
@@ -82,7 +86,7 @@ void apply_power_management_config(bool power_save_enabled);
 
 void display_manager_update_status_bar_color(void);
 
-void rainbow_effect_cb(lv_timer_t *timer);
+// void rainbow_effect_cb(lv_timer_t *timer); // Removed: internal static function
 
 /**
  * @brief Destroy the current view.
@@ -121,6 +125,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName);
 // Reduce I2C activity (e.g., pause battery polling/logging) while other subsystems
 // such as PN532 scanning/bruteforcing are active to avoid bus contention.
 void display_manager_set_low_i2c_mode(bool on);
+bool display_manager_is_low_i2c_mode(void);
 
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
@@ -139,6 +144,8 @@ LV_IMG_DECLARE(settings_icon);
 LV_IMG_DECLARE(infrared);
 LV_IMG_DECLARE(terminal_icon);
 LV_IMG_DECLARE(nfc_icon);
+LV_IMG_DECLARE(compass);
+LV_IMG_DECLARE(usb);
 
 joystick_t joysticks[5];
 #ifdef CONFIG_USE_ENCODER

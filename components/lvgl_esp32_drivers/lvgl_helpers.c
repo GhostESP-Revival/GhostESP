@@ -150,6 +150,11 @@ void lvgl_driver_init(void)
     #error "No protocol defined for touch controller"
     #endif
 #else
+    #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        touch_driver_init();
+    }
+    #endif
 #endif
 }
 

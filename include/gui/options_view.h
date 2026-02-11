@@ -38,6 +38,9 @@ void options_view_update_item_text(options_view_t *ov, int index, const char *ne
 // Remove all items.
 void options_view_clear(options_view_t *ov);
 
+// Return the number of items currently in the view.
+int options_view_get_item_count(const options_view_t *ov);
+
 // Access underlying list container (lv_list).
 lv_obj_t *options_view_get_list(options_view_t *ov);
 
