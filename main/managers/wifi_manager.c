@@ -471,14 +471,16 @@ static void wifi_ap_diag_event_handler(void *arg, esp_event_base_t event_base, i
             case WIFI_EVENT_AP_STACONNECTED: {
                 const wifi_event_ap_staconnected_t *e = (const wifi_event_ap_staconnected_t *)event_data;
                 if (e) {
-                    ESP_LOGI(TAG, "ap: sta connected: " MACSTR " aid=%d", MAC2STR(e->mac), (int)e->aid);
+                    ESP_LOGI(TAG, "ap: sta connected: %02x:%02x:%02x:%02x:%02x:%02x aid=%d",
+                             e->mac[0], e->mac[1], e->mac[2], e->mac[3], e->mac[4], e->mac[5], (int)e->aid);
                 }
                 break;
             }
             case WIFI_EVENT_AP_STADISCONNECTED: {
                 const wifi_event_ap_stadisconnected_t *e = (const wifi_event_ap_stadisconnected_t *)event_data;
                 if (e) {
-                    ESP_LOGI(TAG, "ap: sta disconnected: " MACSTR " aid=%d reason=%d", MAC2STR(e->mac),
+                    ESP_LOGI(TAG, "ap: sta disconnected: %02x:%02x:%02x:%02x:%02x:%02x aid=%d reason=%d",
+                             e->mac[0], e->mac[1], e->mac[2], e->mac[3], e->mac[4], e->mac[5],
                              (int)e->aid, (int)e->reason);
                 }
                 break;
