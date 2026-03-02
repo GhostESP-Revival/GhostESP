@@ -79,7 +79,15 @@ typedef enum {
 #endif
     SETTING_RUN_SETUP_WIZARD,
     SETTING_I2C_SCAN,
+    SETTING_FACTORY_RESET,
     SETTING_SETUP_COMPLETE,
+    SETTING_WIGLE_API_KEY,
+    SETTING_WIGLE_AUTO_UPLOAD,
+    SETTING_WIGLE_DONATE,
+    SETTING_WIGLE_TEST_API,
+    SETTING_WIGLE_HELP,
+    SETTING_WIGLE_MANUAL_UPLOAD,
+    SETTING_WIGLE_STATS,
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     SETTING_BADUSB_VID,
     SETTING_BADUSB_PID,
@@ -193,6 +201,15 @@ typedef struct {
   bool setup_complete;
   bool auto_save_scans;
   uint8_t wifi_country;
+
+  // Wigle API key for wardriving upload (format: "APIName:APIToken" from wigle.net/account)
+  char wigle_api_key[129];
+  bool wigle_auto_upload; // Auto-upload CSVs at boot when WiFi connected
+  bool wigle_donate; // Whether to donate uploads to Wigle
+  // IO expander programmable buttons (P10, P11, P12) - command to run when pressed, empty = send as joystick
+  char io_btn_p10_cmd[129];
+  char io_btn_p11_cmd[129];
+  char io_btn_p12_cmd[129];
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
   uint16_t badusb_vid;
   uint16_t badusb_pid;
@@ -372,6 +389,11 @@ bool settings_get_setup_complete(const FSettings *settings);
 void settings_set_wifi_country(FSettings *settings, uint8_t country);
 uint8_t settings_get_wifi_country(const FSettings *settings);
 
+void settings_set_wigle_auto_upload(FSettings *settings, bool enabled);
+bool settings_get_wigle_auto_upload(const FSettings *settings);
+void settings_set_wigle_donate(FSettings *settings, bool enabled);
+bool settings_get_wigle_donate(const FSettings *settings);
+
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 // Status display idle animation accessors
 void settings_set_status_idle_animation(FSettings *settings, IdleAnimation anim);
@@ -379,6 +401,14 @@ IdleAnimation settings_get_status_idle_animation(const FSettings *settings);
 void settings_set_status_idle_timeout_ms(FSettings *settings, uint32_t timeout_ms);
 uint32_t settings_get_status_idle_timeout_ms(const FSettings *settings);
 #endif
+
+// IO expander programmable buttons (P10, P11, P12)
+const char *settings_get_io_btn_p10_cmd(const FSettings *settings);
+void settings_set_io_btn_p10_cmd(FSettings *settings, const char *cmd);
+const char *settings_get_io_btn_p11_cmd(const FSettings *settings);
+void settings_set_io_btn_p11_cmd(FSettings *settings, const char *cmd);
+const char *settings_get_io_btn_p12_cmd(const FSettings *settings);
+void settings_set_io_btn_p12_cmd(FSettings *settings, const char *cmd);
 
 // BadUSB emulation settings
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)

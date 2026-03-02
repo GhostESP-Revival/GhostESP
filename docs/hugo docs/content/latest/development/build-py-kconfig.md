@@ -76,6 +76,8 @@ When **Enable Status Display** is enabled, you can configure:
 
 The status display shows system information, attack status, and idle animations when configured. It's particularly useful for boards like the Heltec V3 which includes an onboard OLED display.
 
+On boards that use the IO expander, three buttons on the expander (P10, P11, P12) can be programmed to run CLI commands or act as joystick buttons. Configure them via **Settings → IO Buttons** on the device or the `iobtn` and `settings` commands; see the [CLI reference](/getting-started/command-line-reference/#io-expander-buttons-if-present).
+
 ### Configuring LVGL display driver
 
 After enabling **Enable Screen Support**, navigate to **Component config → LVGL** to configure the display driver:

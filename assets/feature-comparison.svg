@@ -1,274 +1,152 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600" viewBox="0 0 1200 1600" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="1811" height="2400" viewBox="0 0 1811 2400" fill="none">
   <style>
-    .bg { fill: #0b0b0b; }
-    .text { fill: #f7f7f7; font-family: "IBM Plex Mono", "Menlo", "Consolas", monospace; }
-    .title { font-size: 22px; letter-spacing: 0.3px; text-anchor: middle; }
-    .header { font-size: 18px; font-weight: 600; }
-    .subhead { font-size: 17px; font-weight: 600; }
-    .row { font-size: 16px; }
-    .col0 { width: 420px; }
-    .col1, .col2, .col3 { width: 200px; text-anchor: middle; }
-    .check { fill: #f7f7f7; }
+    .bg { fill: #04070b; }
+    .txt {
+      fill: #f5f7fa;
+      font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0.2px;
+    }
+    .note { font-size: 17px; font-weight: 500; }
+    .head { font-size: 15px; font-weight: 700; }
+    .sect { font-size: 16px; font-weight: 700; }
+    .row  { font-size: 15px; font-weight: 500; }
+    .mark { font-size: 15px; font-weight: 500; text-anchor: middle; }
+    .rule { stroke: #f5f7fa; stroke-width: 1.6; opacity: 0.9; }
+    .rule-strong { stroke-width: 2.2; }
   </style>
-  <rect class="bg" x="0" y="0" width="1200" height="1600" rx="24"/>
-  <text class="text title" x="600" y="60">This comparison is based on Ghost ESP. It is not a complete feature list for Bruce or Marauder.</text>
-  <g transform="translate(80,120)">
-    <text class="text header" x="0" y="0">Feature</text>
-    <text class="text header" x="480" y="0" text-anchor="middle">Ghost ESP</text>
-    <text class="text header" x="700" y="0" text-anchor="middle">Bruce</text>
-    <text class="text header" x="920" y="0" text-anchor="middle">ESP32 Marauder</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="2"/>
-  </g>
 
-  <!-- WiFi -->
-  <g transform="translate(80,170)">
-    <text class="text subhead" x="0" y="0">[WiFi]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">Deauth / disassoc attacks</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">Evil Portal</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,80)">
-      <text class="text" x="0" y="0">Beacon spam (lists/random)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,105)">
-      <text class="text" x="0" y="0">AP / STA / All scans</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,130)">
-      <text class="text" x="0" y="0">Network scanners (ARP/port/SSH)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,155)">
-      <text class="text" x="0" y="0">WiFi OUI vendor lookup</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,180)">
-      <text class="text" x="0" y="0">WPA3 / SAE-specific</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,205)">
-      <text class="text" x="0" y="0">DHCP starvation</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,230)">
-      <text class="text" x="0" y="0">Sweep scan (WiFi/BLE/GPS/802.15.4 CSV)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,255)">
-      <text class="text" x="0" y="0">RSSI tracking for selected APs/stations</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,280)">
-      <text class="text" x="0" y="0">Drone detection / spoofing</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <rect class="bg" x="0" y="0" width="1811" height="2400" rx="36"/>
 
-  <!-- BLE -->
-  <g transform="translate(80,500)">
-    <text class="text subhead" x="0" y="0">[BLE]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">BLE scan</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">BLE spam modes</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,80)">
-      <text class="text" x="0" y="0">BLE wardrive</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,105)">
-      <text class="text" x="0" y="0">AirTag scan / spoof</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,130)">
-      <text class="text" x="0" y="0">Flipper finder</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle">[x]</text>
-    </g>
-    <g class="row" transform="translate(0,155)">
-      <text class="text" x="0" y="0">GATT/service scan + per-device RSSI</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt note" x="905.5" y="76" text-anchor="middle">This comparison is based on Ghost ESP. It is not a complete feature list for Bruce or Marauder.</text>
 
-  <!-- NFC -->
-  <g transform="translate(80,700)">
-    <text class="text subhead" x="0" y="0">[NFC / RFID (HF)]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">PN532 NTAG/MIFARE Classic</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">Flipper .nfc import/export</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,80)">
-      <text class="text" x="0" y="0">Chameleon Ultra</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,105)">
-      <text class="text" x="0" y="0">PM3 MIFARE Classic dict attack</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,130)">
-      <text class="text" x="0" y="0">Flipper NFC parsers (transit/parking)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,155)">
-      <text class="text" x="0" y="0">MIFARE Desfire detection</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt head" x="100" y="150">Feature</text>
+  <text class="txt head" x="870" y="150" text-anchor="middle">Ghost ESP</text>
+  <text class="txt head" x="1180" y="150" text-anchor="middle">Bruce</text>
+  <text class="txt head" x="1510" y="150" text-anchor="middle">ESP32 Marauder</text>
+  <line class="rule rule-strong" x1="100" y1="166" x2="1711" y2="166"/>
 
-  <!-- IR -->
-  <g transform="translate(80,920)">
-    <text class="text subhead" x="0" y="0">[IR]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">IR TX/RX on supported boards</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">IR Learn mode</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,80)">
-      <text class="text" x="0" y="0">IR Easy Learn mode</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,105)">
-      <text class="text" x="0" y="0">IR CLI tools</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,130)">
-      <text class="text" x="0" y="0">IR Dazzler (38 kHz high duty)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt sect" x="100" y="212">[WiFi]</text>
+  <line class="rule" x1="100" y1="226" x2="1711" y2="226"/>
 
-  <!-- Dual communication -->
-  <g transform="translate(80,1100)">
-    <text class="text subhead" x="0" y="0">[Dual communication]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">Dual-ESP command support</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">WebUI dual-device control</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,80)">
-      <text class="text" x="0" y="0">Dual-ESP display interface (GhostLink)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt row" x="100" y="258">Deauth / disassoc attacks</text>
+  <text class="txt mark" x="870" y="258">[x]</text><text class="txt mark" x="1180" y="258">[x]</text><text class="txt mark" x="1510" y="258">[x]</text>
+  <text class="txt row" x="100" y="290">Evil Portal</text>
+  <text class="txt mark" x="870" y="290">[x]</text><text class="txt mark" x="1180" y="290">[x]</text><text class="txt mark" x="1510" y="290">[x]</text>
+  <text class="txt row" x="100" y="322">Karma</text>
+  <text class="txt mark" x="870" y="322">[x]</text>
+  <text class="txt row" x="100" y="354">Beacon spam (single/list/random)</text>
+  <text class="txt mark" x="870" y="354">[x]</text><text class="txt mark" x="1180" y="354">[x]</text><text class="txt mark" x="1510" y="354">[x]</text>
+  <text class="txt row" x="100" y="386">AP / STA / All scans</text>
+  <text class="txt mark" x="870" y="386">[x]</text><text class="txt mark" x="1180" y="386">[x]</text><text class="txt mark" x="1510" y="386">[x]</text>
+  <text class="txt row" x="100" y="418">Network scanners (ARP/port/SSH)</text>
+  <text class="txt mark" x="870" y="418">[x]</text><text class="txt mark" x="1180" y="418">[x]</text><text class="txt mark" x="1510" y="418">[x]</text>
+  <text class="txt row" x="100" y="450">WiFi OUI vendor lookup</text>
+  <text class="txt mark" x="870" y="450">[x]</text>
+  <text class="txt row" x="100" y="482">WPA3 / SAE specific</text>
+  <text class="txt mark" x="870" y="482">[x]</text><text class="txt mark" x="1510" y="482">[x]</text>
+  <text class="txt row" x="100" y="514">DHCP starvation</text>
+  <text class="txt mark" x="870" y="514">[x]</text>
+  <text class="txt row" x="100" y="546">Handshake + PMKID capture</text>
+  <text class="txt mark" x="870" y="546">[x]</text><text class="txt mark" x="1510" y="546">[x]</text>
+  <text class="txt row" x="100" y="578">USB dongle mode (Wireshark)</text>
+  <text class="txt mark" x="870" y="578">[x]</text>
+  <text class="txt row" x="100" y="610">Sweep scan (WiFi/BLE/GPS/802.15.4 CSV)</text>
+  <text class="txt mark" x="870" y="610">[x]</text>
+  <text class="txt row" x="100" y="642">Split-channel wardrive helper (GhostLink)</text>
+  <text class="txt mark" x="870" y="642">[x]</text>
+  <text class="txt row" x="100" y="674">RSSI tracking for selected APs/stations</text>
+  <text class="txt mark" x="870" y="674">[x]</text>
+  <text class="txt row" x="100" y="706">Drone detection / spoofing</text>
+  <text class="txt mark" x="870" y="706">[x]</text>
 
-  <!-- Setup / UI -->
-  <g transform="translate(80,1240)">
-    <text class="text subhead" x="0" y="0">[Setup / UI]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">First-boot setup wizard (display builds)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">Wired screen mirroring (display builds)</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt sect" x="100" y="764">[BLE]</text>
+  <line class="rule" x1="100" y1="778" x2="1711" y2="778"/>
 
-  <!-- Ethernet -->
-  <g transform="translate(80,1380)">
-    <text class="text subhead" x="0" y="0">[Ethernet]</text>
-    <line x1="0" y1="10" x2="1040" y2="10" stroke="#f7f7f7" stroke-width="1.5"/>
-    <g class="row" transform="translate(0,30)">
-      <text class="text" x="0" y="0">Scan ARP/port/SSH</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-    <g class="row" transform="translate(0,55)">
-      <text class="text" x="0" y="0">Ethernet fingerprint scan</text>
-      <text class="text" x="480" y="0" text-anchor="middle">[x]</text>
-      <text class="text" x="700" y="0" text-anchor="middle"></text>
-      <text class="text" x="920" y="0" text-anchor="middle"></text>
-    </g>
-  </g>
+  <text class="txt row" x="100" y="810">BLE scan</text>
+  <text class="txt mark" x="870" y="810">[x]</text><text class="txt mark" x="1180" y="810">[x]</text><text class="txt mark" x="1510" y="810">[x]</text>
+  <text class="txt row" x="100" y="842">BLE spam modes</text>
+  <text class="txt mark" x="870" y="842">[x]</text><text class="txt mark" x="1180" y="842">[x]</text><text class="txt mark" x="1510" y="842">[x]</text>
+  <text class="txt row" x="100" y="874">BLE wardrive</text>
+  <text class="txt mark" x="870" y="874">[x]</text><text class="txt mark" x="1180" y="874">[x]</text><text class="txt mark" x="1510" y="874">[x]</text>
+  <text class="txt row" x="100" y="906">AirTag scan / spoof</text>
+  <text class="txt mark" x="870" y="906">[x]</text><text class="txt mark" x="1180" y="906">[x]</text><text class="txt mark" x="1510" y="906">[x]</text>
+  <text class="txt row" x="100" y="938">Flipper finder</text>
+  <text class="txt mark" x="870" y="938">[x]</text><text class="txt mark" x="1180" y="938">[x]</text><text class="txt mark" x="1510" y="938">[x]</text>
+  <text class="txt row" x="100" y="970">GATT/service scan + per-device RSSI</text>
+  <text class="txt mark" x="870" y="970">[x]</text>
+  <text class="txt row" x="100" y="1002">BLE stream to Wireshark</text>
+  <text class="txt mark" x="870" y="1002">[x]</text>
+  <text class="txt row" x="100" y="1034">BLE skimmer detection</text>
+  <text class="txt mark" x="870" y="1034">[x]</text>
+
+  <text class="txt sect" x="100" y="1092">[NFC / RFID (HF)]</text>
+  <line class="rule" x1="100" y1="1106" x2="1711" y2="1106"/>
+
+  <text class="txt row" x="100" y="1138">PN532 NTAG/MIFARE Classic</text>
+  <text class="txt mark" x="870" y="1138">[x]</text><text class="txt mark" x="1180" y="1138">[x]</text>
+  <text class="txt row" x="100" y="1170">Flipper .nfc import/export</text>
+  <text class="txt mark" x="870" y="1170">[x]</text><text class="txt mark" x="1180" y="1170">[x]</text>
+  <text class="txt row" x="100" y="1202">Chameleon Ultra</text>
+  <text class="txt mark" x="870" y="1202">[x]</text><text class="txt mark" x="1180" y="1202">[x]</text>
+  <text class="txt row" x="100" y="1234">PM3 MIFARE Classic dict attack</text>
+  <text class="txt mark" x="870" y="1234">[x]</text>
+  <text class="txt row" x="100" y="1266">Flipper NFC parsers (transit/parking)</text>
+  <text class="txt mark" x="870" y="1266">[x]</text>
+  <text class="txt row" x="100" y="1298">MIFARE Desfire detection</text>
+  <text class="txt mark" x="870" y="1298">[x]</text>
+
+  <text class="txt sect" x="100" y="1356">[USB]</text>
+  <line class="rule" x1="100" y1="1370" x2="1711" y2="1370"/>
+
+  <text class="txt row" x="100" y="1402">USB keyboard host mode (ESP32-S3 builds)</text>
+  <text class="txt mark" x="870" y="1402">[x]</text>
+  <text class="txt row" x="100" y="1434">Remote keyboard control over GhostLink</text>
+  <text class="txt mark" x="870" y="1434">[x]</text>
+  <text class="txt row" x="100" y="1466">BadUSB</text>
+  <text class="txt mark" x="870" y="1466">[x]</text><text class="txt mark" x="1180" y="1466">[x]</text>
+  <text class="txt row" x="100" y="1498">BadUSB identity options (VID/PID/MFR/PROD/layout)</text>
+  <text class="txt mark" x="870" y="1498">[x]</text>
+
+  <text class="txt sect" x="100" y="1556">[IR]</text>
+  <line class="rule" x1="100" y1="1570" x2="1711" y2="1570"/>
+
+  <text class="txt row" x="100" y="1602">IR TX/RX on supported boards</text>
+  <text class="txt mark" x="870" y="1602">[x]</text><text class="txt mark" x="1180" y="1602">[x]</text>
+  <text class="txt row" x="100" y="1634">IR learn mode</text>
+  <text class="txt mark" x="870" y="1634">[x]</text><text class="txt mark" x="1180" y="1634">[x]</text>
+  <text class="txt row" x="100" y="1666">IR easy learn mode</text>
+  <text class="txt mark" x="870" y="1666">[x]</text>
+  <text class="txt row" x="100" y="1698">Flipper .ir file support</text>
+  <text class="txt mark" x="870" y="1698">[x]</text>
+  <text class="txt row" x="100" y="1730">Universal library transmit</text>
+  <text class="txt mark" x="870" y="1730">[x]</text>
+  <text class="txt row" x="100" y="1762">IR CLI tools</text>
+  <text class="txt mark" x="870" y="1762">[x]</text>
+  <text class="txt row" x="100" y="1794">IR Dazzler (38 kHz high duty)</text>
+  <text class="txt mark" x="870" y="1794">[x]</text>
+
+  <text class="txt sect" x="100" y="1852">[Dual communication]</text>
+  <line class="rule" x1="100" y1="1866" x2="1711" y2="1866"/>
+
+  <text class="txt row" x="100" y="1898">Dual-ESP command support</text>
+  <text class="txt mark" x="870" y="1898">[x]</text>
+  <text class="txt row" x="100" y="1930">WebUI dual-device control</text>
+  <text class="txt mark" x="870" y="1930">[x]</text>
+  <text class="txt row" x="100" y="1962">Dual-ESP display interface (GhostLink)</text>
+  <text class="txt mark" x="870" y="1962">[x]</text>
+
+  <text class="txt sect" x="100" y="2020">[Setup / UI]</text>
+  <line class="rule" x1="100" y1="2034" x2="1711" y2="2034"/>
+
+  <text class="txt row" x="100" y="2066">First-boot setup wizard (display builds)</text>
+  <text class="txt mark" x="870" y="2066">[x]</text>
+  <text class="txt row" x="100" y="2098">Wired screen mirroring (display builds)</text>
+  <text class="txt mark" x="870" y="2098">[x]</text>
+  <text class="txt sect" x="100" y="2156">[Ethernet]</text>
+  <line class="rule" x1="100" y1="2170" x2="1711" y2="2170"/>
+
+  <text class="txt row" x="100" y="2202">Scan ARP/port/SSH</text>
+  <text class="txt mark" x="870" y="2202">[x]</text>
+  <text class="txt row" x="100" y="2234">Ethernet fingerprint scan</text>
+  <text class="txt mark" x="870" y="2234">[x]</text>
 </svg>

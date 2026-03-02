@@ -1,20 +1,38 @@
 #include "managers/views/options_screen.h"
 #include "core/serial_manager.h"
-#include "core/commandline.h" // for get_evil_portal_list
+#include "core/commandline.h"
 #include "managers/display_manager.h"
 #include "gui/options_view.h"
 #include "core/screen_mirror.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
+#include "gui/theme_palette_api.h"
 #include "io_manager.h"
+#include "managers/views/wardriving_screen.h"
+#include "managers/wigle_manager.h"
+#include "gui/popup.h"
+#include "core/utils.h"
+#include "managers/sd_card_manager.h"  /* MAX_PORTAL_NAME, sd_card_list_dir_paged */
 
-#define MAX_PORTALS 32
-#define MAX_PORTAL_NAME 64
+/* MAX_PORTALS / MAX_PORTAL_NAME come from sd_card_manager.h */
+#define PORTAL_PAGE_SIZE 8    /* keep portal pages small to avoid LVGL stalls */
+#define WIGLE_CSV_PAGE_SIZE 8
 
-static char selected_portal[MAX_PORTAL_NAME] = {0}; // <-- Move here
+static char selected_portal[MAX_PORTAL_NAME] = {0};
+static char selected_karma_portal[MAX_PORTAL_NAME] = {0};
 
-static char *evil_portal_names = NULL;  // Dynamic allocation based on actual count
-static const char **evil_portal_options = NULL;
+static char *evil_portal_names = NULL;   /* flat name storage for current page */
+static const char **evil_portal_options = NULL; /* NULL-terminated pointer array  */
+static int   portal_page_offset   = 0;   /* first file index of current page    */
+static bool  portal_has_next_page = false;
+
+static char *wigle_csv_names = NULL;
+static const char **wigle_csv_options = NULL;
+static int wigle_csv_page_offset = 0;
+static bool wigle_csv_has_next_page = false;
+static bool wigle_csv_browser_active = false;
+static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
+
 
 #include "managers/views/keyboard_screen.h"
 #include "esp_timer.h"
@@ -34,130 +52,65 @@ static const char **evil_portal_options = NULL;
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
-#include "managers/sd_card_manager.h"
 #include "managers/views/keyboard_screen.h"
 #include "managers/usb_keyboard_manager.h"
+#include "managers/views/badusb_view.h"
+#include "managers/views/infrared_view.h"
+#include "managers/views/nfc_view.h"
+#include "managers/views/compass_screen.h"
+#include "managers/views/accelerometer_screen.h"
+#include "managers/views/clock_screen.h"
+#include "managers/views/app_gallery_screen.h"
+
+uint32_t theme_palette_get_background(uint8_t theme);
+uint32_t theme_palette_get_surface_alt(uint8_t theme);
+uint32_t theme_palette_get_text(uint8_t theme);
+
 
 #define KARMA_MAX_SSIDS 64
 
 static const char *TAG = "optionsScreen";
 
-static const char *settings_categories[] = {"Display & UI", "System & Hardware", NULL};
-
 typedef enum {
-    SETTINGS_CATEGORY_DISPLAY,
-    SETTINGS_CATEGORY_CONFIG,
-    SETTINGS_CATEGORY_COUNT
+    SETTINGS_CAT_DISPLAY = 0,
+    SETTINGS_CAT_APPEARANCE,
+    SETTINGS_CAT_LED_RGB,
+    SETTINGS_CAT_NAVIGATION,
+    SETTINGS_CAT_STATUS_DISPLAY,
+    SETTINGS_CAT_NETWORK,
+    SETTINGS_CAT_POWER_SYSTEM,
+    SETTINGS_CAT_WIGLE,
+#ifdef CONFIG_USE_IO_EXPANDER
+    SETTINGS_CAT_IO_BUTTONS,
+#endif
+    SETTINGS_CAT_COUNT
+} SettingsCategoryId;
+
+typedef struct {
+    const char *name;
+    SettingsCategoryId id;
+    bool conditional;
+    const char *condition_config;
 } SettingsCategory;
 
-static int current_settings_category = -1;
-
-#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
- #define SETTINGS_ITEMS_COUNT_BACKLIGHT 1
-#else
- #define SETTINGS_ITEMS_COUNT_BACKLIGHT 0
-#endif
-
+static SettingsCategory settings_categories[] = {
+    {"Display",        SETTINGS_CAT_DISPLAY,       false, NULL},
+    {"Appearance",     SETTINGS_CAT_APPEARANCE,    false, NULL},
+    {"LED & RGB",      SETTINGS_CAT_LED_RGB,       false, NULL},
+    {"Navigation",     SETTINGS_CAT_NAVIGATION,    false, NULL},
 #ifdef CONFIG_WITH_STATUS_DISPLAY
- #define SETTINGS_ITEMS_COUNT_STATUS 2
-#else
- #define SETTINGS_ITEMS_COUNT_STATUS 0
+    {"Status Display", SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
 #endif
-
-#ifdef CONFIG_USE_ENCODER
- #define SETTINGS_ITEMS_COUNT_ENCODER 1
-#else
- #define SETTINGS_ITEMS_COUNT_ENCODER 0
-#endif
-
-#if CONFIG_IDF_TARGET_ESP32S3
- #define SETTINGS_ITEMS_COUNT_USB_HOST 1
-#else
- #define SETTINGS_ITEMS_COUNT_USB_HOST 0
-#endif
-
-#define SETTINGS_ITEMS_BASE_COUNT 15
-#define SETTINGS_ITEM_INDEX_I2C_SCAN (SETTINGS_ITEMS_BASE_COUNT + SETTINGS_ITEMS_COUNT_BACKLIGHT + SETTINGS_ITEMS_COUNT_STATUS + SETTINGS_ITEMS_COUNT_ENCODER + SETTINGS_ITEMS_COUNT_USB_HOST)
-#define SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY (SETTINGS_ITEM_INDEX_I2C_SCAN + 1)
-
-// Indices of settings for each category in the settings menu.
-// Each sub-array lists the indices of settings_items[] that belong to a category.
-// The last element in each sub-array must be -1 to mark the end.
-//
-// Category 0: "Display & UI" groups visual and navigation-related options.
-// Category 1: "System & Hardware" groups network, power, LED and control options.
-// Example: settings_category_indices[0] lists settings for category index 0.
-static int settings_category_indices[][20] = {
-#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
-        {1, 9, 2, 14, 4, 5, 11, 12,
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-        15, 16,
-#endif
-        -1},
-        {6, 7, 8, 0, 10, 3, 13,
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        17,
-#elif defined(CONFIG_USE_ENCODER)
-        15,
-#endif
-#if CONFIG_IDF_TARGET_ESP32S3
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        18, 19,
-#elif defined(CONFIG_USE_ENCODER) || defined(CONFIG_WITH_STATUS_DISPLAY)
-        16, 17,
-#else
-        15, 16,
-#endif
-#else
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        18,
-#elif defined(CONFIG_USE_ENCODER)
-        16,
-#elif defined(CONFIG_WITH_STATUS_DISPLAY)
-        17,
-#else
-        15,
-#endif
-#endif
-        SETTINGS_ITEM_INDEX_I2C_SCAN,
-        SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY,
-        -1},
-#else
-        {1, 2, 13, 4, 5, 10, 11,
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-        14, 15,
-#endif
-        -1},
-        {6, 7, 8, 0, 9, 3, 12,
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        16,
-#elif defined(CONFIG_USE_ENCODER)
-        15,
-#endif
-#if CONFIG_IDF_TARGET_ESP32S3
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        17, 18,
-#elif defined(CONFIG_USE_ENCODER) || defined(CONFIG_WITH_STATUS_DISPLAY)
-        15, 16,
-#else
-        14, 15,
-#endif
-#else
-#if defined(CONFIG_USE_ENCODER) && defined(CONFIG_WITH_STATUS_DISPLAY)
-        17,
-#elif defined(CONFIG_USE_ENCODER)
-        15,
-#elif defined(CONFIG_WITH_STATUS_DISPLAY)
-        16,
-#else
-        14,
-#endif
-#endif
-        SETTINGS_ITEM_INDEX_I2C_SCAN,
-        SETTINGS_ITEM_INDEX_WEBUI_AP_ONLY,
-        -1},
+    {"Network",        SETTINGS_CAT_NETWORK,       false, NULL},
+    {"Power & System", SETTINGS_CAT_POWER_SYSTEM,  false, NULL},
+    {"WiGLE", SETTINGS_CAT_WIGLE, false, NULL},
+#ifdef CONFIG_USE_IO_EXPANDER
+    {"IO Buttons", SETTINGS_CAT_IO_BUTTONS, true, "CONFIG_USE_IO_EXPANDER"},
 #endif
 };
+
+static int current_settings_category = -1;
+static int settings_submenu_depth = 0;
 
 typedef enum {
     WIFI_MENU_MAIN,
@@ -169,10 +122,12 @@ typedef enum {
     WIFI_MENU_EVIL_PORTAL,
     WIFI_MENU_CONNECTION,
     WIFI_MENU_MISC,
-    WIFI_MENU_EVIL_PORTAL_SELECT
+    WIFI_MENU_EVIL_PORTAL_SELECT,
+    WIFI_MENU_KARMA_PORTAL_SELECT
 } WifiMenuState;
 
 static WifiMenuState current_wifi_menu_state = WIFI_MENU_MAIN;
+static int io_btn_being_edited = 0;
 
 static const char *wifi_attacks_options[] = {
     "Start Deauth Attack",
@@ -184,6 +139,7 @@ static const char *wifi_attacks_options[] = {
     "Stop DHCP-Starve",
     "Start Karma Attack",
     "Start Karma Attack (Custom SSIDs)", // <-- Add this line
+    "Start Karma Attack (Custom Portal)",
     "Stop Karma Attack",       
     NULL
 };
@@ -403,61 +359,180 @@ typedef struct {
     const char **value_options;
     int value_count;
     int current_value;
+    SettingsCategoryId category_id;
+    bool conditional;
+    const char *condition_config;
 } SettingsItem;
 
 static const char *rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", "Knight Rider", "Red", "Green", "Blue", "Yellow", "TWH Purple", "Cyan", "Orange", "White", "Pink"};
 static const char *timeout_options[] = {"5s", "10s", "30s", "60s", "Never"};
-static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest"};
+static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 static const char *bool_options[] = {"Off", "On"};
 static const char *textcolor_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
 static const uint32_t textcolor_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
 static const char *menu_layout_options[] = {"Normal", "Grid", "List"};
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *idle_animation_options[] = {"Game of Life", "Ghost", "Starfield", "HUD", "Matrix", "Flying Ghosts", "Spiral", "Falling Leaves", "Bouncing Text"};
-#endif
-#ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *idle_delay_options[] = {"Never", "5s", "10s", "30s"};
 #endif
 static const char *action_options[] = {"Press OK"};
-
-// SettingsType enum moved to settings_manager.h
 
 static const char *brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
 };
 
 static SettingsItem settings_items[] = {
-    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 13, 0},
-    {"Display Timeout", SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1},
-    {"Menu Theme", SETTING_MENU_THEME, theme_options, 15, 0},
-    {"Third Control", SETTING_THIRD_CONTROL, bool_options, 2, 0},
-    {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0},
-    {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0},
-    {"Web Auth", SETTING_WEB_AUTH, bool_options, 2, 1},
-    {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1},
-    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0},
-    #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
-    {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9}, // default 100%
-    #endif
-    {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9}, // default 100%
-    {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0},
-    {"Navigation Buttons", SETTING_NAV_BUTTONS, bool_options, 2, 1},
-    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1},
-    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0},
-    #ifdef CONFIG_WITH_STATUS_DISPLAY
-    {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 9, 0},
-    {"Idle Anim Delay", SETTING_IDLE_ANIM_DELAY, idle_delay_options, 4, 0},
-    #endif
-    #ifdef CONFIG_USE_ENCODER
-    {"Invert Encoder", SETTING_ENCODER_INVERT, bool_options, 2, 0},
-    #endif
-    #if CONFIG_IDF_TARGET_ESP32S3
-    {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0},
-    #endif
-    {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0},
-    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0},
-    {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1},
+    {"Display Timeout", SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1, SETTINGS_CAT_DISPLAY, false, NULL},
+#ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
+    {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL},
+#endif
+    {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL},
+    
+    {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    
+    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, 13, 0, SETTINGS_CAT_LED_RGB, false, NULL},
+    {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_LED_RGB, false, NULL},
+    
+    {"Navigation Buttons", SETTING_NAV_BUTTONS, bool_options, 2, 1, SETTINGS_CAT_NAVIGATION, false, NULL},
+    {"Third Control", SETTING_THIRD_CONTROL, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, false, NULL},
+#ifdef CONFIG_USE_ENCODER
+    {"Invert Encoder", SETTING_ENCODER_INVERT, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, true, "CONFIG_USE_ENCODER"},
+#endif
+    
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+    {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 9, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
+    {"Idle Anim Delay", SETTING_IDLE_ANIM_DELAY, idle_delay_options, 4, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
+#endif
+    
+    {"Web Auth", SETTING_WEB_AUTH, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    
+    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+#if CONFIG_IDF_TARGET_ESP32S3
+    {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, true, "CONFIG_IDF_TARGET_ESP32S3"},
+#endif
+    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    
+    {"Auto Upload", SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {"Donate Data", SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL},
+    {"Test API Key", SETTING_WIGLE_TEST_API, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {"Help", SETTING_WIGLE_HELP, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {"Manual Upload", SETTING_WIGLE_MANUAL_UPLOAD, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {"View WiGLE Stats", SETTING_WIGLE_STATS, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
 };
+
+#define IO_BTN_EDIT_P10 0x1000
+#define IO_BTN_EDIT_P11 0x1001
+#define IO_BTN_EDIT_P12 0x1002
+
+typedef struct {
+    const char* name;
+    const char* cmd_prefix;
+    View* view;
+} io_btn_preset_t;
+
+static const io_btn_preset_t io_btn_presets[] = {
+    {"WiFi", "view:wifi", &options_menu_view},
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    {"BLE", "view:ble", &options_menu_view},
+#endif
+#ifdef CONFIG_HAS_NFC
+    {"NFC", "view:nfc", &nfc_view},
+#endif
+#if CONFIG_HAS_INFRARED
+    {"Infrared", "view:ir", &infrared_view},
+#endif
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
+    {"BadUSB", "view:badusb", &badusb_view},
+#endif
+#ifdef CONFIG_HAS_GPS
+    {"GPS", "view:gps", &options_menu_view},
+#endif
+#ifdef CONFIG_HAS_COMPASS
+    {"Compass", "view:compass", &compass_view},
+#endif
+#ifdef CONFIG_HAS_ACCELEROMETER
+    {"Accelerometer", "view:accel", &accelerometer_view},
+#endif
+    {"Clock", "view:clock", &clock_view},
+    {"Apps", "view:apps", &apps_menu_view},
+    {"Settings", "view:settings", &options_menu_view},
+    {"GhostLink", "view:ghostlink", &options_menu_view},
+    {"Custom Command", "cmd:", NULL},
+};
+
+#define NUM_IO_BTN_PRESETS (sizeof(io_btn_presets) / sizeof(io_btn_presets[0]))
+
+static const char* io_btn_preset_options[NUM_IO_BTN_PRESETS + 1];
+
+static void build_io_btn_preset_options(void) {
+    for (int i = 0; i < NUM_IO_BTN_PRESETS; i++) {
+        io_btn_preset_options[i] = io_btn_presets[i].name;
+    }
+    io_btn_preset_options[NUM_IO_BTN_PRESETS] = NULL;
+}
+
+static const char** get_io_btn_preset_options(void) {
+    static bool initialized = false;
+    if (!initialized) {
+        build_io_btn_preset_options();
+        initialized = true;
+    }
+    return io_btn_preset_options;
+}
+
+static int get_current_io_btn_action(const char* cmd) {
+    if (!cmd || cmd[0] == '\0') return -1;
+    for (int i = 0; i < NUM_IO_BTN_PRESETS; i++) {
+        const char* prefix = io_btn_presets[i].cmd_prefix;
+        size_t prefix_len = strlen(prefix);
+        if (strncmp(cmd, prefix, prefix_len) == 0) return i;
+    }
+    return -1;
+}
+
+static int get_settings_count_for_category(SettingsCategoryId cat_id) {
+#ifdef CONFIG_USE_IO_EXPANDER
+    if (cat_id == SETTINGS_CAT_IO_BUTTONS) return 3;
+#endif
+    int count = 0;
+    int settings_count = sizeof(settings_items) / sizeof(settings_items[0]);
+    for (int i = 0; i < settings_count; i++) {
+        if (settings_items[i].category_id == cat_id) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static int get_setting_index_in_category(int position_in_category, SettingsCategoryId cat_id) {
+#ifdef CONFIG_USE_IO_EXPANDER
+    if (cat_id == SETTINGS_CAT_IO_BUTTONS) {
+        if (position_in_category == 0) return IO_BTN_EDIT_P10;
+        if (position_in_category == 1) return IO_BTN_EDIT_P11;
+        if (position_in_category == 2) return IO_BTN_EDIT_P12;
+        return -1;
+    }
+#endif
+    int current_pos = 0;
+    int settings_count = sizeof(settings_items) / sizeof(settings_items[0]);
+    for (int i = 0; i < settings_count; i++) {
+        if (settings_items[i].category_id == cat_id) {
+            if (current_pos == position_in_category) {
+                return i;
+            }
+            current_pos++;
+        }
+    }
+    return -1;
+}
 
 static bool is_settings_mode = false;
 
@@ -488,6 +563,25 @@ static bool touch_on_scroll_btn = false; // Flag active between press and releas
 
 // Add button declaration for back button
 static lv_obj_t *back_btn = NULL;
+
+// WiGLE help popup
+static lv_obj_t *wigle_help_popup = NULL;
+static lv_obj_t *wigle_help_close_btn = NULL;
+
+// WiGLE manual-upload popup
+static lv_obj_t *wigle_manual_popup = NULL;
+static lv_obj_t *wigle_manual_upload_btn = NULL;
+static lv_obj_t *wigle_manual_close_btn = NULL;
+static lv_obj_t *wigle_manual_info_label = NULL;
+static int wigle_manual_popup_selected = 0;
+
+// WiGLE stats popup
+static lv_obj_t *wigle_stats_popup = NULL;
+static lv_obj_t *wigle_stats_down_btn = NULL;
+static lv_obj_t *wigle_stats_close_btn = NULL;
+static lv_obj_t *wigle_stats_body_label = NULL;
+static lv_obj_t *wigle_stats_scroll = NULL;
+static int wigle_stats_popup_selected = 1;
 
 // --- Add Bluetooth submenu arrays and state ---
 static const char *bluetooth_main_options[] = {
@@ -541,6 +635,7 @@ static int button_height_global = 0;
 static bool is_small_screen_global = false;
 
 static void rebuild_current_menu(void); // Forward declaration
+static void portal_free_cache(void);    // Forward declaration
 
 static void update_settings_arrows_visibility(void) {
     if (!menu_container || !lv_obj_is_valid(menu_container)) return;
@@ -563,6 +658,7 @@ static void update_settings_arrows_visibility(void) {
             if (lv_obj_get_user_data(child) == (void *)2) {
 #ifdef CONFIG_USE_TOUCHSCREEN
                 // On touch devices, always show arrows
+                (void)is_selected;
                 lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
 #else
                 // On non-touch devices, only show arrows on selected item
@@ -651,6 +747,20 @@ static void update_scroll_buttons_visibility(void) {
 
 static void select_option_item(int index); // Forward Declaration
 static void back_event_cb(lv_event_t *e); // Forward Declaration for back button callback
+static void wigle_help_close_cb(lv_event_t *e); // Forward Declaration for WiGLE help close
+static void wigle_manual_popup_close_cb(lv_event_t *e);
+static void wigle_manual_popup_upload_cb(lv_event_t *e);
+static void wigle_manual_popup_update_selection(void);
+static void wigle_stats_popup_open(void);
+static void wigle_stats_popup_close_cb(lv_event_t *e);
+static void wigle_stats_popup_scroll(int delta_y);
+static void wigle_stats_popup_scroll_down_cb(lv_event_t *e);
+static void wigle_stats_popup_update_selection(void);
+static void wigle_stats_popup_activate_selected(void);
+static void wigle_get_popup_geometry(int *popup_w, int *popup_h, int *y_offset);
+static void wigle_test_result_cb(bool success, const char *message);
+static void wigle_manual_upload_result_cb(bool success, const char *message);
+static void wigle_stats_result_cb(bool success, const char *message);
 static void wifi_connect_kb_cb(const char *text);
 static void ssh_scan_kb_cb(const char *text);
 static void dual_comm_connect_kb_cb(const char *text);
@@ -658,9 +768,18 @@ static void dual_comm_send_kb_cb(const char *text);
 static void dual_comm_wifi_connect_kb_cb(const char *text);
 static void dual_comm_apcred_kb_cb(const char *text);
 static void dual_comm_karma_custom_ssids_cb(const char *text);
+static void karma_portal_ssids_cb(const char *input);
 static void dual_comm_dns_lookup_kb_cb(const char *text);
 static void dual_comm_traceroute_kb_cb(const char *text);
 static void dual_comm_http_request_kb_cb(const char *text);
+static void wigle_csv_free_cache(void);
+static const char **wigle_csv_load_page(void);
+static void wigle_show_csv_details_popup(const char *filename);
+#ifdef CONFIG_USE_IO_EXPANDER
+static void iobtn_p10_kb_cb(const char *text);
+static void iobtn_p11_kb_cb(const char *text);
+static void iobtn_p12_kb_cb(const char *text);
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 static void zigbee_capture_kb_cb(const char *text);
 #endif
@@ -739,6 +858,10 @@ const char *options_menu_type_to_string(EOptionsMenuType menuType) {
         return "GhostLink";
     case OT_Settings:
         return "Settings";
+    case OT_IOButtonPresets:
+        return "IO Button Action";
+    case OT_WigleManualUpload:
+        return "WiGLE Upload";
     default:
         return "Unknown";
     }
@@ -780,10 +903,15 @@ void options_menu_create() {
 
     /* Styling handled by options_view */
 
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t control_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t control_text_color = lv_color_hex(theme_palette_get_text(theme));
+
+    display_manager_fill_screen(bg_color);
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
 
-    root = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root(NULL, NULL, bg_color, LV_OPA_COVER);
     options_menu_view.root = root;
     const int STATUS_BAR_HEIGHT = 20;
     g_options_view = options_view_create(root, options_menu_type_to_string(SelectedMenuType));
@@ -820,6 +948,13 @@ void options_menu_create() {
                 options = evil_portal_options;
                 break;
             }
+            case WIFI_MENU_KARMA_PORTAL_SELECT:
+            {
+                // Same portal list as evil portal select — population in rebuild_current_menu
+                ESP_LOGI(TAG, "Karma portal select menu state activated");
+                options = evil_portal_options;
+                break;
+            }
         }
         break;
     case OT_Bluetooth:
@@ -852,7 +987,16 @@ void options_menu_create() {
         break;
     case OT_Settings: 
         is_settings_mode = true;
+        current_settings_category = -1;
+        settings_submenu_depth = 0;
         load_current_settings_values();
+        break;
+    case OT_IOButtonPresets:
+        is_settings_mode = false;
+        break;
+    case OT_WigleManualUpload:
+        is_settings_mode = false;
+        options = wigle_csv_load_page();
         break;
     default: options = NULL; break;
     }
@@ -868,15 +1012,9 @@ void options_menu_create() {
     button_height_global = button_height;
     
     if (is_settings_mode) {
-        if (current_settings_category < 0) {
-            current_options_list = settings_categories;
-            build_item_index = 0;
-            menu_build_timer = lv_timer_create(menu_builder_cb, 20, NULL);
-        } else {
-            current_options_list = NULL;
-            build_item_index = 0;
-            menu_build_timer = lv_timer_create(menu_builder_cb, 15, NULL);
-        }
+        current_options_list = NULL;
+        build_item_index = 0;
+        menu_build_timer = lv_timer_create(menu_builder_cb, current_settings_category < 0 ? 20 : 15, NULL);
     } else {
         current_options_list = options;
         build_item_index = 0;
@@ -890,13 +1028,14 @@ void options_menu_create() {
     scroll_up_btn = lv_btn_create(root);
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_BOTTOM_LEFT, SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_up_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scroll_up_btn, control_color, LV_PART_MAIN);
     lv_obj_set_style_radius(scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroll_up_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(scroll_up_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(scroll_up_btn, scroll_options_up, LV_EVENT_CLICKED, NULL);
     lv_obj_t *up_label = lv_label_create(scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
+    lv_obj_set_style_text_color(up_label, control_text_color, 0);
     lv_obj_center(up_label);
     /* hide scroll buttons until the menu is built and we know if scrolling is required */
     lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
@@ -904,20 +1043,21 @@ void options_menu_create() {
     scroll_down_btn = lv_btn_create(root);
     lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_down_btn, LV_ALIGN_BOTTOM_RIGHT, -SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_down_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scroll_down_btn, control_color, LV_PART_MAIN);
     lv_obj_set_style_radius(scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroll_down_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(scroll_down_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(scroll_down_btn, scroll_options_down, LV_EVENT_CLICKED, NULL);
     lv_obj_t *down_label = lv_label_create(scroll_down_btn);
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_color(down_label, control_text_color, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     back_btn = lv_btn_create(root);
     lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 20, SCROLL_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x555555), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(back_btn, control_color, LV_PART_MAIN);
     lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(back_btn, 10, LV_PART_MAIN);
     lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
@@ -925,6 +1065,7 @@ void options_menu_create() {
     lv_obj_add_event_cb(back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(back_btn);
     lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
+    lv_obj_set_style_text_color(back_label, control_text_color, 0);
     lv_obj_center(back_label);
 #endif
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
@@ -1018,6 +1159,12 @@ static void load_current_settings_values(void) {
                 settings_items[i].current_value = usb_keyboard_manager_is_host_mode() ? 1 : 0;
                 break;
 #endif
+            case SETTING_WIGLE_AUTO_UPLOAD:
+                settings_items[i].current_value = settings_get_wigle_auto_upload(&G_Settings) ? 1 : 0;
+                break;
+            case SETTING_WIGLE_DONATE:
+                settings_items[i].current_value = settings_get_wigle_donate(&G_Settings) ? 1 : 0;
+                break;
             default:
                 settings_items[i].current_value = 0;
                 break;
@@ -1144,6 +1291,123 @@ static void apply_setting_change(int setting_index, int new_value) {
             display_manager_switch_view(&terminal_view);
             io_manager_scan_i2c();
             return;
+        case SETTING_FACTORY_RESET:
+            nvs_flash_erase();
+            esp_restart();
+            return;
+        case SETTING_WIGLE_AUTO_UPLOAD:
+            settings_set_wigle_auto_upload(&G_Settings, new_value == 1);
+            break;
+        case SETTING_WIGLE_DONATE:
+            settings_set_wigle_donate(&G_Settings, new_value == 1);
+            break;
+        case SETTING_WIGLE_TEST_API: {
+            if (wigle_is_test_in_progress()) {
+                return;
+            }
+            if (!is_wifi_sta_connected()) {
+                error_popup_create("Connect to WiFi first");
+                return;
+            }
+            const char *api_key = wigle_get_api_key();
+            if (!api_key || api_key[0] == '\0') {
+                error_popup_create("No API key set\nUse CLI: wigle API <name>:<token>");
+                return;
+            }
+            error_popup_create("Testing API key...");
+            wigle_set_test_callback(wigle_test_result_cb);
+            esp_err_t err = wigle_test_api_key();
+            if (err != ESP_OK) {
+                wigle_set_test_callback(NULL);
+                error_popup_create("Failed to start test");
+                return;
+            }
+            return;
+        }
+        case SETTING_WIGLE_HELP: {
+            if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
+                lvgl_obj_del_safe(&wigle_help_popup);
+                return;
+            }
+            
+            int popup_w = LV_HOR_RES - 20;
+            int popup_h = LV_VER_RES - 40;
+            wigle_help_popup = popup_create_container(lv_layer_top(), popup_w, popup_h);
+            lv_obj_set_style_bg_color(wigle_help_popup, lv_color_hex(0x1E1E1E), 0);
+            lv_obj_add_flag(wigle_help_popup, LV_OBJ_FLAG_CLICKABLE);
+            
+            lv_obj_t *title = lv_label_create(wigle_help_popup);
+            lv_label_set_text(title, "WiGLE Setup Help");
+            lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_text_font(title, &lv_font_montserrat_12, 0);
+            lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
+            
+            lv_obj_t *help_scroll = popup_create_scroll_area(wigle_help_popup, popup_w - 16, popup_h - 50, LV_ALIGN_TOP_MID, 0, 25);
+            
+            lv_obj_t *help_label = lv_label_create(help_scroll);
+            lv_label_set_long_mode(help_label, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(help_label, popup_w - 20);
+            lv_obj_set_style_text_color(help_label, lv_color_hex(0xCCCCCC), 0);
+            
+            const char *help_text = 
+                "1. Create free account at wigle.net\n"
+                "2. Account > API section\n"
+                "3. Copy API Name & Token\n\n"
+                "CLI: wigle API <name>:<token>\n"
+                "Ex: wigle API ABC123:DEF456\n\n"
+                "Auto Upload: Upload CSV when WiFi connects\n"
+                "Donate: Share scans publicly (recommended)\n\n"
+                "Needs: GPS, SD card, WiFi, CSV files in /mnt/ghostesp/gps/";
+            
+            lv_label_set_text(help_label, help_text);
+            lv_obj_set_style_text_font(help_label, &lv_font_montserrat_10, 0);
+            
+            lv_obj_t *close_btn = lv_btn_create(wigle_help_popup);
+            wigle_help_close_btn = close_btn;
+            lv_obj_add_flag(close_btn, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_size(close_btn, 80, 30);
+            lv_obj_align(close_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
+            lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x444444), 0);
+            lv_obj_add_event_cb(close_btn, wigle_help_close_cb, LV_EVENT_CLICKED, NULL);
+            
+            lv_obj_t *btn_label = lv_label_create(close_btn);
+            lv_label_set_text(btn_label, "Close");
+            lv_obj_center(btn_label);
+            lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
+            
+            return;
+        }
+        case SETTING_WIGLE_MANUAL_UPLOAD: {
+            wigle_csv_page_offset = 0;
+            wigle_csv_browser_active = true;
+            SelectedMenuType = OT_WigleManualUpload;
+            is_settings_mode = false;
+            rebuild_current_menu();
+            return;
+        }
+        case SETTING_WIGLE_STATS: {
+            if (wigle_is_stats_in_progress()) {
+                wigle_stats_popup_open();
+                wigle_set_stats_callback(wigle_stats_result_cb);
+                if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
+                    lv_label_set_text(wigle_stats_body_label, "Stats request already running...\nPress Close to exit.");
+                }
+                return;
+            }
+            wigle_stats_popup_open();
+            if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
+                lv_label_set_text(wigle_stats_body_label, "Loading WiGLE stats...");
+            }
+            wigle_set_stats_callback(wigle_stats_result_cb);
+            esp_err_t err = wigle_get_stats_async();
+            if (err != ESP_OK) {
+                wigle_set_stats_callback(NULL);
+                if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
+                    lv_label_set_text(wigle_stats_body_label, "Failed to start stats request");
+                }
+            }
+            return;
+        }
     }
     
     // Save only the changed setting to NVS (Granular Save)
@@ -1164,10 +1428,28 @@ static void change_current_row(bool increment)
         return;
     }
     int setting_idx = (int)(intptr_t)udata;
+#ifdef CONFIG_USE_IO_EXPANDER
+    if (setting_idx == IO_BTN_EDIT_P10 || setting_idx == IO_BTN_EDIT_P11 || setting_idx == IO_BTN_EDIT_P12) {
+        io_btn_being_edited = (setting_idx == IO_BTN_EDIT_P10) ? 0 : (setting_idx == IO_BTN_EDIT_P11) ? 1 : 2;
+        SelectedMenuType = OT_IOButtonPresets;
+        is_settings_mode = false;
+        rebuild_current_menu();
+        return;
+    }
+#endif
     change_setting_value(setting_idx, increment);
 }
 
 static void change_setting_value(int setting_index, bool increment) {
+#ifdef CONFIG_USE_IO_EXPANDER
+    if (setting_index == IO_BTN_EDIT_P10 || setting_index == IO_BTN_EDIT_P11 || setting_index == IO_BTN_EDIT_P12) {
+        io_btn_being_edited = (setting_index == IO_BTN_EDIT_P10) ? 0 : (setting_index == IO_BTN_EDIT_P11) ? 1 : 2;
+        SelectedMenuType = OT_IOButtonPresets;
+        is_settings_mode = false;
+        rebuild_current_menu();
+        return;
+    }
+#endif
     SettingsItem *item = &settings_items[setting_index];
     int new_value = item->current_value;
     
@@ -1178,6 +1460,8 @@ static void change_setting_value(int setting_index, bool increment) {
     }
     
     apply_setting_change(setting_index, new_value);
+    
+    if (!menu_container) return;
     
     lv_obj_t *current_item = lv_obj_get_child(menu_container, selected_item_index);
     if (current_item) {
@@ -1216,9 +1500,95 @@ static void select_option_item(int index) {
 }
 
 void handle_hardware_button_press_options(InputEvent *event) {
+    // Close wigle help popup on exit button or joystick back
+    if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
+        if (event->type == INPUT_TYPE_EXIT_BUTTON || 
+            (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_index == 0)) {
+            wigle_help_close_cb(NULL);
+            return;
+        }
+    }
+    if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+        if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+            wigle_manual_popup_close_cb(NULL);
+            return;
+        }
+    }
+    if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+        if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+            wigle_stats_popup_close_cb(NULL);
+            return;
+        }
+    }
+
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
         if (data->state == LV_INDEV_STATE_PR) {
+            // When popup is open, only handle close button touches
+            if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
+                if (wigle_help_close_btn && lv_obj_is_valid(wigle_help_close_btn)) {
+                    lv_area_t area; lv_obj_get_coords(wigle_help_close_btn, &area);
+                    if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
+                        data->point.y >= area.y1 && data->point.y <= area.y2) {
+                        wigle_help_close_cb(NULL);
+                    }
+                }
+                // Consume all other touches when popup is open
+                opt_touch_started = false;
+                return;
+            }
+            if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+                if (wigle_manual_close_btn && lv_obj_is_valid(wigle_manual_close_btn)) {
+                    lv_area_t c_area; lv_obj_get_coords(wigle_manual_close_btn, &c_area);
+                    if (data->point.x >= c_area.x1 && data->point.x <= c_area.x2 &&
+                        data->point.y >= c_area.y1 && data->point.y <= c_area.y2) {
+                        wigle_manual_popup_selected = 1;
+                        wigle_manual_popup_update_selection();
+                        wigle_manual_popup_close_cb(NULL);
+                        opt_touch_started = false;
+                        return;
+                    }
+                }
+                if (wigle_manual_upload_btn && lv_obj_is_valid(wigle_manual_upload_btn)) {
+                    lv_area_t u_area; lv_obj_get_coords(wigle_manual_upload_btn, &u_area);
+                    if (data->point.x >= u_area.x1 && data->point.x <= u_area.x2 &&
+                        data->point.y >= u_area.y1 && data->point.y <= u_area.y2) {
+                        wigle_manual_popup_selected = 0;
+                        wigle_manual_popup_update_selection();
+                        wigle_manual_popup_upload_cb(NULL);
+                        opt_touch_started = false;
+                        return;
+                    }
+                }
+                opt_touch_started = false;
+                return;
+            }
+            if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+                if (wigle_stats_down_btn && lv_obj_is_valid(wigle_stats_down_btn)) {
+                    lv_area_t d_area; lv_obj_get_coords(wigle_stats_down_btn, &d_area);
+                    if (data->point.x >= d_area.x1 && data->point.x <= d_area.x2 &&
+                        data->point.y >= d_area.y1 && data->point.y <= d_area.y2) {
+                        wigle_stats_popup_selected = 0;
+                        wigle_stats_popup_update_selection();
+                        wigle_stats_popup_activate_selected();
+                        opt_touch_started = false;
+                        return;
+                    }
+                }
+                if (wigle_stats_close_btn && lv_obj_is_valid(wigle_stats_close_btn)) {
+                    lv_area_t s_area; lv_obj_get_coords(wigle_stats_close_btn, &s_area);
+                    if (data->point.x >= s_area.x1 && data->point.x <= s_area.x2 &&
+                        data->point.y >= s_area.y1 && data->point.y <= s_area.y2) {
+                        wigle_stats_popup_selected = 1;
+                        wigle_stats_popup_update_selection();
+                        wigle_stats_popup_activate_selected();
+                        opt_touch_started = false;
+                        return;
+                    }
+                }
+                opt_touch_started = false;
+                return;
+            }
             // existing "press" logic unchanged...
             if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) {
                 lv_area_t area; lv_obj_get_coords(scroll_up_btn, &area);
@@ -1264,8 +1634,10 @@ void handle_hardware_button_press_options(InputEvent *event) {
 
             // Calculate swipe thresholds
             int thr_y = LV_VER_RES / OPT_SWIPE_THRESHOLD_RATIO;
-            // Lower threshold for Evil Portal HTML list
-            if (current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
+            // Lower threshold for portal HTML lists (short lists need a lighter swipe)
+            if (current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT ||
+                current_wifi_menu_state == WIFI_MENU_KARMA_PORTAL_SELECT ||
+                SelectedMenuType == OT_WigleManualUpload) {
                 thr_y = LV_VER_RES / 20; // much more sensitive for short lists
             }
             int thr_x = LV_HOR_RES / OPT_SWIPE_THRESHOLD_RATIO;
@@ -1379,6 +1751,31 @@ void handle_hardware_button_press_options(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
         ESP_LOGI(TAG, "Joystick index = %d", button);
+
+        if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+            if (button == 0 || button == 2 || button == 3 || button == 4) {
+                wigle_manual_popup_selected = (wigle_manual_popup_selected + 1) % 2;
+                wigle_manual_popup_update_selection();
+            } else if (button == 1) {
+                if (wigle_manual_popup_selected == 0) {
+                    wigle_manual_popup_upload_cb(NULL);
+                } else {
+                    wigle_manual_popup_close_cb(NULL);
+                }
+            }
+            return;
+        }
+
+        if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+            if (button == 0 || button == 2 || button == 3 || button == 4) {
+                wigle_stats_popup_selected = (wigle_stats_popup_selected + 1) % 2;
+                wigle_stats_popup_update_selection();
+            } else if (button == 1) {
+                wigle_stats_popup_activate_selected();
+            }
+            return;
+        }
+
         if (button == 2) {
             select_option_item(selected_item_index - 1);
         } else if (button == 4) {
@@ -1453,6 +1850,35 @@ void handle_hardware_button_press_options(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t keyValue = event->data.key_value;
 
+        if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+            if (keyValue == 'h' || keyValue == 'l' || keyValue == ',' || keyValue == ';' || keyValue == '/' || keyValue == '.') {
+                wigle_manual_popup_selected = (wigle_manual_popup_selected + 1) % 2;
+                wigle_manual_popup_update_selection();
+            } else if (keyValue == 13) {
+                if (wigle_manual_popup_selected == 0) wigle_manual_popup_upload_cb(NULL);
+                else wigle_manual_popup_close_cb(NULL);
+            } else if (keyValue == 29 || keyValue == '`') {
+                wigle_manual_popup_close_cb(NULL);
+            }
+            return;
+        }
+
+        if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+            if (keyValue == 'h' || keyValue == 'l') {
+                wigle_stats_popup_selected = (wigle_stats_popup_selected + 1) % 2;
+                wigle_stats_popup_update_selection();
+            } else if (keyValue == 'k' || keyValue == 44 || keyValue == ',' || keyValue == 59 || keyValue == ';') {
+                wigle_stats_popup_scroll(-40);
+            } else if (keyValue == 'j' || keyValue == 47 || keyValue == '/' || keyValue == 46 || keyValue == '.') {
+                wigle_stats_popup_scroll(40);
+            } else if (keyValue == 13) {
+                wigle_stats_popup_activate_selected();
+            } else if (keyValue == 29 || keyValue == '`') {
+                wigle_stats_popup_close_cb(NULL);
+            }
+            return;
+        }
+
         // --- Vim keybinds ---
         if (keyValue == 'h') { // Vim left
             ESP_LOGI(TAG, "Vim 'h' pressed (left)");
@@ -1522,6 +1948,27 @@ void handle_hardware_button_press_options(InputEvent *event) {
             back_event_cb(NULL);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
+        if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+            if (event->data.encoder.button) {
+                if (wigle_manual_popup_selected == 0) wigle_manual_popup_upload_cb(NULL);
+                else wigle_manual_popup_close_cb(NULL);
+            } else {
+                wigle_manual_popup_selected = (wigle_manual_popup_selected + 1) % 2;
+                wigle_manual_popup_update_selection();
+            }
+            return;
+        }
+
+        if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+            if (event->data.encoder.button) {
+                wigle_stats_popup_activate_selected();
+            } else if (event->data.encoder.direction != 0) {
+                wigle_stats_popup_selected = (wigle_stats_popup_selected + 1) % 2;
+                wigle_stats_popup_update_selection();
+            }
+            return;
+        }
+
         if (event->data.encoder.button) {
             // Encoder button press - treat as select/enter/cycle
             if (is_settings_mode) {
@@ -1584,12 +2031,17 @@ static void karma_custom_ssids_cb(const char *input) {
 
     // Parse comma-separated SSIDs
     const char *ssids[KARMA_MAX_SSIDS];
-    char ssid_buf[33 * KARMA_MAX_SSIDS];
+    // Heap-allocate to avoid blowing the LVGL task stack (2 KB+ on-stack otherwise).
+    char *ssid_buf = malloc(33 * KARMA_MAX_SSIDS);
+    if (!ssid_buf) {
+        error_popup_create("Out of memory.");
+        return;
+    }
     int count = 0;
 
     // Copy input to buffer for strtok
-    strncpy(ssid_buf, input, sizeof(ssid_buf) - 1);
-    ssid_buf[sizeof(ssid_buf) - 1] = '\0';
+    strncpy(ssid_buf, input, 33 * KARMA_MAX_SSIDS - 1);
+    ssid_buf[33 * KARMA_MAX_SSIDS - 1] = '\0';
 
     char *token = strtok(ssid_buf, ",");
     while (token && count < KARMA_MAX_SSIDS) {
@@ -1607,17 +2059,80 @@ static void karma_custom_ssids_cb(const char *input) {
     }
 
     if (count == 0) {
+        free(ssid_buf);
         error_popup_create("No valid SSIDs entered.");
         return;
     }
 
     // Set SSID list and start Karma attack
     wifi_manager_set_karma_ssid_list(ssids, count);
+    free(ssid_buf);
     wifi_manager_start_karma();
 
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom SSIDs\n");
+    keyboard_view_set_submit_callback(NULL);
+}
+
+// Called after the user picks a portal file and optionally types SSIDs.
+// selected_karma_portal holds the filename chosen from the SD card list.
+static void karma_portal_ssids_cb(const char *input) {
+    if (!selected_karma_portal[0]) {
+        error_popup_create("No portal selected.");
+        return;
+    }
+
+    // Build full SD path for the chosen portal file (or keep "default").
+    // static: avoids 320 bytes on the LVGL task stack; callbacks are serialised.
+    static char portal_path[320];
+    if (strcmp(selected_karma_portal, "default") == 0) {
+        strncpy(portal_path, "default", sizeof(portal_path));
+    } else {
+        snprintf(portal_path, sizeof(portal_path),
+                 "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
+    }
+    wifi_manager_set_karma_portal_file(portal_path);
+
+    // Parse optional comma-separated SSIDs; blank = passive/auto mode.
+    if (input && strlen(input) > 0) {
+        const char *ssids[KARMA_MAX_SSIDS];
+        // Heap-allocate to avoid blowing the LVGL task stack (2 KB+ on-stack otherwise).
+        char *ssid_buf = malloc(33 * KARMA_MAX_SSIDS);
+        if (!ssid_buf) {
+            error_popup_create("Out of memory.");
+            return;
+        }
+        int count = 0;
+
+        strncpy(ssid_buf, input, 33 * KARMA_MAX_SSIDS - 1);
+        ssid_buf[33 * KARMA_MAX_SSIDS - 1] = '\0';
+
+        char *token = strtok(ssid_buf, ",");
+        while (token && count < KARMA_MAX_SSIDS) {
+            while (*token == ' ') token++;
+            char *end = token + strlen(token) - 1;
+            while (end > token && (*end == ' ' || *end == '\n' || *end == '\r')) {
+                *end = '\0';
+                end--;
+            }
+            if (strlen(token) > 0 && strlen(token) < 33) {
+                ssids[count++] = token;
+            }
+            token = strtok(NULL, ",");
+        }
+        if (count > 0) {
+            wifi_manager_set_karma_ssid_list(ssids, count);
+        }
+        free(ssid_buf);
+    }
+
+    wifi_manager_start_karma();
+
+    selected_karma_portal[0] = '\0';
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom portal: %s\n", portal_path);
     keyboard_view_set_submit_callback(NULL);
 }
 
@@ -1627,7 +2142,6 @@ void option_event_cb(lv_event_t *e) {
     bool view_switched = false; 
 
     static const char *last_option = NULL;
-    static unsigned long last_time_ms = 0;
     unsigned long now_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
     
     if (now_ms - createdTimeInMs <= 500) {
@@ -1657,6 +2171,16 @@ void option_event_cb(lv_event_t *e) {
         }
 
         int setting_index = (int)(intptr_t)udata;
+#ifdef CONFIG_USE_IO_EXPANDER
+        if (setting_index == IO_BTN_EDIT_P10 || setting_index == IO_BTN_EDIT_P11 || setting_index == IO_BTN_EDIT_P12) {
+            io_btn_being_edited = (setting_index == IO_BTN_EDIT_P10) ? 0 : (setting_index == IO_BTN_EDIT_P11) ? 1 : 2;
+            SelectedMenuType = OT_IOButtonPresets;
+            is_settings_mode = false;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+#endif
         change_setting_value(setting_index, true);
         option_invoked = false;
         return;
@@ -1669,6 +2193,78 @@ void option_event_cb(lv_event_t *e) {
         back_event_cb(NULL);
         option_invoked = false;
         return;
+    }
+
+    if (SelectedMenuType == OT_WigleManualUpload) {
+        if (strcmp(Selected_Option, "No CSV files found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            wigle_csv_page_offset += WIGLE_CSV_PAGE_SIZE;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            wigle_csv_page_offset -= WIGLE_CSV_PAGE_SIZE;
+            if (wigle_csv_page_offset < 0) wigle_csv_page_offset = 0;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        wigle_show_csv_details_popup(Selected_Option);
+        option_invoked = false;
+        return;
+    }
+
+    if (SelectedMenuType == OT_IOButtonPresets) {
+#ifdef CONFIG_USE_IO_EXPANDER
+        int preset_idx = -1;
+        for (int i = 0; i < NUM_IO_BTN_PRESETS; i++) {
+            if (strcmp(Selected_Option, io_btn_presets[i].name) == 0) {
+                preset_idx = i;
+                break;
+            }
+        }
+
+        if (preset_idx >= 0) {
+            const char* prefix = io_btn_presets[preset_idx].cmd_prefix;
+            if (strcmp(prefix, "cmd:") == 0) {
+                const char* cur = (io_btn_being_edited == 0) ? settings_get_io_btn_p10_cmd(&G_Settings)
+                                 : (io_btn_being_edited == 1) ? settings_get_io_btn_p11_cmd(&G_Settings)
+                                 : settings_get_io_btn_p12_cmd(&G_Settings);
+                const char* cmd_start = cur ? cur : "";
+                if (strncmp(cmd_start, "cmd:", 4) == 0) cmd_start += 4;
+                keyboard_view_set_return_view(&options_menu_view);
+                keyboard_view_set_placeholder("Command (e.g. nfc read)");
+                keyboard_view_set_start_caps(false);
+                keyboard_view_set_initial_text(cmd_start);
+                keyboard_view_set_submit_callback(io_btn_being_edited == 0 ? iobtn_p10_kb_cb : io_btn_being_edited == 1 ? iobtn_p11_kb_cb : iobtn_p12_kb_cb);
+                display_manager_switch_view(&keyboard_view);
+            } else {
+                if (io_btn_being_edited == 0) {
+                    settings_set_io_btn_p10_cmd(&G_Settings, prefix);
+                } else if (io_btn_being_edited == 1) {
+                    settings_set_io_btn_p11_cmd(&G_Settings, prefix);
+                } else {
+                    settings_set_io_btn_p12_cmd(&G_Settings, prefix);
+                }
+                settings_save(&G_Settings);
+                current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+                settings_submenu_depth = 1;
+                SelectedMenuType = OT_Settings;
+                is_settings_mode = true;
+                rebuild_current_menu();
+            }
+        }
+        option_invoked = false;
+        return;
+#else
+        option_invoked = false;
+        return;
+#endif
     }
 
     if (SelectedMenuType == OT_DualComm) {
@@ -2511,6 +3107,39 @@ display_manager_switch_view(&terminal_view);
         keyboard_view_set_placeholder("SSID1,SSID2,SSID3");
         return;
     }
+    else if (strcmp(Selected_Option, "Start Karma Attack (Custom Portal)") == 0) {
+        portal_page_offset = 0;
+        current_wifi_menu_state = WIFI_MENU_KARMA_PORTAL_SELECT;
+        rebuild_current_menu();
+        option_invoked = false;
+        return;
+    }
+    else if (current_wifi_menu_state == WIFI_MENU_KARMA_PORTAL_SELECT) {
+        if (strcmp(Selected_Option, "No portal files found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        /* Page navigation */
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            portal_page_offset += PORTAL_PAGE_SIZE;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            portal_page_offset -= PORTAL_PAGE_SIZE;
+            if (portal_page_offset < 0) portal_page_offset = 0;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        strncpy(selected_karma_portal, Selected_Option, MAX_PORTAL_NAME - 1);
+        selected_karma_portal[MAX_PORTAL_NAME - 1] = '\0';
+        keyboard_view_set_submit_callback(karma_portal_ssids_cb);
+        display_manager_switch_view(&keyboard_view);
+        keyboard_view_set_placeholder("SSIDs (comma-sep, blank=auto)");
+        return;
+    }
 
     else if (strcmp(Selected_Option, "Capture WPS") == 0) {
         terminal_set_return_view(&options_menu_view);
@@ -2548,21 +3177,35 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Start Custom Evil Portal") == 0) {
+        portal_page_offset = 0;
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL_SELECT;
         rebuild_current_menu();
         option_invoked = false;
         return;
     }
     else if (current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
-        // Prevent selection of placeholder
+        /* Non-selectable placeholder */
         if (strcmp(Selected_Option, "No portal files found") == 0) {
             option_invoked = false;
             return;
         }
-        
-        // Prompt for SSID after selecting portal
-        strncpy(selected_portal, Selected_Option, MAX_PORTAL_NAME-1);
-        selected_portal[MAX_PORTAL_NAME-1] = '\0';
+        /* Page navigation */
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            portal_page_offset += PORTAL_PAGE_SIZE;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            portal_page_offset -= PORTAL_PAGE_SIZE;
+            if (portal_page_offset < 0) portal_page_offset = 0;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        /* Prompt for SSID after selecting a portal file */
+        strncpy(selected_portal, Selected_Option, MAX_PORTAL_NAME - 1);
+        selected_portal[MAX_PORTAL_NAME - 1] = '\0';
         keyboard_view_set_submit_callback(evil_portal_ssid_cb);
         display_manager_switch_view(&keyboard_view);
         keyboard_view_set_placeholder("SSID");
@@ -2570,9 +3213,8 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Start Wardriving") == 0) {
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("startwd");
+        wardriving_view_set_scan_mode(true);
+        display_manager_switch_view(&wardriving_view);
         view_switched = true;
     }
 
@@ -2806,21 +3448,18 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "GPS Info") == 0) {
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("gpsinfo");
+        display_manager_switch_view(&wardriving_view);
         view_switched = true;
     }
 
     else if (strcmp(Selected_Option, "BLE Wardriving") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("blewardriving");
+        wardriving_view_set_ble_mode(true);
+        display_manager_switch_view(&wardriving_view);
         view_switched = true;
 #else
         error_popup_create("Device Does not Support Bluetooth...");
-        
+
 #endif
     }
 
@@ -3038,14 +3677,15 @@ void options_menu_destroy() {
 
     is_settings_mode = false;
 
-    if (evil_portal_names != NULL) {
-        free(evil_portal_names);
-        evil_portal_names = NULL;
-    }
-    if (evil_portal_options != NULL) {
-        free(evil_portal_options);
-        evil_portal_options = NULL;
-    }
+    portal_page_offset = 0;
+    portal_free_cache();
+
+    wigle_csv_page_offset = 0;
+    wigle_csv_browser_active = false;
+    selected_wigle_csv[0] = '\0';
+    wigle_csv_free_cache();
+    wigle_manual_popup_close_cb(NULL);
+    wigle_stats_popup_close_cb(NULL);
 }
 
 void get_options_menu_callback(void **callback) { *callback = options_menu_view.input_callback; }
@@ -3057,6 +3697,88 @@ View options_menu_view = {.root = NULL,
                           .name = "Options Screen",
                           .get_hardwareinput_callback = get_options_menu_callback};
 
+static void wigle_help_close_cb(lv_event_t *e) {
+    (void)e;
+    if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
+        lvgl_obj_del_safe(&wigle_help_popup);
+    }
+    wigle_help_close_btn = NULL;
+}
+
+static void wigle_test_result_async(void *data) {
+    uint8_t *args = (uint8_t *)data;
+    bool success = args[0];
+    char *message = (char *)(&args[1]);
+    wigle_set_test_callback(NULL);
+    if (success) {
+        error_popup_create(message);
+    } else {
+        error_popup_create(message);
+    }
+    free(data);
+}
+
+static void wigle_test_result_cb(bool success, const char *message) {
+    // Must use lv_async_call since this runs in FreeRTOS task, not LVGL thread
+    size_t len = strlen(message) + 1;
+    uint8_t *args = malloc(sizeof(bool) + len);
+    if (!args) return;
+    args[0] = success;
+    memcpy(&args[1], message, len);
+    lv_async_call(wigle_test_result_async, args);
+}
+
+static void wigle_manual_upload_result_async(void *data) {
+    uint8_t *args = (uint8_t *)data;
+    bool success = args[0];
+    char *message = (char *)(&args[1]);
+    wigle_set_manual_upload_callback(NULL);
+
+    if (wigle_manual_info_label && lv_obj_is_valid(wigle_manual_info_label)) {
+        lv_label_set_text(wigle_manual_info_label, message);
+    }
+    if (success) {
+        wigle_csv_free_cache();
+        rebuild_current_menu();
+    }
+    free(data);
+}
+
+static void wigle_manual_upload_result_cb(bool success, const char *message) {
+    size_t len = strlen(message) + 1;
+    uint8_t *args = malloc(sizeof(bool) + len);
+    if (!args) return;
+    args[0] = success;
+    memcpy(&args[1], message, len);
+    lv_async_call(wigle_manual_upload_result_async, args);
+}
+
+static void wigle_stats_result_async(void *data) {
+    uint8_t *args = (uint8_t *)data;
+    (void)args[0];
+    char *message = (char *)(&args[1]);
+    wigle_set_stats_callback(NULL);
+
+    if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup) &&
+        wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
+        lv_label_set_text(wigle_stats_body_label, message);
+        if (wigle_stats_close_btn && lv_obj_is_valid(wigle_stats_close_btn)) {
+            lv_obj_t *lbl = lv_obj_get_child(wigle_stats_close_btn, 0);
+            if (lbl) lv_label_set_text(lbl, "Close");
+        }
+    }
+    free(data);
+}
+
+static void wigle_stats_result_cb(bool success, const char *message) {
+    size_t len = strlen(message) + 1;
+    uint8_t *args = malloc(sizeof(bool) + len);
+    if (!args) return;
+    args[0] = success;
+    memcpy(&args[1], message, len);
+    lv_async_call(wigle_stats_result_async, args);
+}
+
 static void back_event_cb(lv_event_t *e) {
 
     // Save settings when exiting options menu
@@ -3064,9 +3786,46 @@ static void back_event_cb(lv_event_t *e) {
         settings_save(&G_Settings);
     }
 
+    if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
+        wigle_help_close_cb(NULL);
+        return;
+    }
+    if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+        wigle_manual_popup_close_cb(NULL);
+        return;
+    }
+    if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+        wigle_stats_popup_close_cb(NULL);
+        return;
+    }
+
+    if (SelectedMenuType == OT_WigleManualUpload || wigle_csv_browser_active) {
+        wigle_csv_page_offset = 0;
+        wigle_csv_browser_active = false;
+        selected_wigle_csv[0] = '\0';
+        wigle_csv_free_cache();
+        SelectedMenuType = OT_Settings;
+        is_settings_mode = true;
+        current_settings_category = SETTINGS_CAT_WIGLE;
+        settings_submenu_depth = 1;
+        rebuild_current_menu();
+        return;
+    }
+
     // If in Evil Portal select submenu, go back to Evil Portal menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
+        portal_page_offset = 0;
+        portal_free_cache();
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;
+        rebuild_current_menu();
+        return;
+    }
+    // If in Karma portal select submenu, go back to Attacks menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_KARMA_PORTAL_SELECT) {
+        portal_page_offset = 0;
+        portal_free_cache();
+        selected_karma_portal[0] = '\0';
+        current_wifi_menu_state = WIFI_MENU_ATTACKS;
         rebuild_current_menu();
         return;
     }
@@ -3091,6 +3850,7 @@ static void back_event_cb(lv_event_t *e) {
     // If in a settings submenu, go back to category selection
     if (is_settings_mode && current_settings_category >= 0) {
         current_settings_category = -1;
+        settings_submenu_depth = 0;
         rebuild_current_menu();
         return;
     }
@@ -3098,34 +3858,438 @@ static void back_event_cb(lv_event_t *e) {
     display_manager_switch_view(&main_menu_view);
 }
 
+static void wigle_csv_free_cache(void) {
+    if (wigle_csv_names) { free(wigle_csv_names); wigle_csv_names = NULL; }
+    if (wigle_csv_options) { free(wigle_csv_options); wigle_csv_options = NULL; }
+}
+
+static const char **wigle_csv_load_page(void) {
+    static const char *empty[] = {"No CSV files found", NULL};
+
+    wigle_csv_free_cache();
+
+    char (*file_names)[MAX_PORTAL_NAME] = malloc(WIGLE_CSV_PAGE_SIZE * MAX_PORTAL_NAME);
+    if (!file_names) {
+        ESP_LOGE(TAG, "wigle_csv_load_page: OOM for file name buffer");
+        return empty;
+    }
+
+    int count = wigle_list_csv_files_paged(
+        wigle_csv_page_offset,
+        WIGLE_CSV_PAGE_SIZE,
+        file_names,
+        &wigle_csv_has_next_page);
+
+    if (count < 0) {
+        free(file_names);
+        return empty;
+    }
+
+    bool show_prev = (wigle_csv_page_offset > 0);
+    bool show_next = wigle_csv_has_next_page;
+    int total = (show_prev ? 1 : 0) + count + (show_next ? 1 : 0);
+
+    if (total == 0) {
+        free(file_names);
+        return empty;
+    }
+
+    wigle_csv_names = malloc(MAX_PORTAL_NAME * (size_t)total);
+    wigle_csv_options = malloc(sizeof(char *) * ((size_t)total + 1));
+    if (!wigle_csv_names || !wigle_csv_options) {
+        free(file_names);
+        wigle_csv_free_cache();
+        return empty;
+    }
+
+    int idx = 0;
+    if (show_prev) {
+        strcpy(wigle_csv_names + idx * MAX_PORTAL_NAME, "< Prev");
+        wigle_csv_options[idx] = wigle_csv_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    for (int i = 0; i < count; i++) {
+        strcpy(wigle_csv_names + idx * MAX_PORTAL_NAME, file_names[i]);
+        wigle_csv_options[idx] = wigle_csv_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    if (show_next) {
+        strcpy(wigle_csv_names + idx * MAX_PORTAL_NAME, "Next >");
+        wigle_csv_options[idx] = wigle_csv_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    wigle_csv_options[idx] = NULL;
+
+    free(file_names);
+    return wigle_csv_options;
+}
+
+static void wigle_manual_popup_close_cb(lv_event_t *e) {
+    (void)e;
+    wigle_set_manual_upload_callback(NULL);
+    if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+        lvgl_obj_del_safe(&wigle_manual_popup);
+    }
+    wigle_manual_upload_btn = NULL;
+    wigle_manual_close_btn = NULL;
+    wigle_manual_info_label = NULL;
+    wigle_manual_popup_selected = 0;
+}
+
+static void wigle_manual_popup_update_selection(void) {
+    lv_obj_t *btns[2] = { wigle_manual_upload_btn, wigle_manual_close_btn };
+    popup_update_selection(btns, 2, wigle_manual_popup_selected);
+}
+
+static void wigle_get_popup_geometry(int *popup_w, int *popup_h, int *y_offset) {
+    int w = (LV_HOR_RES <= 240) ? (LV_HOR_RES - 20) : (LV_HOR_RES - 30);
+    int h;
+    int y = 0;
+
+    if (LV_VER_RES <= 135) {
+        h = 130;
+        y = 0;
+    } else if (LV_VER_RES <= 200) {
+        h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
+        if (h < 120) h = 120;
+        y = 10;
+    } else {
+        h = (LV_VER_RES <= 240) ? 140 : 160;
+        y = 10;
+    }
+
+    if (popup_w) *popup_w = w;
+    if (popup_h) *popup_h = h;
+    if (y_offset) *y_offset = y;
+}
+
+static void wigle_stats_popup_close_cb(lv_event_t *e) {
+    (void)e;
+    wigle_set_stats_callback(NULL);
+    if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+        lvgl_obj_del_safe(&wigle_stats_popup);
+    }
+    wigle_stats_down_btn = NULL;
+    wigle_stats_close_btn = NULL;
+    wigle_stats_body_label = NULL;
+    wigle_stats_scroll = NULL;
+    wigle_stats_popup_selected = 1;
+}
+
+static void wigle_stats_popup_scroll(int delta_y) {
+    if (!wigle_stats_scroll || !lv_obj_is_valid(wigle_stats_scroll) || delta_y == 0) {
+        return;
+    }
+
+    lv_obj_update_layout(wigle_stats_scroll);
+    lv_coord_t y = lv_obj_get_scroll_y(wigle_stats_scroll);
+    if (delta_y > 0 && lv_obj_get_scroll_bottom(wigle_stats_scroll) <= 0) {
+        lv_obj_scroll_to_y(wigle_stats_scroll, 0, LV_ANIM_OFF);
+        return;
+    }
+
+    lv_obj_scroll_to_y(wigle_stats_scroll, y + delta_y, LV_ANIM_OFF);
+}
+
+static void wigle_stats_popup_scroll_down_cb(lv_event_t *e) {
+    (void)e;
+    wigle_stats_popup_scroll(40);
+}
+
+static void wigle_stats_popup_update_selection(void) {
+    lv_obj_t *btns[2] = { wigle_stats_down_btn, wigle_stats_close_btn };
+    popup_update_selection(btns, 2, wigle_stats_popup_selected);
+}
+
+static void wigle_stats_popup_activate_selected(void) {
+    if (wigle_stats_popup_selected == 0) {
+        wigle_stats_popup_scroll(40);
+    } else {
+        wigle_stats_popup_close_cb(NULL);
+    }
+}
+
+static void wigle_stats_popup_open(void) {
+    if (wigle_stats_popup && lv_obj_is_valid(wigle_stats_popup)) {
+        return;
+    }
+
+    int popup_w = 0;
+    int popup_h = 0;
+    int y_offset = 0;
+    wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
+    wigle_stats_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset);
+    lv_obj_set_style_bg_color(wigle_stats_popup, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_add_flag(wigle_stats_popup, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *title = popup_create_title_label(wigle_stats_popup, "WiGLE Stats", &lv_font_montserrat_12, 5);
+    (void)title;
+
+    int scroll_h = popup_h - 76;
+    if (scroll_h < 58) scroll_h = 58;
+    wigle_stats_scroll = popup_create_scroll_area(wigle_stats_popup, popup_w - 16, scroll_h,
+                                                   LV_ALIGN_TOP_MID, 0, 24);
+    wigle_stats_body_label = lv_label_create(wigle_stats_scroll);
+    lv_label_set_long_mode(wigle_stats_body_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(wigle_stats_body_label, popup_w - 24);
+    lv_obj_set_style_text_color(wigle_stats_body_label, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_font(wigle_stats_body_label,
+                               (LV_VER_RES <= 200) ? &lv_font_montserrat_10 : &lv_font_montserrat_12,
+                               0);
+    lv_obj_set_style_text_line_space(wigle_stats_body_label, 3, 0);
+    lv_label_set_text(wigle_stats_body_label, "Loading WiGLE stats...");
+
+    wigle_stats_down_btn = popup_add_styled_button(
+        wigle_stats_popup, "Down", 88, 32,
+        LV_ALIGN_BOTTOM_LEFT, 10, -8,
+        &lv_font_montserrat_12,
+        wigle_stats_popup_scroll_down_cb, NULL);
+    wigle_stats_close_btn = popup_add_styled_button(
+        wigle_stats_popup, "Close", 96, 32,
+        LV_ALIGN_BOTTOM_RIGHT, -10, -8,
+        &lv_font_montserrat_12,
+        wigle_stats_popup_close_cb, NULL);
+
+    lv_obj_t *btns[2] = { wigle_stats_down_btn, wigle_stats_close_btn };
+    PopupButtonLayoutConfig cfg = {
+        .min_w = 80,
+        .max_w = 140,
+        .min_threshold = 64,
+        .gap = 10,
+    };
+    popup_layout_buttons_responsive(wigle_stats_popup, btns, 2, -8, &cfg);
+    wigle_stats_popup_selected = 1;
+    wigle_stats_popup_update_selection();
+}
+
+static void wigle_manual_popup_upload_cb(lv_event_t *e) {
+    (void)e;
+    if (!selected_wigle_csv[0]) {
+        error_popup_create("No CSV selected");
+        return;
+    }
+    if (wigle_is_manual_upload_in_progress()) {
+        error_popup_create("Upload already in progress");
+        return;
+    }
+
+    if (wigle_manual_info_label && lv_obj_is_valid(wigle_manual_info_label)) {
+        lv_label_set_text_fmt(wigle_manual_info_label,
+                              "Name: %s\n\nUploading...", selected_wigle_csv);
+    }
+    wigle_set_manual_upload_callback(wigle_manual_upload_result_cb);
+    esp_err_t err = wigle_upload_single_csv_async(selected_wigle_csv);
+    if (err != ESP_OK) {
+        wigle_set_manual_upload_callback(NULL);
+        if (wigle_manual_info_label && lv_obj_is_valid(wigle_manual_info_label)) {
+            lv_label_set_text(wigle_manual_info_label, "Failed to start upload.");
+        }
+        return;
+    }
+}
+
+static void wigle_show_csv_details_popup(const char *filename) {
+    if (!filename || !filename[0]) {
+        error_popup_create("Invalid CSV name");
+        return;
+    }
+
+    int wifi_rows = 0;
+    int total_rows = 0;
+    esp_err_t err = wigle_get_csv_info(filename, &wifi_rows, &total_rows);
+    if (err != ESP_OK) {
+        error_popup_create("Failed to read CSV info");
+        return;
+    }
+
+    strncpy(selected_wigle_csv, filename, sizeof(selected_wigle_csv) - 1);
+    selected_wigle_csv[sizeof(selected_wigle_csv) - 1] = '\0';
+
+    if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
+        lvgl_obj_del_safe(&wigle_manual_popup);
+    }
+
+    int popup_w = 0;
+    int popup_h = 0;
+    int y_offset = 0;
+    wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
+    wigle_manual_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset);
+    lv_obj_set_style_bg_color(wigle_manual_popup, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_add_flag(wigle_manual_popup, LV_OBJ_FLAG_CLICKABLE);
+
+    popup_create_title_label(wigle_manual_popup, "WiGLE Manual Upload", &lv_font_montserrat_12, 5);
+
+    int info_scroll_h = popup_h - 76;
+    if (info_scroll_h < 58) info_scroll_h = 58;
+    lv_obj_t *info_scroll = popup_create_scroll_area(wigle_manual_popup, popup_w - 16, info_scroll_h,
+                                                     LV_ALIGN_TOP_MID, 0, 28);
+    wigle_manual_info_label = lv_label_create(info_scroll);
+    lv_label_set_long_mode(wigle_manual_info_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(wigle_manual_info_label, popup_w - 24);
+    lv_obj_set_style_text_color(wigle_manual_info_label, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_font(wigle_manual_info_label,
+                               (LV_VER_RES <= 200) ? &lv_font_montserrat_10 : &lv_font_montserrat_12,
+                               0);
+    lv_obj_set_style_text_line_space(wigle_manual_info_label, 2, 0);
+
+    char details[220];
+    snprintf(details, sizeof(details),
+             "Name: %s\nWiFi rows: %d\nTotal rows: %d",
+             filename, wifi_rows, total_rows);
+    lv_label_set_text(wigle_manual_info_label, details);
+
+    wigle_manual_upload_btn = popup_add_styled_button(
+        wigle_manual_popup, "Upload", 90, 32,
+        LV_ALIGN_BOTTOM_LEFT, 10, -8,
+        &lv_font_montserrat_12,
+        wigle_manual_popup_upload_cb, NULL);
+    wigle_manual_close_btn = popup_add_styled_button(
+        wigle_manual_popup, "Cancel", 90, 32,
+        LV_ALIGN_BOTTOM_RIGHT, -10, -8,
+        &lv_font_montserrat_12,
+        wigle_manual_popup_close_cb, NULL);
+
+    lv_obj_t *btns[2] = { wigle_manual_upload_btn, wigle_manual_close_btn };
+    PopupButtonLayoutConfig cfg = {
+        .min_w = 80,
+        .max_w = 140,
+        .min_threshold = 64,
+        .gap = 10,
+    };
+    popup_layout_buttons_responsive(wigle_manual_popup, btns, 2, -8, &cfg);
+    wigle_manual_popup_selected = 0;
+    wigle_manual_popup_update_selection();
+}
+
+/* -----------------------------------------------------------------------
+ * Portal page helpers
+ * ----------------------------------------------------------------------- */
+
+/** Free the heap storage for the currently loaded portal page. */
+static void portal_free_cache(void) {
+    if (evil_portal_names)   { free(evil_portal_names);   evil_portal_names   = NULL; }
+    if (evil_portal_options) { free(evil_portal_options); evil_portal_options = NULL; }
+}
+
+/**
+ * Load one page of .html files from the portals directory into
+ * evil_portal_names / evil_portal_options.
+ *
+ * Layout of the returned NULL-terminated options array:
+ *   page 0 : [default]  [file0 … fileN]  [Next > if more]
+ *   page 1+: [< Prev]   [file0 … fileN]  [Next > if more]
+ *
+ * Always frees any previously cached page first.
+ * Returns evil_portal_options on success, a static fallback {"default",NULL}
+ * on allocation or directory-open failure.
+ *
+ * The caller is responsible for JIT-mounting/unmounting the SD card around
+ * this call on shared-SPI boards.
+ */
+static const char **portal_load_page(void) {
+    static const char *fallback[] = {"default", NULL};
+
+    portal_free_cache();
+
+    /* ---- read one page from the SD card ---- */
+    char (*file_names)[MAX_PORTAL_NAME] =
+        malloc(PORTAL_PAGE_SIZE * MAX_PORTAL_NAME);
+    if (!file_names) {
+        ESP_LOGE(TAG, "portal_load_page: OOM for file name buffer");
+        return fallback;
+    }
+
+    int count = sd_card_list_dir_paged(
+        "/mnt/ghostesp/evil_portal/portals", ".html",
+        portal_page_offset, PORTAL_PAGE_SIZE,
+        file_names, &portal_has_next_page);
+
+    if (count < 0) {
+        ESP_LOGW(TAG, "portal_load_page: directory scan failed (offset=%d)", portal_page_offset);
+        free(file_names);
+        return fallback;
+    }
+
+    /* ---- determine optional prefix / suffix navigation items ---- */
+    bool show_prev    = (portal_page_offset > 0);
+    bool show_default = (portal_page_offset == 0);
+    bool show_next    = portal_has_next_page;
+
+    int total = (show_prev ? 1 : 0) + (show_default ? 1 : 0)
+              + count + (show_next ? 1 : 0);
+
+    if (total == 0) {
+        /* Empty directory — show a non-selectable placeholder */
+        free(file_names);
+        static const char *empty[] = {"No portal files found", NULL};
+        return empty;
+    }
+
+    /* ---- allocate final storage ---- */
+    evil_portal_names   = malloc(MAX_PORTAL_NAME * (size_t)total);
+    evil_portal_options = malloc(sizeof(char *) * ((size_t)total + 1));
+
+    if (!evil_portal_names || !evil_portal_options) {
+        ESP_LOGE(TAG, "portal_load_page: OOM for portal list (total=%d)", total);
+        free(file_names);
+        portal_free_cache();
+        return fallback;
+    }
+
+    /* ---- fill options array ---- */
+    int idx = 0;
+
+    if (show_prev) {
+        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "< Prev");
+        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    if (show_default) {
+        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "default");
+        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    for (int i = 0; i < count; i++) {
+        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, file_names[i]);
+        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    if (show_next) {
+        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "Next >");
+        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
+        idx++;
+    }
+    evil_portal_options[idx] = NULL;
+
+    free(file_names);
+
+    ESP_LOGI(TAG, "portal page loaded: offset=%d files=%d prev=%d next=%d "
+             "heap_used=%zu bytes",
+             portal_page_offset, count, show_prev, show_next,
+             (size_t)total * MAX_PORTAL_NAME + sizeof(char *) * ((size_t)total + 1));
+
+    return evil_portal_options;
+}
+
 static void rebuild_current_menu(void) {
-    // stop any existing build timer
     lvgl_timer_del_safe(&menu_build_timer);
     
-    // clear existing items efficiently
     if (g_options_view) {
         options_view_clear(g_options_view);
     } else if (menu_container && lv_obj_is_valid(menu_container)) {
         lv_obj_clean(menu_container);
     }
     
-    // reset build state
     num_items = 0;
     build_item_index = 0;
     selected_item_index = 0;
     
-    // determine options and timer period based on current menu state
     const char **options = NULL;
-    int timer_period = 15; // increased from 10ms to give more time between batches
+    int timer_period = 15;
     
     if (is_settings_mode) {
-        if (current_settings_category < 0) {
-            current_options_list = settings_categories;
-            timer_period = 20;
-        } else {
-            current_options_list = NULL;
-            timer_period = 15;
-        }
+        current_options_list = NULL;
+        timer_period = current_settings_category < 0 ? 20 : 15;
     } else {
         switch (SelectedMenuType) {
         case OT_Wifi:
@@ -3141,68 +4305,40 @@ static void rebuild_current_menu(void) {
                 case WIFI_MENU_MISC: options = wifi_misc_options; break;
                 case WIFI_MENU_EVIL_PORTAL_SELECT:
                 {
-                    // Always try to populate the portal list if not already done
-                    if (!evil_portal_names || !evil_portal_options) {
-                        ESP_LOGI(TAG, "Re-populating evil portal selector...");
-                        
-                        // First, allocate a temporary buffer to count portals safely
-                        char (*temp_buffer)[MAX_PORTAL_NAME] = malloc(sizeof(char[MAX_PORTALS][MAX_PORTAL_NAME]));
-                        if (!temp_buffer) {
-                            ESP_LOGE(TAG, "Failed to allocate temp buffer for portal counting");
-                            static const char *fallback_options[] = {"default", NULL};
-                            options = fallback_options;
-                            break;
+                    /* JIT-mount on shared-SPI boards before scanning SD */
+                    bool jit_mounted = false;
+                    bool display_suspended = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+                    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+                        if (!sd_card_manager.is_initialized) {
+                            if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
+                                jit_mounted = true;
+                            }
                         }
-                        
-                        int count = get_evil_portal_list(temp_buffer);
-                        
-                        if (count <= 0) {
-                            // Use static fallback for no portals case (no heap allocation)
-                            free(temp_buffer);
-                            static const char *no_portals_options[] = {"No portal files found", "default", NULL};
-                            options = no_portals_options;
-                            break;
-                        }
-                        
-                        // Allocate only the memory we actually need for final storage
-                        evil_portal_names = malloc(sizeof(char[MAX_PORTAL_NAME]) * count);
-                        evil_portal_options = malloc(sizeof(char*) * (count + 1));
-                        
-                        if (!evil_portal_names || !evil_portal_options) {
-                            ESP_LOGE(TAG, "Failed to allocate memory for portal list!");
-                            // Clean up allocations
-                            free(temp_buffer);
-                            if (evil_portal_names) free(evil_portal_names);
-                            if (evil_portal_options) free(evil_portal_options);
-                            evil_portal_names = NULL;
-                            evil_portal_options = NULL;
-                            // Fallback to default options
-                            static const char *fallback_options[] = {"default", NULL};
-                            options = fallback_options;
-                            break;
-                        }
-                        
-                        // Copy only the portals we need from temp buffer
-                        for (int i = 0; i < count; ++i) {
-                            strcpy(evil_portal_names + i * MAX_PORTAL_NAME, temp_buffer[i]);
-                            evil_portal_options[i] = evil_portal_names + i * MAX_PORTAL_NAME;
-                        }
-                        evil_portal_options[count] = NULL;
-                        
-                        // Free the temporary buffer
-                        free(temp_buffer);
-                        
-                        ESP_LOGI(TAG, "Loaded %d portals (using %zu bytes)", count, 
-                                sizeof(char[MAX_PORTAL_NAME]) * count + sizeof(char*) * (count + 1));
                     }
-                    
-                    if (evil_portal_options) {
-                        options = evil_portal_options;
-                    } else {
-                        // Fallback if somehow still NULL
-                        static const char *fallback_options[] = {"default", NULL};
-                        options = fallback_options;
+#endif
+                    options = portal_load_page();
+                    timer_period = 25;
+                    if (jit_mounted) sd_card_unmount_after_flush(display_suspended);
+                    break;
+                }
+                case WIFI_MENU_KARMA_PORTAL_SELECT:
+                {
+                    /* Reuse same SD directory as evil portal. JIT-mount if needed. */
+                    bool jit_mounted = false;
+                    bool display_suspended = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+                    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+                        if (!sd_card_manager.is_initialized) {
+                            if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
+                                jit_mounted = true;
+                            }
+                        }
                     }
+#endif
+                    options = portal_load_page();
+                    timer_period = 25;
+                    if (jit_mounted) sd_card_unmount_after_flush(display_suspended);
                     break;
                 }
             }
@@ -3235,6 +4371,14 @@ static void rebuild_current_menu(void) {
                 case DUALCOMM_MENU_KEYBOARD: options = dual_comm_keyboard_options; break;
             }
             break;
+        case OT_IOButtonPresets:
+            is_settings_mode = false;
+            options = get_io_btn_preset_options();
+            break;
+        case OT_WigleManualUpload:
+            options = wigle_csv_load_page();
+            timer_period = 25;
+            break;
         default: break;
         }
         current_options_list = options;
@@ -3242,7 +4386,16 @@ static void rebuild_current_menu(void) {
     
     // update title
     if (is_settings_mode) {
-        options_view_set_title(g_options_view, "Settings");
+        if (current_settings_category >= 0) {
+            int cat_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+            if (current_settings_category < cat_count) {
+                options_view_set_title(g_options_view, settings_categories[current_settings_category].name);
+            } else {
+                options_view_set_title(g_options_view, "Settings");
+            }
+        } else {
+            options_view_set_title(g_options_view, "Settings");
+        }
     } else {
         options_view_set_title(g_options_view, options_menu_type_to_string(SelectedMenuType));
     }
@@ -3268,18 +4421,53 @@ static void switch_to_settings_category(int cat_idx) {
      * Instead, treat any out-of-range index exactly like a Back press and  *
      * leave current_settings_category unchanged.                           *
      * ------------------------------------------------------------------ */
-    if (cat_idx < 0 || cat_idx >= SETTINGS_CATEGORY_COUNT) {
+    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    if (cat_idx < 0 || cat_idx >= category_count) {
         ESP_LOGW(TAG,
                  "switch_to_settings_category: index %d outside [0..%d]; "
                  "interpreting as Back action",
-                 cat_idx, SETTINGS_CATEGORY_COUNT - 1);
+                 cat_idx, category_count - 1);
         back_event_cb(NULL);
         return;
     }
 
     current_settings_category = cat_idx;
+    settings_submenu_depth = 1;
     rebuild_current_menu();
 }
+
+#ifdef CONFIG_USE_IO_EXPANDER
+static void iobtn_p10_kb_cb(const char *text) {
+    settings_set_io_btn_p10_cmd(&G_Settings, text ? text : "");
+    settings_save(&G_Settings);
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    settings_submenu_depth = 1;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    display_manager_switch_view(&options_menu_view);
+}
+static void iobtn_p11_kb_cb(const char *text) {
+    settings_set_io_btn_p11_cmd(&G_Settings, text ? text : "");
+    settings_save(&G_Settings);
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    settings_submenu_depth = 1;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    display_manager_switch_view(&options_menu_view);
+}
+static void iobtn_p12_kb_cb(const char *text) {
+    settings_set_io_btn_p12_cmd(&G_Settings, text ? text : "");
+    settings_save(&G_Settings);
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    settings_submenu_depth = 1;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    display_manager_switch_view(&options_menu_view);
+}
+#endif
 
 static void ssh_scan_kb_cb(const char *text) {
     if (!text || strlen(text) == 0) {
@@ -3491,29 +4679,31 @@ static void dual_comm_http_request_kb_cb(const char *text) {
 // build menu items in small batches so we don't starve the watchdog
 static void menu_builder_cb(lv_timer_t *t)
 {
-    /* If the view or options view is gone, stop this timer immediately. */
     if (!menu_container || !lv_obj_is_valid(menu_container) || !g_options_view) {
         if (t) lv_timer_del(t);
         menu_build_timer = NULL;
         return;
     }
-    const int BATCH = 3; // increased from 2 to reduce timer iterations
+    const bool is_portal_select =
+        (!is_settings_mode) &&
+        ((SelectedMenuType == OT_Wifi &&
+          (current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT ||
+           current_wifi_menu_state == WIFI_MENU_KARMA_PORTAL_SELECT)) ||
+         SelectedMenuType == OT_WigleManualUpload);
+
+    const int BATCH = is_portal_select ? 2 : 6;
     int built_this_tick = 0;
     bool all_current_options_processed = false;
-    
-    // yield to other tasks to prevent watchdog starvation
-    taskYIELD();
 
-    // Check if the "Back" option has already been added in a prior tick for this menu
     bool back_option_was_added_in_previous_tick = (bool)(intptr_t)t->user_data;
 
-    // Add regular menu items if the "Back" option hasn't been added yet
     if (!back_option_was_added_in_previous_tick) {
         if (is_settings_mode) {
-            if (current_settings_category < 0) { // Top-level categories (e.g., "Display", "Config")
-                while (settings_categories[build_item_index] != NULL && built_this_tick < BATCH) {
-                    const char *cat = settings_categories[build_item_index];
-                    lv_obj_t *btn = options_view_add_item(g_options_view, cat, option_event_cb, (void *)(intptr_t)build_item_index);
+            if (current_settings_category < 0) {
+                int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+                while (build_item_index < category_count && built_this_tick < BATCH) {
+                    SettingsCategory *cat = &settings_categories[build_item_index];
+                    lv_obj_t *btn = options_view_add_item(g_options_view, cat->name, option_event_cb, (void *)(intptr_t)build_item_index);
                     if (!btn) break;
                     lv_obj_set_user_data(btn, (void *)(intptr_t)build_item_index);
                     lv_obj_set_height(btn, button_height_global * 1.2);
@@ -3521,44 +4711,92 @@ static void menu_builder_cb(lv_timer_t *t)
                     num_items++;
                     built_this_tick++;
                     build_item_index++;
-                    // Select first item for all devices
                     if (num_items == 1) {
                         select_option_item(0);
                     }
                 }
-                if (settings_categories[build_item_index] == NULL) { // End of categories list
-
-
-
+                if (build_item_index >= category_count) {
                     all_current_options_processed = true;
                 }
-            } else { // Submenu of a settings category (e.g., "RGB Mode", "Display Timeout")
-                int *indices = settings_category_indices[current_settings_category];
-                while (indices[build_item_index] >= 0 && built_this_tick < BATCH) {
-                    int setting_idx = indices[build_item_index];
-                    SettingsItem *item = &settings_items[setting_idx];
-                    char buf[128];
-                    snprintf(buf, sizeof(buf), "%s: %s", item->label, item->value_options[item->current_value]);
-                    lv_obj_t *btn = options_view_add_item(g_options_view, buf, option_event_cb, (void *)(intptr_t)setting_idx);
-                    if (!btn) break;
-                    lv_obj_set_user_data(btn, (void *)(intptr_t)setting_idx);
-                    lv_obj_set_height(btn, button_height_global);
-                    decorate_settings_row_with_arrows(btn);
-                    num_items++;
-                    built_this_tick++;
-                    build_item_index++;
-                    // Select first item and refresh its style after arrows are created
-                    if (num_items == 1) {
-                        select_option_item(0);
-                        // Re-apply selected style now that arrows exist
-                        options_view_refresh_selected_item(g_options_view);
+            } else {
+#ifdef CONFIG_USE_IO_EXPANDER
+                if (current_settings_category == SETTINGS_CAT_IO_BUTTONS) {
+                    const char *p10 = settings_get_io_btn_p10_cmd(&G_Settings);
+                    const char *p11 = settings_get_io_btn_p11_cmd(&G_Settings);
+                    const char *p12 = settings_get_io_btn_p12_cmd(&G_Settings);
+                    const char *cmds[] = { p10, p11, p12 };
+                    static const char *io_btn_labels[] = { "Center", "Right", "Left" };
+                    int indices[] = { IO_BTN_EDIT_P10, IO_BTN_EDIT_P11, IO_BTN_EDIT_P12 };
+                    for (int k = 0; k < 3 && built_this_tick < BATCH; k++) {
+                        if (build_item_index <= k) {
+                            char row[128];
+                            const char* display_name = "(none)";
+                            if (cmds[k] && cmds[k][0]) {
+                                int action_idx = get_current_io_btn_action(cmds[k]);
+                                if (action_idx >= 0 && action_idx < NUM_IO_BTN_PRESETS) {
+                                    display_name = io_btn_presets[action_idx].name;
+                                } else {
+                                    display_name = cmds[k];
+                                }
+                            }
+                            snprintf(row, sizeof(row), "%s: %s", io_btn_labels[k], display_name);
+                            if (strlen(row) > 100) { row[97] = '.'; row[98] = '.'; row[99] = '\0'; }
+                            lv_obj_t *btn = options_view_add_item(g_options_view, row, option_event_cb, (void *)(intptr_t)indices[k]);
+                            if (!btn) break;
+                            lv_obj_set_user_data(btn, (void *)(intptr_t)indices[k]);
+                            lv_obj_set_height(btn, button_height_global);
+                            num_items++;
+                            built_this_tick++;
+                            build_item_index++;
+                            if (num_items == 1) {
+                                select_option_item(0);
+                                options_view_refresh_selected_item(g_options_view);
+                            }
+                        }
+                    }
+                    if (build_item_index >= 3) all_current_options_processed = true;
+                } else
+#endif
+                {
+                int settings_count = sizeof(settings_items) / sizeof(settings_items[0]);
+                int items_in_category = 0;
+                
+                for (int i = 0; i < settings_count; i++) {
+                    if (settings_items[i].category_id == current_settings_category) {
+                        items_in_category++;
                     }
                 }
-                if (indices[build_item_index] < 0) { // End of settings submenu list
+                
+                int current_item_in_category = 0;
+                for (int i = 0; i < settings_count && built_this_tick < BATCH; i++) {
+                    if (settings_items[i].category_id == current_settings_category) {
+                        if (current_item_in_category >= build_item_index) {
+                            SettingsItem *item = &settings_items[i];
+                            char buf[128];
+                            snprintf(buf, sizeof(buf), "%s: %s", item->label, item->value_options[item->current_value]);
+                            lv_obj_t *btn = options_view_add_item(g_options_view, buf, option_event_cb, (void *)(intptr_t)i);
+                            if (!btn) break;
+                            lv_obj_set_user_data(btn, (void *)(intptr_t)i);
+                            lv_obj_set_height(btn, button_height_global);
+                            decorate_settings_row_with_arrows(btn);
+                            num_items++;
+                            built_this_tick++;
+                            build_item_index++;
+                            if (num_items == 1) {
+                                select_option_item(0);
+                                options_view_refresh_selected_item(g_options_view);
+                            }
+                        }
+                        current_item_in_category++;
+                    }
+                }
+                
+                if (build_item_index >= items_in_category) {
                     all_current_options_processed = true;
+                }
                 }
             }
-        } else { // Non-settings menus (e.g., Wi-Fi Attacks, Bluetooth Main)
+        } else {
             while (current_options_list != NULL && current_options_list[build_item_index] != NULL && built_this_tick < BATCH) {
                 const char *opt = current_options_list[build_item_index];
                 lv_obj_t *btn = options_view_add_item(g_options_view, opt, option_event_cb, (void *)opt);
@@ -3568,32 +4806,27 @@ static void menu_builder_cb(lv_timer_t *t)
                 num_items++;
                 built_this_tick++;
                 build_item_index++;
-                // Select first item for all devices
                 if (num_items == 1) {
                     select_option_item(0);
                 }
             }
-            if (current_options_list == NULL || current_options_list[build_item_index] == NULL) { // End of regular options list
+            if (current_options_list == NULL || current_options_list[build_item_index] == NULL) {
                 all_current_options_processed = true;
             }
         }
     }
 
-    // Update arrow visibility after each batch of items is built
-    // This ensures arrows appear immediately on touch devices
     if (is_settings_mode && current_settings_category >= 0 && built_this_tick > 0) {
         update_settings_arrows_visibility();
     }
 
-    // Now, handle adding the "Back" button and stopping the timer
     if (all_current_options_processed) {
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
         bool need_back_button = true;
 #else
-        // Add back button when mirroring is active (for virtual joystick support)
         bool need_back_button = screen_mirror_is_enabled();
 #endif
-        if (need_back_button && !back_option_was_added_in_previous_tick) { // Add back button only once
+        if (need_back_button && !back_option_was_added_in_previous_tick) {
             lv_obj_t *btn = options_view_add_item(g_options_view, LV_SYMBOL_LEFT " Back", option_event_cb, (void *)"__BACK_OPTION__");
             if (btn) {
                 lv_obj_set_user_data(btn, (void *)"__BACK_OPTION__");
@@ -3603,10 +4836,9 @@ static void menu_builder_cb(lv_timer_t *t)
                     if (label) lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
                 }
                 num_items++;
-                t->user_data = (void*)1; // Mark back option as added
+                t->user_data = (void*)1;
             }
         }
-        // Timer should stop if all options are processed AND (if encoder/joystick/mirroring, the back option is now added, OR if neither)
         if (
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
             (bool)(intptr_t)t->user_data
@@ -3615,10 +4847,8 @@ static void menu_builder_cb(lv_timer_t *t)
 #endif
         ) {
             lv_timer_del(t);
-            /* menu build complete -- show or hide touch scroll buttons depending on scrollable content */
             if (menu_container && lv_obj_is_valid(menu_container)) {
                 update_scroll_buttons_visibility();
-                // Update arrow visibility after menu is built
                 update_settings_arrows_visibility();
             }
             menu_build_timer = NULL;

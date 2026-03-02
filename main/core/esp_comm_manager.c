@@ -94,7 +94,7 @@ typedef struct {
 
 typedef struct {
     char command[33];
-    char data[COMM_PACKET_SIZE - 32];
+    char data[COMM_PACKET_SIZE];
 } comm_command_t;
 
 typedef struct {

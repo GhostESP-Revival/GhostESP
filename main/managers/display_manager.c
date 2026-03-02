@@ -15,6 +15,12 @@
 #include "managers/views/options_screen.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/clock_screen.h"
+#include "managers/views/compass_screen.h"
+#include "managers/views/accelerometer_screen.h"
+#include "managers/views/infrared_view.h"
+#include "managers/views/nfc_view.h"
+#include "managers/views/badusb_view.h"
+#include "managers/views/app_gallery_screen.h"
 #include "managers/encoder_manager.h"
 #include <stdlib.h>
 #include <string.h>
@@ -31,8 +37,14 @@
 #include "driver/i2c.h"
 #include "soc/soc_caps.h"
 #include "io_manager/i2c_bus_lock.h"
+#ifdef CONFIG_USE_IO_EXPANDER
+#include "io_manager/io_manager.h"
+#endif
 #include "core/screen_mirror.h"
 #include "gui/lvgl_safe.h"
+
+uint32_t theme_palette_get_surface_alt(uint8_t theme);
+uint32_t theme_palette_get_text_muted(uint8_t theme);
 
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
@@ -682,33 +694,6 @@ void fade_in_cb(void *obj, int32_t v) {
 }
 
 static void rainbow_effect_cb(lv_timer_t *timer) {
-  if (!status_bar || !lv_obj_is_valid(status_bar)) {
-    return;
-  }
-
-  rainbow_hue = (rainbow_hue + 5) % 360;
-
-  lv_color_t color = lv_color_hsv_to_rgb(rainbow_hue, 100, 100);
-
-  lv_obj_set_style_border_color(status_bar, color, 0);
-
-  if (wifi_label && lv_obj_is_valid(wifi_label)) {
-    lv_obj_set_style_text_color(wifi_label, color, 0);
-  }
-  if (bt_label && lv_obj_is_valid(bt_label)) {
-    lv_obj_set_style_text_color(bt_label, color, 0);
-  }
-  if (sd_label && lv_obj_is_valid(sd_label)) {
-    lv_obj_set_style_text_color(sd_label, color, 0);
-  }
-  if (battery_label && lv_obj_is_valid(battery_label)) {
-    lv_obj_set_style_text_color(battery_label, color, 0);
-  }
-  if (mainlabel && lv_obj_is_valid(mainlabel)) {
-    lv_obj_set_style_text_color(mainlabel, color, 0);
-  }
-
-  lv_obj_invalidate(status_bar);
 }
 
 void display_manager_set_rainbow_mode(bool enable) {
@@ -882,7 +867,8 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   lv_obj_invalidate(status_bar);
 
   // set status bar icon colors based on power save mode and AP state
-  lv_color_t default_color = lv_color_hex(0xCCCCCC);
+  uint8_t theme = settings_get_menu_theme(&G_Settings);
+  lv_color_t default_color = lv_color_hex(theme_palette_get_text_muted(theme));
   lv_color_t gray_color = lv_color_hex(0x808080); // Gray for inactive state
   
   // WiFi icon color logic
@@ -980,8 +966,10 @@ void display_manager_update_status_bar_color(void) {
 
   uint8_t theme = settings_get_menu_theme(&G_Settings);
   lv_color_t accent_color = lv_color_hex(theme_palette_get_accent(theme));
-  lv_color_t text_color = lv_color_hex(0x999999);
+  lv_color_t status_bg_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+  lv_color_t text_color = lv_color_hex(theme_palette_get_text_muted(theme));
   
+  lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_style_border_color(status_bar, accent_color, LV_PART_MAIN);
 
   // Reset all status bar label colors when leaving rainbow mode
@@ -1006,6 +994,10 @@ void display_manager_update_status_bar_color(void) {
 
 void display_manager_add_status_bar(const char *CurrentMenuName) {
     const char *label_text = CurrentMenuName ? CurrentMenuName : "";
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t status_bg_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t status_text_color = lv_color_hex(theme_palette_get_text_muted(theme));
+
     if (status_bar && lv_obj_is_valid(status_bar)) {
         if (mainlabel && lv_obj_is_valid(mainlabel)) {
             lv_label_set_text(mainlabel, label_text);
@@ -1025,14 +1017,11 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
     status_bar = lv_obj_create(lv_scr_act());
   lv_obj_set_size(status_bar, LV_HOR_RES, 20);
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_bg_color(status_bar, lv_color_hex(0x333333), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
   lv_obj_set_style_border_width(status_bar, 1, LV_PART_MAIN);
-  {
-    uint8_t theme = settings_get_menu_theme(&G_Settings);
-    lv_obj_set_style_border_color(status_bar, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
-  }
+  lv_obj_set_style_border_color(status_bar, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
   lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_radius(status_bar, 0, LV_PART_MAIN);
 
@@ -1045,7 +1034,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   // fill left container
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
-  lv_obj_set_style_text_color(mainlabel, lv_color_hex(0x999999), 0);
+  lv_obj_set_style_text_color(mainlabel, status_text_color, 0);
   lv_obj_set_style_text_font(mainlabel, &lv_font_montserrat_14, 0);
 
   // Create Status bar right container
@@ -1059,25 +1048,25 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   // add sd status to right container
   sd_label = lv_label_create(right_container);
   lv_label_set_text(sd_label, LV_SYMBOL_SD_CARD);
-  lv_obj_set_style_text_color(sd_label, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_color(sd_label, status_text_color, 0);
   lv_obj_set_style_text_font(sd_label, &lv_font_montserrat_12, 0);
   lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
   // add ble status to right container
   bt_label = lv_label_create(right_container);
   lv_label_set_text(bt_label, LV_SYMBOL_BLUETOOTH);
-  lv_obj_set_style_text_color(bt_label, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_color(bt_label, status_text_color, 0);
   lv_obj_set_style_text_font(bt_label, &lv_font_montserrat_12, 0);
   lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
   // add wifi status to right container
   wifi_label = lv_label_create(right_container);
   lv_label_set_text(wifi_label, LV_SYMBOL_WIFI);
-  lv_obj_set_style_text_color(wifi_label, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_color(wifi_label, status_text_color, 0);
   lv_obj_set_style_text_font(wifi_label, &lv_font_montserrat_12, 0);
   lv_obj_add_flag(wifi_label, LV_OBJ_FLAG_HIDDEN);
   // add battery status to right container
   battery_label = lv_label_create(right_container);
   lv_label_set_text(battery_label, "");
-  lv_obj_set_style_text_color(battery_label, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_color(battery_label, status_text_color, 0);
   lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_12, 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
@@ -1272,7 +1261,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   /* width * 8 gives ~8 lines of buffer which balances responsiveness and RAM use */
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  static lv_color_t buf1[CONFIG_TFT_WIDTH * 3] __attribute__((aligned(4)));
+  static lv_color_t buf1[CONFIG_TFT_WIDTH * 1] __attribute__((aligned(4)));
 #else
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
   static lv_color_t buf2[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
@@ -1299,8 +1288,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   /* single buffer mode: use width * 5 for responsive drawing without excessive RAM */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  /* single buffer mode: use width * 3 for ESP32 to save DRAM */
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 3);
+  /* single buffer mode: one scanline for maximum DRAM savings on ESP32 */
+  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 1);
 #else
   /* default: double buffer for smoother drawing */
   lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
@@ -1471,7 +1460,16 @@ static void display_manager_switch_view_internal(View *view) {
     ESP_LOGI(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
     if (dm.current_view && dm.current_view->root) {
       display_manager_previous_view = dm.current_view;
-      display_manager_fade_out(dm.current_view->root, fade_out_ready_cb, view);
+      if (dm.current_view->destroy) {
+        dm.current_view->destroy();
+      }
+      dm.current_view = view;
+      if (view->get_hardwareinput_callback) {
+        view->get_hardwareinput_callback((void **)&dm.current_view->input_callback);
+      }
+      view->create();
+      lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
+      if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     } else {
       display_manager_previous_view = dm.current_view;
       dm.current_view = view;
@@ -1479,7 +1477,8 @@ static void display_manager_switch_view_internal(View *view) {
         view->get_hardwareinput_callback((void **)&dm.current_view->input_callback);
       }
       view->create();
-      display_manager_fade_in(view->root);
+      lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
+      if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     }
     xSemaphoreGive(dm.mutex);
   } else {
@@ -1521,7 +1520,11 @@ void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
 
 void display_manager_switch_view(View *view) {
   if (view == NULL) return;
-  display_manager_run_on_lvgl(dm_switch_async_cb, view);
+  dm_lvgl_call_t *call = malloc(sizeof(*call));
+  if (!call) return;
+  call->fn = dm_switch_async_cb;
+  call->arg = view;
+  lv_async_call(dm_run_on_lvgl_async_cb, call);
 }
 
 void display_manager_destroy_current_view(void) {
@@ -1539,12 +1542,11 @@ View *display_manager_get_current_view(void) { return dm.current_view; }
 bool display_manager_is_available(void) { return display_manager_init_success; }
 
 void display_manager_fill_screen(lv_color_t color) {
-  static lv_style_t style;
-  lv_style_init(&style);
-  lv_style_set_bg_color(&style, color);
-  lv_style_set_bg_opa(&style, LV_OPA_COVER);
-  lv_obj_set_scrollbar_mode(lv_scr_act(), LV_SCROLLBAR_MODE_OFF);
-  lv_obj_add_style(lv_scr_act(), &style, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_t *scr = lv_scr_act();
+  if (!scr) return;
+  lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_set_style_bg_color(scr, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 void display_manager_suspend_lvgl_task(void) {
@@ -1753,6 +1755,7 @@ void hardware_input_task(void *pvParameters) {
   lv_indev_data_t touch_data;
   uint16_t calData[5] = {339, 3470, 237, 3438, 2};
   bool touch_active = false;
+  bool skip_next_release = false;
   int screen_width = LV_HOR_RES;
 #ifdef CONFIG_IS_S3TWATCH
   bool was_woken_by_interrupt = false; // New flag for S3T-Watch
@@ -1837,7 +1840,7 @@ void hardware_input_task(void *pvParameters) {
               if (is_backlight_dimmed) {
                 set_backlight_brightness(100);
                 is_backlight_dimmed = false;
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(20));
               }
               
               InputEvent event;
@@ -2084,7 +2087,7 @@ void hardware_input_task(void *pvParameters) {
             set_backlight_brightness(100);
             is_backlight_dimmed = false;
             skip_event = true;
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(20));
           }
 
           if (!skip_event) {
@@ -2165,6 +2168,7 @@ void hardware_input_task(void *pvParameters) {
             InputEvent event;
             event.type = INPUT_TYPE_JOYSTICK;
             event.data.joystick_index = direction;
+            event.data.joystick_pressed = true;
             xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
           }
           
@@ -2177,11 +2181,18 @@ void hardware_input_task(void *pvParameters) {
         trackball_right_flag = false;
       }
       
-      if (joystick_just_pressed(&joysticks[1])) {
+      if (joystick_just_released(&joysticks[1])) {
+        InputEvent event;
+        event.type = INPUT_TYPE_JOYSTICK;
+        event.data.joystick_index = 1;
+        event.data.joystick_pressed = false;
+        xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+      } else if (joystick_just_pressed(&joysticks[1])) {
         last_touch_time = xTaskGetTickCount();
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
         event.data.joystick_index = 1;
+        event.data.joystick_pressed = true;
         xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
       }
     }
@@ -2190,23 +2201,64 @@ void hardware_input_task(void *pvParameters) {
     for (int i = 0; i < 5; i++) {
       if (joysticks[i].pin < 0) continue;
 
+      // For the select button (index 1), check release BEFORE press so that
+      // joystick_just_released() sees the state before joystick_just_pressed()
+      // clears it. Release events are only sent for index 1.
+      if (i == 1) {
+        if (joystick_just_released(&joysticks[1])) {
+          InputEvent event;
+          event.type = INPUT_TYPE_JOYSTICK;
+          event.data.joystick_index = 1;
+          event.data.joystick_pressed = false;
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+          continue;
+        } else if (joystick_just_pressed(&joysticks[1])) {
+          last_touch_time = xTaskGetTickCount();
+          if (is_backlight_dimmed || is_backlight_off) {
+            set_backlight_brightness(100);
+            is_backlight_dimmed = false;
+            is_backlight_off = false;
+          } else {
+            InputEvent event;
+            event.type = INPUT_TYPE_JOYSTICK;
+            event.data.joystick_index = 1;
+            event.data.joystick_pressed = true;
+            if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
+              ESP_LOGE(TAG, "Failed to send joystick input to queue\n");
+            }
+          }
+          continue;
+        }
+        continue;
+      }
+
       if (joystick_just_pressed(&joysticks[i])) {
         last_touch_time = xTaskGetTickCount();
+
+        if (is_backlight_dimmed || is_backlight_off) {
+          set_backlight_brightness(100);
+          is_backlight_dimmed = false;
+          is_backlight_off = false;
+          joystick_repeat_next_ms[i] = 0;
+          continue;
+        }
+
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
         event.data.joystick_index = i;
+        event.data.joystick_pressed = true;
 
         if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
           ESP_LOGE(TAG, "Failed to send joystick input to queue\n");
         }
 
-        if (i == 2 || i == 4) {
+        if (i == 0 || i == 2 || i == 3 || i == 4) {
           joystick_repeat_next_ms[i] = dm_now_ms() + JOYSTICK_REPEAT_INITIAL_DELAY_MS;
         }
         continue;
       }
 
-      if (i != 2 && i != 4) continue;
+      if (i != 0 && i != 2 && i != 3 && i != 4) continue;
 
       if (!joystick_get_button_state(&joysticks[i])) {
         joystick_repeat_next_ms[i] = 0;
@@ -2221,12 +2273,160 @@ void hardware_input_task(void *pvParameters) {
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
         event.data.joystick_index = i;
+        event.data.joystick_pressed = true;
 
         if (xQueueSend(input_queue, &event, 0) == pdTRUE) {
           joystick_repeat_next_ms[i] = now_ms + JOYSTICK_REPEAT_INTERVAL_MS;
         }
       }
     }
+#ifdef CONFIG_USE_IO_EXPANDER
+    /* P10, P11, P12 (B1, B2, B3): if a command is set, run it; else send as joystick 5/6/7 */
+    {
+        static bool prev_b1 = false, prev_b2 = false, prev_b3 = false;
+        btn_event_t states = {0};
+        if (io_manager_get_cached_button_states(&states) == ESP_OK) {
+            if (states.b1 && !prev_b1) {
+                last_touch_time = xTaskGetTickCount();
+                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                const char *cmd = settings_get_io_btn_p10_cmd(&G_Settings);
+                if (cmd && cmd[0] != '\0') {
+                    if (strncmp(cmd, "view:", 5) == 0) {
+                        if (strcmp(cmd, "view:wifi") == 0) {
+                            SelectedMenuType = OT_Wifi;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ble") == 0) {
+                            SelectedMenuType = OT_Bluetooth;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:nfc") == 0) {
+                            display_manager_switch_view(&nfc_view);
+                        } else if (strcmp(cmd, "view:ir") == 0) {
+                            display_manager_switch_view(&infrared_view);
+                        } else if (strcmp(cmd, "view:badusb") == 0) {
+                            display_manager_switch_view(&badusb_view);
+                        } else if (strcmp(cmd, "view:gps") == 0) {
+                            SelectedMenuType = OT_GPS;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:compass") == 0) {
+                            display_manager_switch_view(&compass_view);
+                        } else if (strcmp(cmd, "view:accel") == 0) {
+                            display_manager_switch_view(&accelerometer_view);
+                        } else if (strcmp(cmd, "view:clock") == 0) {
+                            display_manager_switch_view(&clock_view);
+                        } else if (strcmp(cmd, "view:apps") == 0) {
+                            display_manager_switch_view(&apps_menu_view);
+                        } else if (strcmp(cmd, "view:settings") == 0) {
+                            SelectedMenuType = OT_Settings;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ghostlink") == 0) {
+                            SelectedMenuType = OT_DualComm;
+                            display_manager_switch_view(&options_menu_view);
+                        }
+                    } else {
+                        display_manager_switch_view(&terminal_view);
+                        simulateCommand(cmd);
+                    }
+                } else {
+                    InputEvent ev = { .type = INPUT_TYPE_JOYSTICK, .data.joystick_index = 5 };
+                    xQueueSend(input_queue, &ev, pdMS_TO_TICKS(10));
+                }
+            }
+            if (states.b2 && !prev_b2) {
+                last_touch_time = xTaskGetTickCount();
+                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                const char *cmd = settings_get_io_btn_p11_cmd(&G_Settings);
+                if (cmd && cmd[0] != '\0') {
+                    if (strncmp(cmd, "view:", 5) == 0) {
+                        if (strcmp(cmd, "view:wifi") == 0) {
+                            SelectedMenuType = OT_Wifi;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ble") == 0) {
+                            SelectedMenuType = OT_Bluetooth;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:nfc") == 0) {
+                            display_manager_switch_view(&nfc_view);
+                        } else if (strcmp(cmd, "view:ir") == 0) {
+                            display_manager_switch_view(&infrared_view);
+                        } else if (strcmp(cmd, "view:badusb") == 0) {
+                            display_manager_switch_view(&badusb_view);
+                        } else if (strcmp(cmd, "view:gps") == 0) {
+                            SelectedMenuType = OT_GPS;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:compass") == 0) {
+                            display_manager_switch_view(&compass_view);
+                        } else if (strcmp(cmd, "view:accel") == 0) {
+                            display_manager_switch_view(&accelerometer_view);
+                        } else if (strcmp(cmd, "view:clock") == 0) {
+                            display_manager_switch_view(&clock_view);
+                        } else if (strcmp(cmd, "view:apps") == 0) {
+                            display_manager_switch_view(&apps_menu_view);
+                        } else if (strcmp(cmd, "view:settings") == 0) {
+                            SelectedMenuType = OT_Settings;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ghostlink") == 0) {
+                            SelectedMenuType = OT_DualComm;
+                            display_manager_switch_view(&options_menu_view);
+                        }
+                    } else {
+                        display_manager_switch_view(&terminal_view);
+                        simulateCommand(cmd);
+                    }
+                } else {
+                    InputEvent ev = { .type = INPUT_TYPE_JOYSTICK, .data.joystick_index = 6 };
+                    xQueueSend(input_queue, &ev, pdMS_TO_TICKS(10));
+                }
+            }
+            if (states.b3 && !prev_b3) {
+                last_touch_time = xTaskGetTickCount();
+                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                const char *cmd = settings_get_io_btn_p12_cmd(&G_Settings);
+                if (cmd && cmd[0] != '\0') {
+                    if (strncmp(cmd, "view:", 5) == 0) {
+                        if (strcmp(cmd, "view:wifi") == 0) {
+                            SelectedMenuType = OT_Wifi;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ble") == 0) {
+                            SelectedMenuType = OT_Bluetooth;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:nfc") == 0) {
+                            display_manager_switch_view(&nfc_view);
+                        } else if (strcmp(cmd, "view:ir") == 0) {
+                            display_manager_switch_view(&infrared_view);
+                        } else if (strcmp(cmd, "view:badusb") == 0) {
+                            display_manager_switch_view(&badusb_view);
+                        } else if (strcmp(cmd, "view:gps") == 0) {
+                            SelectedMenuType = OT_GPS;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:compass") == 0) {
+                            display_manager_switch_view(&compass_view);
+                        } else if (strcmp(cmd, "view:accel") == 0) {
+                            display_manager_switch_view(&accelerometer_view);
+                        } else if (strcmp(cmd, "view:clock") == 0) {
+                            display_manager_switch_view(&clock_view);
+                        } else if (strcmp(cmd, "view:apps") == 0) {
+                            display_manager_switch_view(&apps_menu_view);
+                        } else if (strcmp(cmd, "view:settings") == 0) {
+                            SelectedMenuType = OT_Settings;
+                            display_manager_switch_view(&options_menu_view);
+                        } else if (strcmp(cmd, "view:ghostlink") == 0) {
+                            SelectedMenuType = OT_DualComm;
+                            display_manager_switch_view(&options_menu_view);
+                        }
+                    } else {
+                        display_manager_switch_view(&terminal_view);
+                        simulateCommand(cmd);
+                    }
+                } else {
+                    InputEvent ev = { .type = INPUT_TYPE_JOYSTICK, .data.joystick_index = 7 };
+                    xQueueSend(input_queue, &ev, pdMS_TO_TICKS(10));
+                }
+            }
+            prev_b1 = states.b1;
+            prev_b2 = states.b2;
+            prev_b3 = states.b3;
+        }
+    }
+#endif
 #endif
  #endif
 
@@ -2255,16 +2455,19 @@ void hardware_input_task(void *pvParameters) {
       if (was_woken_by_interrupt) {
         was_woken_by_interrupt = false; // Consume the flag
         skip_event = true;
-        vTaskDelay(pdMS_TO_TICKS(100)); // Debounce period
+        vTaskDelay(pdMS_TO_TICKS(30)); // Debounce period
       } else
 #endif
-      if (is_backlight_dimmed) {
+      if (is_backlight_dimmed || is_backlight_off) {
 // Disable tap-to-wake, use button interrupt instead.
 #ifndef CONFIG_IS_S3TWATCH
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
+        is_backlight_off = false;
         skip_event = true;
-        vTaskDelay(pdMS_TO_TICKS(100));
+        touch_active = true;       // claim this touch so re-polls while held don't re-fire
+        skip_next_release = true;  // eat the paired release too
+        vTaskDelay(pdMS_TO_TICKS(20));
 #endif
       }
       if (!skip_event) {
@@ -2280,13 +2483,17 @@ void hardware_input_task(void *pvParameters) {
       }
     } else if (touch_data.state == LV_INDEV_STATE_REL && touch_active) {
       last_touch_time = xTaskGetTickCount();
-      InputEvent event;
-      event.type = INPUT_TYPE_TOUCH;
-      event.data.touch_data = touch_data;
-      if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to send touch input to queue\n");
-      }
       touch_active = false;
+      if (skip_next_release) {
+        skip_next_release = false; // eat the release that paired with the swallowed wake press
+      } else {
+        InputEvent event;
+        event.type = INPUT_TYPE_TOUCH;
+        event.data.touch_data = touch_data;
+        if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
+          ESP_LOGE(TAG, "Failed to send touch input to queue\n");
+        }
+      }
     }
 
     } // enable_touch_polling
@@ -2367,6 +2574,13 @@ void processEvent() {
       xSemaphoreGive(dm.mutex);
 
       ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
+      // Joystick release events are only meaningful in the keyboard view.
+      // All other views only check joystick_index and would double-fire on release.
+      if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
+          strcmp(view_name, "Keyboard Screen") != 0) {
+        processed++;
+        continue;
+      }
       if (input_callback) input_callback(&event);
     }
     processed++;
@@ -2395,7 +2609,12 @@ void processEvent() {
         xSemaphoreGive(dm.mutex);
 
         ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
-        if (input_callback) input_callback(&event);
+        if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
+            strcmp(view_name, "Keyboard Screen") != 0) {
+          // drop release event for non-keyboard views
+        } else if (input_callback) {
+          input_callback(&event);
+        }
       }
     }
   }

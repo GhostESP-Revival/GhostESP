@@ -4,7 +4,7 @@ Use these snippets and angles when covering Ghost ESP: an actively maintained ES
 
 ## What is Ghost ESP?
 
-Ghost ESP delivers professional-grade Wi-Fi/BLE/NFC/IR tooling on accessible ESP32 hardware. It now includes GhostLink dual-ESP control with split-view terminal, a first-boot setup wizard, wired screen mirroring, Ethernet scans/fingerprinting, and expanded NFC parsers (Flipper formats, Desfire detection).
+Ghost ESP delivers professional-grade Wi-Fi/BLE/NFC/IR/USB tooling on accessible ESP32 hardware. It now includes GhostLink dual-ESP control, split-channel wardriving helper mode, setup wizard, wired + web screen mirroring, Wireshark USB dongle mode, Ethernet scans/fingerprinting, and expanded NFC parser support.
 
 **Elevator pitch**: “Ghost ESP brings pro wireless testing tools to $10-$20 ESP32 boards—fast UI, broad hardware support, and a thriving community.”
 
@@ -14,12 +14,18 @@ Ghost ESP delivers professional-grade Wi-Fi/BLE/NFC/IR tooling on accessible ESP
 - Deauth/disassoc, beacon spam, probe logging
 - Evil Portal with keylogging, WPA3 SAE flood, DHCP starvation
 - AP/STA scans, ARP/SSH/port scans, OUI lookup, sweep capture (WiFi/BLE/GPS/802.15.4)
+- Handshake/PMKID capture, Wireshark USB dongle mode, GhostLink split-channel helper
 - GhostLink Ethernet scans + fingerprinting
 
 **Bluetooth (BLE)**
 - AirTag spoofing, vendor-specific spam (Apple/Microsoft/Samsung/Google)
 - BLE packet capture, Flipper finder/RSSI tracking, GATT/service scans
-- BLE wardriving with GPS logging
+- BLE wardriving with GPS logging, BLE skimmer detection, BLE Wireshark streaming
+
+**USB**
+- USB keyboard host mode (ESP32-S3 builds)
+- Remote keyboard control via GhostLink
+- BadUSB script runner with per-run identity options (VID/PID/manufacturer/product/layout/randomize)
 
 **NFC**
 - NTAG read/write (213/215/216) with NDEF parsing
@@ -32,8 +38,8 @@ Ghost ESP delivers professional-grade Wi-Fi/BLE/NFC/IR tooling on accessible ESP
 
 **Bonus Features**
 - GhostLink dual-ESP control with on-device split terminal
-- Wired screen mirroring, GPS wardriving, DIAL/Chromecast control, network printer output
-- Customizable LED modes, mini-apps
+- Wired + web screen mirroring, GPS wardriving, DIAL/Chromecast control, network printer output
+- Customizable LED modes
 
 ## Key Selling Points
 
@@ -64,15 +70,15 @@ Ghost ESP delivers professional-grade Wi-Fi/BLE/NFC/IR tooling on accessible ESP
 - **`congestion`** — Display Wi-Fi channel congestion chart
 
 ## Reference Links
-- GitHub repository (source, issues, changelog): https://github.com/jaylikesbunda/Ghost_ESP
+- GitHub repository (source, issues, changelog): https://github.com/GhostESP-Revival/GhostESP
 - Online flasher: https://flasher.ghostesp.net
 - Documentation: https://docs.ghostesp.net
 - Community Discord: https://discord.gg/5cyNmUMgwh
 - Merch Store: https://shop.ghostesp.net
 
 ## Contact & Attribution
-- **Press/creator inquiries**: Use the Discord server channel, or message @jaylikesbunda on discord or @ghostesprevival on instagram.
-- Please credit "GhostESP: Revival" and link to https://ghostesp.net or https://github.com/jaylikesbunda/Ghost_ESP in descriptions or footers.
+- **Press/creator inquiries**: Use the Discord server channel, email us at partners@ghostesp.net or @ghostesprevival on instagram.
+- Please credit "GhostESP: Revival" and link to https://ghostesp.net or https://github.com/GhostESP-Revival/GhostESP in descriptions or footers.
 
 ## Legal & Responsible Use Reminder
 Ghost ESP is an educational tool. Cover responsible usage, local laws, and consent-based testing in your content. Encourage viewers to practice ethical security research and respect privacy.

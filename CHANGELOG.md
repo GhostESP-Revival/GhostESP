@@ -1,5 +1,89 @@
 # Ghost ESP Changelog
 
+
+
+## Revival v1.9.4
+
+### Added
+- Added `wifistatus` CLI command to show connection status and saved network info
+- Added new wardriving and GPS info display view
+- Added GhostLink split-channel wardriving helper mode (`startwd --helper`) with helper-to-primary observation streaming
+- Added optional software NMEA RX backend (`minmea_soft`) for template-specific GPS routing constraints
+- Added Factory Reset option to wipe NVS and reboot
+- Added auto upload to WiGLE - @Play2BReal
+- Added WiGLE manual upload browser in display settings with paged CSV list and per-file upload actions
+- Added WiGLE stats popup in display settings with scroll and close controls
+- Added WiGLE CLI commands: `wigle files [page]`, `wigle upload <filename>`, and `wigle stats` - @Play2BReal, @jaylikesbunda
+- Added control app updates - @tototo31
+- Added Flipper Zero Companion App documentation - @tototo31
+- Added SD JIT mounting for custom evil portal menu option
+- Added hold to invert letter case on joystick select in keyboard view
+- Added option to select custom portal for karma attack
+- Add IO expander programmable button commands - @tototo31
+- Added 'Cherry Blossom' and 'Soft Sand' themes
+
+### Changed
+- 'chipinfo' command now shows firmware version and enabled build features (Display, NFC, BadUSB, IR, GPS, etc.)
+- Use country-appropriate channel list in main deauth task
+- Improved GPS Info display with fix mode, satellites in view, and cleaner logging
+- Moved multiple attacks and scans to separate files for maintainability
+- Significantly optimised port scan memory usage
+- Slightly increased IR Learn task size to prevent crash
+- Improved BLE Spam
+- Deauth: fixed 5GHz HT40 tuning, added burst loops, and removed rate limiting
+- Reorganized settings menu into more categories
+- Directly iterate to channels when deauthing multiple APs
+- Optimised wardriving dwell times, added active probing and improved validation
+- Wardriving now builds role-aware channel plans for split capture (primary 5 GHz, helper 2.4 GHz when both are available)
+- Wardriving heartbeat now reports helper merge stats (`helper=merged/received`) for link visibility
+- Reworked wardriving Wi-Fi dedupe into peek/commit flow to avoid consuming dedupe state before a successful CSV write
+- Shortened delays for misc display menu building for more responsive feel
+- Improved clock view responsiveness
+- Increased BadUSB VSense delay to improve reliability of USB enumeration
+- Improved CLI `scan` validation and status messaging for invalid durations and failed timed scans
+- Improved CLI `sd` read/write/append reliability checks to report short writes and stream errors
+- Improved task startup error handling for DIAL, Karma, Deauth, Beacon, EAPOL, DHCP Starvation, and SAE Flood
+- Improved BLE capture startup flow to fail fast when handler registration or scan start fails
+- Optimized PineAP detection memory model by lazily allocating detection tables at start and freeing them on stop
+- Reworked PineAP detection logging to use a single queued worker task instead of per-detection task creation
+- Reworked PCAP writer buffering to use a fixed static packet slot pool instead of per-packet heap allocations
+- Reduced splash screen hold time from 2000ms to 900ms
+- Refactored surface colors to be consistent across the UI
+- Changed default screen timeout to 30s
+- Miscellaneous fixes, improvements and refactors
+- Fixed feberis pro spelling
+
+### Fixed
+- Fixed station deauth channel lookup
+- Fixed potential NULL dereference in command registration when `strdup` fails under low memory
+- Fixed silent serial startup failures by validating queue and task creation in `serial_manager_init`
+- Fixed race-prone stop behavior in SAE flood by waiting for task exit before freeing crypto context
+- Fixed race-prone restart behavior in Karma and Beacon by waiting/cleaning lingering tasks on stop
+- Fixed DHCP starvation reporting success while socket/send operations were failing
+- Fixed `select` CLI parse errors that omitted the invalid token and improved index list boundary checks
+- Fixed GPS latitude parsing for GLL sentences (was using 3-digit degree width instead of 2)
+- Fixed BLE not initializing when selecting a flipper
+- Fixed crash when deinitializing BLE
+- Fixed BLE stop hangs by draining active scan callbacks before shutdown and reducing heavy callback work
+- Potentially fixed "Connect to saved WiFi" resets on repeated use
+- Fixed GPS satellites logic
+- Fixed misc wardriving issues
+- Fixed wardriving AP loss where entries seen before a valid GPS fix could be skipped later by premature dedupe mutation
+- Fixed 5GHz deauthing
+- Fixed crash when stopping deauth
+- Fixed joystick repeat only working vertically
+- Fixed evil portal JIT mounting
+- Fixed crash on the Setup Wizard screen
+- Fixed touch handler for the WiGLE help popup
+- Fixed saving of WiGLE API credentials to mirror other setting saves
+- Fixed listing large amounts of evil portals on displays
+- Fixed crash starting karma attack
+- Fixed 'stop' not stopping the karma attack
+- Fixed joystick and touch input not checking if display is dimmed
+- Fixed wardrive exiting when waking the display with a touch press
+- Fixed NFC saved tag popup having vertically aligned buttons instead of horizontal
+- Fixed Marauder v4 SD Card mounting
+
 ## Revival v1.9.3
 
 ### Added
@@ -167,6 +251,7 @@
 - IR and NFC display views and popups now properly use active set UI theme
 - Standardized LVGL screen root creation across display views and added status-bar content offset GUI helpers
 - Grid menu now scrolls up and down instead of left and right
+- BLE wardriving now uses dedicated wardriving screen with GPS stats and reliable device name parsing
 - Reorganised the settings menu and adjusted styling
 - Minor keyboard view logic and styling refactor
 - Terminal enter/select now submits text if typed, otherwise opens keyboard view

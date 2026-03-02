@@ -56,6 +56,8 @@ static const TickType_t STATUS_DISPLAY_MIN_FLUSH_INTERVAL_TICKS = pdMS_TO_TICKS(
 static TimerHandle_t s_idle_timer;
 static TickType_t s_last_update_tick;
 static const TickType_t ANIM_INTERVAL_TICKS = pdMS_TO_TICKS(150);
+static const TickType_t STATUS_UPDATE_MIN_INTERVAL_TICKS = pdMS_TO_TICKS(500);
+static TickType_t s_last_status_update_tick;
 static int s_anim_frame;
 static TaskHandle_t s_anim_task;
 static TickType_t s_next_anim_allowed_tick;
@@ -470,6 +472,7 @@ void status_display_init(void) {
     status_display_render(s_line1, s_line2);
     // setup idle animation timer
     s_last_update_tick = xTaskGetTickCount();
+    s_last_status_update_tick = 0;
     s_anim_frame = 0;
     s_idle_timer = xTimerCreate("status_idle", ANIM_INTERVAL_TICKS, pdTRUE, NULL, status_display_idle_timer_cb);
     if (s_idle_timer) {
@@ -521,6 +524,11 @@ void status_display_show_status(const char *status_line) {
         ESP_LOGW(TAG, "show_status ignored (display not ready)");
         return;
     }
+    TickType_t now = xTaskGetTickCount();
+    if (now - s_last_status_update_tick < STATUS_UPDATE_MIN_INTERVAL_TICKS) {
+        return;
+    }
+    s_last_status_update_tick = now;
     status_display_set_lines("Status:", status_line ? status_line : "");
 }
 

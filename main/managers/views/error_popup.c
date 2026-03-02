@@ -129,8 +129,11 @@ static void error_popup_destroy_task(void *param) {
         // Wait for fade out to complete
         vTaskDelay(pdMS_TO_TICKS(ANIMATION_TIME_MS));
 
-        // Destroy the popup
-        error_popup_destroy();
+        // Destroy directly while holding mutex (avoid nested take on same mutex)
+        if (error_popup_root) {
+            lvgl_obj_del_safe(&error_popup_root);
+            error_popup_label = NULL;
+        }
         xSemaphoreGive(popup_mutex);
     }
 

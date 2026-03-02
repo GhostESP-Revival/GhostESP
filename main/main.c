@@ -1,4 +1,5 @@
 #include "core/commandline.h"
+#include "core/callbacks.h"
 #include "core/serial_manager.h"
 #include "core/system_manager.h"
 #include "core/ghostesp_version.h"
@@ -205,6 +206,7 @@ void app_main(void) {
         int32_t comm_rx = G_Settings.esp_comm_rx_pin;
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
+    wardriving_register_stream_handler();
     usb_keyboard_manager_register_stream_handler();
 #ifdef CONFIG_HAS_BADUSB
     badusb_manager_register_stream_handler();
@@ -271,7 +273,7 @@ void app_main(void) {
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
         if (rgb_led_count <= 0) {
-            rgb_led_count = CONFIG_NUM_LEDS > 0 ? CONFIG_NUM_LEDS : 1;
+            rgb_led_count = CONFIG_NUM_LEDS;
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);
@@ -286,17 +288,21 @@ void app_main(void) {
                                                  LED_MODEL_WS2812, red_pin, green_pin, blue_pin));
             initialized = (rgb_err == ESP_OK);
         }
-            if (!initialized) {
+            if (!initialized && rgb_led_count > 0) {
 #ifdef CONFIG_LED_DATA_PIN
+            if (CONFIG_LED_DATA_PIN >= 0) {
             esp_err_t rgb_err;
             MEASURE_INIT_RAM("RGB Manager (fallback) init", rgb_err = rgb_manager_init(&rgb_manager, CONFIG_LED_DATA_PIN, rgb_led_count, LED_ORDER,
                                                  LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC));
             initialized = (rgb_err == ESP_OK);
+            }
 #elif defined(CONFIG_RED_RGB_PIN) && defined(CONFIG_GREEN_RGB_PIN) && defined(CONFIG_BLUE_RGB_PIN)
+            if (CONFIG_RED_RGB_PIN >= 0 && CONFIG_GREEN_RGB_PIN >= 0 && CONFIG_BLUE_RGB_PIN >= 0) {
             esp_err_t rgb_err;
             MEASURE_INIT_RAM("RGB Manager (fallback separate pins) init", rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, rgb_led_count, LED_PIXEL_FORMAT_GRB,
                                                  LED_MODEL_WS2812, CONFIG_RED_RGB_PIN, CONFIG_GREEN_RGB_PIN, CONFIG_BLUE_RGB_PIN));
             initialized = (rgb_err == ESP_OK);
+            }
 #endif
         }
         RGBMode boot_mode = settings_get_rgb_mode(&G_Settings);

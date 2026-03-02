@@ -6,6 +6,16 @@ file(GLOB_RECURSE app_sources
 # Exclude all Flipper NFC parser sources from the glob so we can whitelist only
 # the parsers that are actually wired into the compat layer.
 list(FILTER app_sources EXCLUDE REGEX "managers/nfc/flipper_parsers/.*\\.c")
+
+# Exclude BLE sources for ESP32-S2 (no BLE hardware support)
+# Use idf_build_get_property for reliable target detection in component CMake
+idf_build_get_property(idf_target IDF_TARGET)
+if(idf_target STREQUAL "esp32s2")
+    message(STATUS "Excluding BLE sources for ESP32-S2 target (no BLE hardware)")
+    list(FILTER app_sources EXCLUDE REGEX "attacks/ble/.*\\.c")
+    list(FILTER app_sources EXCLUDE REGEX "scans/ble/.*\\.c")
+    list(FILTER app_sources EXCLUDE REGEX "managers/ble_manager\\.c")
+endif()
 # Explicitly add hooked-up Flipper parsers
 list(APPEND app_sources
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/smartrider.c"
@@ -64,7 +74,7 @@ if(CONFIG_HAS_NFC)
     endif()
 endif()
 
-if("${IDF_TARGET}" STREQUAL "esp32s3")
+if(idf_target STREQUAL "esp32s3")
     # Add the M5GFX wrapper source file
     list(APPEND sources "vendor/m5/m5gfx_wrapper.cpp")
     # Add M5GFX to the required components
@@ -82,7 +92,7 @@ if(CONFIG_USE_IO_EXPANDER)
 endif()
 
 # Add IEEE 802.15.4 component for Zigbee capture on ESP32-C5/C6
-if("${IDF_TARGET}" STREQUAL "esp32c5" OR "${IDF_TARGET}" STREQUAL "esp32c6")
+if(idf_target STREQUAL "esp32c5" OR idf_target STREQUAL "esp32c6")
     list(APPEND required_components ieee802154)
     # Add Zigbee manager source
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/zigbee_manager.c")
@@ -117,7 +127,7 @@ else()
 endif()
 
 # add compile definition for esp32s2 target to maintain legacy guards (needs COMPONENT_LIB)
-if("${IDF_TARGET}" STREQUAL "esp32s2")
+if(idf_target STREQUAL "esp32s2")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_IDF_TARGET_ESP32S2)
 endif()
 

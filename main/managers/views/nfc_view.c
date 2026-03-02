@@ -2269,9 +2269,7 @@ static void update_saved_buttons_layout(void) {
 
     if (count == 0) return;
 
-    PopupButtonLayoutConfig cfg = {0};
-    cfg.min_threshold = 48; // keep legacy minimum for wide popups
-    popup_layout_buttons_responsive(saved_popup, btns, count, -8, &cfg);
+    popup_layout_buttons_responsive(saved_popup, btns, count, -8, NULL);
 }
 
 static void saved_update_button_labels(void) {

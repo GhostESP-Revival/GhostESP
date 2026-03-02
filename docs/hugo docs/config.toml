@@ -16,6 +16,10 @@ enableRobotsTXT = true
   name = "Latest"
 
 [[params.versioning.options]]
+  id = "v1.9.4"
+  name = "v1.9.4"
+
+[[params.versioning.options]]
   id = "v1.9.3"
   name = "v1.9.3"
 
@@ -66,3 +70,13 @@ enableRobotsTXT = true
   name = "Firmware"
   url = "/latest/firmware/"
   weight = 4
+
+[[menu.sidebar]]
+  name = "GPS & Wardriving"
+  url = "/latest/gps/"
+  weight = 5
+
+[[menu.sidebar]]
+  name = "Flipper Zero App"
+  url = "/latest/flipper-app/"
+  weight = 6

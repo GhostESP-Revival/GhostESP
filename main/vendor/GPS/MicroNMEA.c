@@ -62,7 +62,8 @@ static float parse_lat_long(esp_gps_t *esp_gps) {
   // Determine if this is latitude (2 digits) or longitude (3 digits)
   bool is_latitude =
       (esp_gps->cur_statement == STATEMENT_GGA && esp_gps->item_num == 2) ||
-      (esp_gps->cur_statement == STATEMENT_RMC && esp_gps->item_num == 3);
+      (esp_gps->cur_statement == STATEMENT_RMC && esp_gps->item_num == 3) ||
+      (esp_gps->cur_statement == STATEMENT_GLL && esp_gps->item_num == 1);
   int deg_width = is_latitude ? 2 : 3;
 
   // Parse degrees part

@@ -26,12 +26,16 @@
 #include "managers/views/accelerometer_screen.h"
 #endif
 
+uint32_t theme_palette_get_background(uint8_t theme);
+uint32_t theme_palette_get_surface(uint8_t theme);
+uint32_t theme_palette_get_text(uint8_t theme);
+
 LV_IMG_DECLARE(dualcomm);
 LV_IMG_DECLARE(accelerometer_icon);
 
 static const char *TAG = "MainMenu";
 
-#define ANIM_DURATION 60 // Animation duration in milliseconds HIGH: 30, LOW: 120
+#define ANIM_DURATION 40 // Animation duration in milliseconds HIGH: 30, LOW: 120
 
 // Menu layout types
 typedef enum {
@@ -54,6 +58,9 @@ static bool is_animating = false;
 #define SWIPE_THRESHOLD 50
 #define TAP_THRESHOLD 10 // Add a threshold for tap detection
 static MenuLayoutType current_layout = MENU_LAYOUT_CAROUSEL;
+static lv_color_t menu_bg_color;
+static lv_color_t menu_surface_color;
+static lv_color_t menu_text_color;
 
 // Grid layout variables
 static lv_obj_t **grid_buttons = NULL;
@@ -69,14 +76,10 @@ static int grid_card_height = 0;
 // List layout variables
 static lv_obj_t **list_buttons = NULL;
 
-const View *pending_view_to_switch = NULL;
-static EOptionsMenuType pending_menu_type;
-static bool menu_item_selected = false;
-
 typedef struct {
   const char *name;
   const lv_img_dsc_t *icon;
-  const int palette_index; // pick a color 0-5 to assign the menu item
+  const int palette_index; // kept for compatibility; runtime assigns slots by visible order
   lv_color_t border_color;
 } menu_item_t;
 
@@ -165,13 +168,21 @@ static bool colors_equal(lv_color_t a, lv_color_t b) {
 #endif
 }
 
+static void refresh_menu_surface_colors(void) {
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    menu_bg_color = lv_color_hex(theme_palette_get_background(theme));
+    menu_surface_color = lv_color_hex(theme_palette_get_surface(theme));
+    menu_text_color = lv_color_hex(theme_palette_get_text(theme));
+}
+
 static void init_menu_colors(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
+    refresh_menu_surface_colors();
 
     bool connected = esp_comm_manager_is_connected();
     for (int visible = 0; visible < num_items; visible++) {
         int menu_index = visible_index_to_menu_index(visible, connected);
-        int slot = menu_items[menu_index].palette_index;
+        int slot = visible % THEME_PALETTE_SLOT_COUNT;
         menu_items[menu_index].border_color = lv_color_hex(theme_palette_get(theme, slot));
     }
 }
@@ -310,8 +321,7 @@ static void anim_set_bg_color(void *obj, int32_t v) {
 // Restore label color timer callback (used since buttons are transparent)
 static void restore_label_color_cb(lv_timer_t *timer) {
     lv_obj_t *label_obj = (lv_obj_t *)timer->user_data;
-    // restore label text color to white
-    lv_obj_set_style_text_color(label_obj, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(label_obj, menu_text_color, 0);
     lv_timer_del(timer);
 }
 
@@ -325,44 +335,7 @@ static void animate_nav_button_press(lv_obj_t *btn) {
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFF00), 0);
 
     // Return label to original color after a short delay
-    lv_timer_create(restore_label_color_cb, 150, label);
-}
-
-static void button_click_anim_cb(lv_anim_t *a) {
-    if (pending_view_to_switch) {
-        if (pending_view_to_switch == &options_menu_view) {
-            SelectedMenuType = pending_menu_type;
-            ESP_LOGI(TAG, "button_click_anim_cb: Set SelectedMenuType=%d for options menu", SelectedMenuType);
-        }
-        display_manager_switch_view((View *)pending_view_to_switch);
-        pending_view_to_switch = NULL;
-    }
-}
-
-static void animate_button_click(lv_obj_t *btn) {
-    // Animate opacity down and back up
-    int anim_duration = ANIM_DURATION / 8; // Half duration for click effect - divide by 8 for faster click effect
-    if (anim_duration < 10) anim_duration = 10; // Ensure minimum duration
-    
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, btn);
-    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_50);
-    lv_anim_set_time(&a, anim_duration);
-    lv_anim_set_exec_cb(&a, anim_set_opa);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-    lv_anim_start(&a);
-
-    lv_anim_t a2;
-    lv_anim_init(&a2);
-    lv_anim_set_var(&a2, btn);
-    lv_anim_set_values(&a2, LV_OPA_50, LV_OPA_COVER);
-    lv_anim_set_time(&a2, anim_duration);
-    lv_anim_set_exec_cb(&a2, anim_set_opa);
-    lv_anim_set_path_cb(&a2, lv_anim_path_ease_in);
-    lv_anim_set_ready_cb(&a2, button_click_anim_cb);
-    lv_anim_start(&a2);
-    
+    lv_timer_create(restore_label_color_cb, 80, label);
 }
 
 // rebuild the single-item carousel card when selection changes
@@ -404,7 +377,7 @@ static void update_menu_item(bool slide_left) {
     bool connected = esp_comm_manager_is_connected();
     int menu_index = visible_index_to_menu_index(selected_item_index, connected);
 
-    lv_obj_set_style_bg_color(current_item_obj, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(current_item_obj, menu_surface_color, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_item_obj, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_item_obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_border_width(current_item_obj, 2, LV_PART_MAIN);
@@ -449,7 +422,7 @@ static void update_menu_item(bool slide_left) {
         lv_obj_t *label = lv_label_create(current_item_obj);
         lv_label_set_text(label, menu_items[menu_index].name);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, menu_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         carousel_cache.label = label;
     }
@@ -790,7 +763,7 @@ void select_menu_item(int index, bool slide_left) {
             // Remove highlight from previous selection
             if (selected_item_index >= 0 && selected_item_index < num_items && grid_buttons[selected_item_index]) {
                 lv_obj_set_style_border_width(grid_buttons[selected_item_index], 2, LV_PART_MAIN);
-                lv_obj_set_style_border_color(grid_buttons[selected_item_index], lv_color_hex(0x444444), LV_PART_MAIN);
+                lv_obj_set_style_border_color(grid_buttons[selected_item_index], menu_surface_color, LV_PART_MAIN);
             }
 
             // Highlight new selection
@@ -938,32 +911,11 @@ static void handle_menu_item_selection(int item_index) {
         return;
     }
 
-    pending_view_to_switch = target_view;
-    pending_menu_type = target_type;
-    menu_item_selected = true;
-
-    lv_obj_t *anim_target = NULL;
-    if (current_layout == MENU_LAYOUT_CAROUSEL && current_item_obj) {
-        anim_target = current_item_obj;
-    } else if (current_layout == MENU_LAYOUT_GRID_CARDS && grid_cards && item_index >= 0 && item_index < num_items) {
-        anim_target = grid_cards[item_index];
-    } else if (current_layout == MENU_LAYOUT_GRID && grid_buttons && item_index >= 0 && item_index < num_items) {
-        anim_target = grid_buttons[item_index];
-    } else if (current_layout == MENU_LAYOUT_LIST && list_buttons && item_index >= 0 && item_index < num_items) {
-        anim_target = list_buttons[item_index];
+    if (target_view == &options_menu_view) {
+        SelectedMenuType = target_type;
+        ESP_LOGI(TAG, "handle_menu_item_selection: Set SelectedMenuType=%d for options menu", SelectedMenuType);
     }
-
-    if (anim_target) {
-        animate_button_click(anim_target);
-    } else {
-        ESP_LOGI(TAG, "No animation target found for menu item selection");
-        if (pending_view_to_switch == &options_menu_view) {
-            SelectedMenuType = pending_menu_type;
-            ESP_LOGI(TAG, "handle_menu_item_selection: Set SelectedMenuType=%d for options menu (no animation)", SelectedMenuType);
-        }
-        display_manager_switch_view((View *)pending_view_to_switch);
-        pending_view_to_switch = NULL;
-    }
+    display_manager_switch_view((View *)target_view);
 }
 
 /**
@@ -1034,7 +986,7 @@ static void create_grid_menu(void) {
         lv_obj_set_size(grid_cards[i], cw, ch);
 
         // Style card (Grid-style with rounded corners and shadows) - use theme colors
-        lv_obj_set_style_bg_color(grid_cards[i], lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(grid_cards[i], menu_surface_color, LV_PART_MAIN);
         int shadow_w = (ch <= 50 ? 4 : 8);
         lv_obj_set_style_shadow_width(grid_cards[i], shadow_w, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(grid_cards[i], lv_color_hex(0x000000), LV_PART_MAIN);
@@ -1082,7 +1034,7 @@ static void create_grid_menu(void) {
         // smaller font on small tiles
         const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
         lv_obj_set_style_text_font(label, lbl_font, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, menu_text_color, 0);
         // Center label within the card and ensure proper centering of text
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(label, cw - 8);
@@ -1143,7 +1095,7 @@ static void create_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, menu_surface_color, LV_PART_MAIN);
         lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(btn, menu_items[menu_index].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
@@ -1170,7 +1122,7 @@ static void create_list_menu(void) {
 
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, menu_items[menu_index].name);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, menu_text_color, 0);
         const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
@@ -1232,7 +1184,8 @@ static void menu_refresh_timer_cb(lv_timer_t *t) {
  * @brief Creates the main menu screen view.
  */
 void main_menu_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    refresh_menu_surface_colors();
+    display_manager_fill_screen(menu_bg_color);
     int total_menu_items = (int)(sizeof(menu_items) / sizeof(menu_items[0]));
     bool dual_comm_connected = esp_comm_manager_is_connected();
     was_dual_comm_connected = dual_comm_connected;
@@ -1257,7 +1210,7 @@ void main_menu_create(void) {
             break;
     }
 
-    menu_container = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_TRANSP);
+    menu_container = gui_screen_create_root(NULL, NULL, menu_bg_color, LV_OPA_TRANSP);
     main_menu_view.root = menu_container;
 
     // Create menu based on layout
@@ -1327,7 +1280,7 @@ void main_menu_create(void) {
         if (btn_size < 40) {
             lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         }
-        lv_obj_set_style_text_color(left_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(left_label, menu_text_color, 0);
         lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
 
         // Create right navigation button
@@ -1350,7 +1303,7 @@ void main_menu_create(void) {
         if (btn_size < 40) {
             lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         }
-        lv_obj_set_style_text_color(right_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(right_label, menu_text_color, 0);
         lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
         
         ESP_LOGI(TAG, "Navigation buttons created - size: %d, margin: %d", btn_size, btn_margin);

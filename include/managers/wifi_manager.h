@@ -24,9 +24,15 @@ extern wifi_ap_record_t *scanned_aps;
 extern wifi_ap_record_t selected_ap;
 extern wifi_ap_record_t *selected_aps;
 extern int selected_ap_count;
-extern void *beacon_task_handle;
-extern void *deauth_task_handle;
-extern int beacon_task_running;
+extern uint16_t ap_count;
+extern volatile bool ap_sta_has_ip;
+
+// Channel list for deauth and wireshark (country-appropriate)
+extern uint8_t wireshark_channels[50];
+extern size_t wireshark_channels_count;
+
+// Note: Use wifi_channels_build_country_list() from scans/wifi/wifi_channels.h
+// to build country-appropriate channel lists
 
 // WiFi event group bits
 #define WIFI_CONNECTED_BIT BIT0
@@ -96,12 +102,6 @@ typedef struct {
 } host_result_t;
 
 typedef struct {
-  char ip[16];
-  uint8_t mac[6];
-  bool is_active;
-} arp_host_t;
-
-typedef struct {
   const char *ssid;
   const char *password;
 } wifi_credentials_t;
@@ -113,12 +113,7 @@ typedef struct {
   size_t num_active_hosts;
 } scanner_ctx_t;
 
-typedef struct {
-  char subnet_prefix[16];
-  arp_host_t *hosts;
-  size_t max_hosts;
-  size_t num_active_hosts;
-} arp_scanner_ctx_t;
+// Note: arp_host_t and arp_scanner_ctx_t are now defined in scans/wifi/arp_scan.h
 
 typedef void (*wifi_promiscuous_cb_t_t)(void *buf,
                                         wifi_promiscuous_pkt_type_t type);
@@ -193,9 +188,6 @@ void wifi_manager_start_deauth();
 
 void wifi_manager_stop_deauth();
 
-esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel,
-                                        uint8_t mac[6]);
-
 void wifi_stations_sniffer_callback(void *buf,
                                     wifi_promiscuous_pkt_type_t type);
 
@@ -234,17 +226,13 @@ void scan_udp_ports_on_host(const char *target_ip, host_result_t *result);
 bool scan_ip_udp_port_range(const char *target_ip, uint16_t start_port,
                             uint16_t end_port);
 
-// ARP scan functions
-arp_scanner_ctx_t *arp_scanner_init(void);
-void arp_scanner_cleanup(arp_scanner_ctx_t *ctx);
+// ARP scan functions (wrapper that delegates to arp_scan module)
 bool wifi_manager_arp_scan_subnet(void);
-bool send_arp_request(const char *target_ip);
-bool get_arp_table_entry(const char *ip, uint8_t *mac);
 
 extern const uint16_t COMMON_PORTS[];
 extern const size_t NUM_PORTS;
 
-void wifi_manager_start_scan_with_time(int seconds);
+esp_err_t wifi_manager_start_scan_with_time(int seconds);
 
 void wifi_manager_scanall_chart(void);
 
@@ -256,12 +244,6 @@ void wifi_manager_show_beacon_list(void);
 void wifi_manager_start_beacon_list(void);
 
 void wifi_manager_start_live_ap_scan(void);
-
-// Add DHCP starvation attack functions
-void wifi_manager_start_dhcpstarve(int threads);
-void wifi_manager_stop_dhcpstarve(void);
-void wifi_manager_dhcpstarve_display(void);
-void wifi_manager_dhcpstarve_help(void);
 
 void wifi_manager_start_eapollogoff_attack(void);
 void wifi_manager_stop_eapollogoff_attack(void);
@@ -283,6 +265,7 @@ void wifi_manager_clear_scan_results(void);
 void wifi_manager_start_karma(void);
 void wifi_manager_stop_karma(void);
 void wifi_manager_set_karma_ssid_list(const char **ssids, int count);
+void wifi_manager_set_karma_portal_file(const char *path);
 
 // RSSI tracking functions
 void wifi_manager_track_ap(void);

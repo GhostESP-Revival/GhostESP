@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attacks · GhostESP Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/css/main.min.7863a37f454e0310ae10e3a5e7453fd98d3f146119b3133fa53210668f4ac659.css" integrity="sha256-eGOjf0VOAxCuEOOl50U/2Y0/FGEZsxM/pTIQZo9Kxlk=">
+  
+  
+  
+
+  
+    
+  
+  
+
+  
+    
+  
+
+  
+    
+      
+    
+  
+
+  
+  
+    
+  
+
+  
+  
+
+  <meta name="description" content="Launch WiFi attacks including Karma and other techniques.">
+  <meta property="og:site_name" content="GhostESP Documentation">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Attacks">
+  <meta property="og:description" content="Launch WiFi attacks including Karma and other techniques.">
+  <meta property="og:url" content="//localhost:1313/latest/wifi/attacks/">
+  <meta property="og:locale" content="en">
+  <meta property="og:image" content="//localhost:1313/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Attacks">
+  <meta name="twitter:description" content="Launch WiFi attacks including Karma and other techniques.">
+  <meta name="twitter:image" content="//localhost:1313/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png">
+  <script>
+    (function() {
+      const theme = localStorage.getItem('ghostesp-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+
+      if (window.innerWidth >= 992) {
+        if (localStorage.getItem('sidebarState') === 'open') {
+          document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>');
+        }
+      }
+    })();
+  </script>
+</head>
+<body>
+  
+  
+  
+  
+  
+    
+    
+    
+    
+    
+      
+      
+        
+      
+    
+      
+      
+    
+  
+  
+  
+  
+  
+    
+      
+    
+    
+  
+  
+  
+  
+  
+  
+  
+    
+  
+  
+  
+  <header class="topbar">
+    <button class="topbar__toggle" type="button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="false">
+      <svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true">
+        <line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"></line>
+        <line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"></line>
+        <line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"></line>
+      </svg>
+    </button>
+    <a href="/" class="topbar__brand">
+      
+        <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="topbar__logo">
+      
+    </a>
+    <div class="topbar__actions">
+      <button class="topbar__theme" type="button" data-theme-toggle aria-label="Toggle theme">
+        <svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon aria-hidden="true">
+          <g class="icon-theme__sun">
+            <circle cx="12" cy="12" r="5"></circle>
+            <g class="icon-theme__sun-rays">
+              <line x1="12" y1="2.5" x2="12" y2="5.5"></line>
+              <line x1="12" y1="18.5" x2="12" y2="21.5"></line>
+              <line x1="4.5" y1="12" x2="7.5" y2="12"></line>
+              <line x1="16.5" y1="12" x2="19.5" y2="12"></line>
+              <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"></line>
+              <line x1="16.2" y1="16.2" x2="18.4" y2="18.4"></line>
+              <line x1="5.6" y1="18.4" x2="7.8" y2="16.2"></line>
+              <line x1="16.2" y1="7.8" x2="18.4" y2="5.6"></line>
+            </g>
+          </g>
+          <g class="icon-theme__moon">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+          </g>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" data-current-version="latest">
+      <div class="sidebar__brand">
+        <a href="/" class="sidebar__title">
+          
+            <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="sidebar__logo">
+          
+        </a>
+        
+      </div>
+      
+        <div class="sidebar__version">
+          <label for="sidebar-version" class="sidebar__version-label">Firmware version</label>
+          <select id="sidebar-version" class="sidebar__version-select" data-version-select>
+            
+              <option value="latest" selected>Latest</option>
+            
+              <option value="v1.8">v1.8</option>
+            
+          </select>
+        </div>
+      
+      <div class="sidebar__search">
+        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="/index.json">
+        <div class="sidebar__search-results" data-search-results role="listbox"></div>
+      </div>
+      <nav class="sidebar__nav">
+        
+        
+        
+        <a href="/latest/" class="sidebar__link sidebar__link--active">Home</a>
+        
+          
+            
+            
+            
+            
+              
+              
+              <div class="sidebar__group">
+                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-latestgetting-started" aria-expanded="false" aria-controls="collapse-latestgetting-started">
+                  <span>Getting Started</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse sidebar__group-items" id="collapse-latestgetting-started">
+                  <a href="/latest/getting-started/" class="sidebar__sublink">Overview</a>
+                  
+                    <a href="/latest/getting-started/installation-guide/" class="sidebar__sublink">Installation Guide</a>
+                  
+                    <a href="/latest/getting-started/command-line-reference/" class="sidebar__sublink">Command Line Reference</a>
+                  
+                    <a href="/latest/getting-started/faq/" class="sidebar__sublink">FAQ</a>
+                  
+                </div>
+              </div>
+            
+          
+            
+            
+            
+            
+              
+              
+              <div class="sidebar__group group--open">
+                <button class="sidebar__group-toggle sidebar__group-toggle--active" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-latestwifi" aria-expanded="true" aria-controls="collapse-latestwifi">
+                  <span>Wi-Fi</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse show sidebar__group-items" id="collapse-latestwifi">
+                  <a href="/latest/wifi/" class="sidebar__sublink">Overview</a>
+                  
+                    <a href="/latest/wifi/survey/" class="sidebar__sublink">Scanning networks</a>
+                  
+                    <a href="/latest/wifi/capture/" class="sidebar__sublink">Capturing packets</a>
+                  
+                    <a href="/latest/wifi/attacks/" class="sidebar__sublink sidebar__sublink--active">Attacks</a>
+                  
+                    <a href="/latest/wifi/handshakes/" class="sidebar__sublink">Capturing handshakes</a>
+                  
+                    <a href="/latest/wifi/evil-portal/" class="sidebar__sublink">Evil Portal</a>
+                  
+                </div>
+              </div>
+            
+          
+            
+            
+            
+            
+              
+              
+              <div class="sidebar__group">
+                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-latestble" aria-expanded="false" aria-controls="collapse-latestble">
+                  <span>Bluetooth LE</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse sidebar__group-items" id="collapse-latestble">
+                  <a href="/latest/ble/" class="sidebar__sublink">Overview</a>
+                  
+                    <a href="/latest/ble/scanning/" class="sidebar__sublink">Scanning</a>
+                  
+                    <a href="/latest/ble/attacks/" class="sidebar__sublink">Attacks</a>
+                  
+                </div>
+              </div>
+            
+          
+            
+            
+            
+            
+              
+              
+              <div class="sidebar__group">
+                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-latestinfrared" aria-expanded="false" aria-controls="collapse-latestinfrared">
+                  <span>Infrared</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse sidebar__group-items" id="collapse-latestinfrared">
+                  <a href="/latest/infrared/" class="sidebar__sublink">Overview</a>
+                  
+                    <a href="/latest/infrared/learning/" class="sidebar__sublink">Learning Signals</a>
+                  
+                    <a href="/latest/infrared/transmitting/" class="sidebar__sublink">Transmitting Signals</a>
+                  
+                    <a href="/latest/infrared/files/" class="sidebar__sublink">Infrared Files</a>
+                  
+                    <a href="/latest/infrared/hardware/" class="sidebar__sublink">Hardware Support</a>
+                  
+                </div>
+              </div>
+            
+          
+            
+            
+            
+            
+              
+              
+              <div class="sidebar__group">
+                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-latestnfc" aria-expanded="false" aria-controls="collapse-latestnfc">
+                  <span>NFC</span>
+                  <span class="sidebar__group-icon" aria-hidden="true"></span>
+                </button>
+                <div class="collapse sidebar__group-items" id="collapse-latestnfc">
+                  <a href="/latest/nfc/" class="sidebar__sublink">Overview</a>
+                  
+                    <a href="/latest/nfc/scanning/" class="sidebar__sublink">Scanning</a>
+                  
+                    <a href="/latest/nfc/saving/" class="sidebar__sublink">Saving Tags</a>
+                  
+                    <a href="/latest/nfc/writing/" class="sidebar__sublink">Writing NTAG</a>
+                  
+                    <a href="/latest/nfc/supported/" class="sidebar__sublink">Supported Tags</a>
+                  
+                </div>
+              </div>
+            
+          
+          
+        
+      </nav>
+    </aside>
+    <div class="content">
+      <main class="content__body">
+        
+<article class="doc">
+  <header>
+    <h1>Attacks</h1>
+    <p>Launch WiFi attacks including Karma and other techniques.</p>
+  </header>
+  
+    <aside class="doc__toc">
+      <h2>On this page</h2>
+      <nav id="TableOfContents">
+  <ul>
+    <li><a href="#karma-attack">Karma Attack</a>
+      <ul>
+        <li><a href="#how-karma-works">How Karma works</a></li>
+        <li><a href="#starting-karma">Starting Karma</a></li>
+        <li><a href="#verifying-karma-is-working">Verifying Karma is working</a></li>
+        <li><a href="#testing-karma-safely">Testing Karma safely</a></li>
+      </ul>
+    </li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#notes">Notes</a></li>
+  </ul>
+</nav>
+    </aside>
+  
+  <p>Perform WiFi attacks to test network security and device behavior. This includes Karma attacks that respond to device probe requests with fake networks.</p>
+<blockquote>
+<p><strong>Note</strong>: Only test on networks you own or have explicit permission to test. Unauthorized attacks on networks are illegal in most jurisdictions.</p></blockquote>
+
+
+
+<h2 id="karma-attack">
+  Karma Attack
+  <a class="heading-anchor" href="#karma-attack" aria-label="Copy link to this section">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
+        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
+        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
+      </g>
+    </svg>
+  </a>
+</h2>
+
+<p>The Karma attack responds to probe requests from nearby devices by creating fake access points with the SSIDs that devices are searching for.</p>
+
+
+
+<h3 id="how-karma-works">How Karma works</h3>
+
+<p><strong>Automatic SSID Learning</strong></p>
+<ul>
+<li>Listens for probe requests on all WiFi channels</li>
+<li>When a device probes for a network, the SSID is cached</li>
+<li>Cached SSIDs are used to create fake access points</li>
+<li>Maximum of 64 SSIDs can be cached</li>
+</ul>
+<p><strong>SSID Rotation</strong></p>
+<ul>
+<li>If multiple SSIDs are cached, rotates between them every 5 seconds</li>
+<li>Increases the chance of catching devices looking for different networks</li>
+<li>Each rotation creates a new fake AP with the current SSID</li>
+</ul>
+<p><strong>Evil Portal Integration</strong></p>
+<ul>
+<li>Each fake AP automatically starts an evil portal</li>
+<li>Users who connect see a captive portal page</li>
+<li>Credentials and other data can be captured</li>
+</ul>
+<p><strong>Beacon Broadcasting</strong></p>
+<ul>
+<li>Broadcasts beacon frames for all cached SSIDs every 500ms</li>
+<li>Makes the fake networks visible to nearby devices</li>
+<li>Devices scanning for WiFi will see these networks</li>
+</ul>
+
+
+
+<h3 id="starting-karma">Starting Karma</h3>
+
+
+
+
+<h4 id="on-device-ui">On-device UI</h4>
+
+<ol>
+<li>Open <strong>Menu → WiFi → Attacks</strong>.
+You should see the attack options.</li>
+<li>Choose <strong>Start Karma Attack</strong> for automatic SSID learning, or <strong>Start Karma Attack (Custom SSIDs)</strong> to specify networks manually.
+The device will start listening for probe requests and broadcasting fake networks.</li>
+<li>To stop, select <strong>Stop Karma Attack</strong>.
+The device will shut down all fake networks.</li>
+</ol>
+
+
+
+<h4 id="command-line">Command line</h4>
+
+<p><strong>Start Karma with automatic SSID learning</strong></p>
+<pre tabindex="0"><code>karma start
+</code></pre><p><strong>Start Karma with specific SSIDs</strong></p>
+<pre tabindex="0"><code>karma start SSID1 SSID2 SSID3
+</code></pre><p>Example: <code>karma start FreeWiFi Starbucks McDonald's</code></p>
+<p><strong>Stop Karma</strong></p>
+<pre tabindex="0"><code>karma stop
+</code></pre>
+
+
+<h3 id="verifying-karma-is-working">Verifying Karma is working</h3>
+
+<p>Look for these log messages in the terminal:</p>
+<pre tabindex="0"><code>[KARMA] Received probe request from STA XX:XX:XX:XX:XX:XX for SSID &#39;NetworkName&#39;
+Karma cached SSID: NetworkName
+Karma rotating to SSID: NetworkName
+[KARMA] Evil portal started for SSID: NetworkName
+</code></pre><p>From another device, scan for WiFi networks. You should see the SSIDs that Karma is broadcasting as open networks.</p>
+
+
+
+<h3 id="testing-karma-safely">Testing Karma safely</h3>
+
+<ul>
+<li><strong>Use your own devices</strong> for testing</li>
+<li><strong>Test in controlled environments</strong> (your home, lab)</li>
+<li><strong>Never test on public networks</strong> or other people&rsquo;s devices</li>
+<li><strong>Stop the attack</strong> when testing is complete</li>
+</ul>
+<p>To generate probe requests for testing:</p>
+<ol>
+<li>Forget a known network on your phone&rsquo;s WiFi settings</li>
+<li>Turn WiFi off and on — your phone will probe for the forgotten network</li>
+<li>Walk around with WiFi enabled — phones constantly probe for known networks</li>
+<li>Use IoT devices that automatically probe for specific networks</li>
+</ol>
+
+
+
+<h2 id="troubleshooting">
+  Troubleshooting
+  <a class="heading-anchor" href="#troubleshooting" aria-label="Copy link to this section">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
+        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
+        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
+      </g>
+    </svg>
+  </a>
+</h2>
+
+<ul>
+<li><strong>Karma not detecting probes</strong>: Ensure WiFi is enabled on test devices. Try moving closer to the ESP32. Verify devices are actually probing by forgetting a known network.</li>
+<li><strong>Fake APs not appearing</strong>: Check terminal for error messages. Try restarting Karma with <code>karma stop</code> then <code>karma start</code>. Verify the ESP32 has sufficient power.</li>
+<li><strong>No devices connecting</strong>: Ensure evil portal is working correctly. Check that fake APs are visible in WiFi scans. Verify SSIDs match what devices are looking for.</li>
+</ul>
+
+
+
+<h2 id="notes">
+  Notes
+  <a class="heading-anchor" href="#notes" aria-label="Copy link to this section">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
+        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
+        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
+      </g>
+    </svg>
+  </a>
+</h2>
+
+<ul>
+<li>Karma is not available on ESP32-S2 devices.</li>
+<li>Karma works best when combined with evil portal functionality.</li>
+<li>The device can cache up to 64 SSIDs simultaneously.</li>
+<li>SSID rotation happens every 5 seconds when multiple SSIDs are cached.</li>
+</ul>
+
+  
+    <nav class="doc__nav" aria-label="Document navigation">
+      
+        <a class="doc__nav-link doc__nav-link--prev" href="/latest/wifi/capture/">
+          <span>← Previous</span>
+          <span>Capturing packets</span>
+        </a>
+      
+      
+        <a class="doc__nav-link doc__nav-link--next" href="/latest/wifi/handshakes/">
+          <span>Next →</span>
+          <span>Capturing handshakes</span>
+        </a>
+      
+    </nav>
+  
+</article>
+
+      </main>
+      <footer class="content__footer">
+        <p>website made with love by jay candel &lt;3</p>
+      </footer>
+    </div>
+  </div>
+  <div class="sidebar__overlay" id="overlay" onclick="toggleSidebar()"></div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  
+    
+    <script src="/js/search.8ad7cae1b50e63ef6906d133f6bcedc7e76dca92a5fa385781c1fbf5a58857fb.js" integrity="sha256-itfK4bUOY&#43;9pBtEz9rztx&#43;dtypKl&#43;jhXgcH79aWIV/s=" defer></script>
+  
+  
+    
+    <script src="/js/sidebar.7f78bf759d677658e6484780bac4b517f02ad1f309adc9f973a8829f9418d58b.js" integrity="sha256-f3i/dZ1ndljmSEeAusS1F/Aq0fMJrcn5c6iCn5QY1Ys=" defer></script>
+  
+  
+    
+    <script src="/js/theme.f8496df9250aa179fc0d91f6ac046dfe73cc9b262d34b68d12691b6ed1453754.js" integrity="sha256-&#43;Elt&#43;SUKoXn8DZH2rARt/nPMmyYtNLaNEmkbbtFFN1Q=" defer></script>
+  
+</body>
+</html>

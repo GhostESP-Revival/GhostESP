@@ -8,6 +8,7 @@
 
 extern nmea_parser_handle_t nmea_hdl;
 extern gps_date_t cacheddate;
+extern bool has_valid_cached_date;
 
 // Struct definition for GPSManager
 typedef struct {

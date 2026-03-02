@@ -1,6 +1,8 @@
-name: Compile
+name: Compile Ghost ESP
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
     inputs:
       buildType:
@@ -12,10 +14,18 @@ on:
           - "all"
         default: "prerelease"
       releaseVersion:
-        description: "Release tag (e.g. v1.7.2). leave empty to auto-generate"
+        description: "Release tag (e.g. v1.7.2). Leave empty to auto-generate"
         required: false
         type: string
         default: ""
+      releaseName:
+        description: "Release name (e.g. 'Bug Fix Release'). Leave empty for auto-generated"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -25,47 +35,48 @@ jobs:
     strategy:
       matrix:
         target:
-          - { name: "esp32-generic", idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.default.esp32",      zip_name: "esp32-generic.zip" }
-          - { name: "esp32s2-generic", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32s2-generic.zip" }
-          - { name: "esp32s3-generic", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.default.esp32s3",    zip_name: "esp32s3-generic.zip" }
-          - { name: "esp32c3-generic", idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.default.esp32c3",    zip_name: "esp32c3-generic.zip" }
-          - { name: "esp32c5-generic", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.default.esp32c5",    zip_name: "esp32c5-generic-v01.zip" }
-          - { name: "esp32c6-generic", idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",    zip_name: "esp32c6-generic.zip" }
-          - { name: "Awok V5",         idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",    zip_name: "esp32v5_awok.zip" }
-          - { name: "ghostboard",      idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",         zip_name: "ghostboard.zip" }
-          - { name: "MarauderV4_FlipperHub", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.marauderv4",     zip_name: "MarauderV4_FlipperHub.zip" }
-          - { name: "MarauderV6&AwokDual",   idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.marauderv6",     zip_name: "MarauderV6_AwokDual.zip" }
-          - { name: "AwokMini",        idf_target: "esp32s2",   sdkconfig_file: "configs/sdkconfig.awokmini",           zip_name: "AwokMini.zip" }
-          - { name: "ESP32-S3-Cardputer", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",       zip_name: "ESP32-S3-Cardputer.zip" }
-          - { name: "Heltec V3",       idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.heltecv3",           zip_name: "HeltecV3.zip" }
-          - { name: "CYD2USB",         idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB",            zip_name: "CYD2USB.zip" }
-          - { name: "CYDMicroUSB",     idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDMicroUSB",        zip_name: "CYDMicroUSB.zip" }
-          - { name: "CYDDualUSB",      idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDDualUSB",         zip_name: "CYDDualUSB.zip" }
-          - { name: "CYD2USB2.4_Inch", idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",     zip_name: "CYD2USB2.4Inch.zip" }
-          - { name: "CYD2USB2.4_Inch_C", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient", zip_name: "CYD2USB2.4Inch_C.zip" }
-          - { name: "CYD2432S028R",    idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",       zip_name: "CYD2432S028R.zip" }
-          - { name: "Waveshare_LCD",   idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",     zip_name: "Waveshare_LCD.zip" }
-          - { name: "Crowtech_LCD",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",      zip_name: "Crowtech_LCD.zip" }
-          - { name: "Sunton_LCD",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",        zip_name: "Sunton_LCD.zip" }
-          - { name: "JC3248W535EN_LCD", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",       zip_name: "JC3248W535EN_LCD.zip" }
-          - { name: "Flipper_JCMK_GPS", idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",    zip_name: "Flipper_JCMK_GPS.zip" }
-          - { name: "T-Deck",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",              zip_name: "LilyGo-T-Deck.zip" }
-          - { name: "TEmbedC1101",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",        zip_name: "LilyGo-TEmbedC1101.zip" }
-          - { name: "S3TWatch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",           zip_name: "LilyGo-S3TWatch-2020.zip" }
-          - { name: "TDisplayS3-Touch",    idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",     zip_name: "LilyGo-TDisplayS3-Touch.zip" } 
-          - { name: "JCMK_DevBoardPro", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro", zip_name: "JCMK_DevBoardPro.zip" }
-          - { name: "RabbitLabs_Minion", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.minion", zip_name: "RabbitLabs_Minion.zip" }
-          - { name: "Lolin_S3_Pro", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro", zip_name: "Lolin_S3_Pro.zip" }
-          - { name: "Cardputer ADV", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv", zip_name: "CardputerADV.zip" }
-          - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist", zip_name: "Poltergeist.zip" }
-          - { name: "Banshee C5", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething", zip_name: "Banshee_C5.zip" }
-          - { name: "Banshee S3", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2", zip_name: "Banshee_S3.zip" }
-          - { name: "FebrisPro", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.febrispro", zip_name: "FebrisPro.zip" }
-          - { name: "ACE C5", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5", zip_name: "ACE_C5.zip" }
-          - { name: "ACE S3", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3", zip_name: "ACE_S3.zip" }
+          - { name: "esp32-generic",          idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.default.esp32",                   zip_name: "esp32-generic.zip" }
+          - { name: "esp32s2-generic",         idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32s2-generic.zip" }
+          - { name: "esp32s3-generic",         idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.default.esp32s3",                 zip_name: "esp32s3-generic.zip" }
+          - { name: "esp32c3-generic",         idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.default.esp32c3",                 zip_name: "esp32c3-generic.zip" }
+          - { name: "esp32c5-generic",         idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.default.esp32c5",                 zip_name: "esp32c5-generic-v01.zip" }
+          - { name: "esp32c6-generic",         idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",                 zip_name: "esp32c6-generic.zip" }
+          - { name: "Awok V5",                 idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32v5_awok.zip" }
+          - { name: "ghostboard",              idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",                      zip_name: "ghostboard.zip" }
+          - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip" }
+          - { name: "MarauderV6&AwokDual",     idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv6",                      zip_name: "MarauderV6_AwokDual.zip" }
+          - { name: "AwokMini",                idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.awokmini",                        zip_name: "AwokMini.zip" }
+          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip" }
+          - { name: "Heltec V3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.heltecv3",                        zip_name: "HeltecV3.zip" }
+          - { name: "CYD2USB",                 idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB",                         zip_name: "CYD2USB.zip" }
+          - { name: "CYDMicroUSB",             idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDMicroUSB",                     zip_name: "CYDMicroUSB.zip" }
+          - { name: "CYDDualUSB",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDDualUSB",                      zip_name: "CYDDualUSB.zip" }
+          - { name: "CYD2USB2.4_Inch",         idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",                  zip_name: "CYD2USB2.4Inch.zip" }
+          - { name: "CYD2USB2.4_Inch_C",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient",        zip_name: "CYD2USB2.4Inch_C.zip" }
+          - { name: "CYD2432S028R",            idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",                    zip_name: "CYD2432S028R.zip" }
+          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip" }
+          - { name: "Crowtech_LCD",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",                   zip_name: "Crowtech_LCD.zip" }
+          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip" }
+          - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip" }
+          - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
+          - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
+          - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip" }
+          - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip" }
+          - { name: "TDisplayS3-Touch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",               zip_name: "LilyGo-TDisplayS3-Touch.zip" }
+          - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }
+          - { name: "RabbitLabs_Minion",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.minion",                         zip_name: "RabbitLabs_Minion.zip" }
+          - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
+          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip" }
+          - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
+          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip" }
+          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip" }
+          - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
+          - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
+          - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.9'
@@ -76,22 +87,26 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v5.5-${{ runner.os }}-v2
+          key: esp-idf-v5.5.3-${{ runner.os }}-v2
           restore-keys: |
-            esp-idf-v5.5-${{ runner.os }}-
+            esp-idf-v5.5.3-${{ runner.os }}-
 
-      - name: Install ESP-IDF
+      - name: Install ESP-IDF Dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util
-          git clone -b v5.5 --depth 1 https://github.com/espressif/esp-idf.git ~/esp-idf
+
+      - name: Install ESP-IDF
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          git clone -b v5.5.3 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
       - name: Apply Custom SDK Config
         run: cp "${{ matrix.target.sdkconfig_file }}" sdkconfig.defaults
 
-      - name: Set up ESP-IDF and Target
+      - name: Set up ESP-IDF Environment
         run: |
           . ~/esp-idf/export.sh
           export IDF_TARGET=${{ matrix.target.idf_target }}
@@ -109,33 +124,24 @@ jobs:
             exit 1
           }
 
-      - name: Verify Local Bootloader Exists
+      - name: Verify Bootloader Exists
         run: |
           BOOTLOADER_PATH="build/bootloader/bootloader.bin"
           if [ ! -f "$BOOTLOADER_PATH" ]; then
-            echo "Error: Bootloader not found at $BOOTLOADER_PATH. Build may have failed."
+            echo "Error: Bootloader not found at $BOOTLOADER_PATH"
             exit 1
           fi
-          echo "Local bootloader found at $BOOTLOADER_PATH."
+          echo "Bootloader found at $BOOTLOADER_PATH"
 
       - name: Package Artifacts into ZIP
         run: |
           . ~/esp-idf/export.sh
-          ARTIFACT_DIR="packaged_artifacts"
+          ARTIFACT_DIR="packaged_artifacts_${{ matrix.target.name }}"
           ZIP_FILE="${{ matrix.target.zip_name }}"
           mkdir -p "$ARTIFACT_DIR"
-          cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/partitions.bin" || {
-            echo "Failed to copy partition table"
-            exit 1
-          }
-          cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/" || {
-            echo "Failed to copy bootloader"
-            exit 1
-          }
-          cp build/Ghost_ESP_IDF.bin "$ARTIFACT_DIR/firmware.bin" || {
-            echo "Failed to copy app binary"
-            exit 1
-          }
+          cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/partitions.bin" || { echo "Failed to copy partition table"; exit 1; }
+          cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/bootloader.bin" || { echo "Failed to copy bootloader"; exit 1; }
+          cp build/Ghost_ESP_IDF.bin "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to copy app binary"; exit 1; }
           FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
           FLASH_SIZE=${FLASH_SIZE:-4MB}
           python3 -m esptool --chip ${{ matrix.target.idf_target }} merge_bin \
@@ -145,26 +151,19 @@ jobs:
             --target-offset 0x0 \
             0x1000 "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
-            0x10000 "$ARTIFACT_DIR/firmware.bin" || {
-            echo "Failed to create merged binary"
-            exit 1
-          }
-          cd "$ARTIFACT_DIR"
-          zip "../$ZIP_FILE" ./* || {
-            echo "Failed to create ZIP"
-            exit 1
-          }
-          cd ..
+            0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+          zip -j "$ZIP_FILE" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_FILE"; exit 1; }
           ls -lh "$ZIP_FILE"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target.zip_name }}
+          name: build-${{ matrix.target.name }}
           path: ${{ matrix.target.zip_name }}
-          
-  upload_all:
-    name: Upload Artifacts
+
+  upload_prerelease:
+    name: Create Pre-release and Upload Artifacts
     needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'prerelease'
     runs-on: ubuntu-latest
 
     steps:
@@ -172,36 +171,150 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: all_artifacts
+          path: all_build_artifacts
 
-      # Flatten artefacts (unchanged)
-      - name: Verify and Flatten Artifacts
+      - name: Verify and Prepare Artifacts for Upload
         run: |
-          mkdir -p flat_artifacts
-          find all_artifacts -type f -exec cp {} flat_artifacts/ \;
-          ls -lh flat_artifacts
+          mkdir -p release_assets
+          find all_build_artifacts -name '*.zip' -exec cp {} release_assets/ \;
+          echo "Prepared release assets:"
+          ls -lh release_assets
 
+      - name: Generate Pre-release Tag and Title
+        id: pre_release_info
+        run: |
+          if [ -n "${{ github.event.inputs.releaseVersion }}" ]; then
+            TAG_NAME="${{ github.event.inputs.releaseVersion }}"
+          else
+            TAG_NAME="prerelease-$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}"
+          fi
 
-      # -----------------------------------------
-      # 📦  Create a new release (or use provided tag) and upload all zips
-      # -----------------------------------------
-      - name: Create Release and Upload Assets
+          if [ -n "${{ github.event.inputs.releaseName }}" ]; then
+            TITLE="${{ github.event.inputs.releaseName }}"
+          elif [ -n "${{ github.event.inputs.releaseVersion }}" ]; then
+            TITLE="Release $TAG_NAME"
+          else
+            TITLE="Pre-release $(date +'%Y-%m-%d %H:%M:%S')"
+          fi
+
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "release_title=$TITLE" >> $GITHUB_OUTPUT
+          echo "Generated Tag: $TAG_NAME"
+          echo "Generated Title: $TITLE"
+
+      - name: Create GitHub Pre-Release and Upload Assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.pre_release_info.outputs.tag_name }}
+          TITLE: ${{ steps.pre_release_info.outputs.release_title }}
+        run: |
+          echo "Creating pre-release with tag $TAG and title '$TITLE'"
+          cat > release_notes.md <<EOF
+          Automated pre-release build for tag $TAG.
+
+          Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG
+          Changelog: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md
+
+          You can flash the bins with https://espressoflash.com/
+          EOF
+          if [ -z "$(ls -A release_assets/*.zip 2>/dev/null)" ]; then
+            echo "No ZIP files found in release_assets. Creating pre-release without assets."
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --prerelease
+          else
+            echo "Uploading assets from release_assets:"
+            ls -l release_assets/*.zip
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --prerelease \
+              release_assets/*.zip
+          fi
+          echo "Pre-release creation attempted."
+
+  upload_release:
+    name: Create Release and Upload Artifacts
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'all'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_build_artifacts
+
+      - name: Verify and Prepare Artifacts for Upload
+        run: |
+          mkdir -p release_assets
+          find all_build_artifacts -name '*.zip' -exec cp {} release_assets/ \;
+          echo "Prepared release assets:"
+          ls -lh release_assets
+
+      - name: Generate Release Tag and Title
+        id: release_info
+        run: |
+          if [ -n "${{ github.event.inputs.releaseVersion }}" ]; then
+            TAG_NAME="${{ github.event.inputs.releaseVersion }}"
+          else
+            TAG_NAME="v$(date +'%Y.%m.%d')-${GITHUB_SHA::7}"
+          fi
+
+          if [ -n "${{ github.event.inputs.releaseName }}" ]; then
+            TITLE="${{ github.event.inputs.releaseName }}"
+          elif [ -n "${{ github.event.inputs.releaseVersion }}" ]; then
+            TITLE="Release $TAG_NAME"
+          else
+            TITLE="Release $(date +'%Y-%m-%d %H:%M:%S')"
+          fi
+
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "release_title=$TITLE" >> $GITHUB_OUTPUT
+          echo "Generated Tag: $TAG_NAME"
+          echo "Generated Title: $TITLE"
+
+      - name: Create GitHub Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_info.outputs.tag_name }}
+          TITLE: ${{ steps.release_info.outputs.release_title }}
         run: |
-          RELEASE_TAG="${{ github.event.inputs.releaseVersion }}"
-          if [ -z "$RELEASE_TAG" ]; then
-            RELEASE_TAG="release-$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}"
-          fi
-          echo "Using release tag: $RELEASE_TAG"
-          # try to create a new release with the provided tag and upload assets
-          if gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --title "Release $RELEASE_TAG" --notes "Automated release $RELEASE_TAG" flat_artifacts/*.zip; then
-            echo "Release $RELEASE_TAG created and assets uploaded."
+          echo "Creating release with tag $TAG and title '$TITLE'"
+          cat > release_notes.md <<EOF
+          Automated release build for tag $TAG.
+
+          Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG
+          Changelog: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md
+
+          You can flash the bins with https://espressoflash.com/
+          EOF
+          if [ -z "$(ls -A release_assets/*.zip 2>/dev/null)" ]; then
+            echo "No ZIP files found in release_assets. Creating release without assets."
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --latest
           else
-            echo "gh release create failed. a release with tag $RELEASE_TAG may already exist; aborting to avoid modifying existing release."
-            exit 1
+            echo "Uploading assets from release_assets:"
+            ls -l release_assets/*.zip
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --latest \
+              release_assets/*.zip
           fi
-          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "Release creation attempted."

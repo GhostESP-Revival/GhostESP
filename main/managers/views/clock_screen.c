@@ -9,6 +9,8 @@
 #include "gui/theme_palette_api.h"
 #include "esp_log.h"
 
+uint32_t theme_palette_get_background(uint8_t theme);
+
 static const char *TAG = "ClockScreens";
 
 static lv_obj_t *clock_container;
@@ -151,35 +153,76 @@ void clock_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     uint32_t accent_color = theme_palette_get_accent(theme);
     
-    // Keep original background color
-    display_manager_fill_screen(lv_color_hex(0x121212));
-    clock_container = gui_screen_create_root(NULL, "Clock", lv_color_hex(0x121212), LV_OPA_COVER);
+    lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
+    display_manager_fill_screen(bg_color);
+    clock_container = gui_screen_create_root(NULL, "Clock", bg_color, LV_OPA_COVER);
     clock_view.root = clock_container;
     lv_obj_t *content = gui_screen_create_content(clock_container, GUI_STATUS_BAR_HEIGHT);
 
-    time_label = lv_label_create(content);
+    // Pick fonts and row gap based on usable content height so nothing clips
+    int content_h = LV_VER_RES - GUI_STATUS_BAR_HEIGHT;
+    const lv_font_t *time_font;
+    const lv_font_t *secondary_font;
+    const lv_font_t *small_font;
+    int row_gap;
+    bool show_year_tz;
+
+    if (content_h < 80) {
+        time_font      = &lv_font_montserrat_18;
+        secondary_font = &lv_font_montserrat_10;
+        small_font     = &lv_font_montserrat_10;
+        row_gap        = 2;
+        show_year_tz   = false;
+    } else if (content_h < 120) {
+        time_font      = &lv_font_montserrat_24;
+        secondary_font = &lv_font_montserrat_12;
+        small_font     = &lv_font_montserrat_10;
+        row_gap        = 4;
+        show_year_tz   = true;
+    } else {
+        time_font      = &lv_font_montserrat_40;
+        secondary_font = &lv_font_montserrat_14;
+        small_font     = &lv_font_montserrat_12;
+        row_gap        = 6;
+        show_year_tz   = true;
+    }
+
+    // Flex column — labels stack vertically and the whole group stays centered
+    lv_obj_t *label_stack = lv_obj_create(content);
+    lv_obj_set_style_bg_opa(label_stack, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_opa(label_stack, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(label_stack, 0, 0);
+    lv_obj_set_size(label_stack, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_align(label_stack, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_layout(label_stack, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(label_stack, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(label_stack, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(label_stack, row_gap, 0);
+
+    time_label = lv_label_create(label_stack);
     lv_label_set_text(time_label, "12:00:00 AM");
-    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(time_label, time_font, 0);
     lv_obj_set_style_text_color(time_label, lv_color_hex(accent_color), 0);
-    lv_obj_align(time_label, LV_ALIGN_CENTER, 0, -25);
-    
-    date_label = lv_label_create(content);
+
+    date_label = lv_label_create(label_stack);
     lv_label_set_text(date_label, "Wednesday, January 01");
-    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
+    lv_label_set_long_mode(date_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(date_label, LV_PCT(95));
+    lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(date_label, secondary_font, 0);
     lv_obj_set_style_text_color(date_label, lv_color_hex(accent_color), 0);
-    lv_obj_align(date_label, LV_ALIGN_CENTER, 0, 20);
-    
-    year_label = lv_label_create(content);
+
+    year_label = lv_label_create(label_stack);
     lv_label_set_text(year_label, "2025");
-    lv_obj_set_style_text_font(year_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(year_label, secondary_font, 0);
     lv_obj_set_style_text_color(year_label, lv_color_hex(accent_color), 0);
-    lv_obj_align(year_label, LV_ALIGN_CENTER, 0, 40);
-    
-    tz_label = lv_label_create(content);
+    if (!show_year_tz) lv_obj_add_flag(year_label, LV_OBJ_FLAG_HIDDEN);
+
+    tz_label = lv_label_create(label_stack);
     lv_label_set_text(tz_label, "TZ: UTC");
-    lv_obj_set_style_text_font(tz_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(tz_label, small_font, 0);
     lv_obj_set_style_text_color(tz_label, lv_color_hex(accent_color), 0);
-    lv_obj_align(tz_label, LV_ALIGN_CENTER, 0, 60);
+    if (!show_year_tz) lv_obj_add_flag(tz_label, LV_OBJ_FLAG_HIDDEN);
 
     clock_timer = lv_timer_create(digital_clock_cb, 1000, NULL);
     digital_clock_cb(NULL);
@@ -207,4 +250,4 @@ View clock_view = {
     .input_callback = clock_event_handler,
     .name = "Clock",
     .get_hardwareinput_callback = get_clock_callback
-}; 
+};

@@ -14,6 +14,8 @@ lv_obj_t *img;
 static void fade_anim_cb(void *var, int32_t opacity);
 static void fade_out_cb(void *var);
 
+#define SPLASH_HOLD_MS 900
+
 void splash_create(void) {
 
   display_manager_fill_screen(lv_color_black());
@@ -60,7 +62,7 @@ void splash_create(void) {
 
   lv_anim_set_var(&fade_anim, img);
   lv_anim_set_values(&fade_anim, LV_OPA_100, LV_OPA_100);
-  lv_anim_set_time(&fade_anim, 2000);
+  lv_anim_set_time(&fade_anim, SPLASH_HOLD_MS);
   lv_anim_set_exec_cb(&fade_anim, fade_anim_cb);
   lv_anim_set_ready_cb(&fade_anim, fade_out_cb);
   lv_anim_start(&fade_anim);

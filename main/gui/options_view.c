@@ -6,6 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+uint32_t theme_palette_get_background(uint8_t theme);
+uint32_t theme_palette_get_surface(uint8_t theme);
+uint32_t theme_palette_get_surface_alt(uint8_t theme);
+uint32_t theme_palette_get_text(uint8_t theme);
+
 typedef struct options_view_t {
     lv_obj_t *list;
     lv_style_t style_item;
@@ -34,6 +39,14 @@ static inline lv_style_t *get_zebra_style(options_view_t *ov, int idx) {
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
     return (ov->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+}
+
+static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface, lv_color_t *surface_alt, lv_color_t *text) {
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    if (bg) *bg = lv_color_hex(theme_palette_get_background(theme));
+    if (surface) *surface = lv_color_hex(theme_palette_get_surface(theme));
+    if (surface_alt) *surface_alt = lv_color_hex(theme_palette_get_surface_alt(theme));
+    if (text) *text = lv_color_hex(theme_palette_get_text(theme));
 }
 
 static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
@@ -73,13 +86,15 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
             }
         }
     } else {
+        lv_color_t normal_txt;
+        get_theme_surface_colors(NULL, NULL, NULL, &normal_txt);
         lv_obj_remove_style(item, &ov->style_selected, 0);
         for (uint32_t i = 0; i < child_cnt; ++i) {
             lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
             if (!child) continue;
             void *ud = lv_obj_get_user_data(child);
             if (ud == (void *)1 || ud == (void *)2) {
-                lv_obj_set_style_text_color(child, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_text_color(child, normal_txt, 0);
             }
             // Handle arrow visibility for non-selected items
             if (ud == (void *)2) {
@@ -106,22 +121,28 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
     bool small = (w <= 240 || h <= 240);
     ov->btn_h = small ? 40 : 55;
 
+    lv_color_t bg;
+    lv_color_t surface;
+    lv_color_t surface_alt;
+    lv_color_t text;
+    get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
+
     ov->list = lv_list_create(parent);
     lv_obj_set_size(ov->list, w, h - STATUS_BAR_HEIGHT);
     lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
-    lv_obj_set_style_bg_color(ov->list, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_pad_all(ov->list, 0, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
     lv_style_init(&ov->style_item);
-    lv_style_set_bg_color(&ov->style_item, lv_color_hex(0x1E1E1E));
+    lv_style_set_bg_color(&ov->style_item, surface);
     lv_style_set_bg_opa(&ov->style_item, LV_OPA_COVER);
     lv_style_set_border_width(&ov->style_item, 0);
     lv_style_set_radius(&ov->style_item, 0);
 
     lv_style_init(&ov->style_item_alt);
-    lv_style_set_bg_color(&ov->style_item_alt, lv_color_hex(0x232323));
+    lv_style_set_bg_color(&ov->style_item_alt, surface_alt);
     lv_style_set_bg_opa(&ov->style_item_alt, LV_OPA_COVER);
     lv_style_set_border_width(&ov->style_item_alt, 0);
     lv_style_set_radius(&ov->style_item_alt, 0);
@@ -163,10 +184,12 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
     lv_obj_t *lbl = lv_obj_get_child(btn, 0);
     if (lbl) {
         const lv_font_t *font = get_item_font(ov);
+        lv_color_t text;
+        get_theme_surface_colors(NULL, NULL, NULL, &text);
         lv_obj_set_style_text_font(lbl, font, 0);
         // Label inherits vertical centering from parent's flex align
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(lbl, text, 0);
         lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_user_data(lbl, (void *)1);
     }
@@ -243,12 +266,34 @@ void options_view_set_title(options_view_t *ov, const char *title) {
 
 void options_view_refresh_styles(options_view_t *ov) {
     if (!ov) return;
+
+    lv_color_t bg;
+    lv_color_t surface;
+    lv_color_t surface_alt;
+    lv_color_t text;
+    get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
+    if (ov->list && lv_obj_is_valid(ov->list)) {
+        lv_obj_set_style_bg_color(ov->list, bg, 0);
+    }
+    lv_style_set_bg_color(&ov->style_item, surface);
+    lv_style_set_bg_color(&ov->style_item_alt, surface_alt);
+
     for (int i = 0; i < ov->count; ++i) {
         lv_obj_t *btn = ov->items[i];
         if (!btn || !lv_obj_is_valid(btn)) continue;
         lv_obj_remove_style(btn, &ov->style_item, 0);
         lv_obj_remove_style(btn, &ov->style_item_alt, 0);
         lv_obj_add_style(btn, get_zebra_style(ov, i), 0);
+
+        uint32_t child_cnt = lv_obj_get_child_cnt(btn);
+        for (uint32_t j = 0; j < child_cnt; ++j) {
+            lv_obj_t *child = lv_obj_get_child(btn, (int32_t)j);
+            if (!child || !lv_obj_is_valid(child)) continue;
+            void *ud = lv_obj_get_user_data(child);
+            if (ud == (void *)1 || ud == (void *)2) {
+                lv_obj_set_style_text_color(child, text, 0);
+            }
+        }
     }
     // re-apply selection with current theme color
     for (int i = 0; i < ov->count; ++i) {

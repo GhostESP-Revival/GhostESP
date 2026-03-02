@@ -1,7 +1,8 @@
 import json
+import re
 from serial.tools import list_ports
 import serial
-from serial_threads import SerialMonitorThread, PortalFileSenderThread
+from serial_threads import SerialMonitorThread, PortalFileSenderThread, AssetDownloadThread, ReleaseFetchThread
 from dialogs import show_select_ap_dialog, show_custom_beacon_dialog, show_printer_dialog
 from utils import log_message, timestamp
 from espidf_utils import find_esp_idf_gui, download_esp_idf_gui, get_esp_idf_env
@@ -11,7 +12,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QComboBox, QPushButton, QLabel, QTextEdit,
                              QTabWidget, QGroupBox, QGridLayout, QLineEdit, QMessageBox,
                              QSplitter, QInputDialog, QSpinBox, QFormLayout, QStyle, QFileDialog, QCheckBox, QDialog, QProgressBar, QSizePolicy, QStackedWidget,
-                             QMenuBar, QDialogButtonBox, QSlider)
+                             QMenuBar, QDialogButtonBox, QSlider, QRadioButton)
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QTextCursor, QIcon
@@ -37,6 +38,8 @@ class ESP32ControlGUI(QMainWindow):
         
         self.setWindowTitle("Ghost ESP Commander")
         self.setGeometry(100, 100, 1400, 900)
+        # Set minimum size to prevent window from shrinking too much
+        self.setMinimumSize(800, 600)
 
         # Set custom app icon
         self.setWindowIcon(QIcon("assets/gesp_ghost_trans_bg.png"))  # Use .ico, .png, or .svg
@@ -185,7 +188,8 @@ class ESP32ControlGUI(QMainWindow):
         """
         try:
             self.panel_container.setEnabled(enabled)
-            self.panel_combo.setEnabled(enabled)
+            if hasattr(self, 'panel_tabs'):
+                self.panel_tabs.setEnabled(enabled)
             self.log_group.setEnabled(enabled)
             self.display_text.setEnabled(enabled)
             self.cmd_entry.setEnabled(enabled)
@@ -265,20 +269,10 @@ class ESP32ControlGUI(QMainWindow):
         flash_controls_layout = QVBoxLayout(flash_controls_widget)
         flash_controls_layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- Flash Mode Panel Dropdown (like normal mode) ---
-        self.flash_panel_combo = QComboBox()
-        self.flash_panel_combo.addItems([
-            "Flash Firmware",
-            "Flash Release Bundle",
-            "Custom Build"
-        ])
-        self.flash_panel_combo.setCurrentIndex(0)
-        self.flash_panel_combo.setMinimumHeight(28)
-        flash_controls_layout.addWidget(self.flash_panel_combo)
-
-        # --- Flash Mode Panels as QStackedWidget ---
-        self.flash_panel_stack = QStackedWidget()
-        flash_controls_layout.addWidget(self.flash_panel_stack)
+        # --- Flash Mode Panels as QTabWidget ---
+        self.flash_panel_tabs = QTabWidget()
+        self.flash_panel_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        flash_controls_layout.addWidget(self.flash_panel_tabs)
 
         # Panel 1: Flash Firmware
         flash_firmware_panel = QWidget()
@@ -297,6 +291,24 @@ class ESP32ControlGUI(QMainWindow):
         self.selected_chip = ""  # Default to blank
         self.chip_combo.currentTextChanged.connect(self.set_chip_type)
 
+        # --- Flash mode selection (separate files vs merged .bin) ---
+        flash_mode_layout = QHBoxLayout()
+        self.flash_mode_separate_radio = QRadioButton("Separate files")
+        self.flash_mode_merged_radio = QRadioButton("Merged .bin file")
+        self.flash_mode_separate_radio.setChecked(True)  # Default to separate files
+        flash_mode_layout.addWidget(QLabel("Mode:"))
+        flash_mode_layout.addWidget(self.flash_mode_separate_radio)
+        flash_mode_layout.addWidget(self.flash_mode_merged_radio)
+        flash_mode_layout.addStretch()
+        flash_firmware_layout.addLayout(flash_mode_layout)
+        self.flash_mode_separate_radio.toggled.connect(self.on_flash_mode_changed)
+        self.flash_mode_merged_radio.toggled.connect(self.on_flash_mode_changed)
+
+        # --- Container for separate files mode ---
+        self.separate_files_widget = QWidget()
+        separate_files_layout = QVBoxLayout(self.separate_files_widget)
+        separate_files_layout.setContentsMargins(0, 0, 0, 0)
+
         # --- Bootloader file selection ---
         bootloader_layout = QHBoxLayout()
         self.bootloader_file_edit = QLineEdit()
@@ -305,7 +317,7 @@ class ESP32ControlGUI(QMainWindow):
         bootloader_browse_btn = QPushButton("Browse")
         bootloader_browse_btn.clicked.connect(lambda: self.browse_bin_file(self.bootloader_file_edit))
         bootloader_layout.addWidget(bootloader_browse_btn)
-        flash_firmware_layout.addLayout(bootloader_layout)
+        separate_files_layout.addLayout(bootloader_layout)
 
         # --- Partition table file selection ---
         partition_layout = QHBoxLayout()
@@ -315,7 +327,7 @@ class ESP32ControlGUI(QMainWindow):
         partition_browse_btn = QPushButton("Browse")
         partition_browse_btn.clicked.connect(lambda: self.browse_bin_file(self.partition_file_edit))
         partition_layout.addWidget(partition_browse_btn)
-        flash_firmware_layout.addLayout(partition_layout)
+        separate_files_layout.addLayout(partition_layout)
 
         # --- Firmware file selection ---
         firmware_layout = QHBoxLayout()
@@ -325,22 +337,44 @@ class ESP32ControlGUI(QMainWindow):
         firmware_browse_btn = QPushButton("Browse")
         firmware_browse_btn.clicked.connect(lambda: self.browse_bin_file(self.firmware_file_edit))
         firmware_layout.addWidget(firmware_browse_btn)
-        flash_firmware_layout.addLayout(firmware_layout)
+        separate_files_layout.addLayout(firmware_layout)
+
+        flash_firmware_layout.addWidget(self.separate_files_widget)
+
+        # --- Container for merged file mode ---
+        self.merged_file_widget = QWidget()
+        merged_file_layout = QVBoxLayout(self.merged_file_widget)
+        merged_file_layout.setContentsMargins(0, 0, 0, 0)
+        self.merged_file_widget.hide()  # Hidden by default
+
+        # --- Merged .bin file selection ---
+        merged_layout = QHBoxLayout()
+        self.merged_file_edit = QLineEdit()
+        self.merged_file_edit.setPlaceholderText("Select merged .bin file...")
+        merged_layout.addWidget(self.merged_file_edit)
+        merged_browse_btn = QPushButton("Browse")
+        merged_browse_btn.clicked.connect(lambda: self.browse_bin_file(self.merged_file_edit))
+        merged_layout.addWidget(merged_browse_btn)
+        merged_file_layout.addLayout(merged_layout)
+
+        flash_firmware_layout.addWidget(self.merged_file_widget)
 
         # --- Flash/Exit buttons and status ---
         self.flash_btn = QPushButton("Flash Board")
         self.flash_btn.clicked.connect(self.flash_board)
         flash_firmware_layout.addWidget(self.flash_btn)
         self.flash_status = QLabel("")
+        self.flash_status.setWordWrap(True)
+        self.flash_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.flash_status.setMaximumHeight(50)  # Limit height to prevent expansion
         flash_firmware_layout.addWidget(self.flash_status)
         exit_btn = QPushButton("Exit Flash Mode")
         exit_btn.clicked.connect(self.exit_flash_mode)
         flash_firmware_layout.addWidget(exit_btn)
         flash_firmware_layout.addStretch()
 
-        # Add firmware panel to stacked widget
-        self.flash_panel_stack.addWidget(flash_firmware_panel)
-        self.flash_panel_combo.currentIndexChanged.connect(self.on_flash_panel_changed)
+        # Add firmware panel as tab
+        self.flash_panel_tabs.addTab(flash_firmware_panel, "Flash Firmware")
 
 
         # --- Panel 2: Flash Release Bundle ---
@@ -404,9 +438,12 @@ class ESP32ControlGUI(QMainWindow):
         self.flash_bundle_btn.clicked.connect(self.flash_release_bundle)
         release_bundle_layout.addWidget(self.flash_bundle_btn)
         self.flash_bundle_status = QLabel("")
+        self.flash_bundle_status.setWordWrap(True)
+        self.flash_bundle_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.flash_bundle_status.setMaximumHeight(50)  # Limit height to prevent expansion
         release_bundle_layout.addWidget(self.flash_bundle_status)
 
-        self.flash_panel_stack.addWidget(release_bundle_panel)
+        self.flash_panel_tabs.addTab(release_bundle_panel, "Flash Release Bundle")
 
         # Panel 3: Custom Build
         custom_build_panel = QWidget()
@@ -566,12 +603,15 @@ class ESP32ControlGUI(QMainWindow):
         self.custom_flash_btn.clicked.connect(self.flash_custom_build)
         custom_build_layout.addWidget(self.custom_flash_btn)
         self.custom_flash_status = QLabel("")
+        self.custom_flash_status.setWordWrap(True)
+        self.custom_flash_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.custom_flash_status.setMaximumHeight(50)  # Limit height to prevent expansion
         custom_build_layout.addWidget(self.custom_flash_status)
 
-        self.flash_panel_stack.addWidget(custom_build_panel)
+        self.flash_panel_tabs.addTab(custom_build_panel, "Custom Build")
 
-        # Connect combo box to stacked widget
-        self.flash_panel_combo.currentIndexChanged.connect(self.flash_panel_stack.setCurrentIndex)
+        # Connect tab change to show instructions
+        self.flash_panel_tabs.currentChanged.connect(self.on_flash_panel_changed)
 
         # Add controls to splitter
         flash_splitter.addWidget(flash_controls_widget)
@@ -581,6 +621,20 @@ class ESP32ControlGUI(QMainWindow):
         flasher_output_label = QLabel("Flasher Output")
         flasher_output_label.setStyleSheet("font-weight: bold; font-size: 16px;")
         flasher_output_layout.addWidget(flasher_output_label)
+        
+        # Progress bar for flash progress
+        self.flash_progress_bar = QProgressBar()
+        self.flash_progress_bar.setMinimum(0)
+        self.flash_progress_bar.setMaximum(100)
+        self.flash_progress_bar.setValue(0)
+        self.flash_progress_bar.setVisible(False)
+        self.flash_progress_label = QLabel("")
+        self.flash_progress_label.setVisible(False)
+        progress_layout = QVBoxLayout()
+        progress_layout.addWidget(self.flash_progress_label)
+        progress_layout.addWidget(self.flash_progress_bar)
+        flasher_output_layout.addLayout(progress_layout)
+        
         self.flash_console = QTextEdit()
         self.flash_console.setReadOnly(True)
         self.flash_console.setMinimumWidth(400)
@@ -641,62 +695,211 @@ class ESP32ControlGUI(QMainWindow):
         if file_path:
             self.flash_file_edit.setText(file_path)
 
+    def on_flash_mode_changed(self):
+        """Toggle visibility of separate files vs merged file widgets based on radio button selection."""
+        if self.flash_mode_separate_radio.isChecked():
+            self.separate_files_widget.show()
+            self.merged_file_widget.hide()
+        else:
+            self.separate_files_widget.hide()
+            self.merged_file_widget.show()
+
+    def parse_esptool_output(self, line):
+        """
+        Parse esptool output line and update progress bar if progress information is found.
+        Returns tuple: (has_progress, progress_percent, error_message)
+        """
+        line_lower = line.lower()
+        
+        # Check for error patterns (but not false positives like "failed to connect" during normal operation)
+        error_keywords = ['error:', 'failed:', 'exception', 'traceback', 'fatal error']
+        if any(keyword in line_lower for keyword in error_keywords):
+            return (False, None, line)
+        
+        # Match progress patterns like "Writing at 0x00010000... (20 %)" or "(100 %)"
+        # Find all progress percentages in the line and take the highest one
+        progress_pattern = r'\((\d+)\s*%\)'
+        matches = re.findall(progress_pattern, line)
+        if matches:
+            # Get the highest progress value (in case multiple percentages appear)
+            progress = max(int(m) for m in matches)
+            return (True, progress, None)
+        
+        # Check for completion indicators
+        if 'done' in line_lower and ('leaving' in line_lower or 'hard resetting' in line_lower):
+            return (True, 100, None)
+        
+        return (False, None, None)
+
+    def reset_flash_progress(self):
+        """Reset the flash progress bar to initial state."""
+        self.flash_progress_bar.setValue(0)
+        self.flash_progress_bar.setVisible(False)
+        self.flash_progress_label.setText("")
+        self.flash_progress_label.setVisible(False)
+        self.flash_progress_label.setStyleSheet("")  # Reset style
+
+    def update_flash_progress(self, percent, status_text=""):
+        """Update the flash progress bar."""
+        self.flash_progress_bar.setValue(percent)
+        self.flash_progress_bar.setVisible(True)
+        if status_text:
+            self.flash_progress_label.setText(status_text)
+            self.flash_progress_label.setVisible(True)
+        else:
+            self.flash_progress_label.setText(f"Flashing... {percent}%")
+            self.flash_progress_label.setVisible(True)
+
     def flash_board(self):
-        """Flash the selected firmware, bootloader, and partition table to the ESP32 board."""
+        """Flash the selected firmware, bootloader, and partition table to the ESP32 board, or a merged .bin file."""
         # get actual device from combo data if available
         data = self.port_combo.currentData()
         port = data if data else self.port_combo.currentText().split()[0]
         chip = getattr(self, "selected_chip", "")
-        bootloader = self.bootloader_file_edit.text().strip()
-        partition = self.partition_file_edit.text().strip()
-        firmware = self.firmware_file_edit.text().strip()
 
         # Validate inputs
         if not chip:
             self.flash_status.setText("Please select a chip type before flashing.")
             return
-        if not all([bootloader, partition, firmware, port]):
-            self.flash_status.setText("Please select all .bin files and a serial port.")
+        if not port:
+            self.flash_status.setText("Please select a serial port.")
             return
 
-        # Determine offsets based on chip type
-        if chip in ["esp32s2", "esp32"]:
-            boot_offset = "0x1000"
-        elif chip in ["esp32s3", "esp32c3", "esp32c5", "esp32c6"]:
-            boot_offset = "0x0"
-        else:
-            boot_offset = "0x1000"  # Default/fallback
-
-        partition_offset = "0x8000"
-        firmware_offset = "0x10000"
-
-        self.flash_status.setText(f"Flashing ({chip})... Please wait.")
-        self.flash_console.clear()
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            import subprocess
-            cmd = [
-                sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write-flash",
-                boot_offset, bootloader,
-                partition_offset, partition,
-                firmware_offset, firmware
-            ]
-            self.flash_console.append(f"$ {' '.join(cmd)}\n")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-            for line in process.stdout:
-                self.flash_console.append(line.rstrip())
-                self.flash_console.ensureCursorVisible()
-                QApplication.processEvents()  # Keep UI responsive
-            process.wait()
-            if process.returncode == 0:
-                self.flash_status.setText("Flashing successful!")
+        # Check which mode is selected
+        use_merged = self.flash_mode_merged_radio.isChecked()
+        
+        if use_merged:
+            # Merged .bin file mode
+            merged_file = self.merged_file_edit.text().strip()
+            if not merged_file:
+                self.flash_status.setText("Please select a merged .bin file.")
+                return
+            
+            # Determine boot offset based on chip type (for merged files, we flash at boot offset)
+            if chip in ["esp32s2", "esp32"]:
+                flash_offset = "0x1000"
+            elif chip in ["esp32s3", "esp32c3", "esp32c5", "esp32c6"]:
+                flash_offset = "0x0"
             else:
-                self.flash_status.setText("Flashing failed. See console output.")
-        except Exception as e:
-            self.flash_status.setText(f"Error: {str(e)}")
-            self.flash_console.append(f"Error: {str(e)}")
-        finally:
-            QApplication.restoreOverrideCursor()
+                flash_offset = "0x1000"  # Default/fallback
+
+            self.flash_status.setText(f"Flashing merged .bin ({chip})... Please wait.")
+            self.flash_console.clear()
+            self.reset_flash_progress()
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            error_message = None
+            try:
+                import subprocess
+                cmd = [
+                    sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write_flash",
+                    flash_offset, merged_file
+                ]
+                self.flash_console.append(f"$ {' '.join(cmd)}\n")
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                for line in process.stdout:
+                    self.flash_console.append(line.rstrip())
+                    self.flash_console.ensureCursorVisible()
+                    
+                    # Parse output for progress and errors
+                    has_progress, progress, error = self.parse_esptool_output(line)
+                    if error:
+                        error_message = error
+                        self.flash_progress_label.setText(f"Error: {error}")
+                        self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                    elif has_progress and progress is not None:
+                        self.update_flash_progress(progress)
+                    
+                    QApplication.processEvents()  # Keep UI responsive
+                process.wait()
+                if process.returncode == 0:
+                    self.flash_status.setText("Flashing successful!")
+                    self.update_flash_progress(100, "Flashing completed successfully!")
+                    self.flash_progress_label.setStyleSheet("color: #44bb44;")
+                else:
+                    self.flash_status.setText("Flashing failed. See console output.")
+                    if error_message:
+                        self.flash_progress_label.setText(f"Error: {error_message}")
+                    else:
+                        self.flash_progress_label.setText("Flashing failed. See console output.")
+                    self.flash_progress_label.setStyleSheet("color: #ff4444;")
+            except Exception as e:
+                self.flash_status.setText(f"Error: {str(e)}")
+                self.flash_console.append(f"Error: {str(e)}")
+                self.flash_progress_label.setText(f"Error: {str(e)}")
+                self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                self.flash_progress_label.setVisible(True)
+            finally:
+                QApplication.restoreOverrideCursor()
+        else:
+            # Separate files mode
+            bootloader = self.bootloader_file_edit.text().strip()
+            partition = self.partition_file_edit.text().strip()
+            firmware = self.firmware_file_edit.text().strip()
+
+            if not all([bootloader, partition, firmware]):
+                self.flash_status.setText("Please select all .bin files.")
+                return
+
+            # Determine offsets based on chip type
+            if chip in ["esp32s2", "esp32"]:
+                boot_offset = "0x1000"
+            elif chip in ["esp32s3", "esp32c3", "esp32c5", "esp32c6"]:
+                boot_offset = "0x0"
+            else:
+                boot_offset = "0x1000"  # Default/fallback
+
+            partition_offset = "0x8000"
+            firmware_offset = "0x10000"
+
+            self.flash_status.setText(f"Flashing ({chip})... Please wait.")
+            self.flash_console.clear()
+            self.reset_flash_progress()
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            error_message = None
+            try:
+                import subprocess
+                cmd = [
+                    sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write_flash",
+                    boot_offset, bootloader,
+                    partition_offset, partition,
+                    firmware_offset, firmware
+                ]
+                self.flash_console.append(f"$ {' '.join(cmd)}\n")
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                for line in process.stdout:
+                    self.flash_console.append(line.rstrip())
+                    self.flash_console.ensureCursorVisible()
+                    
+                    # Parse output for progress and errors
+                    has_progress, progress, error = self.parse_esptool_output(line)
+                    if error:
+                        error_message = error
+                        self.flash_progress_label.setText(f"Error: {error}")
+                        self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                    elif has_progress and progress is not None:
+                        self.update_flash_progress(progress)
+                    
+                    QApplication.processEvents()  # Keep UI responsive
+                process.wait()
+                if process.returncode == 0:
+                    self.flash_status.setText("Flashing successful!")
+                    self.update_flash_progress(100, "Flashing completed successfully!")
+                    self.flash_progress_label.setStyleSheet("color: #44bb44;")
+                else:
+                    self.flash_status.setText("Flashing failed. See console output.")
+                    if error_message:
+                        self.flash_progress_label.setText(f"Error: {error_message}")
+                    else:
+                        self.flash_progress_label.setText("Flashing failed. See console output.")
+                    self.flash_progress_label.setStyleSheet("color: #ff4444;")
+            except Exception as e:
+                self.flash_status.setText(f"Error: {str(e)}")
+                self.flash_console.append(f"Error: {str(e)}")
+                self.flash_progress_label.setText(f"Error: {str(e)}")
+                self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                self.flash_progress_label.setVisible(True)
+            finally:
+                QApplication.restoreOverrideCursor()
 
     def flash_custom_build(self):
         """Flash the .bin files built in ../../build to the ESP32 board."""
@@ -740,11 +943,13 @@ class ESP32ControlGUI(QMainWindow):
         firmware_offset = "0x10000"
 
         self.custom_flash_status.setText(f"Flashing ({chip})... Please wait.")
+        self.reset_flash_progress()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        error_message = None
         try:
             import subprocess
             cmd = [
-                sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write-flash",
+                sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write_flash",
                 boot_offset, bootloader,
                 partition_offset, partition,
                 firmware_offset, firmware
@@ -754,15 +959,35 @@ class ESP32ControlGUI(QMainWindow):
             for line in process.stdout:
                 self.flash_console.append(line.rstrip())
                 self.flash_console.ensureCursorVisible()
+                
+                # Parse output for progress and errors
+                has_progress, progress, error = self.parse_esptool_output(line)
+                if error:
+                    error_message = error
+                    self.flash_progress_label.setText(f"Error: {error}")
+                    self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                elif has_progress and progress is not None:
+                    self.update_flash_progress(progress)
+                
                 QApplication.processEvents()
             process.wait()
             if process.returncode == 0:
                 self.custom_flash_status.setText("Flashing successful!")
+                self.update_flash_progress(100, "Flashing completed successfully!")
+                self.flash_progress_label.setStyleSheet("color: #44bb44;")
             else:
                 self.custom_flash_status.setText("Flashing failed. See console output.")
+                if error_message:
+                    self.flash_progress_label.setText(f"Error: {error_message}")
+                else:
+                    self.flash_progress_label.setText("Flashing failed. See console output.")
+                self.flash_progress_label.setStyleSheet("color: #ff4444;")
         except Exception as e:
             self.custom_flash_status.setText(f"Error: {str(e)}")
             self.flash_console.append(f"Error: {str(e)}")
+            self.flash_progress_label.setText(f"Error: {str(e)}")
+            self.flash_progress_label.setStyleSheet("color: #ff4444;")
+            self.flash_progress_label.setVisible(True)
         finally:
             QApplication.restoreOverrideCursor()
 
@@ -790,6 +1015,7 @@ class ESP32ControlGUI(QMainWindow):
 
         self.flash_bundle_status.setText("Extracting and flashing bundle...")
         self.flash_console.clear()
+        self.reset_flash_progress()
         self.flash_console.append(f"Extracting {zip_path} ...")
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -842,24 +1068,42 @@ class ESP32ControlGUI(QMainWindow):
 
                 import subprocess
                 cmd = [
-                    sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write-flash",
+                    sys.executable, "-m", "esptool", "--chip", chip, "--port", port, "write_flash",
                     boot_offset, bootloader,
                     partition_offset, partition,
                     firmware_offset, firmware
                 ]
                 self.flash_console.append(f"$ {' '.join(cmd)}\n")
+                error_message = None
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 for line in process.stdout:
                     self.flash_console.append(line.rstrip())
                     self.flash_console.ensureCursorVisible()
+                    
+                    # Parse output for progress and errors
+                    has_progress, progress, error = self.parse_esptool_output(line)
+                    if error:
+                        error_message = error
+                        self.flash_progress_label.setText(f"Error: {error}")
+                        self.flash_progress_label.setStyleSheet("color: #ff4444;")
+                    elif has_progress and progress is not None:
+                        self.update_flash_progress(progress)
+                    
                     QApplication.processEvents()
                 process.wait()
                 if process.returncode == 0:
                     self.flash_bundle_status.setText("Flashing successful!")
                     self.flash_console.append("Flashing successful!")
+                    self.update_flash_progress(100, "Flashing completed successfully!")
+                    self.flash_progress_label.setStyleSheet("color: #44bb44;")
                 else:
                     self.flash_bundle_status.setText("Flashing failed. See console output.")
                     self.flash_console.append("Flashing failed. See console output.")
+                    if error_message:
+                        self.flash_progress_label.setText(f"Error: {error_message}")
+                    else:
+                        self.flash_progress_label.setText("Flashing failed. See console output.")
+                    self.flash_progress_label.setStyleSheet("color: #ff4444;")
         except Exception as e:
             self.flash_bundle_status.setText(f"Error: {str(e)}")
             self.flash_console.append(f"Error: {str(e)}")
@@ -932,7 +1176,7 @@ class ESP32ControlGUI(QMainWindow):
         # --- Flash Mode Button (right justified) ---
         self.flash_mode_btn = QPushButton("Flash Mode")
         self.flash_mode_btn.setCheckable(True)
-        self.flash_mode_btn.setFixedWidth(110)
+        self.flash_mode_btn.setFixedWidth(130)  # Increased to fit "Command Mode" text
         self.flash_mode_btn.setToolTip("Toggle Flash Mode to flash your board")
         self.flash_mode_btn.clicked.connect(self.toggle_flash_mode)
         connection_layout.addWidget(self.flash_mode_btn)
@@ -976,53 +1220,26 @@ class ESP32ControlGUI(QMainWindow):
 
     def setup_command_panels(self, layout):
         """
-        Set up the command panel dropdown and associated panels.
+        Set up the command panel tabs and associated panels.
 
         Args:
-            layout (QVBoxLayout): The layout to add the panels to.
+            layout (QVBoxLayout): The layout to add the tabs to.
         """
-        # Dropdown for panel selection
-        self.panel_combo = QComboBox()
-        self.panel_combo.addItems([
-            "WiFi Operations",
-            "Network Operations",
-            "BLE Operations",
-            "Evil Portal",
-            "Settings"
-        ])
-        layout.addWidget(self.panel_combo)
-
-        # Create each panel widget
-        self.panels = []
-        self.panels.append(self.create_wifi_tab())
-        self.panels.append(self.create_network_tab())
-        self.panels.append(self.create_ble_tab())
-        self.panels.append(self.create_evil_portal_tab())
-        self.panels.append(self.create_settings_tab())
-
-        # Container for panels
-        self.panel_container = QWidget()
-        self.panel_layout = QVBoxLayout(self.panel_container)
-        for panel in self.panels:
-            self.panel_layout.addWidget(panel)
-            panel.hide()
-        layout.addWidget(self.panel_container)
-
-        # Show the first panel by default
-        self.panels[0].show()
-
-        # Connect dropdown change to panel switch
-        self.panel_combo.currentIndexChanged.connect(self.switch_panel)
-
-    def switch_panel(self, index):
-        """
-        Switch the visible command panel based on dropdown selection.
-
-        Args:
-            index (int): The index of the selected panel.
-        """
-        for i, panel in enumerate(self.panels):
-            panel.setVisible(i == index)
+        # Create tab widget for panel selection
+        self.panel_tabs = QTabWidget()
+        self.panel_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # Create each panel widget and add as tabs
+        self.panel_tabs.addTab(self.create_wifi_tab(), "WiFi Operations")
+        self.panel_tabs.addTab(self.create_network_tab(), "Network Operations")
+        self.panel_tabs.addTab(self.create_ble_tab(), "BLE Operations")
+        self.panel_tabs.addTab(self.create_evil_portal_tab(), "Evil Portal")
+        self.panel_tabs.addTab(self.create_settings_tab(), "Settings")
+        
+        layout.addWidget(self.panel_tabs)
+        
+        # Store reference to tab widget as panel_container for compatibility
+        self.panel_container = self.panel_tabs
 
     def setup_command_tabs(self, layout):
         """
@@ -1034,44 +1251,21 @@ class ESP32ControlGUI(QMainWindow):
         self.setup_command_panels(layout)
 
     def create_wifi_tab(self):
-        """Create and return the WiFi operations tab widget."""
-        wifi_widget = QWidget()
-        wifi_layout = QGridLayout(wifi_widget)
-
-        # Scanning Operations
+        """Create and return the WiFi operations tab widget with subtabs."""
+        wifi_tabs = QTabWidget()
+        wifi_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # Scanning subtab
+        scanning_widget = QWidget()
+        scanning_layout = QGridLayout(scanning_widget)
         self.create_command_group("WiFi Scanning", [
             ("Scan Access Points", "scanap"),
             ("Scan Stations", "scansta"),
             ("Stop Scan", "stopscan"),
             ("List APs", "list -a"),
             ("List Stations", "list -s")
-        ], wifi_layout, 0, 0)
-
-        # Attack Operations
-        self.create_command_group("Attack Operations", [
-            ("Start Deauth", "attack -d"),
-            ("Stop Deauth", "stopdeauth"),
-            ("Select AP", lambda: show_select_ap_dialog(self))
-        ], wifi_layout, 0, 1)
-
-        # Beacon Operations
-        self.create_command_group("Beacon Operations", [
-            ("Random Beacon Spam", "beaconspam -r"),
-            ("Rickroll Beacon", "beaconspam -rr"),
-            ("AP List Beacon", "beaconspam -l"),
-            ("Custom SSID Beacon", lambda: show_custom_beacon_dialog(self)),
-            ("Stop Spam", "stopspam")
-        ], wifi_layout, 1, 0)
-
-        # Beacon List Management
-        self.create_command_group("Beacon List Management", [
-            ("Add SSID to List", self.show_beacon_add_dialog),
-            ("Remove SSID from List", self.show_beacon_remove_dialog),
-            ("Clear Beacon List", "beaconclear"),
-            ("Show Beacon List", "beaconshow"),
-            ("Spam Beacon List", "beaconspamlist"),
-        ], wifi_layout, 1, 1)
-
+        ], scanning_layout, 0, 0)
+        
         # Probe Request Listener
         probe_group = QGroupBox("Probe Request Listener")
         probe_layout = QHBoxLayout(probe_group)
@@ -1084,11 +1278,48 @@ class ESP32ControlGUI(QMainWindow):
         stop_probe_btn = QPushButton("Stop Listening")
         stop_probe_btn.clicked.connect(lambda: self.send_command("listenprobes stop"))
         probe_layout.addWidget(stop_probe_btn)
-        wifi_layout.addWidget(probe_group, 2, 0)
-
-        # --- Capture Controls ---
+        scanning_layout.addWidget(probe_group, 0, 1)
+        scanning_layout.setColumnStretch(0, 1)
+        scanning_layout.setColumnStretch(1, 1)
+        wifi_tabs.addTab(scanning_widget, "Scanning")
+        
+        # Attacks subtab
+        attacks_widget = QWidget()
+        attacks_layout = QGridLayout(attacks_widget)
+        self.create_command_group("Attack Operations", [
+            ("Start Deauth", "attack -d"),
+            ("Stop Deauth", "stopdeauth"),
+            ("Select AP", lambda: show_select_ap_dialog(self))
+        ], attacks_layout, 0, 0)
+        attacks_layout.setColumnStretch(0, 1)
+        wifi_tabs.addTab(attacks_widget, "Attacks")
+        
+        # Beacons subtab
+        beacons_widget = QWidget()
+        beacons_layout = QGridLayout(beacons_widget)
+        self.create_command_group("Beacon Operations", [
+            ("Random Beacon Spam", "beaconspam -r"),
+            ("Rickroll Beacon", "beaconspam -rr"),
+            ("AP List Beacon", "beaconspam -l"),
+            ("Custom SSID Beacon", lambda: show_custom_beacon_dialog(self)),
+            ("Stop Spam", "stopspam")
+        ], beacons_layout, 0, 0)
+        self.create_command_group("Beacon List Management", [
+            ("Add SSID to List", self.show_beacon_add_dialog),
+            ("Remove SSID from List", self.show_beacon_remove_dialog),
+            ("Clear Beacon List", "beaconclear"),
+            ("Show Beacon List", "beaconshow"),
+            ("Spam Beacon List", "beaconspamlist"),
+        ], beacons_layout, 0, 1)
+        beacons_layout.setColumnStretch(0, 1)
+        beacons_layout.setColumnStretch(1, 1)
+        wifi_tabs.addTab(beacons_widget, "Beacons")
+        
+        # Capture subtab
+        capture_widget = QWidget()
+        capture_layout = QVBoxLayout(capture_widget)
         capture_group = QGroupBox("Capture Operations")
-        capture_layout = QVBoxLayout(capture_group)
+        capture_group_layout = QVBoxLayout(capture_group)
         self.capture_type_combo = QComboBox()
         self.capture_type_combo.addItems([
             "Probes",
@@ -1099,8 +1330,8 @@ class ESP32ControlGUI(QMainWindow):
             "Pwnagotchi"
         ])
         self.capture_type_combo.setMinimumHeight(32)
-        capture_layout.addWidget(QLabel("Capture Type:"))
-        capture_layout.addWidget(self.capture_type_combo)
+        capture_group_layout.addWidget(QLabel("Capture Type:"))
+        capture_group_layout.addWidget(self.capture_type_combo)
         button_layout = QHBoxLayout()
         start_btn = QPushButton("Start Capture")
         stop_btn = QPushButton("Stop Capture")
@@ -1108,78 +1339,85 @@ class ESP32ControlGUI(QMainWindow):
         stop_btn.setMinimumHeight(32)
         button_layout.addWidget(start_btn)
         button_layout.addWidget(stop_btn)
-        capture_layout.addLayout(button_layout)
-        capture_layout.addStretch()
+        capture_group_layout.addLayout(button_layout)
+        capture_group_layout.addStretch()
         start_btn.clicked.connect(self.start_capture)
         stop_btn.clicked.connect(lambda: self.send_command("capture -stop"))
-        # Place Capture Operations at the bottom of the WiFi tab, spanning both columns
-        wifi_layout.addWidget(capture_group, 2, 1)
-
-        wifi_layout.setColumnStretch(0, 1)
-        wifi_layout.setColumnStretch(1, 1)
-
-        return wifi_widget
+        capture_layout.addWidget(capture_group)
+        capture_layout.addStretch()
+        wifi_tabs.addTab(capture_widget, "Capture")
+        
+        return wifi_tabs
 
     def create_network_tab(self):
-        """Create and return the Network operations tab widget."""
-        network_widget = QWidget()
-        network_layout = QGridLayout(network_widget)
-
-        # WiFi Connection
+        """Create and return the Network operations tab widget with subtabs."""
+        network_tabs = QTabWidget()
+        network_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # WiFi Connection subtab
+        wifi_connect_widget = QWidget()
+        wifi_connect_layout = QVBoxLayout(wifi_connect_widget)
         wifi_connect_group = QGroupBox("WiFi Connection")
-        wifi_connect_layout = QFormLayout(wifi_connect_group)
+        wifi_connect_form = QFormLayout(wifi_connect_group)
         self.wifi_ssid = QLineEdit()
         self.wifi_password = QLineEdit()
         self.wifi_password.setEchoMode(QLineEdit.EchoMode.Password)
-        wifi_connect_layout.addRow("SSID:", self.wifi_ssid)
-        wifi_connect_layout.addRow("Password:", self.wifi_password)
+        wifi_connect_form.addRow("SSID:", self.wifi_ssid)
+        wifi_connect_form.addRow("Password:", self.wifi_password)
         connect_btn = QPushButton("Connect to Network")
         connect_btn.clicked.connect(self.connect_to_wifi)
-        wifi_connect_layout.addRow(connect_btn)
-        network_layout.addWidget(wifi_connect_group, 0, 0)
-
-        # Network Tools
+        wifi_connect_form.addRow(connect_btn)
+        wifi_connect_layout.addWidget(wifi_connect_group)
+        wifi_connect_layout.addStretch()
+        network_tabs.addTab(wifi_connect_widget, "WiFi Connection")
+        
+        # Network Tools subtab
+        network_tools_widget = QWidget()
+        network_tools_layout = QGridLayout(network_tools_widget)
         self.create_command_group("Network Tools", [
             ("Cast Random YouTube Video", "dialconnect"),
             ("Print to Network Printer", lambda: show_printer_dialog(self))
-        ], network_layout, 0, 1)
-
-        # Port Scanner
+        ], network_tools_layout, 0, 0)
+        network_tools_layout.setColumnStretch(0, 1)
+        network_tabs.addTab(network_tools_widget, "Network Tools")
+        
+        # Port Scanner subtab
+        portscan_widget = QWidget()
+        portscan_layout = QVBoxLayout(portscan_widget)
         portscan_group = QGroupBox("Port Scanner")
-        portscan_layout = QFormLayout(portscan_group)
+        portscan_form = QFormLayout(portscan_group)
         self.portscan_ip = QLineEdit()
         self.portscan_args = QLineEdit()
-        portscan_layout.addRow("Target IP (or 'local'):", self.portscan_ip)
-        portscan_layout.addRow("Args (-C, -A, or range):", self.portscan_args)
+        portscan_form.addRow("Target IP (or 'local'):", self.portscan_ip)
+        portscan_form.addRow("Args (-C, -A, or range):", self.portscan_args)
         scan_btn = QPushButton("Scan Ports")
         scan_btn.clicked.connect(self.run_port_scan)
-        portscan_layout.addRow(scan_btn)
-        network_layout.addWidget(portscan_group, 1, 0)
-
+        portscan_form.addRow(scan_btn)
+        portscan_layout.addWidget(portscan_group)
+        portscan_layout.addStretch()
+        network_tabs.addTab(portscan_widget, "Port Scanner")
         
-        # Make both columns stretch equally
-        network_layout.setColumnStretch(0, 1)
-        network_layout.setColumnStretch(1, 1)
-
-        return network_widget
+        return network_tabs
 
     def create_ble_tab(self):
-        """Create and return the BLE operations tab widget."""
-        ble_widget = QWidget()
-        ble_layout = QGridLayout(ble_widget)
-
+        """Create and return the BLE operations tab widget with subtabs."""
+        ble_tabs = QTabWidget()
+        ble_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # BLE Scanning subtab
+        ble_scanning_widget = QWidget()
+        ble_scanning_layout = QGridLayout(ble_scanning_widget)
         self.create_command_group("BLE Scanning", [
             ("Find Flippers", "blescan -f"),
             ("BLE Spam Detector", "blescan -ds"),
             ("AirTag Scanner", "blescan -a"),
             ("Raw BLE Scan", "blescan -r"),
             ("Stop BLE Scan", "blescan -s")
-        ], ble_layout, 0, 0)
-
-        ble_layout.setColumnStretch(0, 1)
-        ble_layout.setColumnStretch(1, 1)
-
-        return ble_widget
+        ], ble_scanning_layout, 0, 0)
+        ble_scanning_layout.setColumnStretch(0, 1)
+        ble_tabs.addTab(ble_scanning_widget, "Scanning")
+        
+        return ble_tabs
 
     def create_capture_tab(self):
         """Create and return the Capture operations tab widget as a dropdown with Start/Stop buttons."""
@@ -1271,27 +1509,29 @@ class ESP32ControlGUI(QMainWindow):
         return portal_widget
 
     def create_settings_tab(self):
-        """Create and return the Settings tab widget with grouped categories."""
-        settings_widget = QWidget()
-        main_layout = QVBoxLayout(settings_widget)
-
-        # --- Display Settings ---
+        """Create and return the Settings tab widget with subtabs."""
+        settings_tabs = QTabWidget()
+        settings_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # Display Settings subtab
+        display_widget = QWidget()
+        display_layout = QVBoxLayout(display_widget)
         display_group = QGroupBox("Display Settings")
-        display_layout = QFormLayout(display_group)
+        display_form = QFormLayout(display_group)
 
         rgb_mode = QComboBox()
         rgb_mode.addItems(["Normal", "Rainbow", "Stealth"])
         rgb_mode.currentIndexChanged.connect(
             lambda i: self.send_command(f"setrgbmode {rgb_mode.currentText().lower()}")
         )
-        display_layout.addRow("RGB Mode:", rgb_mode)
+        display_form.addRow("RGB Mode:", rgb_mode)
 
         timeout = QComboBox()
         timeout.addItems(["5s", "10s", "30s", "60s", "Never"])
         timeout.currentIndexChanged.connect(
             lambda i: self.send_command(f"settimeout {i}")
         )
-        display_layout.addRow("Display Timeout:", timeout)
+        display_form.addRow("Display Timeout:", timeout)
 
         theme = QComboBox()
         theme.addItems([
@@ -1302,68 +1542,399 @@ class ESP32ControlGUI(QMainWindow):
         theme.currentIndexChanged.connect(
             lambda i: self.send_command(f"settheme {i}")
         )
-        display_layout.addRow("Menu Theme:", theme)
+        display_form.addRow("Menu Theme:", theme)
 
         term_color = QComboBox()
         term_color.addItems(["Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"])
         term_color.currentIndexChanged.connect(
             lambda i: self.send_command(f"settermcolor {i}")
         )
-        display_layout.addRow("Terminal Color:", term_color)
+        display_form.addRow("Terminal Color:", term_color)
 
         invert_colors = QComboBox()
         invert_colors.addItems(["Off", "On"])
         invert_colors.currentIndexChanged.connect(
             lambda i: self.send_command(f"setinvert {'on' if i else 'off'}")
         )
-        display_layout.addRow("Invert Colors:", invert_colors)
+        display_form.addRow("Invert Colors:", invert_colors)
 
         max_brightness = QComboBox()
         max_brightness.addItems(["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"])
         max_brightness.currentIndexChanged.connect(
             lambda i: self.send_command(f"setbrightness {(i+1)*10}")
         )
-        display_layout.addRow("Max Brightness:", max_brightness)
+        display_form.addRow("Max Brightness:", max_brightness)
 
-        main_layout.addWidget(display_group)
+        display_layout.addWidget(display_group)
+        display_layout.addStretch()
+        settings_tabs.addTab(display_widget, "Display")
 
-        # --- Network Settings ---
+        # RGB Settings subtab
+        rgb_widget = QWidget()
+        rgb_layout = QVBoxLayout(rgb_widget)
+        rgb_group = QGroupBox("RGB/LED Settings")
+        rgb_form = QFormLayout(rgb_group)
+
+        rgb_speed = QSpinBox()
+        rgb_speed.setRange(0, 255)
+        rgb_speed.setValue(128)
+        rgb_speed.valueChanged.connect(
+            lambda v: self.send_command(f"settings set rgb_speed {v}")
+        )
+        rgb_form.addRow("RGB Speed (0-255):", rgb_speed)
+
+        rgb_data_pin = QSpinBox()
+        rgb_data_pin.setRange(-1, 48)
+        rgb_data_pin.setValue(-1)
+        rgb_data_pin.setSpecialValueText("Not used")
+        rgb_data_pin.valueChanged.connect(
+            lambda v: self.send_command(f"settings set rgb_data_pin {v}")
+        )
+        rgb_form.addRow("RGB Data Pin:", rgb_data_pin)
+
+        rgb_red_pin = QSpinBox()
+        rgb_red_pin.setRange(-1, 48)
+        rgb_red_pin.setValue(-1)
+        rgb_red_pin.setSpecialValueText("Not used")
+        rgb_red_pin.valueChanged.connect(
+            lambda v: self.send_command(f"settings set rgb_red_pin {v}")
+        )
+        rgb_form.addRow("RGB Red Pin:", rgb_red_pin)
+
+        rgb_green_pin = QSpinBox()
+        rgb_green_pin.setRange(-1, 48)
+        rgb_green_pin.setValue(-1)
+        rgb_green_pin.setSpecialValueText("Not used")
+        rgb_green_pin.valueChanged.connect(
+            lambda v: self.send_command(f"settings set rgb_green_pin {v}")
+        )
+        rgb_form.addRow("RGB Green Pin:", rgb_green_pin)
+
+        rgb_blue_pin = QSpinBox()
+        rgb_blue_pin.setRange(-1, 48)
+        rgb_blue_pin.setValue(-1)
+        rgb_blue_pin.setSpecialValueText("Not used")
+        rgb_blue_pin.valueChanged.connect(
+            lambda v: self.send_command(f"settings set rgb_blue_pin {v}")
+        )
+        rgb_form.addRow("RGB Blue Pin:", rgb_blue_pin)
+
+        neopixel_bright = QSpinBox()
+        neopixel_bright.setRange(0, 100)
+        neopixel_bright.setValue(50)
+        neopixel_bright.setSuffix("%")
+        neopixel_bright.valueChanged.connect(
+            lambda v: self.send_command(f"settings set neopixel_bright {v}")
+        )
+        rgb_form.addRow("Neopixel Brightness:", neopixel_bright)
+
+        rgb_layout.addWidget(rgb_group)
+        rgb_layout.addStretch()
+        settings_tabs.addTab(rgb_widget, "RGB/LED")
+
+        # Network Settings subtab
+        network_widget = QWidget()
+        network_layout = QVBoxLayout(network_widget)
         network_group = QGroupBox("Network Settings")
-        network_layout = QFormLayout(network_group)
+        network_form = QFormLayout(network_group)
 
         web_auth = QComboBox()
         web_auth.addItems(["Off", "On"])
         web_auth.currentIndexChanged.connect(
             lambda i: self.send_command(f"webauth {'on' if i else 'off'}")
         )
-        network_layout.addRow("Web Auth:", web_auth)
+        network_form.addRow("Web Auth:", web_auth)
 
         ap_enabled = QComboBox()
         ap_enabled.addItems(["Off", "On"])
         ap_enabled.currentIndexChanged.connect(
             lambda i: self.send_command(f"apenable {'on' if i else 'off'}")
         )
-        network_layout.addRow("AP Enabled:", ap_enabled)
+        network_form.addRow("AP Enabled:", ap_enabled)
 
-        main_layout.addWidget(network_group)
+        ap_ssid = QLineEdit()
+        ap_ssid.setPlaceholderText("Enter AP SSID")
+        ap_ssid.returnPressed.connect(
+            lambda: self.send_command(f"settings set ap_ssid {ap_ssid.text()}")
+        )
+        ap_ssid_btn = QPushButton("Set AP SSID")
+        ap_ssid_btn.clicked.connect(
+            lambda: self.send_command(f"settings set ap_ssid {ap_ssid.text()}")
+        )
+        ap_ssid_layout = QHBoxLayout()
+        ap_ssid_layout.addWidget(ap_ssid)
+        ap_ssid_layout.addWidget(ap_ssid_btn)
+        network_form.addRow("AP SSID:", ap_ssid_layout)
 
-        # --- System Settings ---
+        ap_password = QLineEdit()
+        ap_password.setEchoMode(QLineEdit.EchoMode.Password)
+        ap_password.setPlaceholderText("Enter AP password")
+        ap_password.returnPressed.connect(
+            lambda: self.send_command(f"settings set ap_password {ap_password.text()}")
+        )
+        ap_password_btn = QPushButton("Set AP Password")
+        ap_password_btn.clicked.connect(
+            lambda: self.send_command(f"settings set ap_password {ap_password.text()}")
+        )
+        ap_password_layout = QHBoxLayout()
+        ap_password_layout.addWidget(ap_password)
+        ap_password_layout.addWidget(ap_password_btn)
+        network_form.addRow("AP Password:", ap_password_layout)
+
+        sta_ssid = QLineEdit()
+        sta_ssid.setPlaceholderText("Enter Station SSID")
+        sta_ssid.returnPressed.connect(
+            lambda: self.send_command(f"settings set sta_ssid {sta_ssid.text()}")
+        )
+        sta_ssid_btn = QPushButton("Set Station SSID")
+        sta_ssid_btn.clicked.connect(
+            lambda: self.send_command(f"settings set sta_ssid {sta_ssid.text()}")
+        )
+        sta_ssid_layout = QHBoxLayout()
+        sta_ssid_layout.addWidget(sta_ssid)
+        sta_ssid_layout.addWidget(sta_ssid_btn)
+        network_form.addRow("Station SSID:", sta_ssid_layout)
+
+        sta_password = QLineEdit()
+        sta_password.setEchoMode(QLineEdit.EchoMode.Password)
+        sta_password.setPlaceholderText("Enter Station password")
+        sta_password.returnPressed.connect(
+            lambda: self.send_command(f"settings set sta_password {sta_password.text()}")
+        )
+        sta_password_btn = QPushButton("Set Station Password")
+        sta_password_btn.clicked.connect(
+            lambda: self.send_command(f"settings set sta_password {sta_password.text()}")
+        )
+        sta_password_layout = QHBoxLayout()
+        sta_password_layout.addWidget(sta_password)
+        sta_password_layout.addWidget(sta_password_btn)
+        network_form.addRow("Station Password:", sta_password_layout)
+
+        network_layout.addWidget(network_group)
+        network_layout.addStretch()
+        settings_tabs.addTab(network_widget, "Network")
+
+        # Evil Portal Settings subtab
+        portal_settings_widget = QWidget()
+        portal_settings_layout = QVBoxLayout(portal_settings_widget)
+        portal_settings_group = QGroupBox("Evil Portal Settings")
+        portal_settings_form = QFormLayout(portal_settings_group)
+
+        portal_url = QLineEdit()
+        portal_url.setPlaceholderText("Enter portal URL or file path")
+        portal_url.returnPressed.connect(
+            lambda: self.send_command(f"settings set portal_url {portal_url.text()}")
+        )
+        portal_url_btn = QPushButton("Set")
+        portal_url_btn.clicked.connect(
+            lambda: self.send_command(f"settings set portal_url {portal_url.text()}")
+        )
+        portal_url_layout = QHBoxLayout()
+        portal_url_layout.addWidget(portal_url)
+        portal_url_layout.addWidget(portal_url_btn)
+        portal_settings_form.addRow("Portal URL:", portal_url_layout)
+
+        portal_ssid_setting = QLineEdit()
+        portal_ssid_setting.setPlaceholderText("Enter portal SSID")
+        portal_ssid_setting.returnPressed.connect(
+            lambda: self.send_command(f"settings set portal_ssid {portal_ssid_setting.text()}")
+        )
+        portal_ssid_setting_btn = QPushButton("Set")
+        portal_ssid_setting_btn.clicked.connect(
+            lambda: self.send_command(f"settings set portal_ssid {portal_ssid_setting.text()}")
+        )
+        portal_ssid_setting_layout = QHBoxLayout()
+        portal_ssid_setting_layout.addWidget(portal_ssid_setting)
+        portal_ssid_setting_layout.addWidget(portal_ssid_setting_btn)
+        portal_settings_form.addRow("Portal SSID:", portal_ssid_setting_layout)
+
+        portal_password_setting = QLineEdit()
+        portal_password_setting.setEchoMode(QLineEdit.EchoMode.Password)
+        portal_password_setting.setPlaceholderText("Enter portal password")
+        portal_password_setting.returnPressed.connect(
+            lambda: self.send_command(f"settings set portal_password {portal_password_setting.text()}")
+        )
+        portal_password_setting_btn = QPushButton("Set")
+        portal_password_setting_btn.clicked.connect(
+            lambda: self.send_command(f"settings set portal_password {portal_password_setting.text()}")
+        )
+        portal_password_setting_layout = QHBoxLayout()
+        portal_password_setting_layout.addWidget(portal_password_setting)
+        portal_password_setting_layout.addWidget(portal_password_setting_btn)
+        portal_settings_form.addRow("Portal Password:", portal_password_setting_layout)
+
+        portal_ap_ssid = QLineEdit()
+        portal_ap_ssid.setPlaceholderText("Enter portal AP SSID")
+        portal_ap_ssid.returnPressed.connect(
+            lambda: self.send_command(f"settings set portal_ap_ssid {portal_ap_ssid.text()}")
+        )
+        portal_ap_ssid_btn = QPushButton("Set")
+        portal_ap_ssid_btn.clicked.connect(
+            lambda: self.send_command(f"settings set portal_ap_ssid {portal_ap_ssid.text()}")
+        )
+        portal_ap_ssid_layout = QHBoxLayout()
+        portal_ap_ssid_layout.addWidget(portal_ap_ssid)
+        portal_ap_ssid_layout.addWidget(portal_ap_ssid_btn)
+        portal_settings_form.addRow("Portal AP SSID:", portal_ap_ssid_layout)
+
+        portal_domain = QLineEdit()
+        portal_domain.setPlaceholderText("Enter portal domain")
+        portal_domain.returnPressed.connect(
+            lambda: self.send_command(f"settings set portal_domain {portal_domain.text()}")
+        )
+        portal_domain_btn = QPushButton("Set")
+        portal_domain_btn.clicked.connect(
+            lambda: self.send_command(f"settings set portal_domain {portal_domain.text()}")
+        )
+        portal_domain_layout = QHBoxLayout()
+        portal_domain_layout.addWidget(portal_domain)
+        portal_domain_layout.addWidget(portal_domain_btn)
+        portal_settings_form.addRow("Portal Domain:", portal_domain_layout)
+
+        portal_offline = QComboBox()
+        portal_offline.addItems(["Off", "On"])
+        portal_offline.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set portal_offline {'true' if i else 'false'}")
+        )
+        portal_settings_form.addRow("Portal Offline Mode:", portal_offline)
+
+        portal_settings_layout.addWidget(portal_settings_group)
+        portal_settings_layout.addStretch()
+        settings_tabs.addTab(portal_settings_widget, "Evil Portal")
+
+        # Printer Settings subtab
+        printer_widget = QWidget()
+        printer_layout = QVBoxLayout(printer_widget)
+        printer_group = QGroupBox("Printer Settings")
+        printer_form = QFormLayout(printer_group)
+
+        printer_ip = QLineEdit()
+        printer_ip.setPlaceholderText("Enter printer IP address")
+        printer_ip.returnPressed.connect(
+            lambda: self.send_command(f"settings set printer_ip {printer_ip.text()}")
+        )
+        printer_ip_btn = QPushButton("Set")
+        printer_ip_btn.clicked.connect(
+            lambda: self.send_command(f"settings set printer_ip {printer_ip.text()}")
+        )
+        printer_ip_layout = QHBoxLayout()
+        printer_ip_layout.addWidget(printer_ip)
+        printer_ip_layout.addWidget(printer_ip_btn)
+        printer_form.addRow("Printer IP:", printer_ip_layout)
+
+        printer_text = QLineEdit()
+        printer_text.setPlaceholderText("Enter printer text")
+        printer_text.returnPressed.connect(
+            lambda: self.send_command(f"settings set printer_text {printer_text.text()}")
+        )
+        printer_text_btn = QPushButton("Set")
+        printer_text_btn.clicked.connect(
+            lambda: self.send_command(f"settings set printer_text {printer_text.text()}")
+        )
+        printer_text_layout = QHBoxLayout()
+        printer_text_layout.addWidget(printer_text)
+        printer_text_layout.addWidget(printer_text_btn)
+        printer_form.addRow("Printer Text:", printer_text_layout)
+
+        printer_font_size = QSpinBox()
+        printer_font_size.setRange(1, 100)
+        printer_font_size.setValue(12)
+        printer_font_size.valueChanged.connect(
+            lambda v: self.send_command(f"settings set printer_font_size {v}")
+        )
+        printer_form.addRow("Printer Font Size:", printer_font_size)
+
+        printer_alignment = QComboBox()
+        printer_alignment.addItems(["0", "1", "2", "3", "4"])
+        printer_alignment.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set printer_alignment {i}")
+        )
+        printer_form.addRow("Printer Alignment:", printer_alignment)
+
+        printer_layout.addWidget(printer_group)
+        printer_layout.addStretch()
+        settings_tabs.addTab(printer_widget, "Printer")
+
+        # System Settings subtab
+        system_widget = QWidget()
+        system_layout = QVBoxLayout(system_widget)
         system_group = QGroupBox("System Settings")
-        system_layout = QFormLayout(system_group)
+        system_form = QFormLayout(system_group)
 
         thirds_control = QComboBox()
         thirds_control.addItems(["Off", "On"])
         thirds_control.currentIndexChanged.connect(
             lambda i: self.send_command(f"setthirdcontrol {'on' if i else 'off'}")
         )
-        system_layout.addRow("Third Control:", thirds_control)
+        system_form.addRow("Third Control:", thirds_control)
 
         power_save = QComboBox()
         power_save.addItems(["Off", "On"])
         power_save.currentIndexChanged.connect(
             lambda i: self.send_command(f"setpowersave {'on' if i else 'off'}")
         )
-        system_layout.addRow("Power Saving Mode:", power_save)
+        system_form.addRow("Power Saving Mode:", power_save)
+
+        channel_delay = QSpinBox()
+        channel_delay.setRange(0, 10000)
+        channel_delay.setValue(100)
+        channel_delay.setSuffix(" ms")
+        channel_delay.valueChanged.connect(
+            lambda v: self.send_command(f"settings set channel_delay {v}")
+        )
+        system_form.addRow("Channel Delay:", channel_delay)
+
+        broadcast_speed = QSpinBox()
+        broadcast_speed.setRange(1, 1000)
+        broadcast_speed.setValue(1)
+        broadcast_speed.valueChanged.connect(
+            lambda v: self.send_command(f"settings set broadcast_speed {v}")
+        )
+        system_form.addRow("Broadcast Speed:", broadcast_speed)
+
+        gps_rx_pin = QSpinBox()
+        gps_rx_pin.setRange(-1, 48)
+        gps_rx_pin.setValue(-1)
+        gps_rx_pin.setSpecialValueText("Not used")
+        gps_rx_pin.valueChanged.connect(
+            lambda v: self.send_command(f"settings set gps_rx_pin {v}")
+        )
+        system_form.addRow("GPS RX Pin:", gps_rx_pin)
+
+        zebra_menus = QComboBox()
+        zebra_menus.addItems(["Off", "On"])
+        zebra_menus.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set zebra_menus {'true' if i else 'false'}")
+        )
+        system_form.addRow("Zebra Menus:", zebra_menus)
+
+        nav_buttons = QComboBox()
+        nav_buttons.addItems(["Off", "On"])
+        nav_buttons.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set nav_buttons {'true' if i else 'false'}")
+        )
+        system_form.addRow("Navigation Buttons:", nav_buttons)
+
+        menu_layout = QComboBox()
+        menu_layout.addItems(["Carousel", "Grid", "List"])
+        menu_layout.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set menu_layout {i}")
+        )
+        system_form.addRow("Menu Layout:", menu_layout)
+
+        infrared_easy = QComboBox()
+        infrared_easy.addItems(["Off", "On"])
+        infrared_easy.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set infrared_easy {'true' if i else 'false'}")
+        )
+        system_form.addRow("Infrared Easy Mode:", infrared_easy)
+
+        rts_enabled = QComboBox()
+        rts_enabled.addItems(["Off", "On"])
+        rts_enabled.currentIndexChanged.connect(
+            lambda i: self.send_command(f"settings set rts_enabled {'true' if i else 'false'}")
+        )
+        system_form.addRow("RTS Enabled:", rts_enabled)
 
         # Reboot and Save buttons side by side
         button_layout = QHBoxLayout()
@@ -1375,11 +1946,65 @@ class ESP32ControlGUI(QMainWindow):
         save_btn.clicked.connect(lambda: self.send_command("savesetting"))
         button_layout.addWidget(save_btn)
 
-        system_layout.addRow(button_layout)
+        system_form.addRow(button_layout)
 
-        main_layout.addWidget(system_group)
+        system_layout.addWidget(system_group)
+        system_layout.addStretch()
+        settings_tabs.addTab(system_widget, "System")
 
-        return settings_widget
+        # Custom Settings subtab
+        custom_widget = QWidget()
+        custom_layout = QVBoxLayout(custom_widget)
+        custom_group = QGroupBox("Custom Settings")
+        custom_form = QFormLayout(custom_group)
+
+        flappy_name = QLineEdit()
+        flappy_name.setPlaceholderText("Enter Flappy Ghost name")
+        flappy_name.returnPressed.connect(
+            lambda: self.send_command(f"settings set flappy_name {flappy_name.text()}")
+        )
+        flappy_name_btn = QPushButton("Set")
+        flappy_name_btn.clicked.connect(
+            lambda: self.send_command(f"settings set flappy_name {flappy_name.text()}")
+        )
+        flappy_name_layout = QHBoxLayout()
+        flappy_name_layout.addWidget(flappy_name)
+        flappy_name_layout.addWidget(flappy_name_btn)
+        custom_form.addRow("Flappy Ghost Name:", flappy_name_layout)
+
+        timezone_setting = QLineEdit()
+        timezone_setting.setPlaceholderText("e.g., America/New_York")
+        timezone_setting.returnPressed.connect(
+            lambda: self.send_command(f"settings set timezone {timezone_setting.text()}")
+        )
+        timezone_setting_btn = QPushButton("Set")
+        timezone_setting_btn.clicked.connect(
+            lambda: self.send_command(f"settings set timezone {timezone_setting.text()}")
+        )
+        timezone_setting_layout = QHBoxLayout()
+        timezone_setting_layout.addWidget(timezone_setting)
+        timezone_setting_layout.addWidget(timezone_setting_btn)
+        custom_form.addRow("Timezone:", timezone_setting_layout)
+
+        accent_color = QLineEdit()
+        accent_color.setPlaceholderText("e.g., #FF0000")
+        accent_color.returnPressed.connect(
+            lambda: self.send_command(f"settings set accent_color {accent_color.text()}")
+        )
+        accent_color_btn = QPushButton("Set")
+        accent_color_btn.clicked.connect(
+            lambda: self.send_command(f"settings set accent_color {accent_color.text()}")
+        )
+        accent_color_layout = QHBoxLayout()
+        accent_color_layout.addWidget(accent_color)
+        accent_color_layout.addWidget(accent_color_btn)
+        custom_form.addRow("Accent Color (hex):", accent_color_layout)
+
+        custom_layout.addWidget(custom_group)
+        custom_layout.addStretch()
+        settings_tabs.addTab(custom_widget, "Custom")
+
+        return settings_tabs
 
     def create_command_group(self, title, commands, layout, row, col):
         """
@@ -1934,43 +2559,99 @@ class ESP32ControlGUI(QMainWindow):
     def fetch_github_releases(self):
         """Fetch release tags from GitHub and populate the version dropdown."""
         api_url = "https://api.github.com/repos/jaylikesbunda/Ghost_ESP/releases"
-        try:
-            response = requests.get(api_url, timeout=10)
-            response.raise_for_status()
-            releases = response.json()
-            show_prereleases = self.show_prereleases_checkbox.isChecked()
-            # Filter out versions that start with "prerelease-" if box is unchecked
-            if not show_prereleases:
-                releases = [
-                    r for r in releases
-                    if not r.get("prerelease", False) and not r.get("tag_name", "").startswith("prerelease-")
-                ]
-            self._github_releases = releases  # Save for asset lookup
-            versions = [release.get("tag_name", "Unknown") for release in releases if "tag_name" in release]
-            self.release_version_combo.blockSignals(True)
-            self.release_version_combo.clear()
-            # Add "Custom local .zip" as the default option
-            self.release_version_combo.addItem("Custom local .zip")
-            if versions:
-                self.release_version_combo.addItems(versions)
-            else:
-                self.release_version_combo.addItem("No releases found")
-            self.release_version_combo.setCurrentIndex(0)  # Always select "Custom local .zip" by default
-            self.release_version_combo.blockSignals(False)
-        except Exception as e:
-            self.release_version_combo.clear()
-            self.release_version_combo.addItem("Custom local .zip")
-            self.release_version_combo.addItem("Failed to load releases")
-            self.release_version_combo.setCurrentIndex(0)
-            self._github_releases = []
-            print(f"Error fetching releases: {e}")
-
+        
+        # Clean up any existing thread
+        if hasattr(self, 'release_fetch_thread') and self.release_fetch_thread:
+            self.release_fetch_thread.finished.disconnect()
+            self.release_fetch_thread.error.disconnect()
+            self.release_fetch_thread.retry_info.disconnect()
+            self.release_fetch_thread.stop()
+            self.release_fetch_thread.wait(100)
+            self.release_fetch_thread = None
+        
+        # Show loading state
+        self.release_version_combo.blockSignals(True)
+        self.release_version_combo.clear()
+        self.release_version_combo.addItem("Loading releases...")
+        self.release_version_combo.setEnabled(False)
+        
+        # Create and start the fetch thread
+        show_prereleases = self.show_prereleases_checkbox.isChecked()
+        self.release_fetch_thread = ReleaseFetchThread(api_url, show_prereleases)
+        self.release_fetch_thread.finished.connect(self.on_releases_fetched)
+        self.release_fetch_thread.error.connect(self.on_releases_fetch_error)
+        self.release_fetch_thread.retry_info.connect(self.on_releases_fetch_retry)
+        self.release_fetch_thread.start()
+    
+    def on_releases_fetched(self, releases):
+        """Handle successful release fetch."""
+        self._github_releases = releases  # Save for asset lookup
+        versions = [release.get("tag_name", "Unknown") for release in releases if "tag_name" in release]
+        self.release_version_combo.clear()
+        # Add versions first, then "Custom local .zip" at the end
+        if versions:
+            self.release_version_combo.addItems(versions)
+        else:
+            self.release_version_combo.addItem("No releases found")
+        # Add "Custom local .zip" as the last option
+        self.release_version_combo.addItem("Custom local .zip")
+        self.release_version_combo.setCurrentIndex(0)  # Select first version by default
+        self.release_version_combo.setEnabled(True)
+        self.release_version_combo.blockSignals(False)
+        
         # Always update assets dropdown as well
         self.update_release_assets_dropdown()
+        
+        # Clean up thread
+        if hasattr(self, 'release_fetch_thread') and self.release_fetch_thread:
+            self.release_fetch_thread.finished.disconnect()
+            self.release_fetch_thread.error.disconnect()
+            self.release_fetch_thread.retry_info.disconnect()
+            self.release_fetch_thread.wait(100)
+            self.release_fetch_thread = None
+    
+    def on_releases_fetch_error(self, error_msg):
+        """Handle release fetch error."""
+        self.release_version_combo.clear()
+        if "Timeout" in error_msg:
+            self.release_version_combo.addItem("Timeout: Failed to load releases (network too slow)")
+        else:
+            self.release_version_combo.addItem("Failed to load releases")
+        self.release_version_combo.addItem("Custom local .zip")
+        self.release_version_combo.setCurrentIndex(0)
+        self.release_version_combo.setEnabled(True)
+        self._github_releases = []
+        self.release_version_combo.blockSignals(False)
+        
+        if hasattr(self, 'flash_console'):
+            self.flash_console.append(f"Error: {error_msg}")
+        print(f"Error fetching releases: {error_msg}")
+        
+        # Always update assets dropdown as well
+        self.update_release_assets_dropdown()
+        
+        # Clean up thread
+        if hasattr(self, 'release_fetch_thread') and self.release_fetch_thread:
+            self.release_fetch_thread.finished.disconnect()
+            self.release_fetch_thread.error.disconnect()
+            self.release_fetch_thread.retry_info.disconnect()
+            self.release_fetch_thread.wait(100)
+            self.release_fetch_thread = None
+    
+    def on_releases_fetch_retry(self, message, attempt, max_retries):
+        """Handle release fetch retry."""
+        self.release_version_combo.clear()
+        self.release_version_combo.addItem(f"Retrying... (attempt {attempt}/{max_retries})")
 
     def update_release_assets_dropdown(self):
         """Populate the asset dropdown based on the selected version."""
         if not hasattr(self, "release_asset_combo"):
+            # Create container for asset selection and progress
+            asset_container = QWidget()
+            asset_container_layout = QVBoxLayout(asset_container)
+            asset_container_layout.setContentsMargins(0, 0, 0, 0)
+            asset_container_layout.setSpacing(5)
+            
             asset_layout = QHBoxLayout()
             asset_label = QLabel("Asset:")
             asset_label.setContentsMargins(0, 0, 0, 0)
@@ -1979,8 +2660,19 @@ class ESP32ControlGUI(QMainWindow):
             self.release_asset_combo.addItem("Select a version first")
             asset_layout.addWidget(asset_label)
             asset_layout.addWidget(self.release_asset_combo)
+            asset_container_layout.addLayout(asset_layout)
+            
+            # Add progress bar below the dropdown
+            self.asset_download_progress = QProgressBar()
+            self.asset_download_progress.setMinimum(0)
+            self.asset_download_progress.setMaximum(100)
+            self.asset_download_progress.setValue(0)
+            self.asset_download_progress.setVisible(False)
+            self.asset_download_progress.setMinimumHeight(20)
+            self.asset_download_progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            asset_container_layout.addWidget(self.asset_download_progress)
 
-            # Insert asset_layout directly after the version_layout
+            # Insert asset_container directly after the version_layout
             parent_layout = self.release_version_combo.parentWidget().layout()
             insert_index = None
             for i in range(parent_layout.count()):
@@ -1996,9 +2688,9 @@ class ESP32ControlGUI(QMainWindow):
                 if insert_index is not None:
                     break
             if insert_index is not None:
-                parent_layout.insertLayout(insert_index, asset_layout)
+                parent_layout.insertWidget(insert_index, asset_container)
             else:
-                parent_layout.addLayout(asset_layout)  # fallback
+                parent_layout.addWidget(asset_container)  # fallback
 
             # Connect asset selection to download handler
             self.release_asset_combo.currentIndexChanged.connect(self.download_selected_asset)
@@ -2053,31 +2745,147 @@ class ESP32ControlGUI(QMainWindow):
             self.custom_chip_combo.setCurrentText(chip)
             self.selected_chip = chip
 
-        # --- Download the asset ---
-        import requests
+        # --- Download the asset in background thread ---
         import tempfile
         import os
+        
         temp_dir = tempfile.gettempdir()
         safe_name = os.path.basename(name)
         temp_path = os.path.join(temp_dir, safe_name)
+        
+        # Stop any existing download thread
+        if hasattr(self, 'asset_download_thread') and self.asset_download_thread.isRunning():
+            self.asset_download_thread.stop()
+            self.asset_download_thread.wait(1000)  # Wait up to 1 second for thread to stop
+        
+        # Show download status
         self.flash_console.append(f"Downloading asset: {name} ...")
-        try:
-            response = requests.get(url, stream=True, timeout=30)
-            response.raise_for_status()
-            with open(temp_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            self.release_zip_edit.setText(temp_path)
-            self.flash_bundle_status.setText(f"Downloaded {name} to {temp_path}")
-            self.flash_console.append(f"Downloaded {name} to {temp_path}")
-        except Exception as e:
-            self.flash_bundle_status.setText(f"Failed to download asset: {e}")
-            self.flash_console.append(f"Failed to download asset: {e}")
+        self.flash_bundle_status.setText(f"Downloading {name}...")
+        
+        # Show and reset progress bar
+        if hasattr(self, 'asset_download_progress'):
+            self.asset_download_progress.setValue(0)
+            self.asset_download_progress.setVisible(True)
+            self.asset_download_progress.setFormat("Downloading... 0%")
+        
+        # Create and start download thread
+        self.asset_download_thread = AssetDownloadThread(url, temp_path, name)
+        
+        # Connect signals
+        self.asset_download_thread.progress_update.connect(self.on_download_progress)
+        self.asset_download_thread.status_update.connect(self.on_download_status)
+        self.asset_download_thread.finished.connect(self.on_download_finished)
+        self.asset_download_thread.error.connect(self.on_download_error)
+        self.asset_download_thread.retry_info.connect(self.on_download_retry)
+        
+        # Start the download thread
+        self.asset_download_thread.start()
+    
+    def on_download_progress(self, name, downloaded_mb, total_mb):
+        """Update UI with download progress."""
+        if total_mb > 0:
+            percent = int((downloaded_mb / total_mb) * 100)
+            self.flash_bundle_status.setText(
+                f"Downloading {name}... {percent:.1f}% ({downloaded_mb}MB/{total_mb}MB)"
+            )
+            # Update progress bar
+            if hasattr(self, 'asset_download_progress'):
+                self.asset_download_progress.setValue(percent)
+                self.asset_download_progress.setFormat(f"Downloading... {percent}% ({downloaded_mb}MB/{total_mb}MB)")
+        else:
+            self.flash_bundle_status.setText(f"Downloading {name}... {downloaded_mb}MB")
+            # Update progress bar (indeterminate mode)
+            if hasattr(self, 'asset_download_progress'):
+                self.asset_download_progress.setValue(0)
+                self.asset_download_progress.setFormat(f"Downloading... {downloaded_mb}MB")
+    
+    def on_download_status(self, message):
+        """Update UI with download status message."""
+        # Truncate very long status messages to prevent window expansion
+        max_status_length = 80
+        if len(message) > max_status_length:
+            truncated_message = message[:max_status_length] + "..."
+        else:
+            truncated_message = message
+        self.flash_bundle_status.setText(truncated_message)
+        self.flash_console.append(message)
+        # Update progress bar text (truncate for progress bar too)
+        if hasattr(self, 'asset_download_progress'):
+            progress_format = truncated_message[:50] if len(truncated_message) > 50 else truncated_message
+            self.asset_download_progress.setFormat(progress_format)
+    
+    def on_download_retry(self, message, attempt, max_retries):
+        """Update UI with retry information."""
+        self.flash_console.append(message)
+        self.flash_bundle_status.setText(f"Retrying download (attempt {attempt}/{max_retries})...")
+        # Reset progress bar on retry
+        if hasattr(self, 'asset_download_progress'):
+            self.asset_download_progress.setValue(0)
+            self.asset_download_progress.setFormat(f"Retrying... (attempt {attempt}/{max_retries})")
+    
+    def on_download_finished(self, file_path, message):
+        """Handle successful download completion."""
+        self.release_zip_edit.setText(file_path)
+        self.flash_bundle_status.setText(message)
+        self.flash_console.append(message)
+        # Update progress bar to show completion
+        if hasattr(self, 'asset_download_progress'):
+            self.asset_download_progress.setValue(100)
+            self.asset_download_progress.setFormat("Download complete!")
+            # Hide progress bar after a short delay
+            QTimer.singleShot(2000, lambda: self.asset_download_progress.setVisible(False) if hasattr(self, 'asset_download_progress') else None)
+        # Clean up thread - disconnect signals and wait for it to finish
+        if hasattr(self, 'asset_download_thread') and self.asset_download_thread:
+            self.asset_download_thread.progress_update.disconnect()
+            self.asset_download_thread.status_update.disconnect()
+            self.asset_download_thread.finished.disconnect()
+            self.asset_download_thread.error.disconnect()
+            self.asset_download_thread.retry_info.disconnect()
+            self.asset_download_thread.wait(100)  # Wait briefly for thread to finish
+            self.asset_download_thread = None
+    
+    def on_download_error(self, error_message):
+        """Handle download error."""
+        # Truncate very long error messages to prevent window expansion
+        max_error_length = 60  # Reduced to prevent expansion
+        if len(error_message) > max_error_length:
+            truncated_error = error_message[:max_error_length] + "..."
+        else:
+            truncated_error = error_message
+        
+        # Use a shorter, fixed message format to prevent layout expansion
+        self.flash_bundle_status.setText(f"Download failed: {truncated_error}")
+        
+        # Preserve window size by ensuring layout doesn't expand
+        current_size = self.size()
+        QApplication.processEvents()  # Process any pending layout updates
+        # Restore window size if it changed
+        if self.size() != current_size:
+            self.resize(current_size)
+        self.flash_console.append(f"Failed to download asset: {error_message}")
+        self.flash_console.append("This may be due to network issues or GitHub server problems.")
+        self.flash_console.append("Please try again later, or use 'Custom local .zip' to browse for a local file.")
+        # Update progress bar to show error
+        if hasattr(self, 'asset_download_progress'):
+            self.asset_download_progress.setValue(0)
+            self.asset_download_progress.setFormat("Download failed")
+            self.asset_download_progress.setStyleSheet("QProgressBar::chunk { background-color: #ff4444; }")
+            # Hide progress bar after a delay
+            QTimer.singleShot(3000, lambda: self.asset_download_progress.setVisible(False) if hasattr(self, 'asset_download_progress') else None)
+            # Reset style after hiding
+            QTimer.singleShot(3000, lambda: self.asset_download_progress.setStyleSheet("") if hasattr(self, 'asset_download_progress') else None)
+        # Clean up thread - disconnect signals and wait for it to finish
+        if hasattr(self, 'asset_download_thread') and self.asset_download_thread:
+            self.asset_download_thread.progress_update.disconnect()
+            self.asset_download_thread.status_update.disconnect()
+            self.asset_download_thread.finished.disconnect()
+            self.asset_download_thread.error.disconnect()
+            self.asset_download_thread.retry_info.disconnect()
+            self.asset_download_thread.wait(100)  # Wait briefly for thread to finish
+            self.asset_download_thread = None
 
     def on_flash_panel_changed(self, index):
-        """Switch the visible flash panel based on dropdown selection and show instructions."""
-        self.flash_panel_stack.setCurrentIndex(index)
+        """Show instructions when flash panel tab is changed."""
         # Show instructions in the flasher output window for each panel
         self.flash_console.clear()
         if index == 0:  # Flash Firmware

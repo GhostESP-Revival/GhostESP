@@ -22,6 +22,9 @@ static lv_obj_t *root = NULL;
 static lv_obj_t *input_label = NULL;
 static char input_buffer[128] = {0};
 static int input_len = 0;
+static char pending_initial_text[128] = {0};
+static bool has_pending_initial_text = false;
+static bool start_with_caps = true;
 static KeyboardSubmitCallback submit_callback = NULL;
 
 static bool is_caps = true;
@@ -140,6 +143,12 @@ static int keyboard_build_col = 0;
 static int keyboard_build_phase = 0; // 0=create buttons, 1=create labels
 // track which btnmatrix item is currently focused by joystick to manage CHECKED state
 static int joy_focused_btn_id = -1;
+// hold-to-invert state for joystick
+#define KEYBOARD_HOLD_INVERT_MS 800
+static bool joy_holding_letter = false;  // true after hold threshold crossed; label is inverted
+static bool joy_pending_letter  = false; // true after press, before threshold or release
+static bool joy_inverted_case   = false;
+static lv_timer_t *joy_hold_timer = NULL;
 
 static bool is_shift_key(const char *key) {
     return strcmp(key, "SHIFT") == 0;
@@ -509,7 +518,7 @@ static void keyboard_build_step(lv_timer_t *t) {
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
     int built = 0;
-    const int batch = 1;
+    const int batch = 4;
     // timing for profiling heavy steps
     int64_t t0 = esp_timer_get_time();
     while (built < batch && keyboard_build_row < num_rows) {
@@ -634,10 +643,20 @@ static void destroy_key_buttons(void) {
 }
 
 static void keyboard_create() {
-    is_caps = true; // Start in caps mode
+    is_caps = start_with_caps;
+    start_with_caps = true; /* reset so next open gets default (caps) */
     is_symbols_mode = false;
     input_len = 0;
     memset(input_buffer, 0, sizeof(input_buffer));
+    if (has_pending_initial_text) {
+        size_t n = strnlen(pending_initial_text, sizeof(pending_initial_text) - 1);
+        if (n > 0) {
+            memcpy(input_buffer, pending_initial_text, n + 1);
+            input_len = (int)n;
+        }
+        has_pending_initial_text = false;
+        memset(pending_initial_text, 0, sizeof(pending_initial_text));
+    }
 
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
@@ -781,7 +800,30 @@ static void keyboard_destroy() {
         cursor_row = 0;
         cursor_col = 0;
         joy_focused_btn_id = -1;
+        joy_holding_letter = false;
+        joy_pending_letter  = false;
+        joy_inverted_case   = false;
+        if (joy_hold_timer) { lv_timer_del(joy_hold_timer); joy_hold_timer = NULL; }
     }
+}
+
+// Fires once after KEYBOARD_HOLD_INVERT_MS while select is still held on a letter.
+// Flips the label to inverted case; release will then type the inverted character.
+static void keyboard_hold_invert_cb(lv_timer_t *t) {
+    (void)t;
+    joy_hold_timer = NULL; // one-shot; LVGL auto-deletes after repeat_count reaches 0
+    if (!joy_pending_letter || !key_matrix) return;
+    joy_pending_letter = false;
+    joy_holding_letter = true;
+    build_key_matrix();
+    // Re-apply focus highlight on the held key
+    const int *lens = get_current_row_lengths();
+    int id = 0;
+    for (int r = 0; r < cursor_row; r++) id += lens[r];
+    id += cursor_col;
+    lv_btnmatrix_set_selected_btn(key_matrix, id);
+    lv_btnmatrix_set_btn_ctrl(key_matrix, id, LV_BTNMATRIX_CTRL_CHECKED);
+    joy_focused_btn_id = id;
 }
 
 static void handle_hardware_button_press_keyboard(InputEvent *event) {
@@ -871,21 +913,22 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
 #endif
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
+        bool pressed = event->data.joystick_pressed;
         const int *row_lens = get_current_row_lengths();
-        int prev_row = cursor_row;
-        int prev_col = cursor_col;
 
-        // Update virtual cursor position
-        if (button == 0) { // left
-            if (cursor_col > 0) cursor_col--; else cursor_col = row_lens[cursor_row] - 1;
-        } else if (button == 3) { // right
-            if (cursor_col < row_lens[cursor_row] - 1) cursor_col++; else cursor_col = 0;
-        } else if (button == 2) { // up
-            cursor_row = (cursor_row > 0) ? cursor_row - 1 : num_rows - 1;
-            if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
-        } else if (button == 4) { // down
-            cursor_row = (cursor_row < num_rows - 1) ? cursor_row + 1 : 0;
-            if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
+        // Navigation buttons (only on press, not release)
+        if (pressed) {
+            if (button == 0) { // left
+                if (cursor_col > 0) cursor_col--; else cursor_col = row_lens[cursor_row] - 1;
+            } else if (button == 3) { // right
+                if (cursor_col < row_lens[cursor_row] - 1) cursor_col++; else cursor_col = 0;
+            } else if (button == 2) { // up
+                cursor_row = (cursor_row > 0) ? cursor_row - 1 : num_rows - 1;
+                if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
+            } else if (button == 4) { // down
+                cursor_row = (cursor_row < num_rows - 1) ? cursor_row + 1 : 0;
+                if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
+            }
         }
 
         ensure_valid_cursor();
@@ -899,7 +942,68 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 id += lens[r];
             }
             id += cursor_col;
-            // make sure btnmatrix selection matches joystick focus so events see this key
+            
+            // Handle button 1 (select) with hold-to-invert for letters
+            if (button == 1) {
+                const char *txt = lv_btnmatrix_get_btn_text(key_matrix, id);
+                bool is_letter = txt && strlen(txt) == 1 && isalpha((unsigned char)txt[0]);
+                
+                if (pressed) {
+                    // On press: update focus highlight
+                    lv_btnmatrix_set_selected_btn(key_matrix, id);
+                    if (joy_focused_btn_id >= 0 && joy_focused_btn_id != id) {
+                        bool shift_caps_active = (joy_focused_btn_id == shift_btn_id) && (is_caps || is_capslock);
+                        if (!shift_caps_active) {
+                            lv_btnmatrix_clear_btn_ctrl(key_matrix, joy_focused_btn_id, LV_BTNMATRIX_CTRL_CHECKED);
+                        }
+                    }
+                    joy_focused_btn_id = id;
+                    lv_btnmatrix_set_btn_ctrl(key_matrix, id, LV_BTNMATRIX_CTRL_CHECKED);
+
+                    // Cancel any leftover hold timer from a previous press
+                    if (joy_hold_timer) { lv_timer_del(joy_hold_timer); joy_hold_timer = NULL; }
+                    joy_holding_letter = false;
+                    joy_pending_letter = false;
+                    joy_inverted_case  = false;
+
+                    if (is_letter) {
+                        // Start hold timer — inversion only activates after KEYBOARD_HOLD_INVERT_MS
+                        joy_pending_letter = true;
+                        joy_inverted_case  = !(is_capslock || is_caps);
+                        joy_hold_timer = lv_timer_create(keyboard_hold_invert_cb, KEYBOARD_HOLD_INVERT_MS, NULL);
+                        lv_timer_set_repeat_count(joy_hold_timer, 1);
+                    } else {
+                        // Non-letter key: trigger immediately on press
+                        lv_event_send(key_matrix, LV_EVENT_VALUE_CHANGED, NULL);
+                    }
+                } else {
+                    // On release: cancel timer if hold threshold wasn't reached yet
+                    if (joy_hold_timer) { lv_timer_del(joy_hold_timer); joy_hold_timer = NULL; }
+
+                    if (is_letter && (joy_holding_letter || joy_pending_letter)) {
+                        // Capture the char before any rebuild that might invalidate txt
+                        char typed = txt[0]; // btnmatrix label already reflects current/inverted case
+                        bool was_holding = joy_holding_letter;
+                        joy_holding_letter = false;
+                        joy_pending_letter  = false;
+                        joy_inverted_case   = false;
+                        add_char_to_buffer_raw(typed);
+                        bool needs_rebuild = was_holding; // always redraw after hold to restore labels
+                        if (!was_holding && is_caps && !is_capslock) {
+                            // Short press with one-shot shift: reset shift as normal
+                            is_caps = false;
+                            needs_rebuild = true;
+                        }
+                        if (needs_rebuild) build_key_matrix();
+                    } else {
+                        joy_holding_letter = false;
+                        joy_pending_letter  = false;
+                        joy_inverted_case   = false;
+                    }
+                }
+                return;
+            }
+            
             lv_btnmatrix_set_selected_btn(key_matrix, id);
             // clear previous joystick highlight if any
             if (joy_focused_btn_id >= 0 && joy_focused_btn_id != id) {
@@ -912,21 +1016,66 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             joy_focused_btn_id = id;
             // mark current key as CHECKED so it uses inverted colors
             lv_btnmatrix_set_btn_ctrl(key_matrix, id, LV_BTNMATRIX_CTRL_CHECKED);
-            if (button == 1) { // select -> trigger same path as touch
-                lv_event_send(key_matrix, LV_EVENT_VALUE_CHANGED, NULL);
-            }
             return;
         }
 #endif
 
-        if (button == 1) { // select fallback when no btnmatrix is present
-            activate_selected_key();
+        // Fallback for non-btnmatrix (legacy per-key buttons)
+        if (button == 1) {
+            if (pressed) {
+                // Cancel any leftover hold timer
+                if (joy_hold_timer) { lv_timer_del(joy_hold_timer); joy_hold_timer = NULL; }
+                joy_holding_letter = false;
+                joy_pending_letter  = false;
+                joy_inverted_case   = false;
+                const char *(*current_keys)[10] = get_current_keys();
+                if (cursor_row >= 0 && cursor_row < num_rows && cursor_col >= 0 && cursor_col < row_lens[cursor_row]) {
+                    const char *key = current_keys[cursor_row][cursor_col];
+                    if (strlen(key) == 1 && isalpha((unsigned char)key[0])) {
+                        // Letter key: start hold timer
+                        joy_pending_letter = true;
+                        joy_inverted_case  = !(is_capslock || is_caps);
+                        joy_hold_timer = lv_timer_create(keyboard_hold_invert_cb, KEYBOARD_HOLD_INVERT_MS, NULL);
+                        lv_timer_set_repeat_count(joy_hold_timer, 1);
+                        apply_selection_highlight();
+                    } else {
+                        // Non-letter: activate immediately
+                        activate_selected_key();
+                    }
+                }
+            } else {
+                // Release: cancel timer if not yet fired
+                if (joy_hold_timer) { lv_timer_del(joy_hold_timer); joy_hold_timer = NULL; }
+                if (joy_holding_letter || joy_pending_letter) {
+                    const char *(*current_keys)[10] = get_current_keys();
+                    const char *key = current_keys[cursor_row][cursor_col];
+                    char c = key[0];
+                    bool was_holding = joy_holding_letter;
+                    if (was_holding) {
+                        c = joy_inverted_case ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+                    } else {
+                        c = is_caps ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+                    }
+                    joy_holding_letter = false;
+                    joy_pending_letter  = false;
+                    joy_inverted_case   = false;
+                    add_char_to_buffer_raw(c);
+                    bool needs_rebuild = was_holding; // restore inverted label after hold
+                    if (!was_holding && is_caps && !is_capslock) {
+                        is_caps = false;
+                        needs_rebuild = true;
+                    }
+                    if (needs_rebuild) update_key_labels();
+                } else {
+                    joy_holding_letter = false;
+                    joy_pending_letter  = false;
+                    joy_inverted_case   = false;
+                }
+                apply_selection_highlight();
+            }
             return;
         }
 
-        if (prev_row != cursor_row || prev_col != cursor_col) {
-            apply_selection_highlight();
-        }
     } else if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_PR) {
         int touch_x = event->data.touch_data.point.x;
         int touch_y = event->data.touch_data.point.y;
@@ -1114,6 +1263,34 @@ void keyboard_view_set_placeholder(const char *text){
     update_input_label();
 }
 
+void keyboard_view_set_start_caps(bool start_caps) {
+    start_with_caps = start_caps;
+}
+
+void keyboard_view_set_initial_text(const char *text) {
+    memset(pending_initial_text, 0, sizeof(pending_initial_text));
+    has_pending_initial_text = true;
+    if (text && text[0] != '\0') {
+        size_t n = strlen(text);
+        if (n >= sizeof(pending_initial_text)) n = sizeof(pending_initial_text) - 1;
+        memcpy(pending_initial_text, text, n + 1);
+    }
+    /* If view already exists, apply now so it shows without waiting for next create */
+    if (root != NULL) {
+        memset(input_buffer, 0, sizeof(input_buffer));
+        input_len = 0;
+        if (text && text[0] != '\0') {
+            size_t n = strlen(text);
+            if (n >= sizeof(input_buffer)) n = sizeof(input_buffer) - 1;
+            memcpy(input_buffer, text, n + 1);
+            input_buffer[n] = '\0';
+            input_len = (int)n;
+        }
+        has_pending_initial_text = false;
+        update_input_label();
+    }
+}
+
 void keyboard_view_set_return_view(View *view) {
     keyboard_return_view = view;
 }
@@ -1194,6 +1371,16 @@ static void build_key_matrix(void) {
     int map_idx = 0;
     int btn_idx = 0;
     shift_btn_id = -1;
+    // Calculate focused button index from cursor position
+    int focused_btn_idx = 0;
+    if (joy_holding_letter) {
+        for (int r = 0; r < cursor_row && r < num_rows; r++) {
+            focused_btn_idx += row_lens[r];
+        }
+        focused_btn_idx += cursor_col;
+    } else {
+        focused_btn_idx = -1; // No focus when not holding
+    }
     for (int r = 0; r < num_rows; r++) {
         for (int c = 0; c < row_lens[r]; c++) {
             const char *src = current_keys[r][c];
@@ -1201,7 +1388,13 @@ static void build_key_matrix(void) {
             if (is_shift_key(src)) label = LV_SYMBOL_UP;
             else if (is_del_key(src)) label = LV_SYMBOL_BACKSPACE;
             else if (!is_symbols_mode && is_alpha_key(src)) {
-                char ch = is_caps ? (char)toupper((unsigned char)src[0]) : (char)tolower((unsigned char)src[0]);
+                char ch;
+                // Use inverted case for the focused button when holding
+                if (joy_holding_letter && btn_idx == focused_btn_idx) {
+                    ch = joy_inverted_case ? (char)toupper((unsigned char)src[0]) : (char)tolower((unsigned char)src[0]);
+                } else {
+                    ch = is_caps ? (char)toupper((unsigned char)src[0]) : (char)tolower((unsigned char)src[0]);
+                }
                 map_text_storage[btn_idx][0] = ch;
                 map_text_storage[btn_idx][1] = '\0';
                 label = map_text_storage[btn_idx];

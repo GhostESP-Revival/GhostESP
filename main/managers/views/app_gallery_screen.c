@@ -13,6 +13,10 @@
 #include <stdlib.h>
 #include "esp_log.h"
 
+uint32_t theme_palette_get_background(uint8_t theme);
+uint32_t theme_palette_get_surface(uint8_t theme);
+uint32_t theme_palette_get_text(uint8_t theme);
+
 static const char *TAG = "AppGalleryScreen";
 
 #define ANIM_DURATION 60 // ms, use the same value in both files
@@ -59,12 +63,23 @@ static AppsLayoutType apps_layout = APPS_LAYOUT_CAROUSEL;
 static lv_obj_t **apps_grid_cards = NULL;
 static lv_obj_t **apps_list_buttons = NULL;
 static lv_obj_t *grid_cards_container = NULL;
+static lv_color_t apps_bg_color;
+static lv_color_t apps_surface_color;
+static lv_color_t apps_text_color;
+
+static void refresh_apps_surface_colors(void) {
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    apps_bg_color = lv_color_hex(theme_palette_get_background(theme));
+    apps_surface_color = lv_color_hex(theme_palette_get_surface(theme));
+    apps_text_color = lv_color_hex(theme_palette_get_text(theme));
+}
 
 // Use the same theme palettes as the main menu to color app borders
 static void init_app_colors(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
+    refresh_apps_surface_colors();
     for (int i = 0; i < num_apps; ++i) {
-        int slot = app_items[i].palette_index;
+        int slot = i % THEME_PALETTE_SLOT_COUNT;
         app_items[i].border_color = lv_color_hex(theme_palette_get(theme, slot));
     }
 }
@@ -129,7 +144,7 @@ static void update_app_item(bool slide_left) {
 
     // Create new item (off-screen, transparent)
     current_app_obj = lv_btn_create(apps_container);
-    lv_obj_set_style_bg_color(current_app_obj, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(current_app_obj, apps_surface_color, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_app_obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_border_width(current_app_obj, 2, LV_PART_MAIN);
@@ -180,7 +195,7 @@ static void update_app_item(bool slide_left) {
         }
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, apps_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
     }
 
@@ -259,7 +274,7 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_pos(card, x, y);
         lv_obj_set_size(card, cw, ch);
 
-        lv_obj_set_style_bg_color(card, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(card, apps_surface_color, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(card, 6, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(card, LV_OPA_40, LV_PART_MAIN);
@@ -305,7 +320,7 @@ static void create_apps_grid_menu(void) {
         lv_label_set_text(label, label_text);
         const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
         lv_obj_set_style_text_font(label, lbl_font, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, apps_text_color, 0);
 
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(label, cw - 8);
@@ -339,7 +354,7 @@ static void create_apps_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E1E1E), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, apps_surface_color, LV_PART_MAIN);
         lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(btn, app_items[i].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
@@ -374,7 +389,7 @@ static void create_apps_list_menu(void) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(label, apps_text_color, 0);
         const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
         lv_obj_set_style_text_font(label, lbl_font, 0);
 
@@ -388,11 +403,12 @@ static void create_apps_list_menu(void) {
  * @brief Creates the apps menu screen view
  */
  void apps_menu_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    refresh_apps_surface_colors();
+    display_manager_fill_screen(apps_bg_color);
 
     const char *title = (LV_VER_RES > 320 ? "Apps Menu" : "Apps");
 
-    apps_container = gui_screen_create_root(NULL, title, lv_color_hex(0x121212), LV_OPA_TRANSP);
+    apps_container = gui_screen_create_root(NULL, title, apps_bg_color, LV_OPA_TRANSP);
     apps_menu_view.root = apps_container;
 
     init_app_colors();
@@ -464,7 +480,7 @@ static void create_apps_list_menu(void) {
         if (btn_size < 40) {
             lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
         }
-        lv_obj_set_style_text_color(left_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(left_label, apps_text_color, 0);
         lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
 
         right_nav_btn = lv_btn_create(lv_scr_act());
@@ -482,7 +498,7 @@ static void create_apps_list_menu(void) {
         if (btn_size < 40) {
             lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
         }
-        lv_obj_set_style_text_color(right_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(right_label, apps_text_color, 0);
         lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
 
         ESP_LOGI(TAG, "Navigation buttons created for apps menu");

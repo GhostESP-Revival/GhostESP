@@ -145,6 +145,7 @@ static void usb_kbd_handle_event(const usb_kbd_key_event_t *ev) {
         InputEvent ie = {0};
         ie.type = INPUT_TYPE_JOYSTICK;
         ie.data.joystick_index = joy_idx;
+        ie.data.joystick_pressed = true;
         xQueueSend((QueueHandle_t)input_queue, &ie, 0);
         return;
     }
@@ -359,6 +360,7 @@ static void usb_kbd_stream_rx_cb(uint8_t channel, const uint8_t* data, size_t le
         InputEvent ie = {0};
         ie.type = INPUT_TYPE_JOYSTICK;
         ie.data.joystick_index = joy_idx;
+        ie.data.joystick_pressed = true;
         xQueueSend((QueueHandle_t)input_queue, &ie, 0);
         return;
     }
@@ -449,6 +451,7 @@ static void usb_kbd_stream_rx_cb_simple(uint8_t channel, const uint8_t* data, si
         InputEvent ie = {0};
         ie.type = INPUT_TYPE_JOYSTICK;
         ie.data.joystick_index = joy_idx;
+        ie.data.joystick_pressed = true;
         xQueueSend((QueueHandle_t)input_queue, &ie, 0);
         return;
     }

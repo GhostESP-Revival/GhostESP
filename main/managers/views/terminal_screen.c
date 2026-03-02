@@ -20,6 +20,7 @@
 
 extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
+extern void keyboard_view_set_start_caps(bool start_caps);
 
 static View *terminal_return_view = NULL;
 
@@ -643,6 +644,7 @@ void text_box_click_cb(lv_event_t *e){
   printf("Text box clicked\n");
 
   keyboard_view_set_return_view(&terminal_view);
+  keyboard_view_set_start_caps(false);
   display_manager_switch_view(&keyboard_view);
 
   // If using a hardware keyboard, we can ignore this click
@@ -825,7 +827,7 @@ void terminal_view_create(void) {
     display_manager_add_status_bar("Terminal");
 
     if (!terminal_update_timer) {
-        terminal_update_timer = lv_timer_create(process_queued_messages_callback, 50, NULL);
+        terminal_update_timer = lv_timer_create(process_queued_messages_callback, 30, NULL);
         if (!terminal_update_timer) {
             ESP_LOGE(TAG, "Failed to create terminal update timer");
         }
@@ -1013,6 +1015,7 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
         keyboard_view_set_return_view(&terminal_view);
         keyboard_view_set_submit_callback(keyboard_input_callback);
         keyboard_view_set_placeholder("Enter command...");
+        keyboard_view_set_start_caps(false);
         display_manager_switch_view(&keyboard_view);
       }
     } else if (button == 2) {
@@ -1037,6 +1040,7 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
         keyboard_view_set_return_view(&terminal_view);
         keyboard_view_set_submit_callback(keyboard_input_callback);
         keyboard_view_set_placeholder("Enter command...");
+        keyboard_view_set_start_caps(false);
         display_manager_switch_view(&keyboard_view);
       }
     } else if (key == 8 || key == 127) { // backspace
@@ -1069,6 +1073,7 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
         keyboard_view_set_return_view(&terminal_view);
         keyboard_view_set_submit_callback(keyboard_input_callback);
         keyboard_view_set_placeholder("Enter command...");
+        keyboard_view_set_start_caps(false);
         display_manager_switch_view(&keyboard_view);
 #else
       } else {

@@ -1,10 +1,10 @@
-# Ghost ESP: Revival
+# GhostESP: Revival
 
 > **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
 
-**⭐️ Enjoying Ghost ESP? Please give the repo a star!**
+**⭐️ Enjoying GhostESP? Please give the repo a star!**
 
-Ghost ESP turns your ESP32 into a powerful, cheap and helpful wireless testing tool. Built on ESP-IDF.
+GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing tool. Built on ESP-IDF.
 
 ---
 
@@ -25,104 +25,98 @@ Ghost ESP turns your ESP32 into a powerful, cheap and helpful wireless testing t
 <details>
 <summary><strong>WiFi Features</strong></summary>
 
-- **Evil Portal** – Set up a fake WiFi portal with a custom SSID and domain.
-- **Deauthentication Attacks** – Disconnect clients from specific networks (supports multiple APs).
-- **Beacon Spam** – Broadcast customizable SSID beacons.
-- **WiFi Capture** – Log probe requests, beacon frames, deauth packets, and raw data *(requires SD card or compatible storage)*.
-- **Pineapple Detection** – Detect Wi-Fi Pineapples and Evil Twin Attacks.
-- **SAE Flood Attack** – Target WPA3 networks specifically.
-- **EAPOL Logoff Attack** – Force disconnect authenticated clients.
-- **Web-UI** – Built-in interface for configuring settings, sending commands to another connected ESP, and managing the filesystem.
-- **AP Scanning** – Detect nearby WiFi networks.
-- **Station Scanning** – Monitor connected WiFi clients.
-- **Combined AP/Station Scan** – Perform both AP and station scans in one command (`scanall`).
-- **Beacon Spam List Management** – Manage SSID lists (`beaconadd`, `beaconremove`, `beaconclear`, `beaconshow`) and spam them (`beaconspamlist`).
-- **Probe Request Listening** – Passive monitoring of device probe requests.
-- **DHCP Starvation** – Flood DHCP requests to exhaust network leases (`dhcpstarve`).
-- **Port Scanning** – Scan your local network for open ports.
-- **ARP Scanning** – Scan for devices on local network using ARP (`scanarp`).
-- **SSH Scanning** – Scan for SSH services on network (`scanssh`).
-- **IP Lookup** – Retrieve local network IP information (`scanlocal`).
-- **Ethernet Mode** – Wired networking with fingerprint scanning and OUI vendor lookup.
-- **Wardriving Enhancements** – Unique AP counting, deduped WiGLE v1.6 exports, and a sweep scan that logs WiFi/BLE/GPS/802.15.4 to CSV.
-- **RSSI Tracking** – Track signal strength for selected APs and stations.
-- **Drone Detection/Spoofing** – Detect and spoof detected drones.
+- Evil Portal
+- Deauth / disassoc attacks
+- Karma
+- Beacon spam (single/list/random)
+- AP scan / STA scan / scanall
+- Probe request listening
+- Handshake + PMKID capture
+- WiFi capture to SD (PCAP)
+- USB dongle mode for Wireshark (extcap stream)
+- DHCP starvation
+- ARP / port / SSH / local IP scanners
+- WiFi OUI vendor lookup
+- WPA3/SAE attacks
+- EAPOL logoff attack
+- Wardriving exports (WiFi/BLE/GPS) + sweep CSV (WiFi/BLE/GPS/802.15.4)
+- Split-channel wardriving helper via GhostLink
+- RSSI tracking (AP/station)
+- Drone detection / spoofing
+- Web UI + filesystem + remote command relay
 
 </details>
 
 <details>
 <summary><strong>BLE Features</strong></summary>
 
-- **BLE Spam** – Spoof Apple, Microsoft, Samsung, and Google devices *(not supported on ESP32S2)*.
-- **AirTag Spoofing** – Spoof the identity of a selected AirTag device (`spoofairtag`).
-- **BLE Packet Capture** – Capture and analyze BLE traffic.
-- **BLE Scanning** – Detect BLE devices, including specialized modes for AirTags, Flipper Zeros, and more.
-- **Flipper Zero RSSI Tracking** – Detect and monitor the signal strength (RSSI) of Flipper Zero devices (`blescan -f`).
-- **AirTag RSSI Updates** – Existing tags periodically refresh RSSI so proximity changes are visible.
-- **GATT/Service Discovery** – Scan services/characteristics and track RSSI per device.
-- **BLE Wardriving** – Map and track BLE devices in your vicinity.
+- BLE scan modes (general, AirTag, Flipper)
+- BLE spam modes
+- AirTag scan / spoof
+- BLE packet capture
+- BLE stream to Wireshark
+- Flipper finder + RSSI
+- GATT/service scan + per-device RSSI
+- BLE wardriving
+- BLE skimmer detection
+
+</details>
+
+<details>
+<summary><strong>USB Features</strong></summary>
+
+- USB keyboard host mode (ESP32-S3 builds)
+- Remote keyboard control over GhostLink
+- BadUSB script runner
+- BadUSB identity options (VID/PID/manufacturer/product/layout/randomize)
 
 </details>
 
 <details>
 <summary><strong>IR Features</strong></summary>
 
-- **Easy Learn Mode** – Learn IR signals from your remote with auto naming *(supported on TEmbed C1101)*.
-- **FlipperZero IR File Support** – Use FlipperZero formatted IR files stored on SD card *(supported on LilyGo S3TWatch, Cardputer and TEmbed C1101)*.
-- **Universal Library IR Transmit** – Send pre-programmed universal remote signals.
-- **IR Transmit** – Transmit IR signals from F0 files.
-- **IR Receive and Decode** – Decode IR signals received by the device *(supported on TEmbed C1101)*.
-- **Multiple IR Protocols** – Support for NEC, Kaseikyo, Pioneer, RCA, Samsung, SIRC, RC5, and RC6 protocols.
-- **IR Rename, Delete, Add Remotes** – Rename, delete, and add remotes *(supported on TEmbed C1101)*.
-- **IR CLI Tools** – Full IR command-line control.
-- **IR Dazzler** – 38 kHz high-duty pulsing for IR dazzler use cases.
+- IR TX/RX on supported boards
+- IR learn mode
+- IR easy learn mode
+- Flipper `.ir` file support
+- Universal library transmit
+- IR CLI tools
+- IR dazzler (38 kHz high duty)
 
 </details>
 
 <details>
 <summary><strong>NFC Features</strong></summary>
 
-#### PN532 NFC Capability
-
-- **NTAG Support (Type 2)**
-  - Read NTAG213/215/216 with NDEF parsing.
-  - Write NTAG213/215/216 from `.nfc` files.
-  - Save to Flipper `.nfc` format.
-- **MIFARE Classic Support (Mini/1K/4K)**
-  - Flipper's 1000+ key dictionary attack.
-  - Parse and display NDEF TLV data.
-  - Save to Flipper `.nfc` format.
-- **File Management**
-  - 'Saved' menu to browse `.nfc` files and rename/delete them from the UI.
-  - 'User Keys' view to list `/mnt/ghostesp/nfc/mfc_user_dict.nfc`.
-- **Flipper Parser Compatibility** – Built-in Flipper Zero parser layer with dozens of transit/parking/access cards (Aime, CSC, WashCity, Metromoney, Bip, CharlieCard, Disney Infinity, HI!, HID PACS, H World, Kazan, Microel, MiZIP, Plantain, Saflok, Skylanders, SmartRider, Social Moscow, Troika, Two Cities, Umarsh, Zolotaya Korona, Zolotaya Korona Online).
-- **MIFARE Desfire Detection** – Basic detection to flag Desfire cards.
-
-#### Chameleon Ultra Support
-
-- **CLI & UI Integration**
-  - Connect/disconnect and status/battery commands.
-- **Card Support**
-  - NTAG and MIFARE Classic NDEF parsing.
-  - Flipper `.nfc` exports via `chameleon savehf/savedump/saventag` and UI.
-  - Dictionary attack capability.
+- PN532 NTAG/MIFARE Classic support
+- Flipper `.nfc` import/export
+- MIFARE Classic dictionary attack
+- Flipper NFC parser set (transit/parking/access)
+- MIFARE Desfire detection
+- Chameleon Ultra support (CLI + UI)
 
 </details>
 
 <details>
 <summary><strong>Additional Features</strong></summary>
 
-- **GhostLink (Dual Comm)** – Split-view terminal on-device when linked to a peer device.
-- **Setup Wizard** – First-boot guided setup for display builds.
-- **DIAL & Chromecast V2 Support** – Interact with DIAL-capable devices (e.g., Roku, Chromecast).
-- **Rave Mode** – Extra visualizer app for boards with displays.
-- **GPS Integration** – Retrieve location info via the `gpsinfo` command *(on supported hardware)*.
-- **Network Printer Output** – Print custom text to a LAN printer (`powerprinter`).
-- **RGB LED Modes** – Customizable LED feedback (Stealth, Normal, Rainbow).
-- **Timezone Configuration** – Change system timezone string (`timezone`).
+- GhostLink (dual-device command and display interface)
+- Setup wizard (display builds)
+- Wired + web screen mirroring
+- Ethernet mode + fingerprint scan
+- DIAL / Chromecast V2 support
+- GPS integration (`gpsinfo`)
+- Network printer output (`powerprinter`)
+- RGB LED modes
+- Timezone configuration (`timezone`)
+- Rave mode (display builds)
 
 </details>
-<img width="600" height="800" alt="image" src="https://github.com/user-attachments/assets/9f1ee121-23a9-481a-94cd-aeb353e0e4b7" />
+
+## ESP32 Firmware Comparison
+
+<img width="800" height="2400" alt="image" src="https://github.com/user-attachments/assets/005c96f0-4d0a-4f97-926c-99059dfb9e21" />
+
 
 
 

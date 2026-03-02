@@ -866,6 +866,14 @@ menu "Ghost ESP Options"
         help
             Define the MOSI pin for SD Card SPI.
 
+    config SHARED_TFT_SD_SPI
+        bool "Shared TFT/SD SPI bus"
+        default n
+        depends on USING_SPI && WITH_SCREEN
+        help
+            Enable extra TFT/SD SPI bus coordination for boards that share
+            MOSI/MISO/CLK between display and SD card.
+
     config SD_MMC_D0 
         int "SD Card D0 Pin"
         default 13

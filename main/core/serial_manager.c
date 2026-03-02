@@ -32,10 +32,22 @@
 #define BUF_SIZE (512)
 #define SERIAL_BUFFER_SIZE 512
 
+#ifndef CONFIG_CONSOLE_UART_BAUDRATE
+#ifdef CONFIG_MONITOR_BAUD
+#define CONFIG_CONSOLE_UART_BAUDRATE CONFIG_MONITOR_BAUD
+#else
+#define CONFIG_CONSOLE_UART_BAUDRATE 115200
+#endif
+#endif
+
 char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
+
+static bool serial_should_disable_uart(void) {
+  return false;
+}
 
 int serial_manager_write_bytes(const void *data, size_t len) {
   if (data == NULL || len == 0) {
@@ -741,6 +753,8 @@ void serial_task(void *pvParameter) {
 
 // Initialize the SerialManager
 void serial_manager_init() {
+  s_uart_disabled = serial_should_disable_uart();
+
   // UART configuration for main UART
   const uart_config_t uart_config = {
       .baud_rate = CONFIG_CONSOLE_UART_BAUDRATE,
@@ -766,16 +780,26 @@ void serial_manager_init() {
 #endif
 
   commandQueue = xQueueCreate(6, sizeof(SerialCommand));
+  if (commandQueue == NULL) {
+    ESP_LOGE("SerialManager", "Failed to create command queue");
+    return;
+  }
   ESP_LOGI("SerialManager", "Command queue created: depth=6, item_size=%u bytes", sizeof(SerialCommand));
 
-  xTaskCreate(serial_task, "SerialTask",  5120, NULL, 2, &s_serial_task_handle);
+  BaseType_t task_rc = xTaskCreate(serial_task, "SerialTask",  5120, NULL, 2, &s_serial_task_handle);
+  if (task_rc != pdPASS) {
+    ESP_LOGE("SerialManager", "Failed to create serial task (%ld)", (long)task_rc);
+    vQueueDelete(commandQueue);
+    commandQueue = NULL;
+    return;
+  }
   ESP_LOGI("SerialManager", "Serial task created");
   s_serial_initialized = true;
   if (!s_uart_disabled) {
     command_history_init();
     glog("Serial Started...\n");
   } else {
-    glog("Serial Disabled (template: somethingsomething)\n");
+    glog("UART console disabled.\n");
   }
 }
 

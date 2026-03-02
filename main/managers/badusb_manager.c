@@ -343,7 +343,7 @@ static void badusb_exec_task(void *arg) {
         }
         ESP_LOGI(TAG, "VBUS detected, letting connection settle...");
         // Let VBUS and data lines stabilise before touching the USB stack
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(500));
         // Notify peer (C5) that USB is connected
         if (esp_comm_manager_is_connected()) {
             esp_comm_manager_send_command("badusb", "status running");

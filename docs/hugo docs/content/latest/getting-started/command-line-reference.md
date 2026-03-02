@@ -156,6 +156,17 @@ Available on boards with an onboard OLED status display or when an external stat
   - `statusidle list` — List available idle animations.
   - `statusidle set <life|ghost|0|1>` — Select the idle animation mode.
 
+## IO expander buttons (if present)
+
+Available on boards with **CONFIG_USE_IO_EXPANDER**. Three physical buttons (P10, P11 “Right button”, P12) can each run a custom CLI command or act as a joystick button when no command is set.
+
+- **`iobtn <1|2|3> [command]`** — View or set the command for button 1 (P10), 2 (P11), or 3 (P12). Without `command`, prints the current command (or “(none)”). With `command`, saves it and runs it on the next press. Example: `iobtn 1 nfc read`.
+- **`settings get io_btn_p10_cmd`** / **`settings set io_btn_p10_cmd <value>`** — Same for P10; use `io_btn_p11_cmd` and `io_btn_p12_cmd` for P11 and P12.
+
+On press, the device switches to the terminal view and runs the command. To use a button as a normal joystick action instead, clear its command (e.g. `iobtn 1 ""` or `settings set io_btn_p10_cmd ""`).
+
+**On-device UI:** **Settings → IO Buttons** lets you edit each button’s command with the keyboard; the current command is pre-filled when editing.
+
 ## Infrared
 
 - **`ir list [path]`** — List `.ir` files (default: `/mnt/ghostesp/infrared/remotes`).
