@@ -36,6 +36,8 @@ typedef void (*comm_command_callback_t)(const char* command, const char* data, v
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
+#define COMM_STREAM_CHANNEL_GPS 4
+#define COMM_STREAM_CHANNEL_NRF24 5
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 

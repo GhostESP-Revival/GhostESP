@@ -15,6 +15,7 @@
 #include "managers/status_display_manager.h"
 #include "core/glog.h"
 #include "esp_random.h"
+#include "freertos/semphr.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
 #include "nimble/ble.h"
@@ -242,6 +243,7 @@ static volatile uint32_t spam_adv_count  = 0;
 static esp_timer_handle_t spam_log_timer = NULL;
 static const int spam_log_interval_ms    = 5000;
 static TaskHandle_t spam_task_handle     = NULL;
+static SemaphoreHandle_t spam_task_exit_sem = NULL;
 static volatile bool spam_running        = false;
 static ble_spam_type_t current_spam_type = BLE_SPAM_APPLE;
 
@@ -722,7 +724,19 @@ static void spam_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(idle_ms));
     }
 
-    vTaskSuspend(NULL);
+    if (ble_is_initialized() && ble_gap_adv_active()) {
+        ble_gap_adv_stop();
+    }
+
+    if (spam_task_handle == xTaskGetCurrentTaskHandle()) {
+        spam_task_handle = NULL;
+    }
+
+    if (spam_task_exit_sem != NULL) {
+        xSemaphoreGive(spam_task_exit_sem);
+    }
+
+    vTaskDelete(NULL);
 }
 
 // ============================================================================
@@ -733,15 +747,20 @@ void ble_spam_start(ble_spam_type_t type) {
     if (spam_running) {
         glog("Spam already running, stopping first...\n");
         ble_spam_stop();
-        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     if (spam_task_handle != NULL) {
         if (eTaskGetState(spam_task_handle) != eDeleted) {
-            vTaskDelete(spam_task_handle);
+            ble_spam_stop();
         }
         spam_task_handle = NULL;
-        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (spam_task_exit_sem == NULL) {
+        spam_task_exit_sem = xSemaphoreCreateBinary();
+    }
+    if (spam_task_exit_sem != NULL) {
+        (void)xSemaphoreTake(spam_task_exit_sem, 0);
     }
 
     if (!ble_is_initialized()) ble_init();
@@ -779,24 +798,34 @@ void ble_spam_start(ble_spam_type_t type) {
 }
 
 void ble_spam_stop(void) {
-    if (!spam_running) return;
+    bool task_was_running = (spam_task_handle != NULL);
+    if (!spam_running && !task_was_running) {
+        return;
+    }
 
     spam_running = false;
-
-    if (spam_task_handle != NULL) {
-        vTaskDelay(pdMS_TO_TICKS(300));
-        if (eTaskGetState(spam_task_handle) != eDeleted) {
-            vTaskDelete(spam_task_handle);
-        }
-        spam_task_handle = NULL;
-    }
 
     if (spam_log_timer) {
         esp_timer_stop(spam_log_timer);
     }
 
-    if (ble_gap_adv_active()) {
+    if (ble_is_initialized() && ble_gap_adv_active()) {
         ble_gap_adv_stop();
+    }
+
+    if (task_was_running) {
+        bool task_exited = false;
+        if (spam_task_exit_sem != NULL) {
+            task_exited = (xSemaphoreTake(spam_task_exit_sem, pdMS_TO_TICKS(750)) == pdTRUE);
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        if (!task_exited && spam_task_handle != NULL && eTaskGetState(spam_task_handle) != eDeleted) {
+            glog("BLE spam task exit timed out, forcing stop\n");
+            vTaskDelete(spam_task_handle);
+            spam_task_handle = NULL;
+        }
     }
 
     glog("BLE Spam stopped\n");

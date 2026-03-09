@@ -2,6 +2,8 @@ name: Compile Ghost ESP
 
 on:
   push:
+    paths-ignore:
+      - "firmware-manifest.json"
   pull_request:
   workflow_dispatch:
     inputs:
@@ -26,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   build:
@@ -138,10 +141,14 @@ jobs:
           . ~/esp-idf/export.sh
           ARTIFACT_DIR="packaged_artifacts_${{ matrix.target.name }}"
           ZIP_FILE="${{ matrix.target.zip_name }}"
+          ELF_FILE="${ZIP_FILE%.zip}.elf"
           mkdir -p "$ARTIFACT_DIR"
           cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/partitions.bin" || { echo "Failed to copy partition table"; exit 1; }
           cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/bootloader.bin" || { echo "Failed to copy bootloader"; exit 1; }
           cp build/Ghost_ESP_IDF.bin "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to copy app binary"; exit 1; }
+          if [ -f build/Ghost_ESP_IDF.elf ]; then
+            cp build/Ghost_ESP_IDF.elf "$ARTIFACT_DIR/$ELF_FILE" || { echo "Failed to copy app elf"; exit 1; }
+          fi
           FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
           FLASH_SIZE=${FLASH_SIZE:-4MB}
           python3 -m esptool --chip ${{ matrix.target.idf_target }} merge_bin \
@@ -152,13 +159,119 @@ jobs:
             0x1000 "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
             0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+
           zip -j "$ZIP_FILE" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_FILE"; exit 1; }
           ls -lh "$ZIP_FILE"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.target.name }}
+          name: artifact-${{ matrix.target.zip_name }}
           path: ${{ matrix.target.zip_name }}
+
+  update_manifest_for_commit:
+    name: Update Commit Manifest (push)
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_build_artifacts
+
+      - name: Fetch current run artifact index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifact_index.json
+
+      - name: Update root manifest with commit configs
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          now = datetime.now(timezone.utc).isoformat()
+
+          path = "firmware-manifest.json"
+          if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+          else:
+            manifest = {
+              "schema_version": 2,
+              "repository": repo,
+              "generated_by": "compile_all.yml",
+              "commits": {},
+            }
+
+          manifest["schema_version"] = 2
+          manifest["repository"] = repo
+          manifest["updated_at"] = now
+
+          zips = sorted({os.path.basename(p) for p in glob.glob("all_build_artifacts/**/*.zip", recursive=True)})
+          with open("artifact_index.json", "r", encoding="utf-8") as fp:
+            artifact_index = json.load(fp)
+          artifacts = artifact_index.get("artifacts", [])
+          artifact_ids = {a.get("name"): a.get("id") for a in artifacts if a.get("name") and a.get("id")}
+
+          items = []
+          for zip_name in zips:
+            artifact_name = f"artifact-{zip_name}"
+            artifact_id = artifact_ids.get(artifact_name)
+            download_url = None
+            if artifact_id is not None:
+              download_url = f"https://github.com/{repo}/actions/runs/{run_id}/artifacts/{artifact_id}"
+            items.append({
+              "config": Path(zip_name).stem,
+              "zip_name": zip_name,
+              "channel": "commit",
+              "release_tag": None,
+              "download_url": download_url,
+              "artifact_run_url": f"https://github.com/{repo}/actions/runs/{run_id}",
+            })
+
+          commits = manifest.setdefault("commits", {})
+          entry = commits.get(sha, {})
+          refs = entry.get("release_refs", [])
+          entry.update({
+            "source_commit": sha,
+            "last_channel": "commit",
+            "last_tag": None,
+            "updated_at": now,
+            "configs": items,
+            "release_refs": refs,
+          })
+          commits[sha] = entry
+
+          with open(path, "w", encoding="utf-8") as fp:
+            json.dump(manifest, fp, indent=2, sort_keys=True)
+            fp.write("\n")
+          PY
+
+      - name: Commit root manifest
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git add firmware-manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged; no commit needed."
+          else
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${GITHUB_SHA::7} [skip ci]"
+            git push origin "HEAD:${BRANCH}"
+          fi
 
   upload_prerelease:
     name: Create Pre-release and Upload Artifacts
@@ -170,6 +283,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -205,6 +319,86 @@ jobs:
           echo "Generated Tag: $TAG_NAME"
           echo "Generated Title: $TITLE"
 
+      - name: Update Root Firmware Manifest
+        env:
+          TAG: ${{ steps.pre_release_info.outputs.tag_name }}
+          CHANNEL: prerelease
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["TAG"]
+          channel = os.environ["CHANNEL"]
+          sha = os.environ["GITHUB_SHA"]
+          now = datetime.now(timezone.utc).isoformat()
+
+          path = "firmware-manifest.json"
+          if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+          else:
+            manifest = {
+              "schema_version": 2,
+              "repository": repo,
+              "generated_by": "compile_all.yml",
+              "commits": {},
+            }
+
+          manifest["schema_version"] = 2
+          manifest["repository"] = repo
+          manifest["updated_at"] = now
+
+          items = []
+          for zip_path in sorted(glob.glob("release_assets/*.zip")):
+            zip_name = os.path.basename(zip_path)
+            stem = Path(zip_name).stem
+            items.append({
+              "config": stem,
+              "zip_name": zip_name,
+              "channel": channel,
+              "release_tag": tag,
+              "download_url": f"https://github.com/{repo}/releases/download/{tag}/{zip_name}",
+            })
+
+          commits = manifest.setdefault("commits", {})
+          entry = commits.get(sha, {})
+          refs = entry.get("release_refs", [])
+          if not any(r.get("tag") == tag for r in refs):
+            refs.append({"tag": tag, "channel": channel, "updated_at": now})
+
+          entry.update({
+            "source_commit": sha,
+            "last_channel": channel,
+            "last_tag": tag,
+            "updated_at": now,
+            "configs": items,
+            "release_refs": refs,
+          })
+          commits[sha] = entry
+
+          with open(path, "w", encoding="utf-8") as fp:
+            json.dump(manifest, fp, indent=2, sort_keys=True)
+            fp.write("\n")
+          PY
+
+      - name: Commit Root Manifest to Repository
+        env:
+          TAG: ${{ steps.pre_release_info.outputs.tag_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git add firmware-manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged; no commit needed."
+          else
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
+            git push origin "HEAD:${BRANCH}"
+          fi
+
       - name: Create GitHub Pre-Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -224,6 +418,7 @@ jobs:
             echo "No ZIP files found in release_assets. Creating pre-release without assets."
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file release_notes.md \
               --prerelease
@@ -232,6 +427,7 @@ jobs:
             ls -l release_assets/*.zip
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file release_notes.md \
               --prerelease \
@@ -249,6 +445,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -284,6 +481,86 @@ jobs:
           echo "Generated Tag: $TAG_NAME"
           echo "Generated Title: $TITLE"
 
+      - name: Update Root Firmware Manifest
+        env:
+          TAG: ${{ steps.release_info.outputs.tag_name }}
+          CHANNEL: stable
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["TAG"]
+          channel = os.environ["CHANNEL"]
+          sha = os.environ["GITHUB_SHA"]
+          now = datetime.now(timezone.utc).isoformat()
+
+          path = "firmware-manifest.json"
+          if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+          else:
+            manifest = {
+              "schema_version": 2,
+              "repository": repo,
+              "generated_by": "compile_all.yml",
+              "commits": {},
+            }
+
+          manifest["schema_version"] = 2
+          manifest["repository"] = repo
+          manifest["updated_at"] = now
+
+          items = []
+          for zip_path in sorted(glob.glob("release_assets/*.zip")):
+            zip_name = os.path.basename(zip_path)
+            stem = Path(zip_name).stem
+            items.append({
+              "config": stem,
+              "zip_name": zip_name,
+              "channel": channel,
+              "release_tag": tag,
+              "download_url": f"https://github.com/{repo}/releases/download/{tag}/{zip_name}",
+            })
+
+          commits = manifest.setdefault("commits", {})
+          entry = commits.get(sha, {})
+          refs = entry.get("release_refs", [])
+          if not any(r.get("tag") == tag for r in refs):
+            refs.append({"tag": tag, "channel": channel, "updated_at": now})
+
+          entry.update({
+            "source_commit": sha,
+            "last_channel": channel,
+            "last_tag": tag,
+            "updated_at": now,
+            "configs": items,
+            "release_refs": refs,
+          })
+          commits[sha] = entry
+
+          with open(path, "w", encoding="utf-8") as fp:
+            json.dump(manifest, fp, indent=2, sort_keys=True)
+            fp.write("\n")
+          PY
+
+      - name: Commit Root Manifest to Repository
+        env:
+          TAG: ${{ steps.release_info.outputs.tag_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git add firmware-manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged; no commit needed."
+          else
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
+            git push origin "HEAD:${BRANCH}"
+          fi
+
       - name: Create GitHub Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -304,6 +581,7 @@ jobs:
             echo "No ZIP files found in release_assets. Creating release without assets."
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file release_notes.md \
               --latest
@@ -312,6 +590,7 @@ jobs:
             ls -l release_assets/*.zip
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file release_notes.md \
               --latest \

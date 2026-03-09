@@ -34,7 +34,7 @@ typedef struct {
 } app_item_t;
 
 static app_item_t app_items[] = {
-    {"Rave", &rave, 4, {{0}}, &music_visualizer_view},
+    {"Visualizer", &rave, 4, {{0}}, &music_visualizer_view},
     {"Terminal", &terminal_icon, 5, {{0}}, &terminal_view},
     {"Back", NULL, 0, {{0}}, NULL},
 };

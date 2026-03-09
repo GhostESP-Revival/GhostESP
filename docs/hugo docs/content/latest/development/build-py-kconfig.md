@@ -46,6 +46,12 @@ idf.py menuconfig
 
 Use the menu to browse `GhostESP Options → GhostESP Features`. Save and exit when finished.
 
+### Enabling core dumps to flash
+
+GhostESP can capture ESP-IDF core dumps into a dedicated flash partition after a crash. When enabled, the device exposes a `coredump` CLI command (plus extra coredump status lines in `chipinfo`).
+
+In `idf.py menuconfig`, use the search function to find `ESP_COREDUMP_ENABLE_TO_FLASH` (or search for `COREDUMP`) and enable **core dump to flash**. Make sure your partition table includes a `data,coredump` partition.
+
 ### Enabling NFC features
 
 Open **Ghost ESP Options → NFC Options** to toggle the backends:

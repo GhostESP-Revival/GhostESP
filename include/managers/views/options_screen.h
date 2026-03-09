@@ -4,7 +4,16 @@
 #include "lvgl/lvgl.h"
 #include "managers/display_manager.h"
 
-typedef enum { OT_Wifi, OT_Bluetooth, OT_GPS, OT_DualComm, OT_Settings, OT_IOButtonPresets, OT_WigleManualUpload } EOptionsMenuType;
+typedef enum {
+    OT_Wifi,
+    OT_Bluetooth,
+    OT_GPS,
+    OT_DualComm,
+    OT_NRF24,
+    OT_Settings,
+    OT_IOButtonPresets,
+    OT_WigleManualUpload
+} EOptionsMenuType;
 
 extern View options_menu_view;
 extern EOptionsMenuType SelectedMenuType;

@@ -22,6 +22,7 @@
 #include "managers/views/terminal_screen.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -267,6 +268,204 @@ void ap_scan_start(void) {
             rgb_manager_apply_static_from_settings();
         }
     }
+}
+
+static bool async_scan_in_progress = false;
+static int64_t async_scan_start_time = 0;
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+#define MIN_SCAN_TIME_MS 6000
+#else
+#define MIN_SCAN_TIME_MS 5000
+#endif
+
+esp_err_t ap_scan_start_async(void) {
+    log_heap_status(TAG, "async_scan_start");
+    status_display_show_status("WiFi Scanning...");
+
+    if (selected_aps != NULL) {
+        free(selected_aps);
+        selected_aps = NULL;
+        selected_ap_count = 0;
+    }
+    if (scanned_aps != NULL) {
+        free(scanned_aps);
+        scanned_aps = NULL;
+        ap_count = 0;
+    }
+
+    ap_manager_stop_services();
+
+    wifi_mode_t current_mode;
+    esp_err_t err = esp_wifi_get_mode(&current_mode);
+    if (err == ESP_ERR_WIFI_NOT_INIT) {
+        ESP_LOGW(TAG, "Wi-Fi not initialized, reinitializing driver...");
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
+            TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
+            return err;
+        }
+    }
+
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set STA mode: %s", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("WiFi mode set failed: %s\n", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start Wi-Fi: %s", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("WiFi start failed: %s\n", esp_err_to_name(err));
+        return err;
+    }
+
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+        .scan_time = {.active.min = 250, .active.max = 300, .passive = 300}
+#else
+        .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}
+#endif
+    };
+
+    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
+
+    printf("WiFi Scan started (async)\n");
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+    printf("Please wait ~5 Seconds...\n");
+    TERMINAL_VIEW_ADD_TEXT("Please wait ~5 Seconds...\n");
+#else
+    printf("Please wait 5 Seconds...\n");
+    TERMINAL_VIEW_ADD_TEXT("Please wait 5 Seconds...\n");
+#endif
+
+    err = esp_wifi_scan_start(&scan_config, false);
+    if (err != ESP_OK) {
+        printf("WiFi scan failed to start: %s", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
+        log_heap_status(TAG, "async_scan_start_failed");
+        return err;
+    }
+
+    async_scan_in_progress = true;
+    async_scan_start_time = esp_timer_get_time();
+    log_heap_status(TAG, "async_scan_started");
+    return ESP_OK;
+}
+
+bool ap_scan_is_running(void) {
+    return async_scan_in_progress;
+}
+
+bool ap_scan_check_done(void) {
+    if (!async_scan_in_progress) {
+        return true;
+    }
+    
+    int64_t elapsed_ms = (esp_timer_get_time() - async_scan_start_time) / 1000;
+    if (elapsed_ms < MIN_SCAN_TIME_MS) {
+        ESP_LOGD(TAG, "Scan in progress: %lld ms elapsed, min %d ms", elapsed_ms, MIN_SCAN_TIME_MS);
+        return false;
+    }
+    
+    uint16_t num = 0;
+    esp_err_t err = esp_wifi_scan_get_ap_num(&num);
+    ESP_LOGI(TAG, "Scan check: elapsed=%lldms, err=%s, ap_num=%u", 
+             elapsed_ms, esp_err_to_name(err), num);
+    
+    if (err == ESP_OK) {
+        async_scan_in_progress = false;
+        return true;
+    }
+    
+    return false;
+}
+
+void ap_scan_finish_async(void) {
+    async_scan_in_progress = false;
+    
+    rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    
+    uint16_t initial_ap_count = 0;
+    esp_err_t err = esp_wifi_scan_get_ap_num(&initial_ap_count);
+    if (err != ESP_OK) {
+        printf("Failed to get AP count: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to get AP count: %s\n", esp_err_to_name(err));
+        esp_wifi_stop();
+        ap_manager_start_services();
+        return;
+    }
+
+    printf("Found %u access points\n", initial_ap_count);
+    TERMINAL_VIEW_ADD_TEXT("Found %u access points\n", initial_ap_count);
+
+    if (initial_ap_count > AP_SCAN_MAX_RESULTS) {
+        printf("Too many APs (%u). Truncating list to first %d\n", initial_ap_count, AP_SCAN_MAX_RESULTS);
+        TERMINAL_VIEW_ADD_TEXT("Showing first %d APs (truncated)\n", AP_SCAN_MAX_RESULTS);
+        initial_ap_count = AP_SCAN_MAX_RESULTS;
+    }
+
+    if (initial_ap_count > 0) {
+        if (scanned_aps != NULL) {
+            free(scanned_aps);
+            scanned_aps = NULL;
+        }
+
+        if (selected_aps != NULL) {
+            free(selected_aps);
+            selected_aps = NULL;
+            selected_ap_count = 0;
+        }
+
+        scanned_aps = calloc(initial_ap_count, sizeof(wifi_ap_record_t));
+        if (scanned_aps == NULL) {
+            printf("Failed to allocate memory for AP info\n");
+            ap_count = 0;
+            esp_wifi_stop();
+            ap_manager_start_services();
+            return;
+        }
+
+        uint16_t actual_ap_count = initial_ap_count;
+        err = esp_wifi_scan_get_ap_records(&actual_ap_count, scanned_aps);
+        if (err != ESP_OK) {
+            printf("Failed to get AP records: %s\n", esp_err_to_name(err));
+            free(scanned_aps);
+            scanned_aps = NULL;
+            ap_count = 0;
+            esp_wifi_stop();
+            ap_manager_start_services();
+            return;
+        }
+
+        ap_count = actual_ap_count;
+    } else {
+        printf("No access points found\n");
+        ap_count = 0;
+    }
+
+    err = esp_wifi_scan_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "Scan stop returned: %s", esp_err_to_name(err));
+    }
+    
+    esp_wifi_stop();
+    ap_manager_start_services();
+
+    if (rgb_effect_task_handle == NULL) {
+        RGBMode mode = settings_get_rgb_mode(&G_Settings);
+        if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
+            mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
+            rgb_manager_apply_static_from_settings();
+        }
+    }
+    
+    log_heap_status(TAG, "async_scan_finished");
 }
 
 void ap_scan_stop(void) {

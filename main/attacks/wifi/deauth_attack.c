@@ -18,6 +18,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
+#include "scans/wifi/station_scan.h"
 #include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -442,7 +443,9 @@ void deauth_attack_stop(void) {
 }
 
 void deauth_attack_start_station(void) {
+    station_selected_local = station_scan_get_selection(&selected_station_local);
     if (!station_selected_local) {
+        glog("No station selected; falling back to AP deauth mode.\n");
         deauth_attack_start();
         return;
     }

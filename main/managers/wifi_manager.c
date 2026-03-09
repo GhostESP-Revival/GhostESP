@@ -32,13 +32,14 @@
 #include <dhcpserver/dhcpserver.h>
 #include <esp_http_server.h>
 #include <esp_random.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <mdns.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
-#ifdef WITH_SCREEN
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
 #include "managers/views/music_visualizer.h"
 #endif
 #include "managers/sd_card_manager.h"
@@ -49,6 +50,7 @@
 #include "core/utils.h" // Add utils include
 #include <inttypes.h>
 #include "managers/default_portal.h"
+#include "core/commandline.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
 #include "mbedtls/ecp.h"
@@ -67,6 +69,10 @@
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/wifi_channels.h"
+
+void music_visualizer_view_update(const uint8_t *amplitudes,
+                                  const char *track_name,
+                                  const char *artist_name);
 
 // Defines for Wireshark channel validation
 #if !defined(MAX_WIFI_CHANNEL)
@@ -119,6 +125,9 @@ const char *TAG = "WiFiManager";
 // Station scan variables moved to station_scan.c module
 bool manual_disconnect = false;
 static bool boot_connection_attempted = false;
+static volatile bool wifi_connect_cancel_requested = false;
+static volatile bool visualizer_stop_requested = false;
+static volatile int visualizer_socket = -1;
 
 static bool karma_portal_active = false;
 
@@ -438,6 +447,37 @@ struct DeviceInfo {
 
 void wifi_manager_set_manual_disconnect(bool disconnect) {
     manual_disconnect = disconnect;
+}
+
+void wifi_manager_cancel_connect(void) {
+    wifi_connect_cancel_requested = true;
+    manual_disconnect = true;
+    esp_err_t err = esp_wifi_disconnect();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED && err != ESP_ERR_WIFI_NOT_CONNECT) {
+        ESP_LOGW(TAG, "cancel_connect: esp_wifi_disconnect returned %s", esp_err_to_name(err));
+    }
+}
+
+void wifi_manager_stop_visualizer(void) {
+    visualizer_stop_requested = true;
+
+    if (visualizer_socket >= 0) {
+        shutdown(visualizer_socket, 0);
+    }
+}
+
+void wifi_manager_start_visualizer(bool for_screen) {
+    if (VisualizerHandle != NULL) {
+        return;
+    }
+
+    if (for_screen) {
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
+        xTaskCreate(screen_music_visualizer_task, "udp_server", 4096, NULL, 5, &VisualizerHandle);
+#endif
+    } else {
+        xTaskCreate(animate_led_based_on_amplitude, "udp_server", 4096, NULL, 5, &VisualizerHandle);
+    }
 }
 
 static void tolower_str(const uint8_t *src, char *dst) {
@@ -2044,14 +2084,17 @@ void wifi_manager_deauth_station(void) {
 
 #define MAX_PAYLOAD 64
 #define UDP_PORT 6677
+#define VIS_DISCOVERY_PORT 6678
+#define VIS_DISCOVERY_PAYLOAD "GHOSTESP_RAVE_DISCOVER_V1"
+#define VIS_RECV_TIMEOUT_MS 250
+#define VIS_DISCOVERY_INTERVAL_US 1000000ULL
 #define TRACK_NAME_LEN 32
 #define ARTIST_NAME_LEN 32
 #define NUM_BARS 15
 
 void screen_music_visualizer_task(void *pvParameters) {
+    (void)pvParameters;
     char rx_buffer[128];
-    char track_name[TRACK_NAME_LEN + 1];
-    char artist_name[ARTIST_NAME_LEN + 1];
     uint8_t amplitudes[NUM_BARS];
 
     struct sockaddr_in dest_addr;
@@ -2059,52 +2102,98 @@ void screen_music_visualizer_task(void *pvParameters) {
     dest_addr.sin_port = htons(UDP_PORT);
     dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
+    struct sockaddr_in helper_discovery_addr;
+    helper_discovery_addr.sin_family = AF_INET;
+    helper_discovery_addr.sin_port = htons(VIS_DISCOVERY_PORT);
+    helper_discovery_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+    visualizer_stop_requested = false;
+
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock < 0) {
         printf("Unable to create socket: errno %d\n", errno);
+        VisualizerHandle = NULL;
         vTaskDelete(NULL);
-        return;
     }
 
+    visualizer_socket = sock;
+
     printf("Socket created\n");
+
+    struct timeval recv_timeout = {
+        .tv_sec = 0,
+        .tv_usec = VIS_RECV_TIMEOUT_MS * 1000,
+    };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
 
     int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
         printf("Socket unable to bind: errno %d\n", errno);
         close(sock);
+        visualizer_socket = -1;
+        VisualizerHandle = NULL;
         vTaskDelete(NULL);
-        return;
     }
 
     printf("Socket bound, port %d\n", UDP_PORT);
 
-    while (1) {
-        printf("Waiting for data...\n");
+    int discover_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (discover_sock >= 0) {
+        int broadcast_enable = 1;
+        setsockopt(discover_sock, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+    }
+    int64_t last_discovery_us = 0;
 
-        struct sockaddr_in6 source_addr;
+    while (!visualizer_stop_requested) {
+        int64_t now_us = esp_timer_get_time();
+        if (discover_sock >= 0 && (now_us - last_discovery_us) >= VIS_DISCOVERY_INTERVAL_US) {
+            sendto(discover_sock,
+                   VIS_DISCOVERY_PAYLOAD,
+                   strlen(VIS_DISCOVERY_PAYLOAD),
+                   0,
+                   (struct sockaddr *)&helper_discovery_addr,
+                   sizeof(helper_discovery_addr));
+            last_discovery_us = now_us;
+        }
+
+        struct sockaddr_in source_addr;
         socklen_t socklen = sizeof(source_addr);
 
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
                            (struct sockaddr *)&source_addr, &socklen);
         if (len < 0) {
-            printf("recvfrom failed: errno %d\n", errno);
-            break;
+            if (visualizer_stop_requested) {
+                break;
+            }
+
+            int err = errno;
+            if (err == EAGAIN || err == EWOULDBLOCK || err == ETIMEDOUT || err == EINTR) {
+                continue;
+            }
+
+            if (err == ENETDOWN || err == ENETUNREACH || err == EHOSTUNREACH ||
+                err == ENOTCONN || err == EADDRNOTAVAIL) {
+                vTaskDelay(pdMS_TO_TICKS(80));
+                continue;
+            }
+
+            if (err == EBADF || err == ENOTSOCK) {
+                printf("recvfrom socket invalid: errno %d\n", err);
+                break;
+            }
+
+            printf("recvfrom transient error: errno %d\n", err);
+            vTaskDelay(pdMS_TO_TICKS(80));
+            continue;
         }
 
         rx_buffer[len] = '\0';
 
         if (len >= TRACK_NAME_LEN + ARTIST_NAME_LEN + NUM_BARS) {
-
-            memcpy(track_name, rx_buffer, TRACK_NAME_LEN);
-            track_name[TRACK_NAME_LEN] = '\0';
-
-            memcpy(artist_name, rx_buffer + TRACK_NAME_LEN, ARTIST_NAME_LEN);
-            artist_name[ARTIST_NAME_LEN] = '\0';
-
             memcpy(amplitudes, rx_buffer + TRACK_NAME_LEN + ARTIST_NAME_LEN, NUM_BARS);
 
-#ifdef WITH_SCREEN
-            music_visualizer_view_update(amplitudes, track_name, artist_name);
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
+            music_visualizer_view_update(amplitudes, "LIVE INPUT", "Desktop Audio (Wi-Fi)");
 #endif
         } else {
             printf("Received packet of unexpected size\n");
@@ -2116,10 +2205,17 @@ void screen_music_visualizer_task(void *pvParameters) {
         shutdown(sock, 0);
         close(sock);
     }
+    if (discover_sock >= 0) {
+        close(discover_sock);
+    }
 
+    visualizer_socket = -1;
+    visualizer_stop_requested = false;
+    VisualizerHandle = NULL;
     vTaskDelete(NULL);
 }
 void animate_led_based_on_amplitude(void *pvParameters) {
+    (void)pvParameters;
     char rx_buffer[128];
     char addr_str[128];
     int addr_family = AF_INET;
@@ -2130,17 +2226,23 @@ void animate_led_based_on_amplitude(void *pvParameters) {
     dest_addr.sin_family = addr_family;
     dest_addr.sin_port = htons(UDP_PORT);
 
+    visualizer_stop_requested = false;
+
     int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
     if (sock < 0) {
         printf("Unable to create socket: errno %d\n", errno);
-        return;
+        VisualizerHandle = NULL;
+        vTaskDelete(NULL);
     }
+    visualizer_socket = sock;
     printf("Socket created\n");
 
     if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
         printf("Socket unable to bind: errno %d\n", errno);
         close(sock);
-        return;
+        visualizer_socket = -1;
+        VisualizerHandle = NULL;
+        vTaskDelete(NULL);
     }
     printf("Socket bound, port %d\n", UDP_PORT);
 
@@ -2152,7 +2254,7 @@ void animate_led_based_on_amplitude(void *pvParameters) {
     uint32_t last_error_time = 0;
     const uint32_t error_rate_limit_ms = 5000;
 
-    while (1) {
+    while (!visualizer_stop_requested) {
         struct sockaddr_in source_addr;
         socklen_t socklen = sizeof(source_addr);
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT,
@@ -2242,6 +2344,11 @@ void animate_led_based_on_amplitude(void *pvParameters) {
         shutdown(sock, 0);
         close(sock);
     }
+
+    visualizer_socket = -1;
+    visualizer_stop_requested = false;
+    VisualizerHandle = NULL;
+    vTaskDelete(NULL);
 }
 
 #define START_HOST 1
@@ -2887,9 +2994,35 @@ void wifi_manager_start_ip_lookup() {
     TERMINAL_VIEW_ADD_TEXT("IP Scan Done...\n");
 }
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
+    if (ssid == NULL || ssid[0] == '\0') {
+        printf("No SSID provided\n");
+        TERMINAL_VIEW_ADD_TEXT("No SSID provided\n");
+        status_display_show_status("WiFi No SSID");
+        return;
+    }
+
+    if (!wifi_ctrl_lock(pdMS_TO_TICKS(2000))) {
+        ESP_LOGE(TAG, "connect: wifi ctrl mutex lock failed");
+        TERMINAL_VIEW_ADD_TEXT("WiFi busy, try again\n");
+        status_display_show_status("WiFi Busy");
+        return;
+    }
+
     printf("Connecting to WiFi: %s\n", ssid);
     TERMINAL_VIEW_ADD_TEXT("Connecting to WiFi: %s\n", ssid);
     status_display_show_status("WiFi Connecting...");
+    wifi_connect_cancel_requested = false;
+
+    wifi_ap_record_t current_ap = {0};
+    if (esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK &&
+        strncmp((const char *)current_ap.ssid, ssid, sizeof(current_ap.ssid)) == 0) {
+        printf("Already connected to %s\n", ssid);
+        TERMINAL_VIEW_ADD_TEXT("Already connected to %s\n", ssid);
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        status_display_show_status("WiFi Connected");
+        wifi_ctrl_unlock();
+        return;
+    }
     
     wifi_config_t wifi_config = {0};
     
@@ -2915,24 +3048,57 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     
     // Set the connecting bit BEFORE any WiFi operations
     xEventGroupSetBits(wifi_event_group, WIFI_CONNECTING_BIT);
-    
-    // Stop WiFi completely to ensure clean state
-    esp_wifi_stop();
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    // Reconfigure and restart WiFi
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    
-    // Wait for WiFi to be ready
-    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err != ESP_OK) {
+        printf("Failed to set WiFi mode: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to set WiFi mode\n");
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTING_BIT);
+        status_display_show_status("WiFi Mode Fail");
+        wifi_ctrl_unlock();
+        return;
+    }
+
+    err = esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    if (err != ESP_OK) {
+        printf("Failed to configure STA: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to configure WiFi\n");
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTING_BIT);
+        status_display_show_status("WiFi Config Fail");
+        wifi_ctrl_unlock();
+        return;
+    }
+
+    err = esp_wifi_disconnect();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT && err != ESP_ERR_WIFI_CONN) {
+        ESP_LOGW(TAG, "connect: esp_wifi_disconnect returned %s", esp_err_to_name(err));
+    }
+
+    err = esp_wifi_start();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+        printf("Failed to start WiFi: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("Failed to start WiFi\n");
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTING_BIT);
+        status_display_show_status("WiFi Start Fail");
+        wifi_ctrl_unlock();
+        return;
+    }
+
+    wifi_ctrl_unlock();
+
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     int retry_count = 0;
     const int max_retries = 5;  // Reduced retry count for cleaner logs
     bool connected = false;
 
     while (retry_count < max_retries && !connected) {
+        if (wifi_connect_cancel_requested) {
+            TERMINAL_VIEW_ADD_TEXT("WiFi connection cancelled\n");
+            printf("WiFi connection cancelled\n");
+            break;
+        }
+
         if (retry_count > 0) {
             printf("Retry attempt %d/%d...\n", retry_count, max_retries);
             TERMINAL_VIEW_ADD_TEXT("Retry attempt %d/%d...\n", retry_count, max_retries);
@@ -2941,12 +3107,40 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
         esp_err_t ret = esp_wifi_connect();
         if (ret == ESP_ERR_WIFI_CONN) {
             ret = ESP_OK; // Already connecting, handled elsewhere
+        } else if (ret == ESP_ERR_WIFI_NOT_STARTED) {
+            esp_err_t start_err = esp_wifi_start();
+            if (start_err == ESP_OK || start_err == ESP_ERR_WIFI_CONN) {
+                vTaskDelay(pdMS_TO_TICKS(150));
+                ret = esp_wifi_connect();
+                if (ret == ESP_ERR_WIFI_CONN) {
+                    ret = ESP_OK;
+                }
+            }
         }
 
         if (ret == ESP_OK) {
-            // Wait for connection with timeout
-            EventBits_t bits = xEventGroupWaitBits(wifi_event_group, 
-                WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
+            EventBits_t bits = 0;
+            const TickType_t wait_slice = pdMS_TO_TICKS(250);
+            const TickType_t wait_total = pdMS_TO_TICKS(10000);
+            TickType_t waited = 0;
+
+            while (!wifi_connect_cancel_requested && waited < wait_total) {
+                bits = xEventGroupWaitBits(wifi_event_group,
+                                           WIFI_CONNECTED_BIT,
+                                           pdFALSE,
+                                           pdTRUE,
+                                           wait_slice);
+                if (bits & WIFI_CONNECTED_BIT) {
+                    break;
+                }
+                waited += wait_slice;
+            }
+
+            if (wifi_connect_cancel_requested) {
+                TERMINAL_VIEW_ADD_TEXT("WiFi connection cancelled\n");
+                printf("WiFi connection cancelled\n");
+                break;
+            }
             
             if (bits & WIFI_CONNECTED_BIT) {
                 connected = true;
@@ -2971,11 +3165,13 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     // Clear the connecting bit as we're done with the manual connection attempt
     xEventGroupClearBits(wifi_event_group, WIFI_CONNECTING_BIT);
 
-    if (!connected) {
+    if (!connected && !wifi_connect_cancel_requested) {
         TERMINAL_VIEW_ADD_TEXT("Failed to connect to %s after %d attempts\n", ssid, max_retries);
         printf("Failed to connect to %s after %d attempts\n", ssid, max_retries);
         esp_wifi_disconnect();
     }
+
+    wifi_connect_cancel_requested = false;
 }
 
 // Beacon spam start function - wrapper for beacon_spam module
@@ -3015,10 +3211,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
     TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-    {
-        char buf[64]; snprintf(buf, sizeof(buf), "Please wait %d Seconds...\n", seconds);
-        TERMINAL_VIEW_ADD_TEXT(buf);
-    }
+    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n", seconds);
 
     err = esp_wifi_scan_start(&scan_config, false);
     if (err != ESP_OK) {

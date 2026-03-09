@@ -168,6 +168,12 @@ void wifi_manager_start_ip_lookup();
 
 void wifi_manager_connect_wifi(const char *ssid, const char *password);
 
+void wifi_manager_cancel_connect(void);
+
+void wifi_manager_start_visualizer(bool for_screen);
+
+void wifi_manager_stop_visualizer(void);
+
 void wifi_manager_stop_monitor_mode();
 
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback);

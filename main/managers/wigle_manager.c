@@ -275,17 +275,25 @@ static esp_err_t wigle_upload_file(const char *filepath, const char *api_key) {
 
     size_t body_len = part1_len + file_len + part2_len;
 
-    /* Build Authorization: Basic base64(APIName:APIToken) */
+    /* Build Authorization: Basic base64(APIName:APIToken)
+     * If api_key has no colon, it's already EncodedForUseToken (pre-encoded) */
     char auth_b64[AUTH_BUF_SIZE];
-    size_t enc_len = AUTH_BUF_SIZE - 1;
-    int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
-                                  (const unsigned char *)api_key, strlen(api_key));
-    if (r != 0) {
-        fclose(f);
-        glog("Wigle: base64 encode failed\n");
-        return ESP_FAIL;
+    if (strchr(api_key, ':') == NULL) {
+        // Already encoded token - use directly
+        strncpy(auth_b64, api_key, AUTH_BUF_SIZE - 1);
+        auth_b64[AUTH_BUF_SIZE - 1] = '\0';
+    } else {
+        // Need to encode APIName:APIToken
+        size_t enc_len = AUTH_BUF_SIZE - 1;
+        int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
+                                      (const unsigned char *)api_key, strlen(api_key));
+        if (r != 0) {
+            fclose(f);
+            glog("Wigle: base64 encode failed\n");
+            return ESP_FAIL;
+        }
+        auth_b64[enc_len] = '\0';
     }
-    auth_b64[enc_len] = '\0';
 
     char auth_val[6 + AUTH_BUF_SIZE + 1];
     snprintf(auth_val, sizeof(auth_val), "Basic %s", auth_b64);
@@ -431,14 +439,23 @@ static esp_err_t wigle_upload_file_jit(const char *filepath, long fsize,
         strlen(donate_val) + strlen("\r\n--" WIGLE_BOUNDARY "--\r\n");
     size_t body_len = part1_len + (size_t)fsize + part2_len;
 
+    /* Build Authorization: Basic base64(APIName:APIToken)
+     * If api_key has no colon, it's already EncodedForUseToken (pre-encoded) */
     char auth_b64[AUTH_BUF_SIZE];
-    size_t enc_len = AUTH_BUF_SIZE - 1;
-    if (mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
-                              (const unsigned char *)api_key, strlen(api_key)) != 0) {
-        glog("Wigle JIT: base64 encode failed\n");
-        return ESP_FAIL;
+    if (strchr(api_key, ':') == NULL) {
+        // Already encoded token - use directly
+        strncpy(auth_b64, api_key, AUTH_BUF_SIZE - 1);
+        auth_b64[AUTH_BUF_SIZE - 1] = '\0';
+    } else {
+        // Need to encode APIName:APIToken
+        size_t enc_len = AUTH_BUF_SIZE - 1;
+        if (mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
+                                  (const unsigned char *)api_key, strlen(api_key)) != 0) {
+            glog("Wigle JIT: base64 encode failed\n");
+            return ESP_FAIL;
+        }
+        auth_b64[enc_len] = '\0';
     }
-    auth_b64[enc_len] = '\0';
 
     char auth_val[6 + AUTH_BUF_SIZE + 1];
     snprintf(auth_val, sizeof(auth_val), "Basic %s", auth_b64);
@@ -920,14 +937,12 @@ static esp_err_t wigle_process_queue(const char *api_key) {
 esp_err_t wigle_upload_all(void) {
     const char *api_key = wigle_get_api_key();
     if (!api_key || api_key[0] == '\0') {
-        glog("Wigle: no API key set. Use 'wigle API <name>:<token>'\n");
+        glog("Wigle: no API key set. Use 'wigle API <encoded>' or 'wigle API <name>:<token>'\n");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (strchr(api_key, ':') == NULL) {
-        glog("Wigle: API key must be format APIName:APIToken\n");
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Accept both formats: APIName:APIToken or EncodedForUseToken (no colon)
+    // EncodedForUseToken is already base64 encoded by Wigle
 
     if (!wigle_sta_has_ip()) {
         glog("Wigle: STA not connected - connect to WiFi first (Menu > WiFi > Connect)\n");
@@ -999,7 +1014,7 @@ void wigle_upload_all_async(void) {
         return;
     }
     const char *key = wigle_get_api_key();
-    if (!key || key[0] == '\0' || strchr(key, ':') == NULL) return;
+    if (!key || key[0] == '\0') return;
     wigle_upload_in_progress = true;
     if (xTaskCreate(wigle_upload_all_task, "wigle_up", WIGLE_TASK_STACK, NULL, 5, NULL) == pdPASS) {
         glog("Wigle: auto-upload started\n");
@@ -1025,13 +1040,23 @@ static esp_err_t wigle_build_auth_header(const char *api_key, char *auth_val, si
     if (!api_key || !auth_val || auth_val_len == 0) return ESP_ERR_INVALID_ARG;
 
     char auth_b64[AUTH_BUF_SIZE];
-    size_t enc_len = AUTH_BUF_SIZE - 1;
-    int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
-                                  (const unsigned char *)api_key, strlen(api_key));
-    if (r != 0) {
-        return ESP_FAIL;
+    
+    /* If api_key has no colon, it's already EncodedForUseToken (pre-encoded) */
+    if (strchr(api_key, ':') == NULL) {
+        // Already encoded token - use directly
+        strncpy(auth_b64, api_key, AUTH_BUF_SIZE - 1);
+        auth_b64[AUTH_BUF_SIZE - 1] = '\0';
+    } else {
+        // Need to encode APIName:APIToken
+        size_t enc_len = AUTH_BUF_SIZE - 1;
+        int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
+                                      (const unsigned char *)api_key, strlen(api_key));
+        if (r != 0) {
+            return ESP_FAIL;
+        }
+        auth_b64[enc_len] = '\0';
     }
-    auth_b64[enc_len] = '\0';
+    
     snprintf(auth_val, auth_val_len, "Basic %s", auth_b64);
     return ESP_OK;
 }
@@ -1099,10 +1124,7 @@ esp_err_t wigle_upload_single_csv(const char *filename, char *message, size_t me
         snprintf(message, message_len, "No API key set");
         return ESP_ERR_INVALID_STATE;
     }
-    if (strchr(api_key, ':') == NULL) {
-        snprintf(message, message_len, "API key must be APIName:APIToken");
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Accept both APIName:APIToken or EncodedForUseToken
     if (!wigle_sta_has_ip()) {
         snprintf(message, message_len, "Connect to WiFi first");
         return ESP_ERR_INVALID_STATE;
@@ -1216,10 +1238,7 @@ esp_err_t wigle_get_stats(char *message, size_t message_len) {
         snprintf(message, message_len, "No API key set");
         return ESP_ERR_INVALID_STATE;
     }
-    if (strchr(api_key, ':') == NULL) {
-        snprintf(message, message_len, "API key must be APIName:APIToken");
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Accept both APIName:APIToken or EncodedForUseToken
     if (!wigle_sta_has_ip()) {
         snprintf(message, message_len, "Connect to WiFi first");
         return ESP_ERR_INVALID_STATE;
@@ -1371,9 +1390,7 @@ esp_err_t wigle_test_api_key(void) {
     if (!api_key || api_key[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-    if (strchr(api_key, ':') == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Accept both formats: APIName:APIToken or EncodedForUseToken
     
     wigle_test_result_t *result = calloc(1, sizeof(wigle_test_result_t));
     if (!result) {
@@ -1409,16 +1426,25 @@ static void wigle_test_api_task(void *arg) {
         goto done;
     }
     
+    /* Build Authorization: Basic base64(APIName:APIToken)
+     * If api_key has no colon, it's already EncodedForUseToken (pre-encoded) */
     char auth_b64[AUTH_BUF_SIZE];
-    size_t enc_len = AUTH_BUF_SIZE - 1;
-    int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
-                                  (const unsigned char *)api_key, strlen(api_key));
-    if (r != 0) {
-        strncpy(result->message, "API key encoding failed", sizeof(result->message) - 1);
-        result->success = false;
-        goto done;
+    if (strchr(api_key, ':') == NULL) {
+        // Already encoded token - use directly
+        strncpy(auth_b64, api_key, AUTH_BUF_SIZE - 1);
+        auth_b64[AUTH_BUF_SIZE - 1] = '\0';
+    } else {
+        // Need to encode APIName:APIToken
+        size_t enc_len = AUTH_BUF_SIZE - 1;
+        int r = mbedtls_base64_encode((unsigned char *)auth_b64, AUTH_BUF_SIZE, &enc_len,
+                                      (const unsigned char *)api_key, strlen(api_key));
+        if (r != 0) {
+            strncpy(result->message, "API key encoding failed", sizeof(result->message) - 1);
+            result->success = false;
+            goto done;
+        }
+        auth_b64[enc_len] = '\0';
     }
-    auth_b64[enc_len] = '\0';
     
     char auth_val[6 + AUTH_BUF_SIZE + 1];
     snprintf(auth_val, sizeof(auth_val), "Basic %s", auth_b64);

@@ -16,6 +16,7 @@
 #include <esp_heap_caps.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 #include <sys/time.h>
 #include "esp_rom_sys.h"  // Contains esp_rom_printf
@@ -49,9 +50,21 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define MAX_WIFI_CHANNEL 13
 #endif
 #define CHANNEL_HOP_INTERVAL_MS 100
-#define WARDRIVE_STREAM_VERSION 1
+#define WARDRIVE_STREAM_VERSION 2
+#define WARDRIVE_STREAM_VERSION_LEGACY 1
+#define WARDRIVE_STREAM_FLAG_GPS_PRESENT 0x01
+#define WARDRIVE_STREAM_FLAG_GPS_FIX 0x02
+#define WARDRIVE_STREAM_FLAG_GPS_DATE_VALID 0x04
+#define WARDRIVE_STREAM_FLAG_GPS_TIME_VALID 0x08
+#define GPS_STREAM_VERSION 1
+#define GPS_STREAM_FLAG_PRESENT 0x01
+#define GPS_STREAM_FLAG_FIX 0x02
+#define GPS_STREAM_FLAG_DATE_VALID 0x04
+#define GPS_STREAM_FLAG_TIME_VALID 0x08
 #define WARDRIVE_HELPER_DEDUPE_SIZE 128
 #define WARDRIVE_HELPER_REFRESH_MS 25000
+#define PEER_GPS_STREAM_INTERVAL_MS 1000
+#define PEER_GPS_INIT_RETRY_MS 5000
 #define RECENT_SSID_COUNT 5
 #define LOG_DELAY_MS 5000
 #define PROBE_DEDUPE_TIMEOUT_MS 1000
@@ -86,6 +99,11 @@ static uint32_t wardrive_helper_tx_refresh = 0;
 static uint32_t wardrive_helper_tx_suppressed = 0;
 static uint32_t wardrive_helper_stream_send_ok = 0;
 static uint32_t wardrive_helper_stream_send_fail = 0;
+static uint32_t peer_gps_stream_tx_ok = 0;
+static uint32_t peer_gps_stream_tx_fail = 0;
+static uint32_t peer_gps_stream_rx_packets = 0;
+static uint32_t peer_gps_stream_rx_fix_packets = 0;
+static TaskHandle_t peer_gps_stream_task_handle = NULL;
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #define BLE_WD_SEEN_SIZE 64
@@ -151,6 +169,7 @@ static uint8_t wardrive_forced_helper_channels[WIFI_CHANNELS_MAX] = {0};
 static uint8_t wardrive_forced_helper_channel_count = 0;
 
 static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
+static void gps_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
 static uint8_t wardrive_select_auth_code(const char *encryption_type);
 static const char *wardrive_auth_code_to_string(uint8_t auth_code);
 static uint32_t wardrive_hash_bssid(const uint8_t *bssid);
@@ -160,7 +179,15 @@ static bool wardrive_send_helper_observation(const uint8_t *bssid,
                                              int8_t rssi,
                                              uint8_t auth_code,
                                              const char *ssid);
+static inline void wardrive_put_i32le(uint8_t *dst, int32_t value);
+static inline void wardrive_put_i16le(uint8_t *dst, int16_t value);
+static inline int32_t wardrive_get_i32le(const uint8_t *src);
+static inline int16_t wardrive_get_i16le(const uint8_t *src);
+static bool wardrive_is_valid_date(const gps_date_t *date);
+static bool wardrive_is_valid_time(const gps_time_t *tim);
 static inline uint32_t now_ms_u32(void);
+static bool wardrive_send_peer_gps_stream(void);
+static void peer_gps_stream_task(void *arg);
 static uint32_t wardrive_get_hop_interval_ms(void);
 static void wardrive_apply_hop_interval(void);
 static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels);
@@ -212,6 +239,46 @@ static uint32_t wardrive_hash_bssid(const uint8_t *bssid) {
         hash *= 16777619u;
     }
     return hash ? hash : 1u;
+}
+
+static inline void wardrive_put_i32le(uint8_t *dst, int32_t value) {
+    dst[0] = (uint8_t)(value & 0xFF);
+    dst[1] = (uint8_t)((value >> 8) & 0xFF);
+    dst[2] = (uint8_t)((value >> 16) & 0xFF);
+    dst[3] = (uint8_t)((value >> 24) & 0xFF);
+}
+
+static inline void wardrive_put_i16le(uint8_t *dst, int16_t value) {
+    dst[0] = (uint8_t)(value & 0xFF);
+    dst[1] = (uint8_t)((value >> 8) & 0xFF);
+}
+
+static inline int32_t wardrive_get_i32le(const uint8_t *src) {
+    return (int32_t)((uint32_t)src[0] |
+                     ((uint32_t)src[1] << 8) |
+                     ((uint32_t)src[2] << 16) |
+                     ((uint32_t)src[3] << 24));
+}
+
+static inline int16_t wardrive_get_i16le(const uint8_t *src) {
+    return (int16_t)((uint16_t)src[0] | ((uint16_t)src[1] << 8));
+}
+
+static bool wardrive_is_valid_date(const gps_date_t *date) {
+    if (!date) {
+        return false;
+    }
+    if (date->year > 99 || date->month < 1 || date->month > 12 || date->day < 1 || date->day > 31) {
+        return false;
+    }
+    return true;
+}
+
+static bool wardrive_is_valid_time(const gps_time_t *tim) {
+    if (!tim) {
+        return false;
+    }
+    return tim->hour <= 23 && tim->minute <= 59 && tim->second <= 59;
 }
 
 static bool wardrive_helper_should_send(const uint8_t *bssid, int8_t rssi, const char *ssid) {
@@ -279,13 +346,14 @@ static bool wardrive_send_helper_observation(const uint8_t *bssid,
     uint8_t ssid_len = 0;
     if (ssid) {
         size_t raw_len = strlen(ssid);
-        if (raw_len > 32) {
-            raw_len = 32;
+        /* Keep helper stream payload <= 59 bytes so it fits one comm packet. */
+        if (raw_len > 23) {
+            raw_len = 23;
         }
         ssid_len = (uint8_t)raw_len;
     }
 
-    uint8_t payload[1 + 1 + 1 + 1 + 6 + 1 + 32] = {0};
+    uint8_t payload[1 + 1 + 1 + 1 + 6 + 1 + 32 + 1 + 4 + 4 + 2 + 1 + 1 + 1 + 1 + 2 + 7] = {0};
     size_t pos = 0;
     payload[pos++] = WARDRIVE_STREAM_VERSION;
     payload[pos++] = channel;
@@ -299,7 +367,217 @@ static bool wardrive_send_helper_observation(const uint8_t *bssid,
         pos += ssid_len;
     }
 
+    uint8_t gps_flags = 0;
+    int32_t lat_e7 = 0;
+    int32_t lon_e7 = 0;
+    int16_t alt_dm = 0;
+    uint8_t sats_in_use = 0;
+    uint8_t sats_in_view = 0;
+    uint8_t fix = (uint8_t)GPS_FIX_INVALID;
+    uint8_t fix_mode = (uint8_t)GPS_MODE_INVALID;
+    uint16_t hdop_x10 = 0;
+    uint8_t gps_day = 0;
+    uint8_t gps_month = 0;
+    uint16_t gps_year = 0;
+    uint8_t gps_hour = 0;
+    uint8_t gps_minute = 0;
+    uint8_t gps_second = 0;
+
+    gps_t local_gps = {0};
+    if (gps_manager_has_recent_update() && gps_manager_get_local_gps_snapshot(&local_gps)) {
+        gps_flags |= WARDRIVE_STREAM_FLAG_GPS_PRESENT;
+        sats_in_use = local_gps.sats_in_use;
+        sats_in_view = local_gps.sats_in_view;
+        fix = (uint8_t)local_gps.fix;
+        fix_mode = (uint8_t)local_gps.fix_mode;
+
+        if (local_gps.dop_h >= 0.0f && local_gps.dop_h <= 6553.5f) {
+            hdop_x10 = (uint16_t)(local_gps.dop_h * 10.0f);
+        }
+
+        if (wardrive_is_valid_date(&local_gps.date)) {
+            gps_flags |= WARDRIVE_STREAM_FLAG_GPS_DATE_VALID;
+        }
+        if (wardrive_is_valid_time(&local_gps.tim)) {
+            gps_flags |= WARDRIVE_STREAM_FLAG_GPS_TIME_VALID;
+        }
+        gps_day = local_gps.date.day;
+        gps_month = local_gps.date.month;
+        gps_year = local_gps.date.year;
+        gps_hour = local_gps.tim.hour;
+        gps_minute = local_gps.tim.minute;
+        gps_second = local_gps.tim.second;
+
+        if (local_gps.valid && local_gps.fix >= GPS_FIX_GPS && local_gps.fix_mode >= GPS_MODE_2D &&
+            local_gps.latitude >= -90.0f && local_gps.latitude <= 90.0f &&
+            local_gps.longitude >= -180.0f && local_gps.longitude <= 180.0f) {
+            gps_flags |= WARDRIVE_STREAM_FLAG_GPS_FIX;
+            lat_e7 = (int32_t)(local_gps.latitude * 10000000.0f);
+            lon_e7 = (int32_t)(local_gps.longitude * 10000000.0f);
+            float alt = local_gps.altitude * 10.0f;
+            if (alt > 32767.0f) {
+                alt = 32767.0f;
+            }
+            if (alt < -32768.0f) {
+                alt = -32768.0f;
+            }
+            alt_dm = (int16_t)alt;
+        }
+    }
+
+    payload[pos++] = gps_flags;
+    if (gps_flags & WARDRIVE_STREAM_FLAG_GPS_PRESENT) {
+        wardrive_put_i32le(payload + pos, lat_e7);
+        pos += 4;
+        wardrive_put_i32le(payload + pos, lon_e7);
+        pos += 4;
+        wardrive_put_i16le(payload + pos, alt_dm);
+        pos += 2;
+        payload[pos++] = sats_in_use;
+        payload[pos++] = sats_in_view;
+        payload[pos++] = fix;
+        payload[pos++] = fix_mode;
+        payload[pos++] = (uint8_t)(hdop_x10 & 0xFF);
+        payload[pos++] = (uint8_t)((hdop_x10 >> 8) & 0xFF);
+        payload[pos++] = gps_day;
+        payload[pos++] = gps_month;
+        wardrive_put_i16le(payload + pos, (int16_t)gps_year);
+        pos += 2;
+        payload[pos++] = gps_hour;
+        payload[pos++] = gps_minute;
+        payload[pos++] = gps_second;
+    }
+
     return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_WARDRIVE, payload, pos);
+}
+
+static bool wardrive_send_peer_gps_stream(void) {
+    if (!esp_comm_manager_is_connected()) {
+        return false;
+    }
+
+    gps_t gps_local = {0};
+    if (!gps_manager_get_local_gps_snapshot(&gps_local)) {
+        return false;
+    }
+
+    uint8_t payload[1 + 1 + 4 + 4 + 2 + 1 + 1 + 1 + 1 + 2 + 2 + 2 + 7] = {0};
+    size_t pos = 0;
+    payload[pos++] = GPS_STREAM_VERSION;
+
+    uint8_t flags = GPS_STREAM_FLAG_PRESENT;
+    bool has_fix = gps_local.valid &&
+                   gps_local.fix >= GPS_FIX_GPS &&
+                   gps_local.fix_mode >= GPS_MODE_2D &&
+                   gps_local.latitude >= -90.0f && gps_local.latitude <= 90.0f &&
+                   gps_local.longitude >= -180.0f && gps_local.longitude <= 180.0f;
+    if (has_fix) {
+        flags |= GPS_STREAM_FLAG_FIX;
+    }
+    if (wardrive_is_valid_date(&gps_local.date)) {
+        flags |= GPS_STREAM_FLAG_DATE_VALID;
+    }
+    if (wardrive_is_valid_time(&gps_local.tim)) {
+        flags |= GPS_STREAM_FLAG_TIME_VALID;
+    }
+    payload[pos++] = flags;
+
+    int32_t lat_e7 = has_fix ? (int32_t)(gps_local.latitude * 10000000.0f) : 0;
+    int32_t lon_e7 = has_fix ? (int32_t)(gps_local.longitude * 10000000.0f) : 0;
+    float alt_dm_f = gps_local.altitude * 10.0f;
+    if (alt_dm_f > 32767.0f) {
+        alt_dm_f = 32767.0f;
+    }
+    if (alt_dm_f < -32768.0f) {
+        alt_dm_f = -32768.0f;
+    }
+    int16_t alt_dm = (int16_t)alt_dm_f;
+
+    uint16_t hdop_x10 = 0;
+    if (isfinite(gps_local.dop_h) && gps_local.dop_h >= 0.0f && gps_local.dop_h <= 6553.5f) {
+        hdop_x10 = (uint16_t)(gps_local.dop_h * 10.0f);
+    }
+
+    float speed_x100_f = gps_local.speed * 100.0f;
+    if (!isfinite(speed_x100_f)) {
+        speed_x100_f = 0.0f;
+    }
+    if (speed_x100_f > 32767.0f) {
+        speed_x100_f = 32767.0f;
+    }
+    if (speed_x100_f < -32768.0f) {
+        speed_x100_f = -32768.0f;
+    }
+    int16_t speed_x100 = (int16_t)speed_x100_f;
+
+    float course_x100_f = gps_local.cog * 100.0f;
+    if (!isfinite(course_x100_f)) {
+        course_x100_f = 0.0f;
+    }
+    if (course_x100_f > 32767.0f) {
+        course_x100_f = 32767.0f;
+    }
+    if (course_x100_f < -32768.0f) {
+        course_x100_f = -32768.0f;
+    }
+    int16_t course_x100 = (int16_t)course_x100_f;
+
+    wardrive_put_i32le(payload + pos, lat_e7);
+    pos += 4;
+    wardrive_put_i32le(payload + pos, lon_e7);
+    pos += 4;
+    wardrive_put_i16le(payload + pos, alt_dm);
+    pos += 2;
+    payload[pos++] = gps_local.sats_in_use;
+    payload[pos++] = gps_local.sats_in_view;
+    payload[pos++] = (uint8_t)gps_local.fix;
+    payload[pos++] = (uint8_t)gps_local.fix_mode;
+    wardrive_put_i16le(payload + pos, (int16_t)hdop_x10);
+    pos += 2;
+    wardrive_put_i16le(payload + pos, speed_x100);
+    pos += 2;
+    wardrive_put_i16le(payload + pos, course_x100);
+    pos += 2;
+    payload[pos++] = gps_local.date.day;
+    payload[pos++] = gps_local.date.month;
+    wardrive_put_i16le(payload + pos, (int16_t)gps_local.date.year);
+    pos += 2;
+    payload[pos++] = gps_local.tim.hour;
+    payload[pos++] = gps_local.tim.minute;
+    payload[pos++] = gps_local.tim.second;
+
+    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_GPS, payload, pos);
+}
+
+static void peer_gps_stream_task(void *arg) {
+    (void)arg;
+    int64_t last_init_try_ms = 0;
+    gps_t gps_local = {0};
+
+    while (1) {
+        if (esp_comm_manager_is_connected()) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+            if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0 &&
+                !g_gpsManager.isinitilized) {
+                int64_t now_ms = esp_timer_get_time() / 1000;
+                if ((now_ms - last_init_try_ms) >= PEER_GPS_INIT_RETRY_MS) {
+                    gps_manager_init(&g_gpsManager);
+                    last_init_try_ms = now_ms;
+                }
+            }
+#endif
+
+            if (gps_manager_get_local_gps_snapshot(&gps_local)) {
+                if (wardrive_send_peer_gps_stream()) {
+                    peer_gps_stream_tx_ok++;
+                } else {
+                    peer_gps_stream_tx_fail++;
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(PEER_GPS_STREAM_INTERVAL_MS));
+    }
 }
 
 static uint32_t wardrive_get_hop_interval_ms(void) {
@@ -1072,6 +1350,8 @@ static void wardrive_hop_timer_callback(void *arg) {
 
     if (wardrive_role == WARDRIVE_ROLE_PRIMARY && wardrive_peer_assist_active && !esp_comm_manager_is_connected()) {
         wardrive_peer_assist_active = false;
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_clear_peer_fix();
         wardrive_build_channel_list();
         wardrive_channel_idx = 0;
         if (wardrive_channel_count > 0) {
@@ -1148,25 +1428,42 @@ static void wardrive_heartbeat_cb(void *arg) {
         return;
     }
 
+    gps_t gps_snapshot = {0};
+    bool using_peer_gps = false;
+    bool have_active_gps = gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer_gps);
+    bool peer_preferred = gps_manager_is_peer_gps_preferred();
     gps_t *gps_local = NULL;
     const char *fix_status = "No GPS";
+    char fix_status_buf[24] = {0};
     uint8_t sats = 0;
 
-    if (nmea_hdl != NULL) {
-        gps_local = &((esp_gps_t *)nmea_hdl)->parent;
+    if (have_active_gps) {
+        gps_local = &gps_snapshot;
+    } else if (!peer_preferred) {
+        static gps_t local_snapshot = {0};
+        if (gps_manager_get_local_gps_snapshot(&local_snapshot)) {
+            gps_local = &local_snapshot;
+        }
     }
 
     if (gps_local != NULL) {
         sats = gps_local->sats_in_use;
         if (!gps_local->valid || gps_local->fix < GPS_FIX_GPS || gps_local->fix_mode < GPS_MODE_2D) {
-            fix_status = "No Fix";
+            fix_status = using_peer_gps ? "Peer No Fix" : "No Fix";
         } else if (gps_local->fix_mode == GPS_MODE_2D) {
-            fix_status = "2D";
+            fix_status = using_peer_gps ? "Peer 2D" : "2D";
         } else if (gps_local->fix_mode == GPS_MODE_3D) {
-            fix_status = "3D";
+            fix_status = using_peer_gps ? "Peer 3D" : "3D";
         } else {
-            fix_status = "Fix";
+            fix_status = using_peer_gps ? "Peer Fix" : "Fix";
         }
+
+        if (!wardrive_is_valid_date(&gps_local->date)) {
+            snprintf(fix_status_buf, sizeof(fix_status_buf), "%s/NoDate", fix_status);
+            fix_status = fix_status_buf;
+        }
+    } else if (peer_preferred) {
+        fix_status = "Peer Stale";
     }
 
     uint32_t up_s = 0;
@@ -1182,7 +1479,7 @@ static void wardrive_heartbeat_cb(void *arg) {
     size_t heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
+        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -1196,6 +1493,10 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned long)wardrive_helper_tx_suppressed,
              (unsigned long)wardrive_helper_stream_send_ok,
              (unsigned long)wardrive_helper_stream_send_fail,
+             (unsigned long)peer_gps_stream_rx_packets,
+             (unsigned long)peer_gps_stream_rx_fix_packets,
+             (unsigned long)peer_gps_stream_tx_ok,
+             (unsigned long)peer_gps_stream_tx_fail,
              (unsigned)wardrive_channel,
              (unsigned long)up_m,
              (unsigned long)up_rem_s,
@@ -1205,13 +1506,17 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned)heap_free,
              (unsigned)heap_largest);
     } else {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
+        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
              (unsigned long)wardrive_gps_rejected,
              (unsigned long)wardrive_helper_merged_ok,
              (unsigned long)wardrive_helper_rx_observations,
+             (unsigned long)peer_gps_stream_rx_packets,
+             (unsigned long)peer_gps_stream_rx_fix_packets,
+             (unsigned long)peer_gps_stream_tx_ok,
+             (unsigned long)peer_gps_stream_tx_fail,
              (unsigned)wardrive_channel,
              (unsigned long)up_m,
              (unsigned long)up_rem_s,
@@ -1239,6 +1544,10 @@ static void start_wardrive_heartbeat(void) {
     wardrive_helper_tx_suppressed = 0;
     wardrive_helper_stream_send_ok = 0;
     wardrive_helper_stream_send_fail = 0;
+    peer_gps_stream_tx_ok = 0;
+    peer_gps_stream_tx_fail = 0;
+    peer_gps_stream_rx_packets = 0;
+    peer_gps_stream_rx_fix_packets = 0;
     memset(wardrive_helper_dedupe, 0, sizeof(wardrive_helper_dedupe));
     wardrive_helper_dedupe_idx = 0;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -1391,7 +1700,7 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
 
     size_t pos = 0;
     uint8_t version = data[pos++];
-    if (version != WARDRIVE_STREAM_VERSION) {
+    if (version != WARDRIVE_STREAM_VERSION && version != WARDRIVE_STREAM_VERSION_LEGACY) {
         return;
     }
 
@@ -1409,6 +1718,80 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     if (ssid_len > 0) {
         memcpy(ssid, data + pos, ssid_len);
         ssid[ssid_len] = '\0';
+    }
+    pos += ssid_len;
+
+    gps_peer_fix_t peer_fix = {0};
+    bool peer_fix_present = false;
+    bool peer_fix_has_coords = false;
+    if (version >= WARDRIVE_STREAM_VERSION) {
+        if (pos >= length) {
+            return;
+        }
+
+        uint8_t gps_flags = data[pos++];
+        if (gps_flags & WARDRIVE_STREAM_FLAG_GPS_PRESENT) {
+            if ((length - pos) < (4 + 4 + 2 + 1 + 1 + 1 + 1 + 2)) {
+                return;
+            }
+
+            int32_t lat_e7 = wardrive_get_i32le(data + pos);
+            pos += 4;
+            int32_t lon_e7 = wardrive_get_i32le(data + pos);
+            pos += 4;
+            int16_t alt_dm = wardrive_get_i16le(data + pos);
+            pos += 2;
+            uint8_t sats_in_use = data[pos++];
+            uint8_t sats_in_view = data[pos++];
+            uint8_t fix = data[pos++];
+            uint8_t fix_mode = data[pos++];
+            uint16_t hdop_x10 = (uint16_t)data[pos] | ((uint16_t)data[pos + 1] << 8);
+            pos += 2;
+            uint8_t day = 0;
+            uint8_t month = 0;
+            uint16_t year = 0;
+            uint8_t hour = 0;
+            uint8_t minute = 0;
+            uint8_t second = 0;
+            if ((length - pos) >= 7) {
+                day = data[pos++];
+                month = data[pos++];
+                year = (uint16_t)data[pos] | ((uint16_t)data[pos + 1] << 8);
+                pos += 2;
+                hour = data[pos++];
+                minute = data[pos++];
+                second = data[pos++];
+            }
+
+            peer_fix_present = true;
+            peer_fix.valid = (gps_flags & WARDRIVE_STREAM_FLAG_GPS_FIX) != 0;
+            peer_fix.fix = (gps_fix_t)fix;
+            peer_fix.fix_mode = (gps_fix_mode_t)fix_mode;
+            peer_fix.date_valid = (gps_flags & WARDRIVE_STREAM_FLAG_GPS_DATE_VALID) != 0;
+            peer_fix.time_valid = (gps_flags & WARDRIVE_STREAM_FLAG_GPS_TIME_VALID) != 0;
+            peer_fix.date.day = day;
+            peer_fix.date.month = month;
+            peer_fix.date.year = year;
+            peer_fix.tim.hour = hour;
+            peer_fix.tim.minute = minute;
+            peer_fix.tim.second = second;
+            peer_fix.tim.thousand = 0;
+            peer_fix.sats_in_use = sats_in_use;
+            peer_fix.sats_in_view = sats_in_view;
+            peer_fix.latitude = (float)lat_e7 / 10000000.0f;
+            peer_fix.longitude = (float)lon_e7 / 10000000.0f;
+            peer_fix.altitude = (float)alt_dm / 10.0f;
+            peer_fix.speed = 0.0f;
+            peer_fix.course = 0.0f;
+            peer_fix.hdop = (float)hdop_x10 / 10.0f;
+
+            peer_fix_has_coords =
+                peer_fix.valid &&
+                peer_fix.latitude >= -90.0f && peer_fix.latitude <= 90.0f &&
+                peer_fix.longitude >= -180.0f && peer_fix.longitude <= 180.0f;
+
+            gps_manager_update_peer_fix(&peer_fix);
+        }
     }
 
     wardrive_helper_rx_observations++;
@@ -1434,6 +1817,12 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     strncpy(wardriving_data.encryption_type,
             wardrive_auth_code_to_string(auth_code),
             sizeof(wardriving_data.encryption_type) - 1);
+    if (peer_fix_present && peer_fix_has_coords) {
+        wardriving_data.latitude = peer_fix.latitude;
+        wardriving_data.longitude = peer_fix.longitude;
+        wardriving_data.altitude = peer_fix.altitude;
+        wardriving_data.accuracy = peer_fix.hdop * 5.0f;
+    }
 
     wardrive_log_attempts++;
     esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
@@ -1445,11 +1834,104 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     }
 }
 
+static void gps_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data) {
+    (void)channel;
+    (void)user_data;
+
+    if (!data || length < (1 + 1 + 4 + 4 + 2 + 1 + 1 + 1 + 1 + 2 + 2 + 2)) {
+        return;
+    }
+
+    size_t pos = 0;
+    uint8_t version = data[pos++];
+    if (version != GPS_STREAM_VERSION) {
+        return;
+    }
+
+    uint8_t flags = data[pos++];
+    int32_t lat_e7 = wardrive_get_i32le(data + pos);
+    pos += 4;
+    int32_t lon_e7 = wardrive_get_i32le(data + pos);
+    pos += 4;
+    int16_t alt_dm = wardrive_get_i16le(data + pos);
+    pos += 2;
+    uint8_t sats_in_use = data[pos++];
+    uint8_t sats_in_view = data[pos++];
+    uint8_t fix = data[pos++];
+    uint8_t fix_mode = data[pos++];
+    int16_t hdop_x10 = wardrive_get_i16le(data + pos);
+    pos += 2;
+    int16_t speed_x100 = wardrive_get_i16le(data + pos);
+    pos += 2;
+    int16_t course_x100 = wardrive_get_i16le(data + pos);
+    pos += 2;
+    uint8_t day = 0;
+    uint8_t month = 0;
+    uint16_t year = 0;
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+    uint8_t second = 0;
+    if ((length - pos) >= 7) {
+        day = data[pos++];
+        month = data[pos++];
+        year = (uint16_t)data[pos] | ((uint16_t)data[pos + 1] << 8);
+        pos += 2;
+        hour = data[pos++];
+        minute = data[pos++];
+        second = data[pos++];
+    }
+
+    gps_peer_fix_t peer_fix = {0};
+    peer_fix.valid = (flags & GPS_STREAM_FLAG_FIX) != 0;
+    peer_fix.fix = (gps_fix_t)fix;
+    peer_fix.fix_mode = (gps_fix_mode_t)fix_mode;
+    peer_fix.date_valid = (flags & GPS_STREAM_FLAG_DATE_VALID) != 0;
+    peer_fix.time_valid = (flags & GPS_STREAM_FLAG_TIME_VALID) != 0;
+    peer_fix.date.day = day;
+    peer_fix.date.month = month;
+    peer_fix.date.year = year;
+    peer_fix.tim.hour = hour;
+    peer_fix.tim.minute = minute;
+    peer_fix.tim.second = second;
+    peer_fix.tim.thousand = 0;
+    peer_fix.sats_in_use = sats_in_use;
+    peer_fix.sats_in_view = sats_in_view;
+    peer_fix.latitude = (float)lat_e7 / 10000000.0f;
+    peer_fix.longitude = (float)lon_e7 / 10000000.0f;
+    peer_fix.altitude = (float)alt_dm / 10.0f;
+    peer_fix.hdop = (float)hdop_x10 / 10.0f;
+    peer_fix.speed = (float)speed_x100 / 100.0f;
+    peer_fix.course = (float)course_x100 / 100.0f;
+
+    gps_manager_update_peer_fix(&peer_fix);
+    peer_gps_stream_rx_packets++;
+    if (peer_fix.valid) {
+        peer_gps_stream_rx_fix_packets++;
+    }
+}
+
 void wardriving_register_stream_handler(void) {
     bool ok = esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_WARDRIVE,
                                                        wardrive_stream_rx_cb,
                                                        NULL);
+    bool gps_ok = esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_GPS,
+                                                           gps_stream_rx_cb,
+                                                           NULL);
     ESP_LOGI(TAG, "Wardrive stream handler: %s", ok ? "OK" : "FAIL");
+    ESP_LOGI(TAG, "Peer GPS stream handler: %s", gps_ok ? "OK" : "FAIL");
+
+    if (peer_gps_stream_task_handle == NULL) {
+        BaseType_t rc = xTaskCreate(peer_gps_stream_task,
+                                    "peer_gps_stream",
+                                    3072,
+                                    NULL,
+                                    3,
+                                    &peer_gps_stream_task_handle);
+        if (rc != pdPASS) {
+            peer_gps_stream_task_handle = NULL;
+            ESP_LOGW(TAG, "Peer GPS stream task create failed");
+        }
+    }
 }
 
 bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len) {
@@ -1529,6 +2011,8 @@ bool wardriving_set_helper_channels_from_csv(const char *csv) {
 void start_wardriving(void) {
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
     wardrive_forced_helper_channel_count = 0;
+    gps_manager_set_peer_gps_preferred(false);
+    gps_manager_clear_peer_fix();
     start_wardrive_channel_hopping();
     start_wardrive_heartbeat();
 }
@@ -1536,6 +2020,8 @@ void start_wardriving(void) {
 void start_wardriving_helper(void) {
     wardrive_role = WARDRIVE_ROLE_HELPER;
     wardrive_peer_assist_active = false;
+    gps_manager_set_peer_gps_preferred(false);
+    gps_manager_clear_peer_fix();
     start_wardrive_channel_hopping();
     start_wardrive_heartbeat();
 }
@@ -1546,11 +2032,17 @@ void stop_wardriving(void) {
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
     wardrive_peer_assist_active = false;
     wardrive_forced_helper_channel_count = 0;
+    gps_manager_set_peer_gps_preferred(false);
+    gps_manager_clear_peer_fix();
 }
 
 void wardriving_set_peer_assist(bool enabled) {
     bool changed = (wardrive_peer_assist_active != enabled);
     wardrive_peer_assist_active = enabled;
+    gps_manager_set_peer_gps_preferred(enabled);
+    if (!enabled) {
+        gps_manager_clear_peer_fix();
+    }
     if (changed && wardrive_role == WARDRIVE_ROLE_PRIMARY) {
         wardrive_build_channel_list();
         wardrive_channel_idx = 0;
@@ -1786,6 +2278,8 @@ void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int
     switch (event_id) {
     case GPS_UPDATE:
         gps = (gps_t *)event_data;
+        gps_manager_update_local_snapshot(gps);
+        gps_manager_note_update();
         gps_try_sync_time_from_fix(gps);
         
         // Add status display messages for GPS fix status
@@ -1915,16 +2409,16 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     }
 
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)pkt->payload;
-    wifi_ieee80211_mac_hdr_t hdr_copy;
-    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));
-    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
-
-    const uint8_t *payload = pkt->payload;
     int len = pkt->rx_ctrl.sig_len;
     if (len < 36) {
         return;
     }
+
+    const uint8_t *payload = pkt->payload;
+    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)payload;
+    wifi_ieee80211_mac_hdr_t hdr_copy;
+    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));
+    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
 
     uint8_t frame_type = hdr->frame_ctrl & 0xFC;
     if (frame_type != 0x80 && frame_type != 0x50) {
@@ -2064,14 +2558,6 @@ rsn_done:
         encryption_type[copy_len] = '\0';
     }
 
-    double latitude = 0;
-    double longitude = 0;
-
-    if (gps != NULL) {
-        latitude = gps->latitude;
-        longitude = gps->longitude;
-    }
-
     if (ssid_malformed) {
         return;
     }
@@ -2101,8 +2587,6 @@ rsn_done:
              bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
     wardriving_data.rssi = rssi;
     wardriving_data.channel = channel;
-    wardriving_data.latitude = latitude;
-    wardriving_data.longitude = longitude;
     strncpy(wardriving_data.encryption_type, encryption_type,
             sizeof(wardriving_data.encryption_type) - 1);
     wardriving_data.encryption_type[sizeof(wardriving_data.encryption_type) - 1] = '\0';
@@ -2470,16 +2954,14 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
     }
 
     // Get GPS data from the global handle, if available
-    if (nmea_hdl != NULL) {
-        gps_t *gps_local = &((esp_gps_t *)nmea_hdl)->parent;
-        if (gps_local != NULL && gps_local->valid) {
-            wardriving_data.gps_quality.satellites_used = gps_local->sats_in_use;
-            wardriving_data.gps_quality.hdop = gps_local->dop_h;
-            wardriving_data.gps_quality.speed = gps_local->speed;
-            wardriving_data.gps_quality.course = gps_local->cog;
-            wardriving_data.gps_quality.fix_quality = gps_local->fix;
-            wardriving_data.gps_quality.has_valid_fix = (gps_local->fix >= GPS_FIX_GPS);
-        }
+    gps_t gps_local = {0};
+    if (gps_manager_get_local_gps_snapshot(&gps_local) && gps_local.valid) {
+        wardriving_data.gps_quality.satellites_used = gps_local.sats_in_use;
+        wardriving_data.gps_quality.hdop = gps_local.dop_h;
+        wardriving_data.gps_quality.speed = gps_local.speed;
+        wardriving_data.gps_quality.course = gps_local.cog;
+        wardriving_data.gps_quality.fix_quality = gps_local.fix;
+        wardriving_data.gps_quality.has_valid_fix = (gps_local.fix >= GPS_FIX_GPS);
     }
     
 

@@ -828,6 +828,18 @@ void ble_init(void) {
 
 void ble_deinit(void) {
     if (ble_initialized) {
+        ble_spam_stop();
+        ble_stop_spoofing();
+        if (flipper_scan_is_active()) {
+            flipper_scan_stop();
+        }
+        if (airtag_scan_is_active()) {
+            airtag_scan_stop();
+        }
+        if (gatt_scan_is_active()) {
+            gatt_scan_stop();
+        }
+
         handler_count = 0;
 
         ble_pending_clear = true;
@@ -956,10 +968,9 @@ void ble_stop(void) {
     ble_pcap_packet_count = 0;
     ble_pcap_event_total_count = 0;
 
-    // Stop spoofing if it was active
+    ble_spam_stop();
     ble_stop_spoofing();
 
-    // Stop active BLE scan modules first so their callbacks unregister
     if (flipper_scan_is_active()) {
         flipper_scan_stop();
     }

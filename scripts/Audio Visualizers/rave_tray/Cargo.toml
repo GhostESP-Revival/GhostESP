@@ -1,0 +1,12 @@
+[package]
+name = "rave_tray"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+tray-icon = "0.19"
+tinyfiledialogs = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }

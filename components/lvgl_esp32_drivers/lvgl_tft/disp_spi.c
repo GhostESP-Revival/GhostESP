@@ -169,6 +169,10 @@ void disp_spi_change_device_speed(int clock_speed_hz)
 
 void disp_spi_remove_device()
 {
+    if (spi == NULL) {
+        return;
+    }
+
     /* Wait for previous pending transaction results */
     disp_wait_for_pending_transactions();
 
@@ -275,6 +279,10 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
 void disp_wait_for_pending_transactions(void)
 {
     spi_transaction_t *presult;
+
+	if (TransactionPool == NULL) {
+		return;
+	}
 
 	while(uxQueueMessagesWaiting(TransactionPool) < SPI_TRANSACTION_POOL_SIZE) {	/* service until the transaction reuse pool is full again */
         if (spi_device_get_trans_result(spi, &presult, 1) == ESP_OK) {

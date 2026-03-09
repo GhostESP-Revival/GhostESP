@@ -14,11 +14,19 @@ toc: true
 ## Core
 
 - **`help [category|all]`** — List commands by category (`wifi`, `ble`, `portal`, `comm`, `sd`, `led`, `gps`, `misc`, `printer`, `cast`, `capture`, `beacon`, `attack`, `ethernet`).
-- **`chipinfo`** — Print SoC model, cores, features, and IDF version.
+- **`chipinfo`** — Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
 - (for developers) **`mem [dump|trace <start|stop|dump>]`** — Print heap stats, dump allocation state, or control heap tracing.
 - **`reboot`** — Soft restart the device.
 - **`timezone <TZ>`** — Set timezone, e.g., `timezone EST5EDT,M3.2.0,M11.1.0`.
 - **`stop`** — Stops all active attacks, scans, and background tasks. Also restarts Wi-Fi if it was suspended by BLE.
+
+### Core dumps (flash builds only)
+
+These commands are only present on builds that enable ESP-IDF core dumps **to flash** (`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`).
+
+- **`coredump`** — Print a quick summary (partition size and whether a coredump is present).
+- **`coredump dump`** — Stream the coredump partition as base64. Save the output body to `coredump.b64` (omit the start/end marker lines), then decode on your host with `idf.py coredump-info -c coredump.b64`.
+- **`coredump erase`** — Erase the coredump partition (clears the saved crash).
 
 ## WiFi
 

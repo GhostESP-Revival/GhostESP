@@ -313,35 +313,70 @@ static uint8_t compute_packet_checksum(const comm_packet_t* packet, bool use_crc
 }
 
 static bool send_packet_internal(const comm_packet_t* packet, TickType_t wait) {
-    if (!s_comm_manager || !packet) return false;
-    if (s_comm_manager->tx_queue) {
-        if (xQueueSend(s_comm_manager->tx_queue, packet, wait) != pdPASS) {
-            s_comm_manager->tx_dropped_packets++;
-            if ((s_comm_manager->tx_dropped_packets & 0x0F) == 1) {
+    if (!packet || !s_comm_manager) {
+        return false;
+    }
+
+    esp_comm_manager_t *comm = s_comm_manager;
+    bool lock_acquired = false;
+    if (comm->state_mutex) {
+        TaskHandle_t holder = xSemaphoreGetMutexHolder(comm->state_mutex);
+        TaskHandle_t self = xTaskGetCurrentTaskHandle();
+        if (holder != self && xSemaphoreTake(comm->state_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+            lock_acquired = true;
+        } else if (holder != self) {
+            return false;
+        }
+    }
+
+    if (!comm->initialized) {
+        if (lock_acquired) {
+            unlock_state(comm);
+        }
+        return false;
+    }
+
+    QueueHandle_t tx_queue = comm->tx_queue;
+    bool use_crc = comm->use_crc;
+
+    if (tx_queue) {
+        if (xQueueSend(tx_queue, packet, wait) != pdPASS) {
+            comm->tx_dropped_packets++;
+            if ((comm->tx_dropped_packets & 0x0F) == 1) {
                 printf("TX queue full, dropped packet type 0x%02x (drops=%lu)\n",
-                       packet->type, (unsigned long)s_comm_manager->tx_dropped_packets);
+                       packet->type, (unsigned long)comm->tx_dropped_packets);
+            }
+            if (lock_acquired) {
+                unlock_state(comm);
             }
             return false;
         }
-        return true;
-    } else {
-        // Direct transmit path used during scanning/handshake before TX task exists
-        uart_write_bytes(s_uart_num, (const char*)packet, PACKET_HEADER_SIZE + packet->length);
-        uint8_t checksum = compute_packet_checksum(packet, s_comm_manager->use_crc);
-        uart_write_bytes(s_uart_num, (const char*)&checksum, 1);
-        if (packet->type == PACKET_TYPE_RESPONSE) {
-            bool ends_with_newline = false;
-            if (packet->length > 2) {
-                uint8_t last = packet->data[packet->length - 1];
-                ends_with_newline = (last == '\n');
-            }
-            vTaskDelay(pdMS_TO_TICKS(5));
-            if (ends_with_newline) {
-                vTaskDelay(pdMS_TO_TICKS(2));
-            }
+        if (lock_acquired) {
+            unlock_state(comm);
         }
         return true;
     }
+
+    if (lock_acquired) {
+        unlock_state(comm);
+    }
+
+    // Direct transmit path used during scanning/handshake before TX task exists
+    uart_write_bytes(s_uart_num, (const char *)packet, PACKET_HEADER_SIZE + packet->length);
+    uint8_t checksum = compute_packet_checksum(packet, use_crc);
+    uart_write_bytes(s_uart_num, (const char *)&checksum, 1);
+    if (packet->type == PACKET_TYPE_RESPONSE) {
+        bool ends_with_newline = false;
+        if (packet->length > 2) {
+            uint8_t last = packet->data[packet->length - 1];
+            ends_with_newline = (last == '\n');
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+        if (ends_with_newline) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+    }
+    return true;
 }
 
 static bool send_packet(const comm_packet_t* packet) {
@@ -1660,40 +1695,21 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
 
     comm->state = COMM_STATE_SCANNING;
 
-    // stop ping timer
+    // Stop ping timer; keep it allocated and restart on next connection.
     if (comm->ping_timer) {
         xTimerStop(comm->ping_timer, 0);
-        xTimerDelete(comm->ping_timer, 0);
-        comm->ping_timer = NULL;
     }
 
-    // teardown protocol resources to a lightweight scanning mode
-    if (comm->protocol_task_handle) {
-        vTaskDelete(comm->protocol_task_handle);
-        comm->protocol_task_handle = NULL;
-        free_task_resources(&comm->protocol_task_res);
-    }
-    if (comm->command_executor_task_handle) {
-        vTaskDelete(comm->command_executor_task_handle);
-        comm->command_executor_task_handle = NULL;
-        free_task_resources(&comm->command_task_res);
-    }
+    // Keep protocol/queue resources alive to avoid racey teardown under load.
+    // Just clear pending work so reconnect starts cleanly.
     if (comm->rx_packet_queue) {
-        vQueueDelete(comm->rx_packet_queue);
-        comm->rx_packet_queue = NULL;
+        xQueueReset(comm->rx_packet_queue);
     }
     if (comm->command_queue) {
-        vQueueDelete(comm->command_queue);
-        comm->command_queue = NULL;
-    }
-    if (comm->tx_task_handle) {
-        vTaskDelete(comm->tx_task_handle);
-        comm->tx_task_handle = NULL;
-        free_task_resources(&comm->tx_task_res);
+        xQueueReset(comm->command_queue);
     }
     if (comm->tx_queue) {
-        vQueueDelete(comm->tx_queue);
-        comm->tx_queue = NULL;
+        xQueueReset(comm->tx_queue);
     }
 
     // restart discovery timer

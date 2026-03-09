@@ -324,6 +324,14 @@ menu "Ghost ESP Options"
                 commands to a paired S3 via GhostLink/commsend. The C5 does not execute
                 scripts itself - it only provides the UI.
 
+        config HAS_NRF24_REMOTE
+            bool "Enable NRF24 Remote (display controls via GhostLink peer)"
+            default n
+            help
+                Enable NRF24 analyzer controls on a display controller that routes
+                commands to a paired NRF24-capable peer over GhostLink/commsend.
+                The display device does not scan RF directly - it only provides the UI.
+
         config HAS_BATTERY
             bool "Enable power saving"
             default n
@@ -565,6 +573,91 @@ menu "Ghost ESP Options"
             depends on USE_ENCODER
             help
                 Set the GPIO pin for the Encoder button.
+
+        menu "NRF24 Options"
+
+            config HAS_NRF24
+                bool "Enable NRF24 App"
+                default n
+                help
+                    Enable the NRF24 app menu and frequency analyzer view.
+
+            config NRF24_SPI_HOST
+                int "NRF24 SPI Host"
+                range 2 3
+                default 2
+                depends on HAS_NRF24
+                help
+                    SPI host for NRF24 (2 = SPI2_HOST, 3 = SPI3_HOST).
+
+            config NRF24_SPI_MOSI_PIN
+                int "NRF24 MOSI Pin"
+                default 14
+                depends on HAS_NRF24
+                help
+                    GPIO pin for NRF24 MOSI.
+
+            config NRF24_SPI_MISO_PIN
+                int "NRF24 MISO Pin"
+                default 21
+                depends on HAS_NRF24
+                help
+                    GPIO pin for NRF24 MISO.
+
+            config NRF24_SPI_SCK_PIN
+                int "NRF24 SCK Pin"
+                default 13
+                depends on HAS_NRF24
+                help
+                    GPIO pin for NRF24 SCK.
+
+            config NRF24_CSN_PIN
+                int "NRF24 CSN Pin"
+                default 12
+                depends on HAS_NRF24
+                help
+                    GPIO pin for NRF24 CSN.
+
+            config NRF24_CE_PIN
+                int "NRF24 CE Pin"
+                default 11
+                depends on HAS_NRF24
+                help
+                    GPIO pin for NRF24 CE.
+
+            config NRF24_SPI_CLOCK_HZ
+                int "NRF24 SPI Clock (Hz)"
+                range 1000000 10000000
+                default 8000000
+                depends on HAS_NRF24
+                help
+                    SPI clock used to communicate with the NRF24L01 module.
+
+            config NRF24_ANALYZER_SAMPLES_PER_CHANNEL
+                int "Analyzer Samples per Channel"
+                range 1 16
+                default 4
+                depends on HAS_NRF24
+                help
+                    Number of RPD samples taken for each channel update.
+
+            config NRF24_ANALYZER_SETTLE_US
+                int "Analyzer Settle Time (us)"
+                range 130 5000
+                default 200
+                depends on HAS_NRF24
+                help
+                    Delay after setting channel before reading RPD.
+
+            config NRF24_ANALYZER_CHANNELS_PER_TICK
+                int "Analyzer Channels per Tick"
+                range 1 32
+                default 8
+                depends on HAS_NRF24
+                help
+                    Number of channels processed each analyzer timer tick.
+
+        endmenu
 
         menu "NFC Options"
 

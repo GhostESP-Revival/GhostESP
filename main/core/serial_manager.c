@@ -12,6 +12,9 @@
 #include "managers/wifi_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/views/terminal_screen.h"
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
+#include "managers/views/music_visualizer.h"
+#endif
 #include <core/commandline.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -112,6 +115,114 @@ typedef enum {
 static ir_capture_state_t ir_capture_state = IR_STATE_IDLE;
 static char ir_capture_buffer[2048];
 static size_t ir_capture_pos = 0;
+
+typedef enum {
+    RAVE_SERIAL_IDLE,
+    RAVE_SERIAL_MARK_1,
+    RAVE_SERIAL_MARK_2,
+    RAVE_SERIAL_MARK_3,
+    RAVE_SERIAL_LEN_0,
+    RAVE_SERIAL_LEN_1,
+    RAVE_SERIAL_PAYLOAD
+} rave_serial_state_t;
+
+static rave_serial_state_t rave_serial_state = RAVE_SERIAL_IDLE;
+static uint16_t rave_serial_payload_len = 0;
+static uint16_t rave_serial_payload_pos = 0;
+static uint8_t rave_serial_payload[96];
+
+#define RAVE_SERIAL_MARKER_0 0xA5
+#define RAVE_SERIAL_MARKER_1 0x5A
+#define RAVE_SERIAL_MARKER_2 0xC3
+#define RAVE_SERIAL_MARKER_3 0x3C
+
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
+#define RAVE_SERIAL_FRAME_SIZE ((uint16_t)(32 + 32 + NUM_BARS))
+#define RAVE_SERIAL_BARS_ONLY_SIZE ((uint16_t)(NUM_BARS))
+#else
+#define RAVE_SERIAL_FRAME_SIZE ((uint16_t)(32 + 32 + 15))
+#define RAVE_SERIAL_BARS_ONLY_SIZE ((uint16_t)15)
+#endif
+
+static void rave_serial_reset(void) {
+    rave_serial_state = RAVE_SERIAL_IDLE;
+    rave_serial_payload_len = 0;
+    rave_serial_payload_pos = 0;
+}
+
+static void rave_serial_process_payload(void) {
+#if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
+    if (!music_visualizer_view.root) {
+        display_manager_switch_view(&music_visualizer_view);
+    }
+
+    if (rave_serial_payload_len == RAVE_SERIAL_FRAME_SIZE) {
+        music_visualizer_view_update(rave_serial_payload + 64, "LIVE INPUT", "Desktop Audio (USB)");
+        return;
+    }
+
+    if (rave_serial_payload_len == RAVE_SERIAL_BARS_ONLY_SIZE) {
+        music_visualizer_view_update(rave_serial_payload, "LIVE INPUT", "Desktop Audio (USB)");
+    }
+#endif
+}
+
+static bool process_rave_serial_byte(uint8_t byte) {
+    switch (rave_serial_state) {
+    case RAVE_SERIAL_IDLE:
+        if (byte == RAVE_SERIAL_MARKER_0) {
+            rave_serial_state = RAVE_SERIAL_MARK_1;
+            return true;
+        }
+        return false;
+    case RAVE_SERIAL_MARK_1:
+        if (byte == RAVE_SERIAL_MARKER_1) {
+            rave_serial_state = RAVE_SERIAL_MARK_2;
+        } else if (byte == RAVE_SERIAL_MARKER_0) {
+            rave_serial_state = RAVE_SERIAL_MARK_1;
+        } else {
+            rave_serial_reset();
+        }
+        return true;
+    case RAVE_SERIAL_MARK_2:
+        if (byte == RAVE_SERIAL_MARKER_2) {
+            rave_serial_state = RAVE_SERIAL_MARK_3;
+        } else {
+            rave_serial_reset();
+        }
+        return true;
+    case RAVE_SERIAL_MARK_3:
+        if (byte == RAVE_SERIAL_MARKER_3) {
+            rave_serial_state = RAVE_SERIAL_LEN_0;
+        } else {
+            rave_serial_reset();
+        }
+        return true;
+    case RAVE_SERIAL_LEN_0:
+        rave_serial_payload_len = byte;
+        rave_serial_state = RAVE_SERIAL_LEN_1;
+        return true;
+    case RAVE_SERIAL_LEN_1:
+        rave_serial_payload_len |= (uint16_t)byte << 8;
+        if (rave_serial_payload_len == 0 || rave_serial_payload_len > sizeof(rave_serial_payload)) {
+            rave_serial_reset();
+        } else {
+            rave_serial_payload_pos = 0;
+            rave_serial_state = RAVE_SERIAL_PAYLOAD;
+        }
+        return true;
+    case RAVE_SERIAL_PAYLOAD:
+        rave_serial_payload[rave_serial_payload_pos++] = byte;
+        if (rave_serial_payload_pos >= rave_serial_payload_len) {
+            rave_serial_process_payload();
+            rave_serial_reset();
+        }
+        return true;
+    }
+
+    rave_serial_reset();
+    return false;
+}
 
 // Forward declaration of command handler
 int handle_serial_command(const char *command);
@@ -532,6 +643,10 @@ void serial_task(void *pvParameter) {
     if (length > 0) {
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
+
+        if (process_rave_serial_byte((uint8_t)incoming_char)) {
+          continue;
+        }
 
         if (incoming_char == '\b' || (unsigned char)incoming_char == 0x7F) {
           // Reset arrow key state when backspace is pressed

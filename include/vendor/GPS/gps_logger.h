@@ -37,6 +37,11 @@ typedef struct {
     bool has_valid_fix;  // indicates if GPS data is valid
   } gps_quality;
 
+  gps_date_t gps_date;
+  gps_time_t gps_time;
+  bool gps_date_valid;
+  bool gps_time_valid;
+
   // Add BLE fields
   struct {
     char ble_mac[18];

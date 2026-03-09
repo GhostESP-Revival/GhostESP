@@ -1,516 +1,62 @@
-<!DOCTYPE html>
-<html lang="en" data-theme="auto">
-<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SD Card · GhostESP Documentation</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  
-  <link rel="stylesheet" href="/css/main.min.333343cc98c92f6015786bf32d605cb6c14c60642eacf8de3b94d3248f97d117.css">
-  
-  
-  
-
-  
-    
-  
-  
-
-  
-    
-  
-
-  
-    
-      
-    
-  
-
-  
-  
-    
-  
-
-  
-  
-
-  
-    
-    <link rel="canonical" href="//localhost:1313/latest/getting-started/sd-card/">
-  
-
-  <meta name="description" content="Using SD card storage with GhostESP for file management, captures, and configuration.">
-  <meta property="og:site_name" content="GhostESP Documentation">
-  <meta property="og:type" content="article">
-  <meta property="og:title" content="SD Card">
-  <meta property="og:description" content="Using SD card storage with GhostESP for file management, captures, and configuration.">
-  <meta property="og:url" content="//localhost:1313/v1.9/getting-started/sd-card/">
-  <meta property="og:locale" content="en">
-  <meta property="og:image" content="//localhost:1313/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="SD Card">
-  <meta name="twitter:description" content="Using SD card storage with GhostESP for file management, captures, and configuration.">
-  <meta name="twitter:image" content="//localhost:1313/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png">
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-Q9CNW8QW7K"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-Q9CNW8QW7K');
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    "name": "GhostESP Documentation",
-    "description": "Using SD card storage with GhostESP for file management, captures, and configuration.",
-    "url": "\/\/localhost:1313\/v1.9\/getting-started\/sd-card\/",
-    "author": {"@type": "Organization", "name": "GhostESP Team"},
-    "publisher": {"@type": "Organization", "name": "GhostESP"}
-    ,
-    "datePublished": "0001-01-01T00:00:00Z",
-    "dateModified": "0001-01-01T00:00:00Z"
-    
-  }
-  </script>
-  <script>
-    (function() {
-      const theme = localStorage.getItem('ghostesp-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      document.documentElement.setAttribute('data-theme', theme);
-
-      if (window.innerWidth >= 992) {
-        if (localStorage.getItem('sidebarState') === 'open') {
-          document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>');
-        }
-      }
-    })();
-  </script>
-</head>
-<body>
-  
-  
-  
-  
-  
-    
-    
-    
-    
-    
-      
-      
-    
-      
-      
-    
-      
-      
-    
-      
-      
-        
-      
-    
-      
-      
-    
-      
-      
-    
-  
-  
-  
-  
-  
-    
-      
-    
-    
-  
-  
-  
-  
-  
-  
-  
-    
-  
-  
-  
-  <header class="topbar">
-    <button class="topbar__toggle" type="button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="false">
-      <svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true">
-        <line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"></line>
-        <line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"></line>
-        <line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"></line>
-      </svg>
-    </button>
-    <a href="/" class="topbar__brand">
-      
-        <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="topbar__logo">
-      
-    </a>
-    <div class="topbar__actions">
-      <button class="topbar__theme" type="button" data-theme-toggle aria-label="Toggle theme">
-        <svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon aria-hidden="true">
-          <g class="icon-theme__sun">
-            <circle cx="12" cy="12" r="5"></circle>
-            <g class="icon-theme__sun-rays">
-              <line x1="12" y1="2.5" x2="12" y2="5.5"></line>
-              <line x1="12" y1="18.5" x2="12" y2="21.5"></line>
-              <line x1="4.5" y1="12" x2="7.5" y2="12"></line>
-              <line x1="16.5" y1="12" x2="19.5" y2="12"></line>
-              <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"></line>
-              <line x1="16.2" y1="16.2" x2="18.4" y2="18.4"></line>
-              <line x1="5.6" y1="18.4" x2="7.8" y2="16.2"></line>
-              <line x1="16.2" y1="7.8" x2="18.4" y2="5.6"></line>
-            </g>
-          </g>
-          <g class="icon-theme__moon">
-            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
-          </g>
-        </svg>
-      </button>
-    </div>
-  </header>
-  <div class="app">
-    <aside class="sidebar" id="sidebar" data-current-version="v1.9">
-      <div class="sidebar__brand">
-        <a href="/" class="sidebar__title">
-          
-            <img src="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png" alt="GhostESP: Revival" class="sidebar__logo">
-          
-        </a>
-        
-      </div>
-      
-        <div class="sidebar__version">
-          <label for="sidebar-version" class="sidebar__version-label">Firmware version</label>
-          <select id="sidebar-version" class="sidebar__version-select" data-version-select>
-            
-              <option value="latest">Latest</option>
-            
-              <option value="v1.9.4">v1.9.4</option>
-            
-              <option value="v1.9.3">v1.9.3</option>
-            
-              <option value="v1.9" selected>v1.9</option>
-            
-              <option value="v1.8.1">v1.8.1</option>
-            
-              <option value="v1.8">v1.8</option>
-            
-          </select>
-        </div>
-      
-      <div class="sidebar__search">
-        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="/index.json">
-        <div class="sidebar__search-results" data-search-results role="listbox"></div>
-      </div>
-      <nav class="sidebar__nav">
-        
-        
-        
-        <a href="/v1.9/" class="sidebar__link sidebar__link--active">Home</a>
-        
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group group--open">
-                <button class="sidebar__group-toggle sidebar__group-toggle--active" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19getting-started" aria-expanded="true" aria-controls="collapse-v19getting-started">
-                  <span>Getting Started</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse show sidebar__group-items" id="collapse-v19getting-started">
-                  <a href="/v1.9/getting-started/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/getting-started/installation-guide/" class="sidebar__sublink">Installation Guide</a>
-                  
-                    <a href="/v1.9/getting-started/supported-hardware/" class="sidebar__sublink">Supported Hardware</a>
-                  
-                    <a href="/v1.9/getting-started/command-line-reference/" class="sidebar__sublink">CLI Reference</a>
-                  
-                    <a href="/v1.9/getting-started/flipper-companion-app/" class="sidebar__sublink">Flipper Zero Companion App</a>
-                  
-                    <a href="/v1.9/getting-started/dual-communication/" class="sidebar__sublink">GhostLink</a>
-                  
-                    <a href="/v1.9/getting-started/screen-mirroring/" class="sidebar__sublink">Screen Mirroring</a>
-                  
-                    <a href="/v1.9/getting-started/webui-guide/" class="sidebar__sublink">WebUI</a>
-                  
-                    <a href="/v1.9/getting-started/faq/" class="sidebar__sublink">FAQ</a>
-                  
-                    <a href="/v1.9/getting-started/sd-card/" class="sidebar__sublink sidebar__sublink--active">SD Card</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19wifi" aria-expanded="false" aria-controls="collapse-v19wifi">
-                  <span>Wi-Fi</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19wifi">
-                  <a href="/v1.9/wifi/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/wifi/basics/" class="sidebar__sublink">Wi-Fi Basics</a>
-                  
-                    <a href="/v1.9/wifi/survey/" class="sidebar__sublink">Scanning networks</a>
-                  
-                    <a href="/v1.9/wifi/capture/" class="sidebar__sublink">Capturing packets</a>
-                  
-                    <a href="/v1.9/wifi/deauth/" class="sidebar__sublink">Deauthentication Attacks</a>
-                  
-                    <a href="/v1.9/wifi/handshakes/" class="sidebar__sublink">Capturing handshakes</a>
-                  
-                    <a href="/v1.9/wifi/evil-portal/" class="sidebar__sublink">Evil Portal</a>
-                  
-                    <a href="/v1.9/wifi/karma/" class="sidebar__sublink">Karma Attack</a>
-                  
-                    <a href="/v1.9/wifi/aerial-detection/" class="sidebar__sublink">Aerial Detection</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19ble" aria-expanded="false" aria-controls="collapse-v19ble">
-                  <span>Bluetooth LE</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19ble">
-                  <a href="/v1.9/ble/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/ble/scanning/" class="sidebar__sublink">Scanning</a>
-                  
-                    <a href="/v1.9/ble/gatt/" class="sidebar__sublink">GATT Discovery</a>
-                  
-                    <a href="/v1.9/ble/attacks/" class="sidebar__sublink">Attacks</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19infrared" aria-expanded="false" aria-controls="collapse-v19infrared">
-                  <span>Infrared</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19infrared">
-                  <a href="/v1.9/infrared/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/infrared/learning/" class="sidebar__sublink">Learning Signals</a>
-                  
-                    <a href="/v1.9/infrared/transmitting/" class="sidebar__sublink">Transmitting Signals</a>
-                  
-                    <a href="/v1.9/infrared/dazzler/" class="sidebar__sublink">IR Dazzler</a>
-                  
-                    <a href="/v1.9/infrared/files/" class="sidebar__sublink">Infrared Files</a>
-                  
-                    <a href="/v1.9/infrared/hardware/" class="sidebar__sublink">Hardware Support</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19nfc" aria-expanded="false" aria-controls="collapse-v19nfc">
-                  <span>NFC</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19nfc">
-                  <a href="/v1.9/nfc/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/nfc/chameleon-ultra/" class="sidebar__sublink">Chameleon Ultra</a>
-                  
-                    <a href="/v1.9/nfc/scanning/" class="sidebar__sublink">Scanning</a>
-                  
-                    <a href="/v1.9/nfc/saving/" class="sidebar__sublink">Saving Tags</a>
-                  
-                    <a href="/v1.9/nfc/writing/" class="sidebar__sublink">Writing NTAG</a>
-                  
-                    <a href="/v1.9/nfc/supported/" class="sidebar__sublink">Supported Tags</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19usb" aria-expanded="false" aria-controls="collapse-v19usb">
-                  <span>USB</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19usb">
-                  <a href="/v1.9/usb/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/usb/keyboard/" class="sidebar__sublink">Keyboard Control</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19ethernet" aria-expanded="false" aria-controls="collapse-v19ethernet">
-                  <span>Ethernet</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19ethernet">
-                  <a href="/v1.9/ethernet/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/ethernet/connection/" class="sidebar__sublink">Connection Management</a>
-                  
-                    <a href="/v1.9/ethernet/fingerprinting/" class="sidebar__sublink">Network Fingerprinting</a>
-                  
-                    <a href="/v1.9/ethernet/scanning/" class="sidebar__sublink">Network Scanning</a>
-                  
-                    <a href="/v1.9/ethernet/http/" class="sidebar__sublink">HTTP Requests</a>
-                  
-                </div>
-              </div>
-            
-          
-            
-            
-            
-            
-              
-              
-              <div class="sidebar__group">
-                <button class="sidebar__group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-v19development" aria-expanded="false" aria-controls="collapse-v19development">
-                  <span>Development</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse sidebar__group-items" id="collapse-v19development">
-                  <a href="/v1.9/development/" class="sidebar__sublink">Overview</a>
-                  
-                    <a href="/v1.9/development/build-py-kconfig/" class="sidebar__sublink">Adjusting build options</a>
-                  
-                </div>
-              </div>
-            
-          
-          
-        
-      </nav>
-    </aside>
-    <div class="content">
-      <main class="content__body">
-        
-<article class="doc">
-  <header>
-    <h1>SD Card</h1>
-    <p>Using SD card storage with GhostESP for file management, captures, and configuration.</p>
-  </header>
-  
-    <aside class="doc__toc">
-      <h2>On this page</h2>
-      <nav id="TableOfContents">
-  <ul>
-    <li><a href="#storage-structure">Storage Structure</a></li>
-    <li><a href="#web-serial-interface">Web Serial Interface</a></li>
-    <li><a href="#webui-file-manager">WebUI File Manager</a>
-      <ul>
-        <li><a href="#capabilities">Capabilities</a></li>
-      </ul>
-    </li>
-    <li><a href="#cli-commands">CLI Commands</a>
-      <ul>
-        <li><a href="#status">Status</a></li>
-        <li><a href="#list-files">List Files</a></li>
-        <li><a href="#file-info">File Info</a></li>
-        <li><a href="#read-file">Read File</a></li>
-        <li><a href="#file-size">File Size</a></li>
-        <li><a href="#write-file">Write File</a></li>
-        <li><a href="#append-to-file">Append to File</a></li>
-        <li><a href="#create-directory">Create Directory</a></li>
-        <li><a href="#delete">Delete</a></li>
-        <li><a href="#tree-view">Tree View</a></li>
-      </ul>
-    </li>
-    <li><a href="#pin-configuration">Pin Configuration</a>
-      <ul>
-        <li><a href="#spi-mode">SPI Mode</a></li>
-        <li><a href="#sdmmc-mode">SDMMC Mode</a></li>
-        <li><a href="#view-current-config">View Current Config</a></li>
-        <li><a href="#save-configuration">Save Configuration</a></li>
-      </ul>
-    </li>
-    <li><a href="#virtual-storage">Virtual Storage</a></li>
-    <li><a href="#machine-parsable-output">Machine-Parsable Output</a></li>
-    <li><a href="#troubleshooting">Troubleshooting</a>
-      <ul>
-        <li><a href="#sd-card-not-detected">SD Card Not Detected</a></li>
-        <li><a href="#mount-failures">Mount Failures</a></li>
-        <li><a href="#slow-transfers">Slow Transfers</a></li>
-      </ul>
-    </li>
-    <li><a href="#next-steps">Next Steps</a></li>
-  </ul>
-</nav>
-    </aside>
-  
-  <p>GhostESP uses SD cards to store captures, logs, and files. Learn how to manage files and configure pins.</p>
-
-
-
-<h2 id="storage-structure">
-  Storage Structure
-  <a class="heading-anchor" href="#storage-structure" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>When initialized, GhostESP creates the following directory structure:</p>
-<pre tabindex="0"><code>/mnt/ghostesp/
+<!doctype html><html lang=en data-theme=auto><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>SD Card · GhostESP Documentation</title><link rel=preconnect href=https://fonts.googleapis.com><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel=stylesheet><link href=https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css rel=stylesheet><link rel=stylesheet href=/css/main.min.333343cc98c92f6015786bf32d605cb6c14c60642eacf8de3b94d3248f97d117.css><link rel=canonical href=/latest/getting-started/sd-card/><meta name=description content="Using SD card storage with GhostESP for file management, captures, and configuration."><meta property="og:site_name" content="GhostESP Documentation"><meta property="og:type" content="article"><meta property="og:title" content="SD Card"><meta property="og:description" content="Using SD card storage with GhostESP for file management, captures, and configuration."><meta property="og:url" content="/v1.9/getting-started/sd-card/"><meta property="og:locale" content="en"><meta property="og:image" content="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png"><meta name=twitter:card content="summary_large_image"><meta name=twitter:title content="SD Card"><meta name=twitter:description content="Using SD card storage with GhostESP for file management, captures, and configuration."><meta name=twitter:image content="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png"><script async src="https://www.googletagmanager.com/gtag/js?id=G-Q9CNW8QW7K"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date),gtag("config","G-Q9CNW8QW7K")</script><script type=application/ld+json>{"@context":"https://schema.org","@type":"Article","name":"GhostESP Documentation","description":"Using SD card storage with GhostESP for file management, captures, and configuration.","url":"\/v1.9\/getting-started\/sd-card\/","author":{"@type":"Organization","name":"GhostESP Team"},"publisher":{"@type":"Organization","name":"GhostESP"},"datePublished":"0001-01-01T00:00:00Z","dateModified":"0001-01-01T00:00:00Z"}</script><script>(function(){const e=localStorage.getItem("ghostesp-theme")||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",e),window.innerWidth>=992&&localStorage.getItem("sidebarState")==="open"&&document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>')})()</script></head><body><header class=topbar><button class=topbar__toggle type=button onclick=toggleSidebar() aria-label="Toggle navigation" aria-expanded=false>
+<svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true"><line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"/><line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"/><line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"/></svg>
+</button>
+<a href=/ class=topbar__brand><img src=/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png alt="GhostESP: Revival" class=topbar__logo></a><div class=topbar__actions><button class=topbar__theme type=button data-theme-toggle aria-label="Toggle theme">
+<svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon="" aria-hidden="true"><g class="icon-theme__sun"><circle cx="12" cy="12" r="5"/><g class="icon-theme__sun-rays"><line x1="12" y1="2.5" x2="12" y2="5.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="4.5" y1="12" x2="7.5" y2="12"/><line x1="16.5" y1="12" x2="19.5" y2="12"/><line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/><line x1="5.6" y1="18.4" x2="7.8" y2="16.2"/><line x1="16.2" y1="7.8" x2="18.4" y2="5.6"/></g></g><g class="icon-theme__moon"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></g></svg></button></div></header><div class=app><aside class=sidebar id=sidebar data-current-version=v1.9><div class=sidebar__brand><a href=/ class=sidebar__title><img src=/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png alt="GhostESP: Revival" class=sidebar__logo></a></div><div class=sidebar__version><label for=sidebar-version class=sidebar__version-label>Firmware version</label>
+<select id=sidebar-version class=sidebar__version-select data-version-select><option value=latest>Latest</option><option value=v1.9.4>v1.9.4</option><option value=v1.9.3>v1.9.3</option><option value=v1.9 selected>v1.9</option><option value=v1.8.1>v1.8.1</option><option value=v1.8>v1.8</option></select></div><div class=sidebar__search><input type=search placeholder=Search autocomplete=off data-search-input data-search-index=/index.json><div class=sidebar__search-results data-search-results role=listbox></div></div><nav class=sidebar__nav><a href=/v1.9/ class="sidebar__link sidebar__link--active">Home</a><div class="sidebar__group group--open"><button class="sidebar__group-toggle sidebar__group-toggle--active" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19getting-started aria-expanded=true aria-controls=collapse-v19getting-started>
+<span>Getting Started</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse show sidebar__group-items" id=collapse-v19getting-started><a href=/v1.9/getting-started/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/getting-started/installation-guide/ class=sidebar__sublink>Installation Guide</a>
+<a href=/v1.9/getting-started/supported-hardware/ class=sidebar__sublink>Supported Hardware</a>
+<a href=/v1.9/getting-started/command-line-reference/ class=sidebar__sublink>CLI Reference</a>
+<a href=/v1.9/getting-started/flipper-companion-app/ class=sidebar__sublink>Flipper Zero Companion App</a>
+<a href=/v1.9/getting-started/dual-communication/ class=sidebar__sublink>GhostLink</a>
+<a href=/v1.9/getting-started/screen-mirroring/ class=sidebar__sublink>Screen Mirroring</a>
+<a href=/v1.9/getting-started/webui-guide/ class=sidebar__sublink>WebUI</a>
+<a href=/v1.9/getting-started/faq/ class=sidebar__sublink>FAQ</a>
+<a href=/v1.9/getting-started/sd-card/ class="sidebar__sublink sidebar__sublink--active">SD Card</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19wifi aria-expanded=false aria-controls=collapse-v19wifi>
+<span>Wi-Fi</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19wifi><a href=/v1.9/wifi/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/wifi/basics/ class=sidebar__sublink>Wi-Fi Basics</a>
+<a href=/v1.9/wifi/survey/ class=sidebar__sublink>Scanning networks</a>
+<a href=/v1.9/wifi/capture/ class=sidebar__sublink>Capturing packets</a>
+<a href=/v1.9/wifi/deauth/ class=sidebar__sublink>Deauthentication Attacks</a>
+<a href=/v1.9/wifi/handshakes/ class=sidebar__sublink>Capturing handshakes</a>
+<a href=/v1.9/wifi/evil-portal/ class=sidebar__sublink>Evil Portal</a>
+<a href=/v1.9/wifi/karma/ class=sidebar__sublink>Karma Attack</a>
+<a href=/v1.9/wifi/aerial-detection/ class=sidebar__sublink>Aerial Detection</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19ble aria-expanded=false aria-controls=collapse-v19ble>
+<span>Bluetooth LE</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19ble><a href=/v1.9/ble/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/ble/scanning/ class=sidebar__sublink>Scanning</a>
+<a href=/v1.9/ble/gatt/ class=sidebar__sublink>GATT Discovery</a>
+<a href=/v1.9/ble/attacks/ class=sidebar__sublink>Attacks</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19infrared aria-expanded=false aria-controls=collapse-v19infrared>
+<span>Infrared</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19infrared><a href=/v1.9/infrared/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/infrared/learning/ class=sidebar__sublink>Learning Signals</a>
+<a href=/v1.9/infrared/transmitting/ class=sidebar__sublink>Transmitting Signals</a>
+<a href=/v1.9/infrared/dazzler/ class=sidebar__sublink>IR Dazzler</a>
+<a href=/v1.9/infrared/files/ class=sidebar__sublink>Infrared Files</a>
+<a href=/v1.9/infrared/hardware/ class=sidebar__sublink>Hardware Support</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19nfc aria-expanded=false aria-controls=collapse-v19nfc>
+<span>NFC</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19nfc><a href=/v1.9/nfc/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/nfc/chameleon-ultra/ class=sidebar__sublink>Chameleon Ultra</a>
+<a href=/v1.9/nfc/scanning/ class=sidebar__sublink>Scanning</a>
+<a href=/v1.9/nfc/saving/ class=sidebar__sublink>Saving Tags</a>
+<a href=/v1.9/nfc/writing/ class=sidebar__sublink>Writing NTAG</a>
+<a href=/v1.9/nfc/supported/ class=sidebar__sublink>Supported Tags</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19usb aria-expanded=false aria-controls=collapse-v19usb>
+<span>USB</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19usb><a href=/v1.9/usb/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/usb/keyboard/ class=sidebar__sublink>Keyboard Control</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19ethernet aria-expanded=false aria-controls=collapse-v19ethernet>
+<span>Ethernet</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19ethernet><a href=/v1.9/ethernet/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/ethernet/connection/ class=sidebar__sublink>Connection Management</a>
+<a href=/v1.9/ethernet/fingerprinting/ class=sidebar__sublink>Network Fingerprinting</a>
+<a href=/v1.9/ethernet/scanning/ class=sidebar__sublink>Network Scanning</a>
+<a href=/v1.9/ethernet/http/ class=sidebar__sublink>HTTP Requests</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v19development aria-expanded=false aria-controls=collapse-v19development>
+<span>Development</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v19development><a href=/v1.9/development/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9/development/build-py-kconfig/ class=sidebar__sublink>Adjusting build options</a></div></div></nav></aside><div class=content><main class=content__body><article class=doc><header><h1>SD Card</h1><p>Using SD card storage with GhostESP for file management, captures, and configuration.</p></header><aside class=doc__toc><h2>On this page</h2><nav id=TableOfContents><ul><li><a href=#storage-structure>Storage Structure</a></li><li><a href=#web-serial-interface>Web Serial Interface</a></li><li><a href=#webui-file-manager>WebUI File Manager</a><ul><li><a href=#capabilities>Capabilities</a></li></ul></li><li><a href=#cli-commands>CLI Commands</a><ul><li><a href=#status>Status</a></li><li><a href=#list-files>List Files</a></li><li><a href=#file-info>File Info</a></li><li><a href=#read-file>Read File</a></li><li><a href=#file-size>File Size</a></li><li><a href=#write-file>Write File</a></li><li><a href=#append-to-file>Append to File</a></li><li><a href=#create-directory>Create Directory</a></li><li><a href=#delete>Delete</a></li><li><a href=#tree-view>Tree View</a></li></ul></li><li><a href=#pin-configuration>Pin Configuration</a><ul><li><a href=#spi-mode>SPI Mode</a></li><li><a href=#sdmmc-mode>SDMMC Mode</a></li><li><a href=#view-current-config>View Current Config</a></li><li><a href=#save-configuration>Save Configuration</a></li></ul></li><li><a href=#virtual-storage>Virtual Storage</a></li><li><a href=#machine-parsable-output>Machine-Parsable Output</a></li><li><a href=#troubleshooting>Troubleshooting</a><ul><li><a href=#sd-card-not-detected>SD Card Not Detected</a></li><li><a href=#mount-failures>Mount Failures</a></li><li><a href=#slow-transfers>Slow Transfers</a></li></ul></li><li><a href=#next-steps>Next Steps</a></li></ul></nav></aside><p>GhostESP uses SD cards to store captures, logs, and files. Learn how to manage files and configure pins.</p><h2 id=storage-structure>Storage Structure
+<a class=heading-anchor href=#storage-structure aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>When initialized, GhostESP creates the following directory structure:</p><pre tabindex=0><code>/mnt/ghostesp/
 ├── debug/          # Debug logs
 ├── pcaps/          # Packet captures
 ├── scans/          # Scan results
@@ -522,196 +68,60 @@
 │   ├── remotes/    # Learned IR signals
 │   └── universals/ # Universal IR databases
 └── nfc/            # NFC card data (if enabled)
-</code></pre>
-
-
-<h2 id="web-serial-interface">
-  Web Serial Interface
-  <a class="heading-anchor" href="#web-serial-interface" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>For the easiest file management experience, use the <strong>Web Serial Interface</strong> at:</p>
-<p><strong><a href="https://ghostesp.net/serial">ghostesp.net/serial</a></strong></p>
-<p>This browser-based tool connects directly to your GhostESP via USB and provides:</p>
-<ul>
-<li><strong>File Browser</strong> — Browse, upload, and download files using the SD CLI</li>
-<li><strong>Serial Console</strong> — Full terminal access to all CLI commands</li>
-<li><strong>Screen Mirror</strong> — View your device&rsquo;s display in real-time</li>
-</ul>
-<blockquote>
-<p><strong>Note</strong>: Requires a Chromium-based browser (Chrome, Edge, Brave) with Web Serial API support.</p></blockquote>
-
-
-
-<h2 id="webui-file-manager">
-  WebUI File Manager
-  <a class="heading-anchor" href="#webui-file-manager" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>Access the SD card through the WebUI&rsquo;s <strong>SD Card</strong> tab:</p>
-<ol>
-<li>Connect to <strong>GhostNet</strong> and open <code>192.168.4.1</code> or <code>ghostesp.local</code></li>
-<li>Navigate to the <strong>SD Card</strong> tab</li>
-<li>Browse the <code>/mnt/ghostesp/</code> directory structure</li>
-</ol>
-
-
-
-<h3 id="capabilities">Capabilities</h3>
-
-<ul>
-<li><strong>Navigate</strong> — Click folders to browse</li>
-<li><strong>Download</strong> — Download PCAP captures, logs, and other files</li>
-<li><strong>Upload</strong> — Add custom portal HTML files or IR remotes</li>
-<li><strong>Delete</strong> — Remove files to free space</li>
-</ul>
-<blockquote>
-<p><strong>Tip</strong>: For large file transfers (&gt;1MB), use a USB card reader for faster speeds.</p></blockquote>
-
-
-
-<h2 id="cli-commands">
-  CLI Commands
-  <a class="heading-anchor" href="#cli-commands" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>The <code>sd</code> command allows scripting and direct file access.</p>
-
-
-
-<h3 id="status">Status</h3>
-
-<pre tabindex="0"><code>sd status
-</code></pre><p>Output format:</p>
-<pre tabindex="0"><code>SD:STATUS:mounted=true
+</code></pre><h2 id=web-serial-interface>Web Serial Interface
+<a class=heading-anchor href=#web-serial-interface aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>For the easiest file management experience, use the <strong>Web Serial Interface</strong> at:</p><p><strong><a href=https://ghostesp.net/serial>ghostesp.net/serial</a></strong></p><p>This browser-based tool connects directly to your GhostESP via USB and provides:</p><ul><li><strong>File Browser</strong> — Browse, upload, and download files using the SD CLI</li><li><strong>Serial Console</strong> — Full terminal access to all CLI commands</li><li><strong>Screen Mirror</strong> — View your device&rsquo;s display in real-time</li></ul><blockquote><p><strong>Note</strong>: Requires a Chromium-based browser (Chrome, Edge, Brave) with Web Serial API support.</p></blockquote><h2 id=webui-file-manager>WebUI File Manager
+<a class=heading-anchor href=#webui-file-manager aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>Access the SD card through the WebUI&rsquo;s <strong>SD Card</strong> tab:</p><ol><li>Connect to <strong>GhostNet</strong> and open <code>192.168.4.1</code> or <code>ghostesp.local</code></li><li>Navigate to the <strong>SD Card</strong> tab</li><li>Browse the <code>/mnt/ghostesp/</code> directory structure</li></ol><h3 id=capabilities>Capabilities</h3><ul><li><strong>Navigate</strong> — Click folders to browse</li><li><strong>Download</strong> — Download PCAP captures, logs, and other files</li><li><strong>Upload</strong> — Add custom portal HTML files or IR remotes</li><li><strong>Delete</strong> — Remove files to free space</li></ul><blockquote><p><strong>Tip</strong>: For large file transfers (>1MB), use a USB card reader for faster speeds.</p></blockquote><h2 id=cli-commands>CLI Commands
+<a class=heading-anchor href=#cli-commands aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>The <code>sd</code> command allows scripting and direct file access.</p><h3 id=status>Status</h3><pre tabindex=0><code>sd status
+</code></pre><p>Output format:</p><pre tabindex=0><code>SD:STATUS:mounted=true
 SD:STATUS:type=physical
 SD:STATUS:name=SD32G
 SD:STATUS:capacity_mb=30436
 SD:STATUS:used_pct=12
 SD:STATUS:free_mb=26784
-</code></pre>
-
-
-<h3 id="list-files">List Files</h3>
-
-<pre tabindex="0"><code>sd list [path]
-</code></pre><p>Lists files and directories with indices for quick reference:</p>
-<pre tabindex="0"><code>SD:LIST:/mnt/ghostesp
+</code></pre><h3 id=list-files>List Files</h3><pre tabindex=0><code>sd list [path]
+</code></pre><p>Lists files and directories with indices for quick reference:</p><pre tabindex=0><code>SD:LIST:/mnt/ghostesp
 SD:DIR:[0] pcaps
 SD:DIR:[1] scans
 SD:FILE:[2] config.txt 1024
 SD:FILE:[3] log.csv 8192
 SD:OK:listed 4 entries
-</code></pre><p>Use indices in subsequent commands:</p>
-<pre tabindex="0"><code>sd info 2         # Get info for config.txt
+</code></pre><p>Use indices in subsequent commands:</p><pre tabindex=0><code>sd info 2         # Get info for config.txt
 sd cat 3 1000     # Read first 1000 bytes of log.csv
-</code></pre>
-
-
-<h3 id="file-info">File Info</h3>
-
-<pre tabindex="0"><code>sd info &lt;index|path&gt;
-</code></pre><p>Shows file or directory details:</p>
-<pre tabindex="0"><code>SD:INFO:path=/mnt/ghostesp/pcaps/capture.pcap
+</code></pre><h3 id=file-info>File Info</h3><pre tabindex=0><code>sd info &lt;index|path&gt;
+</code></pre><p>Shows file or directory details:</p><pre tabindex=0><code>SD:INFO:path=/mnt/ghostesp/pcaps/capture.pcap
 SD:INFO:type=file
 SD:INFO:size=524288
 SD:OK
-</code></pre>
-
-
-<h3 id="read-file">Read File</h3>
-
-<pre tabindex="0"><code>sd read &lt;index|path&gt; [offset] [length]
-</code></pre><p>Reads file contents with optional offset and length for chunked downloads. No size limit:</p>
-<pre tabindex="0"><code>SD:READ:BEGIN:/mnt/ghostesp/capture.pcap
+</code></pre><h3 id=read-file>Read File</h3><pre tabindex=0><code>sd read &lt;index|path&gt; [offset] [length]
+</code></pre><p>Reads file contents with optional offset and length for chunked downloads. No size limit:</p><pre tabindex=0><code>SD:READ:BEGIN:/mnt/ghostesp/capture.pcap
 SD:READ:SIZE:1048576
 SD:READ:OFFSET:0
 SD:READ:LENGTH:65536
 ... binary file contents ...
 SD:READ:END:bytes=65536
 SD:OK
-</code></pre><p>Example chunked download:</p>
-<pre tabindex="0"><code>sd read myfile.bin 0 65536       # First 64KB
+</code></pre><p>Example chunked download:</p><pre tabindex=0><code>sd read myfile.bin 0 65536       # First 64KB
 sd read myfile.bin 65536 65536   # Next 64KB
 sd read myfile.bin 131072 65536  # Next 64KB...
-</code></pre>
-
-
-<h3 id="file-size">File Size</h3>
-
-<pre tabindex="0"><code>sd size &lt;index|path&gt;
-</code></pre><p>Quick file size check (useful before downloads):</p>
-<pre tabindex="0"><code>SD:SIZE:1048576
+</code></pre><h3 id=file-size>File Size</h3><pre tabindex=0><code>sd size &lt;index|path&gt;
+</code></pre><p>Quick file size check (useful before downloads):</p><pre tabindex=0><code>SD:SIZE:1048576
 SD:OK
-</code></pre>
-
-
-<h3 id="write-file">Write File</h3>
-
-<pre tabindex="0"><code>sd write &lt;path&gt; &lt;base64data&gt;
-</code></pre><p>Creates or overwrites a file with base64-decoded data:</p>
-<pre tabindex="0"><code>sd write myfile.txt SGVsbG8gV29ybGQh
+</code></pre><h3 id=write-file>Write File</h3><pre tabindex=0><code>sd write &lt;path&gt; &lt;base64data&gt;
+</code></pre><p>Creates or overwrites a file with base64-decoded data:</p><pre tabindex=0><code>sd write myfile.txt SGVsbG8gV29ybGQh
 SD:WRITE:bytes=12
 SD:OK:created:/mnt/ghostesp/myfile.txt
-</code></pre>
-
-
-<h3 id="append-to-file">Append to File</h3>
-
-<pre tabindex="0"><code>sd append &lt;path&gt; &lt;base64data&gt;
-</code></pre><p>Appends base64-decoded data to an existing file:</p>
-<pre tabindex="0"><code>sd append myfile.txt IG1vcmUgZGF0YQ==
+</code></pre><h3 id=append-to-file>Append to File</h3><pre tabindex=0><code>sd append &lt;path&gt; &lt;base64data&gt;
+</code></pre><p>Appends base64-decoded data to an existing file:</p><pre tabindex=0><code>sd append myfile.txt IG1vcmUgZGF0YQ==
 SD:APPEND:bytes=10
 SD:OK:appended:/mnt/ghostesp/myfile.txt
-</code></pre><blockquote>
-<p><strong>Note:</strong> For large file uploads via WebUI, use the HTTP API which handles binary data directly. The CLI uses base64 encoding due to serial protocol limitations.</p></blockquote>
-
-
-
-<h3 id="create-directory">Create Directory</h3>
-
-<pre tabindex="0"><code>sd mkdir &lt;path&gt;
-</code></pre><p>Creates a new directory:</p>
-<pre tabindex="0"><code>sd mkdir mydata
+</code></pre><blockquote><p><strong>Note:</strong> For large file uploads via WebUI, use the HTTP API which handles binary data directly. The CLI uses base64 encoding due to serial protocol limitations.</p></blockquote><h3 id=create-directory>Create Directory</h3><pre tabindex=0><code>sd mkdir &lt;path&gt;
+</code></pre><p>Creates a new directory:</p><pre tabindex=0><code>sd mkdir mydata
 SD:OK:created:/mnt/ghostesp/mydata
-</code></pre>
-
-
-<h3 id="delete">Delete</h3>
-
-<pre tabindex="0"><code>sd rm &lt;index|path&gt;
-</code></pre><p>Removes a file or empty directory:</p>
-<pre tabindex="0"><code>sd rm 2
+</code></pre><h3 id=delete>Delete</h3><pre tabindex=0><code>sd rm &lt;index|path&gt;
+</code></pre><p>Removes a file or empty directory:</p><pre tabindex=0><code>sd rm 2
 SD:OK:removed:/mnt/ghostesp/config.txt
-</code></pre>
-
-
-<h3 id="tree-view">Tree View</h3>
-
-<pre tabindex="0"><code>sd tree [path] [depth]
-</code></pre><p>Recursive directory listing (default depth: 2, max: 10):</p>
-<pre tabindex="0"><code>SD:TREE:/mnt/ghostesp
+</code></pre><h3 id=tree-view>Tree View</h3><pre tabindex=0><code>sd tree [path] [depth]
+</code></pre><p>Recursive directory listing (default depth: 2, max: 10):</p><pre tabindex=0><code>SD:TREE:/mnt/ghostesp
 [D] pcaps/
   [F] capture_001.pcap (524288)
   [F] capture_002.pcap (131072)
@@ -719,248 +129,23 @@ SD:OK:removed:/mnt/ghostesp/config.txt
 [D] infrared/
   [D] remotes/
 SD:OK:tree 5 items
-</code></pre>
-
-
-<h2 id="pin-configuration">
-  Pin Configuration
-  <a class="heading-anchor" href="#pin-configuration" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>SD card pins can be reconfigured at runtime without recompiling.</p>
-
-
-
-<h3 id="spi-mode">SPI Mode</h3>
-
-<p>Most boards use SPI mode. Configure pins with:</p>
-<pre tabindex="0"><code>sd_pins_spi &lt;CS&gt; &lt;CLK&gt; &lt;MISO&gt; &lt;MOSI&gt;
-</code></pre><p>Example:</p>
-<pre tabindex="0"><code>sd_pins_spi 5 18 19 23
+</code></pre><h2 id=pin-configuration>Pin Configuration
+<a class=heading-anchor href=#pin-configuration aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>SD card pins can be reconfigured at runtime without recompiling.</p><h3 id=spi-mode>SPI Mode</h3><p>Most boards use SPI mode. Configure pins with:</p><pre tabindex=0><code>sd_pins_spi &lt;CS&gt; &lt;CLK&gt; &lt;MISO&gt; &lt;MOSI&gt;
+</code></pre><p>Example:</p><pre tabindex=0><code>sd_pins_spi 5 18 19 23
 sd_save_config
-</code></pre>
-
-
-<h3 id="sdmmc-mode">SDMMC Mode</h3>
-
-<p>Some boards support faster SDMMC (1-bit or 4-bit):</p>
-<pre tabindex="0"><code>sd_pins_mmc &lt;CLK&gt; &lt;CMD&gt; &lt;D0&gt; &lt;D1&gt; &lt;D2&gt; &lt;D3&gt;
-</code></pre><p>Example (4-bit):</p>
-<pre tabindex="0"><code>sd_pins_mmc 39 38 40 41 42 2
+</code></pre><h3 id=sdmmc-mode>SDMMC Mode</h3><p>Some boards support faster SDMMC (1-bit or 4-bit):</p><pre tabindex=0><code>sd_pins_mmc &lt;CLK&gt; &lt;CMD&gt; &lt;D0&gt; &lt;D1&gt; &lt;D2&gt; &lt;D3&gt;
+</code></pre><p>Example (4-bit):</p><pre tabindex=0><code>sd_pins_mmc 39 38 40 41 42 2
 sd_save_config
-</code></pre>
-
-
-<h3 id="view-current-config">View Current Config</h3>
-
-<pre tabindex="0"><code>sd_config
-</code></pre><p>Shows current pin assignments for both modes.</p>
-
-
-
-<h3 id="save-configuration">Save Configuration</h3>
-
-<pre tabindex="0"><code>sd_save_config
-</code></pre><p>Persists pin settings to NVS. Changes apply on next boot.</p>
-
-
-
-<h2 id="virtual-storage">
-  Virtual Storage
-  <a class="heading-anchor" href="#virtual-storage" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>Devices without SD slots (like S3TWatch) use internal flash as virtual storage (limited to ~4MB).</p>
-<p>Check storage type:</p>
-<pre tabindex="0"><code>sd status
-</code></pre><p>Output:</p>
-<pre tabindex="0"><code>SD:STATUS:mounted=true
+</code></pre><h3 id=view-current-config>View Current Config</h3><pre tabindex=0><code>sd_config
+</code></pre><p>Shows current pin assignments for both modes.</p><h3 id=save-configuration>Save Configuration</h3><pre tabindex=0><code>sd_save_config
+</code></pre><p>Persists pin settings to NVS. Changes apply on next boot.</p><h2 id=virtual-storage>Virtual Storage
+<a class=heading-anchor href=#virtual-storage aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>Devices without SD slots (like S3TWatch) use internal flash as virtual storage (limited to ~4MB).</p><p>Check storage type:</p><pre tabindex=0><code>sd status
+</code></pre><p>Output:</p><pre tabindex=0><code>SD:STATUS:mounted=true
 SD:STATUS:type=virtual
-</code></pre>
-
-
-<h2 id="machine-parsable-output">
-  Machine-Parsable Output
-  <a class="heading-anchor" href="#machine-parsable-output" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<p>All <code>sd</code> command responses use a consistent format for scripting:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Prefix</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>SD:OK:...</code></td>
-          <td>Success with optional message</td>
-      </tr>
-      <tr>
-          <td><code>SD:ERR:...</code></td>
-          <td>Error with reason</td>
-      </tr>
-      <tr>
-          <td><code>SD:STATUS:key=value</code></td>
-          <td>Status key-value pair</td>
-      </tr>
-      <tr>
-          <td><code>SD:LIST:path</code></td>
-          <td>Directory listing header</td>
-      </tr>
-      <tr>
-          <td><code>SD:DIR:[n] name</code></td>
-          <td>Directory entry with index</td>
-      </tr>
-      <tr>
-          <td><code>SD:FILE:[n] name size</code></td>
-          <td>File entry with index and size</td>
-      </tr>
-      <tr>
-          <td><code>SD:INFO:key=value</code></td>
-          <td>File info key-value pair</td>
-      </tr>
-      <tr>
-          <td><code>SD:CAT:BEGIN:path</code></td>
-          <td>File content start marker</td>
-      </tr>
-      <tr>
-          <td><code>SD:CAT:END:bytes=n</code></td>
-          <td>File content end marker</td>
-      </tr>
-      <tr>
-          <td><code>SD:TREE:path</code></td>
-          <td>Tree listing header</td>
-      </tr>
-      <tr>
-          <td><code>SD:EMPTY</code></td>
-          <td>Empty directory</td>
-      </tr>
-  </tbody>
-</table>
-
-
-
-<h2 id="troubleshooting">
-  Troubleshooting
-  <a class="heading-anchor" href="#troubleshooting" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-
-
-
-<h3 id="sd-card-not-detected">SD Card Not Detected</h3>
-
-<ul>
-<li>Verify the card is formatted as FAT32</li>
-<li>Check pin configuration matches your hardware</li>
-<li>Ensure the card is fully inserted</li>
-<li>Try a different SD card</li>
-</ul>
-
-
-
-<h3 id="mount-failures">Mount Failures</h3>
-
-<pre tabindex="0"><code>sd status
+</code></pre><h2 id=machine-parsable-output>Machine-Parsable Output
+<a class=heading-anchor href=#machine-parsable-output aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>All <code>sd</code> command responses use a consistent format for scripting:</p><table><thead><tr><th>Prefix</th><th>Meaning</th></tr></thead><tbody><tr><td><code>SD:OK:...</code></td><td>Success with optional message</td></tr><tr><td><code>SD:ERR:...</code></td><td>Error with reason</td></tr><tr><td><code>SD:STATUS:key=value</code></td><td>Status key-value pair</td></tr><tr><td><code>SD:LIST:path</code></td><td>Directory listing header</td></tr><tr><td><code>SD:DIR:[n] name</code></td><td>Directory entry with index</td></tr><tr><td><code>SD:FILE:[n] name size</code></td><td>File entry with index and size</td></tr><tr><td><code>SD:INFO:key=value</code></td><td>File info key-value pair</td></tr><tr><td><code>SD:CAT:BEGIN:path</code></td><td>File content start marker</td></tr><tr><td><code>SD:CAT:END:bytes=n</code></td><td>File content end marker</td></tr><tr><td><code>SD:TREE:path</code></td><td>Tree listing header</td></tr><tr><td><code>SD:EMPTY</code></td><td>Empty directory</td></tr></tbody></table><h2 id=troubleshooting>Troubleshooting
+<a class=heading-anchor href=#troubleshooting aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><h3 id=sd-card-not-detected>SD Card Not Detected</h3><ul><li>Verify the card is formatted as FAT32</li><li>Check pin configuration matches your hardware</li><li>Ensure the card is fully inserted</li><li>Try a different SD card</li></ul><h3 id=mount-failures>Mount Failures</h3><pre tabindex=0><code>sd status
 SD:STATUS:mounted=false
-</code></pre><ul>
-<li>Run <code>sd_config</code> to verify pin settings</li>
-<li>Some boards require specific pin configurations at compile time</li>
-</ul>
-
-
-
-<h3 id="slow-transfers">Slow Transfers</h3>
-
-<ul>
-<li>Use a Class 10 or higher SD card</li>
-<li>For large files, use a USB card reader instead of WebUI</li>
-<li>Reduce concurrent operations</li>
-</ul>
-
-
-
-<h2 id="next-steps">
-  Next Steps
-  <a class="heading-anchor" href="#next-steps" aria-label="Copy link to this section">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)">
-        <path d="M14 12c0 2.761-2.239 5-5 5H7a5 5 0 110-10h.5"></path>
-        <path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"></path>
-      </g>
-    </svg>
-  </a>
-</h2>
-
-<ul>
-<li><a href="/v1.9/getting-started/webui-guide/">WebUI Guide</a> — File manager and settings</li>
-<li><a href="/v1.9/getting-started/command-line-reference/">Command Line Reference</a> — Full CLI documentation</li>
-<li><a href="/v1.9/infrared/">Infrared</a> — Store IR remotes on SD card</li>
-</ul>
-
-  
-    <nav class="doc__nav" aria-label="Document navigation">
-      
-        <a class="doc__nav-link doc__nav-link--prev" href="/v1.9/getting-started/faq/">
-          <span>← Previous</span>
-          <span>FAQ</span>
-        </a>
-      
-      
-    </nav>
-  
-</article>
-
-      </main>
-      <footer class="content__footer">
-        <p>website made with love by jay candel &lt;3</p>
-      </footer>
-    </div>
-  </div>
-  <div class="sidebar__overlay" id="overlay" onclick="toggleSidebar()"></div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
-  
-    
-    <script src="/js/search.ef50286594fda7181140155c44b192feda3337818f68d846b1c63109da0b2251.js" defer></script>
-  
-  
-    
-    <script src="/js/sidebar.9132b3f444f2ebe86edbf6429f4c0f533f27e02b1ac29f2b450abe1616f06852.js" defer></script>
-  
-  
-    
-    <script src="/js/theme.0d48f97778d5930c369632719af2ad7eb9f6a039eedd5cc721e5dbda6e9d8925.js" defer></script>
-  
-</body>
-</html>
+</code></pre><ul><li>Run <code>sd_config</code> to verify pin settings</li><li>Some boards require specific pin configurations at compile time</li></ul><h3 id=slow-transfers>Slow Transfers</h3><ul><li>Use a Class 10 or higher SD card</li><li>For large files, use a USB card reader instead of WebUI</li><li>Reduce concurrent operations</li></ul><h2 id=next-steps>Next Steps
+<a class=heading-anchor href=#next-steps aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><ul><li><a href=/v1.9/getting-started/webui-guide/>WebUI Guide</a> — File manager and settings</li><li><a href=/v1.9/getting-started/command-line-reference/>Command Line Reference</a> — Full CLI documentation</li><li><a href=/v1.9/infrared/>Infrared</a> — Store IR remotes on SD card</li></ul><nav class=doc__nav aria-label="Document navigation"><a class="doc__nav-link doc__nav-link--prev" href=/v1.9/getting-started/faq/><span>← Previous</span>
+<span>FAQ</span></a></nav></article></main><footer class=content__footer><p>website made with love by jay candel &lt;3</p></footer></div></div><div class=sidebar__overlay id=overlay onclick=toggleSidebar()></div><script src=https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js></script><script src=https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js></script><script src=/js/search.ef50286594fda7181140155c44b192feda3337818f68d846b1c63109da0b2251.js defer></script><script src=/js/sidebar.9132b3f444f2ebe86edbf6429f4c0f533f27e02b1ac29f2b450abe1616f06852.js defer></script><script src=/js/theme.0d48f97778d5930c369632719af2ad7eb9f6a039eedd5cc721e5dbda6e9d8925.js defer></script></body></html>

@@ -32,6 +32,7 @@ uint32_t theme_palette_get_text(uint8_t theme);
 
 LV_IMG_DECLARE(dualcomm);
 LV_IMG_DECLARE(accelerometer_icon);
+LV_IMG_DECLARE(nrf24);
 
 static const char *TAG = "MainMenu";
 
@@ -97,6 +98,9 @@ menu_item_t menu_items[] = {
 #endif
 #ifdef CONFIG_HAS_NFC
     {"NFC", &nfc_icon, 2, {{0}}},
+#endif
+#if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
+    {"NRF24", &nrf24, 4, {{0}}},
 #endif
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     {"BadUSB", &usb, 3, {{0}}},
@@ -854,6 +858,9 @@ static void handle_menu_item_selection(int item_index) {
 #ifdef CONFIG_HAS_NFC
         {"NFC", 0, &nfc_view},
 #endif
+#if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
+        {"NRF24", OT_NRF24, &options_menu_view},
+#endif
         {"Apps", 0, &apps_menu_view},
         {"Clock", 0, &clock_view},
         {"Settings", OT_Settings, &options_menu_view},
@@ -886,6 +893,8 @@ static void handle_menu_item_selection(int item_index) {
                 status_display_show_status("Infrared Menu");
             } else if (strcmp(menu_actions[i].name, "NFC") == 0) {
                 status_display_show_status("NFC Menu");
+            } else if (strcmp(menu_actions[i].name, "NRF24") == 0) {
+                status_display_show_status("NRF24 Menu");
             } else if (strcmp(menu_actions[i].name, "Apps") == 0) {
                 status_display_show_status("Apps Menu");
             } else if (strcmp(menu_actions[i].name, "Clock") == 0) {

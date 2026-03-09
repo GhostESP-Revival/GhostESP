@@ -51,12 +51,91 @@ extern RGBManager_t rgb_manager;
 // Forward declarations
 static bool station_exists(const uint8_t *station_mac, const uint8_t *ap_bssid);
 static void add_station_ap_pair(const uint8_t *station_mac, const uint8_t *ap_bssid);
-static bool station_mac_exists(const uint8_t *station_mac);
 static esp_err_t start_scansta_channel_hopping(void);
 static void stop_scansta_channel_hopping(void);
 
 // Helper macro to check for broadcast/multicast addresses
 #define IS_BROADCAST_OR_MULTICAST(addr) (((addr)[0] & 0x01) || (memcmp((addr), "\xff\xff\xff\xff\xff\xff", 6) == 0))
+
+// 802.11 frame control parsing helpers
+#define IEEE80211_FC_TYPE(fc) (((fc) >> 2) & 0x3)
+#define IEEE80211_FC_SUBTYPE(fc) (((fc) >> 4) & 0xF)
+#define IEEE80211_FC_TO_DS(fc) (((fc) >> 8) & 0x1)
+#define IEEE80211_FC_FROM_DS(fc) (((fc) >> 9) & 0x1)
+
+#define IEEE80211_TYPE_MGMT 0
+#define IEEE80211_TYPE_DATA 2
+
+static bool is_relevant_mgmt_subtype(uint8_t subtype) {
+    switch (subtype) {
+        case 0x0: // Assoc Request
+        case 0x1: // Assoc Response
+        case 0x2: // Reassoc Request
+        case 0x3: // Reassoc Response
+        case 0xA: // Disassociation
+        case 0xB: // Authentication
+        case 0xC: // Deauthentication
+        case 0xD: // Action
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool extract_station_for_bssid(const wifi_ieee80211_hdr_t *hdr,
+                                      const uint8_t *bssid,
+                                      uint8_t frame_type,
+                                      uint8_t frame_subtype,
+                                      bool to_ds,
+                                      bool from_ds,
+                                      const uint8_t **station_out) {
+    const uint8_t *candidate = NULL;
+
+    if (frame_type == IEEE80211_TYPE_DATA) {
+        // Infrastructure data paths
+        if (to_ds && !from_ds) {
+            // STA -> AP: addr1 is AP/BSSID, addr2 is station
+            if (memcmp(hdr->addr1, bssid, 6) == 0) {
+                candidate = hdr->addr2;
+            }
+        } else if (!to_ds && from_ds) {
+            // AP -> STA: addr2 is AP/BSSID, addr1 is station
+            if (memcmp(hdr->addr2, bssid, 6) == 0) {
+                candidate = hdr->addr1;
+            }
+        } else if (!to_ds && !from_ds && memcmp(hdr->addr3, bssid, 6) == 0) {
+            // Fallback for non-DS frames that still carry the BSSID in addr3
+            if (memcmp(hdr->addr2, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr2)) {
+                candidate = hdr->addr2;
+            } else if (memcmp(hdr->addr1, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr1)) {
+                candidate = hdr->addr1;
+            }
+        }
+    } else if (frame_type == IEEE80211_TYPE_MGMT) {
+        if (!is_relevant_mgmt_subtype(frame_subtype)) {
+            return false;
+        }
+
+        if (memcmp(hdr->addr1, bssid, 6) == 0 && memcmp(hdr->addr2, bssid, 6) != 0) {
+            candidate = hdr->addr2;
+        } else if (memcmp(hdr->addr2, bssid, 6) == 0 && memcmp(hdr->addr1, bssid, 6) != 0) {
+            candidate = hdr->addr1;
+        } else if (memcmp(hdr->addr3, bssid, 6) == 0) {
+            if (memcmp(hdr->addr2, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr2)) {
+                candidate = hdr->addr2;
+            } else if (memcmp(hdr->addr1, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr1)) {
+                candidate = hdr->addr1;
+            }
+        }
+    }
+
+    if (candidate == NULL || IS_BROADCAST_OR_MULTICAST(candidate) || memcmp(candidate, bssid, 6) == 0) {
+        return false;
+    }
+
+    *station_out = candidate;
+    return true;
+}
 
 // ============================================================================
 // Reusable Helper Functions
@@ -223,21 +302,6 @@ static void add_station_ap_pair(const uint8_t *station_mac, const uint8_t *ap_bs
     }
 }
 
-/**
- * @brief Check if a station MAC already exists in the list
- * 
- * @param station_mac Station MAC address to check
- * @return true if MAC exists, false otherwise
- */
-static bool station_mac_exists(const uint8_t *station_mac) {
-    for (int i = 0; i < station_count; i++) {
-        if (memcmp(station_ap_list[i].station_mac, station_mac, 6) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // ============================================================================
 // Channel Hopping Functions
 // ============================================================================
@@ -312,14 +376,14 @@ static void stop_scansta_channel_hopping(void) {
 /**
  * @brief WiFi promiscuous mode callback for station detection
  * 
- * This callback processes management frames to detect station-AP associations.
+ * This callback processes management and data frames to detect station-AP associations.
  * 
  * @param buf Packet buffer
  * @param type Packet type
  */
 void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
-    // Focus on Management frames
-    if (type != WIFI_PKT_MGMT) {
+    // Focus on Management and Data frames
+    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA) {
         return;
     }
 
@@ -334,9 +398,30 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
         return;
     }
 
-    const wifi_promiscuous_pkt_t *packet = (wifi_promiscuous_pkt_t *)buf;
-    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)packet->payload;
-    const wifi_ieee80211_hdr_t *hdr = &ipkt->hdr;
+    if (buf == NULL) {
+        return;
+    }
+
+    const wifi_promiscuous_pkt_t *packet = (const wifi_promiscuous_pkt_t *)buf;
+    if (packet->rx_ctrl.sig_len < sizeof(wifi_ieee80211_hdr_t)) {
+        return;
+    }
+
+    const wifi_ieee80211_hdr_t *hdr = (const wifi_ieee80211_hdr_t *)packet->payload;
+
+    uint16_t frame_ctrl = hdr->frame_ctrl;
+    uint8_t frame_type = IEEE80211_FC_TYPE(frame_ctrl);
+    uint8_t frame_subtype = IEEE80211_FC_SUBTYPE(frame_ctrl);
+    bool to_ds = IEEE80211_FC_TO_DS(frame_ctrl);
+    bool from_ds = IEEE80211_FC_FROM_DS(frame_ctrl);
+
+    if (frame_type != IEEE80211_TYPE_MGMT && frame_type != IEEE80211_TYPE_DATA) {
+        return;
+    }
+
+    if (frame_type == IEEE80211_TYPE_MGMT && !is_relevant_mgmt_subtype(frame_subtype)) {
+        return;
+    }
 
     const uint8_t *station_mac = NULL;
     const uint8_t *ap_bssid = NULL;
@@ -344,35 +429,12 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
 
     // Iterate through known APs (from last scan)
     for (int i = 0; i < ap_count; i++) {
-        uint8_t *bssid = scanned_aps[i].bssid;
-        // Case 1: addr1 == AP BSSID, station likely in addr2
-        if (memcmp(hdr->addr1, bssid, 6) == 0 && memcmp(hdr->addr2, bssid, 6) != 0) {
+        const uint8_t *bssid = scanned_aps[i].bssid;
+        if (extract_station_for_bssid(hdr, bssid, frame_type, frame_subtype,
+                                      to_ds, from_ds, &station_mac)) {
             ap_bssid = bssid;
-            station_mac = hdr->addr2;
             matched_ap_index = i;
             break;
-        }
-        // Case 2: addr2 == AP BSSID, station likely in addr1
-        if (memcmp(hdr->addr2, bssid, 6) == 0 && memcmp(hdr->addr1, bssid, 6) != 0) {
-            ap_bssid = bssid;
-            station_mac = hdr->addr1;
-            matched_ap_index = i;
-            break;
-        }
-        // Case 3: addr3 == AP BSSID, station could be in addr1 or addr2
-        if (memcmp(hdr->addr3, bssid, 6) == 0) {
-            if (memcmp(hdr->addr2, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr2)) {
-                ap_bssid = bssid;
-                station_mac = hdr->addr2;
-                matched_ap_index = i;
-                break;
-            }
-            if (memcmp(hdr->addr1, bssid, 6) != 0 && !IS_BROADCAST_OR_MULTICAST(hdr->addr1)) {
-                ap_bssid = bssid;
-                station_mac = hdr->addr1;
-                matched_ap_index = i;
-                break;
-            }
         }
     }
 
@@ -386,8 +448,8 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
         return;
     }
 
-    // Check if this station MAC has already been seen
-    if (!station_mac_exists(station_mac)) {
+    // Check if this station/AP pair has already been seen
+    if (!station_exists(station_mac, ap_bssid)) {
         // Get the SSID of the matched AP
         char ssid_str[33];
         sanitize_ssid(scanned_aps[matched_ap_index].ssid, ssid_str, sizeof(ssid_str));
@@ -470,7 +532,11 @@ void station_scan_start(void) {
     // Set scan active flag
     scan_active = true;
 
-    // Start monitor mode with the callback
+    // Start monitor mode with management + data frame filtering for station discovery
+    wifi_promiscuous_filter_t filter = {
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA
+    };
+    esp_wifi_set_promiscuous_filter(&filter);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(wifi_stations_sniffer_callback);
 

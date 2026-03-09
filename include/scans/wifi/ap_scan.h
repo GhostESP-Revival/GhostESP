@@ -30,6 +30,40 @@
 void ap_scan_start(void);
 
 /**
+ * @brief Start an async WiFi AP scan
+ * 
+ * Initiates a non-blocking WiFi scan for access points.
+ * Use ap_scan_is_running() to check completion.
+ * 
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t ap_scan_start_async(void);
+
+/**
+ * @brief Check if async scan is still running
+ * 
+ * @return true if scan is in progress, false otherwise
+ */
+bool ap_scan_is_running(void);
+
+/**
+ * @brief Check if async scan has completed
+ * 
+ * Polls to check if the scan has finished.
+ * 
+ * @return true if scan is complete, false if still running
+ */
+bool ap_scan_check_done(void);
+
+/**
+ * @brief Complete the async scan and retrieve results
+ * 
+ * Should be called after ap_scan_is_running() returns false.
+ * Retrieves scan results and stores them internally.
+ */
+void ap_scan_finish_async(void);
+
+/**
  * @brief Stop an active AP scan
  * 
  * Stops any active WiFi scan and retrieves the results.

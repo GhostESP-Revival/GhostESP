@@ -15,12 +15,23 @@ Upload your wardriving CSV captures to [WiGLE.net](https://wigle.net) to contrib
 
 ## 2-Minute Setup
 
+### Option 1: Using Encoded Token (Recommended)
+
+1. Get your "Encoded for Use" token from [wigle.net/account](https://wigle.net/account)
+2. Set API token:
+   ```
+   wigle API <EncodedForUseToken>
+   ```
+
+### Option 2: Using Legacy Format
+
 1. Get credentials from [wigle.net/account](https://wigle.net/account) (`APIName:APIToken`)
 2. Set API key:
-
    ```
    wigle API <APIName>:<APIToken>
    ```
+
+### Complete Setup
 
 3. (Recommended) Enable upload on Wi-Fi connect:
 
@@ -84,7 +95,8 @@ wigle show
 
 | Command | Description |
 |---------|-------------|
-| `wigle API <name>:<token>` | Set your WiGLE API credentials |
+| `wigle API <encoded>` | Set WiGLE Encoded for Use token (recommended) |
+| `wigle API <name>:<token>` | Set WiGLE API credentials (legacy format) |
 | `wigle auto on/off` | Enable/disable auto-upload on Wi-Fi (STA) connect |
 | `wigle donate on/off` | Enable/disable data donation |
 | `wigle show` | Display current settings |
@@ -163,6 +175,8 @@ wigle stats
 
 The same stats call is available from **Settings → Wigle → View WiGLE Stats** on display builds.
 
+**Note:** Stats now work with both EncodedForUseToken and legacy APIName:APIToken formats.
+
 ## Data Donation
 
 When **Donate Data** is enabled (default), your uploads contribute to WiGLE's public database. This helps:
@@ -189,9 +203,29 @@ Typical names:
 - `wardriving_<n>.csv`
 - `ble_wardriving_<n>.csv`
 
+## SD Card Config Loader
+
+You can load WiGLE credentials and WiFi settings from a config file on your SD card.
+
+**Quick Setup:**
+1. Create `config.cfg` in SD card root with:
+   ```ini
+   SSID=YourNetwork
+   PASSKEY=YourPassword
+   EncodedForUseToken=YourBase64Token
+   AutoUpload=true
+   Donate=true
+   ```
+
+2. Load via:
+   - **GUI**: Settings → WiGLE → Load Config from SD
+   - **CLI**: `loadconfig`
+
+See [SD Card Configuration](../../getting-started/sd-card-config) for complete documentation.
+
 ## Troubleshooting
 
-- **"no API key set"**: Run `wigle API <name>:<token>` to configure credentials
+- **"no API key set"**: Run `wigle API <encoded>` or `wigle API <name>:<token>` to configure credentials
 - **Upload fails**: Ensure device is connected to Wi-Fi STA mode and has internet access
 - **Files not uploading**: Check that CSV files exist in `/mnt/ghostesp/gps/`
 - **"CSV has no data rows"**: Usually means capture had no accepted GPS rows (for example no valid fix)
