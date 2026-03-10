@@ -2,6 +2,22 @@
 
 
 
+## Revival v1.9.6
+
+### Added
+- Added Channel Switch attack
+
+### Changed
+- Optimised CYD WiFi config values to save memory
+- Enabled dynamic fatfs buffers for all CYD configs to save memory
+- Optimised the terminal view to use half the memory with same functionality
+- Offloaded misc memory allocations to PSRAM if enabled to lower internal pressure
+- Universal remote transmit will cache signal batches into PSRAM if available to avoid suspending input processing on JIT mount configs
+
+### Fixed
+- Fixed FreeRTOS xTaskCreateStatic stack size bug, saving significant memory
+- Fixed SD/SPI regression potentially causing some devices to not function properly
+
 ## Revival v1.9.5
 
 ### Added

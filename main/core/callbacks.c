@@ -978,7 +978,7 @@ static void pcap_writer_task(void *arg) {
             processed++;
             if ((processed & 0xFF) == 0) { // log occasionally to avoid spam
                 UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(NULL);
-                glog("PCAP writer HWM (words): %lu\n", (unsigned long)hwm_words);
+                glog("PCAP writer HWM (bytes): %lu\n", (unsigned long)hwm_words);
             }
             if ((processed & 0x1F) == 0) {
                 pcap_flush_buffer_to_file();

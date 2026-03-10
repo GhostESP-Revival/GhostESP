@@ -603,7 +603,7 @@ void gps_manager_init(GPSManager *manager) {
     if (g_gps_check_task_res.stack && g_gps_check_task_res.tcb) {
         gps_check_task_handle = xTaskCreateStatic(check_gps_connection_task,
                                                   "gps_check",
-                                                  gps_check_stack_words,
+                                                  gps_check_stack_words * sizeof(StackType_t),
                                                   NULL,
                                                   1,
                                                   g_gps_check_task_res.stack,

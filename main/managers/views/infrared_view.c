@@ -882,76 +882,61 @@ static void ir_sd_worker_task(void *arg)
     }
 }
 
-static void universal_transmit_task(void *arg) {
-    UniversalTransmitArgs_t *args = (UniversalTransmitArgs_t *)arg;
-    char path[256];
-    char command[32];
-    strncpy(path, args->path, sizeof(path) -1);
-    path[sizeof(path) - 1] = '\0';
-    strncpy(command, args->command, sizeof(command) -1);
-    command[sizeof(command) - 1] = '\0';
-    free(args);
+#ifdef CONFIG_SPIRAM
 
-    printf("universal_transmit_task: start %s -> %s\n", path, command);
-    
-    // Special handling for TURNHISTVOFF - use universal IR system
-    if (strcmp(path, "TURNHISTVOFF") == 0) {
-        printf("Using universal IR system for TURNHISTVOFF transmission\n");
-        
-        // Get signal count and cycle through all universal power signals
-        size_t signal_count = universal_ir_get_signal_count();
-        universal_transmit_cancel = false;
-        
-        for (size_t i = 0; i < signal_count; i++) {
-            if (universal_transmit_cancel) break;
-            
-            infrared_signal_t signal;
-            if (universal_ir_get_signal(i, &signal)) {
-                printf("Transmitting TURNHISTVOFF signal %zu: %s\n", i, signal.name);
-                status_display_show_status("Universal IR TX");
-                infrared_manager_transmit(&signal);
-                infrared_manager_free_signal(&signal);
-                vTaskDelay(pdMS_TO_TICKS(150));
-            }
-        }
-        
-        lv_async_call(cleanup_transmit_popup, NULL);
-        universal_task_handle = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    bool susp = false; bool did = ir_sd_begin(&susp);
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        printf("universal_transmit_task: fopen failed for %s\n", path);
-        if (did) ir_sd_end(susp);
-        lv_async_call(cleanup_transmit_popup, NULL);
-        universal_task_handle = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
+#define UNIVERSAL_BATCH_SIZE 16
 
+typedef struct {
+    infrared_signal_t *signals;
+    size_t count;
+    bool eof_reached;
+    bool target_found;
+} universal_batch_t;
+
+static void free_batch_signals(universal_batch_t *batch) {
+    if (!batch || !batch->signals) return;
+    for (size_t i = 0; i < batch->count; i++) {
+        infrared_manager_free_signal(&batch->signals[i]);
+    }
+    free(batch->signals);
+    batch->signals = NULL;
+    batch->count = 0;
+}
+
+static bool read_universal_batch(FILE *f, const char *command, universal_batch_t *batch) {
+    if (!f || !command || !batch) return false;
+    
+    batch->signals = heap_caps_malloc(UNIVERSAL_BATCH_SIZE * sizeof(infrared_signal_t), 
+                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!batch->signals) return false;
+    
+    batch->count = 0;
+    batch->eof_reached = false;
+    batch->target_found = false;
+    
     char buf[256];
     infrared_signal_t sig;
     bool in_block = false, block_valid = false;
-    universal_transmit_cancel = false;
-
-    while (fgets(buf, sizeof(buf), f)) {
-        if (universal_transmit_cancel) break;
+    
+    while (batch->count < UNIVERSAL_BATCH_SIZE && fgets(buf, sizeof(buf), f)) {
         char *s = buf; while (*s && isspace((unsigned char)*s)) s++;
         if (*s=='#'||*s=='\0') continue;
+        
         if (strncmp(s, "name:", 5)==0) {
-            if (in_block&&block_valid) {
-                infrared_manager_transmit(&sig);
-                infrared_manager_free_signal(&sig);
-                vTaskDelay(pdMS_TO_TICKS(150));
+            if (in_block && block_valid) {
+                memcpy(&batch->signals[batch->count], &sig, sizeof(sig));
+                batch->count++;
+                if (batch->count >= UNIVERSAL_BATCH_SIZE) {
+                    batch->target_found = true;
+                    return true;
+                }
             }
             char *v = s+5; while (*v && isspace((unsigned char)*v)) v++;
             char *e=v+strlen(v)-1; while (e>v&&isspace((unsigned char)*e))*e--='\0';
             if (strcmp(v, command)==0) {
                 in_block=true; block_valid=false; memset(&sig,0,sizeof(sig));
                 strncpy(sig.name, v, sizeof(sig.name)-1);
+                batch->target_found = true;
             } else {
                 in_block=false;
             }
@@ -1014,6 +999,232 @@ static void universal_transmit_task(void *arg) {
             }
         }
     }
+    
+    if (in_block && block_valid) {
+        memcpy(&batch->signals[batch->count], &sig, sizeof(sig));
+        batch->count++;
+    }
+    
+    batch->eof_reached = feof(f) != 0;
+    return batch->count > 0 || batch->eof_reached;
+}
+
+static void universal_transmit_task(void *arg) {
+    UniversalTransmitArgs_t *args = (UniversalTransmitArgs_t *)arg;
+    char path[256];
+    char command[32];
+    strncpy(path, args->path, sizeof(path) -1);
+    path[sizeof(path) - 1] = '\0';
+    strncpy(command, args->command, sizeof(command) -1);
+    command[sizeof(command) - 1] = '\0';
+    free(args);
+
+    printf("universal_transmit_task: start %s -> %s\n", path, command);
+    
+    if (strcmp(path, "TURNHISTVOFF") == 0) {
+        printf("Using universal IR system for TURNHISTVOFF transmission\n");
+        size_t signal_count = universal_ir_get_signal_count();
+        universal_transmit_cancel = false;
+        
+        for (size_t i = 0; i < signal_count; i++) {
+            if (universal_transmit_cancel) break;
+            infrared_signal_t signal;
+            if (universal_ir_get_signal(i, &signal)) {
+                printf("Transmitting TURNHISTVOFF signal %zu: %s\n", i, signal.name);
+                status_display_show_status("Universal IR TX");
+                infrared_manager_transmit(&signal);
+                infrared_manager_free_signal(&signal);
+                vTaskDelay(pdMS_TO_TICKS(150));
+            }
+        }
+        lv_async_call(cleanup_transmit_popup, NULL);
+        universal_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    universal_transmit_cancel = false;
+    long file_pos = 0;
+    bool done = false;
+    
+    while (!done && !universal_transmit_cancel) {
+        bool susp = false;
+        bool did = ir_sd_begin(&susp);
+        
+        FILE *f = fopen(path, "r");
+        if (!f) {
+            printf("universal_transmit_task: fopen failed for %s\n", path);
+            if (did) ir_sd_end(susp);
+            break;
+        }
+        
+        if (file_pos > 0) {
+            fseek(f, file_pos, SEEK_SET);
+        }
+        
+        universal_batch_t batch = {0};
+        bool read_ok = read_universal_batch(f, command, &batch);
+        file_pos = ftell(f);
+        
+        fclose(f);
+        if (did) ir_sd_end(susp);
+        
+        if (!read_ok || batch.count == 0) {
+            done = true;
+            break;
+        }
+        
+        for (size_t i = 0; i < batch.count && !universal_transmit_cancel; i++) {
+            infrared_manager_transmit(&batch.signals[i]);
+            infrared_manager_free_signal(&batch.signals[i]);
+            vTaskDelay(pdMS_TO_TICKS(150));
+        }
+        
+        free(batch.signals);
+        batch.signals = NULL;
+        
+        if (batch.eof_reached) {
+            done = true;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+    printf("universal_transmit_task: finished processing %s\n", path);
+    lv_async_call(cleanup_transmit_popup, NULL);
+    universal_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+#else
+
+static void universal_transmit_task(void *arg) {
+    UniversalTransmitArgs_t *args = (UniversalTransmitArgs_t *)arg;
+    char path[256];
+    char command[32];
+    strncpy(path, args->path, sizeof(path) -1);
+    path[sizeof(path) - 1] = '\0';
+    strncpy(command, args->command, sizeof(command) -1);
+    command[sizeof(command) - 1] = '\0';
+    free(args);
+
+    printf("universal_transmit_task: start %s -> %s\n", path, command);
+    
+    if (strcmp(path, "TURNHISTVOFF") == 0) {
+        printf("Using universal IR system for TURNHISTVOFF transmission\n");
+        size_t signal_count = universal_ir_get_signal_count();
+        universal_transmit_cancel = false;
+        
+        for (size_t i = 0; i < signal_count; i++) {
+            if (universal_transmit_cancel) break;
+            infrared_signal_t signal;
+            if (universal_ir_get_signal(i, &signal)) {
+                printf("Transmitting TURNHISTVOFF signal %zu: %s\n", i, signal.name);
+                status_display_show_status("Universal IR TX");
+                infrared_manager_transmit(&signal);
+                infrared_manager_free_signal(&signal);
+                vTaskDelay(pdMS_TO_TICKS(150));
+            }
+        }
+        lv_async_call(cleanup_transmit_popup, NULL);
+        universal_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    bool susp = false; bool did = ir_sd_begin(&susp);
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        printf("universal_transmit_task: fopen failed for %s\n", path);
+        if (did) ir_sd_end(susp);
+        lv_async_call(cleanup_transmit_popup, NULL);
+        universal_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    char buf[256];
+    infrared_signal_t sig;
+    bool in_block = false, block_valid = false;
+    universal_transmit_cancel = false;
+
+    while (fgets(buf, sizeof(buf), f)) {
+        if (universal_transmit_cancel) break;
+        char *s = buf; while (*s && isspace((unsigned char)*s)) s++;
+        if (*s=='#'||*s=='\0') continue;
+        if (strncmp(s, "name:", 5)==0) {
+            if (in_block&&block_valid) {
+                infrared_manager_transmit(&sig);
+                infrared_manager_free_signal(&sig);
+                vTaskDelay(pdMS_TO_TICKS(150));
+            }
+            char *v = s+5; while (*v && isspace((unsigned char)*v)) v++;
+            char *e=v+strlen(v)-1; while (e>v&&isspace((unsigned char)*e))*e--='\0';
+            if (strcmp(v, command)==0) {
+                in_block=true; block_valid=false; memset(&sig,0,sizeof(sig));
+                strncpy(sig.name, v, sizeof(sig.name)-1);
+            } else {
+                in_block=false;
+            }
+        } else if (in_block) {
+            if (strncmp(s, "type:",5)==0) {
+                char *v=s+5; while(*v&&isspace((unsigned char)*v))v++;
+                char *e=v+strlen(v)-1; while (e>v&&isspace((unsigned char)*e))*e--='\0';
+                sig.is_raw = (strncmp(v,"raw",3)==0);
+                block_valid = true;
+            } else if (sig.is_raw) {
+                if (strncmp(s, "frequency:",10)==0) sig.payload.raw.frequency = strtoul(s+10,NULL,10);
+                else if (strncmp(s, "duty_cycle:",11)==0) sig.payload.raw.duty_cycle = strtof(s+11,NULL);
+                else if (strncmp(s, "data:",5)==0) {
+                    char *p=s+5; size_t cnt=0; char *t=p;
+                    while(*t){while(*t&&isspace((unsigned char)*t))t++;if(!*t)break;cnt++;while(*t&&!isspace((unsigned char)*t))t++;}
+                    uint32_t *arr=malloc(cnt*sizeof(uint32_t)); size_t ii=0; char *endp;
+                    while(*p){while(*p&&isspace((unsigned char)*p))p++;if(!*p)break;arr[ii++]=strtoul(p,&endp,10);p=endp;}
+                    sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt;
+                }
+            } else {
+                if (strncmp(s, "protocol:",9)==0) {
+                    char *v=s+9; 
+                    while(*v && isspace((unsigned char)*v)) v++;
+                    char *e = v + strlen(v) - 1;
+                    while(e > v && isspace((unsigned char)*e)) *e-- = '\0';
+                    strncpy(sig.payload.message.protocol, v, sizeof(sig.payload.message.protocol)-1);
+                    sig.payload.message.protocol[sizeof(sig.payload.message.protocol)-1] = '\0';
+                    block_valid=true;
+                } else if (strncmp(s, "address:",8)==0) {
+                    char* p = s + 8;
+                    uint32_t addr = 0;
+                    uint8_t shift = 0;
+                    while (*p && shift < 32) {
+                        while (*p && isspace((unsigned char)*p)) p++;
+                        if (!*p) break;
+                        char* endp;
+                        unsigned long val = strtoul(p, &endp, 16);
+                        if (p == endp) break;
+                        addr |= (uint32_t)(val & 0xFF) << shift;
+                        shift += 8;
+                        p = endp;
+                    }
+                    sig.payload.message.address = addr;
+                } else if (strncmp(s, "command:",8)==0) {
+                    char* p = s + 8;
+                    uint32_t cmd = 0;
+                    uint8_t shift = 0;
+                    while (*p && shift < 32) {
+                        while (*p && isspace((unsigned char)*p)) p++;
+                        if (!*p) break;
+                        char* endp;
+                        unsigned long val = strtoul(p, &endp, 16);
+                        if (p == endp) break;
+                        cmd |= (uint32_t)(val & 0xFF) << shift;
+                        shift += 8;
+                        p = endp;
+                    }
+                    sig.payload.message.command = cmd;
+                }
+            }
+        }
+    }
     if (!universal_transmit_cancel && in_block&&block_valid) {
         infrared_manager_transmit(&sig);
         infrared_manager_free_signal(&sig);
@@ -1025,6 +1236,8 @@ static void universal_transmit_task(void *arg) {
     universal_task_handle = NULL;
     vTaskDelete(NULL);
 }
+
+#endif
 
 static void back_event_cb(lv_event_t *e) {
     if (showing_commands) {

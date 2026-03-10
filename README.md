@@ -1,14 +1,13 @@
-# GhostESP: Revival
 
-> **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
-
-**⭐️ Enjoying GhostESP? Please give the repo a star!**
+<img width="800" height="990" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
 
 GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing tool. Built on ESP-IDF.
 
+**⭐️ Enjoying GhostESP? Please give the repo a star!**
+
 ---
 
-## Getting Started
+## Get Started
 
 1. **Flash your device:** [flasher.ghostesp.net](https://flasher.ghostesp.net)
 
@@ -20,7 +19,7 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 
 ---
 
-## Key Features
+## Features
 
 <details>
 <summary><strong>WiFi Features</strong></summary>
@@ -113,16 +112,10 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 
 </details>
 
-## ESP32 Firmware Comparison
-
-<img width="800" height="2400" alt="image" src="https://github.com/user-attachments/assets/005c96f0-4d0a-4f97-926c-99059dfb9e21" />
-
-
-
 
 ---
 
-## Supported ESP32 Models
+## Supported ESP32 Variants
 
 - **ESP32 Wroom**
 
@@ -207,6 +200,14 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 </details>
 
 ---
+
+
+## ESP32 Firmware Comparison
+
+<img width="800" height="2400" alt="image" src="https://github.com/user-attachments/assets/005c96f0-4d0a-4f97-926c-99059dfb9e21" />
+
+
+
 
 ## Credits
 
@@ -300,6 +301,8 @@ Special thanks to:
 ## Disclaimers
 
 Ghost ESP is intended solely for educational and ethical security research. Unauthorized or malicious use is illegal. Be sure to familiarize your local laws, and always obtain proper permissions before conducting any network tests.
+
+> **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
 
 For guidelines on using the GhostESP name and logo, please see [BRAND GUIDELINES](BRAND_GUIDELINES.md).
 

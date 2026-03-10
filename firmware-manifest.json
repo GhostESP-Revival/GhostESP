@@ -281,6 +281,623 @@
       "source_commit": "198a81125c5240138f4704461117dc5d0aafdbad",
       "updated_at": "2026-03-05T15:09:34.438447+00:00"
     },
+    "1bc1d52bfa5ccd94493868ce3506c4071e0bd6cb": {
+      "configs": [
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "ACE_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831604276",
+          "release_tag": null,
+          "zip_name": "ACE_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "ACE_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831590462",
+          "release_tag": null,
+          "zip_name": "ACE_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "AwokMini",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831650326",
+          "release_tag": null,
+          "zip_name": "AwokMini.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Banshee_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831594195",
+          "release_tag": null,
+          "zip_name": "Banshee_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Banshee_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831603925",
+          "release_tag": null,
+          "zip_name": "Banshee_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYD2432S028R",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831671373",
+          "release_tag": null,
+          "zip_name": "CYD2432S028R.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYD2USB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831653004",
+          "release_tag": null,
+          "zip_name": "CYD2USB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYD2USB2.4Inch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831664120",
+          "release_tag": null,
+          "zip_name": "CYD2USB2.4Inch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYD2USB2.4Inch_C",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831667360",
+          "release_tag": null,
+          "zip_name": "CYD2USB2.4Inch_C.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYDDualUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831606551",
+          "release_tag": null,
+          "zip_name": "CYDDualUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CYDMicroUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831643860",
+          "release_tag": null,
+          "zip_name": "CYDMicroUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "CardputerADV",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831664816",
+          "release_tag": null,
+          "zip_name": "CardputerADV.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Crowtech_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831600401",
+          "release_tag": null,
+          "zip_name": "Crowtech_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "ESP32-S3-Cardputer",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831663086",
+          "release_tag": null,
+          "zip_name": "ESP32-S3-Cardputer.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "FeberisPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831600005",
+          "release_tag": null,
+          "zip_name": "FeberisPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Flipper_JCMK_GPS",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831580339",
+          "release_tag": null,
+          "zip_name": "Flipper_JCMK_GPS.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "HeltecV3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831608161",
+          "release_tag": null,
+          "zip_name": "HeltecV3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "JC3248W535EN_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831674218",
+          "release_tag": null,
+          "zip_name": "JC3248W535EN_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "JCMK_DevBoardPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831649137",
+          "release_tag": null,
+          "zip_name": "JCMK_DevBoardPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "LilyGo-S3TWatch-2020",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831610881",
+          "release_tag": null,
+          "zip_name": "LilyGo-S3TWatch-2020.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "LilyGo-T-Deck",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831605229",
+          "release_tag": null,
+          "zip_name": "LilyGo-T-Deck.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "LilyGo-TDisplayS3-Touch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831649433",
+          "release_tag": null,
+          "zip_name": "LilyGo-TDisplayS3-Touch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "LilyGo-TEmbedC1101",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831603106",
+          "release_tag": null,
+          "zip_name": "LilyGo-TEmbedC1101.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Lolin_S3_Pro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831669738",
+          "release_tag": null,
+          "zip_name": "Lolin_S3_Pro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "MarauderV4_FlipperHub",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831581533",
+          "release_tag": null,
+          "zip_name": "MarauderV4_FlipperHub.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "MarauderV6_AwokDual",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831545334",
+          "release_tag": null,
+          "zip_name": "MarauderV6_AwokDual.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Poltergeist",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831648297",
+          "release_tag": null,
+          "zip_name": "Poltergeist.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "RabbitLabs_Minion",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831583692",
+          "release_tag": null,
+          "zip_name": "RabbitLabs_Minion.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Sunton_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831676029",
+          "release_tag": null,
+          "zip_name": "Sunton_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "Waveshare_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831608720",
+          "release_tag": null,
+          "zip_name": "Waveshare_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-ACE_C5",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ACE_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-ACE_S3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ACE_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-AwokMini",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-AwokMini.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Banshee_C5",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Banshee_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Banshee_S3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Banshee_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYD2432S028R",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2432S028R.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYD2USB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYD2USB2.4Inch",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB2.4Inch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYD2USB2.4Inch_C",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB2.4Inch_C.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYDDualUSB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYDDualUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CYDMicroUSB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYDMicroUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-CardputerADV",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CardputerADV.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Crowtech_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Crowtech_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-ESP32-S3-Cardputer",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ESP32-S3-Cardputer.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-FeberisPro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-FeberisPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Flipper_JCMK_GPS",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Flipper_JCMK_GPS.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-HeltecV3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-HeltecV3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-JC3248W535EN_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-JC3248W535EN_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-JCMK_DevBoardPro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-JCMK_DevBoardPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-LilyGo-S3TWatch-2020",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-S3TWatch-2020.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-LilyGo-T-Deck",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-T-Deck.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-LilyGo-TDisplayS3-Touch",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-TDisplayS3-Touch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-LilyGo-TEmbedC1101",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-TEmbedC1101.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Lolin_S3_Pro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Lolin_S3_Pro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-MarauderV4_FlipperHub",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-MarauderV4_FlipperHub.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-MarauderV6_AwokDual",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-MarauderV6_AwokDual.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Poltergeist",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Poltergeist.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-RabbitLabs_Minion",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-RabbitLabs_Minion.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Sunton_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Sunton_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-Waveshare_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Waveshare_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32c3-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32c5-generic-v01",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c5-generic-v01.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32c6-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c6-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32s2-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32s2-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32s3-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32s3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-esp32v5_awok",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32v5_awok.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "artifact-ghostboard",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ghostboard.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831593006",
+          "release_tag": null,
+          "zip_name": "esp32-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32c3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831594919",
+          "release_tag": null,
+          "zip_name": "esp32c3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32c5-generic-v01",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831580347",
+          "release_tag": null,
+          "zip_name": "esp32c5-generic-v01.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32c6-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831538080",
+          "release_tag": null,
+          "zip_name": "esp32c6-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32s2-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831568190",
+          "release_tag": null,
+          "zip_name": "esp32s2-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32s3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831598116",
+          "release_tag": null,
+          "zip_name": "esp32s3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "esp32v5_awok",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831652576",
+          "release_tag": null,
+          "zip_name": "esp32v5_awok.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039",
+          "channel": "commit",
+          "config": "ghostboard",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22859350039/artifacts/5831641491",
+          "release_tag": null,
+          "zip_name": "ghostboard.zip"
+        }
+      ],
+      "last_channel": "commit",
+      "last_tag": null,
+      "release_refs": [],
+      "source_commit": "1bc1d52bfa5ccd94493868ce3506c4071e0bd6cb",
+      "updated_at": "2026-03-09T15:03:05.590072+00:00"
+    },
     "21fde0118068888a9c4ac4f1f1741bfdfc97e152": {
       "configs": [
         {
@@ -4209,6 +4826,904 @@
       "source_commit": "a2b2f7cf22a0ff07b68455b30cc18e664d371e56",
       "updated_at": "2026-03-08T08:59:26.953203+00:00"
     },
+    "d158e531da6f3d5beee6ef13ee1301dbd05a3f45": {
+      "configs": [
+        {
+          "channel": "stable",
+          "config": "ACE_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/ACE_C5.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "ACE_C5.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "ACE_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/ACE_S3.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "ACE_S3.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "AwokMini",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/AwokMini.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "AwokMini.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Banshee_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Banshee_C5.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Banshee_C5.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Banshee_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Banshee_S3.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Banshee_S3.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYD2432S028R",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYD2432S028R.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYD2432S028R.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYD2USB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYD2USB.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYD2USB.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYD2USB2.4Inch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYD2USB2.4Inch.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYD2USB2.4Inch.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYD2USB2.4Inch_C",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYD2USB2.4Inch_C.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYD2USB2.4Inch_C.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYDDualUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYDDualUSB.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYDDualUSB.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CYDMicroUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CYDMicroUSB.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CYDMicroUSB.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "CardputerADV",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/CardputerADV.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "CardputerADV.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Crowtech_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Crowtech_LCD.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Crowtech_LCD.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "ESP32-S3-Cardputer",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/ESP32-S3-Cardputer.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "ESP32-S3-Cardputer.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "FeberisPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/FeberisPro.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "FeberisPro.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Flipper_JCMK_GPS",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Flipper_JCMK_GPS.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Flipper_JCMK_GPS.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "HeltecV3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/HeltecV3.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "HeltecV3.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "JC3248W535EN_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/JC3248W535EN_LCD.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "JC3248W535EN_LCD.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "JCMK_DevBoardPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/JCMK_DevBoardPro.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "JCMK_DevBoardPro.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "LilyGo-S3TWatch-2020",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/LilyGo-S3TWatch-2020.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "LilyGo-S3TWatch-2020.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "LilyGo-T-Deck",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/LilyGo-T-Deck.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "LilyGo-T-Deck.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "LilyGo-TDisplayS3-Touch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/LilyGo-TDisplayS3-Touch.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "LilyGo-TDisplayS3-Touch.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "LilyGo-TEmbedC1101",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/LilyGo-TEmbedC1101.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "LilyGo-TEmbedC1101.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Lolin_S3_Pro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Lolin_S3_Pro.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Lolin_S3_Pro.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "MarauderV4_FlipperHub",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/MarauderV4_FlipperHub.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "MarauderV4_FlipperHub.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "MarauderV6_AwokDual",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/MarauderV6_AwokDual.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "MarauderV6_AwokDual.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Poltergeist",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Poltergeist.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Poltergeist.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "RabbitLabs_Minion",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/RabbitLabs_Minion.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "RabbitLabs_Minion.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Sunton_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Sunton_LCD.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Sunton_LCD.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "Waveshare_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/Waveshare_LCD.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "Waveshare_LCD.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32-generic.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32-generic.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32c3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32c3-generic.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32c3-generic.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32c5-generic-v01",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32c5-generic-v01.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32c5-generic-v01.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32c6-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32c6-generic.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32c6-generic.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32s2-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32s2-generic.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32s2-generic.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32s3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32s3-generic.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32s3-generic.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "esp32v5_awok",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/esp32v5_awok.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "esp32v5_awok.zip"
+        },
+        {
+          "channel": "stable",
+          "config": "ghostboard",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/releases/download/v1.9.5/ghostboard.zip",
+          "release_tag": "v1.9.5",
+          "zip_name": "ghostboard.zip"
+        }
+      ],
+      "last_channel": "stable",
+      "last_tag": "v1.9.5",
+      "release_refs": [
+        {
+          "channel": "stable",
+          "tag": "v1.9.5",
+          "updated_at": "2026-03-09T14:57:35.667286+00:00"
+        }
+      ],
+      "source_commit": "d158e531da6f3d5beee6ef13ee1301dbd05a3f45",
+      "updated_at": "2026-03-09T14:57:35.667286+00:00"
+    },
+    "db003d1f134c2a83fc898a69455597dfcd9bcf94": {
+      "configs": [
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "ACE_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855720395",
+          "release_tag": null,
+          "zip_name": "ACE_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "ACE_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855686542",
+          "release_tag": null,
+          "zip_name": "ACE_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "AwokMini",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855617537",
+          "release_tag": null,
+          "zip_name": "AwokMini.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Banshee_C5",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855621779",
+          "release_tag": null,
+          "zip_name": "Banshee_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Banshee_S3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855629555",
+          "release_tag": null,
+          "zip_name": "Banshee_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYD2432S028R",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855628835",
+          "release_tag": null,
+          "zip_name": "CYD2432S028R.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYD2USB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855713463",
+          "release_tag": null,
+          "zip_name": "CYD2USB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYD2USB2.4Inch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855625868",
+          "release_tag": null,
+          "zip_name": "CYD2USB2.4Inch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYD2USB2.4Inch_C",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855687852",
+          "release_tag": null,
+          "zip_name": "CYD2USB2.4Inch_C.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYDDualUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855626301",
+          "release_tag": null,
+          "zip_name": "CYDDualUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CYDMicroUSB",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855625876",
+          "release_tag": null,
+          "zip_name": "CYDMicroUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "CardputerADV",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855678232",
+          "release_tag": null,
+          "zip_name": "CardputerADV.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Crowtech_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855629017",
+          "release_tag": null,
+          "zip_name": "Crowtech_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "ESP32-S3-Cardputer",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855715610",
+          "release_tag": null,
+          "zip_name": "ESP32-S3-Cardputer.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "FeberisPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855688237",
+          "release_tag": null,
+          "zip_name": "FeberisPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Flipper_JCMK_GPS",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855674836",
+          "release_tag": null,
+          "zip_name": "Flipper_JCMK_GPS.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "HeltecV3",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855628544",
+          "release_tag": null,
+          "zip_name": "HeltecV3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "JC3248W535EN_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855674901",
+          "release_tag": null,
+          "zip_name": "JC3248W535EN_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "JCMK_DevBoardPro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855709887",
+          "release_tag": null,
+          "zip_name": "JCMK_DevBoardPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "LilyGo-S3TWatch-2020",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855708447",
+          "release_tag": null,
+          "zip_name": "LilyGo-S3TWatch-2020.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "LilyGo-T-Deck",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855626986",
+          "release_tag": null,
+          "zip_name": "LilyGo-T-Deck.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "LilyGo-TDisplayS3-Touch",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855630032",
+          "release_tag": null,
+          "zip_name": "LilyGo-TDisplayS3-Touch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "LilyGo-TEmbedC1101",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855690962",
+          "release_tag": null,
+          "zip_name": "LilyGo-TEmbedC1101.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Lolin_S3_Pro",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855690584",
+          "release_tag": null,
+          "zip_name": "Lolin_S3_Pro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "MarauderV4_FlipperHub",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855622872",
+          "release_tag": null,
+          "zip_name": "MarauderV4_FlipperHub.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "MarauderV6_AwokDual",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855632399",
+          "release_tag": null,
+          "zip_name": "MarauderV6_AwokDual.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Poltergeist",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855681936",
+          "release_tag": null,
+          "zip_name": "Poltergeist.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "RabbitLabs_Minion",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855677701",
+          "release_tag": null,
+          "zip_name": "RabbitLabs_Minion.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Sunton_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855687173",
+          "release_tag": null,
+          "zip_name": "Sunton_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "Waveshare_LCD",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855627107",
+          "release_tag": null,
+          "zip_name": "Waveshare_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-ACE_C5",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ACE_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-ACE_S3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ACE_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-AwokMini",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-AwokMini.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Banshee_C5",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Banshee_C5.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Banshee_S3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Banshee_S3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYD2432S028R",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2432S028R.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYD2USB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYD2USB2.4Inch",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB2.4Inch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYD2USB2.4Inch_C",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYD2USB2.4Inch_C.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYDDualUSB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYDDualUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CYDMicroUSB",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CYDMicroUSB.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-CardputerADV",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-CardputerADV.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Crowtech_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Crowtech_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-ESP32-S3-Cardputer",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ESP32-S3-Cardputer.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-FeberisPro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-FeberisPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Flipper_JCMK_GPS",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Flipper_JCMK_GPS.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-HeltecV3",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-HeltecV3.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-JC3248W535EN_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-JC3248W535EN_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-JCMK_DevBoardPro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-JCMK_DevBoardPro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-LilyGo-S3TWatch-2020",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-S3TWatch-2020.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-LilyGo-T-Deck",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-T-Deck.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-LilyGo-TDisplayS3-Touch",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-TDisplayS3-Touch.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-LilyGo-TEmbedC1101",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-LilyGo-TEmbedC1101.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Lolin_S3_Pro",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Lolin_S3_Pro.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-MarauderV4_FlipperHub",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-MarauderV4_FlipperHub.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-MarauderV6_AwokDual",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-MarauderV6_AwokDual.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Poltergeist",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Poltergeist.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-RabbitLabs_Minion",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-RabbitLabs_Minion.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Sunton_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Sunton_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-Waveshare_LCD",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-Waveshare_LCD.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32c3-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32c5-generic-v01",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c5-generic-v01.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32c6-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32c6-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32s2-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32s2-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32s3-generic",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32s3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-esp32v5_awok",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-esp32v5_awok.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "artifact-ghostboard",
+          "download_url": null,
+          "release_tag": null,
+          "zip_name": "artifact-ghostboard.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855628136",
+          "release_tag": null,
+          "zip_name": "esp32-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32c3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855674855",
+          "release_tag": null,
+          "zip_name": "esp32c3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32c5-generic-v01",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855621879",
+          "release_tag": null,
+          "zip_name": "esp32c5-generic-v01.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32c6-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855621629",
+          "release_tag": null,
+          "zip_name": "esp32c6-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32s2-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855636110",
+          "release_tag": null,
+          "zip_name": "esp32s2-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32s3-generic",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855627461",
+          "release_tag": null,
+          "zip_name": "esp32s3-generic.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "esp32v5_awok",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855672894",
+          "release_tag": null,
+          "zip_name": "esp32v5_awok.zip"
+        },
+        {
+          "artifact_run_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083",
+          "channel": "commit",
+          "config": "ghostboard",
+          "download_url": "https://github.com/GhostESP-Revival/GhostESP/actions/runs/22917197083/artifacts/5855673953",
+          "release_tag": null,
+          "zip_name": "ghostboard.zip"
+        }
+      ],
+      "last_channel": "commit",
+      "last_tag": null,
+      "release_refs": [],
+      "source_commit": "db003d1f134c2a83fc898a69455597dfcd9bcf94",
+      "updated_at": "2026-03-10T18:16:17.425378+00:00"
+    },
     "dbb823ea5be2900d848da6020eb724ac8f00b47a": {
       "configs": [
         {
@@ -6003,5 +7518,5 @@
   "generated_by": "compile_all.yml",
   "repository": "GhostESP-Revival/GhostESP",
   "schema_version": 2,
-  "updated_at": "2026-03-09T04:39:15.451281+00:00"
+  "updated_at": "2026-03-10T18:16:17.425378+00:00"
 }

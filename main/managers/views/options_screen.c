@@ -430,6 +430,7 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
 
 static const char *wifi_attacks_options[] = {
     "Start Deauth Attack",
+    "Start Channel Switch Attack",
     "Beacon Spam - Random",
     "Beacon Spam - Rickroll",
     "Beacon Spam - List",
@@ -437,7 +438,7 @@ static const char *wifi_attacks_options[] = {
     "Start DHCP-Starve",
     "Stop DHCP-Starve",
     "Start Karma Attack",
-    "Start Karma Attack (Custom SSIDs)", // <-- Add this line
+    "Start Karma Attack (Custom SSIDs)",
     "Start Karma Attack (Custom Portal)",
     "Stop Karma Attack",       
     NULL
@@ -3154,6 +3155,12 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend attack -d");
             view_switched = true;
+        } else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend attack -c");
+            view_switched = true;
         } else if (strcmp(Selected_Option, "Start EAPOL Logoff") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
@@ -3758,6 +3765,17 @@ void option_event_cb(lv_event_t *e) {
             glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
         } else {
             simulateCommand("attack -d");
+        }
+        view_switched = true; 
+    }
+    
+    else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+        } else {
+            simulateCommand("attack -c");
         }
         view_switched = true; 
     }

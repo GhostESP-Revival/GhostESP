@@ -224,21 +224,21 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
     terminal_view_add_text(log_buffer);
 }
 
-static StackType_t* alloc_task_stack(size_t words);
+static StackType_t* alloc_task_stack(size_t stack_bytes);
 static StaticTask_t* alloc_task_tcb(void);
 static void free_task_resources(psram_task_resources_t* res);
 
 static TaskHandle_t create_task_static(psram_task_resources_t* res,
                                        TaskFunction_t task_fn,
                                        const char* name,
-                                       uint32_t stack_words,
+                                       uint32_t stack_bytes,
                                        void* arg,
                                        UBaseType_t priority) {
     if (!res) {
         return NULL;
     }
 
-    res->stack = alloc_task_stack(stack_words);
+    res->stack = alloc_task_stack(stack_bytes);
     res->tcb = alloc_task_tcb();
 
     if (!res->stack || !res->tcb) {
@@ -246,17 +246,17 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    return xTaskCreateStatic(task_fn, name, stack_words, arg, priority, res->stack, res->tcb);
+    return xTaskCreateStatic(task_fn, name, stack_bytes, arg, priority, res->stack, res->tcb);
 }
 
-static StackType_t* alloc_task_stack(size_t words) {
+static StackType_t* alloc_task_stack(size_t stack_bytes) {
 #if CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
-    StackType_t* stack = (StackType_t*)heap_caps_malloc(words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    StackType_t* stack = (StackType_t*)heap_caps_malloc(stack_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (stack) {
         return stack;
     }
 #endif
-    return (StackType_t*)heap_caps_malloc(words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return (StackType_t*)heap_caps_malloc(stack_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
 static StaticTask_t* alloc_task_tcb(void) {
@@ -417,7 +417,6 @@ static void tx_task(void* arg) {
 static void rx_task(void* arg) {
     esp_comm_manager_t* comm = (esp_comm_manager_t*)arg;
     uint8_t rx_buffer[COMM_BUFFER_SIZE];
-    TickType_t last_stats_log = 0;
 
     while (comm->initialized) {
         int len = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, pdMS_TO_TICKS(10));
@@ -540,29 +539,9 @@ static void rx_task(void* arg) {
                 }
             }
 
-            if (now - last_stats_log >= pdMS_TO_TICKS(5000)) {
-                size_t fifo_bytes = 0;
-                if (uart_get_buffered_data_len(s_uart_num, &fifo_bytes) != ESP_OK) {
-                    fifo_bytes = 0;
-                }
-                UBaseType_t queue_free = comm->rx_packet_queue
-                    ? uxQueueSpacesAvailable(comm->rx_packet_queue)
-                    : 0;
-                // printf("I: RX stats crc_err=%lu rx_queue_drop=%lu tx_drop=%lu fifo=%u high_water=%u high_alerts=%lu queue_free=%u\n",
-                //        (unsigned long)comm->rx_crc_error_count,
-                //        (unsigned long)comm->rx_queue_dropped_packets,
-                //        (unsigned long)comm->tx_dropped_packets,
-                //        (unsigned)fifo_bytes,
-                //        (unsigned)comm->rx_buffer_high_watermark,
-                //        (unsigned long)comm->rx_high_water_alerts,
-                //        (unsigned)queue_free);
-                last_stats_log = now;
-            }
-
             int drained = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, 0);
             if (drained > 0) {
                 len = drained;
-                now = xTaskGetTickCount();
             } else {
                 len = 0;
             }
@@ -655,7 +634,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                         if (comm->command_queue && !comm->command_executor_task_handle) {
                             TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                               "comm_cmd_exec_task", 2048, comm, 5);
+                                                               "comm_cmd_exec_task", 3072, comm, 5);
                             if (!t) {
                                 printf("E: failed to create command executor task\n");
                                 free_task_resources(&comm->command_task_res);
@@ -690,7 +669,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     if (!comm->tx_task_handle && comm->tx_queue) {
                         TaskHandle_t t = create_task_static(&comm->tx_task_res, tx_task,
-                                                            "comm_tx_task", 2048, comm, 11);
+                                                            "comm_tx_task", 3072, comm, 11);
                         if (!t) {
                             printf("E: failed to create tx task\n");
                             free_task_resources(&comm->tx_task_res);
@@ -702,7 +681,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                         TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                            "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
+                                                            "comm_protocol_t", 4096, comm, 10);
                         if (!t) {
                             printf("E: failed to create protocol task\n");
                             free_task_resources(&comm->protocol_task_res);
@@ -734,7 +713,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                     if (comm->command_queue && !comm->command_executor_task_handle) {
                         TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                           "comm_cmd_exec_task", 2048, comm, 5);
+                                                           "comm_cmd_exec_task", 3072, comm, 5);
                         if (!t) {
                             printf("E: failed to create command executor task\n");
                             free_task_resources(&comm->command_task_res);
@@ -758,7 +737,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 if (!comm->tx_task_handle && comm->tx_queue) {
                     TaskHandle_t t = create_task_static(&comm->tx_task_res, tx_task,
-                                                        "comm_tx_task", 2048, comm, 11);
+                                                        "comm_tx_task", 3072, comm, 11);
                     if (!t) {
                         printf("E: failed to create tx task\n");
                         free_task_resources(&comm->tx_task_res);
@@ -770,7 +749,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                     TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
-                                                        "comm_protocol_t", COMM_PROTOCOL_STACK_WORDS, comm, 10);
+                                                        "comm_protocol_t", 4096, comm, 10);
                     if (!t) {
                         printf("E: failed to create protocol task\n");
                         free_task_resources(&comm->protocol_task_res);
@@ -790,7 +769,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                     if (comm->command_queue && !comm->command_executor_task_handle) {
                         TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                           "comm_cmd_exec_task", 2048, comm, 5);
+                                                           "comm_cmd_exec_task", 3072, comm, 5);
                         if (!t) {
                             printf("E: failed to create command executor task\n");
                             free_task_resources(&comm->command_task_res);

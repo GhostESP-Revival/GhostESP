@@ -22,6 +22,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managers/status_display_manager.h"
+#include "managers/display_manager.h"
+#include "lvgl_tft/disp_spi.h"
 
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
@@ -130,7 +132,8 @@ static void display_spi_resume_after_sd(void) {}
 #endif
 
 static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
-#if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDISPLAY_S3)
+#if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
+  ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d)", guard_active);
   if (guard_active) display_manager_resume_lvgl_task();
 #else
   (void)guard_active;
@@ -215,7 +218,10 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 #endif
 
 static void sd_spi_bus_release_if_tracked(void) {
+  ESP_LOGI(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
+           s_spi_bus_initialized, s_spi_host_id);
   if (s_spi_bus_initialized && s_spi_host_id >= 0) {
+    ESP_LOGI(TAG, "Freeing SPI bus host %d", s_spi_host_id);
     spi_bus_free(s_spi_host_id);
     s_spi_bus_initialized = false;
     s_spi_host_id = -1;
@@ -513,16 +519,22 @@ esp_err_t sd_card_init(void) {
 
   bool shared_spi_guard_active = false;
   bool display_rebind_required = false;
-#if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDISPLAY_S3)
+#if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
+  ESP_LOGI(TAG, "Checking shared SPI: is_shared_display_sd_spi()=%d, display_sd_spi_pins_match()=%d",
+           is_shared_display_sd_spi(), display_sd_spi_pins_match());
   display_rebind_required = display_spi_requires_rebind_for_sd();
+  ESP_LOGI(TAG, "display_rebind_required=%d", display_rebind_required);
   if (is_shared_display_sd_spi() && !display_rebind_required) {
     shared_spi_guard_active = true;
+    ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
     display_manager_suspend_lvgl_task();
     disp_wait_for_pending_transactions();
 #ifdef CONFIG_LV_DISP_SPI_CS
     gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
 #endif
   }
+#else
+  ESP_LOGI(TAG, "Shared SPI code path not compiled in");
 #endif
 
   bool gating_template = false;
@@ -638,7 +650,7 @@ esp_err_t sd_card_init(void) {
   vTaskDelay(pdMS_TO_TICKS(2));
 
 #ifdef CONFIG_IDF_TARGET_ESP32
-  int dmabus = 2;
+  int dmabus = SPI_DMA_CH_AUTO;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   int dmabus = SPI_DMA_CH_AUTO;
 #else
@@ -669,12 +681,21 @@ esp_err_t sd_card_init(void) {
 #if !defined(CONFIG_ENCODER_INA)
 #if defined(CONFIG_IDF_TARGET_ESP32)
   {
+    ESP_LOGI(TAG, "ESP32: Attempting spi_bus_initialize on host %d (%s)", sd_host_id, sd_spi_host_name(sd_host_id));
     esp_err_t bus_ret = spi_bus_initialize(sd_host_id, &bus_config, dmabus);
+    ESP_LOGI(TAG, "ESP32: spi_bus_initialize returned %s", esp_err_to_name(bus_ret));
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
       s_spi_bus_initialized = true;
       s_spi_host_id = sd_host_id;
-    } else if (bus_ret != ESP_ERR_INVALID_STATE) {
+      ESP_LOGI(TAG, "ESP32: Bus init success, s_spi_bus_initialized=true");
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      /* Bus already initialized - don't free it, just reuse like ESP32S3 does */
+      ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", sd_host_id);
+      s_spi_host_id = sd_host_id;
+    } else {
+      ESP_LOGE(TAG, "ESP32: spi_bus_initialize failed with %s, calling shared_spi_guard_resume_lvgl_if_needed(%d)", 
+               esp_err_to_name(bus_ret), shared_spi_guard_active);
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
@@ -753,13 +774,21 @@ esp_err_t sd_card_init(void) {
     ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
                                   &sd_card_manager.card);
   }
+  ESP_LOGI(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d", 
+           esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
   shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
   if (ret != ESP_OK) {
+    ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
     if (bus_init_success) {
       sd_spi_bus_release_if_tracked();
     }
+#else
+    (void)bus_init_success;
+#endif
     if (display_was_suspended) {
+      ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
     return ret;

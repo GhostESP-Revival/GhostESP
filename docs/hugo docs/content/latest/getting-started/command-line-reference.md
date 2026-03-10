@@ -51,7 +51,12 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 ### Offense
 
-- **`attack -d|-e|-s <password>`** — Trigger deauth, EAPOL logoff, or SAE flood (`-s` needs ESP32-C5/C6 and the target PSK).
+- **`attack -d|-c|-e|-s <password>`** — Trigger deauth, channel switch (CSA), EAPOL logoff, or SAE flood (`-s` needs ESP32-C5/C6 and the target PSK).
+  - `-d` — Deauthentication attack on selected AP(s).
+  - `-c` — Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP's real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
+  - `-e` — EAPOL logoff attack.
+  - `-s` — SAE flood attack (ESP32-C5/C6 only, requires target PSK).
+- **`stop`** — Stops all active attacks, scans, and background tasks.
 - **`stopdeauth`** / **`stopspam`** — Halt active attacks or beacon floods.
 - **`beaconspam [mode]`** — Broadcast spoof SSIDs (`-r`, `-rr`, `-l`, or custom text).
 - **`karma start [ssid...]`** / **`karma stop`** — Respond to client probes with saved or provided SSIDs.

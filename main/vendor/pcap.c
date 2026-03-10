@@ -6,6 +6,7 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
+#include "esp_heap_caps.h"
 #include "managers/sd_card_manager.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
@@ -28,7 +29,7 @@ static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static volatile pcap_capture_type_t s_capture_type = PCAP_CAPTURE_WIFI;
 static volatile pcap_mode_t s_pcap_mode = PCAP_MODE_FILE;
-static uint8_t pcap_buffer[PCAP_BUFFER_SIZE];
+static uint8_t *pcap_buffer = NULL;
 static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
@@ -52,7 +53,22 @@ esp_err_t pcap_init(void) {
     return ESP_FAIL;
   }
 
-  ESP_LOGI(PCAP_TAG, "PCAP mutex initialized successfully");
+  // Allocate PCAP buffer in PSRAM if available, otherwise use internal RAM
+  if (pcap_buffer == NULL) {
+    pcap_buffer = heap_caps_malloc(PCAP_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (pcap_buffer == NULL) {
+      pcap_buffer = malloc(PCAP_BUFFER_SIZE);
+    }
+    if (pcap_buffer == NULL) {
+      ESP_LOGE(PCAP_TAG, "Failed to allocate PCAP buffer");
+      vSemaphoreDelete(pcap_mutex);
+      pcap_mutex = NULL;
+      return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(PCAP_TAG, "PCAP buffer allocated (%d bytes)", PCAP_BUFFER_SIZE);
+  }
+
+  ESP_LOGI(PCAP_TAG, "PCAP initialized successfully");
   return ESP_OK;
 }
 

@@ -106,6 +106,10 @@ jobs:
           git clone -b v5.5.3 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
+      - name: Patch ESP-IDF fatfs
+        run: |
+          sed -i 's/#if FF_USE_DYN_BUFFER/#if !FF_FS_TINY \&\& FF_USE_DYN_BUFFER/' ~/esp-idf/components/fatfs/src/ff.c
+
       - name: Apply Custom SDK Config
         run: cp "${{ matrix.target.sdkconfig_file }}" sdkconfig.defaults
 

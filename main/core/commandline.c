@@ -656,6 +656,11 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_deauth_station();
             status_display_show_status("Deauth Start");
             return;
+        } else if (strcmp(argv[1], "-c") == 0) {
+            glog("Channel Switch attack starting...\n");
+            wifi_manager_start_channel_switch_attack();
+            status_display_show_status("CSA Attack Start");
+            return;
         } else if (strcmp(argv[1], "-e") == 0) {
             glog("EAPOL Logoff attack starting...\n");
             wifi_manager_start_eapollogoff_attack();
@@ -673,7 +678,7 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
+    glog("Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
     status_display_show_status("Attack Usage");
 }
 
@@ -703,7 +708,8 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_deauth_station();
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
-    glog("Deauth/EAPOL/SAE attacks stopped...\n");
+    wifi_manager_stop_channel_switch_attack();
+    glog("All WiFi attacks stopped...\n");
     status_display_show_status("Attacks Off");
 }
 
@@ -826,6 +832,7 @@ void handle_stop_flipper(int argc, char **argv) {
         wardriving_set_peer_assist(false);
     }
     wifi_manager_stop_deauth();
+    wifi_manager_stop_channel_switch_attack();
     wifi_manager_cancel_connect();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     ble_spam_stop();
@@ -4038,9 +4045,10 @@ void handle_help(int argc, char **argv) {
         glog("attack\n");
         glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        glog("    Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
         glog("    Arguments:\n");
         glog("        -d  : Start deauth attack (supports multiple APs)\n");
+        glog("        -c  : Start channel switch attack (supports multiple APs)\n");
         glog("        -e  : Start EAPOL logoff attack\n");
         glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
         glog("list\n");
@@ -4760,7 +4768,7 @@ void handle_gps_info(int argc, char **argv) {
                 return;
             }
             
-            TaskHandle_t created_task = xTaskCreateStatic(gps_info_display_task, "gps_info", stack_words, NULL, 1, gps_task_stack, gps_task_tcb);
+            TaskHandle_t created_task = xTaskCreateStatic(gps_info_display_task, "gps_info", stack_size, NULL, 1, gps_task_stack, gps_task_tcb);
             if (created_task == NULL) {
                 heap_caps_free(gps_task_stack);
                 heap_caps_free(gps_task_tcb);

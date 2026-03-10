@@ -105,7 +105,6 @@ static char *term_ring = NULL;
 static size_t term_wcount = 0; // total bytes written
 static size_t term_rcount = 0; // consumption baseline for overflow tracking
 static portMUX_TYPE term_ring_mux = portMUX_INITIALIZER_UNLOCKED;
-static char *terminal_incoming_buf = NULL;
 static size_t dropped_bytes_total = 0;
 static size_t dropped_bytes_notified = 0;
 static size_t last_displayed_wcount = 0;
@@ -147,27 +146,16 @@ static void *terminal_alloc_buffer(size_t size) {
 }
 
 static bool ensure_terminal_buffers(void) {
-  if (term_ring && terminal_incoming_buf) {
+  if (term_ring) {
     return true;
   }
 
+  term_ring = terminal_alloc_buffer(MAX_TEXT_LENGTH);
   if (!term_ring) {
-    term_ring = terminal_alloc_buffer(MAX_TEXT_LENGTH);
-    if (!term_ring) {
-      ESP_LOGE(TAG, "Failed to allocate terminal ring buffer");
-      return false;
-    }
-    memset(term_ring, 0, MAX_TEXT_LENGTH);
+    ESP_LOGE(TAG, "Failed to allocate terminal ring buffer");
+    return false;
   }
-
-  if (!terminal_incoming_buf) {
-    terminal_incoming_buf = terminal_alloc_buffer(MAX_TEXT_LENGTH + 1);
-    if (!terminal_incoming_buf) {
-      ESP_LOGE(TAG, "Failed to allocate terminal incoming buffer");
-      return false;
-    }
-    terminal_incoming_buf[0] = '\0';
-  }
+  memset(term_ring, 0, MAX_TEXT_LENGTH);
 
   return true;
 }
@@ -230,7 +218,6 @@ static void clear_message_queue(void) {
   term_rcount = 0;
   memset(term_ring, 0, MAX_TEXT_LENGTH);
   portEXIT_CRITICAL(&term_ring_mux);
-  terminal_incoming_buf[0] = '\0';
   dropped_bytes_total = 0;
   dropped_bytes_notified = 0;
   last_displayed_wcount = 0;
@@ -523,14 +510,6 @@ static void process_queued_messages(void) {
   }
   to_copy = write_count - read_count;
   size_t start_index = read_count;
-  size_t rpos = start_index % MAX_TEXT_LENGTH;
-  size_t first_chunk = (to_copy > (MAX_TEXT_LENGTH - rpos)) ? (MAX_TEXT_LENGTH - rpos) : to_copy;
-  if (first_chunk > 0) {
-    memcpy(terminal_incoming_buf, &term_ring[rpos], first_chunk);
-  }
-  if (to_copy > first_chunk) {
-    memcpy(terminal_incoming_buf + first_chunk, &term_ring[0], to_copy - first_chunk);
-  }
   term_rcount = write_count;
   portEXIT_CRITICAL(&term_ring_mux);
 
@@ -550,39 +529,21 @@ static void process_queued_messages(void) {
     return;
   }
 
-  size_t buf_len = to_copy;
   size_t drop_delta = dropped_bytes_total - dropped_bytes_notified;
   if (drop_delta > 0) {
     char drop_msg[64];
-    int header_len = snprintf(drop_msg, sizeof(drop_msg), "(dropped %u bytes)\n", (unsigned)drop_delta);
-    if (header_len < 0) header_len = 0;
-    if (header_len >= (int)MAX_TEXT_LENGTH) header_len = MAX_TEXT_LENGTH - 1;
-    size_t header_size = (size_t)header_len;
-    size_t available_for_data = (MAX_TEXT_LENGTH - 1 > header_size) ? (MAX_TEXT_LENGTH - 1 - header_size) : 0;
-    size_t data_len = (buf_len > available_for_data) ? available_for_data : buf_len;
-    if (buf_len > data_len) {
-      size_t trim = buf_len - data_len;
-      if (data_len > 0) {
-        memmove(terminal_incoming_buf, terminal_incoming_buf + trim, data_len);
-      }
-      buf_len = data_len;
-    }
-    if (header_size > 0) {
-      if (data_len > 0) {
-        memmove(terminal_incoming_buf + header_size, terminal_incoming_buf, data_len);
-      }
-      memcpy(terminal_incoming_buf, drop_msg, header_size);
-      buf_len = header_size + data_len;
-    } else {
-      buf_len = data_len;
-    }
+    snprintf(drop_msg, sizeof(drop_msg), "(dropped %u bytes)\n", (unsigned)drop_delta);
+    terminal_push_incoming(drop_msg, strlen(drop_msg));
     dropped_bytes_notified = dropped_bytes_total;
-  } else if (buf_len == 0) {
-    terminal_incoming_buf[0] = '\0';
   }
 
-  if (buf_len > 0) {
-    terminal_push_incoming(terminal_incoming_buf, buf_len);
+  if (to_copy > 0) {
+    size_t rpos = start_index % MAX_TEXT_LENGTH;
+    size_t first_chunk = (to_copy > (MAX_TEXT_LENGTH - rpos)) ? (MAX_TEXT_LENGTH - rpos) : to_copy;
+    terminal_push_incoming(&term_ring[rpos], first_chunk);
+    if (to_copy > first_chunk) {
+      terminal_push_incoming(&term_ring[0], to_copy - first_chunk);
+    }
     recalc_layout_if_needed();
     if (terminal_canvas) lv_obj_invalidate(terminal_canvas);
   }
