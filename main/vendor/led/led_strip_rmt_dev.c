@@ -5,6 +5,7 @@
  */
 
 // this file has been fucked around in - deki
+// file has been fixed -RMT channel errors on reinit were broken - Mimsseey
 
 #include "driver/rmt_tx.h"
 #include "esp_check.h"
@@ -33,6 +34,7 @@ typedef struct {
   rmt_encoder_handle_t strip_encoder;
   uint32_t strip_len;
   uint8_t bytes_per_pixel;
+  bool channel_enabled;
   uint8_t pixel_buf[];
 } led_strip_rmt_obj;
 
@@ -91,14 +93,13 @@ static esp_err_t led_strip_rmt_refresh(led_strip_t *strip) {
   // Silent error handling for all operations
   esp_err_t err;
 
-  // Ensure RMT channel is enabled (enable only first time)
-  static bool channel_enabled = false;
-  if (!channel_enabled) {
+  // Ensure RMT channel is enabled (enable only first time per instance)
+  if (!rmt_strip->channel_enabled) {
     err = rmt_enable(rmt_strip->rmt_chan);
     if (err != ESP_OK) {
       return err;
     }
-    channel_enabled = true;
+    rmt_strip->channel_enabled = true;
   }
 
   // Transmit
@@ -131,9 +132,10 @@ static esp_err_t led_strip_rmt_clear(led_strip_t *strip) {
 
 static esp_err_t led_strip_rmt_del(led_strip_t *strip) {
   led_strip_rmt_obj *rmt_strip = __containerof(strip, led_strip_rmt_obj, base);
-  esp_err_t disable_err = rmt_disable(rmt_strip->rmt_chan);
-  if (disable_err != ESP_OK && disable_err != ESP_ERR_INVALID_STATE) {
-    ESP_LOGW(TAG, "disable RMT channel failed: %d", disable_err);
+  // RMT channel must be disabled (back to init state) before deletion
+  if (rmt_strip->channel_enabled) {
+    rmt_disable(rmt_strip->rmt_chan);
+    rmt_strip->channel_enabled = false;
   }
   ESP_RETURN_ON_ERROR(rmt_del_channel(rmt_strip->rmt_chan), TAG,
                       "delete RMT channel failed");
