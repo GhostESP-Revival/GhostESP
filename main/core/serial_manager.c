@@ -950,7 +950,6 @@ int handle_serial_command(const char *input) {
     glog("Received command from peer: %s\n", actual_command);
     glog("Executing received command: %s\n", actual_command);
     int result = handle_serial_command(actual_command);
-    esp_comm_manager_set_remote_command_flag(false);
     return result;
   }
   

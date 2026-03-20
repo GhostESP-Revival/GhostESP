@@ -268,7 +268,7 @@ static void eth_command_cb(const char *command, const char *data, void *ud) {
 // -----------------------------------------------------------------------
 void eth_comm_handler_init(void) {
     ESP_LOGI(TAG, "Registering ethernet command handler");
-    esp_comm_manager_set_command_callback(eth_command_cb, NULL);
+    esp_comm_manager_register_command_handler(COMM_OUTPUT_OWNER_ETHERNET, eth_command_cb, NULL);
 }
 
 void eth_comm_handler_deinit(void) {

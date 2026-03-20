@@ -129,6 +129,9 @@ typedef enum {
     SETTING_MIC_CONTRAST,
     SETTING_MIC_MIRROR_MODE,
     SETTING_MIC_CALIBRATE,
+    SETTING_BLE_BRIDGE_MODE,
+    SETTING_BLE_BRIDGE_BONDING,
+    SETTING_BLE_BRIDGE_AUTO_START,
     SETTING_GHOSTLINK_SPLIT_VIEW,
 } SettingsType;
 
@@ -259,6 +262,10 @@ typedef struct {
     uint8_t mic_smoothing;          // 0-100 (temporal smoothing)
     uint8_t mic_contrast;           // 1-5 (square iterations)
     bool mic_mirror_mode;           // Mirror visualizer center-out
+    uint8_t ble_bridge_mode;        // 0=disabled, 1=peripheral bridge
+    char ble_bridge_name[33];       // BLE bridge advertising name
+    bool ble_bridge_bonding_required;
+    bool ble_bridge_auto_start;
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
 } FSettings;
 
@@ -487,6 +494,14 @@ bool settings_get_mic_calibrate(const FSettings *settings);
 
 void settings_set_ghostlink_split_view(FSettings *settings, bool enabled);
 bool settings_get_ghostlink_split_view(const FSettings *settings);
+void settings_set_ble_bridge_mode(FSettings *settings, uint8_t mode);
+uint8_t settings_get_ble_bridge_mode(const FSettings *settings);
+void settings_set_ble_bridge_name(FSettings *settings, const char *name);
+const char *settings_get_ble_bridge_name(const FSettings *settings);
+void settings_set_ble_bridge_bonding_required(FSettings *settings, bool enabled);
+bool settings_get_ble_bridge_bonding_required(const FSettings *settings);
+void settings_set_ble_bridge_auto_start(FSettings *settings, bool enabled);
+bool settings_get_ble_bridge_auto_start(const FSettings *settings);
 
 extern FSettings G_Settings;
 

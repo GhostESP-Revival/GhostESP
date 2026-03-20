@@ -91,6 +91,10 @@ static const char *NVS_MIC_SENSITIVITY_KEY = "mic_sens";
 static const char *NVS_MIC_SMOOTHING_KEY = "mic_smooth";
 static const char *NVS_MIC_CONTRAST_KEY = "mic_contrast";
 static const char *NVS_MIC_MIRROR_MODE_KEY = "mic_mirror";
+static const char *NVS_BLE_BRIDGE_MODE_KEY = "bleb_mode";
+static const char *NVS_BLE_BRIDGE_NAME_KEY = "bleb_name";
+static const char *NVS_BLE_BRIDGE_BOND_KEY = "bleb_bond";
+static const char *NVS_BLE_BRIDGE_AUTO_KEY = "bleb_auto";
 
 static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
 
@@ -207,6 +211,10 @@ void settings_set_defaults(FSettings *settings) {
   settings->mic_smoothing = 30; // 30% default
   settings->mic_contrast = 2; // Medium contrast
   settings->mic_mirror_mode = false;
+  settings->ble_bridge_mode = 0;
+  strcpy(settings->ble_bridge_name, "GhostESP Bridge");
+  settings->ble_bridge_bonding_required = true;
+  settings->ble_bridge_auto_start = false;
   settings->ghostlink_split_view = true; // Default to split view
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
@@ -684,6 +692,27 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->mic_mirror_mode = (bool)value_u8;
   }
+
+  err = nvs_get_u8(nvsHandle, NVS_BLE_BRIDGE_MODE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->ble_bridge_mode = value_u8;
+  }
+
+  str_size = sizeof(settings->ble_bridge_name);
+  err = nvs_get_str(nvsHandle, NVS_BLE_BRIDGE_NAME_KEY, settings->ble_bridge_name, &str_size);
+  if (err != ESP_OK) {
+    strcpy(settings->ble_bridge_name, "GhostESP Bridge");
+  }
+
+  err = nvs_get_u8(nvsHandle, NVS_BLE_BRIDGE_BOND_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->ble_bridge_bonding_required = (bool)value_u8;
+  }
+
+  err = nvs_get_u8(nvsHandle, NVS_BLE_BRIDGE_AUTO_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->ble_bridge_auto_start = (bool)value_u8;
+  }
   
   err = nvs_get_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -938,6 +967,18 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_MIC_CALIBRATE:
             // Action only, not persisted
             return;
+        case SETTING_BLE_BRIDGE_MODE:
+            err = nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_MODE_KEY, G_Settings.ble_bridge_mode);
+            key = NVS_BLE_BRIDGE_MODE_KEY;
+            break;
+        case SETTING_BLE_BRIDGE_BONDING:
+            err = nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_BOND_KEY, G_Settings.ble_bridge_bonding_required ? 1 : 0);
+            key = NVS_BLE_BRIDGE_BOND_KEY;
+            break;
+        case SETTING_BLE_BRIDGE_AUTO_START:
+            err = nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_AUTO_KEY, G_Settings.ble_bridge_auto_start ? 1 : 0);
+            key = NVS_BLE_BRIDGE_AUTO_KEY;
+            break;
         case SETTING_GHOSTLINK_SPLIT_VIEW:
             err = nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, G_Settings.ghostlink_split_view ? 1 : 0);
             key = NVS_GHOSTLINK_SPLIT_VIEW_KEY;
@@ -1110,6 +1151,10 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_MIC_SMOOTHING_KEY, settings->mic_smoothing);
     nvs_set_u8(nvsHandle, NVS_MIC_CONTRAST_KEY, settings->mic_contrast);
     nvs_set_u8(nvsHandle, NVS_MIC_MIRROR_MODE_KEY, settings->mic_mirror_mode ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_MODE_KEY, settings->ble_bridge_mode);
+    nvs_set_str(nvsHandle, NVS_BLE_BRIDGE_NAME_KEY, settings->ble_bridge_name);
+    nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_BOND_KEY, settings->ble_bridge_bonding_required ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_BLE_BRIDGE_AUTO_KEY, settings->ble_bridge_auto_start ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, settings->ghostlink_split_view ? 1 : 0);
 
     esp_err_t err = nvs_commit(nvsHandle);
@@ -1739,4 +1784,46 @@ void settings_set_ghostlink_split_view(FSettings *settings, bool enabled) {
 
 bool settings_get_ghostlink_split_view(const FSettings *settings) {
   return settings ? settings->ghostlink_split_view : true;
+}
+
+void settings_set_ble_bridge_mode(FSettings *settings, uint8_t mode) {
+  if (settings) {
+    settings->ble_bridge_mode = mode;
+  }
+}
+
+uint8_t settings_get_ble_bridge_mode(const FSettings *settings) {
+  return settings ? settings->ble_bridge_mode : 0;
+}
+
+void settings_set_ble_bridge_name(FSettings *settings, const char *name) {
+  if (!settings || !name) {
+    return;
+  }
+  strncpy(settings->ble_bridge_name, name, sizeof(settings->ble_bridge_name) - 1);
+  settings->ble_bridge_name[sizeof(settings->ble_bridge_name) - 1] = '\0';
+}
+
+const char *settings_get_ble_bridge_name(const FSettings *settings) {
+  return settings ? settings->ble_bridge_name : "GhostESP Bridge";
+}
+
+void settings_set_ble_bridge_bonding_required(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->ble_bridge_bonding_required = enabled;
+  }
+}
+
+bool settings_get_ble_bridge_bonding_required(const FSettings *settings) {
+  return settings ? settings->ble_bridge_bonding_required : true;
+}
+
+void settings_set_ble_bridge_auto_start(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->ble_bridge_auto_start = enabled;
+  }
+}
+
+bool settings_get_ble_bridge_auto_start(const FSettings *settings) {
+  return settings ? settings->ble_bridge_auto_start : false;
 }

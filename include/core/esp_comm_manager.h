@@ -4,6 +4,7 @@
 #include "driver/gpio.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #define DEFAULT_BAUD_RATE 115200
 
@@ -31,6 +32,16 @@ typedef struct {
 } comm_peer_t;
 
 typedef void (*comm_command_callback_t)(const char* command, const char* data, void* user_data);
+typedef void (*comm_response_callback_t)(const uint8_t* data, size_t length, void* user_data);
+
+#define COMM_MAX_COMMAND_HANDLERS 4
+
+typedef enum {
+    COMM_OUTPUT_OWNER_LOCAL = 0,
+    COMM_OUTPUT_OWNER_GHOSTLINK = 1,
+    COMM_OUTPUT_OWNER_BLE_BRIDGE = 2,
+    COMM_OUTPUT_OWNER_ETHERNET = 3,
+} comm_output_owner_t;
 
 #define COMM_MAX_STREAM_CHANNELS 8
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
@@ -52,11 +63,18 @@ bool esp_comm_manager_send_command(const char* command, const char* data);
 bool esp_comm_manager_is_connected(void);
 comm_state_t esp_comm_manager_get_state(void);
 void esp_comm_manager_set_command_callback(comm_command_callback_t callback, void* user_data);
+bool esp_comm_manager_register_command_handler(uint8_t owner_id, comm_command_callback_t callback, void* user_data);
+void esp_comm_manager_unregister_command_handler(uint8_t owner_id);
 void esp_comm_manager_disconnect(void);
 void esp_comm_manager_deinit(void);
 bool esp_comm_manager_send_response(const uint8_t* data, size_t length);
 void esp_comm_manager_set_remote_command_flag(bool is_remote);
 bool esp_comm_manager_is_remote_command(void);
+void esp_comm_manager_set_output_owner(comm_output_owner_t owner, bool active);
+comm_output_owner_t esp_comm_manager_get_output_owner(void);
+
+bool esp_comm_manager_register_response_tap(uint8_t tap_id, comm_response_callback_t callback, void* user_data);
+void esp_comm_manager_unregister_response_tap(uint8_t tap_id);
 
 bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t length);
 bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callback_t callback, void* user_data);

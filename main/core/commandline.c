@@ -11,6 +11,7 @@
 #include "vendor/drivers/pcf8563.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
+#include "managers/ble_bridge_manager.h"
 #include "attacks/ble/ble_spam.h"
 #include "scans/ble/flipper_scan.h"
 #endif
@@ -848,9 +849,13 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_channel_switch_attack();
     wifi_manager_cancel_connect();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    ble_spam_stop();
-    ble_stop_gatt_scan();
-    ble_stop();
+    if (ble_get_current_mode() != BLE_MODE_BRIDGE) {
+        ble_spam_stop();
+        ble_stop_gatt_scan();
+        ble_stop();
+    } else {
+        glog("BLE bridge active; preserving companion link.\n");
+    }
 #endif
     if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
         csv_flush_buffer_to_file();
@@ -4272,6 +4277,7 @@ void handle_help(int argc, char **argv) {
         glog("commstatus\n    Show communication status.\n    Usage: commstatus\n\n");
         glog("commdisconnect\n    Disconnect from current peer.\n    Usage: commdisconnect\n\n");
         glog("commsetpins\n    Change communication GPIO pins at runtime.\n    Usage: commsetpins <tx_pin> <rx_pin>\n    Example: commsetpins 4 5\n\n");
+        glog("blebridge\n    Manage BLE bridge mode for the companion app.\n    Usage: blebridge <start|stop|status|pair-open|forget-bonds|name|auto|bonding>\n\n");
         return;
     }
 
@@ -6802,6 +6808,99 @@ void handle_comm_setpins(int argc, char **argv) {
     }
 }
 
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+static void handle_blebridge_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("Usage: blebridge <start|stop|status|pair-open|forget-bonds|name|auto|bonding>\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "start") == 0) {
+        if (ble_bridge_start(BLE_BRIDGE_MODE_PERIPHERAL)) {
+            settings_set_ble_bridge_mode(&G_Settings, BLE_BRIDGE_MODE_PERIPHERAL);
+            settings_persist_setting(SETTING_BLE_BRIDGE_MODE);
+            glog("BLE bridge started as '%s'.\n", ble_bridge_get_name());
+        } else {
+            glog("Failed to start BLE bridge.\n");
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "stop") == 0) {
+        ble_bridge_stop();
+        settings_set_ble_bridge_mode(&G_Settings, BLE_BRIDGE_MODE_DISABLED);
+        settings_persist_setting(SETTING_BLE_BRIDGE_MODE);
+        glog("BLE bridge stopped.\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "status") == 0) {
+        glog("BLE bridge: active=%s state=%d name=%s bonding=%s auto=%s peer=%s blemode=%d\n",
+             ble_bridge_is_active() ? "yes" : "no",
+             (int)ble_bridge_get_state(),
+             ble_bridge_get_name(),
+             ble_bridge_is_bonding_required() ? "required" : "open",
+             settings_get_ble_bridge_auto_start(&G_Settings) ? "on" : "off",
+             esp_comm_manager_is_connected() ? "connected" : "disconnected",
+             (int)ble_get_current_mode());
+        return;
+    }
+
+    if (strcmp(argv[1], "pair-open") == 0) {
+        uint32_t seconds = 60;
+        if (argc >= 3) {
+            seconds = (uint32_t)atoi(argv[2]);
+            if (seconds == 0) {
+                seconds = 60;
+            }
+        }
+        if (!ble_bridge_is_active()) {
+            if (!ble_bridge_start(BLE_BRIDGE_MODE_PERIPHERAL)) {
+                glog("Failed to start BLE bridge for pairing.\n");
+                return;
+            }
+            settings_set_ble_bridge_mode(&G_Settings, BLE_BRIDGE_MODE_PERIPHERAL);
+            settings_persist_setting(SETTING_BLE_BRIDGE_MODE);
+        }
+        ble_bridge_open_pairing_window(seconds * 1000U);
+        glog("BLE bridge pairing window open for %lu seconds. Advertising as '%s'.\n",
+             (unsigned long)seconds,
+             ble_bridge_get_name());
+        return;
+    }
+
+    if (strcmp(argv[1], "forget-bonds") == 0) {
+        ble_bridge_forget_bonds();
+        return;
+    }
+
+    if (strcmp(argv[1], "name") == 0 && argc >= 3) {
+        settings_set_ble_bridge_name(&G_Settings, argv[2]);
+        settings_save(&G_Settings);
+        ble_bridge_set_name(argv[2]);
+        glog("BLE bridge name set to '%s'.\n", ble_bridge_get_name());
+        return;
+    }
+
+    if (strcmp(argv[1], "auto") == 0 && argc >= 3) {
+        bool enabled = strcmp(argv[2], "on") == 0;
+        settings_set_ble_bridge_auto_start(&G_Settings, enabled);
+        settings_persist_setting(SETTING_BLE_BRIDGE_AUTO_START);
+        glog("BLE bridge auto-start %s.\n", enabled ? "enabled" : "disabled");
+        return;
+    }
+
+    if (strcmp(argv[1], "bonding") == 0 && argc >= 3) {
+        bool enabled = strcmp(argv[2], "on") == 0;
+        ble_bridge_set_bonding_required(enabled);
+        glog("BLE bridge bonding %s.\n", enabled ? "required" : "disabled");
+        return;
+    }
+
+    glog("Unknown blebridge command.\n");
+}
+#endif
+
 static void comm_command_callback(const char* command, const char* data, void* user_data) {
     static char full_command[128];
     
@@ -9028,6 +9127,9 @@ void register_commands() {
     register_command("commstatus", handle_comm_status);
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    register_command("blebridge", handle_blebridge_cmd);
+#endif
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blescan", handle_ble_scan_cmd);
@@ -9134,7 +9236,7 @@ void register_commands() {
 #endif
     register_command("loadconfig", handle_loadconfig_cmd);
 
-    esp_comm_manager_set_command_callback(comm_command_callback, NULL);
+    esp_comm_manager_register_command_handler(COMM_OUTPUT_OWNER_GHOSTLINK, comm_command_callback, NULL);
 
     glog("Registered Commands\n");
 }

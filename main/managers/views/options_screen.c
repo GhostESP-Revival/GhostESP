@@ -12,6 +12,7 @@
 #include "managers/views/wardriving_screen.h"
 #include "managers/views/ethernet_screen.h"
 #include "managers/wigle_manager.h"
+#include "managers/ble_bridge_manager.h"
 #include "managers/config_manager.h"
 #include "gui/popup.h"
 #include "core/utils.h"
@@ -642,6 +643,8 @@ static const char *dual_comm_tools_options[] = {
 };
 
 static const char *dual_comm_ble_options[] = {
+    "Bridge Status",
+    "Open Bridge Pairing",
     "Start AirTag Scanner",
     "List AirTags",
     "Select AirTag",
@@ -709,6 +712,7 @@ static const char *rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", "Knight
 static const char *timeout_options[] = {"5s", "10s", "30s", "60s", "Never"};
 static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 static const char *bool_options[] = {"Off", "On"};
+static const char *ble_bridge_mode_options[] = {"Disabled", "Peripheral"};
 static const char *textcolor_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
 static const uint32_t textcolor_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
 static const char *menu_layout_options[] = {"Normal", "Grid", "List"};
@@ -811,6 +815,9 @@ static SettingsItem settings_items[] = {
     {"Mirror Mode", SETTING_MIC_MIRROR_MODE, bool_options, 2, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
     {"Calibrate", SETTING_MIC_CALIBRATE, action_options, 1, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
 #endif
+    {"BLE Bridge", SETTING_BLE_BRIDGE_MODE, ble_bridge_mode_options, 2, 0, SETTINGS_CAT_GHOSTLINK, false, NULL},
+    {"Bridge Bonding", SETTING_BLE_BRIDGE_BONDING, bool_options, 2, 1, SETTINGS_CAT_GHOSTLINK, false, NULL},
+    {"Bridge AutoStart", SETTING_BLE_BRIDGE_AUTO_START, bool_options, 2, 0, SETTINGS_CAT_GHOSTLINK, false, NULL},
     {"Split Terminal", SETTING_GHOSTLINK_SPLIT_VIEW, bool_options, 2, 1, SETTINGS_CAT_GHOSTLINK, false, NULL},
 };
 
@@ -1663,6 +1670,15 @@ static void load_current_settings_values(void) {
                 settings_items[i].current_value = settings_get_mic_mirror_mode(&G_Settings) ? 1 : 0;
                 break;
 #endif
+            case SETTING_BLE_BRIDGE_MODE:
+                settings_items[i].current_value = settings_get_ble_bridge_mode(&G_Settings);
+                break;
+            case SETTING_BLE_BRIDGE_BONDING:
+                settings_items[i].current_value = settings_get_ble_bridge_bonding_required(&G_Settings) ? 1 : 0;
+                break;
+            case SETTING_BLE_BRIDGE_AUTO_START:
+                settings_items[i].current_value = settings_get_ble_bridge_auto_start(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_GHOSTLINK_SPLIT_VIEW:
                 settings_items[i].current_value = settings_get_ghostlink_split_view(&G_Settings) ? 1 : 0;
                 break;
@@ -1972,6 +1988,22 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MIC_MIRROR_MODE:
             settings_set_mic_mirror_mode(&G_Settings, new_value == 1);
             break;
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        case SETTING_BLE_BRIDGE_MODE:
+            settings_set_ble_bridge_mode(&G_Settings, (uint8_t)new_value);
+            if (new_value == 1) {
+                ble_bridge_start(BLE_BRIDGE_MODE_PERIPHERAL);
+            } else {
+                ble_bridge_stop();
+            }
+            break;
+        case SETTING_BLE_BRIDGE_BONDING:
+            ble_bridge_set_bonding_required(new_value == 1);
+            break;
+        case SETTING_BLE_BRIDGE_AUTO_START:
+            settings_set_ble_bridge_auto_start(&G_Settings, new_value == 1);
+            break;
+#endif
 #if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
         case SETTING_MIC_CALIBRATE:
 #ifdef CONFIG_HAS_MIC
@@ -3259,6 +3291,17 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&keyboard_view);
             keyboard_view_set_placeholder("Command to run on peer");
             view_switched = true;
+        } else if (strcmp(Selected_Option, "Bridge Status") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend blebridge status");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Open Bridge Pairing") == 0) {
+            simulateCommand("commsend blebridge pair-open");
+            error_popup_create("Bridge pairing opened for 60 seconds");
+            option_invoked = false;
+            return;
         } else if (strcmp(Selected_Option, "Scan Access Points") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);

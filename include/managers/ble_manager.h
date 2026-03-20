@@ -21,6 +21,16 @@ struct ble_gap_event;
 
 typedef void (*ble_data_handler_t)(struct ble_gap_event *event, size_t len);
 
+typedef enum {
+  BLE_MODE_NONE = 0,
+  BLE_MODE_SCAN,
+  BLE_MODE_SPAM_ATTACK,
+  BLE_MODE_AIRTAG_SPOOF,
+  BLE_MODE_GATT_SCAN,
+  BLE_MODE_CHAMELEON,
+  BLE_MODE_BRIDGE,
+} ble_mode_t;
+
 typedef struct {
   uint16_t uuid16[MAX_UUID16];
   int uuid16_count;
@@ -43,6 +53,9 @@ void stop_ble_stack(void);
 bool ble_is_initialized(void);
 bool ble_is_stack_ready(void);
 bool ble_wait_for_ready(void);
+ble_mode_t ble_get_current_mode(void);
+bool ble_acquire_mode(ble_mode_t mode);
+void ble_release_mode(ble_mode_t mode);
 
 // BLE gap event handler (for use by scan modules)
 int ble_gap_event_general(struct ble_gap_event *event, void *arg);

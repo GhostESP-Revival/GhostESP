@@ -8,6 +8,7 @@
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/ble_bridge_manager.h"
 #include "managers/wifi_manager.h"
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
@@ -304,7 +305,7 @@ cleanup:
 #endif
 
 void app_main(void) {
-    // Reduce NimBLE log verbosity (keep warnings/errors only)
+    // Keep generic NimBLE logs quiet; targeted bridge/host snapshots and HCI debug are enabled separately.
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
 
     // Pull SPI CS pins HIGH to prevent bus conflicts for the TEmbed C1101
@@ -471,6 +472,11 @@ void app_main(void) {
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
     nrf24_analyzer_register_stream_handler();
 #endif
+
+    if (settings_get_ble_bridge_auto_start(&G_Settings) &&
+        settings_get_ble_bridge_mode(&G_Settings) == BLE_BRIDGE_MODE_PERIPHERAL) {
+        (void)ble_bridge_start(BLE_BRIDGE_MODE_PERIPHERAL);
+    }
 
     ESP_LOGI(TAG, "Initializing AP Manager");
     MEASURE_INIT_RAM("AP Manager", ap_manager_init());

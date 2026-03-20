@@ -21,7 +21,11 @@
 #include "nimble/ble.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
+#include "os/os_mbuf.h"
 #include "vendor/pcap.h"
+#if CONFIG_BT_HCI_LOG_DEBUG_EN
+#include "hci_log/bt_hci_log.h"
+#endif
 #include <esp_mac.h>
 #include <managers/rgb_manager.h>
 #include "managers/settings_manager.h"
@@ -61,6 +65,33 @@ static volatile bool ble_pending_clear = false;
 static volatile bool ble_cb_busy = false;
 static uint32_t ble_pcap_packet_count = 0;
 static uint32_t ble_pcap_event_total_count = 0;
+static ble_mode_t ble_current_mode = BLE_MODE_NONE;
+
+static void ble_log_host_snapshot(const char *reason) {
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#if CONFIG_SPIRAM
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    size_t psram_free = 0;
+    size_t psram_largest = 0;
+#endif
+    int msys_free = os_msys_num_free();
+
+    ESP_LOGI(TAG_BLE,
+             "%s: init=%u ready=%u mode=%d cb_busy=%u int_free=%u int_largest=%u psram_free=%u psram_largest=%u msys_free=%d",
+             reason ? reason : "BLE host snapshot",
+             (unsigned)ble_initialized,
+             (unsigned)ble_stack_ready,
+             (int)ble_current_mode,
+             (unsigned)ble_cb_busy,
+             (unsigned)internal_free,
+             (unsigned)internal_largest,
+             (unsigned)psram_free,
+             (unsigned)psram_largest,
+             msys_free);
+}
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 static bool ble_ap_suspended = false;
@@ -206,11 +237,17 @@ static void ble_prepare_hs_config(void) {
 static void ble_on_sync(void) {
     ble_stack_ready = true;
     ESP_LOGI(TAG_BLE, "BLE host synced");
+    ble_log_host_snapshot("BLE host synced");
 }
 
 static void ble_on_reset(int reason) {
     ble_stack_ready = false;
     ESP_LOGW(TAG_BLE, "BLE host reset, reason=%d", reason);
+    ble_log_host_snapshot("BLE host reset");
+#if CONFIG_BT_HCI_LOG_DEBUG_EN
+    ESP_LOGW(TAG_BLE, "Dumping BT HCI debug buffer after host reset");
+    bt_hci_log_hci_data_show();
+#endif
 }
 
 static void ble_suspend_networking(void) {
@@ -660,6 +697,10 @@ static bool wait_for_ble_ready(void) {
 }
 
 bool ble_start_scanning(void) {
+    if (!ble_acquire_mode(BLE_MODE_SCAN)) {
+        glog("BLE busy with another mode. Stop it before scanning.\n");
+        return false;
+    }
     if (!ble_initialized) {
         ble_init();
     }
@@ -668,6 +709,7 @@ bool ble_start_scanning(void) {
         ESP_LOGE(TAG_BLE, "BLE stack not ready");
         TERMINAL_VIEW_ADD_TEXT("BLE stack not ready\n");
         status_display_show_status("BLE Not Ready");
+        ble_release_mode(BLE_MODE_SCAN);
         return false;
     }
 
@@ -706,6 +748,7 @@ bool ble_start_scanning(void) {
         ESP_LOGE(TAG_BLE, "Error starting BLE scan");
         TERMINAL_VIEW_ADD_TEXT("Error starting BLE scan\n");
         status_display_show_status("BLE Scan Fail");
+        ble_release_mode(BLE_MODE_SCAN);
         return false;
     } else {
         ESP_LOGI(TAG_BLE, "Scanning started...");
@@ -821,6 +864,7 @@ void ble_init(void) {
 
         ble_initialized = true;
         ESP_LOGI(TAG_BLE, "BLE initialized");
+        ble_log_host_snapshot("BLE initialized");
         TERMINAL_VIEW_ADD_TEXT("BLE initialized\n");
     }
 #endif
@@ -871,6 +915,8 @@ void ble_deinit(void) {
         }
         vTaskDelay(pdMS_TO_TICKS(50));
 
+        ble_log_host_snapshot("BLE deinit pre-port-deinit");
+
         nimble_port_deinit();
 
         if (nimble_host_exit_sem != NULL) {
@@ -909,10 +955,30 @@ bool ble_wait_for_ready(void) {
     return wait_for_ble_ready();
 }
 
+ble_mode_t ble_get_current_mode(void) {
+    return ble_current_mode;
+}
+
+bool ble_acquire_mode(ble_mode_t mode) {
+    if (ble_current_mode != BLE_MODE_NONE && ble_current_mode != mode) {
+        ESP_LOGW(TAG_BLE, "BLE mode busy: current=%d requested=%d", ble_current_mode, mode);
+        return false;
+    }
+    ble_current_mode = mode;
+    return true;
+}
+
+void ble_release_mode(ble_mode_t mode) {
+    if (ble_current_mode == mode) {
+        ble_current_mode = BLE_MODE_NONE;
+    }
+}
+
 void ble_stop(void) {
     ESP_LOGI(TAG_BLE, "ble_stop called, ble_initialized=%d", ble_initialized);
     if (!ble_initialized) {
         ESP_LOGW(TAG_BLE, "ble_stop: BLE not initialized, skipping");
+        ble_release_mode(BLE_MODE_SCAN);
         return;
     }
 
@@ -920,6 +986,7 @@ void ble_stop(void) {
 
     if (!ble_gap_disc_active()) {
         ble_deinit();
+        ble_release_mode(BLE_MODE_SCAN);
         return;
     }
 
@@ -1036,6 +1103,7 @@ void ble_stop(void) {
     }
 
     ble_deinit();
+    ble_release_mode(BLE_MODE_SCAN);
 }
 
 void ble_start_blespam_detector(void) {

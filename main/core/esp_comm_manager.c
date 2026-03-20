@@ -98,6 +98,18 @@ typedef struct {
 } comm_command_t;
 
 typedef struct {
+    uint8_t owner_id;
+    comm_command_callback_t callback;
+    void* user_data;
+} comm_command_handler_t;
+
+typedef struct {
+    uint8_t tap_id;
+    comm_response_callback_t callback;
+    void* user_data;
+} comm_response_tap_t;
+
+typedef struct {
     gpio_num_t tx_pin;
     gpio_num_t rx_pin;
     uint32_t baud_rate;
@@ -117,14 +129,16 @@ typedef struct {
     TimerHandle_t handshake_timer;
     TimerHandle_t ping_timer;
     
-    comm_command_callback_t command_callback;
-    void* callback_user_data;
+    comm_command_handler_t command_handlers[COMM_MAX_COMMAND_HANDLERS];
+    comm_response_tap_t response_taps[COMM_MAX_COMMAND_HANDLERS];
     
     char chip_name[32];
     uint8_t chip_id[6];
     
     volatile bool initialized;
-    bool is_executing_remote_cmd;
+    bool has_command_handlers;
+    bool response_taps_active;
+    comm_output_owner_t output_owner;
     bool uart_driver_installed;
     bool use_crc;
 
@@ -160,8 +174,8 @@ typedef struct {
 } esp_comm_manager_t;
 
 static esp_comm_manager_t* s_comm_manager = NULL;
-static comm_command_callback_t s_pending_callback = NULL;
-static void* s_pending_callback_user_data = NULL;
+static comm_command_handler_t s_pending_command_handlers[COMM_MAX_COMMAND_HANDLERS];
+static comm_response_tap_t s_pending_response_taps[COMM_MAX_COMMAND_HANDLERS];
 static uart_port_t s_uart_num = UART_NUM_1; /* selected UART for dualcomm */
 
 // Forward declarations for functions referenced before their definitions
@@ -177,6 +191,8 @@ static void send_handshake_request(const char* peer_name);
 static void send_handshake_ack(void);
 static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t* packet);
 static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason);
+static bool has_registered_handlers(const esp_comm_manager_t* comm);
+static void notify_response_taps(const uint8_t* data, size_t length);
 
 static inline void lock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
@@ -187,6 +203,39 @@ static inline void lock_state(esp_comm_manager_t* comm) {
 static inline void unlock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
         xSemaphoreGive(comm->state_mutex);
+    }
+}
+
+static bool has_registered_handlers(const esp_comm_manager_t* comm) {
+    if (!comm) {
+        return false;
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        if (comm->command_handlers[i].callback) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool has_pending_handlers(void) {
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        if (s_pending_command_handlers[i].callback) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void notify_response_taps(const uint8_t* data, size_t length) {
+    if (!s_comm_manager || !data || length == 0) {
+        return;
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_response_tap_t* tap = &s_comm_manager->response_taps[i];
+        if (tap->callback) {
+            tap->callback(data, length, tap->user_data);
+        }
     }
 }
 
@@ -630,7 +679,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     if (comm->handshake_timer) {
                         xTimerStart(comm->handshake_timer, 0);
                     }
-                    if (comm->command_callback && !comm->command_queue) {
+                    if (has_registered_handlers(comm) && !comm->command_queue) {
                         comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                         if (comm->command_queue && !comm->command_executor_task_handle) {
                             TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
@@ -709,7 +758,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 if (comm->handshake_timer) {
                     xTimerStop(comm->handshake_timer, 0);
                 }
-                if (comm->command_callback && !comm->command_queue) {
+                if (has_registered_handlers(comm) && !comm->command_queue) {
                     comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                     if (comm->command_queue && !comm->command_executor_task_handle) {
                         TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
@@ -764,7 +813,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
             break;
 
         case PACKET_TYPE_COMMAND:
-            if (comm->state == COMM_STATE_CONNECTED && comm->command_callback) {
+            if (comm->state == COMM_STATE_CONNECTED && has_registered_handlers(comm)) {
                 if (!comm->command_queue) {
                     comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                     if (comm->command_queue && !comm->command_executor_task_handle) {
@@ -922,6 +971,13 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
                             log_response_line(line, line_len, log_buffer, sizeof(log_buffer));
+                            if (line_len > 0) {
+                                char tapped_line[257];
+                                size_t tap_len = line_len < sizeof(tapped_line) - 2 ? line_len : sizeof(tapped_line) - 2;
+                                memcpy(tapped_line, line, tap_len);
+                                tapped_line[tap_len++] = '\n';
+                                notify_response_taps((const uint8_t*)tapped_line, tap_len);
+                            }
                         }
                         comm->response_assembly_len = 0;
                         cap = sizeof(comm->response_assembly);
@@ -949,6 +1005,13 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
                             log_response_line(line, line_len, log_buffer, sizeof(log_buffer));
+                            if (line_len > 0) {
+                                char tapped_line[257];
+                                size_t tap_len = line_len < sizeof(tapped_line) - 2 ? line_len : sizeof(tapped_line) - 2;
+                                memcpy(tapped_line, line, tap_len);
+                                tapped_line[tap_len++] = '\n';
+                                notify_response_taps((const uint8_t*)tapped_line, tap_len);
+                            }
                             // advance start; skip optional '\n' after '\r'
                             start = i + 1;
                             if (c == '\r' && start < comm->response_assembly_len && comm->response_assembly[start] == '\n') {
@@ -980,13 +1043,12 @@ static void command_executor_task(void* arg) {
 
     while (comm->initialized) {
         if (xQueueReceive(comm->command_queue, &received_cmd, pdMS_TO_TICKS(100)) == pdPASS) {
-            if (comm->command_callback) {
-                // Temporarily set the remote command flag to indicate this is a remote command
-                bool was_remote = esp_comm_manager_is_remote_command();
-                esp_comm_manager_set_remote_command_flag(true);
-                comm->command_callback(received_cmd.command, received_cmd.data, comm->callback_user_data);
-                // Restore the previous remote command flag state
-                esp_comm_manager_set_remote_command_flag(was_remote);
+            esp_comm_manager_set_output_owner(COMM_OUTPUT_OWNER_GHOSTLINK, true);
+            for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+                comm_command_handler_t* handler = &comm->command_handlers[i];
+                if (handler->callback) {
+                    handler->callback(received_cmd.command, received_cmd.data, handler->user_data);
+                }
             }
         }
     }
@@ -1057,14 +1119,14 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_13;
             resolved_rx = GPIO_NUM_14;
         }
-        resolved_baud = 460800;
+        resolved_baud = 230400;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
             resolved_tx = GPIO_NUM_9;
             resolved_rx = GPIO_NUM_10;
         }
-        resolved_baud = 460800;
+        resolved_baud = 230400;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Ace_S3") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
@@ -1101,7 +1163,17 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
 
     s_comm_manager->state = COMM_STATE_IDLE;
     s_comm_manager->role = COMM_ROLE_MASTER;
-    s_comm_manager->is_executing_remote_cmd = false;
+    memcpy(s_comm_manager->command_handlers, s_pending_command_handlers, sizeof(s_pending_command_handlers));
+    memcpy(s_comm_manager->response_taps, s_pending_response_taps, sizeof(s_pending_response_taps));
+    s_comm_manager->has_command_handlers = has_registered_handlers(s_comm_manager) || has_pending_handlers();
+    s_comm_manager->response_taps_active = false;
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        if (s_comm_manager->response_taps[i].callback) {
+            s_comm_manager->response_taps_active = true;
+            break;
+        }
+    }
+    s_comm_manager->output_owner = COMM_OUTPUT_OWNER_LOCAL;
     s_comm_manager->uart_driver_installed = false;
     s_comm_manager->use_crc = true;
     s_comm_manager->parse_state = PARSE_STATE_IDLE;
@@ -1113,9 +1185,6 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->rx_drop_until_newline = false;
     s_comm_manager->last_rx_tick = xTaskGetTickCount();
     s_comm_manager->state_mutex = xSemaphoreCreateMutex();
-
-    s_comm_manager->command_callback = s_pending_callback;
-    s_comm_manager->callback_user_data = s_pending_callback_user_data;
 
     esp_read_mac(s_comm_manager->chip_id, ESP_MAC_WIFI_STA);
     snprintf(s_comm_manager->chip_name, sizeof(s_comm_manager->chip_name), 
@@ -1512,23 +1581,164 @@ comm_state_t esp_comm_manager_get_state(void) {
 }
 
 void esp_comm_manager_set_command_callback(comm_command_callback_t callback, void* user_data) {
-    if (s_comm_manager) {
-        s_comm_manager->command_callback = callback;
-        s_comm_manager->callback_user_data = user_data;
+    if (callback) {
+        (void)esp_comm_manager_register_command_handler(COMM_OUTPUT_OWNER_GHOSTLINK, callback, user_data);
     } else {
-        s_pending_callback = callback;
-        s_pending_callback_user_data = user_data;
+        esp_comm_manager_unregister_command_handler(COMM_OUTPUT_OWNER_GHOSTLINK);
     }
 }
 
 void esp_comm_manager_set_remote_command_flag(bool is_remote) {
-    if (s_comm_manager) {
-        s_comm_manager->is_executing_remote_cmd = is_remote;
-    }
+    esp_comm_manager_set_output_owner(is_remote ? COMM_OUTPUT_OWNER_GHOSTLINK : COMM_OUTPUT_OWNER_LOCAL,
+                                      is_remote);
 }
 
 bool esp_comm_manager_is_remote_command(void) {
-    return s_comm_manager && s_comm_manager->is_executing_remote_cmd;
+    return s_comm_manager && s_comm_manager->output_owner != COMM_OUTPUT_OWNER_LOCAL;
+}
+
+bool esp_comm_manager_register_command_handler(uint8_t owner_id, comm_command_callback_t callback, void* user_data) {
+    if (!callback) {
+        return false;
+    }
+    if (!s_comm_manager) {
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_command_handler_t* handler = &s_pending_command_handlers[i];
+            if (handler->callback && handler->owner_id == owner_id) {
+                handler->callback = callback;
+                handler->user_data = user_data;
+                return true;
+            }
+        }
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_command_handler_t* handler = &s_pending_command_handlers[i];
+            if (!handler->callback) {
+                handler->owner_id = owner_id;
+                handler->callback = callback;
+                handler->user_data = user_data;
+                return true;
+            }
+        }
+        return false;
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_command_handler_t* handler = &s_comm_manager->command_handlers[i];
+        if (handler->callback && handler->owner_id == owner_id) {
+            handler->callback = callback;
+            handler->user_data = user_data;
+            s_comm_manager->has_command_handlers = has_registered_handlers(s_comm_manager);
+            return true;
+        }
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_command_handler_t* handler = &s_comm_manager->command_handlers[i];
+        if (!handler->callback) {
+            handler->owner_id = owner_id;
+            handler->callback = callback;
+            handler->user_data = user_data;
+            s_comm_manager->has_command_handlers = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void esp_comm_manager_unregister_command_handler(uint8_t owner_id) {
+    if (!s_comm_manager) {
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_command_handler_t* handler = &s_pending_command_handlers[i];
+            if (handler->owner_id == owner_id) {
+                memset(handler, 0, sizeof(*handler));
+            }
+        }
+        return;
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_command_handler_t* handler = &s_comm_manager->command_handlers[i];
+        if (handler->owner_id == owner_id) {
+            memset(handler, 0, sizeof(*handler));
+        }
+    }
+    s_comm_manager->has_command_handlers = has_registered_handlers(s_comm_manager);
+}
+
+void esp_comm_manager_set_output_owner(comm_output_owner_t owner, bool active) {
+    if (!s_comm_manager) {
+        return;
+    }
+    s_comm_manager->output_owner = active ? owner : COMM_OUTPUT_OWNER_LOCAL;
+}
+
+comm_output_owner_t esp_comm_manager_get_output_owner(void) {
+    return s_comm_manager ? s_comm_manager->output_owner : COMM_OUTPUT_OWNER_LOCAL;
+}
+
+bool esp_comm_manager_register_response_tap(uint8_t tap_id, comm_response_callback_t callback, void* user_data) {
+    if (!callback) {
+        return false;
+    }
+    if (!s_comm_manager) {
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_response_tap_t* tap = &s_pending_response_taps[i];
+            if (tap->callback && tap->tap_id == tap_id) {
+                tap->callback = callback;
+                tap->user_data = user_data;
+                return true;
+            }
+        }
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_response_tap_t* tap = &s_pending_response_taps[i];
+            if (!tap->callback) {
+                tap->tap_id = tap_id;
+                tap->callback = callback;
+                tap->user_data = user_data;
+                return true;
+            }
+        }
+        return false;
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_response_tap_t* tap = &s_comm_manager->response_taps[i];
+        if (tap->callback && tap->tap_id == tap_id) {
+            tap->callback = callback;
+            tap->user_data = user_data;
+            s_comm_manager->response_taps_active = true;
+            return true;
+        }
+    }
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_response_tap_t* tap = &s_comm_manager->response_taps[i];
+        if (!tap->callback) {
+            tap->tap_id = tap_id;
+            tap->callback = callback;
+            tap->user_data = user_data;
+            s_comm_manager->response_taps_active = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void esp_comm_manager_unregister_response_tap(uint8_t tap_id) {
+    if (!s_comm_manager) {
+        for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+            comm_response_tap_t* tap = &s_pending_response_taps[i];
+            if (tap->tap_id == tap_id) {
+                memset(tap, 0, sizeof(*tap));
+            }
+        }
+        return;
+    }
+    s_comm_manager->response_taps_active = false;
+    for (size_t i = 0; i < COMM_MAX_COMMAND_HANDLERS; ++i) {
+        comm_response_tap_t* tap = &s_comm_manager->response_taps[i];
+        if (tap->tap_id == tap_id) {
+            memset(tap, 0, sizeof(*tap));
+        }
+        if (tap->callback) {
+            s_comm_manager->response_taps_active = true;
+        }
+    }
 }
 
 void esp_comm_manager_disconnect(void) {
@@ -1539,6 +1749,7 @@ void esp_comm_manager_disconnect(void) {
         }
         lock_state(s_comm_manager);
         s_comm_manager->state = COMM_STATE_IDLE;
+        s_comm_manager->output_owner = COMM_OUTPUT_OWNER_LOCAL;
         if (s_comm_manager->handshake_timer) {
             xTimerStop(s_comm_manager->handshake_timer, 0);
         }
