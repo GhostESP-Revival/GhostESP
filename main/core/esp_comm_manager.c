@@ -1048,6 +1048,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     uart_port_t desired_uart = UART_NUM_1;
     gpio_num_t resolved_tx = tx_pin;
     gpio_num_t resolved_rx = rx_pin;
+    uint32_t resolved_baud = baud_rate;
 
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
@@ -1056,12 +1057,14 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_13;
             resolved_rx = GPIO_NUM_14;
         }
+        resolved_baud = 460800;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
             resolved_tx = GPIO_NUM_9;
             resolved_rx = GPIO_NUM_10;
         }
+        resolved_baud = 460800;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Ace_S3") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
@@ -1094,7 +1097,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
 
     s_comm_manager->tx_pin = resolved_tx;
     s_comm_manager->rx_pin = resolved_rx;
-    s_comm_manager->baud_rate = baud_rate;
+    s_comm_manager->baud_rate = resolved_baud;
 
     s_comm_manager->state = COMM_STATE_IDLE;
     s_comm_manager->role = COMM_ROLE_MASTER;
@@ -1122,7 +1125,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
              s_comm_manager->chip_id[5]);
 
     uart_config_t uart_config = {
-        .baud_rate = baud_rate,
+        .baud_rate = resolved_baud,
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_EVEN,
         .stop_bits = UART_STOP_BITS_1,
@@ -1208,7 +1211,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     }
 
     printf("ESP Comm Manager initialized as '%s' on TX:%d RX:%d at %lu baud - Auto-listening for peers\n", 
-           s_comm_manager->chip_name, resolved_tx, resolved_rx, (unsigned long)baud_rate);
+           s_comm_manager->chip_name, resolved_tx, resolved_rx, (unsigned long)resolved_baud);
 }
 
 bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t length) {
@@ -1439,9 +1442,9 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
 
     bool result = send_packet(&packet);
     if (result) {
-        printf("Sent command: %s\n", command);
+        printf("Sent command: %s %s\n", command, data ? data : "");
         char log_msg[64];
-        snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s\n", command);
+        snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s %s\n", command, data ? data : "");
         ap_manager_add_log(log_msg);
         terminal_view_add_text(log_msg);
     }

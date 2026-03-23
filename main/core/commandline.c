@@ -23,6 +23,9 @@
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#ifdef CONFIG_HAS_MIC
+#include "managers/microphone/mic_visualizer.h"
+#endif
 #include "vendor/pcap.h"
 #include "vendor/printer.h"
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -34,9 +37,11 @@
 #endif
 #ifdef CONFIG_WITH_ETHERNET
 #include "managers/ethernet_manager.h"
+#include "managers/ethernet/eth_comm_handler.h"
 #include "managers/ethernet/eth_fingerprint.h"
 #include "managers/ethernet/eth_utils.h"
 #include "managers/ethernet/eth_http.h"
+#include "attacks/ethernet/eth_arp_poison.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
@@ -817,6 +822,15 @@ static volatile bool g_eth_scan_cancel = false;
 #endif
 
 void handle_stop_flipper(int argc, char **argv) {
+#ifdef CONFIG_ENABLE_MIC_RGB_VISUALIZER
+    rgb_manager_set_mic_stream_suspended(true);
+#endif
+
+#ifdef CONFIG_HAS_MIC
+    bool restart_mic_visualizer = mic_visualizer_is_running();
+    mic_visualizer_stop();
+#endif
+
     if (g_ir_universal_send_task != NULL) {
         g_ir_universal_send_cancel = true;
     }
@@ -892,6 +906,7 @@ void handle_stop_flipper(int argc, char **argv) {
 #endif
 #ifdef CONFIG_WITH_ETHERNET
     g_eth_scan_cancel = true;
+    if (eth_arp_poison_is_running()) eth_arp_poison_stop();
 #endif
     // ensure pcap is properly flushed and closed
     pcap_file_close();
@@ -903,6 +918,16 @@ void handle_stop_flipper(int argc, char **argv) {
         wifi_manager_stop_visualizer();
     }
     settings_restart_rgb_effect();
+
+#ifdef CONFIG_HAS_MIC
+    if (restart_mic_visualizer) {
+        mic_visualizer_start();
+    }
+#endif
+
+#ifdef CONFIG_ENABLE_MIC_RGB_VISUALIZER
+    rgb_manager_set_mic_stream_suspended(false);
+#endif
 }
 
 void handle_dial_command(int argc, char **argv) {
@@ -3549,6 +3574,29 @@ http_done:
     glog("Total received: %zu bytes\n", total_received);
     
     status_display_show_status(is_https ? "HTTPS OK" : "HTTP OK");
+}
+
+void handle_eth_poison_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("Usage: ethpoison <start|stop|list|cookies|creds|status>\n");
+        return;
+    }
+    if (strcmp(argv[1], "start") == 0) {
+        eth_arp_poison_start();
+    } else if (strcmp(argv[1], "stop") == 0) {
+        eth_arp_poison_stop();
+    } else if (strcmp(argv[1], "list") == 0) {
+        eth_arp_poison_print_domains();
+    } else if (strcmp(argv[1], "cookies") == 0) {
+        eth_arp_poison_print_cookies();
+    } else if (strcmp(argv[1], "creds") == 0) {
+        eth_arp_poison_print_creds();
+    } else if (strcmp(argv[1], "status") == 0) {
+        eth_arp_poison_print_status();
+    } else {
+        glog("Unknown subcommand: %s\n", argv[1]);
+        glog("Usage: ethpoison <start|stop|list|cookies|creds|status>\n");
+    }
 }
 #endif
 
@@ -6759,6 +6807,10 @@ static void comm_command_callback(const char* command, const char* data, void* u
     static char full_command[128];
     
 #ifdef CONFIG_WITH_ETHERNET
+    if (eth_comm_handler_handle_command(command, data)) {
+        return;
+    }
+
     if (strcmp(command, "stop") == 0) {
         g_eth_scan_cancel = true;
     }
@@ -8924,6 +8976,16 @@ void handle_wigle_cmd(int argc, char **argv) {
     glog("Unknown wigle command: %s\n", argv[1]);
 }
 
+#ifdef CONFIG_HAS_MIC
+static void handle_mic_cal_cmd(int argc, char **argv) {
+    extern void goertzel_restart_cal(void);
+    extern void mic_restart_noise_cal(void);
+    goertzel_restart_cal();
+    mic_restart_noise_cal();
+    glog("MIC calibration restarted\n");
+}
+#endif
+
 void register_commands() {
     command_init();
     register_command("help", handle_help);
@@ -9054,6 +9116,7 @@ void register_commands() {
     register_command("ethserv", handle_eth_serv_cmd);
     register_command("ethntp", handle_eth_ntp_cmd);
     register_command("ethhttp", handle_eth_http_cmd);
+    register_command("ethpoison", handle_eth_poison_cmd);
 #endif
     register_command("mirror", handle_mirror_cmd);
     register_command("rave", handle_rave_cmd);
@@ -9071,6 +9134,9 @@ void register_commands() {
     register_command("aerialspoof", handle_aerial_spoof_cmd);
     register_command("aerialspoofstop", handle_aerial_spoof_stop_cmd);
     register_command("wigle", handle_wigle_cmd);
+#ifdef CONFIG_HAS_MIC
+    register_command("mic_cal", handle_mic_cal_cmd);
+#endif
     register_command("loadconfig", handle_loadconfig_cmd);
 
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);

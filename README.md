@@ -283,7 +283,11 @@ Special thanks to:
       <sub>Core NFC library</sub>
     </td>
     <td align="center">
-      <!-- Empty cell for symmetry -->
+      <a href="https://github.com/connornishijima">
+        <img src="https://github.com/connornishijima.png" width="80" height="80" style="border-radius: 50%;" alt="connornishijima"/><br/>
+        <b>connornishijima</b>
+      </a><br/>
+      <sub><a href="https://github.com/connornishijima/SensoryBridge">SensoryBridge</a> - MIC RGB visualizer algorithms &amp; inspiration</sub>
     </td>
     <td align="center">
       <!-- Empty cell for symmetry -->

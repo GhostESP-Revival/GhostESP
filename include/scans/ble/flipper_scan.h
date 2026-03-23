@@ -80,4 +80,6 @@ void flipper_scan_select(int index);
  */
 void flipper_scan_start_tracking(void);
 
+bool flipper_scan_track_device(const uint8_t *mac, uint8_t addr_type, const char *name, int8_t rssi);
+
 #endif // FLIPPER_SCAN_H

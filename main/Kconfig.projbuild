@@ -50,6 +50,15 @@ menu "Ghost ESP Options"
         depends on !USE_NEOPIXEL
         help
             Define the pin for the blue color of RGB LED when not using Neopixel.
+
+    config ENABLE_MIC_RGB_VISUALIZER
+        bool "Enable MIC RGB Visualizer (receive from GhostLink peer)"
+        depends on USE_NEOPIXEL
+        default n
+        help
+            Enable the MIC RGB Visualizer mode that receives audio amplitude data
+            from a GhostLink peer device with a microphone. The peer must have
+            CONFIG_HAS_MIC enabled to transmit audio data.
     
     endmenu
     
@@ -507,7 +516,16 @@ menu "Ghost ESP Options"
             depends on WITH_ETHERNET
             help
                 Set the GPIO pin for W5500 INT (Interrupt). Use -1 if not connected.
-            
+
+        config ETH_W5500_SPI_HOST
+            int "W5500 SPI Host (2=SPI2, 3=SPI3)"
+            default 3
+            depends on WITH_ETHERNET
+            help
+                SPI host to use for the W5500 Ethernet chip.
+                2 = SPI2_HOST, 3 = SPI3_HOST (default).
+                Set to 2 if SPI3 is already used by another peripheral (e.g. NRF24).
+
         config IS_GHOST_BOARD
             bool "Enable Ghost Board Configuration"
             default n
@@ -709,6 +727,51 @@ menu "Ghost ESP Options"
 
         endmenu
 
+    endmenu
+
+    menu "Microphone Configuration"
+        depends on !CONFIG_USE_NEOPIXEL
+
+        config HAS_MIC
+            bool "Enable Microphone Support"
+            default n
+            help
+                Enable I2S microphone for audio capture
+
+        config MIC_I2S_BCLK_PIN
+            int "I2S BCLK Pin"
+            depends on HAS_MIC
+            default 4
+            help
+                BCLK pin for I2S microphone (INMP441)
+
+        config MIC_I2S_WS_PIN
+            int "I2S WS/LRCLK Pin"
+            depends on HAS_MIC
+            default 5
+            help
+                WS/LRCLK pin for I2S microphone (INMP441)
+
+        config MIC_I2S_DIN_PIN
+            int "I2S Data In Pin"
+            depends on HAS_MIC
+            default 6
+            help
+                DIN pin for I2S microphone (INMP441)
+
+        config MIC_SAMPLE_RATE
+            int "Sample Rate"
+            depends on HAS_MIC
+            default 16000
+            help
+                I2S sample rate in Hz (16000 recommended for voice)
+
+        config MIC_BUFFER_SAMPLES
+            int "Samples per read"
+            depends on HAS_MIC
+            default 512
+            help
+                Number of samples to read per I2S transaction
     endmenu
     
     menu "GPS Configuration"

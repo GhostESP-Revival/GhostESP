@@ -21,6 +21,9 @@
 
 #include "esp_heap_caps.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #define MDNS_PORT 5353
 #define MDNS_MULTICAST_ADDR "224.0.0.251"
 #define NBNS_PORT 137
@@ -28,6 +31,13 @@
 #define SSDP_MULTICAST_ADDR "239.255.255.250"
 #define ETH_FINGERPRINT_TIMEOUT_MS 3000
 #define ETH_FINGERPRINT_MAX_HOSTS 32
+
+// --- Async scan state ---
+static eth_fp_results_t   s_last_results;
+static volatile bool      s_fp_running      = false;
+static volatile bool      s_fp_done         = false;
+static volatile bool      s_fp_cancel       = false;
+static TaskHandle_t       s_fp_task_handle  = NULL;
 
 static const char *DEVICE_KEYWORDS[] = {
     "Chromecast", "eero", "Roku", "Apple", "Samsung", "LG", "Sony", "Philips",
@@ -86,6 +96,10 @@ static bool eth_ssdp_header_get(const char *resp, const char *key, char *out, si
         p = line_end + 2;
     }
     return false;
+}
+
+static inline bool eth_fingerprint_is_cancelled(void) {
+    return s_fp_cancel;
 }
 
 static void eth_xml_get_tag_value(const char *xml, const char *tag, char *out, size_t out_len) {
@@ -165,7 +179,9 @@ static void eth_fingerprint_mdns_scan(eth_discovered_host_t *hosts, int *count, 
     socklen_t fromlen = sizeof(from);
     int64_t start = esp_timer_get_time() / 1000;
 
-    while ((esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS && *count < max_hosts) {
+    while (!eth_fingerprint_is_cancelled()
+        && (esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS
+        && *count < max_hosts) {
         int len = recvfrom(sock, buf, 512, 0, (struct sockaddr *)&from, &fromlen);
         if (len > 12) {
             bool found = false;
@@ -237,7 +253,9 @@ static void eth_fingerprint_nbns_scan(eth_discovered_host_t *hosts, int *count, 
     socklen_t fromlen = sizeof(from);
     int64_t start = esp_timer_get_time() / 1000;
 
-    while ((esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS && *count < max_hosts) {
+    while (!eth_fingerprint_is_cancelled()
+        && (esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS
+        && *count < max_hosts) {
         int len = recvfrom(sock, buf, 512, 0, (struct sockaddr *)&from, &fromlen);
         if (len > 56) {
             bool found = false;
@@ -316,7 +334,9 @@ static void eth_fingerprint_ssdp_scan(eth_discovered_host_t *hosts, int *count, 
     socklen_t fromlen = sizeof(from);
     int64_t start = esp_timer_get_time() / 1000;
 
-    while ((esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS && *count < max_hosts) {
+    while (!eth_fingerprint_is_cancelled()
+        && (esp_timer_get_time() / 1000 - start) < ETH_FINGERPRINT_TIMEOUT_MS
+        && *count < max_hosts) {
         int len = recvfrom(sock, buf, 1023, 0, (struct sockaddr *)&from, &fromlen);
         if (len > 0) {
             buf[len] = '\0';
@@ -445,8 +465,12 @@ void eth_fingerprint_run_scan(void) {
 
     int count = 0;
     eth_fingerprint_mdns_scan(hosts, &count, ETH_FINGERPRINT_MAX_HOSTS);
-    eth_fingerprint_nbns_scan(hosts, &count, ETH_FINGERPRINT_MAX_HOSTS);
-    eth_fingerprint_ssdp_scan(hosts, &count, ETH_FINGERPRINT_MAX_HOSTS);
+    if (!eth_fingerprint_is_cancelled()) {
+        eth_fingerprint_nbns_scan(hosts, &count, ETH_FINGERPRINT_MAX_HOSTS);
+    }
+    if (!eth_fingerprint_is_cancelled()) {
+        eth_fingerprint_ssdp_scan(hosts, &count, ETH_FINGERPRINT_MAX_HOSTS);
+    }
 
     if (count == 0) {
         glog("No hosts discovered\n");
@@ -468,6 +492,19 @@ void eth_fingerprint_run_scan(void) {
             if (i < count - 1) {
                 glog("\n");
             }
+
+            // Copy host into async result store
+            if (s_last_results.count < 32) {
+                eth_fp_host_t *h = &s_last_results.hosts[s_last_results.count];
+                struct in_addr _addr = { .s_addr = hosts[i].ip };
+                strlcpy(h->ip_str,      inet_ntoa(_addr),        sizeof(h->ip_str));
+                strlcpy(h->name,        hosts[i].name,           sizeof(h->name));
+                strlcpy(h->device_type, hosts[i].device_type,    sizeof(h->device_type));
+                strlcpy(h->protocol,    hosts[i].protocol,       sizeof(h->protocol));
+                strlcpy(h->service_type, hosts[i].service_type,  sizeof(h->service_type));
+                strlcpy(h->os_info,     hosts[i].os_info,        sizeof(h->os_info));
+                s_last_results.count++;
+            }
         }
     }
 
@@ -476,6 +513,40 @@ void eth_fingerprint_run_scan(void) {
     } else {
         free(hosts);
     }
+}
+
+// --- Async API implementation ---
+
+static void eth_fp_task(void *arg) {
+    s_fp_running = true;
+    s_fp_done    = false;
+    s_fp_cancel  = false;
+    memset(&s_last_results, 0, sizeof(s_last_results));
+    eth_fingerprint_run_scan();
+    s_fp_running     = false;
+    s_fp_done        = true;
+    s_fp_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+void eth_fingerprint_start_async(void) {
+    if (s_fp_running) return;
+    s_fp_done = false;
+    xTaskCreate(eth_fp_task, "eth_fp_scan", 6144, NULL, 5, &s_fp_task_handle);
+}
+
+bool eth_fingerprint_scan_is_running(void) { return s_fp_running; }
+bool eth_fingerprint_scan_is_done(void)    { return s_fp_done;    }
+void eth_fingerprint_scan_cancel(void)     { s_fp_cancel = true;  }
+
+int eth_fingerprint_get_results(eth_fp_results_t *out) {
+    if (!out) return 0;
+    memcpy(out, &s_last_results, sizeof(*out));
+    return out->count;
+}
+
+const eth_fp_results_t *eth_fingerprint_get_last_results(void) {
+    return &s_last_results;
 }
 
 #else

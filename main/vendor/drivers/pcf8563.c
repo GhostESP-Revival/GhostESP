@@ -89,7 +89,10 @@ esp_err_t rtc_set_datetime(const RTC_Date *datetime) {
 esp_err_t rtc_get_datetime(RTC_Date *datetime) {
   if (rtc_chip == RTC_CHIP_PCF8563) {
     uint8_t data[7];
-    ESP_ERROR_CHECK(_read_register(PCF8563_SEC_REG, data, 7));
+    esp_err_t ret = _read_register(PCF8563_SEC_REG, data, 7);
+    if (ret != ESP_OK) {
+      return ret;
+    }
 
     bool century = data[5] & PCF8563_CENTURY_MASK;
     datetime->second = _bcd_to_dec(data[0] & ~PCF8563_VOL_LOW_MASK);
@@ -99,16 +102,18 @@ esp_err_t rtc_get_datetime(RTC_Date *datetime) {
     datetime->month = _bcd_to_dec(data[4] & PCF8563_MONTH_MASK);
     datetime->year = (century ? 1900 : 2000) + _bcd_to_dec(data[5]);
   } else {
-    // DS1307/DS3231
     uint8_t data[7];
-    ESP_ERROR_CHECK(_read_register(DS1307_SEC_REG, data, 7));
+    esp_err_t ret = _read_register(DS1307_SEC_REG, data, 7);
+    if (ret != ESP_OK) {
+      return ret;
+    }
 
     datetime->second = _bcd_to_dec(data[0] & ~DS1307_CH_MASK);
     datetime->minute = _bcd_to_dec(data[1]);
-    datetime->hour = _bcd_to_dec(data[2] & 0x3F); // Handle 12/24 hour
-    datetime->day = _bcd_to_dec(data[4]); // Date
-    datetime->month = _bcd_to_dec(data[5] & 0x1F); // Handle century bit
-    datetime->year = 2000 + _bcd_to_dec(data[6]); // DS1307 is Y2K compatible
+    datetime->hour = _bcd_to_dec(data[2] & 0x3F);
+    datetime->day = _bcd_to_dec(data[4]);
+    datetime->month = _bcd_to_dec(data[5] & 0x1F);
+    datetime->year = 2000 + _bcd_to_dec(data[6]);
   }
   return ESP_OK;
 }
@@ -139,7 +144,10 @@ esp_err_t rtc_set_alarm(const RTC_Alarm *alarm) {
 esp_err_t rtc_get_alarm(RTC_Alarm *alarm) {
   if (rtc_chip == RTC_CHIP_PCF8563) {
     uint8_t data[4];
-    ESP_ERROR_CHECK(_read_register(PCF8563_ALRM_MIN_REG, data, 4));
+    esp_err_t ret = _read_register(PCF8563_ALRM_MIN_REG, data, 4);
+    if (ret != ESP_OK) {
+      return ret;
+    }
 
     alarm->minute = (data[0] != PCF8563_VOL_LOW_MASK)
                         ? _bcd_to_dec(data[0] & PCF8563_MINUTES_MASK)
@@ -163,7 +171,10 @@ esp_err_t rtc_get_alarm(RTC_Alarm *alarm) {
 esp_err_t rtc_enable_alarm() {
   if (rtc_chip == RTC_CHIP_PCF8563) {
     uint8_t data;
-    ESP_ERROR_CHECK(_read_register(PCF8563_STAT2_REG, &data, 1));
+    esp_err_t ret = _read_register(PCF8563_STAT2_REG, &data, 1);
+    if (ret != ESP_OK) {
+      return ret;
+    }
     data |= (1 << 1);
     return _write_register(PCF8563_STAT2_REG, &data, 1);
   } else {
@@ -175,7 +186,10 @@ esp_err_t rtc_enable_alarm() {
 esp_err_t rtc_disable_alarm() {
   if (rtc_chip == RTC_CHIP_PCF8563) {
     uint8_t data;
-    ESP_ERROR_CHECK(_read_register(PCF8563_STAT2_REG, &data, 1));
+    esp_err_t ret = _read_register(PCF8563_STAT2_REG, &data, 1);
+    if (ret != ESP_OK) {
+      return ret;
+    }
     data &= ~(1 << 1);
     return _write_register(PCF8563_STAT2_REG, &data, 1);
   } else {
@@ -187,11 +201,13 @@ esp_err_t rtc_disable_alarm() {
 esp_err_t rtc_check_voltage_low(bool *voltage_low) {
   if (rtc_chip == RTC_CHIP_PCF8563) {
     uint8_t data;
-    ESP_ERROR_CHECK(_read_register(PCF8563_SEC_REG, &data, 1));
-    *voltage_low = data & PCF8563_VOL_LOW_MASK;
+    esp_err_t ret = _read_register(PCF8563_SEC_REG, &data, 1);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+    *voltage_low = data& PCF8563_VOL_LOW_MASK;
     return ESP_OK;
   } else {
-    // DS1307 doesn't have voltage low detection
     *voltage_low = false;
     return ESP_OK;
   }

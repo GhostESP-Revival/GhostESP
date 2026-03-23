@@ -67,6 +67,7 @@ extern View keyboard_view;
 extern View compass_view;
 extern View accelerometer_view;
 extern View wardriving_view;
+extern View ethernet_screen_view;
 extern View *display_manager_previous_view;
 
 /* Function prototypes */

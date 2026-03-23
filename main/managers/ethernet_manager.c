@@ -249,31 +249,18 @@ esp_err_t ethernet_manager_init(void)
     ESP_LOGI(TAG, "Configuring SPI bus with MOSI=%d, MISO=%d, SCK=%d",
              buscfg.mosi_io_num, buscfg.miso_io_num, buscfg.sclk_io_num);
 
-    // On ESP32-S3, try SPI3_HOST first (less likely to be used by SD card/display)
-    // Then try SPI2_HOST if SPI3 fails
-    // SD card and display often use SPI2_HOST, so we prefer SPI3_HOST for Ethernet
-    spi_host_device_t spi_host = SPI3_HOST;
+    // W5500 needs time for internal PLL to lock after power-on before SPI communication
+    // On cold boot, the chip may not respond correctly if SPI transactions start too early
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    spi_host_device_t spi_host = (CONFIG_ETH_W5500_SPI_HOST == 2) ? SPI2_HOST : SPI3_HOST;
     s_spi_bus_initialized_by_us = false;
-    ESP_LOGI(TAG, "Attempting to initialize SPI3_HOST for W5500...");
+    ESP_LOGI(TAG, "Initializing SPI%d for W5500 (CONFIG_ETH_W5500_SPI_HOST=%d)...",
+             spi_host + 1, CONFIG_ETH_W5500_SPI_HOST);
     esp_err_t ret = spi_bus_initialize(spi_host, &buscfg, SPI_DMA_CH_AUTO);
-    
-    // If SPI3 fails with invalid pin or already initialized, try SPI2
+
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "SPI3_HOST initialization failed: %s, trying SPI2_HOST...", esp_err_to_name(ret));
-        spi_host = SPI2_HOST;
-        ESP_LOGI(TAG, "Attempting to initialize SPI2_HOST for W5500...");
-        ret = spi_bus_initialize(spi_host, &buscfg, SPI_DMA_CH_AUTO);
-    }
-    
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "SPI bus initialization failed on both SPI2 and SPI3: %s", esp_err_to_name(ret));
-        ESP_LOGE(TAG, "This usually means one or more GPIO pins are invalid for SPI");
-        ESP_LOGE(TAG, "On ESP32-S3, GPIO 6 should be valid, but may conflict with:");
-        ESP_LOGE(TAG, "  - An already initialized SPI bus with different pins");
-        ESP_LOGE(TAG, "  - Flash/PSRAM configuration");
-        ESP_LOGE(TAG, "  - Another peripheral using GPIO 6");
-        ESP_LOGE(TAG, "Check if SPI2_HOST or SPI3_HOST is already in use by SD card or display");
-        ESP_LOGE(TAG, "You may need to use a different SPI host or ensure pins don't conflict");
+        ESP_LOGE(TAG, "SPI%d bus init failed for W5500: %s", spi_host + 1, esp_err_to_name(ret));
         return ret;
     }
     if (ret == ESP_ERR_INVALID_STATE) {
@@ -298,10 +285,54 @@ esp_err_t ethernet_manager_init(void)
         .queue_size = 20
     };
 
+    // Software reset W5500 before MAC creation (no RST pin configured)
+    {
+        spi_device_handle_t reset_dev;
+        spi_device_interface_config_t reset_cfg = {
+            .mode = 0,
+            .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz for reset
+            .spics_io_num = CONFIG_ETH_W5500_CS_PIN,
+            .queue_size = 1,
+        };
+        esp_err_t reset_ret = spi_bus_add_device(spi_host, &reset_cfg, &reset_dev);
+        if (reset_ret == ESP_OK) {
+            // Write 0x80 to Mode Register (addr 0x0000) to trigger software reset
+            // W5500 SPI frame: 3 addr bytes + 1 control byte + data
+            // Control byte: BSB=00000 (common reg), RWB=1 (write), OM=00 (variable len) = 0x04
+            uint8_t reset_tx[5] = { 0x00, 0x00, 0x00, 0x04, 0x80 };
+            uint8_t reset_rx[5] = {0};
+            spi_transaction_t reset_t = {
+                .length = 40,
+                .tx_buffer = reset_tx,
+                .rx_buffer = reset_rx,
+            };
+            spi_device_polling_transmit(reset_dev, &reset_t);
+            vTaskDelay(pdMS_TO_TICKS(100)); // Wait for reset to complete (W5500 needs longer on cold boot)
+
+            // Verify reset completed (MR bit 7 should be cleared)
+            uint8_t check_tx[5] = { 0x00, 0x00, 0x00, 0x00, 0x00 }; // Read MR
+            uint8_t check_rx[5] = {0};
+            spi_transaction_t check_t = {
+                .length = 40,
+                .tx_buffer = check_tx,
+                .rx_buffer = check_rx,
+            };
+            spi_device_polling_transmit(reset_dev, &check_t);
+            ESP_LOGI(TAG, "W5500 software reset: MR=0x%02x (expected 0x00)", check_rx[4]);
+
+            spi_bus_remove_device(reset_dev);
+            ESP_LOGI(TAG, "W5500 software reset complete");
+        } else {
+            ESP_LOGW(TAG, "Could not add temp SPI device for reset: %s", esp_err_to_name(reset_ret));
+        }
+    }
+
     // Configure W5500 (use the SPI host that was successfully initialized)
     eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(spi_host, &spi_devcfg);
-    w5500_config.int_gpio_num = (CONFIG_ETH_W5500_INT_PIN >= 0) ? CONFIG_ETH_W5500_INT_PIN : -1;
-    w5500_config.poll_period_ms = (CONFIG_ETH_W5500_INT_PIN >= 0) ? 0 : 100; // Use polling if no INT pin
+    w5500_config.int_gpio_num = -1; // Disable INT pin for reliability on cold boot
+    w5500_config.poll_period_ms = 100; // Use polling instead of interrupts
+
+    ESP_LOGI(TAG, "W5500 config: int_gpio=-1 (polling mode), poll_period=%dms", w5500_config.poll_period_ms);
 
     // Configure MAC
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
@@ -316,6 +347,10 @@ esp_err_t ethernet_manager_init(void)
     }
     ESP_LOGI(TAG, "W5500 MAC instance created");
 
+    // W5500 internal PHY needs time to stabilize after cold boot
+    // The software reset clears registers but PHY analog circuits need warm-up time
+    vTaskDelay(pdMS_TO_TICKS(200));
+
     // Configure PHY
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     #ifdef CONFIG_ETH_W5500_RST_PIN
@@ -324,7 +359,7 @@ esp_err_t ethernet_manager_init(void)
     phy_config.reset_gpio_num = -1; // No reset pin configured
     #endif
     phy_config.reset_timeout_ms = 100; // Increase reset timeout
-    phy_config.autonego_timeout_ms = 4000; // Increase autonego timeout
+    phy_config.autonego_timeout_ms = 5000; // Increase autonego timeout (cold boot needs more time)
     ESP_LOGI(TAG, "W5500 PHY config: reset_gpio=%d, reset_timeout=%dms, autonego_timeout=%dms",
              phy_config.reset_gpio_num, phy_config.reset_timeout_ms, phy_config.autonego_timeout_ms);
     s_eth_phy = esp_eth_phy_new_w5500(&phy_config);
@@ -523,6 +558,12 @@ esp_err_t ethernet_manager_get_ip_info(esp_netif_ip_info_t *ip_info)
 esp_netif_t *ethernet_manager_get_netif(void)
 {
     return s_eth_netif;
+}
+
+esp_err_t ethernet_manager_transmit_raw(const uint8_t *buf, size_t len)
+{
+    if (!s_eth_handle) return ESP_ERR_INVALID_STATE;
+    return esp_eth_transmit(s_eth_handle, (void *)buf, len);
 }
 
 esp_err_t ethernet_manager_get_dhcp_server_ip(ip4_addr_t *server_ip)

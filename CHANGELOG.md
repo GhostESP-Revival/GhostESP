@@ -2,6 +2,26 @@
 
 
 
+## Revival v1.9.7
+
+### Added
+- MIC RGB visualizer adapted from SensoryBridge by Connor Nishijima (https://github.com/connornishijima/SensoryBridge)
+- Ethernet ARP poisoning attack with bidirectional spoofing, ICMP ping sweep, passive host discovery, DNS interception using network's actual DNS server, and IP packet forwarding
+
+### Changed
+- Reduced WiFi RX/TX buffer counts and LWIP pool sizes across all configs to lower memory usage
+- Standardised FATFS sector size to 512, disabled per-file cache, and enabled dynamic buffers across all configs for better SD stability
+- Disabled mDNS for Ethernet interface to prevent crashes
+- Disabled SD SPI on somethingsomething2
+- Upped GhostLink baudrate between The Wired Hatter's Banshee chips to 460800
+- GhostLink ethernet uses new detail view instead of terminal
+- Moved Flipper, Airtag and Skimmer display options to New 'Detect Devices' menu using detail view like 'Scan APs'
+
+### Fixed
+- Fixed beacon spam not broadcasting any SSIDs due to race condition where task flag was set after task creation
+- Added back missing RGB pulse for flipper and airtag detection
+- Fixed boot crash loop on devices without RTC hardware by replacing ESP_ERROR_CHECK with graceful error handling in RTC driver
+
 ## Revival v1.9.6
 
 ### Added

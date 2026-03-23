@@ -112,7 +112,10 @@ static void display_spi_resume_after_sd(void) {
     ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
     /* fall through — still resume LVGL task to prevent watchdog */
   } else {
-    disp_spi_add_device(TFT_SPI_HOST);
+    esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
+    if (add_ret != ESP_OK) {
+      ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
+    }
   }
   /* resume lvgl refresh */
   lv_disp_t *disp = lv_disp_get_default();
@@ -195,7 +198,14 @@ static TickType_t s_next_unmount_tick = 0;
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dma_channel) {
+  /* When Ethernet or NRF24 is configured on SPI3, prefer SPI2 for SD to avoid
+   * stealing the host that Ethernet needs, which would force it onto SPI2
+   * where the display is already initialized (causing Ethernet to fail). */
+#if defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
+  int preferred_hosts[] = { SPI2_HOST, SPI3_HOST };
+#else
   int preferred_hosts[] = { SPI3_HOST, SPI2_HOST };
+#endif
 
   for (size_t i = 0; i < sizeof(preferred_hosts) / sizeof(preferred_hosts[0]); ++i) {
     int host_id = preferred_hosts[i];
@@ -704,6 +714,24 @@ esp_err_t sd_card_init(void) {
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   {
     int host_id = sd_host_id;
+#if defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
+    /* SPI3 is reserved for Ethernet/NRF24 on this config. Use SPI2 directly
+     * (old pre-refactor behaviour) so we don't steal SPI3 from those peripherals.
+     * INVALID_STATE means the bus is already up — reuse it. */
+    esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
+    if (bus_ret == ESP_OK) {
+      bus_init_success = true;
+      s_spi_bus_initialized = true;
+      s_spi_host_id = SPI2_HOST;
+    } else if (bus_ret != ESP_ERR_INVALID_STATE) {
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
+      return bus_ret;
+    }
+    sd_host_id = SPI2_HOST;
+    host_id = SPI2_HOST;
+    host.slot = SPI2_HOST;
+#else
     if (!is_shared_display_sd_spi()) {
       host_id = choose_free_s3_sd_spi_host(&bus_config, dmabus);
       if (host_id < 0) {
@@ -730,6 +758,7 @@ esp_err_t sd_card_init(void) {
       /* host already initialized elsewhere; reuse it */
       sd_host_id = host_id;
     }
+#endif
   }
 #else
   {
@@ -780,13 +809,9 @@ esp_err_t sd_card_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
     if (bus_init_success) {
       sd_spi_bus_release_if_tracked();
     }
-#else
-    (void)bus_init_success;
-#endif
     if (display_was_suspended) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();

@@ -68,7 +68,7 @@
 /*********************
  *      DEFINES
  *********************/
-#define SPI_TRANSACTION_POOL_SIZE 50	/* maximum number of DMA transactions simultaneously in-flight */
+#define SPI_TRANSACTION_POOL_SIZE 16	/* maximum number of DMA transactions simultaneously in-flight */
 
 /* DMA Transactions to reserve before queueing additional DMA transactions. A 1/10th seems to be a good balance. Too many (or all) and it will increase latency. */
 #define SPI_TRANSACTION_POOL_RESERVE_PERCENTAGE 10
@@ -102,21 +102,25 @@ static transaction_cb_t chained_post_cb;
 /**********************
  *   GLOBAL FUNCTIONS
  **********************/
-void disp_spi_add_device_config(spi_host_device_t host, spi_device_interface_config_t *devcfg)
+esp_err_t disp_spi_add_device_config(spi_host_device_t host, spi_device_interface_config_t *devcfg)
 {
     spi_host=host;
     chained_post_cb=devcfg->post_cb;
     devcfg->post_cb=spi_ready;
     esp_err_t ret=spi_bus_add_device(host, devcfg, &spi);
-    assert(ret==ESP_OK);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    return ESP_OK;
 }
 
-void disp_spi_add_device(spi_host_device_t host)
+esp_err_t disp_spi_add_device(spi_host_device_t host)
 {
-    disp_spi_add_device_with_speed(host, SPI_TFT_CLOCK_SPEED_HZ);
+    return disp_spi_add_device_with_speed(host, SPI_TFT_CLOCK_SPEED_HZ);
 }
 
-void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
+esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 {
     ESP_LOGI(TAG, "Adding SPI device");
     ESP_LOGI(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
@@ -125,13 +129,13 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
     spi_device_interface_config_t devcfg={
         .clock_speed_hz = clock_speed_hz,
         .mode = SPI_TFT_SPI_MODE,
-        .spics_io_num=DISP_SPI_CS,              // CS pin
+        .spics_io_num=DISP_SPI_CS,
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
         .queue_size=SPI_TRANSACTION_POOL_SIZE,
         .pre_cb=NULL,
         .post_cb=NULL,
 #if defined(DISP_SPI_HALF_DUPLEX)
-        .flags = SPI_DEVICE_NO_DUMMY | SPI_DEVICE_HALFDUPLEX,	/* dummy bits should be explicitly handled via DISP_SPI_VARIABLE_DUMMY as needed */
+        .flags = SPI_DEVICE_NO_DUMMY | SPI_DEVICE_HALFDUPLEX,
 #else
 	#if defined (CONFIG_LV_TFT_DISPLAY_CONTROLLER_FT81X)
 		.flags = 0,
@@ -141,7 +145,10 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 #endif
     };
 
-    disp_spi_add_device_config(host, &devcfg);
+    esp_err_t ret = disp_spi_add_device_config(host, &devcfg);
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
 	/* create the transaction pool and fill it with ptrs to spi_transaction_ext_t to reuse */
 	if(TransactionPool == NULL) {
@@ -155,6 +162,8 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);
 		}
 	}
+
+    return ESP_OK;
 }
 
 void disp_spi_change_device_speed(int clock_speed_hz)

@@ -343,12 +343,16 @@ static void terminal_push_incoming(const char *data, size_t len) {
 static bool terminal_is_dualcomm_line(const char *text);
 static const char *terminal_dualcomm_display_text(const char *text);
 
+static bool terminal_should_use_split_view(void) {
+    return terminal_dualcomm_only && settings_get_ghostlink_split_view(&G_Settings);
+}
+
 static void recalc_layout_if_needed(void) {
   if (!terminal_canvas || !lv_obj_is_valid(terminal_canvas)) return;
   lv_coord_t full_w = lv_obj_get_width(terminal_canvas);
   if (full_w <= 0) return;
 
-  bool split = terminal_dualcomm_only && (full_w > 0);
+  bool split = terminal_should_use_split_view() && (full_w > 0);
   lv_coord_t col_w = split ? (full_w / 2) : full_w;
   if (col_w <= 0) col_w = full_w;
 
@@ -412,7 +416,7 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
   dsc.flag = LV_TEXT_FLAG_NONE;
 
   lv_coord_t w = lv_obj_get_width(obj);
-  bool split = terminal_dualcomm_only && (w > 60);
+  bool split = terminal_should_use_split_view() && (w > 60);
   lv_coord_t col_w = split ? (w / 2) : w;
   lv_coord_t local_top = clip->y1 - obj_coords.y1;
   lv_coord_t local_bottom = clip->y2 - obj_coords.y1;

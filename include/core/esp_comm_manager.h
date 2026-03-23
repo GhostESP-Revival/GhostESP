@@ -38,6 +38,8 @@ typedef void (*comm_command_callback_t)(const char* command, const char* data, v
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
 #define COMM_STREAM_CHANNEL_GPS 4
 #define COMM_STREAM_CHANNEL_NRF24 5
+#define COMM_STREAM_CHANNEL_ETHERNET      6
+#define COMM_STREAM_CHANNEL_MIC_AMPLITUDE 7  // MIC audio data for RGB visualizer
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 

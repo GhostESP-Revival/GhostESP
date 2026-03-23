@@ -318,7 +318,8 @@ static void ble_findtheflippers_callback(struct ble_gap_event *event, size_t len
              "     Name: %s,\n"
              "     RSSI: %d dBm\n",
              discovered_flipper_count, type_str,
-             advertisementMac, advertisementName, advertisementRssi);
+advertisementMac, advertisementName, advertisementRssi);
+        pulse_once(&rgb_manager, 255, 165, 0);
         discovered_flipper_count++;
     }
 }
@@ -461,4 +462,39 @@ void flipper_scan_start_tracking(void) {
     if (rc != 0) {
         glog("Error starting tracker; rc=%d\n", rc);
     }
+}
+
+bool flipper_scan_track_device(const uint8_t *mac, uint8_t addr_type, const char *name, int8_t rssi) {
+    if (mac == NULL) {
+        return false;
+    }
+
+    int index = -1;
+    for (int i = 0; i < discovered_flipper_count; i++) {
+        if (discovered_flippers[i].addr.type == addr_type &&
+            memcmp(discovered_flippers[i].addr.val, mac, 6) == 0) {
+            index = i;
+            break;
+        }
+    }
+
+    if (index < 0) {
+        if (discovered_flipper_count >= MAX_FLIPPERS) {
+            glog("Error: Flipper list is full.\n");
+            return false;
+        }
+        index = discovered_flipper_count++;
+        memset(&discovered_flippers[index], 0, sizeof(discovered_flippers[index]));
+        discovered_flippers[index].addr.type = addr_type;
+        memcpy(discovered_flippers[index].addr.val, mac, 6);
+    }
+
+    discovered_flippers[index].rssi = rssi;
+    if (name != NULL && name[0] != '\0') {
+        strncpy(discovered_flippers[index].name, name, sizeof(discovered_flippers[index].name) - 1);
+        discovered_flippers[index].name[sizeof(discovered_flippers[index].name) - 1] = '\0';
+    }
+
+    flipper_scan_select(index);
+    return true;
 }

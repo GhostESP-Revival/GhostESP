@@ -75,4 +75,7 @@ void airtag_scan_start_spoofing(void);
  */
 void airtag_scan_stop_spoofing(void);
 
+bool airtag_scan_spoof_device(const uint8_t *mac, uint8_t addr_type,
+                              const uint8_t *payload, size_t payload_len, int8_t rssi);
+
 #endif // AIRTAG_SCAN_H

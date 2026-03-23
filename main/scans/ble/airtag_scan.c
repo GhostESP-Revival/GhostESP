@@ -200,6 +200,7 @@ static void airtag_scanner_callback(struct ble_gap_event *event, size_t len) {
     format_mac_address(event->disc.addr.val, macAddress, sizeof(macAddress), false);
     log_airtag_discovery(discovered_airtag_count, discovered_airtag_count + 1,
                          macAddress, event->disc.rssi);
+    pulse_once(&rgb_manager, 0, 0, 255);
     
     discovered_airtag_count++;
 }
@@ -490,6 +491,42 @@ void airtag_scan_start_spoofing(void) {
          selected_airtag_index, macAddress);
     status_display_show_status("AirTag Spoof On");
     pulse_once(&rgb_manager, 0, 255, 0);
+}
+
+bool airtag_scan_spoof_device(const uint8_t *mac, uint8_t addr_type,
+                              const uint8_t *payload, size_t payload_len, int8_t rssi) {
+    if (mac == NULL || payload == NULL || payload_len == 0) {
+        return false;
+    }
+
+    int index = -1;
+    for (int i = 0; i < discovered_airtag_count; i++) {
+        if (discovered_airtags[i].addr.type == addr_type &&
+            memcmp(discovered_airtags[i].addr.val, mac, 6) == 0) {
+            index = i;
+            break;
+        }
+    }
+
+    if (index < 0) {
+        if (discovered_airtag_count >= MAX_AIRTAGS) {
+            glog("Error: AirTag list is full.\n");
+            return false;
+        }
+        index = discovered_airtag_count++;
+        memset(&discovered_airtags[index], 0, sizeof(discovered_airtags[index]));
+        discovered_airtags[index].addr.type = addr_type;
+        memcpy(discovered_airtags[index].addr.val, mac, 6);
+    }
+
+    discovered_airtags[index].payload_len =
+        (payload_len > BLE_HS_ADV_MAX_SZ) ? BLE_HS_ADV_MAX_SZ : payload_len;
+    memcpy(discovered_airtags[index].payload, payload, discovered_airtags[index].payload_len);
+    discovered_airtags[index].rssi = rssi;
+
+    airtag_scan_select(index);
+    airtag_scan_start_spoofing();
+    return airtag_spoofing_active;
 }
 
 /**

@@ -21,9 +21,33 @@ typedef enum {
     RGB_MODE_CYAN = 9,
     RGB_MODE_ORANGE = 10,
     RGB_MODE_WHITE = 11,
-    RGB_MODE_PINK = 12
+    RGB_MODE_PINK = 12,
+    RGB_MODE_MIC_VISUALIZER = 13  // Receives amplitude from GhostLink peer
     // ...add more modes here if needed
 } RGBMode;
+
+// Enum for MIC RGB Visualizer Modes (sensory_bridge inspired)
+typedef enum {
+    MIC_MODE_4BAND_SPECTRUM = 0,    // Current 4-band spectrum analyzer
+    MIC_MODE_VU_METER,              // Single dot VU meter
+    MIC_MODE_KALEIDOSCOPE,          // Perlin noise patterns modulated by audio
+    MIC_MODE_WAVEFORM,              // Oscilloscope-style waveform
+    MIC_MODE_BLOOM,                 // Center-expanding trails
+    MIC_MODE_PEAK_METER,            // Peak level meter with decay
+    MIC_MODE_COUNT
+} MicVisualizerMode;
+
+// Enum for MIC RGB Color Modes
+typedef enum {
+    MIC_COLOR_RAINBOW = 0,          // Fixed rainbow gradient (current)
+    MIC_COLOR_CHROMATIC,            // Musical note-based colors
+    MIC_COLOR_SINGLE_HUE,           // User-defined single hue
+    MIC_COLOR_PALETTE_FIRE,         // Fire palette
+    MIC_COLOR_PALETTE_OCEAN,        // Ocean palette
+    MIC_COLOR_PALETTE_FOREST,       // Forest palette
+    MIC_COLOR_PALETTE_HEAT,         // Heat palette
+    MIC_COLOR_COUNT
+} MicColorMode;
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 // idle/status oled animation mode
@@ -97,6 +121,15 @@ typedef enum {
     SETTING_BADUSB_RANDOMIZE,
     SETTING_BADUSB_KB_LAYOUT,
 #endif
+    // MIC RGB Visualizer settings
+    SETTING_MIC_VISUALIZER_MODE,
+    SETTING_MIC_COLOR_MODE,
+    SETTING_MIC_SENSITIVITY,
+    SETTING_MIC_SMOOTHING,
+    SETTING_MIC_CONTRAST,
+    SETTING_MIC_MIRROR_MODE,
+    SETTING_MIC_CALIBRATE,
+    SETTING_GHOSTLINK_SPLIT_VIEW,
 } SettingsType;
 
 
@@ -216,9 +249,17 @@ typedef struct {
   uint16_t badusb_pid;
   char badusb_manufacturer[33];
   char badusb_product[33];
-  bool badusb_randomize;
-  uint8_t badusb_kb_layout;
+    bool badusb_randomize;
+    uint8_t badusb_kb_layout;
 #endif
+    // MIC RGB Visualizer settings
+    MicVisualizerMode mic_visualizer_mode;
+    MicColorMode mic_color_mode;
+    uint8_t mic_sensitivity;        // 0-100 (AGC gain control)
+    uint8_t mic_smoothing;          // 0-100 (temporal smoothing)
+    uint8_t mic_contrast;           // 1-5 (square iterations)
+    bool mic_mirror_mode;           // Mirror visualizer center-out
+    bool ghostlink_split_view;      // Split GhostLink terminal into two columns
 } FSettings;
 
 // Function declarations
@@ -427,6 +468,25 @@ void settings_set_badusb_kb_layout(FSettings *settings, uint8_t layout);
 uint8_t settings_get_badusb_kb_layout(const FSettings *settings);
 void settings_reset_badusb_defaults(FSettings *settings);
 #endif
+
+// MIC RGB Visualizer getters and setters
+void settings_set_mic_visualizer_mode(FSettings *settings, MicVisualizerMode mode);
+MicVisualizerMode settings_get_mic_visualizer_mode(const FSettings *settings);
+void settings_set_mic_color_mode(FSettings *settings, MicColorMode mode);
+MicColorMode settings_get_mic_color_mode(const FSettings *settings);
+void settings_set_mic_sensitivity(FSettings *settings, uint8_t sensitivity);
+uint8_t settings_get_mic_sensitivity(const FSettings *settings);
+void settings_set_mic_smoothing(FSettings *settings, uint8_t smoothing);
+uint8_t settings_get_mic_smoothing(const FSettings *settings);
+void settings_set_mic_contrast(FSettings *settings, uint8_t contrast);
+uint8_t settings_get_mic_contrast(const FSettings *settings);
+void settings_set_mic_mirror_mode(FSettings *settings, bool enabled);
+bool settings_get_mic_mirror_mode(const FSettings *settings);
+void settings_set_mic_calibrate(FSettings *settings, bool calibrate);
+bool settings_get_mic_calibrate(const FSettings *settings);
+
+void settings_set_ghostlink_split_view(FSettings *settings, bool enabled);
+bool settings_get_ghostlink_split_view(const FSettings *settings);
 
 extern FSettings G_Settings;
 

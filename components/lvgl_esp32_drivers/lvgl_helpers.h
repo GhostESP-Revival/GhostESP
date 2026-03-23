@@ -13,6 +13,7 @@ extern "C" {
  *      INCLUDES
  *********************/
 #include <stdbool.h>
+#include "esp_err.h"
 
 #include "lvgl_spi_conf.h"
 #include "lvgl_tft/disp_driver.h"
@@ -105,7 +106,7 @@ void lvgl_i2c_locking(void* leader);
 void lvgl_driver_init(void);
 
 /* Initialize SPI master  */
-bool lvgl_spi_driver_init(int host, int miso_pin, int mosi_pin, int sclk_pin,
+esp_err_t lvgl_spi_driver_init(int host, int miso_pin, int mosi_pin, int sclk_pin,
     int max_transfer_sz, int dma_channel, int quadwp_pin, int quadhd_pin);
 
 /**********************
