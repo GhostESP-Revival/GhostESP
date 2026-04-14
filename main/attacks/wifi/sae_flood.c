@@ -20,11 +20,10 @@
 #include "esp_log.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
-#include "mbedtls/ecp.h"
-#include "mbedtls/ctr_drbg.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/sha256.h"
-#include "mbedtls/bignum.h"
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
+#include "mbedtls/private/ecp.h"
+#include "mbedtls/private/sha256.h"
+#include "mbedtls/private/bignum.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -110,11 +109,15 @@ static uint8_t sae_pwd_seed[128];
 static uint8_t sae_pwd_value[32];
 
 // Static mbedTLS contexts
-static mbedtls_entropy_context sae_entropy;
-static mbedtls_ctr_drbg_context sae_ctr_drbg;
 static mbedtls_sha256_context sae_sha256;
 static mbedtls_ecp_point sae_tmp_point;
 static bool sae_crypto_initialized = false;
+
+static int sae_random_func(void *ctx, unsigned char *buf, size_t len) {
+    (void)ctx;
+    esp_fill_random(buf, len);
+    return 0;
+}
 
 // Static frame buffer
 static uint8_t sae_frame_buffer[512];
@@ -201,18 +204,12 @@ static esp_err_t sae_derive_pwe(const char *password, const uint8_t *addr1,
 static esp_err_t sae_generate_commit(sae_data_t *sae) {
     ESP_LOGI("SAE_COMMIT", "gen start");
     if (!sae_crypto_initialized) {
-        mbedtls_entropy_init(&sae_entropy);
-        mbedtls_ctr_drbg_init(&sae_ctr_drbg);
         mbedtls_ecp_point_init(&sae_tmp_point);
-        if (mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0) != 0) {
-            ESP_LOGI("SAE_COMMIT", "drbg seed fail");
-            return ESP_FAIL;
-        }
         sae_crypto_initialized = true;
     }
     
-    mbedtls_mpi_fill_random(&sae->rand, 32, mbedtls_ctr_drbg_random, &sae_ctr_drbg);
-    mbedtls_mpi_fill_random(&sae->mask, 32, mbedtls_ctr_drbg_random, &sae_ctr_drbg);
+    mbedtls_mpi_fill_random(&sae->rand, 32, sae_random_func, NULL);
+    mbedtls_mpi_fill_random(&sae->mask, 32, sae_random_func, NULL);
     
     mbedtls_mpi_add_mpi(&sae->own_scalar, &sae->rand, &sae->mask);
     mbedtls_mpi_mod_mpi(&sae->own_scalar, &sae->own_scalar, &sae->group.N);
@@ -233,7 +230,7 @@ static esp_err_t sae_generate_commit(sae_data_t *sae) {
             mbedtls_mpi_lset(&mask_neg, 1);
         }
         if (mbedtls_ecp_mul(&sae->group, &sae->own_element, &mask_neg, &sae->pwe,
-                            mbedtls_ctr_drbg_random, &sae_ctr_drbg) != 0) {
+                            sae_random_func, NULL) != 0) {
             mbedtls_mpi_free(&mask_mod);
             mbedtls_mpi_free(&mask_neg);
             return ESP_FAIL;
@@ -337,10 +334,7 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     const char *pwd = sae_flood_password_buf[0] ? sae_flood_password_buf : NULL;
     const char *ssid = NULL;
     if (!sae_crypto_initialized) {
-        mbedtls_entropy_init(&sae_entropy);
-        mbedtls_ctr_drbg_init(&sae_ctr_drbg);
         mbedtls_ecp_point_init(&sae_tmp_point);
-        mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0);
         sae_crypto_initialized = true;
     }
     if (!sae_initialized) {
@@ -708,10 +702,7 @@ void sae_flood_start(const char *password) {
     const char *ssid = (selected_ap.ssid[0] != '\0') ? (char*)selected_ap.ssid : NULL;
     if (pwd && strlen(pwd) > 0) {
         if (!sae_crypto_initialized) {
-            mbedtls_entropy_init(&sae_entropy);
-            mbedtls_ctr_drbg_init(&sae_ctr_drbg);
             mbedtls_ecp_point_init(&sae_tmp_point);
-            mbedtls_ctr_drbg_seed(&sae_ctr_drbg, mbedtls_entropy_func, &sae_entropy, NULL, 0);
             sae_crypto_initialized = true;
         }
         if (!sae_initialized) {
@@ -824,8 +815,6 @@ void sae_flood_stop(void) {
     }
     if (sae_crypto_initialized) {
         mbedtls_ecp_point_free(&sae_tmp_point);
-        mbedtls_ctr_drbg_free(&sae_ctr_drbg);
-        mbedtls_entropy_free(&sae_entropy);
         sae_crypto_initialized = false;
     }
     memset(sae_commit_cache_ready, 0, sizeof(sae_commit_cache_ready));

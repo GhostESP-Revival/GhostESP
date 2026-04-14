@@ -319,7 +319,8 @@ static void ble_findtheflippers_callback(struct ble_gap_event *event, size_t len
              "     RSSI: %d dBm\n",
              discovered_flipper_count, type_str,
 advertisementMac, advertisementName, advertisementRssi);
-        pulse_once(&rgb_manager, 255, 165, 0);
+        // Avoid blocking the NimBLE host task inside the discovery callback.
+        rgb_manager_set_color(&rgb_manager, -1, 255, 165, 0, false);
         discovered_flipper_count++;
     }
 }

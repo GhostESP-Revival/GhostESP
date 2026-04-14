@@ -6,7 +6,6 @@
 #include "managers/settings_manager.h"
 #include "soc/gpio_periph.h"
 #include "soc/io_mux_reg.h"
-#include "soc/uart_periph.h"
 #include "sys/time.h"
 #include "vendor/GPS/MicroNMEA.h"
 #include "vendor/GPS/gps_logger.h"

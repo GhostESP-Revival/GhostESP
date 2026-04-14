@@ -22,7 +22,9 @@ char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
                                   const char* card_label);
 
 #define MFC_TAG "MFC"
+#ifdef CONFIG_NFC_PN532
 static void crc_a_calc(const uint8_t *data, size_t len, uint8_t out[2]);
+#endif
 
 static const mfc_attack_hooks_t *g_attack_hooks = NULL;
 
@@ -87,6 +89,11 @@ static uint8_t *g_sector_key_b_valid = NULL; // bitset per sector
 
 // Forward declaration for session reset function
 static void mfc_session_reset(void);
+
+#ifndef CONFIG_NFC_PN532
+static void mfc_session_reset(void) {
+}
+#endif
 
 static void mfc_cache_reset(void){
     if(g_mfc_cache){ free(g_mfc_cache); g_mfc_cache=NULL; }

@@ -78,7 +78,7 @@ static bool aime_parse(const NfcDevice* device, FuriString* parsed_data) {
 
     do {
         // verify key
-        MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 0);
+        const MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 0);
         uint64_t key = bit_lib_bytes_to_num_be(sec_tr->key_a.data, 6);
         if(key != aime_key) break;
 

@@ -99,7 +99,7 @@ endif()
 
 idf_component_register(SRCS ${SOURCES}
                        INCLUDE_DIRS ${LVGL_INCLUDE_DIRS}
-                       REQUIRES lvgl driver io_manager)
+                       REQUIRES lvgl driver io_manager esp_driver_i2c esp_driver_spi esp_driver_ledc)
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC "-DLV_LVGL_H_INCLUDE_SIMPLE")
 

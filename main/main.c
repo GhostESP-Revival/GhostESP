@@ -1,3 +1,4 @@
+#include "boot_banner_text.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
 #include "core/serial_manager.h"
@@ -19,6 +20,7 @@
 #include "managers/ble_manager.h"
 #endif
 #include <esp_log.h>
+#include "esp_random.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -58,17 +60,33 @@
 
 // Helper macro for measuring RAM usage
 #define MEASURE_INIT_RAM(name, init_call) do { \
-    size_t before = heap_caps_get_free_size(MALLOC_CAP_8BIT); \
-    ESP_LOGI(TAG, "Free RAM before %s: %d bytes", name, (int)before); \
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    ESP_LOGI(TAG, "Free INTERNAL RAM before %s: %d bytes", name, (int)before); \
     init_call; \
-    size_t after = heap_caps_get_free_size(MALLOC_CAP_8BIT); \
-    ESP_LOGI(TAG, "Free RAM after %s: %d bytes (used: %d bytes)", name, (int)after, (int)(before - after)); \
+    size_t after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    ESP_LOGI(TAG, "Free INTERNAL RAM after %s: %d bytes (used: %d bytes)", name, (int)after, (int)(before - after)); \
 } while(0)
 
 RGBManager_t rgb_manager;  // Global instance for entire project
 
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
+
+static void print_boot_banner(void) {
+    static const char *const banners[] = {
+        BOOT_BANNER_BLOCK,
+        BOOT_BANNER_GHOSTS,
+        BOOT_BANNER_PEOPLE,
+        BOOT_BANNER_DEVILS,
+        BOOT_BANNER_OGRE,
+        BOOT_BANNER_RECTANGLES,
+        BOOT_BANNER_SLANT,
+        BOOT_BANNER_SOFT,
+    };
+    const size_t n = sizeof(banners) / sizeof(banners[0]);
+    unsigned idx = (unsigned)(esp_random() % n);
+    printf("%s\n", banners[idx]);
+}
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #define COREDUMP_ROOT_DIR "/mnt/ghostesp"
@@ -600,9 +618,14 @@ void app_main(void) {
     size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
     float percent_free = (total_heap > 0) ? (100.0f * free_heap / total_heap) : 0.0f;
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    float percent_internal_free = (total_internal > 0) ? (100.0f * free_internal / total_internal) : 0.0f;
 
     ESP_LOGI(TAG, "Free heap after init: %d / %d bytes (%.1f%% free)", (int)free_heap, (int)total_heap, percent_free);
+    ESP_LOGI(TAG, "Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)", (int)free_internal, (int)total_internal, percent_internal_free);
     printf("Free heap after init: %d / %d bytes (%.1f%% free)\n", (int)free_heap, (int)total_heap, percent_free);
+    printf("Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)\n", (int)free_internal, (int)total_internal, percent_internal_free);
 
 #ifdef CONFIG_HAS_RTC_CLOCK
     // Sync system time from RTC on boot
@@ -638,11 +661,7 @@ void app_main(void) {
 #endif
 
     ESP_LOGI(TAG, "Ghost ESP INIT complete.");
-    printf("    ####  #   #  ####   ####  #####   ####  ####  #####\n");
-    printf("   #      #   # #    #  #       #     #     #     #   #\n");
-    printf("   #  ### ##### #    #  ####    #     ####  ####  #####\n");
-    printf("   #   #  #   # #    #     #    #     #        #  #\n");
-    printf("    ####  #   #  ####   ####    #     ##### ####  #\n");
+    print_boot_banner();
     printf("\n");
     printf("ghostcli> Type 'help' for available commands\n");
 }

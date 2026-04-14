@@ -1,11 +1,13 @@
 #include "managers/fuel_gauge_manager.h"
 #include "esp_log.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
 #include "esp_pm.h"
 #include "io_manager/i2c_bus_lock.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #ifdef CONFIG_USE_BQ27220_FUEL_GAUGE
 
@@ -53,6 +55,8 @@ static const char *TAG = "FuelGaugeManager";
 
 static bool is_initialized = false;
 static bool i2c_initialized_by_us = false;
+static i2c_master_bus_handle_t fg_i2c_bus = NULL;
+static i2c_master_dev_handle_t fg_i2c_dev = NULL;
 static fuel_gauge_data_t last_data = {0};
 static volatile bool s_paused = false;
 
@@ -66,9 +70,7 @@ static uint16_t bq27220_read_word(uint8_t reg) {
     if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
 #endif
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
-    esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
-                                                 &reg, 1, data, 2,
-                                                 pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    esp_err_t ret = locked ? i2c_master_transmit_receive(fg_i2c_dev, &reg, 1, data, 2, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
@@ -90,9 +92,7 @@ static esp_err_t bq27220_write_word(uint8_t reg, uint16_t data) {
     if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
 #endif
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
-    esp_err_t ret = i2c_master_write_to_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
-                                      write_data, 3,
-                                      pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    esp_err_t ret = locked ? i2c_master_transmit(fg_i2c_dev, write_data, 3, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
@@ -196,9 +196,7 @@ static uint8_t bq27220_read_byte(uint8_t reg) {
     if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
 #endif
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
-    esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, BQ27220_I2C_ADDRESS,
-                                                  &reg, 1, &data, 1,
-                                                  pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    esp_err_t ret = locked ? i2c_master_transmit_receive(fg_i2c_dev, &reg, 1, &data, 1, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
@@ -311,31 +309,40 @@ static esp_err_t fuel_gauge_reset(void) {
 }
 
 static esp_err_t fuel_gauge_i2c_init(void) {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = CONFIG_BQ27220_I2C_SDA_PIN,
-        .scl_io_num = CONFIG_BQ27220_I2C_SCL_PIN,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
-        .clk_flags = 0,
-    };
-
-    esp_err_t ret = i2c_param_config(I2C_MASTER_NUM, &conf);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to configure I2C parameters: %s", esp_err_to_name(ret));
+    esp_err_t ret = i2c_master_get_bus_handle(I2C_MASTER_NUM, &fg_i2c_bus);
+    if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
+        i2c_master_bus_config_t conf = {
+            .i2c_port = I2C_MASTER_NUM,
+            .sda_io_num = CONFIG_BQ27220_I2C_SDA_PIN,
+            .scl_io_num = CONFIG_BQ27220_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags.enable_internal_pullup = true,
+        };
+        ret = i2c_new_master_bus(&conf, &fg_i2c_bus);
+        if (ret == ESP_OK) {
+            i2c_initialized_by_us = true;
+        }
+    } else if (ret == ESP_OK) {
+        i2c_initialized_by_us = false;
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize I2C bus: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
-    if (ret == ESP_OK) {
-        i2c_initialized_by_us = true;
-    } else if (ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
-        ESP_LOGI(TAG, "I2C driver already installed or busy on port %d", I2C_MASTER_NUM);
-        ret = ESP_OK; // Treat as success
-    } else {
-        ESP_LOGE(TAG, "Failed to install I2C driver: %s", esp_err_to_name(ret));
+    if (!fg_i2c_dev) {
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = BQ27220_I2C_ADDRESS,
+            .scl_speed_hz = 100000,
+            .scl_wait_us = 0,
+        };
+        ret = i2c_master_bus_add_device(fg_i2c_bus, &dev_cfg, &fg_i2c_dev);
     }
+    if (ret != ESP_OK) return ret;
 
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock == NULL) {
@@ -606,15 +613,18 @@ esp_err_t fuel_gauge_manager_reset(void) {
 
 void fuel_gauge_manager_deinit(void) {
     if (is_initialized) {
-        if (i2c_initialized_by_us) {
-            esp_err_t ret = i2c_driver_delete(I2C_MASTER_NUM);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "I2C driver deleted successfully");
-            } else {
-                ESP_LOGW(TAG, "Failed to delete I2C driver: %s", esp_err_to_name(ret));
+        if (fg_i2c_dev) {
+            i2c_master_bus_rm_device(fg_i2c_dev);
+            fg_i2c_dev = NULL;
+        }
+        if (i2c_initialized_by_us && fg_i2c_bus) {
+            esp_err_t ret = i2c_del_master_bus(fg_i2c_bus);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to delete I2C bus: %s", esp_err_to_name(ret));
             }
             i2c_initialized_by_us = false;
         }
+        fg_i2c_bus = NULL;
         is_initialized = false;
         memset(&last_data, 0, sizeof(last_data));
         ESP_LOGI(TAG, "Fuel gauge deinitialized");
@@ -645,8 +655,34 @@ static const char *TAG = "MAX17048";
 
 static bool is_initialized = false;
 static bool i2c_initialized_by_us = false;
+static i2c_master_bus_handle_t fg_i2c_bus = NULL;
+static i2c_master_dev_handle_t fg_i2c_dev = NULL;
 static fuel_gauge_data_t last_data = {0};
 static volatile bool s_paused = false;
+static int8_t s_nvs_soc = -1;
+static uint32_t s_last_nvs_save = 0;
+
+#define NVS_NAMESPACE "fuelgauge"
+#define NVS_KEY_SOC    "soc"
+#define NVS_SAVE_INTERVAL_S 60
+
+static void nvs_save_soc(uint8_t soc) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, NVS_KEY_SOC, soc);
+    nvs_commit(h);
+    nvs_close(h);
+    s_nvs_soc = (int8_t)soc;
+}
+
+static int8_t nvs_load_soc(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return -1;
+    uint8_t val = 0;
+    esp_err_t err = nvs_get_u8(h, NVS_KEY_SOC, &val);
+    nvs_close(h);
+    return (err == ESP_OK) ? (int8_t)val : -1;
+}
 
 #if CONFIG_PM_ENABLE
 static esp_pm_lock_handle_t fg_i2c_pm_lock = NULL;
@@ -661,9 +697,7 @@ static uint16_t max17048_read_word(uint8_t reg) {
     uint16_t result = 0xFFFF;
     for (int retry = 0; retry < 3; retry++) {
         if (i2c_bus_lock(I2C_MASTER_NUM, I2C_LOCK_TIMEOUT_MS)) {
-            esp_err_t ret = i2c_master_write_read_device(I2C_MASTER_NUM, MAX17048_I2C_ADDRESS,
-                                                         &reg, 1, data, 2,
-                                                         pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+            esp_err_t ret = i2c_master_transmit_receive(fg_i2c_dev, &reg, 1, data, 2, I2C_MASTER_TIMEOUT_MS);
             i2c_bus_unlock(I2C_MASTER_NUM);
             if (ret == ESP_OK) {
                 result = (uint16_t)((data[0] << 8) | data[1]);
@@ -691,9 +725,7 @@ static esp_err_t max17048_write_word(uint8_t reg, uint16_t data) {
     esp_err_t ret = ESP_ERR_TIMEOUT;
     for (int retry = 0; retry < 3; retry++) {
         if (i2c_bus_lock(I2C_MASTER_NUM, I2C_LOCK_TIMEOUT_MS)) {
-            ret = i2c_master_write_to_device(I2C_MASTER_NUM, MAX17048_I2C_ADDRESS,
-                                              write_data, 3,
-                                              pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+            ret = i2c_master_transmit(fg_i2c_dev, write_data, 3, I2C_MASTER_TIMEOUT_MS);
             i2c_bus_unlock(I2C_MASTER_NUM);
             if (ret == ESP_OK) break;
         }
@@ -707,36 +739,37 @@ static esp_err_t max17048_write_word(uint8_t reg, uint16_t data) {
 }
 
 static esp_err_t fuel_gauge_i2c_init(void) {
-    // First try to install the driver to check if it's already installed
-    esp_err_t ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
-    if (ret == ESP_OK) {
-        // We installed it - now configure parameters
-        i2c_initialized_by_us = true;
-        i2c_config_t conf = {
-            .mode = I2C_MODE_MASTER,
+    esp_err_t ret = i2c_master_get_bus_handle(I2C_MASTER_NUM, &fg_i2c_bus);
+    if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
+        i2c_master_bus_config_t conf = {
+            .i2c_port = I2C_MASTER_NUM,
             .sda_io_num = CONFIG_MAX17048_I2C_SDA_PIN,
             .scl_io_num = CONFIG_MAX17048_I2C_SCL_PIN,
-            .sda_pullup_en = GPIO_PULLUP_ENABLE,
-            .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master.clk_speed = 100000,
-            .clk_flags = 0,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags.enable_internal_pullup = true,
         };
-
-        ret = i2c_param_config(I2C_MASTER_NUM, &conf);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to configure I2C parameters: %s", esp_err_to_name(ret));
-            i2c_driver_delete(I2C_MASTER_NUM);
-            i2c_initialized_by_us = false;
-            return ret;
+        ret = i2c_new_master_bus(&conf, &fg_i2c_bus);
+        if (ret == ESP_OK) {
+            i2c_initialized_by_us = true;
         }
-    } else if (ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
-        ESP_LOGI(TAG, "I2C driver already installed on port %d", I2C_MASTER_NUM);
+    } else if (ret == ESP_OK) {
         i2c_initialized_by_us = false;
-        ret = ESP_OK; // Treat as success - use existing driver
-    } else {
-        ESP_LOGE(TAG, "Failed to install I2C driver: %s", esp_err_to_name(ret));
-        return ret;
     }
+    if (ret != ESP_OK) return ret;
+
+    if (!fg_i2c_dev) {
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = MAX17048_I2C_ADDRESS,
+            .scl_speed_hz = 100000,
+            .scl_wait_us = 0,
+        };
+        ret = i2c_master_bus_add_device(fg_i2c_bus, &dev_cfg, &fg_i2c_dev);
+    }
+    if (ret != ESP_OK) return ret;
 
 #if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock == NULL) {
@@ -773,42 +806,73 @@ bool fuel_gauge_manager_init(void) {
     if (version == 0xFFFF) {
         ESP_LOGE(TAG, "Failed to communicate with MAX17048 - check wiring and I2C config");
         // CLEANUP: If we installed the driver, remove it so others can use the port cleanly
-        if (i2c_initialized_by_us) {
-            i2c_driver_delete(I2C_MASTER_NUM);
+        if (fg_i2c_dev) {
+            i2c_master_bus_rm_device(fg_i2c_dev);
+            fg_i2c_dev = NULL;
+        }
+        if (i2c_initialized_by_us && fg_i2c_bus) {
+            i2c_del_master_bus(fg_i2c_bus);
             i2c_initialized_by_us = false;
         }
+        fg_i2c_bus = NULL;
         return false;
     }
 
     ESP_LOGI(TAG, "MAX17048 detected, version: 0x%04X", version);
-    
-    // Perform a full software reset to clear any stale ModelGauge data
-    max17048_write_word(MAX17048_REG_CMD, 0x5400);
-    vTaskDelay(pdMS_TO_TICKS(50));
 
-    // Set RCOMP to standard LiPo value (0x97) to stabilize ModelGauge
-    // CONFIG register is at 0x0C. High byte is RCOMP.
-    uint16_t config_reg = max17048_read_word(MAX17048_REG_CONFIG);
-    if (config_reg != 0xFFFF) {
-        uint16_t new_config = (config_reg & 0x00FF) | 0x9700;
-        max17048_write_word(MAX17048_REG_CONFIG, new_config);
+    s_nvs_soc = nvs_load_soc();
+    if (s_nvs_soc >= 0) {
+        ESP_LOGI(TAG, "Loaded SOC from NVS: %d%%", s_nvs_soc);
+    }
+    
+    // Only perform a software reset if the MAX17048 itself experienced a power-on reset.
+    // The POR bit (bit 1 of STATUS register) is set when the chip loses power.
+    // If the ESP resets but the fuel gauge stays powered (e.g. USB still plugged in),
+    // the chip retains its learned ModelGauge state and we should NOT wipe it.
+    uint16_t status = max17048_read_word(MAX17048_REG_STATUS);
+    if (status != 0xFFFF && (status & 0x02)) {
+        ESP_LOGI(TAG, "MAX17048 POR bit set - performing software reset");
+        max17048_write_word(MAX17048_REG_CMD, 0x5400);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    } else {
+        ESP_LOGI(TAG, "MAX17048 POR bit clear - skipping reset (learned data intact)");
+    }
+
+    bool did_reset = (status != 0xFFFF && (status & 0x02));
+
+    if (did_reset) {
+        // Set RCOMP to standard LiPo value (0x97) to stabilize ModelGauge
+        // CONFIG register is at 0x0C. High byte is RCOMP.
+        uint16_t config_reg = max17048_read_word(MAX17048_REG_CONFIG);
+        if (config_reg != 0xFFFF) {
+            uint16_t new_config = (config_reg & 0x00FF) | 0x9700;
+            max17048_write_word(MAX17048_REG_CONFIG, new_config);
+            
+            // Verify write
+            uint16_t verify = max17048_read_word(MAX17048_REG_CONFIG);
+            if ((verify & 0xFF00) == 0x9700) {
+                ESP_LOGI(TAG, "RCOMP set successfully: 0x%04X", verify);
+            } else {
+                ESP_LOGW(TAG, "RCOMP write mismatch! Got: 0x%04X", verify);
+            }
+        }
+
+        // Quick start to update SOC immediately after reset/config
+        uint16_t current_mode = max17048_read_word(MAX17048_REG_MODE);
+        if (current_mode != 0xFFFF) {
+            max17048_write_word(MAX17048_REG_MODE, current_mode | 0x4000); // Set QuickStart bit
+        }
         
-        // Verify write
-        uint16_t verify = max17048_read_word(MAX17048_REG_CONFIG);
-        if ((verify & 0xFF00) == 0x9700) {
-            ESP_LOGI(TAG, "RCOMP set successfully: 0x%04X", verify);
-        } else {
-            ESP_LOGW(TAG, "RCOMP write mismatch! Got: 0x%04X", verify);
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // After reset, the chip's SOC is voltage-based and unreliable when plugged in.
+        // Seed last_data from NVS so the hysteresis/smoothing starts from a sane value.
+        if (s_nvs_soc >= 0) {
+            last_data.percentage = (uint8_t)s_nvs_soc;
+            last_data.is_initialized = true;
+            ESP_LOGI(TAG, "Seeding fuel gauge from NVS SOC: %d%%", s_nvs_soc);
         }
     }
-
-    // Quick start to update SOC immediately after reset/config
-    uint16_t current_mode = max17048_read_word(MAX17048_REG_MODE);
-    if (current_mode != 0xFFFF) {
-        max17048_write_word(MAX17048_REG_MODE, current_mode | 0x4000); // Set QuickStart bit
-    }
-    
-    vTaskDelay(pdMS_TO_TICKS(100));
 
     memset(&last_data, 0, sizeof(last_data));
     last_data.is_initialized = true;
@@ -912,6 +976,13 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
     // Update cache
     memcpy(&last_data, data, sizeof(fuel_gauge_data_t));
 
+    // Periodically save SOC to NVS so we survive fuel gauge power loss
+    uint32_t now = xTaskGetTickCount() / configTICK_RATE_HZ;
+    if (now - s_last_nvs_save >= NVS_SAVE_INTERVAL_S) {
+        s_last_nvs_save = now;
+        nvs_save_soc(data->percentage);
+    }
+
     return true;
 }
 
@@ -941,10 +1012,15 @@ esp_err_t fuel_gauge_manager_reset(void) {
 
 void fuel_gauge_manager_deinit(void) {
     if (is_initialized) {
-        if (i2c_initialized_by_us) {
-            i2c_driver_delete(I2C_MASTER_NUM);
+        if (fg_i2c_dev) {
+            i2c_master_bus_rm_device(fg_i2c_dev);
+            fg_i2c_dev = NULL;
+        }
+        if (i2c_initialized_by_us && fg_i2c_bus) {
+            i2c_del_master_bus(fg_i2c_bus);
             i2c_initialized_by_us = false;
         }
+        fg_i2c_bus = NULL;
         is_initialized = false;
         memset(&last_data, 0, sizeof(last_data));
     }

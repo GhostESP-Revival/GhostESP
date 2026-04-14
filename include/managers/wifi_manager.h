@@ -261,6 +261,12 @@ void wifi_manager_start_sae_flood(const char *password);
 void wifi_manager_stop_sae_flood(void);
 void wifi_manager_sae_flood_help(void);
 
+// GTK Abuse Test
+void wifi_manager_start_gtk_abuse(const char *ssid, const char *password);
+void wifi_manager_stop_gtk_abuse(void);
+bool wifi_manager_gtk_abuse_is_running(void);
+void wifi_manager_gtk_abuse_display(void);
+
 // Channel Switch Attack (CSA)
 void wifi_manager_start_channel_switch_attack(void);
 void wifi_manager_stop_channel_switch_attack(void);
@@ -275,6 +281,7 @@ void wifi_manager_clear_scan_results(void);
 // Karma attack functions
 void wifi_manager_start_karma(void);
 void wifi_manager_stop_karma(void);
+bool wifi_manager_karma_is_running(void);
 void wifi_manager_set_karma_ssid_list(const char **ssids, int count);
 void wifi_manager_set_karma_portal_file(const char *path);
 

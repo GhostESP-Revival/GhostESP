@@ -8,10 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
+
+#include "i2c_shared.h"
 
 #include "vendor/drivers/CH422G.h"
 
@@ -43,23 +45,14 @@
 
 static const char *TAG = "ch422g";
 
-esp_err_t ch422g_new_device(i2c_port_t i2c_num, uint32_t i2c_address,
+esp_err_t ch422g_new_device(i2c_port_num_t i2c_num, uint32_t i2c_address,
                             esp_io_expander_ch422g_t **out_dev) {
-  i2c_config_t conf = {
-      .mode = I2C_MODE_MASTER,
-      .sda_io_num = 8,
-      .scl_io_num = 9,
-      .master.clk_speed = 400000,
-  };
-  esp_err_t err = i2c_param_config(i2c_num, &conf);
+  bool bus_created = false;
+  i2c_master_bus_handle_t bus = NULL;
+  esp_err_t err = i2c_shared_get_or_create_bus(i2c_num, 8, 9, true, &bus, &bus_created);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "I2C param config failed: %s", esp_err_to_name(err));
+    ESP_LOGE(TAG, "I2C bus get/create failed: %s", esp_err_to_name(err));
     return err;
-  }
-
-  err = i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "I2C driver install failed: %s", esp_err_to_name(err));
   }
 
   ESP_RETURN_ON_FALSE(i2c_num < I2C_NUM_MAX, ESP_ERR_INVALID_ARG, TAG,
@@ -72,6 +65,8 @@ esp_err_t ch422g_new_device(i2c_port_t i2c_num, uint32_t i2c_address,
 
   dev->i2c_num = i2c_num;
   dev->i2c_address = i2c_address;
+  dev->bus_handle = bus;
+  dev->owns_i2c_bus = bus_created;
   dev->regs.wr_set = REG_WR_SET_DEFAULT_VAL;
   dev->regs.wr_oc = REG_WR_OC_DEFAULT_VAL;
   dev->regs.wr_io = REG_WR_IO_DEFAULT_VAL;
@@ -83,27 +78,24 @@ esp_err_t ch422g_new_device(i2c_port_t i2c_num, uint32_t i2c_address,
 }
 
 void cleanup_resources(esp_io_expander_ch422g_t *ch422g_dev,
-                       i2c_port_t i2c_num) {
+                       i2c_port_num_t i2c_num) {
   if (ch422g_dev) {
+    if (ch422g_dev->owns_i2c_bus && ch422g_dev->bus_handle) {
+      i2c_del_master_bus(ch422g_dev->bus_handle);
+    }
     free(ch422g_dev);
     ESP_LOGI(TAG, "CH422G device deleted");
   }
-
-  esp_err_t err = i2c_driver_delete(i2c_num);
-  if (err == ESP_OK) {
-    ESP_LOGI(TAG, "I2C driver uninstalled");
-  } else {
-    ESP_LOGE(TAG, "Failed to uninstall I2C driver: %s", esp_err_to_name(err));
-  }
+  (void)i2c_num;
 }
 
 esp_err_t ch422g_read_input_reg(esp_io_expander_ch422g_t *ch422g,
                                 uint32_t *value) {
   uint8_t temp = 0;
 
-  esp_err_t err = i2c_master_read_from_device(
-      ch422g->i2c_num, ch422g->i2c_address | CH422G_REG_RD_IO, &temp, 1,
-      pdMS_TO_TICKS(I2C_TIMEOUT_MS));
+  esp_err_t err = i2c_shared_receive_from_addr(
+      ch422g->bus_handle, ch422g->i2c_address | CH422G_REG_RD_IO, 400000, &temp, 1,
+      I2C_TIMEOUT_MS);
   ESP_RETURN_ON_ERROR(err, TAG, "Failed to read input register");
 
   *value = temp;
@@ -116,17 +108,17 @@ esp_err_t ch422g_write_output_reg(esp_io_expander_ch422g_t *ch422g,
   uint8_t wr_io_data = value & 0xFF;
 
   if (wr_oc_data) {
-    ESP_RETURN_ON_ERROR(i2c_master_write_to_device(
-                            ch422g->i2c_num, CH422G_REG_WR_OC, &wr_oc_data, 1,
-                            pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+    ESP_RETURN_ON_ERROR(i2c_shared_transmit_to_addr(
+                            ch422g->bus_handle, CH422G_REG_WR_OC, 400000, &wr_oc_data, 1,
+                            I2C_TIMEOUT_MS),
                         TAG, "Failed to write WR_OC register");
     ch422g->regs.wr_oc = wr_oc_data;
   }
 
   if (wr_io_data) {
-    ESP_RETURN_ON_ERROR(i2c_master_write_to_device(
-                            ch422g->i2c_num, CH422G_REG_WR_IO, &wr_io_data, 1,
-                            pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+    ESP_RETURN_ON_ERROR(i2c_shared_transmit_to_addr(
+                            ch422g->bus_handle, CH422G_REG_WR_IO, 400000, &wr_io_data, 1,
+                            I2C_TIMEOUT_MS),
                         TAG, "Failed to write WR_IO register");
     ch422g->regs.wr_io = wr_io_data;
   }
@@ -151,9 +143,9 @@ esp_err_t ch422g_write_direction_reg(esp_io_expander_ch422g_t *ch422g,
     data &= ~REG_WR_SET_BIT_IO_OE;
   }
 
-  ESP_RETURN_ON_ERROR(i2c_master_write_to_device(ch422g->i2c_num,
-                                                 CH422G_REG_WR_SET, &data, 1,
-                                                 pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+  ESP_RETURN_ON_ERROR(i2c_shared_transmit_to_addr(ch422g->bus_handle,
+                                                 CH422G_REG_WR_SET, 400000, &data, 1,
+                                                 I2C_TIMEOUT_MS),
                       TAG, "Failed to write direction register");
 
   ch422g->regs.wr_set = data;

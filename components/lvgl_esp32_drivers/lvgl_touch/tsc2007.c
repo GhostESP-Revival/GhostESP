@@ -3,14 +3,16 @@
  */
 
 #include "tsc2007.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "i2c_shared.h"
 
 // TSC2007 Address
 static uint8_t s_tsc2007_addr = 0x4B;
+static i2c_master_bus_handle_t s_tsc2007_bus = NULL;
 
 // I2C Port (assumed 0 based on user context)
 #define I2C_PORT_NUM 0
@@ -22,34 +24,24 @@ static const char *TAG = "TSC2007";
 static bool tsc2007_i2c_read_cmd(uint8_t func, uint16_t *res) {
     uint8_t cmd = (func << 4) | (1 << 2) | (0 << 1); // Func, ADON_IRQOFF, 12-bit
     uint8_t data[2] = {0};
+
+    if (!s_tsc2007_bus && i2c_master_get_bus_handle(I2C_PORT_NUM, &s_tsc2007_bus) != ESP_OK) {
+        return false;
+    }
     
     // Acquire shared lock from io_manager
     if (!i2c_bus_lock(I2C_PORT_NUM, 50)) {
         return false;
     }
     
-    i2c_cmd_handle_t link = i2c_cmd_link_create();
-    i2c_master_start(link);
-    i2c_master_write_byte(link, (s_tsc2007_addr << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(link, cmd, true);
-    i2c_master_stop(link);
-    
-    esp_err_t ret = i2c_master_cmd_begin(I2C_PORT_NUM, link, pdMS_TO_TICKS(50));
-    i2c_cmd_link_delete(link);
+    esp_err_t ret = i2c_shared_transmit_to_addr(s_tsc2007_bus, s_tsc2007_addr, 100000, &cmd, 1, 50);
 
     if (ret != ESP_OK) {
         i2c_bus_unlock(I2C_PORT_NUM);
         return false;
     }
     
-    link = i2c_cmd_link_create();
-    i2c_master_start(link);
-    i2c_master_write_byte(link, (s_tsc2007_addr << 1) | I2C_MASTER_READ, true);
-    i2c_master_read(link, data, 2, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(link);
-
-    ret = i2c_master_cmd_begin(I2C_PORT_NUM, link, pdMS_TO_TICKS(50));
-    i2c_cmd_link_delete(link);
+    ret = i2c_shared_receive_from_addr(s_tsc2007_bus, s_tsc2007_addr, 100000, data, 2, 50);
     
     i2c_bus_unlock(I2C_PORT_NUM);
 

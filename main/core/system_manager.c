@@ -26,7 +26,7 @@ bool system_manager_create_task(void (*task_function)(void *),
   }
 
   // Create a new task
-  TaskHandle_t task_handle;
+  TaskHandle_t task_handle = NULL;
   if (xTaskCreate(task_function, task_name, stack_size, NULL, priority,
                   &task_handle) != pdPASS) {
     printf("Failed to create task %s.\n", task_name);

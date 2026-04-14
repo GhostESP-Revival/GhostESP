@@ -1,6 +1,58 @@
 # Ghost ESP Changelog
 
+## Revival v1.9.8
 
+### Added
+- Added New 'Ghostchi' App - assets by pr3!
+- Added Wi-Fi multi-select flows for APs and stations in the Scan & Select menu so multiple targets can be selected from the paged detail lists before running attacks/actions
+- Added GTK abuse testing flow for checking client isolation bypass behavior after joining a target Wi-Fi network
+- Added beacon_spam_broadcast_karma function that uses real AP MAC so BSSID matches probe responses
+- Added missing encoder controls to the detail view
+- Added option to change background shade of options
+- Added option to enable rounded menu items and set as default on
+- Added a random ascii art boot banner to the serial log - @tototo31
+
+### Changed
+- Migrated project to ESP-IDF v6.0
+- The Wired Hatter's Banshee C5 internal memory optimisations
+- Improved The Wired Hatter's fuel gauge handling
+- Karma now skips channel hopping when AP has connected clients
+- Moved lvgl tick task back out of psram to resolve wd triggering on setup wizard
+- Optimised LVGL memory footprint across all configs by disabling unused components
+- Increased CYD display buffer for significantly smoother rendering
+- Rename 'Normal' main menu layout to 'Carousel'
+- Restyled touch control bar to be more compact and clean
+- Wi-Fi capture commands now lock to the selected AP's channel when one AP is selected, or hop only across the selected AP channels when multiple APs are selected
+- Removed unnecessary channel list rebuild every 100ms in PineAP detection hop timer
+- Improved code readability by replacing comma operator with separate statement in reset_setting_value
+- Replaced unsafe strcpy calls with snprintf in portal and AP credential commands
+- Removed dead _WIN32 code path in file upload handler (never compiled on ESP32)
+- Downgraded Digest auth header logging from INFO to DEBUG to avoid leaking credentials in logs
+- Cleaned up duplicate includes in ap_manager.c and wifi_manager.c
+
+### Fixed
+- Miscellaneous stability fixes and code cleanup across the infrared, terminal, number pad, popup, options, badusb, and clock views
+- Fixed crash on The Wired Hatter's Banshee S3 chip when enabling USB Keyboard caused by running out of input interrupts
+- Potentially fixed issue where the C5 on the Banshee would run out of DMA
+- Fixed channel_enabled flag not being reset when RMT operations fail
+- Fixed crash when opening WebUI File Manager and improved styling
+- Fixed airtag tracking not working
+- Fixed TEmbedCC1101 fuel gague init
+- Fixed WPS detection buffer overflow when exceeding MAX_WPS_NETWORKS limit
+- Fixed out-of-bounds read in EAPOL detection on short packets
+- Fixed EAPOL handshake M4 frames being misclassified as M2 by checking the Secure bit
+- Fixed wardrive heartbeat timer using wrong interval (5s instead of 10s)
+- Misc fixes: added packet validation to PWN scan callback, fixed symbol visibility on compare_bssid, added bounds checks to channel split loops
+- Fixed capture command silently ignoring invalid capture types
+- Fixed AP credentials command not validating SSID length (could overflow buffer)
+- Fixed channel congestion command not checking malloc return values (potential crash on OOM)
+- Fixed settime command rejecting valid Unix timestamp of 0 (Unix epoch)
+- Fixed path traversal vulnerability in WebUI SD card file download and delete handlers (now enforces /mnt prefix)
+- Fixed unbounded malloc in WebUI settings API handler (now capped at 4KB to prevent OOM crashes)
+- Fixed missing HTTP error responses in settings API handler (previously left client hanging on parse errors)
+- Fixed HCI buffer overflow in BLE PCAP callback when advertisement data exceeds 243 bytes
+- Fixed snprintf size mismatch in WebUI file upload handler that could write past allocation
+- Reset BLE spam detector state (company_id + counter) consistently on stop
 
 ## Revival v1.9.7
 

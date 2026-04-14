@@ -3,7 +3,9 @@
  */
 
 #include "touch_driver.h"
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI)
 #include "tp_spi.h"
+#endif
 #include "tsc2007.h"
 #include "sdkconfig.h"
 

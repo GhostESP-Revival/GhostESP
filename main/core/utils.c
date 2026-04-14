@@ -8,7 +8,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/dirent.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>

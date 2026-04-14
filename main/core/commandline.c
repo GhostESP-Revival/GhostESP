@@ -60,8 +60,9 @@
 #include <time.h>
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
+#include "mbedtls/private/entropy.h"
+#include "mbedtls/private/ctr_drbg.h"
 #include "mbedtls/error.h"
 
 // Forward declaration - esp_netif_get_netif_impl is not in public API but exists internally
@@ -74,6 +75,8 @@ void* esp_netif_get_netif_impl(esp_netif_t *esp_netif);
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -525,7 +528,8 @@ static void reset_setting_value(const SettingDescriptor *d, FSettings *s, const 
     void *dst = sb + d->offset;
     switch (d->type) {
         case ST_STRING:
-            strncpy((char *)dst, (const char *)src, d->str_capacity - 1), ((char *)dst)[d->str_capacity - 1] = '\0';
+            strncpy((char *)dst, (const char *)src, d->str_capacity - 1);
+            ((char *)dst)[d->str_capacity - 1] = '\0';
             break;
         case ST_BOOL:
             *(bool *)dst = *(const bool *)src; break;
@@ -681,9 +685,19 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_start_sae_flood(argv[2]);
             status_display_show_status("SAE Start");
             return;
+        } else if (strcmp(argv[1], "-g") == 0) {
+            if (argc < 4) {
+                glog("Usage: attack -g <ssid> <password>\n");
+                status_display_show_status("GTK Usage");
+                return;
+            }
+            glog("GTK Abuse test starting...\n");
+            wifi_manager_start_gtk_abuse(argv[2], argv[3]);
+            status_display_show_status("GTK Start");
+            return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood)\n");
+    glog("Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
     status_display_show_status("Attack Usage");
 }
 
@@ -714,6 +728,7 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
     wifi_manager_stop_channel_switch_attack();
+    wifi_manager_stop_gtk_abuse();
     glog("All WiFi attacks stopped...\n");
     status_display_show_status("Attacks Off");
 }
@@ -1246,7 +1261,7 @@ void handle_start_portal(int argc, char **argv) {
         return;
     }
     char final_url_or_path[MAX_PORTAL_PATH_LEN];
-    strcpy(final_url_or_path, url);
+    snprintf(final_url_or_path, sizeof(final_url_or_path), "%s", url);
 
     // Only prepend /mnt/ if it's not the default portal and doesn't already start with /mnt/
     if (strcmp(url, "default") != 0 && strncmp(final_url_or_path, "/mnt/ghostesp/evil_portal/portals/", 5) != 0) {
@@ -1748,7 +1763,29 @@ void handle_capture_scan(int argc, char **argv) {
         ble_start_skimmer_detection();
 
     }
+    #endif
+
+    if (strcmp(capturetype, "-probe") != 0 &&
+        strcmp(capturetype, "-deauth") != 0 &&
+        strcmp(capturetype, "-beacon") != 0 &&
+        strcmp(capturetype, "-raw") != 0 &&
+        strcmp(capturetype, "-eapol") != 0 &&
+        strcmp(capturetype, "-pwn") != 0 &&
+        strcmp(capturetype, "-wps") != 0 &&
+        strcmp(capturetype, "-wireshark") != 0 &&
+        strcmp(capturetype, "-stop") != 0
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        && strcmp(capturetype, "-wiresharkble") != 0
+        && strcmp(capturetype, "-ble") != 0
+        && strcmp(capturetype, "-skimmer") != 0
 #endif
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        && strcmp(capturetype, "-802154") != 0
+#endif
+    ) {
+        glog("Error: Unknown capture type '%s'.\n", capturetype);
+        status_display_show_status("Capture Unknown");
+    }
 }
 
 void stop_portal(int argc, char **argv) {
@@ -3203,32 +3240,16 @@ void handle_eth_http_cmd(int argc, char **argv) {
         // HTTPS using mbedTLS
         // Use static contexts to reduce stack usage (mbedTLS contexts are very large ~5KB+)
         // Since this is a synchronous command handler, static is safe
-        static mbedtls_entropy_context entropy;
-        static mbedtls_ctr_drbg_context ctr_drbg;
         static mbedtls_net_context server_fd;
         static mbedtls_ssl_context ssl;
         static mbedtls_ssl_config conf;
         static bool tls_initialized = false;
-        const char *pers = "ghost_esp_https";
 
         // Initialize contexts (only once, reuse for subsequent calls)
         if (!tls_initialized) {
-            mbedtls_entropy_init(&entropy);
-            mbedtls_ctr_drbg_init(&ctr_drbg);
             mbedtls_net_init(&server_fd);
             mbedtls_ssl_init(&ssl);
             mbedtls_ssl_config_init(&conf);
-            if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                                      (const unsigned char *)pers, strlen(pers)) != 0) {
-                glog("mbedTLS RNG seed failed\n");
-                mbedtls_ssl_config_free(&conf);
-                mbedtls_ssl_free(&ssl);
-                mbedtls_net_free(&server_fd);
-                mbedtls_ctr_drbg_free(&ctr_drbg);
-                mbedtls_entropy_free(&entropy);
-                status_display_show_status("TLS Init Fail");
-                return;
-            }
             tls_initialized = true;
         } else {
             // Clean up previous connection state and reinit
@@ -3256,7 +3277,6 @@ void handle_eth_http_cmd(int argc, char **argv) {
 
         // Set authmode to optional (skip certificate verification for simplicity)
         mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
-        mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
         mbedtls_ssl_conf_read_timeout(&conf, 10000); // 10 second timeout
 
         // Setup SSL
@@ -3309,8 +3329,6 @@ void handle_eth_http_cmd(int argc, char **argv) {
                 glog("TLS handshake failed: -0x%04x - %s\n", -ret, error_buf);
                 mbedtls_ssl_free(&ssl);
                 mbedtls_ssl_config_free(&conf);
-                mbedtls_ctr_drbg_free(&ctr_drbg);
-                mbedtls_entropy_free(&entropy);
                 mbedtls_net_free(&server_fd);
                 tls_initialized = false;
                 status_display_show_status("TLS Handshake Fail");
@@ -3610,7 +3628,7 @@ void handle_settime_cmd(int argc, char **argv) {
     }
     
     long timestamp = strtol(argv[1], NULL, 10);
-    if (timestamp <= 0) {
+    if (timestamp < 0) {
         glog("Invalid timestamp: %s\n", argv[1]);
         status_display_show_status("SetTime Invalid");
         return;
@@ -4965,9 +4983,21 @@ void handle_apcred(int argc, char **argv) {
     const char *new_ssid = argv[1];
     const char *new_password = argv[2];
 
+    if (strlen(new_ssid) > 32) {
+        glog("Error: SSID must be 32 characters or less\n");
+        status_display_show_status("SSID Too Long");
+        return;
+    }
+
     if (strlen(new_password) < 8) {
         glog("Error: Password must be at least 8 characters\n");
         status_display_show_status("Password Weak");
+        return;
+    }
+
+    if (strlen(new_password) > 63) {
+        glog("Error: Password must be 63 characters or less\n");
+        status_display_show_status("Password Too Long");
         return;
     }
 
@@ -4983,8 +5013,8 @@ void handle_apcred(int argc, char **argv) {
 #endif
         },
     };
-    strcpy((char *)ap_config.ap.ssid, new_ssid);
-    strcpy((char *)ap_config.ap.password, new_password);
+    snprintf((char *)ap_config.ap.ssid, sizeof(ap_config.ap.ssid), "%s", new_ssid);
+    snprintf((char *)ap_config.ap.password, sizeof(ap_config.ap.password), "%s", new_password);
     
     // Force the new config immediately
     esp_wifi_set_config(WIFI_IF_AP, &ap_config);
@@ -5946,6 +5976,13 @@ void handle_congestion_cmd(int argc, char **argv) {
     int unique_count = 0;
     int *channels = malloc(ap_count * sizeof(int));
     int *counts = malloc(ap_count * sizeof(int));
+    if (!channels || !counts) {
+        free(channels);
+        free(counts);
+        glog("Error: Failed to allocate memory for channel counts.\n");
+        status_display_show_status("Congest OOM");
+        return;
+    }
     int max_count = 0;
     for (int i = 0; i < ap_count; i++) {
         int ch = ap_records[i].primary;

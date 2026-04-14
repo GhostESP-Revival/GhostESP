@@ -78,6 +78,10 @@ static void ble_resume_networking(void);
 static bool wait_for_ble_ready(void);
 static bool ble_wait_for_scan_stop(uint32_t timeout_ms);
 static bool ble_wait_for_callbacks_idle(uint32_t timeout_ms);
+static void pcap_flush_timer_cb(void *arg) {
+    (void)arg;
+    (void)pcap_flush_buffer_to_file();
+}
 
 static bool ble_wait_for_scan_stop(uint32_t timeout_ms) {
     if (!ble_gap_disc_active()) {
@@ -1069,6 +1073,8 @@ static void ble_pcap_callback(struct ble_gap_event *event, size_t len) {
     size_t hci_len = 0;
 
     if (event->type == BLE_GAP_EVENT_DISC) {
+        if (event->disc.length_data > 243) return;
+
         hci_buffer[0] = 0x04; // HCI packet type (HCI Event)
         hci_buffer[1] = 0x3E; // HCI Event Code (LE Meta Event)
 
@@ -1138,7 +1144,7 @@ void ble_start_capture(void) {
     }
 
     // Create a timer to flush the buffer periodically
-    esp_timer_create_args_t timer_args = {.callback = (esp_timer_cb_t)pcap_flush_buffer_to_file,
+    esp_timer_create_args_t timer_args = {.callback = pcap_flush_timer_cb,
                                           .name = "pcap_flush"};
 
     if (esp_timer_create(&timer_args, &flush_timer) == ESP_OK) {
@@ -1186,7 +1192,7 @@ void ble_start_capture_wireshark(void) {
     }
 
     /* Flush more frequently for better live capture latency */
-    esp_timer_create_args_t timer_args = {.callback = (esp_timer_cb_t)pcap_flush_buffer_to_file,
+    esp_timer_create_args_t timer_args = {.callback = pcap_flush_timer_cb,
                                           .name = "pcap_flush"};
 
     if (esp_timer_create(&timer_args, &flush_timer) == ESP_OK) {

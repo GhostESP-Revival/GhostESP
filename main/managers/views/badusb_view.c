@@ -903,6 +903,7 @@ void badusb_view_input_cb(InputEvent *event) {
             int thr_y = LV_VER_RES / SWIPE_THRESHOLD_RATIO;
             int thr_x = LV_HOR_RES / SWIPE_THRESHOLD_RATIO;
 
+            if (!menu_container) return;
             lv_area_t cont_area;
             lv_obj_get_coords(menu_container, &cont_area);
             bool started_in_container = (touch_start_x >= cont_area.x1 && touch_start_x <= cont_area.x2 &&

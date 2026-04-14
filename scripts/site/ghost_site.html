@@ -218,56 +218,194 @@
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: var(--surface-color);
+            border-radius: 8px;
+            gap: 4px;
         }
 
         .breadcrumb-item {
             color: var(--text-secondary);
             cursor: pointer;
-            margin-right: 8px;
-            position: relative;
-            padding: 4px 0;
-            font-weight: bold;
-            transition: color 0.3s;
+            padding: 6px 10px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border-radius: 4px;
+            white-space: nowrap;
         }
 
         .breadcrumb-item:hover {
             color: var(--primary-color);
+            background: rgba(var(--primary-color-rgb), 0.1);
         }
 
-        .breadcrumb-item::after {
-            content: '/';
-            margin-left: 8px;
-            color: #ffffff7f;
-        }
-
-        .breadcrumb-item:last-child::after {
-            content: '';
+        .breadcrumb-sep {
+            color: var(--text-secondary);
+            padding: 0 2px;
         }
 
         .breadcrumb-item:last-child {
+            color: var(--primary-color);
             cursor: default;
-            color: #ffffff;
         }
 
-        /* File Explorer Styling */
+        @media (max-width: 600px) {
+            .breadcrumb-item {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+        }
+
+/* File Explorer Styling */
         .file-explorer {
             list-style-type: none;
             padding: 0;
+            margin: 0;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
         }
 
         .file-explorer li {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 15px;
-            background-color: var(--tooltip-bg);
-            border-left: 2px solid var(--border-color);
-            border-right: 2px solid var(--border-color);
-            border-top: 0.5px solid var(--accent-color);
-            border-bottom: 0.5px solid var(--accent-color);
-            transition: background-color 0.3s;
+            padding: 12px 16px;
+            background-color: var(--surface-color);
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.15s;
+            gap: 12px;
+        }
+
+        .file-explorer li:last-child {
+            border-bottom: none;
+        }
+
+        .file-explorer li.folder-item {
+            cursor: pointer;
+        }
+
+        .file-explorer li.folder-item:hover {
+            background-color: var(--primary-color);
+        }
+        
+        .file-explorer li.folder-item:hover .file-info,
+        .file-explorer li.folder-item:hover .folder-arrow {
+            color: var(--background-color);
+        }
+
+        .file-explorer li.file-item:hover {
+            background-color: rgba(var(--primary-color-rgb), 0.1);
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-icon {
+            font-size: 1.2em;
+            flex-shrink: 0;
+        }
+        
+        .file-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 0.95em;
+        }
+        
+        .file-size {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+
+        .folder-arrow {
+            color: var(--text-secondary);
+            font-size: 1.2em;
+            flex-shrink: 0;
+        }
+
+        .file-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        .file-actions .action-btn {
+            padding: 6px 12px !important;
+            font-size: 0.85em !important;
+            border-radius: 4px !important;
+            white-space: nowrap;
+        }
+        
+        .file-actions .danger-btn {
+            background-color: rgba(255, 80, 80, 0.2) !important;
+            color: #ff6b6b !important;
+        }
+        
+        .file-actions .danger-btn:hover {
+            background-color: rgba(255, 80, 80, 0.3) !important;
+        }
+
+        @media (max-width: 600px) {
+            .file-explorer li {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 14px;
+            }
+            
+            .file-explorer li.folder-item {
+                flex-direction: row;
+                align-items: center;
+            }
+
+            .file-info {
+                width: 100%;
+                margin-bottom: 8px;
+            }
+            
+            .file-explorer li.folder-item .file-info {
+                margin-bottom: 0;
+            }
+
+            .file-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .file-actions .action-btn {
+                padding: 10px 16px !important;
+                font-size: 0.9em !important;
+            }
+        }
+
+        .file-explorer li {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background-color: var(--surface-color);
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.2s;
             position: relative;
+        }
+
+        .file-explorer li:first-child {
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        
+        .file-explorer li:last-child {
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+            border-bottom: none;
         }
 
         .file-explorer li.folder-item {
@@ -290,38 +428,49 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            flex: 1;
+            min-width: 0;
             color: var(--text-primary);
         }
 
         .file-icon {
-            font-size: 1.2em;
+            font-size: 1.3em;
+            flex-shrink: 0;
+        }
+        
+        .file-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .folder-arrow {
-            color: var(--text-primary);
-            font-size: 1.4em;
-            font-weight: bold;
+            color: var(--text-secondary);
+            font-size: 1.3em;
+            margin-left: 8px;
         }
 
         .file-actions {
             position: relative;
             display: flex;
             align-items: center;
+            flex-shrink: 0;
         }
 
         .more-options-btn {
             background: transparent !important;
             border: none !important;
             color: var(--text-primary) !important;
-            font-size: 1.8em !important;
-            padding: 0 8px !important;
+            font-size: 1.6em !important;
+            padding: 8px !important;
             line-height: 1 !important;
             cursor: pointer !important;
             margin: 0 !important;
             box-shadow: none !important;
+            border-radius: 4px !important;
         }
         
-        .file-explorer li.folder-item:hover .more-options-btn {
+        .file-explorer li.file-item:is(:hover, :active) .more-options-btn {
             color: var(--background-color) !important;
         }
 
@@ -329,14 +478,14 @@
             display: none;
             position: absolute;
             right: 0;
-            top: calc(100% + 5px); /* Position below button */
+            top: calc(100% + 5px);
             background-color: var(--surface-color);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            z-index: 10;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            padding: 8px;
-            min-width: 120px;
+            border-radius: 8px;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            min-width: 140px;
+            overflow: hidden;
         }
 
         .file-options-menu.show {
@@ -350,31 +499,46 @@
             background: none !important;
             border: none !important;
             color: var(--text-primary) !important;
-            padding: 10px 15px !important;
+            padding: 12px 16px !important;
             margin: 0 !important;
-            border-radius: 4px !important;
-            font-size: 1em !important;
+            font-size: 0.95em !important;
             box-shadow: none !important;
         }
 
         .file-options-menu button:hover {
             background-color: var(--primary-color) !important;
             color: var(--background-color) !important;
-            transform: none !important;
         }
 
-        .file-explorer li:first-child {
-            border-top: 2px solid var(--border-color);
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
-        }
+        @media (max-width: 600px) {
+            .file-explorer li {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 12px 14px;
+                gap: 8px;
+            }
 
-        .file-explorer li:last-child {
-            border-bottom: 2px solid var(--border-color);
-            border-bottom-left-radius: 8px;
-            border-bottom-right-radius: 8px;
-        }
-
+            .file-explorer .file-actions {
+                width: 100%;
+                justify-content: flex-end;
+                padding-top: 4px;
+                border-top: 1px solid var(--border-color);
+                margin-top: 4px;
+            }
+            
+            .file-explorer .file-actions::before {
+                content: 'Actions:';
+                font-size: 0.8em;
+                color: var(--text-secondary);
+                margin-right: auto;
+            }
+            
+            .file-options-menu {
+                right: auto;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+        
         /* Upload Section Styling */
         .upload-section {
             margin-top: 30px;
@@ -1631,7 +1795,7 @@
     <div class="container">
         <div class="page-title">
             <h1 class="title-text">GhostESP: Revival</h1>
-            <span class="version-badge">v1.9.3</span>
+            <span class="version-badge">v1.9.8</span>
         </div>
         <!-- Tab Navigation -->
         <div class="tab">
@@ -2485,12 +2649,19 @@
     <!-- JavaScript for Interactivity -->
     <script>
 
-        let sdCardData = [];          // Stores the entire SD Card structure
+        let sdCardData = [];          // Stores the current directory files
+        let currentPath = "/mnt";      // Current directory path
         let navigationStack = [];     // Keeps track of the navigation path
         let logOffset = 0;
         const termOutput = document.getElementById('terminalOutput');
         const COMM_STATUS_POLL_INTERVAL_MS = 1000;
         const COMM_LOG_POLL_INTERVAL_MS = 500;
+        
+        // Initialize navigation stack with root
+        function initNavigation() {
+            navigationStack = [{ name: "Root", path: "/mnt" }];
+        }
+        initNavigation();
 
         async function uploadFile() {
             const fileInput = document.getElementById('sdcard-upload');
@@ -2504,13 +2675,8 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            // Determine the upload path based on the navigation stack
-            const currentFolder = getCurrentFolder();
-            let uploadPath = '/mnt';
-            if (navigationStack.length > 1) {
-                const pathParts = navigationStack.slice(1).map(folder => folder.name);
-                uploadPath = '/mnt/' + pathParts.join('/');
-            }
+            // Use currentPath for upload
+            let uploadPath = currentPath;
 
             try {
                 // Show uploading status
@@ -2550,26 +2716,48 @@
 
         async function fetchSDCardData() {
             const statusElement = document.getElementById("sdcard-status");
+            statusElement.textContent = "Loading...";
             try {
                 const response = await fetch("/api/sdcard");
                 const data = await response.json();
                 
                 if (response.ok) {
-                    // Update storage bar
                     if (data.storage) {
                         updateStorageBar(data.storage.used, data.storage.total);
                     }
 
-                    sdCardData = data.files; // Store the entire structure
-                    navigationStack = [ { name: "Root", type: "folder", children: sdCardData } ]; // Initialize stack with root
+                    sdCardData = data.files || [];
+                    currentPath = data.path || "/mnt";
+                    initNavigation();
                     renderCurrentFolder();
-                    statusElement.textContent = "SD card data loaded successfully.";
+                    statusElement.textContent = "SD card loaded.";
                 } else {
-                    throw new Error(data.message || "Failed to fetch SD card data.");
+                    throw new Error(data.error || "Failed to fetch SD card data.");
                 }
             } catch (error) {
-                statusElement.textContent = error.message || "Failed to load SD card data.";
+                statusElement.textContent = error.message || "Failed to load SD card.";
                 console.error("Error fetching SD Card data:", error);
+            }
+        }
+        
+        async function fetchFolderContents(path) {
+            const statusElement = document.getElementById("sdcard-status");
+            statusElement.textContent = "Loading...";
+            try {
+                const response = await fetch("/api/sdcard?path=" + encodeURIComponent(path));
+                const data = await response.json();
+                
+                if (response.ok) {
+                    sdCardData = data.files || [];
+                    currentPath = data.path || path;
+                    renderCurrentFolder();
+                    statusElement.textContent = "Loaded: " + currentPath;
+                } else {
+                    throw new Error(data.error || "Failed to fetch folder.");
+                }
+            } catch (error) {
+                statusElement.textContent = error.message || "Failed to load folder.";
+                console.error("Error fetching folder:", error);
             }
         }
 
@@ -2599,16 +2787,11 @@
             }
         }
 
-        function getCurrentFolder() {
-            return navigationStack[navigationStack.length - 1];
-        }
-
         function renderCurrentFolder() {
-            const currentFolder = getCurrentFolder();
             const structureElement = document.getElementById("sdcard-structure");
-            structureElement.innerHTML = ""; // Clear existing contents
+            structureElement.innerHTML = "";
 
-            if (!currentFolder.children || currentFolder.children.length === 0) {
+            if (!sdCardData || sdCardData.length === 0) {
                 structureElement.textContent = "This folder is empty.";
                 return;
             }
@@ -2616,7 +2799,7 @@
             const ul = document.createElement("ul");
             ul.classList.add("file-explorer");
 
-            currentFolder.children.forEach(item => {
+            sdCardData.forEach(item => {
                 const li = document.createElement("li");
 
                 const fileInfo = document.createElement('div');
@@ -2629,67 +2812,58 @@
                 fileName.classList.add("file-name");
                 fileName.textContent = item.name;
 
-                fileInfo.appendChild(fileIcon);
-                fileInfo.appendChild(fileName);
-                li.appendChild(fileInfo);
-
-                const actionContainer = document.createElement("div");
-                actionContainer.classList.add("file-actions");
-
                 if (item.type === "folder") {
                     li.classList.add('folder-item');
                     fileIcon.textContent = '📁';
-                    li.onclick = () => navigateIntoFolder(item);
                     
                     const arrow = document.createElement('span');
                     arrow.classList.add('folder-arrow');
-                    arrow.innerHTML = '›';
-                    actionContainer.appendChild(arrow);
+                    arrow.textContent = '›';
+                    
+                    fileInfo.appendChild(fileIcon);
+                    fileInfo.appendChild(fileName);
+                    li.appendChild(fileInfo);
+                    li.appendChild(arrow);
+                    
+                    li.onclick = () => {
+                        navigationStack.push({ name: item.name, path: item.path });
+                        fetchFolderContents(item.path);
+                    };
                 } else {
                     li.classList.add('file-item');
                     fileIcon.textContent = '📄';
                     
-                    const moreBtn = document.createElement("button");
-                    moreBtn.innerHTML = "⋮";
-                    moreBtn.classList.add("small", "more-options-btn");
+                    if (item.size !== undefined) {
+                        const sizeSpan = document.createElement('span');
+                        sizeSpan.classList.add('file-size');
+                        sizeSpan.textContent = formatBytes(item.size);
+                        fileName.appendChild(document.createElement('br'));
+                        fileName.appendChild(sizeSpan);
+                    }
 
-                    const menu = document.createElement('div');
-                    menu.classList.add('file-options-menu');
-
+                    fileInfo.appendChild(fileIcon);
+                    fileInfo.appendChild(fileName);
+                    
+                    const actions = document.createElement('div');
+                    actions.classList.add('file-actions');
+                    
                     const downloadBtn = document.createElement("button");
                     downloadBtn.textContent = "Download";
-                    downloadBtn.classList.add("small");
+                    downloadBtn.classList.add("small", "action-btn");
                     downloadBtn.onclick = (e) => { e.stopPropagation(); downloadFile(item.path); };
-                    menu.appendChild(downloadBtn);
-
+                    
                     const deleteBtn = document.createElement("button");
                     deleteBtn.textContent = "Delete";
-                    deleteBtn.classList.add("small");
+                    deleteBtn.classList.add("small", "action-btn", "danger-btn");
                     deleteBtn.onclick = (e) => { e.stopPropagation(); deleteFile(item.name, item.path); };
-                    menu.appendChild(deleteBtn);
-
-                    moreBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        // Close other menus
-                        document.querySelectorAll('.file-options-menu.show').forEach(m => {
-                            if (m !== menu) {
-                                m.classList.remove('show');
-                            }
-                        });
-                        menu.classList.toggle('show');
-                    };
                     
-                    document.addEventListener('click', (e) => {
-                        if (!menu.contains(e.target) && !moreBtn.contains(e.target)) {
-                            menu.classList.remove('show');
-                        }
-                    });
-
-                    actionContainer.appendChild(moreBtn);
-                    actionContainer.appendChild(menu);
+                    actions.appendChild(downloadBtn);
+                    actions.appendChild(deleteBtn);
+                    
+                    li.appendChild(fileInfo);
+                    li.appendChild(actions);
                 }
 
-                li.appendChild(actionContainer);
                 ul.appendChild(li);
             });
 
@@ -2700,34 +2874,35 @@
 
         function updateBreadcrumb() {
             const breadcrumb = document.getElementById("breadcrumb");
-            breadcrumb.innerHTML = ""; // Clear existing breadcrumbs
+            breadcrumb.innerHTML = "";
 
             navigationStack.forEach((folder, index) => {
                 const crumb = document.createElement("span");
                 crumb.classList.add("breadcrumb-item");
                 crumb.textContent = folder.name;
+                crumb.style.cursor = "pointer";
 
                 if (index < navigationStack.length - 1) {
                     crumb.onclick = () => navigateToBreadcrumb(index);
                 } else {
-                    // Current folder - not clickable
-                    crumb.style.cursor = 'default';
-                    crumb.style.color = '#ffffff';
+                    crumb.style.color = '#var(--primary-color)';
                 }
 
                 breadcrumb.appendChild(crumb);
+                
+                if (index < navigationStack.length - 1) {
+                    const separator = document.createElement("span");
+                    separator.textContent = "›";
+                    separator.classList.add("breadcrumb-sep");
+                    breadcrumb.appendChild(separator);
+                }
             });
         }
 
-        function navigateIntoFolder(folder) {
-            navigationStack.push(folder);
-            renderCurrentFolder();
-        }
-
         function navigateToBreadcrumb(index) {
-            // Remove folders from the stack after the selected breadcrumb
             navigationStack = navigationStack.slice(0, index + 1);
-            renderCurrentFolder();
+            const folder = navigationStack[navigationStack.length - 1];
+            fetchFolderContents(folder.path);
         }
 
         function basename(path) {

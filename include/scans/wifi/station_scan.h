@@ -95,6 +95,27 @@ bool station_scan_has_selection(void);
 void station_scan_clear_selection(void);
 
 /**
+ * @brief Select multiple stations by indices
+ * 
+ * Selects multiple stations from the scan results for bulk operations.
+ * 
+ * @param indices Array of indices to select
+ * @param count Number of indices in the array
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if any index is invalid
+ */
+esp_err_t station_scan_select_multiple(int *indices, int count);
+
+/**
+ * @brief Get the selected stations
+ * 
+ * Returns the currently selected stations array and count.
+ * 
+ * @param stations Pointer to store the selected stations array pointer
+ * @param count Pointer to store the number of selected stations
+ */
+void station_scan_get_selected_stations(station_ap_pair_t **stations, int *count);
+
+/**
  * @brief Clear all station scan results
  * 
  * Clears the station list and resets the scan state.

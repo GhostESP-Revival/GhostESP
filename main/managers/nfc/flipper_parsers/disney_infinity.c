@@ -1,4 +1,4 @@
-#include <mbedtls/sha1.h>
+#include <mbedtls/md.h>
 #include "managers/nfc/flipper_nfc_compat.h"
 
 #define TAG     "DisneyInfinity"
@@ -12,8 +12,11 @@ static uint8_t seed[38] = {0x0A, 0x14, 0xFD, 0x05, 0x07, 0xFF, 0x4B, 0xCD, 0x02,
 
 void di_key(const uint8_t* uid, MfClassicKey* key) {
     uint8_t hash[20];
+    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
     memcpy(seed + 16, uid, UID_LEN);
-    mbedtls_sha1(seed, sizeof(seed), hash);
+    if (!md_info || mbedtls_md(md_info, seed, sizeof(seed), hash) != 0) {
+        memset(hash, 0, sizeof(hash));
+    }
     key->data[0] = hash[3];
     key->data[1] = hash[2];
     key->data[2] = hash[1];
@@ -81,7 +84,7 @@ static bool disney_infinity_parse(const NfcDevice* device, FuriString* parsed_da
             FURI_LOG_W(TAG, "Invalid UID for Disney Infinity parse (len=%u)", (unsigned)uid_len);
             break;
         }
-        MfClassicSectorTrailer* sec_tr =
+        const MfClassicSectorTrailer* sec_tr =
             mf_classic_get_sector_trailer_by_sector(data, verify_sector);
         if(!sec_tr) break;
 

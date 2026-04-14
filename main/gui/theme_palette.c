@@ -1,4 +1,5 @@
 #include "gui/theme_palette_api.h"
+#include "managers/settings_manager.h"
 
 static const uint32_t s_theme_accents[THEME_PALETTE_THEME_COUNT] = {
     0x1976D2, // Default
@@ -30,33 +31,18 @@ typedef enum {
 } theme_surface_slot_t;
 
 /*
- * Theme Surface Colors (neutral across all themes)
- * 
- * Each row contains 5 color slots (same for every theme):
- *   [0] BACKGROUND     - Main app background (status bar, full-screen containers)
- *   [1] SURFACE        - Primary card/item surfaces (menu cards, list items, buttons)
- *   [2] SURFACE_ALT    - Secondary surfaces (zebra stripes, elevated controls, borders)
- *   [3] TEXT           - Primary text color (titles, labels, content)
- *   [4] TEXT_MUTED     - Secondary/muted text (descriptions, hints, icons)
+ * Shade-indexed surface colors (user-selectable background darkness).
+ * Shade 1 ("Darker") matches the original hardcoded values.
+ *
+ * Each row: [BG, SURFACE, SURFACE_ALT, TEXT, TEXT_MUTED]
  */
-static const uint32_t s_theme_surfaces[THEME_PALETTE_THEME_COUNT][THEME_SURFACE_SLOT_COUNT] = {
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080}
+#define MENU_BG_SHADE_COUNT 4
+
+static const uint32_t s_shade_surfaces[MENU_BG_SHADE_COUNT][THEME_SURFACE_SLOT_COUNT] = {
+    {0x030303, 0x0A0A0A, 0x121212, 0xFFFFFF, 0x707070},  // Darkest
+    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},  // Darker (default)
+    {0x121212, 0x1C1C1C, 0x282828, 0xFFFFFF, 0x909090},  // Dark
+    {0x1C1C1C, 0x282828, 0x343434, 0xFFFFFF, 0x999999},  // Medium
 };
 
 static uint8_t theme_palette_clamp(uint8_t theme) {
@@ -115,9 +101,11 @@ uint32_t theme_palette_get_accent(uint8_t theme) {
 }
 
 static uint32_t theme_surface_get(uint8_t theme, theme_surface_slot_t slot) {
-    theme = theme_palette_clamp(theme);
+    (void)theme;
     if (slot < 0 || slot >= THEME_SURFACE_SLOT_COUNT) slot = THEME_SURFACE_BG;
-    return s_theme_surfaces[theme][slot];
+    uint8_t shade = settings_get_menu_bg_shade(&G_Settings);
+    if (shade >= MENU_BG_SHADE_COUNT) shade = 1;
+    return s_shade_surfaces[shade][slot];
 }
 
 uint32_t theme_palette_get_background(uint8_t theme) {

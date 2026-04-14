@@ -23,8 +23,6 @@ extern "C" {
 /*********************
  *      DEFINES
  *********************/
-#define DISP_BUF_SIZE (LV_HOR_RES_MAX * 40)
-
 #define ST7735S_DC       CONFIG_LV_DISP_PIN_DC
 #define ST7735S_RST      CONFIG_LV_DISP_PIN_RST
 #define ST7735S_USE_RST  CONFIG_LV_DISP_USE_RST

@@ -34,7 +34,7 @@
 #include "core/serial_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/rgb_manager.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "soc/soc_caps.h"
 #include "io_manager/i2c_bus_lock.h"
 #ifdef CONFIG_USE_IO_EXPANDER
@@ -47,6 +47,15 @@ uint32_t theme_palette_get_surface_alt(uint8_t theme);
 uint32_t theme_palette_get_text_muted(uint8_t theme);
 
 #define LVGL_TICK_TASK_STACK_SIZE 8192
+
+#ifndef CONFIG_JC3248W535EN_LCD
+static TaskHandle_t hardware_input_task_handle = NULL;
+static StackType_t *hardware_input_task_stack = NULL;
+static StaticTask_t *hardware_input_task_buffer = NULL;
+#ifdef CONFIG_USE_TDISPLAY_S3
+static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
+#endif
+#endif
 
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
@@ -262,7 +271,7 @@ static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
     
     screen_mirror_send_area(area, color_p);
     
-#ifdef CONFIG_USE_CARDPUTER
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
     m5stack_lvgl_render_callback(drv, area, color_p);
 #elif defined(CONFIG_USE_TDISPLAY_S3)
     i80_display_flush_cb(drv, area, color_p);
@@ -1140,6 +1149,8 @@ void apply_power_management_config(bool power_save_enabled) {
 }
 
 void display_manager_init(void) {
+  ESP_LOGI(TAG, "display_manager_init: starting, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
   static bool lvgl_lock_registered = false;
   if (!lvgl_lock_registered) {
@@ -1147,6 +1158,7 @@ void display_manager_init(void) {
     lvgl_lock_registered = true;
   }
 
+  ESP_LOGI(TAG, "display_manager: configuring power management...");
   esp_pm_config_t pm_cfg = {
     .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
     .min_freq_mhz = 80,
@@ -1156,6 +1168,8 @@ void display_manager_init(void) {
   if (pm_err != ESP_OK) {
     ESP_LOGW(TAG, "pm configure failed: %s", esp_err_to_name(pm_err));
   }
+  ESP_LOGI(TAG, "display_manager: power management configured, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
   apply_power_management_config(settings_get_power_save_enabled(&G_Settings));
 
@@ -1193,6 +1207,8 @@ void display_manager_init(void) {
     ESP_LOGI(TAG, "Backlight GPIO not configured; skipping LEDC channel init");
   }
   #endif
+  ESP_LOGI(TAG, "display_manager: LEDC configured, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
 #ifdef CONFIG_USE_TDECK
 set_keyboard_brightness(0xFF); // Set to 100% brightness
@@ -1219,28 +1235,31 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   // Initialize I2C driver for touch functionality
 #ifdef CONFIG_USE_TDISPLAY_S3
   ESP_LOGI(TAG, "Initializing I2C for touch functionality");
-  i2c_config_t i2c_config = {
-    .mode = I2C_MODE_MASTER,
-    .sda_io_num = 18,  // TDisplay S3 I2C SDA pin
-    .scl_io_num = 17,  // TDisplay S3 I2C SCL pin
-    .sda_pullup_en = GPIO_PULLUP_ENABLE,
-    .scl_pullup_en = GPIO_PULLUP_ENABLE,
-    .master.clk_speed = 100000,  // Standard I2C speed for CST816
-  };
-  esp_err_t i2c_ret = i2c_param_config(I2C_NUM_0, &i2c_config);
+  esp_err_t i2c_ret = i2c_master_get_bus_handle(I2C_NUM_0, &s_touch_i2c_bus);
+  if (i2c_ret == ESP_ERR_NOT_FOUND) {
+    i2c_master_bus_config_t i2c_config = {
+      .i2c_port = I2C_NUM_0,
+      .sda_io_num = 18,
+      .scl_io_num = 17,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags.enable_internal_pullup = true,
+    };
+    i2c_ret = i2c_new_master_bus(&i2c_config, &s_touch_i2c_bus);
+  }
   if (i2c_ret == ESP_OK) {
-    i2c_ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
-    if (i2c_ret == ESP_OK) {
-      ESP_LOGI(TAG, "I2C driver initialized successfully");
-    } else {
-      ESP_LOGE(TAG, "Failed to install I2C driver: %s", esp_err_to_name(i2c_ret));
-    }
+    ESP_LOGI(TAG, "I2C bus ready for touch functionality");
   } else {
-    ESP_LOGE(TAG, "Failed to configure I2C parameters: %s", esp_err_to_name(i2c_ret));
+    ESP_LOGE(TAG, "Failed to initialize touch I2C bus: %s", esp_err_to_name(i2c_ret));
   }
 #endif
+  ESP_LOGI(TAG, "display_manager: initializing LVGL...");
   lv_init();
-#ifdef CONFIG_USE_CARDPUTER
+  ESP_LOGI(TAG, "display_manager: LVGL core init done, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   init_m5gfx_display();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
   esp_err_t ret = i80_display_init();
@@ -1251,6 +1270,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #else
   lvgl_driver_init();
 #endif
+  ESP_LOGI(TAG, "display_manager: display driver init done, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 #endif // CONFIG_JC3248W535EN_LCD
 
 #if !defined(CONFIG_USE_7_INCHER) && !defined(CONFIG_JC3248W535EN_LCD)
@@ -1263,14 +1284,16 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   /* width * 8 gives ~8 lines of buffer which balances responsiveness and RAM use */
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  static lv_color_t buf1[CONFIG_TFT_WIDTH * 1] __attribute__((aligned(4)));
+  static lv_color_t buf1[CONFIG_TFT_WIDTH * 10] __attribute__((aligned(4)));
 #else
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
   static lv_color_t buf2[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
 #endif
+  ESP_LOGI(TAG, "display_manager: draw buffers allocated, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
   /* Determine display resolution */
-#ifdef CONFIG_USE_CARDPUTER
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   int width = get_m5gfx_width();
   int height = get_m5gfx_height();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
@@ -1283,15 +1306,14 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   static lv_disp_draw_buf_t disp_buf;
 /* Initialize draw buffer: prefer single-buffer on cardputer, ESP32, and ESP32-C5 */
-#if defined(CONFIG_USE_CARDPUTER)
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   /* single buffer mode: small buffer for low-memory cardputer */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 2);
 #elif defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32S2)
   /* single buffer mode: use width * 5 for responsive drawing without excessive RAM */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  /* single buffer mode: one scanline for maximum DRAM savings on ESP32 */
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 1);
+  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
 #else
   /* default: double buffer for smoother drawing */
   lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
@@ -1306,6 +1328,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   disp_drv.flush_cb = invert_flush_cb;
   disp_drv.draw_buf = &disp_buf;
   lv_disp_drv_register(&disp_drv);
+  ESP_LOGI(TAG, "display_manager: display driver registered, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
 #elif defined(CONFIG_JC3248W535EN_LCD)
   esp_err_t ret = lcd_axs15231b_init();
@@ -1340,6 +1364,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "Failed to create input queue\n");
     return;
   }
+  ESP_LOGI(TAG, "display_manager: mutex and queue created, free internal RAM: %d bytes", 
+           (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
 #ifdef CONFIG_USE_CARDPUTER
   keyboard_init(&gkeyboard);
@@ -1436,14 +1462,41 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   set_backlight_brightness(100);
 
 
-#ifndef CONFIG_JC3248W535EN_LCD // JC3248W535EN has its own lvgl task
-xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
-            RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+#ifndef CONFIG_JC3248W535EN_LCD
+    // LVGL tick task - use internal RAM for stability
+    xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
+                RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+    ESP_LOGI(TAG, "LVGL tick task stack allocated from internal RAM");
+    ESP_LOGI(TAG, "After LVGL task creation, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+
+    // Allocate hardware input task stack from PSRAM
+    hardware_input_task_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    hardware_input_task_buffer = malloc(sizeof(StaticTask_t));
+    if (hardware_input_task_stack && hardware_input_task_buffer) {
+        hardware_input_task_handle = xTaskCreateStatic(
+            hardware_input_task, "RawInput", 4096,
+            NULL, HARDWARE_INPUT_TASK_PRIORITY,
+            hardware_input_task_stack, hardware_input_task_buffer);
+        ESP_LOGI(TAG, "Hardware input task stack allocated from PSRAM: %d bytes", (int)(4096 * sizeof(StackType_t)));
+        input_task_handle = hardware_input_task_handle;
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate hardware input task stack from PSRAM, falling back to internal");
+        if (hardware_input_task_stack) free(hardware_input_task_stack);
+        if (hardware_input_task_buffer) free(hardware_input_task_buffer);
+        hardware_input_task_stack = NULL;
+        hardware_input_task_buffer = NULL;
+        if (xTaskCreate(hardware_input_task, "RawInput", 4096, NULL,
+                        HARDWARE_INPUT_TASK_PRIORITY, &input_task_handle) != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create RawInput task\n");
+        }
+    }
+    ESP_LOGI(TAG, "After RawInput task creation, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 #endif
-if (xTaskCreate(hardware_input_task, "RawInput", 4096, NULL,
-                HARDWARE_INPUT_TASK_PRIORITY, &input_task_handle) != pdPASS) {
-    ESP_LOGE(TAG, "Failed to create RawInput task\n");
-}
+
+ESP_LOGI(TAG, "display_manager_init: COMPLETE, free internal RAM: %d bytes", 
+         (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
 bool display_manager_register_view(View *view) {
@@ -1580,6 +1633,9 @@ void set_backlight_brightness(uint8_t percentage) {
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
+#if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+        duty = ((1 << LEDC_TIMER_10_BIT) - 1) - duty;
+#endif
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     } else {
@@ -1636,10 +1692,10 @@ void set_backlight_brightness(uint8_t percentage) {
         {
             if (!wifi_manager_is_evil_portal_active()) {
                 wifi_config_t cfg;
-                if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
+                if (esp_wifi_get_config(WIFI_IF_AP, &cfg) == ESP_OK) {
                     original_beacon_interval = cfg.ap.beacon_interval;
                     cfg.ap.beacon_interval = 1000;
-                    esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+                    esp_wifi_set_config(WIFI_IF_AP, &cfg);
                 }
                 esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
             }
@@ -1666,9 +1722,9 @@ void set_backlight_brightness(uint8_t percentage) {
             if (!wifi_manager_is_evil_portal_active()) {
                 esp_wifi_set_ps(WIFI_PS_NONE);
                 wifi_config_t cfg;
-                if (esp_wifi_get_config(ESP_IF_WIFI_AP, &cfg) == ESP_OK) {
+                if (esp_wifi_get_config(WIFI_IF_AP, &cfg) == ESP_OK) {
                     cfg.ap.beacon_interval = original_beacon_interval;
-                    esp_wifi_set_config(ESP_IF_WIFI_AP, &cfg);
+                    esp_wifi_set_config(WIFI_IF_AP, &cfg);
                 }
             }
         }

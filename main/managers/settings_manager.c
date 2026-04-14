@@ -93,6 +93,8 @@ static const char *NVS_MIC_CONTRAST_KEY = "mic_contrast";
 static const char *NVS_MIC_MIRROR_MODE_KEY = "mic_mirror";
 
 static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
+static const char *NVS_MENU_BG_SHADE_KEY = "menu_bg_shd";
+static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
 
 static const char *TAG = "SettingsManager";
 
@@ -208,6 +210,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->mic_contrast = 2; // Medium contrast
   settings->mic_mirror_mode = false;
   settings->ghostlink_split_view = true; // Default to split view
+  settings->menu_bg_shade = 2;
+  settings->menu_rounded = true;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
   settings->status_idle_timeout_ms = 5000; // default 5s
@@ -689,6 +693,16 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->ghostlink_split_view = (bool)value_u8;
   }
+  
+  err = nvs_get_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->menu_bg_shade = value_u8;
+  }
+  
+  err = nvs_get_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->menu_rounded = (bool)value_u8;
+  }
 }
 
 static void update_rainbow_effect(const FSettings *settings) {
@@ -942,6 +956,14 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, G_Settings.ghostlink_split_view ? 1 : 0);
             key = NVS_GHOSTLINK_SPLIT_VIEW_KEY;
             break;
+        case SETTING_MENU_BG_SHADE:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, G_Settings.menu_bg_shade);
+            key = NVS_MENU_BG_SHADE_KEY;
+            break;
+        case SETTING_MENU_ROUNDED:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, G_Settings.menu_rounded ? 1 : 0);
+            key = NVS_MENU_ROUNDED_KEY;
+            break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
             return;
@@ -1111,6 +1133,8 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_MIC_CONTRAST_KEY, settings->mic_contrast);
     nvs_set_u8(nvsHandle, NVS_MIC_MIRROR_MODE_KEY, settings->mic_mirror_mode ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, settings->ghostlink_split_view ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, settings->menu_bg_shade);
+    nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0);
 
     esp_err_t err = nvs_commit(nvsHandle);
     if (err != ESP_OK) {
@@ -1739,4 +1763,24 @@ void settings_set_ghostlink_split_view(FSettings *settings, bool enabled) {
 
 bool settings_get_ghostlink_split_view(const FSettings *settings) {
   return settings ? settings->ghostlink_split_view : true;
+}
+
+void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade) {
+  if (settings) {
+    settings->menu_bg_shade = shade;
+  }
+}
+
+uint8_t settings_get_menu_bg_shade(const FSettings *settings) {
+  return settings ? settings->menu_bg_shade : 1;
+}
+
+void settings_set_menu_rounded(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->menu_rounded = enabled;
+  }
+}
+
+bool settings_get_menu_rounded(const FSettings *settings) {
+  return settings ? settings->menu_rounded : false;
 }

@@ -44,7 +44,7 @@ uint8_t wifi_channels_build_country_list(uint8_t *channels, uint8_t max_count) {
         if (count < max_count) channels[count++] = 6;
         if (count < max_count) channels[count++] = 11;
         
-        #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        #if defined(CONFIG_IDF_TARGET_ESP32C5)
         // 5GHz: common UNII-1 channels
         if (count < max_count) channels[count++] = 36;
         if (count < max_count) channels[count++] = 40;
@@ -75,8 +75,8 @@ uint8_t wifi_channels_build_country_list(uint8_t *channels, uint8_t max_count) {
         }
     }
     
-    #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    // 5GHz band support for ESP32-C5/C6
+    #if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // 5GHz band support for ESP32-C5 (dual-band)
     if (country_code_is(&country, "US") || country_code_is(&country, "CA")) {
         // North America: all bands allowed
         uint8_t us_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165};

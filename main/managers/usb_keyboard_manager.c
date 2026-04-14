@@ -269,7 +269,8 @@ static void usb_kbd_host_task(void *arg) {
     (void)arg;
     const usb_host_config_t cfg = {
         .skip_phy_setup = false,
-        .intr_flags = ESP_INTR_FLAG_LEVEL1,
+        .root_port_unpowered = false,
+        .intr_flags = ESP_INTR_FLAG_LOWMED,
     };
 
     if (usb_host_install(&cfg) != ESP_OK) {

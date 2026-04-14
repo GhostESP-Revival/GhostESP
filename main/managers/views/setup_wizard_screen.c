@@ -61,6 +61,7 @@ static lv_obj_t *welcome_skip_btn = NULL;
 
 static lv_obj_t *option_list = NULL;
 static int option_cursor = 0;
+static bool wizard_exiting = false;
 static bool touch_started = false;
 static int touch_start_y = 0;
 static int touch_start_x = 0;
@@ -92,7 +93,7 @@ static const uint32_t display_timeout_values[] = {5000, 10000, 30000, 60000, UIN
 static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 #define THEME_COUNT 17
 
-static const char *menu_layout_options[] = {"Normal", "Grid", "List"};
+static const char *menu_layout_options[] = {"Carousel", "Grid", "List"};
 #define MENU_LAYOUT_COUNT 3
 
 static const char *terminal_color_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
@@ -535,6 +536,9 @@ static void apply_wifi_country(int country_index) {
 }
 
 static void finish_setup(void) {
+    if (wizard_exiting) return;
+    wizard_exiting = true;
+    
     ESP_LOGI(TAG, "Finishing setup wizard");
     
     if (temp_ap_ssid[0]) {
@@ -564,6 +568,9 @@ static void finish_setup(void) {
 }
 
 static void skip_setup(void) {
+    if (wizard_exiting) return;
+    wizard_exiting = true;
+    
     ESP_LOGI(TAG, "Skipping setup wizard");
     settings_set_setup_complete(&G_Settings, true);
     settings_save(&G_Settings);
@@ -1073,6 +1080,7 @@ static void get_setup_wizard_callback(void **callback) {
 }
 
 void setup_wizard_reset_and_open(void) {
+    wizard_exiting = false;
     current_step = SETUP_STEP_WELCOME;
     selected_country_index = 0;
     temp_ap_ssid[0] = '\0';

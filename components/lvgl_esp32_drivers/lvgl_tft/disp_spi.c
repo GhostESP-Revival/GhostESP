@@ -85,7 +85,7 @@
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void IRAM_ATTR spi_ready (spi_transaction_t *trans);
+static void spi_ready (spi_transaction_t *trans);
 
 /**********************
  *  STATIC VARIABLES
@@ -188,6 +188,18 @@ void disp_spi_remove_device()
     esp_err_t ret=spi_bus_remove_device(spi);
     assert(ret==ESP_OK);
     spi = NULL;  // clear handle so it can be reinitialized during resume
+    /* Free DMA transaction pool to release internal DMA memory.
+     * This is critical when the SPI bus is shared with SD card —
+     * the bus will be freed and re-initialized for SD, and without
+     * unusable, causing out-of-memory errors on re-init. */
+    if (TransactionPool != NULL) {
+        spi_transaction_ext_t *pTransaction;
+        while (xQueueReceive(TransactionPool, &pTransaction, 0) == pdTRUE) {
+            heap_caps_free(pTransaction);
+        }
+        vQueueDelete(TransactionPool);
+        TransactionPool = NULL;
+    }
 }
 
 void disp_spi_transaction(const uint8_t *data, size_t length,

@@ -1,6 +1,11 @@
 dependencies:
+  espressif/cjson: ^1.7.19~1
   espressif/esp_lcd_axs15231b: ==1.0.0
   espressif/esp_io_expander_tca95xx_16bit: ^2.0.0
+  espressif/w5500:
+    version: ^1.0.1
+    rules:
+    - if: target in ["esp32s3"]
   espressif/usb:
     version: ^1.0.1
     rules:

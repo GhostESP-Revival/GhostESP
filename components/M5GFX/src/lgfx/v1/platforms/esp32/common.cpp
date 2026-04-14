@@ -116,13 +116,29 @@ Contributors:
    };
    typedef struct ets_secure_boot_key_digests ets_secure_boot_key_digests_t;
   #endif
-  #include <esp_efuse.h>
+  #if __has_include(<esp_efuse.h>)
+   #include <esp_efuse.h>
+  #elif __has_include(<efuse/esp_efuse.h>)
+   #include <efuse/esp_efuse.h>
+  #endif
   #define USE_ESP_EFUSE_GET_PKG_VER
  #endif
 #endif
 
 #if __has_include(<soc/i2c_periph.h>)
  #include <soc/i2c_periph.h>
+#endif
+#if __has_include(<soc/gpio_reg.h>)
+ #include <soc/gpio_reg.h>
+#endif
+#if __has_include(<soc/periph_defs.h>)
+ #include <soc/periph_defs.h>
+#endif
+#if __has_include(<esp_private/gpio.h>)
+ #include <esp_private/gpio.h>
+#endif
+#if __has_include(<esp_private/periph_ctrl.h>)
+ #include <esp_private/periph_ctrl.h>
 #endif
 
 #if defined (SOC_GDMA_SUPPORTED)  // for C3/S3
@@ -150,8 +166,28 @@ Contributors:
  #endif
 
  #if !defined (SOC_GDMA_PAIRS_PER_GROUP_MAX)
-  #define SOC_GDMA_PAIRS_PER_GROUP_MAX SOC_GDMA_PAIRS_PER_GROUP
+  #ifdef SOC_GDMA_PAIRS_PER_GROUP
+   #define SOC_GDMA_PAIRS_PER_GROUP_MAX SOC_GDMA_PAIRS_PER_GROUP
+  #else
+   #define SOC_GDMA_PAIRS_PER_GROUP_MAX 1
+  #endif
  #endif
+#endif
+
+#if !defined(GPIO_PIN0_REG) && defined(GPIO_PIN_REG_0)
+ #define GPIO_PIN0_REG GPIO_PIN_REG_0
+#endif
+
+#if !defined(esp_efuse_get_pkg_ver)
+static inline uint32_t lgfx_esp_efuse_get_pkg_ver_fallback(void) { return 0; }
+ #define esp_efuse_get_pkg_ver lgfx_esp_efuse_get_pkg_ver_fallback
+#endif
+
+#if !defined(PERIPH_I2C0_MODULE) && defined(PERIPH_I2C0_EXT0_ATOMIC)
+ #define PERIPH_I2C0_MODULE PERIPH_I2C0_EXT0_ATOMIC
+#endif
+#if !defined(PERIPH_I2C1_MODULE) && defined(PERIPH_I2C1_EXT0_ATOMIC)
+ #define PERIPH_I2C1_MODULE PERIPH_I2C1_EXT0_ATOMIC
 #endif
 
 
@@ -761,16 +797,6 @@ namespace lgfx
  #define I2C_ACK_ERR_INT_RAW_M I2C_NACK_INT_RAW_M
 #endif
 
-    __attribute__ ((unused))
-    static periph_module_t getPeriphModule(int num)
-    {
-#if SOC_I2C_NUM == 1 || defined CONFIG_IDF_TARGET_ESP32C6
-      return PERIPH_I2C0_MODULE;
-#else
-      return num == 0 ? PERIPH_I2C0_MODULE : PERIPH_I2C1_MODULE;
-#endif
-    }
-
     static i2c_dev_t* getDev(int num)
     {
 #if SOC_I2C_NUM == 1 || defined CONFIG_IDF_TARGET_ESP32C6
@@ -817,6 +843,16 @@ namespace lgfx
       }
     }
 #else
+    __attribute__ ((unused))
+    static shared_periph_module_t getPeriphModule(int num)
+    {
+#if SOC_I2C_NUM == 1 || defined CONFIG_IDF_TARGET_ESP32C6
+      return PERIPH_I2C0_MODULE;
+#else
+      return num == 0 ? PERIPH_I2C0_MODULE : PERIPH_I2C1_MODULE;
+#endif
+    }
+
     static void i2c_periph_enable(int i2c_num)
     {
       auto mod = getPeriphModule(i2c_num);
@@ -977,7 +1013,7 @@ namespace lgfx
 #if __has_include(<driver/i2c_master.h>)
       if ((int8_t)pin_sda >= 0) {
         gpio_set_level(pin_sda, true);
-        gpio_iomux_out(pin_sda, PIN_FUNC_GPIO, false);
+        gpio_iomux_output(pin_sda, PIN_FUNC_GPIO);
         gpio_set_direction(pin_sda, GPIO_MODE_INPUT_OUTPUT_OD);
         gpio_set_pull_mode(pin_sda, GPIO_PULLUP_ONLY);
         esp_rom_gpio_connect_out_signal(pin_sda, i2c_periph_signal[i2c_num].sda_out_sig, 0, 0);
@@ -985,7 +1021,7 @@ namespace lgfx
       }
       if ((int8_t)pin_scl >= 0) {
         gpio_set_level(pin_scl, true);
-        gpio_iomux_out(pin_scl, PIN_FUNC_GPIO, false);
+        gpio_iomux_output(pin_scl, PIN_FUNC_GPIO);
         gpio_set_direction(pin_scl, GPIO_MODE_INPUT_OUTPUT_OD);
         esp_rom_gpio_connect_out_signal(pin_scl, i2c_periph_signal[i2c_num].scl_out_sig, 0, 0);
         esp_rom_gpio_connect_in_signal(pin_scl, i2c_periph_signal[i2c_num].scl_in_sig, 0);

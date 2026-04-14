@@ -1,7 +1,7 @@
 #ifndef PCF8563_H
 #define PCF8563_H
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
@@ -74,7 +74,7 @@ typedef enum {
 } rtc_chip_type_t;
 
 // Functions
-esp_err_t rtc_init(i2c_port_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type);
+esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type);
 esp_err_t rtc_set_datetime(const RTC_Date *datetime);
 esp_err_t rtc_get_datetime(RTC_Date *datetime);
 esp_err_t rtc_set_alarm(const RTC_Alarm *alarm);
@@ -84,7 +84,7 @@ esp_err_t rtc_disable_alarm(void);
 esp_err_t rtc_check_voltage_low(bool *voltage_low);
 
 // Legacy functions for backward compatibility
-esp_err_t pcf8563_init(i2c_port_t i2c_port, uint8_t addr);
+esp_err_t pcf8563_init(i2c_port_num_t i2c_port, uint8_t addr);
 esp_err_t pcf8563_set_datetime(const RTC_Date *datetime);
 esp_err_t pcf8563_get_datetime(RTC_Date *datetime);
 esp_err_t pcf8563_set_alarm(const RTC_Alarm *alarm);

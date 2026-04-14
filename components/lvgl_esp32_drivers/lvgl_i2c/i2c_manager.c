@@ -28,17 +28,19 @@ SOFTWARE.
 
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 #include <esp_log.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include <driver/i2c.h>
+#include <driver/i2c_master.h>
 
 #include "sdkconfig.h"
 
 #include "i2c_manager.h"
+#include "i2c_shared.h"
 
 
 #if defined __has_include
@@ -55,8 +57,8 @@ static const char* TAG = I2C_TAG;
 
 static SemaphoreHandle_t I2C_FN(_local_mutex)[2] = { NULL, NULL };
 static SemaphoreHandle_t* I2C_FN(_mutex) = &I2C_FN(_local_mutex)[0];
-
-static const uint8_t ACK_CHECK_EN = 1;
+static i2c_master_bus_handle_t s_i2c_bus[2] = { NULL, NULL };
+static bool s_i2c_bus_owned[2] = { false, false };
 
 #if defined (CONFIG_I2C_MANAGER_0_ENABLED)
 #define I2C_ZERO 					I2C_NUM_0
@@ -104,23 +106,75 @@ static const uint8_t ACK_CHECK_EN = 1;
 #endif
 #endif
 
-static void i2c_send_address(i2c_cmd_handle_t cmd, uint16_t addr, i2c_rw_t rw) {
+static uint32_t i2c_port_speed(i2c_port_num_t port) {
+#if defined (I2C_ZERO)
+    if (port == I2C_NUM_0) {
+        return CONFIG_I2C_MANAGER_0_FREQ_HZ;
+    }
+#endif
+#if defined (I2C_ONE)
+    if (port == I2C_NUM_1) {
+        return CONFIG_I2C_MANAGER_1_FREQ_HZ;
+    }
+#endif
+    return 100000;
+}
+
+static esp_err_t i2c_manager_get_or_create_bus(i2c_port_num_t port)
+{
+    if (s_i2c_bus[port]) {
+        return ESP_OK;
+    }
+
+    gpio_num_t sda = GPIO_NUM_NC;
+    gpio_num_t scl = GPIO_NUM_NC;
+    bool pullup = true;
+
+#if defined (I2C_ZERO)
+    if (port == I2C_NUM_0) {
+        sda = CONFIG_I2C_MANAGER_0_SDA;
+        scl = CONFIG_I2C_MANAGER_0_SCL;
+        pullup = I2C_MANAGER_0_PULLUPS;
+    }
+#endif
+#if defined (I2C_ONE)
+    if (port == I2C_NUM_1) {
+        sda = CONFIG_I2C_MANAGER_1_SDA;
+        scl = CONFIG_I2C_MANAGER_1_SCL;
+        pullup = I2C_MANAGER_1_PULLUPS;
+    }
+#endif
+
+    return i2c_shared_get_or_create_bus(port, sda, scl, pullup, &s_i2c_bus[port], &s_i2c_bus_owned[port]);
+}
+
+static esp_err_t i2c_manager_add_device(i2c_port_num_t port, uint16_t addr, i2c_master_dev_handle_t *out_dev)
+{
+    if (!s_i2c_bus[port] || !out_dev) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    i2c_addr_bit_len_t addr_len = I2C_ADDR_BIT_LEN_7;
+    uint16_t device_addr = addr;
+
+#ifdef I2C_ADDR_BIT_LEN_10
     if (addr & I2C_ADDR_10) {
-        i2c_master_write_byte(cmd, 0xF0 | ((addr & 0x3FF) >> 7) | rw, ACK_CHECK_EN);
-        i2c_master_write_byte(cmd, addr & 0xFF, ACK_CHECK_EN);
-    } else {
-        i2c_master_write_byte(cmd, (addr << 1) | rw, ACK_CHECK_EN);
+        addr_len = I2C_ADDR_BIT_LEN_10;
+        device_addr = addr & 0x3FF;
     }
+#endif
+
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = addr_len,
+        .device_address = device_addr,
+        .scl_speed_hz = i2c_port_speed(port),
+        .scl_wait_us = 0,
+    };
+
+    return i2c_master_bus_add_device(s_i2c_bus[port], &dev_config, out_dev);
 }
 
-static void i2c_send_register(i2c_cmd_handle_t cmd, uint32_t reg) {
-    if (reg & I2C_REG_16) {
-        i2c_master_write_byte(cmd, (reg & 0xFF00) >> 8, ACK_CHECK_EN);
-    }
-    i2c_master_write_byte(cmd, reg & 0xFF, ACK_CHECK_EN);
-}
-
-esp_err_t I2C_FN(_init)(i2c_port_t port) {
+esp_err_t I2C_FN(_init)(i2c_port_num_t port) {
 
     I2C_PORT_CHECK(port, ESP_FAIL);
 
@@ -132,44 +186,12 @@ esp_err_t I2C_FN(_init)(i2c_port_t port) {
 
         I2C_FN(_mutex)[port] = xSemaphoreCreateMutex();
 
-        i2c_config_t conf = {0};
-
-#ifdef HAS_CLK_FLAGS
-        conf.clk_flags = 0;
-#endif
-
-#if defined (I2C_ZERO)
-        if (port == I2C_NUM_0) {
-				conf.sda_io_num = CONFIG_I2C_MANAGER_0_SDA;
-				conf.scl_io_num = CONFIG_I2C_MANAGER_0_SCL;
-				conf.sda_pullup_en = I2C_MANAGER_0_PULLUPS ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
-				conf.scl_pullup_en = conf.sda_pullup_en;
-				conf.master.clk_speed = CONFIG_I2C_MANAGER_0_FREQ_HZ;
-			}
-#endif
-
-#if defined (I2C_ONE)
-        if (port == I2C_NUM_1) {
-				conf.sda_io_num = CONFIG_I2C_MANAGER_1_SDA;
-				conf.scl_io_num = CONFIG_I2C_MANAGER_1_SCL;
-				conf.sda_pullup_en = I2C_MANAGER_1_PULLUPS ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
-				conf.scl_pullup_en = conf.sda_pullup_en;
-				conf.master.clk_speed = CONFIG_I2C_MANAGER_1_FREQ_HZ;
-			}
-#endif
-
-        conf.mode = I2C_MODE_MASTER;
-
-        ret = i2c_param_config(port, &conf);
-        ret |= i2c_driver_install(port, conf.mode, 0, 0, 0);
+        ret = i2c_manager_get_or_create_bus(port);
 
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialise I2C port %d.", (int)port);
-            ESP_LOGW(TAG, "If it was already open, we'll use it with whatever settings were used "
-                          "to open it. See I2C Manager README for details.");
         } else {
-            ESP_LOGI(TAG, "Initialised port %d (SDA: %d, SCL: %d, speed: %lu Hz.)",
-                     port, conf.sda_io_num, conf.scl_io_num, conf.master.clk_speed);
+            ESP_LOGI(TAG, "Initialised I2C master bus on port %d", (int)port);
         }
 
     }
@@ -177,7 +199,7 @@ esp_err_t I2C_FN(_init)(i2c_port_t port) {
     return ret;
 }
 
-esp_err_t I2C_FN(_read)(i2c_port_t port, uint16_t addr, uint32_t reg, uint8_t *buffer, uint16_t size) {
+esp_err_t I2C_FN(_read)(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_t *buffer, uint16_t size) {
 
     I2C_PORT_CHECK(port, ESP_FAIL);
 
@@ -201,24 +223,28 @@ esp_err_t I2C_FN(_read)(i2c_port_t port, uint16_t addr, uint32_t reg, uint8_t *b
 #endif
 
     if (I2C_FN(_lock)((int)port) == ESP_OK) {
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-        if (!cmd) {
+        i2c_master_dev_handle_t dev = NULL;
+        result = i2c_manager_add_device(port, addr, &dev);
+        if (result != ESP_OK) {
             I2C_FN(_unlock)((int)port);
-            return ESP_ERR_NO_MEM;
+            return result;
         }
+
         if (!(reg & I2C_NO_REG)) {
-            /* When reading specific register set the addr pointer first. */
-            i2c_master_start(cmd);
-            i2c_send_address(cmd, addr, I2C_MASTER_WRITE);
-            i2c_send_register(cmd, reg);
+            uint8_t reg_buf[2];
+            size_t reg_len = 1;
+            if (reg & I2C_REG_16) {
+                reg_buf[0] = (reg & 0xFF00) >> 8;
+                reg_buf[1] = reg & 0xFF;
+                reg_len = 2;
+            } else {
+                reg_buf[0] = reg & 0xFF;
+            }
+            result = i2c_master_transmit_receive(dev, reg_buf, reg_len, buffer, size, timeout);
+        } else {
+            result = i2c_master_receive(dev, buffer, size, timeout);
         }
-        /* Read size bytes from the current pointer. */
-        i2c_master_start(cmd);
-        i2c_send_address(cmd, addr, I2C_MASTER_READ);
-        i2c_master_read(cmd, buffer, size, I2C_MASTER_LAST_NACK);
-        i2c_master_stop(cmd);
-        result = i2c_master_cmd_begin(port, cmd, timeout);
-        i2c_cmd_link_delete(cmd);
+        i2c_master_bus_rm_device(dev);
         I2C_FN(_unlock)((int)port);
     } else {
         ESP_LOGE(TAG, "Lock could not be obtained for port %d.", (int)port);
@@ -234,7 +260,7 @@ esp_err_t I2C_FN(_read)(i2c_port_t port, uint16_t addr, uint32_t reg, uint8_t *b
     return result;
 }
 
-esp_err_t I2C_FN(_write)(i2c_port_t port, uint16_t addr, uint32_t reg, const uint8_t *buffer, uint16_t size) {
+esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const uint8_t *buffer, uint16_t size) {
 
     I2C_PORT_CHECK(port, ESP_FAIL);
 
@@ -258,20 +284,26 @@ esp_err_t I2C_FN(_write)(i2c_port_t port, uint16_t addr, uint32_t reg, const uin
 #endif
 
     if (I2C_FN(_lock)((int)port) == ESP_OK) {
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-        if (!cmd) {
+        i2c_master_dev_handle_t dev = NULL;
+        result = i2c_manager_add_device(port, addr, &dev);
+        if (result != ESP_OK) {
             I2C_FN(_unlock)((int)port);
-            return ESP_ERR_NO_MEM;
+            return result;
         }
-        i2c_master_start(cmd);
-        i2c_send_address(cmd, addr, I2C_MASTER_WRITE);
+        uint8_t tx[258];
+        size_t tx_len = 0;
         if (!(reg & I2C_NO_REG)) {
-            i2c_send_register(cmd, reg);
+            if (reg & I2C_REG_16) {
+                tx[tx_len++] = (reg & 0xFF00) >> 8;
+            }
+            tx[tx_len++] = reg & 0xFF;
         }
-        i2c_master_write(cmd, (uint8_t *)buffer, size, ACK_CHECK_EN);
-        i2c_master_stop(cmd);
-        result = i2c_master_cmd_begin( port, cmd, timeout);
-        i2c_cmd_link_delete(cmd);
+        if (size > 0) {
+            memcpy(&tx[tx_len], buffer, size);
+            tx_len += size;
+        }
+        result = i2c_master_transmit(dev, tx, tx_len, timeout);
+        i2c_master_bus_rm_device(dev);
         I2C_FN(_unlock)((int)port);
     } else {
         ESP_LOGE(TAG, "Lock could not be obtained for port %d.", (int)port);
@@ -287,15 +319,23 @@ esp_err_t I2C_FN(_write)(i2c_port_t port, uint16_t addr, uint32_t reg, const uin
     return result;
 }
 
-esp_err_t I2C_FN(_close)(i2c_port_t port) {
+esp_err_t I2C_FN(_close)(i2c_port_num_t port) {
     I2C_PORT_CHECK(port, ESP_FAIL);
     vSemaphoreDelete(I2C_FN(_mutex)[port]);
     I2C_FN(_mutex)[port] = NULL;
     ESP_LOGI(TAG, "Closing I2C master at port %d", port);
-    return i2c_driver_delete(port);
+    if (s_i2c_bus_owned[port] && s_i2c_bus[port]) {
+        esp_err_t ret = i2c_del_master_bus(s_i2c_bus[port]);
+        s_i2c_bus[port] = NULL;
+        s_i2c_bus_owned[port] = false;
+        return ret;
+    }
+    s_i2c_bus[port] = NULL;
+    s_i2c_bus_owned[port] = false;
+    return ESP_OK;
 }
 
-esp_err_t I2C_FN(_lock)(i2c_port_t port) {
+esp_err_t I2C_FN(_lock)(i2c_port_num_t port) {
     I2C_PORT_CHECK(port, ESP_FAIL);
     ESP_LOGV(TAG, "Mutex lock set for %d.", (int)port);
 
@@ -320,13 +360,13 @@ esp_err_t I2C_FN(_lock)(i2c_port_t port) {
     }
 }
 
-esp_err_t I2C_FN(_unlock)(i2c_port_t port) {
+esp_err_t I2C_FN(_unlock)(i2c_port_num_t port) {
     I2C_PORT_CHECK(port, ESP_FAIL);
     ESP_LOGV(TAG, "Mutex lock removed for %d.", (int)port);
     return (xSemaphoreGive(I2C_FN(_mutex)[port]) == pdTRUE) ? ESP_OK : ESP_FAIL;
 }
 
-esp_err_t I2C_FN(_force_unlock)(i2c_port_t port) {
+esp_err_t I2C_FN(_force_unlock)(i2c_port_num_t port) {
     I2C_PORT_CHECK(port, ESP_FAIL);
     if (I2C_FN(_mutex)[port]) {
         vSemaphoreDelete(I2C_FN(_mutex)[port]);
@@ -334,6 +374,7 @@ esp_err_t I2C_FN(_force_unlock)(i2c_port_t port) {
     I2C_FN(_mutex)[port] = xSemaphoreCreateMutex();
     return ESP_OK;
 }
+
 
 
 
@@ -353,22 +394,22 @@ void* i2c_manager_locking() {
     }
 
     int32_t i2c_hal_read(void *handle, uint8_t address, uint8_t reg, uint8_t *buffer, uint16_t size) {
-        return i2c_manager_read(*(i2c_port_t*)handle, address, reg, buffer, size);
+        return i2c_manager_read(*(i2c_port_num_t*)handle, address, reg, buffer, size);
     }
 
     int32_t i2c_hal_write(void *handle, uint8_t address, uint8_t reg, const uint8_t *buffer, uint16_t size) {
-        return i2c_manager_write(*(i2c_port_t*)handle, address, reg, buffer, size);
+        return i2c_manager_write(*(i2c_port_num_t*)handle, address, reg, buffer, size);
     }
 
-	static i2c_port_t port_zero = (i2c_port_t)0;
-	static i2c_port_t port_one = (i2c_port_t)1;
+	static i2c_port_num_t port_zero = (i2c_port_num_t)0;
+	static i2c_port_num_t port_one = (i2c_port_num_t)1;
 
     static i2c_hal_t _i2c_hal[2] = {
         {&i2c_hal_read, &i2c_hal_write, &port_zero},
         {&i2c_hal_read, &i2c_hal_write, &port_one}
     };
 
-    void* i2c_hal(i2c_port_t port) {
+    void* i2c_hal(i2c_port_num_t port) {
 		I2C_PORT_CHECK(port, NULL);
         return (void*)&_i2c_hal[port];
     }

@@ -5,8 +5,9 @@
 #ifndef CH422G_H
 #define CH422G_H
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_err.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -17,8 +18,10 @@ extern "C" {
  * @brief CH422G device structure
  */
 typedef struct {
-  i2c_port_t i2c_num;   /*!< I2C port number */
+  i2c_port_num_t i2c_num;   /*!< I2C port number */
   uint32_t i2c_address; /*!< I2C device address */
+  i2c_master_bus_handle_t bus_handle;
+  bool owns_i2c_bus;
   struct {
     uint8_t wr_set; /*!< WR_SET register value */
     uint8_t wr_oc;  /*!< WR_OC register value */
@@ -34,7 +37,7 @@ typedef struct {
  * @param out_dev Pointer to store the allocated device handle
  * @return esp_err_t ESP_OK on success, or appropriate error code
  */
-esp_err_t ch422g_new_device(i2c_port_t i2c_num, uint32_t i2c_address,
+esp_err_t ch422g_new_device(i2c_port_num_t i2c_num, uint32_t i2c_address,
                             esp_io_expander_ch422g_t **out_dev);
 
 /**
@@ -44,7 +47,7 @@ esp_err_t ch422g_new_device(i2c_port_t i2c_num, uint32_t i2c_address,
  * @return esp_err_t ESP_OK on success, or appropriate error code
  */
 void cleanup_resources(esp_io_expander_ch422g_t *ch422g_dev,
-                       i2c_port_t i2c_num);
+                       i2c_port_num_t i2c_num);
 
 /**
  * @brief Read the input register of the CH422G device

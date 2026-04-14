@@ -27,6 +27,7 @@ Contributors:
  #endif
 #else
  #include <driver/ledc.h>
+ #include <driver/gpio.h>
 #endif
 
 namespace lgfx

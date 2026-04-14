@@ -370,7 +370,7 @@ void lvgl_port_flush_ready(lv_disp_t *disp)
 * Private functions
 *******************************************************************************/
 
-extern void processEvent();
+extern void processEvent(void);
 
 static void lvgl_port_task(void *arg)
 {
@@ -388,7 +388,7 @@ static void lvgl_port_task(void *arg)
         } else if (task_delay_ms < 1) {
             task_delay_ms = 1;
         }
-        processEvent(NULL);
+        processEvent();
         vTaskDelay(pdMS_TO_TICKS(task_delay_ms));
     }
 

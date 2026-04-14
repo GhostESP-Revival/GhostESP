@@ -15,15 +15,18 @@
 #include "pn532_driver_i2c.h"
 #include "esp_log.h"
 #include "i2c_bus_lock.h"
+#include "i2c_shared.h"
 
 static const char TAG[] = "pn532_driver_i2c_legacy";
 
 typedef struct {
     gpio_num_t sda;
     gpio_num_t scl;
-    i2c_port_t i2c_port_number;
+    i2c_port_num_t i2c_port_number;
+    i2c_master_bus_handle_t bus_handle;
+    i2c_master_dev_handle_t dev_handle;
     uint8_t frame_buffer[256];
-    bool owns_i2c_driver;
+    bool owns_i2c_bus;
 } pn532_i2c_driver_config;
 
 static esp_err_t pn532_init_io(pn532_io_handle_t io_handle);
@@ -37,7 +40,7 @@ esp_err_t pn532_new_driver_i2c(gpio_num_t sda,
                                gpio_num_t scl,
                                gpio_num_t reset,
                                gpio_num_t irq,
-                               i2c_port_t i2c_port_number,
+                               i2c_port_num_t i2c_port_number,
                                pn532_io_handle_t io_handle)
 {
     if (io_handle == NULL)
@@ -90,36 +93,17 @@ esp_err_t pn532_init_io(pn532_io_handle_t io_handle)
 
     pn532_i2c_driver_config *driver_config = (pn532_i2c_driver_config *)io_handle->driver_data;
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = driver_config->sda,
-        .scl_io_num = driver_config->scl,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
-        .clk_flags = 0,
-    };
-
-    driver_config->owns_i2c_driver = false;
-
-    esp_err_t r = i2c_driver_install(driver_config->i2c_port_number, conf.mode, 0, 0, 0);
-    if (r == ESP_OK) {
-        driver_config->owns_i2c_driver = true;
-        r = i2c_param_config(driver_config->i2c_port_number, &conf);
-        if (r != ESP_OK) {
-            ESP_LOGE(TAG, "i2c_param_config failed: 0x%x", (int)r);
-            i2c_driver_delete(driver_config->i2c_port_number);
-            driver_config->owns_i2c_driver = false;
-            return r;
-        }
-    } else if (r == ESP_ERR_INVALID_STATE || r == ESP_FAIL) {
-        driver_config->owns_i2c_driver = false;
-        ESP_LOGW(TAG, "i2c_driver_install not owned by PN532 (already installed), proceeding with shared bus");
-    } else {
-        ESP_LOGE(TAG, "i2c_driver_install failed: 0x%x", (int)r);
+    esp_err_t r = i2c_shared_get_or_create_bus(driver_config->i2c_port_number,
+                                               driver_config->sda,
+                                               driver_config->scl,
+                                               true,
+                                               &driver_config->bus_handle,
+                                               &driver_config->owns_i2c_bus);
+    if (r != ESP_OK) {
         return r;
     }
-    return ESP_OK;
+
+    return i2c_shared_add_device(driver_config->bus_handle, 0x24, 100000, &driver_config->dev_handle);
 }
 
 void pn532_release_io(pn532_io_handle_t io_handle)
@@ -128,12 +112,20 @@ void pn532_release_io(pn532_io_handle_t io_handle)
         return;
     }
     pn532_i2c_driver_config *driver_config = (pn532_i2c_driver_config *)io_handle->driver_data;
-    if (driver_config->owns_i2c_driver) {
-        esp_err_t r = i2c_driver_delete(driver_config->i2c_port_number);
+    if (driver_config->dev_handle) {
+        esp_err_t r = i2c_master_bus_rm_device(driver_config->dev_handle);
         if (r != ESP_OK) {
-            ESP_LOGW(TAG, "i2c_driver_delete failed: 0x%x", (int)r);
+            ESP_LOGW(TAG, "i2c_master_bus_rm_device failed: 0x%x", (int)r);
         }
-        driver_config->owns_i2c_driver = false;
+        driver_config->dev_handle = NULL;
+    }
+    if (driver_config->owns_i2c_bus && driver_config->bus_handle) {
+        esp_err_t r = i2c_del_master_bus(driver_config->bus_handle);
+        if (r != ESP_OK) {
+            ESP_LOGW(TAG, "i2c_del_master_bus failed: 0x%x", (int)r);
+        }
+        driver_config->bus_handle = NULL;
+        driver_config->owns_i2c_bus = false;
     }
 }
 
@@ -149,7 +141,7 @@ esp_err_t pn532_is_ready(pn532_io_handle_t io_handle)
     uint8_t status = 0;
     bool locked = i2c_bus_lock((int)driver_config->i2c_port_number, 300);
     if (!locked) return ESP_ERR_TIMEOUT;
-    esp_err_t res = i2c_master_read_from_device(driver_config->i2c_port_number, 0x24, &status, 1, 30 / portTICK_PERIOD_MS);
+    esp_err_t res = i2c_master_receive(driver_config->dev_handle, &status, 1, 30);
     i2c_bus_unlock((int)driver_config->i2c_port_number);
     if (res != ESP_OK) return res;
     return (status == 0x01) ? ESP_OK : ESP_FAIL;
@@ -164,7 +156,7 @@ esp_err_t pn532_read(pn532_io_handle_t io_handle, uint8_t *read_buffer, size_t r
     int timeout = (xfer_timeout_ms > 0) ? xfer_timeout_ms / portTICK_PERIOD_MS : 100 / portTICK_PERIOD_MS;
     bool locked = i2c_bus_lock((int)driver_config->i2c_port_number, 300);
     if (!locked) return ESP_ERR_TIMEOUT;
-    esp_err_t res = i2c_master_read_from_device(driver_config->i2c_port_number, 0x24, rx_buffer, read_size + 1, timeout);
+    esp_err_t res = i2c_master_receive(driver_config->dev_handle, rx_buffer, read_size + 1, timeout);
     i2c_bus_unlock((int)driver_config->i2c_port_number);
     if (res != ESP_OK) return res;
     if (rx_buffer[0] != 0x01) return ESP_ERR_TIMEOUT;
@@ -186,7 +178,7 @@ esp_err_t pn532_write(pn532_io_handle_t io_handle, const uint8_t *write_buffer, 
     int timeout = (xfer_timeout_ms > 0) ? xfer_timeout_ms / portTICK_PERIOD_MS : 100 / portTICK_PERIOD_MS;
     bool locked = i2c_bus_lock((int)driver_config->i2c_port_number, 300);
     if (!locked) return ESP_ERR_TIMEOUT;
-    esp_err_t r = i2c_master_write_to_device(driver_config->i2c_port_number, 0x24, driver_config->frame_buffer, write_size + 2, timeout);
+    esp_err_t r = i2c_master_transmit(driver_config->dev_handle, driver_config->frame_buffer, write_size + 2, timeout);
     i2c_bus_unlock((int)driver_config->i2c_port_number);
     return r;
 }

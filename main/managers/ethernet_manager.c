@@ -12,6 +12,8 @@
 #include "esp_eth_mac.h"
 #include "esp_eth_phy.h"
 #include "esp_eth_mac_spi.h"
+#include "esp_eth_mac_w5500.h"
+#include "esp_eth_phy_w5500.h"
 #include "esp_event.h"
 #include "esp_mac.h"
 #include "driver/spi_master.h"

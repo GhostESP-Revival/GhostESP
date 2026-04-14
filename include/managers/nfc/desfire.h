@@ -1,9 +1,9 @@
 #pragma once
 
-#include "sdkconfig.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "managers/nfc/pn532_compat.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,8 +33,6 @@ typedef struct {
 bool desfire_is_desfire_candidate(uint16_t atqa, uint8_t sak);
 
 #ifdef CONFIG_NFC_PN532
-#include "pn532.h"  // for pn532_io_handle_t
-
 // Try to query DESFire version info via native GET_VERSION.
 // Returns true on success and fills out struct, false if command fails or
 // response is not recognized.

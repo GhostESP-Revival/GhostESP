@@ -43,8 +43,7 @@ static lv_coord_t get_screen_height(void) {
 static const lv_font_t *get_font_for_screen(void) {
     lv_coord_t h = get_screen_height();
     if (h <= 135) return &lv_font_montserrat_14;
-    if (h <= 200) return &lv_font_montserrat_16;
-    return &lv_font_montserrat_18;
+    return &lv_font_montserrat_16;
 }
 
 static const lv_font_t *get_small_font_for_screen(void) {

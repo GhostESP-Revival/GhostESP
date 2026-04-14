@@ -1040,6 +1040,8 @@ void esp_comm_manager_init_with_defaults(void) {
 }
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
+    ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (s_comm_manager) {
         printf("Already initialized\n");
         return;
@@ -1094,6 +1096,8 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
         printf("E: Failed to allocate memory\n");
         return;
     }
+    ESP_LOGI(TAG, "esp_comm_manager: struct allocated, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
     s_comm_manager->tx_pin = resolved_tx;
     s_comm_manager->rx_pin = resolved_rx;
@@ -1160,6 +1164,8 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             s_comm_manager->uart_driver_installed = true;
         }
     }
+    ESP_LOGI(TAG, "esp_comm_manager: UART driver installed, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
     if (!s_comm_manager->uart_driver_installed) {
         if (s_comm_manager->state_mutex) {
@@ -1210,6 +1216,8 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
         xTimerStart(s_comm_manager->discovery_timer, 0);
     }
 
+    ESP_LOGI(TAG, "esp_comm_manager_init: COMPLETE, free internal RAM: %d bytes", 
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     printf("ESP Comm Manager initialized as '%s' on TX:%d RX:%d at %lu baud - Auto-listening for peers\n", 
            s_comm_manager->chip_name, resolved_tx, resolved_rx, (unsigned long)resolved_baud);
 }

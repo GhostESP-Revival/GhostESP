@@ -1076,9 +1076,9 @@ void knightrider_task(void *pvParameter) {
 }
 
 void clamp_rgb(uint8_t *r, uint8_t *g, uint8_t *b) {
-  *r = (*r > 255) ? 255 : *r;
-  *g = (*g > 255) ? 255 : *g;
-  *b = (*b > 255) ? 255 : *b;
+  (void)r;
+  (void)g;
+  (void)b;
 }
 
 void rgb_manager_power_transition_begin(void) {

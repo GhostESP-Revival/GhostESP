@@ -1,4 +1,5 @@
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
+#include "i2c_shared.h"
 #include "vendor/drivers/axp2101.h"
 #include <stdio.h>
 
@@ -6,6 +7,9 @@
 #define IS_BIT_SET(value, bit) (((value) & (1 << (bit))) != 0)
 
 bool i2c_initialized = false;
+static i2c_master_bus_handle_t s_axp_bus = NULL;
+static i2c_master_dev_handle_t s_axp_dev = NULL;
+static bool s_axp_bus_owned = false;
 
 #define AXP2101_REG_POWER_LEVEL 0xA4
 #define AXP202_MODE_CHGSTATUS 0x01
@@ -19,16 +23,7 @@ bool axp202_is_battery_connected(void) {
   uint8_t reg = 0;
   uint8_t reg_addr = AXP202_MODE_CHGSTATUS;
 
-  esp_err_t err = i2c_master_write_to_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR,
-                                             &reg_addr, 1, pdMS_TO_TICKS(100));
-  if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to write register address 0x%02X: %s\n",
-           __func__, reg_addr, esp_err_to_name(err));
-    return false;
-  }
-
-  err = i2c_master_read_from_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR, &reg, 1,
-                                    pdMS_TO_TICKS(100));
+  esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &reg, 1, 100);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read register 0x%02X: %s\n", __func__,
            reg_addr, esp_err_to_name(err));
@@ -50,16 +45,7 @@ bool axp202_is_charging(void) {
   uint8_t reg = 0;
   uint8_t reg_addr = AXP202_MODE_CHGSTATUS;
 
-  esp_err_t err = i2c_master_write_to_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR,
-                                             &reg_addr, 1, pdMS_TO_TICKS(100));
-  if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to write register address 0x%02X: %s\n",
-           __func__, reg_addr, esp_err_to_name(err));
-    return false;
-  }
-
-  err = i2c_master_read_from_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR, &reg, 1,
-                                    pdMS_TO_TICKS(100));
+  esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &reg, 1, 100);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read register 0x%02X: %s\n", __func__,
            reg_addr, esp_err_to_name(err));
@@ -81,26 +67,21 @@ esp_err_t axp2101_init(void) {
     return ESP_OK;
   }
 
-  i2c_config_t conf = {
-      .mode = I2C_MODE_MASTER,
-      .sda_io_num = I2C_MASTER_SDA_IO,
-      .scl_io_num = I2C_MASTER_SCL_IO,
-      .sda_pullup_en = GPIO_PULLUP_ENABLE,
-      .scl_pullup_en = GPIO_PULLUP_ENABLE,
-      .master.clk_speed = I2C_MASTER_FREQ_HZ,
-      .clk_flags = 0,
-  };
-
-  esp_err_t err = i2c_param_config(I2C_MASTER_NUM, &conf);
+  esp_err_t err = i2c_shared_get_or_create_bus(I2C_MASTER_NUM,
+                                               I2C_MASTER_SDA_IO,
+                                               I2C_MASTER_SCL_IO,
+                                               true,
+                                               &s_axp_bus,
+                                               &s_axp_bus_owned);
   if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to configure I2C parameters: %s\n", __func__,
+    printf("ERROR [%s]: Failed to create/get I2C bus: %s\n", __func__,
            esp_err_to_name(err));
     return err;
   }
 
-  err = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
+  err = i2c_shared_add_device(s_axp_bus, AXP2101_I2C_ADDR, I2C_MASTER_FREQ_HZ, &s_axp_dev);
   if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to install I2C driver: %s\n", __func__,
+    printf("ERROR [%s]: Failed to attach AXP2101 device: %s\n", __func__,
            esp_err_to_name(err));
     return err;
   }
@@ -116,11 +97,25 @@ esp_err_t axp2101_deinit(void) {
     return ESP_OK;
   }
 
-  esp_err_t err = i2c_driver_delete(I2C_MASTER_NUM);
-  if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to delete I2C driver: %s\n", __func__,
-           esp_err_to_name(err));
-    return err;
+  esp_err_t err = ESP_OK;
+  if (s_axp_dev) {
+    err = i2c_master_bus_rm_device(s_axp_dev);
+    if (err != ESP_OK) {
+      printf("ERROR [%s]: Failed to remove AXP2101 device: %s\n", __func__,
+             esp_err_to_name(err));
+      return err;
+    }
+    s_axp_dev = NULL;
+  }
+  if (s_axp_bus_owned && s_axp_bus) {
+    err = i2c_del_master_bus(s_axp_bus);
+    if (err != ESP_OK) {
+      printf("ERROR [%s]: Failed to delete I2C bus: %s\n", __func__,
+             esp_err_to_name(err));
+      return err;
+    }
+    s_axp_bus = NULL;
+    s_axp_bus_owned = false;
   }
 
   i2c_initialized = false;
@@ -142,16 +137,7 @@ esp_err_t axp2101_get_power_level(uint8_t *power_level) {
   uint8_t reg_addr = AXP2101_REG_POWER_LEVEL;
   uint8_t data = 0;
 
-  esp_err_t err = i2c_master_write_to_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR,
-                                             &reg_addr, 1, pdMS_TO_TICKS(100));
-  if (err != ESP_OK) {
-    printf("ERROR [%s]: Failed to write to AXP2101 register 0x%02X: %s\n",
-           __func__, reg_addr, esp_err_to_name(err));
-    return err;
-  }
-
-  err = i2c_master_read_from_device(I2C_MASTER_NUM, AXP2101_I2C_ADDR, &data, 1,
-                                    pdMS_TO_TICKS(100));
+  esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &data, 1, 100);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read from AXP2101 register 0x%02X: %s\n",
            __func__, reg_addr, esp_err_to_name(err));

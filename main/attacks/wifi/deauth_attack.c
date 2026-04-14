@@ -217,6 +217,9 @@ static void deauth_task(void *param) {
     if (ap_count == 0) {
         glog("No access points found\n");
         glog("Please run 'scan -w' first to find targets\n");
+        deauth_task_running = false;
+        deauth_task_handle = NULL;
+        deauth_stop_requested = false;
         vTaskDelete(NULL);
         return;
     }
@@ -224,6 +227,9 @@ static void deauth_task(void *param) {
     wifi_ap_record_t *ap_info = scanned_aps;
     if (ap_info == NULL) {
         glog("Failed to allocate memory for AP info\n");
+        deauth_task_running = false;
+        deauth_task_handle = NULL;
+        deauth_stop_requested = false;
         vTaskDelete(NULL);
         return;
     }
@@ -313,6 +319,8 @@ static void deauth_task(void *param) {
             last_log = now;
         }
     }
+    deauth_task_running = false;
+    deauth_stop_requested = false;
     deauth_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -426,11 +434,10 @@ void deauth_attack_stop(void) {
             }
             
             if (deauth_task_handle != NULL) {
-                vTaskDelete(deauth_task_handle);
-                deauth_task_handle = NULL;
+                glog("Deauth stop timeout; waiting for task to exit cleanly\n");
             }
         }
-        
+
         deauth_task_running = false;
         deauth_stop_requested = false;
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);

@@ -1,6 +1,6 @@
 #include "i2c_bus_lock.h"
 #include <stddef.h>
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 
 #if defined(__has_include)
 #  if __has_include("freertos/FreeRTOS.h")
@@ -18,9 +18,12 @@ typedef unsigned int TickType_t;
 #define portMAX_DELAY ((TickType_t)0xFFFFFFFFu)
 #endif
 static inline SemaphoreHandle_t xSemaphoreCreateMutex(void) { return (SemaphoreHandle_t)1; }
+static inline SemaphoreHandle_t xSemaphoreCreateRecursiveMutex(void) { return (SemaphoreHandle_t)1; }
 static inline void vSemaphoreDelete(SemaphoreHandle_t h) { (void)h; }
 static inline int xSemaphoreTake(SemaphoreHandle_t h, TickType_t to) { (void)h; (void)to; return 1; }
+static inline int xSemaphoreTakeRecursive(SemaphoreHandle_t h, TickType_t to) { (void)h; (void)to; return 1; }
 static inline void xSemaphoreGive(SemaphoreHandle_t h) { (void)h; }
+static inline void xSemaphoreGiveRecursive(SemaphoreHandle_t h) { (void)h; }
 static inline TickType_t pdMS_TO_TICKS(int ms) { return (TickType_t)ms; }
 #endif
 

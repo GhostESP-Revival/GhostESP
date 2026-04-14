@@ -200,7 +200,8 @@ static void airtag_scanner_callback(struct ble_gap_event *event, size_t len) {
     format_mac_address(event->disc.addr.val, macAddress, sizeof(macAddress), false);
     log_airtag_discovery(discovered_airtag_count, discovered_airtag_count + 1,
                          macAddress, event->disc.rssi);
-    pulse_once(&rgb_manager, 0, 0, 255);
+    // Avoid blocking the NimBLE host task inside the discovery callback.
+    rgb_manager_set_color(&rgb_manager, -1, 0, 0, 255, false);
     
     discovered_airtag_count++;
 }

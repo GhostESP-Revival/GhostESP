@@ -181,7 +181,7 @@ static bool hi_parse(const NfcDevice* device, FuriString* parsed_data) {
         if(!hi_get_card_config(&cfg, data->type)) break;
 
         // Verify key
-        MfClassicSectorTrailer* sec_tr =
+        const MfClassicSectorTrailer* sec_tr =
             mf_classic_get_sector_trailer_by_sector(data, cfg.verify_sector);
         uint64_t key = bit_lib_bytes_to_num_be(sec_tr->key_b.data, 6);
         if(key != cfg.keys[cfg.verify_sector].b) return false;

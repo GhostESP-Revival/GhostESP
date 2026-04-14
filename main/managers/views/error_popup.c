@@ -5,21 +5,37 @@
 #include <string.h>
 #include "esp_log.h"
 #include "gui/lvgl_safe.h"
+#include "lvgl.h"
 
 static const char *TAG = "error_popup";
 
 static lv_obj_t *error_popup_root = NULL;
 static lv_obj_t *error_popup_label = NULL;
+static lv_timer_t *error_popup_timer = NULL;
 static SemaphoreHandle_t popup_mutex = NULL;
 
-#define DISPLAY_DURATION_MS 2000  // Duration popup stays visible
-#define ANIMATION_TIME_MS 150     // Faster animation duration for fade in/out
+#define DISPLAY_DURATION_MS 2000
+#define ANIMATION_TIME_MS 150
 
-static void error_popup_destroy_task(void *param);
-
-// Animation callback for fade in/out
 static void fade_anim_cb(void *obj, int32_t value) {
     lv_obj_set_style_opa(obj, value, 0);
+}
+
+static void error_popup_auto_destroy_cb(lv_timer_t *timer) {
+    error_popup_timer = NULL;
+    if (!error_popup_root) return;
+
+    lv_anim_t fade_out;
+    lv_anim_init(&fade_out);
+    lv_anim_set_var(&fade_out, error_popup_root);
+    lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_0);
+    lv_anim_set_time(&fade_out, ANIMATION_TIME_MS);
+    lv_anim_set_exec_cb(&fade_out, fade_anim_cb);
+    lv_anim_set_ready_cb(&fade_out, (lv_anim_ready_cb_t)lv_obj_del);
+    lv_anim_start(&fade_out);
+
+    error_popup_label = NULL;
+    error_popup_root = NULL;
 }
 
 void error_popup_destroy(void) {
@@ -28,6 +44,10 @@ void error_popup_destroy(void) {
     }
     
     if (xSemaphoreTake(popup_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (error_popup_timer) {
+            lv_timer_del(error_popup_timer);
+            error_popup_timer = NULL;
+        }
         if (error_popup_root) {
             lvgl_obj_del_safe(&error_popup_root);
             error_popup_label = NULL;
@@ -37,6 +57,7 @@ void error_popup_destroy(void) {
 }
 
 void error_popup_create(const char *message) {
+    if (!message) return;
 
     ESP_LOGE(TAG, "Error popup called with message: %s", message);
 
@@ -106,38 +127,13 @@ void error_popup_create(const char *message) {
     lv_anim_set_exec_cb(&fade_in, fade_anim_cb);
     lv_anim_start(&fade_in);
 
-    // Create task to handle fade out and destruction
-    xTaskCreate(error_popup_destroy_task, "error_popup_destroy", 2048, NULL, 5, NULL);
+    if (error_popup_timer) {
+        lv_timer_del(error_popup_timer);
+    }
+    error_popup_timer = lv_timer_create(error_popup_auto_destroy_cb, DISPLAY_DURATION_MS, NULL);
+    lv_timer_set_repeat_count(error_popup_timer, 1);
 
     xSemaphoreGive(popup_mutex);
-}
-
-static void error_popup_destroy_task(void *param) {
-    // Wait for display duration
-    vTaskDelay(pdMS_TO_TICKS(DISPLAY_DURATION_MS));
-
-    if (error_popup_root && xSemaphoreTake(popup_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        // Fade out animation
-        lv_anim_t fade_out;
-        lv_anim_init(&fade_out);
-        lv_anim_set_var(&fade_out, error_popup_root);
-        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_0);
-        lv_anim_set_time(&fade_out, ANIMATION_TIME_MS);
-        lv_anim_set_exec_cb(&fade_out, fade_anim_cb);
-        lv_anim_start(&fade_out);
-
-        // Wait for fade out to complete
-        vTaskDelay(pdMS_TO_TICKS(ANIMATION_TIME_MS));
-
-        // Destroy directly while holding mutex (avoid nested take on same mutex)
-        if (error_popup_root) {
-            lvgl_obj_del_safe(&error_popup_root);
-            error_popup_label = NULL;
-        }
-        xSemaphoreGive(popup_mutex);
-    }
-
-    vTaskDelete(NULL);
 }
 
 bool is_error_popup_rendered(void) {

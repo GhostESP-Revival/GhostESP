@@ -105,7 +105,7 @@ static bool two_cities_parse(const NfcDevice* device, FuriString* parsed_data) {
 
     do {
         // Verify key
-        MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 4);
+        const MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 4);
         uint64_t key = bit_lib_bytes_to_num_be(sec_tr->key_a.data, 6);
         if(key != two_cities_4k_keys[4].a) break;
 

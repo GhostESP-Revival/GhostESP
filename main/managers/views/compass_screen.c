@@ -6,9 +6,11 @@
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "i2c_bus_lock.h"
 #include <math.h>
 
@@ -78,6 +80,7 @@ static void init_fixed_needle(void) {
 }
 
 static lv_timer_t *compass_timer = NULL;
+static i2c_master_dev_handle_t s_compass_dev = NULL;
 
 #define COMPASS_I2C_ADDR 0x7C
 
@@ -86,20 +89,44 @@ static lv_timer_t *compass_timer = NULL;
 #endif
 #define COMPASS_I2C_PORT CONFIG_COMPASS_I2C_PORT
 
+static esp_err_t compass_get_device(void) {
+    if (s_compass_dev) {
+        return ESP_OK;
+    }
+
+    i2c_master_bus_handle_t bus = NULL;
+    esp_err_t ret = i2c_master_get_bus_handle(COMPASS_I2C_PORT, &bus);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C bus %d unavailable: %s", COMPASS_I2C_PORT, esp_err_to_name(ret));
+        return ret;
+    }
+
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = COMPASS_I2C_ADDR,
+        .scl_speed_hz = 100000,
+        .scl_wait_us = 0,
+    };
+
+    ret = i2c_master_bus_add_device(bus, &dev_cfg, &s_compass_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add compass device: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
 static esp_err_t qmc6309_write_reg(uint8_t reg, uint8_t val) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (COMPASS_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg, true);
-    i2c_master_write_byte(cmd, val, true);
-    i2c_master_stop(cmd);
+    esp_err_t ret = compass_get_device();
+    if (ret != ESP_OK) {
+        return ret;
+    }
     
     bool locked = i2c_bus_lock(COMPASS_I2C_PORT, 100);
-    if (!locked) { i2c_cmd_link_delete(cmd); return ESP_ERR_TIMEOUT; }
+    if (!locked) return ESP_ERR_TIMEOUT;
     
-    esp_err_t ret = i2c_master_cmd_begin(COMPASS_I2C_PORT, cmd, pdMS_TO_TICKS(50));
+    uint8_t payload[2] = {reg, val};
+    ret = i2c_master_transmit(s_compass_dev, payload, sizeof(payload), 50);
     i2c_bus_unlock(COMPASS_I2C_PORT);
-    i2c_cmd_link_delete(cmd);
     
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "I2C Write Error: %s", esp_err_to_name(ret));
@@ -108,21 +135,16 @@ static esp_err_t qmc6309_write_reg(uint8_t reg, uint8_t val) {
 }
 
 static esp_err_t qmc6309_read_bytes(uint8_t reg, uint8_t *data, size_t len) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (COMPASS_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg, true);
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (COMPASS_I2C_ADDR << 1) | I2C_MASTER_READ, true);
-    i2c_master_read(cmd, data, len, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
+    esp_err_t ret = compass_get_device();
+    if (ret != ESP_OK) {
+        return ret;
+    }
     
     bool locked = i2c_bus_lock(COMPASS_I2C_PORT, 100);
-    if (!locked) { i2c_cmd_link_delete(cmd); return ESP_ERR_TIMEOUT; }
+    if (!locked) return ESP_ERR_TIMEOUT;
     
-    esp_err_t ret = i2c_master_cmd_begin(COMPASS_I2C_PORT, cmd, pdMS_TO_TICKS(50));
+    ret = i2c_master_transmit_receive(s_compass_dev, &reg, sizeof(reg), data, len, 50);
     i2c_bus_unlock(COMPASS_I2C_PORT);
-    i2c_cmd_link_delete(cmd);
     
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "I2C Read Error: %s", esp_err_to_name(ret));
@@ -505,6 +527,10 @@ void compass_create(void) {
 
 void compass_destroy(void) {
     if (compass_timer) { lv_timer_del(compass_timer); compass_timer = NULL; }
+    if (s_compass_dev) {
+        i2c_master_bus_rm_device(s_compass_dev);
+        s_compass_dev = NULL;
+    }
     if (compass_container) { lv_obj_del(compass_container); compass_container = NULL; compass_view.root = NULL; }
     ring = NULL;
     needle_line_n = NULL;

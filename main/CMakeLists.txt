@@ -48,12 +48,20 @@ list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
 file(GLOB_RECURSE axs15231b_sources "${CMAKE_SOURCE_DIR}/components/axs15231b/*.c")
-
-
+file(GLOB m5gfx_sources
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/Fonts/efont/*.c"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/utility/*.c"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/*.cpp"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/misc/*.cpp"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/panel/*.cpp"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/platforms/esp32/*.cpp"
+    "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/touch/*.cpp"
+)
 list(APPEND app_sources ${axs15231b_sources} ${image_sources})
 
 
-set(required_components bt nvs_flash driver esp_http_server mdns json esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager usb esp_eth espcoredump)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump)
 
 # Optionally add extra include directories
 set(extra_includes "")
@@ -61,29 +69,34 @@ if(CONFIG_USE_IO_EXPANDER)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/io_manager")
 endif()
 
+if(CONFIG_HAS_NFC)
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp-idf-pn532/include")
+endif()
+
 
 set(sources ${app_sources})
 
 
 
-## nfc build control: only include pn532 component/sources when pn532 is enabled
+## nfc build control: main still compiles NFC sources when NFC is enabled,
+## so export pn532 headers whenever NFC support is on
 if(CONFIG_HAS_NFC)
-    if(CONFIG_NFC_PN532)
-        list(APPEND required_components esp-idf-pn532)
-        list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp-idf-pn532/include")
-    endif()
+    list(APPEND required_components esp-idf-pn532)
 endif()
 
-if(idf_target STREQUAL "esp32s3")
-    # Add the M5GFX wrapper source file
+if(idf_target STREQUAL "esp32s3" AND (CONFIG_USE_CARDPUTER OR CONFIG_USE_CARDPUTER_ADV))
     list(APPEND sources "vendor/m5/m5gfx_wrapper.cpp")
-    # Add M5GFX to the required components
-    list(APPEND required_components M5GFX)
-    
-    # Add I80 display driver for TDisplay S3
-    if(CONFIG_USE_TDISPLAY_S3)
-        list(APPEND sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
-    endif()
+    list(APPEND sources ${m5gfx_sources})
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/M5GFX/src")
+endif()
+
+if(idf_target STREQUAL "esp32s3" AND CONFIG_USE_USB_KEYBOARD)
+    list(APPEND required_components usb usb_host_hid)
+endif()
+
+# Add I80 display driver for TDisplay S3
+if(idf_target STREQUAL "esp32s3" AND CONFIG_USE_TDISPLAY_S3)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 endif()
 
 # Only pull in IO expander manager when enabled so headers are exported (all targets)
@@ -132,4 +145,10 @@ if(idf_target STREQUAL "esp32s2")
 endif()
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-incompatible-pointer-types -Wno-unused-local-typedefs)
+
+idf_build_get_property(idf_path IDF_PATH)
+target_include_directories(${COMPONENT_LIB} PRIVATE
+    "${idf_path}/components/wpa_supplicant/src"
+    "${idf_path}/components/wpa_supplicant/esp_supplicant/src"
+)
 

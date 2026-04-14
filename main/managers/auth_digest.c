@@ -4,8 +4,8 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/md.h"
-#include "mbedtls/md5.h"
 #include "mbedtls/base64.h"
 #include "esp_log.h"
 
@@ -103,7 +103,9 @@ int validate_stateless_nonce(const char *key, size_t key_len, const char *nonce,
 // helper to compute MD5 hex of input
 static int md5_hex(const char *input, size_t ilen, char *out_hex, size_t out_len) {
     unsigned char md[16];
-    if (mbedtls_md5((const unsigned char *)input, ilen, md) != 0) return -1;
+    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_MD5);
+    if (!md_info) return -1;
+    if (mbedtls_md(md_info, (const unsigned char *)input, ilen, md) != 0) return -1;
     to_lower_hex(md, sizeof(md), out_hex, out_len);
     return 0;
 }

@@ -19,8 +19,7 @@ extern "C" {
 #define I2C_OEM lvgl
 
 
-// Only here to get the I2C_NUM_0 and I2C_NUM_1 defines.
-#include <driver/i2c.h>
+#include <driver/i2c_master.h>
 
 #define CONCATX(A, B) A ## B
 #define CONCAT(A, B) CONCATX(A, B)
@@ -42,13 +41,22 @@ extern "C" {
 #define I2C_REG_16  ( 1 << 31 )
 #define I2C_NO_REG  ( 1 << 30 )
 
-esp_err_t I2C_FN(_init)(i2c_port_t port);
-esp_err_t I2C_FN(_read)(i2c_port_t port, uint16_t addr, uint32_t reg, uint8_t *buffer, uint16_t size);
-esp_err_t I2C_FN(_write)(i2c_port_t port, uint16_t addr, uint32_t reg, const uint8_t *buffer, uint16_t size);
-esp_err_t I2C_FN(_close)(i2c_port_t port);
-esp_err_t I2C_FN(_lock)(i2c_port_t port);
-esp_err_t I2C_FN(_unlock)(i2c_port_t port);
-esp_err_t I2C_FN(_force_unlock)(i2c_port_t port);
+esp_err_t I2C_FN(_init)(i2c_port_num_t port);
+esp_err_t I2C_FN(_read)(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_t *buffer, uint16_t size);
+esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const uint8_t *buffer, uint16_t size);
+esp_err_t I2C_FN(_close)(i2c_port_num_t port);
+esp_err_t I2C_FN(_lock)(i2c_port_num_t port);
+esp_err_t I2C_FN(_unlock)(i2c_port_num_t port);
+esp_err_t I2C_FN(_force_unlock)(i2c_port_num_t port);
+
+/* Explicit legacy OEM aliases used by existing call sites */
+esp_err_t lvgl_i2c_init(i2c_port_num_t port);
+esp_err_t lvgl_i2c_read(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_t *buffer, uint16_t size);
+esp_err_t lvgl_i2c_write(i2c_port_num_t port, uint16_t addr, uint32_t reg, const uint8_t *buffer, uint16_t size);
+esp_err_t lvgl_i2c_close(i2c_port_num_t port);
+esp_err_t lvgl_i2c_lock(i2c_port_num_t port);
+esp_err_t lvgl_i2c_unlock(i2c_port_num_t port);
+esp_err_t lvgl_i2c_force_unlock(i2c_port_num_t port);
 
 
 #ifdef I2C_OEM
@@ -65,7 +73,7 @@ typedef struct {
     void *handle;
 } i2c_hal_t;
 
-void* i2c_hal(i2c_port_t port);
+void* i2c_hal(i2c_port_num_t port);
 
 #endif
 

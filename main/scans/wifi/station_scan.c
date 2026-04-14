@@ -39,6 +39,10 @@ int station_count = 0;
 station_ap_pair_t selected_station;
 bool station_selected = false;
 
+// Multi-selection storage
+static station_ap_pair_t *selected_stations = NULL;
+static int selected_station_count = 0;
+
 // Module-local state
 static bool scan_active = false;
 static esp_timer_handle_t scansta_channel_hop_timer = NULL;
@@ -659,6 +663,62 @@ esp_err_t station_scan_select(int index) {
     return ESP_OK;
 }
 
+esp_err_t station_scan_select_multiple(int *indices, int count) {
+    if (station_count == 0) {
+        glog("No stations found.\n");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (indices == NULL || count <= 0) {
+        glog("Invalid arguments for multi-select.\n");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (indices[i] < 0 || indices[i] >= station_count) {
+            glog("Invalid station index: %d. Index should be between 0 and %d\n", indices[i], station_count - 1);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
+    if (selected_stations != NULL) {
+        free(selected_stations);
+        selected_stations = NULL;
+    }
+
+    selected_stations = malloc(count * sizeof(station_ap_pair_t));
+    if (selected_stations == NULL) {
+        glog("Failed to allocate memory for selected stations\n");
+        selected_station_count = 0;
+        return ESP_ERR_NO_MEM;
+    }
+
+    selected_station_count = count;
+
+    for (int i = 0; i < count; i++) {
+        selected_stations[i] = station_ap_list[indices[i]];
+    }
+
+    char sta_mac_str[18], ap_mac_str[18];
+    glog("Selected %d stations:\n", count);
+    for (int i = 0; i < count; i++) {
+        format_mac_upper(selected_stations[i].station_mac, sta_mac_str, sizeof(sta_mac_str));
+        format_mac_upper(selected_stations[i].ap_bssid, ap_mac_str, sizeof(ap_mac_str));
+        glog("  [%d] STA: %s -> AP: %s\n", i, sta_mac_str, ap_mac_str);
+    }
+
+    return ESP_OK;
+}
+
+void station_scan_get_selected_stations(station_ap_pair_t **stations, int *count) {
+    if (stations != NULL) {
+        *stations = selected_stations;
+    }
+    if (count != NULL) {
+        *count = selected_station_count;
+    }
+}
+
 bool station_scan_get_selection(station_ap_pair_t *station) {
     if (!station_selected || station == NULL) {
         return false;
@@ -674,11 +734,21 @@ bool station_scan_has_selection(void) {
 void station_scan_clear_selection(void) {
     station_selected = false;
     memset(&selected_station, 0, sizeof(selected_station));
+    if (selected_stations != NULL) {
+        free(selected_stations);
+        selected_stations = NULL;
+    }
+    selected_station_count = 0;
 }
 
 void station_scan_clear_results(void) {
     station_count = 0;
     station_selected = false;
+    if (selected_stations != NULL) {
+        free(selected_stations);
+        selected_stations = NULL;
+    }
+    selected_station_count = 0;
     memset(station_ap_list, 0, sizeof(station_ap_list));
     memset(&selected_station, 0, sizeof(selected_station));
 }

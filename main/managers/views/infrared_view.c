@@ -260,7 +260,6 @@ static void rename_remote_keyboard_callback(const char *name) {
     char filename_part[64];
     
     strncpy(safe_dir_path, dir_path, sizeof(safe_dir_path) - 1);
-    strncpy(safe_dir_path, dir_path, sizeof(safe_dir_path) - 1);
     safe_dir_path[sizeof(safe_dir_path) - 1] = '\0';
     
     strncpy(filename_part, truncated_name, sizeof(filename_part) - 1);
@@ -485,8 +484,8 @@ static void ir_select_item(int index);
 
 // touchscreen controls
 #ifdef CONFIG_USE_TOUCHSCREEN
-#define IR_SCROLL_BTN_SIZE 40
-#define IR_SCROLL_BTN_PADDING 5
+#define IR_SCROLL_BTN_SIZE 28
+#define IR_SCROLL_BTN_PADDING 3
 static lv_obj_t *ir_scroll_up_btn = NULL;
 static lv_obj_t *ir_scroll_down_btn = NULL;
 static lv_obj_t *ir_back_btn = NULL;
@@ -524,7 +523,11 @@ static void learn_remote_event_cb(lv_event_t *e);
 #endif
 
 static void cleanup_transmit_popup(void *obj);
+#ifdef CONFIG_HAS_INFRARED_RX
 static void cleanup_learning_popup(void *obj);
+#else
+static void cleanup_learning_popup(void *obj) { (void)obj; }
+#endif
 static void universal_transmit_task(void *arg);
 static void dazzler_event_cb(lv_event_t *e);
 static void dazzler_stop_cb(lv_event_t *e);
@@ -952,9 +955,11 @@ static bool read_universal_batch(FILE *f, const char *command, universal_batch_t
                 else if (strncmp(s, "data:",5)==0) {
                     char *p=s+5; size_t cnt=0; char *t=p;
                     while(*t){while(*t&&isspace((unsigned char)*t))t++;if(!*t)break;cnt++;while(*t&&!isspace((unsigned char)*t))t++;}
-                    uint32_t *arr=heap_caps_malloc(cnt*sizeof(uint32_t), MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM); size_t ii=0; char *endp;
+                    uint32_t *arr=heap_caps_malloc(cnt*sizeof(uint32_t), MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM);
+                    if (!arr) { sig.payload.raw.timings=NULL; sig.payload.raw.timings_size=0; }
+                    else { size_t ii=0; char *endp;
                     while(*p){while(*p&&isspace((unsigned char)*p))p++;if(!*p)break;arr[ii++]=strtoul(p,&endp,10);p=endp;}
-                    sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt;
+                    sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt; }
                 }
             } else {
                 if (strncmp(s, "protocol:",9)==0) {
@@ -1178,9 +1183,11 @@ static void universal_transmit_task(void *arg) {
                 else if (strncmp(s, "data:",5)==0) {
                     char *p=s+5; size_t cnt=0; char *t=p;
                     while(*t){while(*t&&isspace((unsigned char)*t))t++;if(!*t)break;cnt++;while(*t&&!isspace((unsigned char)*t))t++;}
-                    uint32_t *arr=malloc(cnt*sizeof(uint32_t)); size_t ii=0; char *endp;
+                    uint32_t *arr=malloc(cnt*sizeof(uint32_t));
+                    if (!arr) { sig.payload.raw.timings=NULL; sig.payload.raw.timings_size=0; }
+                    else { size_t ii=0; char *endp;
                     while(*p){while(*p&&isspace((unsigned char)*p))p++;if(!*p)break;arr[ii++]=strtoul(p,&endp,10);p=endp;}
-                    sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt;
+                    sig.payload.raw.timings=arr; sig.payload.raw.timings_size=cnt; }
                 }
             } else {
                 if (strncmp(s, "protocol:",9)==0) {
@@ -1335,8 +1342,8 @@ void infrared_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
-    const int BUTTON_AREA_HEIGHT = IR_SCROLL_BTN_SIZE + IR_SCROLL_BTN_PADDING * 2;
-    int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
+    const int TOUCH_BAR_HEIGHT = IR_SCROLL_BTN_SIZE + IR_SCROLL_BTN_PADDING * 2;
+    int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
     lv_obj_set_size(list, LV_HOR_RES, list_h);
     lv_obj_align(list, LV_ALIGN_TOP_LEFT, 0, STATUS_BAR_HEIGHT);
 #endif
@@ -1375,38 +1382,60 @@ void infrared_view_create(void) {
     if (num_ir_items > 0) options_view_set_selected(g_ir_ov, 0);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
-    ir_scroll_up_btn = lv_btn_create(root);
+    uint8_t ir_theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t ir_bg = lv_color_hex(theme_palette_get_background(ir_theme));
+    lv_color_t ir_ctrl = lv_color_hex(theme_palette_get_surface_alt(ir_theme));
+    lv_color_t ir_ctrl_text = lv_color_hex(theme_palette_get_text(ir_theme));
+
+    lv_obj_t *ir_touch_bar = lv_obj_create(root);
+    lv_obj_remove_style_all(ir_touch_bar);
+    lv_obj_set_size(ir_touch_bar, LV_HOR_RES, IR_SCROLL_BTN_SIZE + IR_SCROLL_BTN_PADDING * 2);
+    lv_obj_align(ir_touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(ir_touch_bar, ir_bg, 0);
+    lv_obj_set_style_bg_opa(ir_touch_bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ir_touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    ir_scroll_up_btn = lv_btn_create(ir_touch_bar);
     lv_obj_set_size(ir_scroll_up_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
-    lv_obj_align(ir_scroll_up_btn, LV_ALIGN_BOTTOM_LEFT, IR_SCROLL_BTN_PADDING, -IR_SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(ir_scroll_up_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_align(ir_scroll_up_btn, LV_ALIGN_LEFT_MID, IR_SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(ir_scroll_up_btn, ir_ctrl, LV_PART_MAIN);
     lv_obj_set_style_radius(ir_scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ir_scroll_up_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ir_scroll_up_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ir_scroll_up_btn, file_scroll_up_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *up_label = lv_label_create(ir_scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
+    lv_obj_set_style_text_color(up_label, ir_ctrl_text, 0);
     lv_obj_center(up_label);
     lv_obj_add_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
-    ir_scroll_down_btn = lv_btn_create(root);
+    ir_back_btn = lv_btn_create(ir_touch_bar);
+    lv_obj_set_size(ir_back_btn, IR_SCROLL_BTN_SIZE + 24, IR_SCROLL_BTN_SIZE);
+    lv_obj_align(ir_back_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(ir_back_btn, ir_ctrl, LV_PART_MAIN);
+    lv_obj_set_style_radius(ir_back_btn, 5, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(ir_back_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ir_back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ir_back_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(ir_back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = lv_label_create(ir_back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_set_style_text_color(back_label, ir_ctrl_text, 0);
+    lv_obj_center(back_label);
+
+    ir_scroll_down_btn = lv_btn_create(ir_touch_bar);
     lv_obj_set_size(ir_scroll_down_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
-    lv_obj_align(ir_scroll_down_btn, LV_ALIGN_BOTTOM_RIGHT, -IR_SCROLL_BTN_PADDING, -IR_SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(ir_scroll_down_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_align(ir_scroll_down_btn, LV_ALIGN_RIGHT_MID, -IR_SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(ir_scroll_down_btn, ir_ctrl, LV_PART_MAIN);
     lv_obj_set_style_radius(ir_scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ir_scroll_down_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ir_scroll_down_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ir_scroll_down_btn, file_scroll_down_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *down_label = lv_label_create(ir_scroll_down_btn);
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_color(down_label, ir_ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(ir_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
-
-    ir_back_btn = lv_btn_create(root);
-    lv_obj_set_size(ir_back_btn, IR_SCROLL_BTN_SIZE + 20, IR_SCROLL_BTN_SIZE);
-    lv_obj_align(ir_back_btn, LV_ALIGN_BOTTOM_MID, 0, -IR_SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(ir_back_btn, lv_color_hex(0x555555), LV_PART_MAIN);
-    lv_obj_set_style_radius(ir_back_btn, 5, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(ir_back_btn, 10, LV_PART_MAIN);
-    lv_obj_add_event_cb(ir_back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *back_label = lv_label_create(ir_back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
-    lv_obj_center(back_label);
 
     if (list && lv_obj_is_valid(list)) {
         lv_coord_t scroll_bottom = lv_obj_get_scroll_bottom(list);

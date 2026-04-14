@@ -32,7 +32,7 @@ typedef struct {
   float flap_strength;   // Upward velocity when the bird flaps
   float pipe_gap_ratio;  // Ratio of the screen height used as pipe gap
   int bird_size;         // Size of the bird (width and height)
-  lv_font_t *score_font; // Font size for the score label
+  const lv_font_t *score_font; // Font size for the score label
   int ground_height;     // Height of the ground
   int buffer_top;        // Top buffer zone height
   int buffer_bottom;     // Bottom buffer zone height

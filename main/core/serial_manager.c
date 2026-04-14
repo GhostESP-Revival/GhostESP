@@ -10,7 +10,9 @@
 #include "freertos/task.h"
 #include "managers/gps_manager.h"
 #include "managers/wifi_manager.h"
+#if CONFIG_HAS_INFRARED
 #include "managers/infrared_manager.h"
+#endif
 #include "managers/views/terminal_screen.h"
 #if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
 #include "managers/views/music_visualizer.h"
@@ -107,6 +109,7 @@ static char html_capture_buffer[2048];
 static size_t html_capture_pos = 0;
 
 // IR capture state
+#if CONFIG_HAS_INFRARED
 typedef enum {
     IR_STATE_IDLE,
     IR_STATE_CAPTURING
@@ -115,6 +118,7 @@ typedef enum {
 static ir_capture_state_t ir_capture_state = IR_STATE_IDLE;
 static char ir_capture_buffer[2048];
 static size_t ir_capture_pos = 0;
+#endif
 
 typedef enum {
     RAVE_SERIAL_IDLE,
@@ -513,6 +517,7 @@ static void display_prompt(void) {
 
 // HTML marker processing and IR inline handling
 static void process_html_line(const char* line) {
+#if CONFIG_HAS_INFRARED
     if (strstr(line, "[IR/BEGIN]") != NULL) {
         ir_capture_state = IR_STATE_CAPTURING;
         ir_capture_pos = 0;
@@ -569,6 +574,7 @@ static void process_html_line(const char* line) {
         }
         return;
     }
+#endif
 
     if (strstr(line, "[HTML/BEGIN]") != NULL) {
         html_capture_state = HTML_STATE_CAPTURING;

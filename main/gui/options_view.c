@@ -37,6 +37,10 @@ static inline lv_style_t *get_zebra_style(options_view_t *ov, int idx) {
     return (idx % 2 == 0) ? &ov->style_item : &ov->style_item_alt;
 }
 
+static inline bool get_menu_rounded(void) {
+    return settings_get_menu_rounded(&G_Settings);
+}
+
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
     return (ov->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
 }
@@ -72,6 +76,7 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
         lv_color_t txt = theme_palette_is_bright(theme) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
         lv_style_set_bg_color(&ov->style_selected, c);
         lv_style_set_bg_grad_color(&ov->style_selected, c);
+        lv_style_set_border_width(&ov->style_selected, 0);
         lv_obj_add_style(item, &ov->style_selected, 0);
         for (uint32_t i = 0; i < child_cnt; ++i) {
             lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
@@ -135,21 +140,29 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
+    bool rounded = get_menu_rounded();
+    lv_coord_t item_radius = rounded ? 4 : 0;
+
+    if (rounded) {
+        lv_obj_set_style_pad_row(ov->list, 2, 0);
+        lv_obj_set_style_pad_hor(ov->list, 3, 0);
+    }
+
     lv_style_init(&ov->style_item);
     lv_style_set_bg_color(&ov->style_item, surface);
     lv_style_set_bg_opa(&ov->style_item, LV_OPA_COVER);
     lv_style_set_border_width(&ov->style_item, 0);
-    lv_style_set_radius(&ov->style_item, 0);
+    lv_style_set_radius(&ov->style_item, item_radius);
 
     lv_style_init(&ov->style_item_alt);
     lv_style_set_bg_color(&ov->style_item_alt, surface_alt);
     lv_style_set_bg_opa(&ov->style_item_alt, LV_OPA_COVER);
     lv_style_set_border_width(&ov->style_item_alt, 0);
-    lv_style_set_radius(&ov->style_item_alt, 0);
+    lv_style_set_radius(&ov->style_item_alt, item_radius);
 
     lv_style_init(&ov->style_selected);
     lv_style_set_bg_opa(&ov->style_selected, LV_OPA_COVER);
-    lv_style_set_radius(&ov->style_selected, 0);
+    lv_style_set_radius(&ov->style_selected, item_radius);
     lv_style_set_bg_grad_dir(&ov->style_selected, LV_GRAD_DIR_NONE);
 
     ov->selected = -1;
@@ -273,11 +286,25 @@ void options_view_refresh_styles(options_view_t *ov) {
     lv_color_t surface_alt;
     lv_color_t text;
     get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
+
+    bool rounded = get_menu_rounded();
+    lv_coord_t item_radius = rounded ? 4 : 0;
+
     if (ov->list && lv_obj_is_valid(ov->list)) {
         lv_obj_set_style_bg_color(ov->list, bg, 0);
+        if (rounded) {
+            lv_obj_set_style_pad_row(ov->list, 2, 0);
+            lv_obj_set_style_pad_hor(ov->list, 3, 0);
+        } else {
+            lv_obj_set_style_pad_row(ov->list, 0, 0);
+            lv_obj_set_style_pad_hor(ov->list, 0, 0);
+        }
     }
     lv_style_set_bg_color(&ov->style_item, surface);
+    lv_style_set_radius(&ov->style_item, item_radius);
     lv_style_set_bg_color(&ov->style_item_alt, surface_alt);
+    lv_style_set_radius(&ov->style_item_alt, item_radius);
+    lv_style_set_radius(&ov->style_selected, item_radius);
 
     for (int i = 0; i < ov->count; ++i) {
         lv_obj_t *btn = ov->items[i];

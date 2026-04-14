@@ -1,12 +1,15 @@
 #include "vendor/drivers/pcf8563.h"
+#include "i2c_shared.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "RTC_DRIVER";
 
-static i2c_port_t rtc_i2c_port;
+static i2c_port_num_t rtc_i2c_port;
 static uint8_t rtc_address;
 static rtc_chip_type_t rtc_chip;
+static i2c_master_bus_handle_t rtc_i2c_bus;
+static i2c_master_dev_handle_t rtc_i2c_dev;
 
 static uint8_t _bcd_to_dec(uint8_t val) {
   return ((val / 16 * 10) + (val % 16));
@@ -17,24 +20,39 @@ static uint8_t _dec_to_bcd(uint8_t val) {
 }
 
 // Generic RTC initialization
-esp_err_t rtc_init(i2c_port_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type) {
+esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type) {
   rtc_i2c_port = i2c_port;
   rtc_address = addr;
   rtc_chip = chip_type;
+
+  esp_err_t ret = i2c_master_get_bus_handle(rtc_i2c_port, &rtc_i2c_bus);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "I2C bus %d not available: %s", (int)rtc_i2c_port, esp_err_to_name(ret));
+    return ret;
+  }
+  if (rtc_i2c_dev) {
+    i2c_master_bus_rm_device(rtc_i2c_dev);
+    rtc_i2c_dev = NULL;
+  }
+  ret = i2c_shared_add_device(rtc_i2c_bus, rtc_address, 100000, &rtc_i2c_dev);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to attach RTC device: %s", esp_err_to_name(ret));
+    return ret;
+  }
   
   ESP_LOGI(TAG, "RTC initialized: chip=%d, addr=0x%02X, port=%d", chip_type, addr, i2c_port);
   
   // For DS1307, ensure clock is running (clear CH bit)
   if (chip_type == RTC_CHIP_DS1307 || chip_type == RTC_CHIP_DS3231) {
     uint8_t sec_reg;
-    esp_err_t ret = i2c_master_write_read_device(rtc_i2c_port, rtc_address, 
-                                                  (uint8_t[]){DS1307_SEC_REG}, 1, 
-                                                  &sec_reg, 1, pdMS_TO_TICKS(1000));
+    ret = i2c_master_transmit_receive(rtc_i2c_dev,
+                                      (uint8_t[]){DS1307_SEC_REG}, 1,
+                                      &sec_reg, 1, 1000);
     if (ret == ESP_OK && (sec_reg & DS1307_CH_MASK)) {
       // Clear clock halt bit
       sec_reg &= ~DS1307_CH_MASK;
       uint8_t data[] = {DS1307_SEC_REG, sec_reg};
-      i2c_master_write_to_device(rtc_i2c_port, rtc_address, data, sizeof(data), pdMS_TO_TICKS(1000));
+      i2c_master_transmit(rtc_i2c_dev, data, sizeof(data), 1000);
       ESP_LOGI(TAG, "DS1307 clock started");
     }
   }
@@ -43,21 +61,19 @@ esp_err_t rtc_init(i2c_port_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type)
 }
 
 // Legacy PCF8563 initialization for backward compatibility
-esp_err_t pcf8563_init(i2c_port_t i2c_port, uint8_t addr) {
+esp_err_t pcf8563_init(i2c_port_num_t i2c_port, uint8_t addr) {
   return rtc_init(i2c_port, addr, RTC_CHIP_PCF8563);
 }
 
 static esp_err_t _read_register(uint8_t reg, uint8_t *data, size_t len) {
-  return i2c_master_write_read_device(rtc_i2c_port, rtc_address, &reg, 1, data,
-                                      len, pdMS_TO_TICKS(1000));
+  return i2c_master_transmit_receive(rtc_i2c_dev, &reg, 1, data, len, 1000);
 }
 
 static esp_err_t _write_register(uint8_t reg, const uint8_t *data, size_t len) {
   uint8_t buffer[1 + len];
   buffer[0] = reg;
   memcpy(&buffer[1], data, len);
-  return i2c_master_write_to_device(rtc_i2c_port, rtc_address, buffer,
-                                    sizeof(buffer), pdMS_TO_TICKS(1000));
+  return i2c_master_transmit(rtc_i2c_dev, buffer, sizeof(buffer), 1000);
 }
 
 esp_err_t rtc_set_datetime(const RTC_Date *datetime) {

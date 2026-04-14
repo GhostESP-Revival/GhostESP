@@ -194,7 +194,7 @@ static bool bip_parse(const NfcDevice* device, FuriString* parsed_data) {
 
     do {
         // verify sector 0 key A
-        MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 0);
+        const MfClassicSectorTrailer* sec_tr = mf_classic_get_sector_trailer_by_sector(data, 0);
 
         if(data->type != MfClassicType1k) break;
 

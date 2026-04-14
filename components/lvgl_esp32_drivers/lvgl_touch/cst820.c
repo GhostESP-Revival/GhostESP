@@ -1,59 +1,39 @@
 #include <esp_log.h>
-#include <driver/i2c.h>
+#include <driver/i2c_master.h>
+#include <driver/gpio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include <lvgl.h>
 #else
 #include <lvgl/lvgl.h>
 #endif
 #include "cst820.h"
+#include "i2c_shared.h"
 
 #define TAG "CST820"
 #define I2C_MASTER_TIMEOUT_MS 1000
 #define I2C_MASTER_FREQ_HZ 400000
 
+static i2c_master_bus_handle_t s_cst820_bus = NULL;
+static i2c_master_dev_handle_t s_cst820_dev = NULL;
+static bool s_cst820_bus_owned = false;
+
 esp_err_t cst820_i2c_read(uint8_t reg_addr, uint8_t *data, size_t len) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    if (!cmd) return ESP_ERR_NO_MEM;
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDR_CST820 << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg_addr, true);
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDR_CST820 << 1) | I2C_MASTER_READ, true);
-    if (len > 1) {
-        i2c_master_read(cmd, data, len - 1, I2C_MASTER_ACK);
-    }
-    i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    esp_err_t err = i2c_master_cmd_begin(0, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-    return err;
+    return i2c_master_transmit_receive(s_cst820_dev, &reg_addr, 1, data, len, I2C_MASTER_TIMEOUT_MS);
 }
 
 esp_err_t cst820_i2c_write(uint8_t reg_addr, uint8_t data) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    if (!cmd) return ESP_ERR_NO_MEM;
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDR_CST820 << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg_addr, true);
-    i2c_master_write_byte(cmd, data, true);
-    i2c_master_stop(cmd);
-    esp_err_t err = i2c_master_cmd_begin(0, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-    return err;
+    uint8_t payload[2] = { reg_addr, data };
+    return i2c_master_transmit(s_cst820_dev, payload, sizeof(payload), I2C_MASTER_TIMEOUT_MS);
 }
 
 void cst820_init(void) {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = CYD28_TouchC_SDA,
-        .scl_io_num = CYD28_TouchC_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
-    };
-    
-    ESP_ERROR_CHECK(i2c_param_config(0, &conf));
-    ESP_ERROR_CHECK(i2c_driver_install(0, conf.mode, 0, 0, 0));
+    ESP_ERROR_CHECK(i2c_shared_get_or_create_bus(0, CYD28_TouchC_SDA, CYD28_TouchC_SCL,
+                                                 true, &s_cst820_bus, &s_cst820_bus_owned));
+    if (s_cst820_dev == NULL) {
+        ESP_ERROR_CHECK(i2c_shared_add_device(s_cst820_bus, I2C_ADDR_CST820, I2C_MASTER_FREQ_HZ, &s_cst820_dev));
+    }
 
     gpio_set_direction(CYD28_TouchC_INT, GPIO_MODE_OUTPUT);
     gpio_set_level(CYD28_TouchC_INT, 1);

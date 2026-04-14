@@ -28,8 +28,8 @@
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
 static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8_t target_channel);
 
-#define STORE_STR_ATTR __attribute__((section(".rodata.str")))
-#define STORE_DATA_ATTR __attribute__((section(".rodata.data")))
+#define STORE_STR_ATTR
+#define STORE_DATA_ATTR
 #define WPS_OUI 0x0050f204
 #define TAG "WIFI_MONITOR"
 #define WPS_CONF_METHODS_PBC 0x0080
@@ -104,6 +104,8 @@ static uint32_t peer_gps_stream_tx_fail = 0;
 static uint32_t peer_gps_stream_rx_packets = 0;
 static uint32_t peer_gps_stream_rx_fix_packets = 0;
 static TaskHandle_t peer_gps_stream_task_handle = NULL;
+static StackType_t *peer_gps_stream_stack = NULL;
+static StaticTask_t *peer_gps_stream_tcb = NULL;
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #define BLE_WD_SEEN_SIZE 64
@@ -650,7 +652,7 @@ static void wardrive_build_channel_list(void) {
             memcpy(wardrive_channels, channels_5, channels_5_count);
             wardrive_channel_count = channels_5_count;
         } else {
-            for (uint8_t i = 0; i < full_count; i += 2) {
+            for (uint8_t i = 0; i < full_count && wardrive_channel_count < WIFI_CHANNELS_MAX; i += 2) {
                 wardrive_channels[wardrive_channel_count++] = full_channels[i];
             }
         }
@@ -662,7 +664,7 @@ static void wardrive_build_channel_list(void) {
             memcpy(wardrive_channels, channels_24, channels_24_count);
             wardrive_channel_count = channels_24_count;
         } else {
-            for (uint8_t i = 1; i < full_count; i += 2) {
+            for (uint8_t i = 1; i < full_count && wardrive_channel_count < WIFI_CHANNELS_MAX; i += 2) {
                 wardrive_channels[wardrive_channel_count++] = full_channels[i];
             }
         }
@@ -755,9 +757,25 @@ static hs_entry_t hs_table[HS_TABLE_MAX];
 static uint8_t hs_count_local = 0;
 static uint8_t hs_insert_idx_local = 0;
 static uint32_t hs_found_count = 0;
+static bool s_pcap_enabled = true;
 
 static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
     return memcmp(a, b, 6) == 0;
+}
+
+uint32_t wifi_callbacks_get_handshake_count(void) {
+    return hs_found_count;
+}
+
+void wifi_callbacks_reset_handshake_tracking(void) {
+    memset(hs_table, 0, sizeof(hs_table));
+    hs_count_local = 0;
+    hs_insert_idx_local = 0;
+    hs_found_count = 0;
+}
+
+void wifi_callbacks_set_pcap_enabled(bool enabled) {
+    s_pcap_enabled = enabled;
 }
 
 static const char *msg_name(uint8_t m) {
@@ -980,12 +998,14 @@ static void pcap_writer_task(void *arg) {
                 UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(NULL);
                 glog("PCAP writer HWM (bytes): %lu\n", (unsigned long)hwm_words);
             }
-            if ((processed & 0x1F) == 0) {
+            if ((processed & 0x1F) == 0 && pcap_auto_flush_enabled()) {
                 pcap_flush_buffer_to_file();
             }
         } else {
             // periodic flush even if idle
-            pcap_flush_buffer_to_file();
+            if (pcap_auto_flush_enabled()) {
+                pcap_flush_buffer_to_file();
+            }
         }
     }
 }
@@ -1037,6 +1057,7 @@ static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len
 }
 
 static inline void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
+    if (!s_pcap_enabled) return;
     enqueue_pcap_write_typed(payload, len, PCAP_CAPTURE_WIFI);
 }
 
@@ -1245,7 +1266,6 @@ static void channel_hop_timer_callback(void *arg) {
     if (!pineap_detection_active)
         return;
 
-    wardrive_build_channel_list();
     wardrive_channel_idx = (wardrive_channel_idx + 1) % wardrive_channel_count;
     current_channel = wardrive_channels[wardrive_channel_idx];
     esp_wifi_set_channel(current_channel, WIFI_SECOND_CHAN_NONE);
@@ -1572,7 +1592,7 @@ static void start_wardrive_heartbeat(void) {
 
     (void)esp_timer_stop(wardrive_heartbeat_timer);
     esp_err_t start_err = esp_timer_start_periodic(wardrive_heartbeat_timer,
-                                                   (uint64_t)LOG_DELAY_MS * 1000ULL);
+                                                    (uint64_t)WARDRIVE_HEARTBEAT_INTERVAL_MS * 1000ULL);
     if (start_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start wardrive heartbeat timer: %s", esp_err_to_name(start_err));
     }
@@ -1921,14 +1941,29 @@ void wardriving_register_stream_handler(void) {
     ESP_LOGI(TAG, "Peer GPS stream handler: %s", gps_ok ? "OK" : "FAIL");
 
     if (peer_gps_stream_task_handle == NULL) {
-        BaseType_t rc = xTaskCreate(peer_gps_stream_task,
-                                    "peer_gps_stream",
-                                    3072,
-                                    NULL,
-                                    3,
-                                    &peer_gps_stream_task_handle);
-        if (rc != pdPASS) {
-            peer_gps_stream_task_handle = NULL;
+        peer_gps_stream_stack = heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        peer_gps_stream_tcb = malloc(sizeof(StaticTask_t));
+        if (peer_gps_stream_stack && peer_gps_stream_tcb) {
+            peer_gps_stream_task_handle = xTaskCreateStatic(
+                peer_gps_stream_task,
+                "peer_gps_stream",
+                3072,
+                NULL,
+                3,
+                peer_gps_stream_stack,
+                peer_gps_stream_tcb);
+            ESP_LOGI(TAG, "Peer GPS stream task stack allocated from PSRAM: %d bytes", 
+                     (int)(3072 * sizeof(StackType_t)));
+        }
+        if (!peer_gps_stream_task_handle) {
+            if (peer_gps_stream_stack) {
+                free(peer_gps_stream_stack);
+                peer_gps_stream_stack = NULL;
+            }
+            if (peer_gps_stream_tcb) {
+                free(peer_gps_stream_tcb);
+                peer_gps_stream_tcb = NULL;
+            }
             ESP_LOGW(TAG, "Peer GPS stream task create failed");
         }
     }
@@ -2298,7 +2333,7 @@ void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int
     }
 }
 
-bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2) {
+static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2) {
     for (int i = 0; i < 6; i++) {
         if (bssid1[i] != bssid2[i]) {
             return false;
@@ -2371,6 +2406,10 @@ bool is_probe_response(const wifi_promiscuous_pkt_t *pkt) {
 }
 
 bool is_eapol_response(const wifi_promiscuous_pkt_t *pkt) {
+    if (pkt->rx_ctrl.sig_len < 34) {
+        return false;
+    }
+
     const uint8_t *frame = pkt->payload;
 
     if ((frame[30] == 0x88 && frame[31] == 0x8E) || (frame[32] == 0x88 && frame[33] == 0x8E)) {
@@ -2460,8 +2499,8 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         uint8_t id = payload[index];
         uint8_t ie_len = payload[index + 1];
 
-        /* sanity checks: ensure IE length is reasonable and within bounds */
-        if (ie_len > MAX_IE_LEN || index + 2 + ie_len > len) {
+        /* sanity checks: ensure IE length fits within bounds */
+        if (index + 2 + ie_len > len) {
             return;
         }
 
@@ -2660,6 +2699,7 @@ void wifi_pwn_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT)
         return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
+    if (!is_packet_valid(pkt, type)) return;
     if (pkt->rx_ctrl.sig_len > 0) {
         enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     }
@@ -2706,6 +2746,7 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         bool is_pairwise = (key_info & 0x0008) != 0;
         bool is_install = (key_info & 0x0040) != 0;
         bool is_ack = (key_info & 0x0080) != 0;
+        bool is_secure = (key_info & 0x0200) != 0;
 
         const uint8_t *addr1 = frame + 4;
         const uint8_t *addr2 = frame + 10;
@@ -2720,9 +2761,9 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             if (!has_mic && is_ack && !is_install) {
                 msg = 1;  // M1: AP->STA, no MIC, no Install
             } else if (has_mic) {
-                if (is_ack && is_install) msg = 3;        // M3
-                else if (!is_ack && !is_install) msg = 2; // M2
-                else if (!is_ack && is_install) msg = 4;  // M4
+                if (is_ack && is_install) msg = 3;             // M3
+                else if (!is_ack && !is_install && !is_secure) msg = 2; // M2
+                else if (!is_ack && !is_install && is_secure) msg = 4;  // M4
             }
             if (msg > 0) {
                 process_eapol_candidate_pair(ap_mac, sta_mac, replay, is_ack, msg);
@@ -2801,7 +2842,9 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)pkt->payload;
-    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    wifi_ieee80211_mac_hdr_t hdr_copy;
+    memcpy(&hdr_copy, &ipkt->hdr, sizeof(wifi_ieee80211_mac_hdr_t));
+    const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
 
     const uint8_t *payload = pkt->payload;
     int len = pkt->rx_ctrl.sig_len;
@@ -2813,7 +2856,6 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     int index = 36;
     char ssid[33] = {0};
-    bool wps_found = false;
     uint8_t bssid[6];
     memcpy(bssid, hdr->addr3, 6);
 
@@ -2821,8 +2863,8 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         uint8_t id = payload[index];
         uint8_t ie_len = payload[index + 1];
 
-        /* sanity checks: ensure IE length is reasonable and within bounds */
-        if (ie_len > MAX_IE_LEN || index + 2 + ie_len > len) {
+        /* sanity checks: ensure IE length fits within bounds */
+        if (index + 2 + ie_len > len) {
             break;
         }
 
@@ -2842,8 +2884,6 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             uint8_t oui_type = payload[index + 5];
 
             if (oui == 0x0050f2 && oui_type == 0x04) {
-                wps_found = true;
-
                 int attr_index = index + 6;
                 int wps_ie_end = index + 2 + ie_len;
 
@@ -2870,18 +2910,18 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
                         }
 
                         if (should_store_wps == 1) {
-                            wps_network_t new_network;
-                            strncpy(new_network.ssid, ssid, sizeof(new_network.ssid) - 1);
-                            new_network.ssid[sizeof(new_network.ssid) - 1] =
-                                '\0'; // Ensure null termination
-                            memcpy(new_network.bssid, bssid, sizeof(new_network.bssid));
-                            new_network.wps_enabled = true;
-                            new_network.wps_mode = config_methods & (WPS_CONF_METHODS_PIN_DISPLAY |
-                                                                     WPS_CONF_METHODS_PIN_KEYPAD)
-                                                       ? WPS_MODE_PIN
-                                                       : WPS_MODE_PBC;
-
-                            detected_wps_networks[detected_network_count++] = new_network;
+                            if (detected_network_count < MAX_WPS_NETWORKS) {
+                                wps_network_t new_network;
+                                strncpy(new_network.ssid, ssid, sizeof(new_network.ssid) - 1);
+                                new_network.ssid[sizeof(new_network.ssid) - 1] = '\0';
+                                memcpy(new_network.bssid, bssid, sizeof(new_network.bssid));
+                                new_network.wps_enabled = true;
+                                new_network.wps_mode = config_methods & (WPS_CONF_METHODS_PIN_DISPLAY |
+                                                                         WPS_CONF_METHODS_PIN_KEYPAD)
+                                                           ? WPS_MODE_PIN
+                                                           : WPS_MODE_PBC;
+                                detected_wps_networks[detected_network_count++] = new_network;
+                            }
                         } else {
                             enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
                         }

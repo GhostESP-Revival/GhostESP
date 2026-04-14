@@ -9,7 +9,7 @@
 #include <ctype.h>
 #include <stdio.h>
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -41,8 +41,9 @@ static const char *TAG = "StatusDisplay";
 
 static SemaphoreHandle_t s_mutex;
 static bool s_ready;
-static bool s_i2c_configured;
-static bool s_i2c_installed;
+static i2c_master_bus_handle_t s_i2c_bus;
+static i2c_master_dev_handle_t s_display_dev;
+static bool s_i2c_bus_owned;
 static uint8_t *s_buffer;
 #define STATUS_BUFFER_SIZE (128 * 8)
 static char s_line1[24];
@@ -64,6 +65,45 @@ static TickType_t s_next_anim_allowed_tick;
 static TickType_t s_oom_backoff_until;
 static bool s_oom_logged;
 // static int s_i2c_error_streak; // unused
+
+static esp_err_t status_display_init_i2c(void) {
+    esp_err_t err = i2c_master_get_bus_handle(STATUS_DISPLAY_I2C_PORT, &s_i2c_bus);
+    if (err == ESP_ERR_NOT_FOUND) {
+#if defined(CONFIG_USE_IO_EXPANDER)
+        return err;
+#else
+        i2c_master_bus_config_t conf = {
+            .i2c_port = STATUS_DISPLAY_I2C_PORT,
+            .sda_io_num = CONFIG_STATUS_DISPLAY_SDA_PIN,
+            .scl_io_num = CONFIG_STATUS_DISPLAY_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags.enable_internal_pullup = true,
+        };
+        err = i2c_new_master_bus(&conf, &s_i2c_bus);
+        if (err == ESP_OK) {
+            s_i2c_bus_owned = true;
+        }
+#endif
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!s_display_dev) {
+        i2c_device_config_t dev_conf = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = STATUS_DISPLAY_ADDR,
+            .scl_speed_hz = 400000,
+            .scl_wait_us = 0,
+        };
+        err = i2c_master_bus_add_device(s_i2c_bus, &dev_conf, &s_display_dev);
+    }
+
+    return err;
+}
 
 static const uint8_t font_5x7[][5] = {
     {0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x5f,0x00,0x00}, {0x00,0x07,0x00,0x07,0x00},
@@ -106,36 +146,27 @@ static esp_err_t status_display_send(uint8_t control, const uint8_t *data, size_
     if (s_oom_backoff_until && now < s_oom_backoff_until) {
         return ESP_ERR_NO_MEM;
     }
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    if (!cmd) {
-        if (!s_oom_logged) {
-            ESP_LOGW(TAG, "i2c_cmd_link_create failed (OOM), backing off");
-            s_oom_logged = true;
-        }
-        s_oom_backoff_until = now + pdMS_TO_TICKS(2000);
-        return ESP_ERR_NO_MEM;
+    if (!s_display_dev) {
+        return ESP_ERR_INVALID_STATE;
     }
     s_oom_backoff_until = 0;
     s_oom_logged = false;
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (STATUS_DISPLAY_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, control, true);
-    i2c_master_write(cmd, (uint8_t *)data, len, true);
-    i2c_master_stop(cmd);
     bool locked = i2c_bus_lock(STATUS_DISPLAY_I2C_PORT, 120);
     if (!locked) {
-        i2c_cmd_link_delete(cmd);
         ESP_LOGD(TAG, "status display i2c busy, skipping ctrl=0x%02X", control);
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = i2c_master_cmd_begin(STATUS_DISPLAY_I2C_PORT, cmd, pdMS_TO_TICKS(100));
+    i2c_master_transmit_multi_buffer_info_t buffers[] = {
+        {.write_buffer = &control, .buffer_size = 1},
+        {.write_buffer = data, .buffer_size = len},
+    };
+    esp_err_t err = i2c_master_multi_buffer_transmit(s_display_dev, buffers, 2, 100);
     i2c_bus_unlock(STATUS_DISPLAY_I2C_PORT);
     if (err != ESP_OK) {
         ESP_LOGD(TAG, "i2c write failed ctrl=0x%02X len=%u err=%s", control, (unsigned)len, esp_err_to_name(err));
     } else {
         ESP_LOGD(TAG, "i2c write ok ctrl=0x%02X len=%u", control, (unsigned)len);
     }
-    i2c_cmd_link_delete(cmd);
     return err;
 }
 
@@ -397,48 +428,11 @@ void status_display_init(void) {
         }
     }
 
-#if defined(CONFIG_USE_IO_EXPANDER)
-    // share existing IO expander bus; do not (re)configure or (re)install the driver
-    s_i2c_configured = false;
-    s_i2c_installed = false;
-#else
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = CONFIG_STATUS_DISPLAY_SDA_PIN,
-        .scl_io_num = CONFIG_STATUS_DISPLAY_SCL_PIN,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000
-    };
-
-    esp_err_t err = i2c_param_config(STATUS_DISPLAY_I2C_PORT, &conf);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "i2c_param_config failed: %s", esp_err_to_name(err));
+    esp_err_t err = status_display_init_i2c();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "status display I2C init failed: %s", esp_err_to_name(err));
         return;
     }
-
-    bool configured_by_us = (err == ESP_OK);
-    if (configured_by_us) {
-        ESP_LOGI(TAG, "configured I2C port %d", STATUS_DISPLAY_I2C_PORT);
-    } else {
-        ESP_LOGW(TAG, "I2C port %d already configured, sharing driver", STATUS_DISPLAY_I2C_PORT);
-    }
-
-    err = i2c_driver_install(STATUS_DISPLAY_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "i2c_driver_install failed: %s", esp_err_to_name(err));
-        if (configured_by_us) {
-            i2c_driver_delete(STATUS_DISPLAY_I2C_PORT);
-        }
-        return;
-    }
-
-    s_i2c_configured = configured_by_us;
-    s_i2c_installed = (err == ESP_OK);
-    if (s_i2c_installed) {
-        ESP_LOGI(TAG, "installed I2C driver for port %d", STATUS_DISPLAY_I2C_PORT);
-    }
-#endif
 
     // quick probe: display off
     if (status_display_write_command(0xAE) != ESP_OK) {
@@ -552,12 +546,14 @@ void status_display_deinit(void) {
         vTaskDelete(s_anim_task);
         s_anim_task = NULL;
     }
-    if (s_i2c_installed) {
-        i2c_driver_delete(STATUS_DISPLAY_I2C_PORT);
-        s_i2c_installed = false;
+    if (s_display_dev) {
+        i2c_master_bus_rm_device(s_display_dev);
+        s_display_dev = NULL;
     }
-    if (s_i2c_configured) {
-        s_i2c_configured = false;
+    if (s_i2c_bus_owned && s_i2c_bus) {
+        i2c_del_master_bus(s_i2c_bus);
+        s_i2c_bus = NULL;
+        s_i2c_bus_owned = false;
     }
 #if CONFIG_STATUS_DISPLAY_POWER_PIN >= 0
     // Turn off display by setting power pin HIGH

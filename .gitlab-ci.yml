@@ -1,0 +1,687 @@
+spec:
+  inputs:
+    buildType:
+      description: "Select the build type"
+      options:
+        - "build-only"
+        - "prerelease"
+        - "all"
+      default: "build-only"
+    releaseVersion:
+      description: "Release tag (e.g. v1.7.2). Leave empty to auto-generate"
+      type: string
+      default: ""
+    releaseName:
+      description: "Release name (e.g. 'Bug Fix Release'). Leave empty for auto-generated"
+      type: string
+      default: ""
+
+---
+stages:
+  - build
+  - manifest
+  - release
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /\[skip ci\]/
+      when: never
+    - when: always
+
+variables:
+  IDF_DOCKER_TAG: "v6.0"
+  R2_ENDPOINT: "https://2c8b11c572ea0e7bbc6ac6f5a87d81c8.r2.cloudflarestorage.com"
+  R2_BUCKET: "ghostesp-releases"
+  R2_CDN_URL: "https://cdn.arcdatabase.net"
+
+build:
+  stage: build
+  image: espressif/idf:${IDF_DOCKER_TAG}
+  before_script:
+    - apt-get update && apt-get install -y zip software-properties-common gnupg
+    - add-apt-repository -y ppa:deadsnakes/ppa
+    - apt-get update && apt-get install -y python3.11 python3.11-venv python3.11-distutils
+    - mkdir -p .ci-bin
+    - ln -sf "$(command -v python3.11)" .ci-bin/python3
+    - export PATH="$CI_PROJECT_DIR/.ci-bin:$PATH"
+    - export IDF_PYTHON_ENV_PATH="$CI_PROJECT_DIR/.idf-python-env"
+    - python3 --version
+  parallel:
+    matrix:
+      - TARGET_NAME: "esp32-generic"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32"
+        ZIP_NAME: "esp32-generic.zip"
+      - TARGET_NAME: "esp32s2-generic"
+        IDF_TARGET: "esp32s2"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32s2"
+        ZIP_NAME: "esp32s2-generic.zip"
+      - TARGET_NAME: "esp32s3-generic"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32s3"
+        ZIP_NAME: "esp32s3-generic.zip"
+      - TARGET_NAME: "esp32c3-generic"
+        IDF_TARGET: "esp32c3"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32c3"
+        ZIP_NAME: "esp32c3-generic.zip"
+      - TARGET_NAME: "esp32c5-generic"
+        IDF_TARGET: "esp32c5"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32c5"
+        ZIP_NAME: "esp32c5-generic-v01.zip"
+      - TARGET_NAME: "esp32c6-generic"
+        IDF_TARGET: "esp32c6"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32c6"
+        ZIP_NAME: "esp32c6-generic.zip"
+      - TARGET_NAME: "Awok V5"
+        IDF_TARGET: "esp32s2"
+        SDKCONFIG_FILE: "configs/sdkconfig.default.esp32s2"
+        ZIP_NAME: "esp32v5_awok.zip"
+      - TARGET_NAME: "ghostboard"
+        IDF_TARGET: "esp32c6"
+        SDKCONFIG_FILE: "configs/sdkconfig.ghostboard"
+        ZIP_NAME: "ghostboard.zip"
+      - TARGET_NAME: "MarauderV4_FlipperHub"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.marauderv4"
+        ZIP_NAME: "MarauderV4_FlipperHub.zip"
+      - TARGET_NAME: "MarauderV6&AwokDual"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.marauderv6"
+        ZIP_NAME: "MarauderV6_AwokDual.zip"
+      - TARGET_NAME: "AwokMini"
+        IDF_TARGET: "esp32s2"
+        SDKCONFIG_FILE: "configs/sdkconfig.awokmini"
+        ZIP_NAME: "AwokMini.zip"
+      - TARGET_NAME: "ESP32-S3-Cardputer"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.cardputer"
+        ZIP_NAME: "ESP32-S3-Cardputer.zip"
+      - TARGET_NAME: "Heltec V3"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.heltecv3"
+        ZIP_NAME: "HeltecV3.zip"
+      - TARGET_NAME: "CYD2USB"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYD2USB"
+        ZIP_NAME: "CYD2USB.zip"
+      - TARGET_NAME: "CYDMicroUSB"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYDMicroUSB"
+        ZIP_NAME: "CYDMicroUSB.zip"
+      - TARGET_NAME: "CYDDualUSB"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYDDualUSB"
+        ZIP_NAME: "CYDDualUSB.zip"
+      - TARGET_NAME: "CYD2USB2.4_Inch"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYD2USB2.4Inch"
+        ZIP_NAME: "CYD2USB2.4Inch.zip"
+      - TARGET_NAME: "CYD2USB2.4_Inch_C"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient"
+        ZIP_NAME: "CYD2USB2.4Inch_C.zip"
+      - TARGET_NAME: "CYD2432S028R"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.CYD2432S028R"
+        ZIP_NAME: "CYD2432S028R.zip"
+      - TARGET_NAME: "Waveshare_LCD"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.waveshare7inch"
+        ZIP_NAME: "Waveshare_LCD.zip"
+      - TARGET_NAME: "Crowtech_LCD"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.crowtech7inch"
+        ZIP_NAME: "Crowtech_LCD.zip"
+      - TARGET_NAME: "Sunton_LCD"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.sunton7inch"
+        ZIP_NAME: "Sunton_LCD.zip"
+      - TARGET_NAME: "JC3248W535EN_LCD"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.JC3248W535EN"
+        ZIP_NAME: "JC3248W535EN_LCD.zip"
+      - TARGET_NAME: "Flipper_JCMK_GPS"
+        IDF_TARGET: "esp32s2"
+        SDKCONFIG_FILE: "configs/sdkconfig.flipper.jcmk_gps"
+        ZIP_NAME: "Flipper_JCMK_GPS.zip"
+      - TARGET_NAME: "T-Deck"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.tdeck"
+        ZIP_NAME: "LilyGo-T-Deck.zip"
+      - TARGET_NAME: "TEmbedC1101"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.TEmbedC1101"
+        ZIP_NAME: "LilyGo-TEmbedC1101.zip"
+      - TARGET_NAME: "S3TWatch"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.S3TWatch"
+        ZIP_NAME: "LilyGo-S3TWatch-2020.zip"
+      - TARGET_NAME: "TDisplayS3-Touch"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.TDisplayS3-Touch"
+        ZIP_NAME: "LilyGo-TDisplayS3-Touch.zip"
+      - TARGET_NAME: "JCMK_DevBoardPro"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.JCMK_DevBoardPro"
+        ZIP_NAME: "JCMK_DevBoardPro.zip"
+      - TARGET_NAME: "RabbitLabs_Minion"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.minion"
+        ZIP_NAME: "RabbitLabs_Minion.zip"
+      - TARGET_NAME: "Lolin_S3_Pro"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.lolins3pro"
+        ZIP_NAME: "Lolin_S3_Pro.zip"
+      - TARGET_NAME: "Cardputer ADV"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.cardputeradv"
+        ZIP_NAME: "CardputerADV.zip"
+      - TARGET_NAME: "Rabbit-Labs Poltergeist"
+        IDF_TARGET: "esp32c5"
+        SDKCONFIG_FILE: "configs/sdkconfig.poltergeist"
+        ZIP_NAME: "Poltergeist.zip"
+      - TARGET_NAME: "Banshee C5"
+        IDF_TARGET: "esp32c5"
+        SDKCONFIG_FILE: "configs/sdkconfig.somethingsomething"
+        ZIP_NAME: "Banshee_C5.zip"
+      - TARGET_NAME: "Banshee S3"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.somethingsomething2"
+        ZIP_NAME: "Banshee_S3.zip"
+      - TARGET_NAME: "FeberisPro"
+        IDF_TARGET: "esp32"
+        SDKCONFIG_FILE: "configs/sdkconfig.feberispro"
+        ZIP_NAME: "FeberisPro.zip"
+      - TARGET_NAME: "ACE C5"
+        IDF_TARGET: "esp32c5"
+        SDKCONFIG_FILE: "configs/sdkconfig.ACE_C5"
+        ZIP_NAME: "ACE_C5.zip"
+      - TARGET_NAME: "ACE S3"
+        IDF_TARGET: "esp32s3"
+        SDKCONFIG_FILE: "configs/sdkconfig.ACE_S3"
+        ZIP_NAME: "ACE_S3.zip"
+  script:
+    - mkdir -p "$IDF_PYTHON_ENV_PATH"
+    - $IDF_PATH/install.sh
+    - . $IDF_PATH/export.sh
+    - rm -f sdkconfig sdkconfig.defaults
+    - cp $SDKCONFIG_FILE sdkconfig.defaults
+    - cp $SDKCONFIG_FILE sdkconfig
+    - printf "\n# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig.defaults
+    - printf "\n# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
+    - printf "\n# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
+    - printf "\n# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig
+    - python3 -c "import os,pathlib; p=pathlib.Path(os.environ['IDF_PATH'])/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
+    - export IDF_TARGET=$IDF_TARGET
+    - export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+    - idf.py clean
+    - idf.py build || { echo "Build failed for $TARGET_NAME"; exit 1; }
+    - |
+      test -f build/bootloader/bootloader.bin || { echo "Error: Bootloader not found"; exit 1; }
+      ARTIFACT_DIR="packaged_artifacts"
+      mkdir -p "$ARTIFACT_DIR"
+      cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/partitions.bin" || { echo "Failed to copy partition table"; exit 1; }
+      cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/bootloader.bin" || { echo "Failed to copy bootloader"; exit 1; }
+      cp build/Ghost_ESP_IDF.bin "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to copy app binary"; exit 1; }
+      ELF_FILE="${ZIP_NAME%.zip}.elf"
+      if [ -f build/Ghost_ESP_IDF.elf ]; then
+        cp build/Ghost_ESP_IDF.elf "$ARTIFACT_DIR/$ELF_FILE" || { echo "Failed to copy app elf"; exit 1; }
+      fi
+      FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
+      FLASH_SIZE=${FLASH_SIZE:-4MB}
+      python3 -m esptool --chip $IDF_TARGET merge_bin \
+        --output "$ARTIFACT_DIR/merged.bin" \
+        --flash_mode dio \
+        --flash_size "$FLASH_SIZE" \
+        --target-offset 0x0 \
+        0x1000 "$ARTIFACT_DIR/bootloader.bin" \
+        0x8000 "$ARTIFACT_DIR/partitions.bin" \
+        0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+      zip -j "$ZIP_NAME" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_NAME"; exit 1; }
+      ls -lh "$ZIP_NAME"
+  artifacts:
+    paths:
+      - $ZIP_NAME
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
+update_manifest_commit:
+  stage: manifest
+  image: python:3.9-bookworm
+  needs:
+    - build
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y git
+  script:
+    - mkdir -p all_build_artifacts
+    - for f in *.zip; do [ -f "$f" ] && cp "$f" all_build_artifacts/; done
+    - |
+      python3 << 'PY'
+      import glob
+      import json
+      import os
+      from pathlib import Path
+      from datetime import datetime, timezone
+
+      project_path = os.environ["CI_PROJECT_PATH"]
+      project_url = os.environ["CI_PROJECT_URL"]
+      sha = os.environ["CI_COMMIT_SHA"]
+      pipeline_id = os.environ["CI_PIPELINE_ID"]
+      now = datetime.now(timezone.utc).isoformat()
+
+      path = "firmware-manifest.json"
+      if os.path.isfile(path):
+          with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+      else:
+          manifest = {
+              "schema_version": 2,
+              "repository": project_path,
+              "generated_by": ".gitlab-ci.yml",
+              "commits": {},
+          }
+
+      manifest["schema_version"] = 2
+      manifest["repository"] = project_path
+      manifest["updated_at"] = now
+
+      zips = sorted({os.path.basename(p) for p in glob.glob("all_build_artifacts/**/*.zip", recursive=True)})
+
+      items = []
+      for zip_name in zips:
+          items.append({
+              "config": Path(zip_name).stem,
+              "zip_name": zip_name,
+              "channel": "commit",
+              "release_tag": None,
+              "download_url": f"{project_url}/-/jobs/artifacts/{sha}/raw/{zip_name}?job=build",
+              "pipeline_url": os.environ.get("CI_PIPELINE_URL", ""),
+          })
+
+      commits = manifest.setdefault("commits", {})
+      entry = commits.get(sha, {})
+      refs = entry.get("release_refs", [])
+      entry.update({
+          "source_commit": sha,
+          "last_channel": "commit",
+          "last_tag": None,
+          "updated_at": now,
+          "configs": items,
+          "release_refs": refs,
+      })
+      commits[sha] = entry
+
+      with open(path, "w", encoding="utf-8") as fp:
+          json.dump(manifest, fp, indent=2, sort_keys=True)
+          fp.write("\n")
+      PY
+    - |
+      git config user.name "GitLab CI"
+      git config user.email "gitlab-ci@$CI_SERVER_HOST"
+      git add firmware-manifest.json
+      if git diff --cached --quiet; then
+        echo "Manifest unchanged; no commit needed."
+      else
+        git commit -m "Update firmware manifest for ${CI_COMMIT_SHA:0:7} [skip ci]"
+        git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_DEFAULT_BRANCH}"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+create_prerelease:
+  stage: release
+  image: python:3.9-bookworm
+  needs:
+    - build
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y git curl python3-pip
+    - pip3 install boto3 --break-system-packages
+  script:
+    - mkdir -p release_assets
+    - for f in *.zip; do [ -f "$f" ] && cp "$f" release_assets/; done
+    - ls -lh release_assets
+    - |
+      RELEASE_VERSION="$[[ inputs.releaseVersion ]]"
+      RELEASE_NAME="$[[ inputs.releaseName ]]"
+      if [ -n "$RELEASE_VERSION" ]; then TAG_NAME="$RELEASE_VERSION"; else TAG_NAME="prerelease-$(date +'%Y%m%d-%H%M%S')-${CI_COMMIT_SHA:0:7}"; fi
+      if [ -n "$RELEASE_NAME" ]; then TITLE="$RELEASE_NAME"; elif [ -n "$RELEASE_VERSION" ]; then TITLE="Release $TAG_NAME"; else TITLE="Pre-release $(date +'%Y-%m-%d %H:%M:%S')"; fi
+      echo "TAG_NAME='$TAG_NAME'" >> build.env
+      echo "RELEASE_TITLE='$TITLE'" >> build.env
+      echo "Generated Tag: $TAG_NAME"
+      echo "Generated Title: $TITLE"
+    - source build.env
+    - export TAG="$TAG_NAME" CHANNEL="prerelease"
+    - |
+      python3 << 'PY'
+      import glob
+      import json
+      import os
+      from pathlib import Path
+      from datetime import datetime, timezone
+
+      project_path = os.environ["CI_PROJECT_PATH"]
+      project_url = os.environ["CI_PROJECT_URL"]
+      cdn_base = os.environ.get("R2_CDN_URL", "")
+      tag = os.environ["TAG"]
+      channel = os.environ["CHANNEL"]
+      sha = os.environ["CI_COMMIT_SHA"]
+      now = datetime.now(timezone.utc).isoformat()
+
+      path = "firmware-manifest.json"
+      if os.path.isfile(path):
+          with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+      else:
+          manifest = {
+              "schema_version": 2,
+              "repository": project_path,
+              "generated_by": ".gitlab-ci.yml",
+              "commits": {},
+          }
+
+      manifest["schema_version"] = 2
+      manifest["repository"] = project_path
+      manifest["updated_at"] = now
+
+      items = []
+      for zip_path in sorted(glob.glob("release_assets/*.zip")):
+          zip_name = os.path.basename(zip_path)
+          stem = Path(zip_name).stem
+          gitlab_url = f"{project_url}/-/packages/generic/ghost-esp/{tag}/{zip_name}"
+          cdn_url = f"{cdn_base}/releases/{tag}/{zip_name}" if cdn_base else None
+          item = {
+              "config": stem,
+              "zip_name": zip_name,
+              "channel": channel,
+              "release_tag": tag,
+              "download_url": cdn_url or gitlab_url,
+              "mirrors": [],
+          }
+          if cdn_url:
+              item["mirrors"].append({"label": "GitLab", "url": gitlab_url})
+          items.append(item)
+
+      commits = manifest.setdefault("commits", {})
+      entry = commits.get(sha, {})
+      refs = entry.get("release_refs", [])
+      if not any(r.get("tag") == tag for r in refs):
+          refs.append({"tag": tag, "channel": channel, "updated_at": now})
+
+      entry.update({
+          "source_commit": sha,
+          "last_channel": channel,
+          "last_tag": tag,
+          "updated_at": now,
+          "configs": items,
+          "release_refs": refs,
+      })
+      commits[sha] = entry
+
+      with open(path, "w", encoding="utf-8") as fp:
+          json.dump(manifest, fp, indent=2, sort_keys=True)
+          fp.write("\n")
+      PY
+    - |
+      source build.env
+      git config user.name "GitLab CI"
+      git config user.email "gitlab-ci@$CI_SERVER_HOST"
+      git add firmware-manifest.json
+      if git diff --cached --quiet; then
+        echo "Manifest unchanged; no commit needed."
+      else
+        git commit -m "Update firmware manifest for ${TAG_NAME} [skip ci]"
+        git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_DEFAULT_BRANCH}"
+      fi
+    - |
+      source build.env
+      echo "Uploading to GitLab packages..."
+      for zip in release_assets/*.zip; do
+        zip_name=$(basename "$zip")
+        echo "  Uploading $zip_name to GitLab..."
+        curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+             --upload-file "$zip" \
+             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ghost-esp/${TAG_NAME}/${zip_name}" || echo "Warning: GitLab upload failed for $zip_name"
+      done
+    - |
+      source build.env
+      echo "Uploading to Cloudflare R2..."
+      python3 << 'PY'
+      import glob, os, boto3
+      from botocore.config import Config
+
+      s3 = boto3.client("s3",
+          endpoint_url=os.environ["R2_ENDPOINT"],
+          aws_access_key_id=os.environ["R2_ACCESS_KEY"],
+          aws_secret_access_key=os.environ["R2_SECRET_KEY"],
+          config=Config(signature_version="s3v4"),
+      )
+      bucket = os.environ["R2_BUCKET"]
+      tag = os.environ["TAG"]
+
+      for zip_path in sorted(glob.glob("release_assets/*.zip")):
+          key = f"releases/{tag}/{os.path.basename(zip_path)}"
+          print(f"  Uploading {os.path.basename(zip_path)} -> {key}")
+          s3.upload_file(zip_path, bucket, key)
+
+      manifest_key = f"manifests/prerelease.json"
+      s3.upload_file("firmware-manifest.json", bucket, manifest_key, ExtraArgs={"ContentType": "application/json"})
+      print(f"  Uploaded manifest -> {manifest_key}")
+      PY
+    - |
+      source build.env
+      ASSETS_JSON="["
+      first=true
+      for zip in release_assets/*.zip; do
+        zip_name=$(basename "$zip")
+        url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ghost-esp/${TAG_NAME}/${zip_name}"
+        [ "$first" = true ] && first=false || ASSETS_JSON="${ASSETS_JSON},"
+        ASSETS_JSON="${ASSETS_JSON}{\"name\":\"${zip_name}\",\"url\":\"${url}\",\"link_type\":\"package\"}"
+      done
+      ASSETS_JSON="${ASSETS_JSON}]"
+      cat > release_notes.txt <<EOF
+      Automated pre-release build for tag ${TAG_NAME}.
+
+      You can flash the bins with https://espressoflash.com/
+      EOF
+      DESCRIPTION=$(python3 -c "import json,sys; print(json.dumps(open('release_notes.txt').read()))")
+      curl --request POST \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "{
+          \"tag_name\": \"${TAG_NAME}\",
+          \"name\": \"${RELEASE_TITLE}\",
+          \"description\": ${DESCRIPTION},
+          \"ref\": \"${CI_COMMIT_SHA}\",
+          \"assets\": { \"links\": ${ASSETS_JSON} }
+        }" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && "$[[ inputs.buildType ]]" == "prerelease"
+      when: manual
+
+create_release:
+  stage: release
+  image: python:3.9-bookworm
+  needs:
+    - build
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y git curl python3-pip
+    - pip3 install boto3 --break-system-packages
+  script:
+    - mkdir -p release_assets
+    - for f in *.zip; do [ -f "$f" ] && cp "$f" release_assets/; done
+    - ls -lh release_assets
+    - |
+      RELEASE_VERSION="$[[ inputs.releaseVersion ]]"
+      RELEASE_NAME="$[[ inputs.releaseName ]]"
+      if [ -n "$RELEASE_VERSION" ]; then TAG_NAME="$RELEASE_VERSION"; else TAG_NAME="v$(date +'%Y.%m.%d')-${CI_COMMIT_SHA:0:7}"; fi
+      if [ -n "$RELEASE_NAME" ]; then TITLE="$RELEASE_NAME"; elif [ -n "$RELEASE_VERSION" ]; then TITLE="Release $TAG_NAME"; else TITLE="Release $(date +'%Y-%m-%d %H:%M:%S')"; fi
+      echo "TAG_NAME='$TAG_NAME'" >> build.env
+      echo "RELEASE_TITLE='$TITLE'" >> build.env
+      echo "Generated Tag: $TAG_NAME"
+      echo "Generated Title: $TITLE"
+    - source build.env
+    - export TAG="$TAG_NAME" CHANNEL="stable"
+    - |
+      python3 << 'PY'
+      import glob
+      import json
+      import os
+      from pathlib import Path
+      from datetime import datetime, timezone
+
+      project_path = os.environ["CI_PROJECT_PATH"]
+      project_url = os.environ["CI_PROJECT_URL"]
+      cdn_base = os.environ.get("R2_CDN_URL", "")
+      tag = os.environ["TAG"]
+      channel = os.environ["CHANNEL"]
+      sha = os.environ["CI_COMMIT_SHA"]
+      now = datetime.now(timezone.utc).isoformat()
+
+      path = "firmware-manifest.json"
+      if os.path.isfile(path):
+          with open(path, "r", encoding="utf-8") as fp:
+              manifest = json.load(fp)
+      else:
+          manifest = {
+              "schema_version": 2,
+              "repository": project_path,
+              "generated_by": ".gitlab-ci.yml",
+              "commits": {},
+          }
+
+      manifest["schema_version"] = 2
+      manifest["repository"] = project_path
+      manifest["updated_at"] = now
+
+      items = []
+      for zip_path in sorted(glob.glob("release_assets/*.zip")):
+          zip_name = os.path.basename(zip_path)
+          stem = Path(zip_name).stem
+          gitlab_url = f"{project_url}/-/packages/generic/ghost-esp/{tag}/{zip_name}"
+          cdn_url = f"{cdn_base}/releases/{tag}/{zip_name}" if cdn_base else None
+          item = {
+              "config": stem,
+              "zip_name": zip_name,
+              "channel": channel,
+              "release_tag": tag,
+              "download_url": cdn_url or gitlab_url,
+              "mirrors": [],
+          }
+          if cdn_url:
+              item["mirrors"].append({"label": "GitLab", "url": gitlab_url})
+          items.append(item)
+
+      commits = manifest.setdefault("commits", {})
+      entry = commits.get(sha, {})
+      refs = entry.get("release_refs", [])
+      if not any(r.get("tag") == tag for r in refs):
+          refs.append({"tag": tag, "channel": channel, "updated_at": now})
+
+      entry.update({
+          "source_commit": sha,
+          "last_channel": channel,
+          "last_tag": tag,
+          "updated_at": now,
+          "configs": items,
+          "release_refs": refs,
+      })
+      commits[sha] = entry
+
+      with open(path, "w", encoding="utf-8") as fp:
+          json.dump(manifest, fp, indent=2, sort_keys=True)
+          fp.write("\n")
+      PY
+    - |
+      source build.env
+      git config user.name "GitLab CI"
+      git config user.email "gitlab-ci@$CI_SERVER_HOST"
+      git add firmware-manifest.json
+      if git diff --cached --quiet; then
+        echo "Manifest unchanged; no commit needed."
+      else
+        git commit -m "Update firmware manifest for ${TAG_NAME} [skip ci]"
+        git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_DEFAULT_BRANCH}"
+      fi
+    - |
+      source build.env
+      echo "Uploading to GitLab packages..."
+      for zip in release_assets/*.zip; do
+        zip_name=$(basename "$zip")
+        echo "  Uploading $zip_name to GitLab..."
+        curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+             --upload-file "$zip" \
+             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ghost-esp/${TAG_NAME}/${zip_name}" || echo "Warning: GitLab upload failed for $zip_name"
+      done
+    - |
+      source build.env
+      echo "Uploading to Cloudflare R2..."
+      python3 << 'PY'
+      import glob, os, boto3
+      from botocore.config import Config
+
+      s3 = boto3.client("s3",
+          endpoint_url=os.environ["R2_ENDPOINT"],
+          aws_access_key_id=os.environ["R2_ACCESS_KEY"],
+          aws_secret_access_key=os.environ["R2_SECRET_KEY"],
+          config=Config(signature_version="s3v4"),
+      )
+      bucket = os.environ["R2_BUCKET"]
+      tag = os.environ["TAG"]
+
+      for zip_path in sorted(glob.glob("release_assets/*.zip")):
+          key = f"releases/{tag}/{os.path.basename(zip_path)}"
+          print(f"  Uploading {os.path.basename(zip_path)} -> {key}")
+          s3.upload_file(zip_path, bucket, key)
+
+      manifest_key = f"manifests/stable.json"
+      s3.upload_file("firmware-manifest.json", bucket, manifest_key, ExtraArgs={"ContentType": "application/json"})
+      print(f"  Uploaded manifest -> {manifest_key}")
+      PY
+    - |
+      source build.env
+      ASSETS_JSON="["
+      first=true
+      for zip in release_assets/*.zip; do
+        zip_name=$(basename "$zip")
+        url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ghost-esp/${TAG_NAME}/${zip_name}"
+        [ "$first" = true ] && first=false || ASSETS_JSON="${ASSETS_JSON},"
+        ASSETS_JSON="${ASSETS_JSON}{\"name\":\"${zip_name}\",\"url\":\"${url}\",\"link_type\":\"package\"}"
+      done
+      ASSETS_JSON="${ASSETS_JSON}]"
+      cat > release_notes.txt <<EOF
+      Automated release build for tag ${TAG_NAME}.
+
+      You can flash the bins with https://espressoflash.com/
+      EOF
+      DESCRIPTION=$(python3 -c "import json,sys; print(json.dumps(open('release_notes.txt').read()))")
+      curl --request POST \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "{
+          \"tag_name\": \"${TAG_NAME}\",
+          \"name\": \"${RELEASE_TITLE}\",
+          \"description\": ${DESCRIPTION},
+          \"ref\": \"${CI_COMMIT_SHA}\",
+          \"assets\": { \"links\": ${ASSETS_JSON} }
+        }" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && "$[[ inputs.buildType ]]" == "all"
+      when: manual

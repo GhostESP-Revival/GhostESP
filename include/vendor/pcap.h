@@ -29,8 +29,13 @@ typedef struct {
   uint32_t orig_len; // Actual length of packet (on the wire)
 } pcap_packet_header_t;
 
-#define MAX_FILE_NAME_LENGTH 64
+#define MAX_FILE_NAME_LENGTH 128
+
+#if CONFIG_SPIRAM
+#define PCAP_BUFFER_SIZE 8192
+#else
 #define PCAP_BUFFER_SIZE 5120
+#endif
 
 #define DLT_IEEE802_11_RADIO 127
 #define DLT_BLUETOOTH_HCI_H4 187
@@ -48,13 +53,18 @@ esp_err_t pcap_init(void);
 esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type);
 esp_err_t pcap_file_open(const char *base_file_name,
                          pcap_capture_type_t capture_type);
+esp_err_t pcap_file_open_in_dir(const char *base_file_name,
+                                const char *dir_path,
+                                pcap_capture_type_t capture_type);
 esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type);
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type);
 esp_err_t pcap_flush_buffer_to_file();
 bool pcap_is_capturing(void);
 bool pcap_is_wireshark_mode(void);
+bool pcap_auto_flush_enabled(void);
 void pcap_file_close();
 void pcap_wireshark_stop(void);
+void pcap_discard_buffer(void);
 
 #endif

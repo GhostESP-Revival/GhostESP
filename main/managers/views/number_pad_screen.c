@@ -26,6 +26,7 @@ static void handle_hardware_button_press_number_pad(InputEvent *event);
 static void get_number_pad_callback(void **callback);
 
 static void update_display() {
+    if (!number_display) return;
     lv_label_set_text(number_display, input_buffer);
     lv_obj_set_style_text_color(number_display, lv_color_hex(0xFFFFFF), 0);
 }
@@ -428,6 +429,7 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
 }
 
 void get_number_pad_callback(void **callback) {
+    if (!callback) return;
     *callback = number_pad_view.input_callback;
 }
 

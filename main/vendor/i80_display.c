@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "esp_idf_version.h"
 
 static const char *TAG = "I80_Display";
 static esp_lcd_i80_bus_handle_t i80_bus = NULL;
@@ -44,8 +45,10 @@ esp_err_t i80_display_init(void)
         .bus_width = 8,
         .max_transfer_bytes = I80_LCD_H_RES * 100 * sizeof(uint16_t),
         .dma_burst_size = 64,
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
         .psram_trans_align = 64,
         .sram_trans_align = 4,
+#endif
     };
     ret = esp_lcd_new_i80_bus(&bus_config, &i80_bus);
     if (ret != ESP_OK) {

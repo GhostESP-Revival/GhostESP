@@ -2,6 +2,8 @@
 #define RGB_MANAGER_H
 
 #include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "vendor/led/led_strip.h"
 
 #if CONFIG_FREERTOS_UNICORE

@@ -297,7 +297,15 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
         if (s_tracking.active && existing->type == s_tracking.type &&
             existing->addr.type == s_tracking.addr.type &&
             memcmp(existing->addr.val, s_tracking.addr.val, sizeof(existing->addr.val)) == 0) {
-            log_tracking_update(existing);
+            if (existing->type == BLE_DETECT_DEVICE_AIRTAG) {
+                char mac[18];
+                format_mac_address(existing->addr.val, mac, sizeof(mac), false);
+                glog("Tracking AirTag: RSSI %d dBm (%s)\n"
+                     "     MAC: %s\n",
+                     existing->rssi, rssi_to_proximity(existing->rssi), mac);
+            } else {
+                log_tracking_update(existing);
+            }
         }
         return;
     }
@@ -341,12 +349,13 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
         glog("     Variant: %s\n", device->subtype);
     }
 
+    // Keep the NimBLE callback path non-blocking so scan stop/deinit can complete promptly.
     if (device->type == BLE_DETECT_DEVICE_FLIPPER) {
-        pulse_once(&rgb_manager, 255, 165, 0);
+        rgb_manager_set_color(&rgb_manager, -1, 255, 165, 0, false);
     } else if (device->type == BLE_DETECT_DEVICE_AIRTAG) {
-        pulse_once(&rgb_manager, 0, 0, 255);
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 255, false);
     } else if (device->type == BLE_DETECT_DEVICE_SKIMMER) {
-        pulse_once(&rgb_manager, 255, 0, 0);
+        rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
     }
 
     if (s_tracking.active && device->type == s_tracking.type &&
@@ -437,35 +446,48 @@ bool ble_device_detect_start_tracking(int index) {
                                          s_devices[index].name, s_devices[index].rssi);
     }
 
+    BLEDetectDevice dev;
+    memcpy(&dev, &s_devices[index], sizeof(dev));
+
     if (!s_scan_active) {
-        ble_device_detect_start();
-        if (!s_scan_active) {
+        if (!ble_is_initialized()) {
+            ble_init();
+        }
+        if (!ble_wait_for_ready()) {
+            ESP_LOGE(TAG, "BLE stack not ready for detect scan");
             return false;
         }
+        ble_unregister_handler(ble_device_detect_callback);
+        ble_register_handler(ble_device_detect_callback);
+        if (!ble_start_scanning()) {
+            ble_unregister_handler(ble_device_detect_callback);
+            return false;
+        }
+        s_scan_active = true;
     }
 
     s_tracking.active = true;
-    s_tracking.type = s_devices[index].type;
-    memcpy(&s_tracking.addr, &s_devices[index].addr, sizeof(s_tracking.addr));
+    s_tracking.type = dev.type;
+    memcpy(&s_tracking.addr, &dev.addr, sizeof(s_tracking.addr));
     s_tracking.last_log_tick = 0;
 
     char mac[18];
-    format_mac_address(s_devices[index].addr.val, mac, sizeof(mac), false);
+    format_mac_address(dev.addr.val, mac, sizeof(mac), false);
     glog("=== Tracking %s ===\n"
          "     MAC: %s\n"
          "     RSSI: %d dBm (%s)\n",
-         ble_device_detect_type_to_string(s_devices[index].type), mac, s_devices[index].rssi,
-         rssi_to_proximity(s_devices[index].rssi));
-    if (s_devices[index].name[0] != '\0') {
-        glog("     Name: %s\n", s_devices[index].name);
+         ble_device_detect_type_to_string(dev.type), mac, dev.rssi,
+         rssi_to_proximity(dev.rssi));
+    if (dev.name[0] != '\0') {
+        glog("     Name: %s\n", dev.name);
     }
-    if (s_devices[index].subtype[0] != '\0') {
-        glog("     Variant: %s\n", s_devices[index].subtype);
+    if (dev.subtype[0] != '\0') {
+        glog("     Variant: %s\n", dev.subtype);
     }
     glog("Move closer to increase signal. Press back to stop.\n\n");
 
     status_display_show_status("BLE Tracking");
-    log_tracking_update(&s_devices[index]);
+    log_tracking_update(&dev);
     return true;
 }
 

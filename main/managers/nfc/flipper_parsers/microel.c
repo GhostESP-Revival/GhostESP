@@ -176,7 +176,7 @@ static bool microel_parse(const NfcDevice* device, FuriString* parsed_data) {
         generateKeyA(uid, UID_LENGTH, keyA);
 
         // Verify key
-        MfClassicSectorTrailer* sec_tr =
+        const MfClassicSectorTrailer* sec_tr =
             mf_classic_get_sector_trailer_by_sector(data, verify_sector);
         uint64_t key = bit_lib_bytes_to_num_be(sec_tr->key_a.data, 6);
         uint64_t key_for_check_from_array = bit_lib_bytes_to_num_be(keyA, KEY_LENGTH);

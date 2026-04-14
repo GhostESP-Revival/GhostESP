@@ -3,12 +3,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "sdkconfig.h"
-#ifdef CONFIG_NFC_PN532
-#include "pn532.h"
-#endif
 #include "esp_err.h"
 #include "managers/nfc/ntag_t2.h"
+#include "managers/nfc/pn532_compat.h"
 
 #ifdef __cplusplus
 extern "C" {

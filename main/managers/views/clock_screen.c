@@ -116,7 +116,7 @@ static void digital_clock_cb(lv_timer_t *timer) {
     const char *tz = settings_get_timezone_str(&G_Settings);
     const char *friendly_tz = get_friendly_timezone_name(tz);
     char tz_buf[32];
-    snprintf(tz_buf, sizeof(tz_buf), "TZ: %s", friendly_tz);
+    snprintf(tz_buf, sizeof(tz_buf), "TZ: %s", friendly_tz ? friendly_tz : "Unknown");
     lv_label_set_text(tz_label, tz_buf);
     
     // Free memory if get_friendly_timezone_name allocated it

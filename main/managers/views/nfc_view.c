@@ -54,7 +54,7 @@ static const char* nfc_get_detected_title(void);
 #include "freertos/task.h"
 #ifdef CONFIG_NFC_PN532
 #include "pn532.h"
-#include "driver/i2c.h"
+#include "driver/i2c_types.h"
 #include "pn532_driver.h"
 #include "pn532_driver_i2c.h"
 #endif
@@ -77,9 +77,9 @@ extern View nfc_view;
 
 static const char *TAG = "NFCView";
 
-// touch nav button sizing to match options_screen
-#define SCROLL_BTN_SIZE 40
-#define SCROLL_BTN_PADDING 5
+// touch nav button sizing
+#define SCROLL_BTN_SIZE 28
+#define SCROLL_BTN_PADDING 3
 
 static options_view_t *g_nfc_ov = NULL;
 
@@ -4087,10 +4087,65 @@ void nfc_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = 20;
-    const int BUTTON_AREA_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
-    int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
+    const int TOUCH_BAR_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+    int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
     lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
+
+    lv_obj_t *touch_bar = lv_obj_create(root);
+    lv_obj_remove_style_all(touch_bar);
+    lv_obj_set_size(touch_bar, LV_HOR_RES, TOUCH_BAR_HEIGHT);
+    lv_obj_align(touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(touch_bar, bg_color, 0);
+    lv_obj_set_style_bg_opa(touch_bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    scroll_up_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
+    lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(scroll_up_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scroll_up_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scroll_up_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(scroll_up_btn, scroll_nfc_up, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *up_label = lv_label_create(scroll_up_btn);
+    lv_label_set_text(up_label, LV_SYMBOL_UP);
+    lv_obj_set_style_text_color(up_label, ctrl_text, 0);
+    lv_obj_center(up_label);
+    lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+
+    back_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 24, SCROLL_BTN_SIZE);
+    lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(back_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(back_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_set_style_text_color(back_label, ctrl_text, 0);
+    lv_obj_center(back_label);
+
+    scroll_down_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
+    lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(scroll_down_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scroll_down_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scroll_down_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(scroll_down_btn, scroll_nfc_down, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *down_label = lv_label_create(scroll_down_btn);
+    lv_label_set_text(down_label, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_color(down_label, ctrl_text, 0);
+    lv_obj_center(down_label);
+    lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 #endif
 
     scan_btn = options_view_add_item(g_nfc_ov, "Scan", nfc_option_event_cb, (void *)"Scan");
@@ -4107,50 +4162,6 @@ void nfc_view_create(void) {
     options_view_add_back_row(g_nfc_ov, nfc_option_event_cb, (void *)"__BACK_OPTION__");
     num_items = options_view_get_item_count(g_nfc_ov);
 #endif
-
-#ifdef CONFIG_USE_TOUCHSCREEN
-    scroll_up_btn = lv_btn_create(root);
-    lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
-    lv_obj_align(scroll_up_btn, LV_ALIGN_BOTTOM_LEFT, SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_up_btn, lv_color_hex(0x333333), LV_PART_MAIN);
-    lv_obj_set_style_radius(scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_border_width(scroll_up_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(scroll_up_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(scroll_up_btn, scroll_nfc_up, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *up_label = lv_label_create(scroll_up_btn);
-    lv_label_set_text(up_label, LV_SYMBOL_UP);
-    lv_obj_center(up_label);
-    lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
-
-    scroll_down_btn = lv_btn_create(root);
-    lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
-    lv_obj_align(scroll_down_btn, LV_ALIGN_BOTTOM_RIGHT, -SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_down_btn, lv_color_hex(0x333333), LV_PART_MAIN);
-    lv_obj_set_style_radius(scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_border_width(scroll_down_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(scroll_down_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(scroll_down_btn, scroll_nfc_down, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *down_label = lv_label_create(scroll_down_btn);
-    lv_label_set_text(down_label, LV_SYMBOL_DOWN);
-    lv_obj_center(down_label);
-    lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
-
-    back_btn = lv_btn_create(root);
-    lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 20, SCROLL_BTN_SIZE);
-    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x555555), LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(back_btn, 10, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
-    lv_obj_center(back_label);
-#endif
-
-    selected_index = 0;
-    options_view_set_selected(g_nfc_ov, 0);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     if (menu_container && lv_obj_is_valid(menu_container)) {

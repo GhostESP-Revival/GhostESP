@@ -130,6 +130,8 @@ typedef enum {
     SETTING_MIC_MIRROR_MODE,
     SETTING_MIC_CALIBRATE,
     SETTING_GHOSTLINK_SPLIT_VIEW,
+    SETTING_MENU_BG_SHADE,
+    SETTING_MENU_ROUNDED,
 } SettingsType;
 
 
@@ -260,6 +262,8 @@ typedef struct {
     uint8_t mic_contrast;           // 1-5 (square iterations)
     bool mic_mirror_mode;           // Mirror visualizer center-out
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
+    uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
+    bool menu_rounded;              // Rounded corners on menu items
 } FSettings;
 
 // Function declarations
@@ -487,6 +491,11 @@ bool settings_get_mic_calibrate(const FSettings *settings);
 
 void settings_set_ghostlink_split_view(FSettings *settings, bool enabled);
 bool settings_get_ghostlink_split_view(const FSettings *settings);
+
+void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade);
+uint8_t settings_get_menu_bg_shade(const FSettings *settings);
+void settings_set_menu_rounded(FSettings *settings, bool enabled);
+bool settings_get_menu_rounded(const FSettings *settings);
 
 extern FSettings G_Settings;
 

@@ -20,6 +20,7 @@ static const int input_list[] = {13, 15, 3, 4, 5, 6, 7};
 #else
 #include "lvgl_helpers.h"
 #include "lvgl_i2c/i2c_manager.h"
+#include "i2c_shared.h"
 // minimal TCA8418 support using I2C
 #define TCA8418_I2C_ADDR              0x34
 #define TCA8418_REG_CFG               0x01
@@ -31,6 +32,7 @@ static const int input_list[] = {13, 15, 3, 4, 5, 6, 7};
 #define TCA8418_REG_KP_GPIO3          0x1F
 
 static bool tca_ready = false;
+static i2c_master_bus_handle_t s_tca_bus = NULL;
 // fixed-size active key buffer to avoid malloc/realloc in hot path
 #define TCA_ACTIVE_KEYS_MAX 16
 static Point2D_t s_active_keys[TCA_ACTIVE_KEYS_MAX];
@@ -52,10 +54,13 @@ static void tca_push_key_event(uint8_t key_value){
 }
 
 static inline esp_err_t tca_write_u8(uint8_t reg, uint8_t val){
-    return lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, TCA8418_I2C_ADDR, reg, &val, 1);
+    uint8_t payload[2] = { reg, val };
+    if (!s_tca_bus) return ESP_ERR_INVALID_STATE;
+    return i2c_shared_transmit_to_addr(s_tca_bus, TCA8418_I2C_ADDR, 400000, payload, sizeof(payload), 100);
 }
 static inline esp_err_t tca_read_u8(uint8_t reg, uint8_t *out){
-    return lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, TCA8418_I2C_ADDR, reg, out, 1);
+    if (!s_tca_bus) return ESP_ERR_INVALID_STATE;
+    return i2c_shared_transmit_receive_from_addr(s_tca_bus, TCA8418_I2C_ADDR, 400000, &reg, 1, out, 1, 100);
 }
 static void tca_add_active(Point2D_t p){
     for (size_t i=0;i<s_active_count;i++){
@@ -246,9 +251,14 @@ void keyboard_begin(Keyboard_t* keyboard) {
     keyboard_set_output(output_list, sizeof(output_list) / sizeof(output_list[0]), 0);
 #else
     // init TCA8418 for 7x8 matrix; enable key events
+    bool bus_created = false;
+    (void)bus_created;
+    if (i2c_shared_get_or_create_bus(CONFIG_LV_I2C_TOUCH_PORT, 8, 9, true, &s_tca_bus, &bus_created) != ESP_OK) {
+        s_tca_bus = NULL;
+    }
     // configure matrix rows/cols
     // rows: 7 (R0..R6) -> 0x7F, cols: 8 (C0..C7) -> 0xFF, C8..C9 disabled -> 0x00
-    if (tca_write_u8(TCA8418_REG_KP_GPIO1, 0x7F) == ESP_OK &&
+    if (s_tca_bus && tca_write_u8(TCA8418_REG_KP_GPIO1, 0x7F) == ESP_OK &&
         tca_write_u8(TCA8418_REG_KP_GPIO2, 0xFF) == ESP_OK &&
         tca_write_u8(TCA8418_REG_KP_GPIO3, 0x00) == ESP_OK) {
         // clear interrupts

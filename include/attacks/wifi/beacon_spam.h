@@ -50,6 +50,13 @@ void beacon_spam_show_list(void);
 esp_err_t beacon_spam_broadcast(const char *ssid);
 
 /**
+ * @brief Broadcast a beacon frame for Karma attack (uses real AP MAC, no channel hopping)
+ * @param ssid The SSID to broadcast
+ * @return ESP_OK on success
+ */
+esp_err_t beacon_spam_broadcast_karma(const char *ssid);
+
+/**
  * @brief Check if beacon spam is currently running
  * @return true if running, false otherwise
  */

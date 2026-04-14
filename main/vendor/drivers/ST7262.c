@@ -10,6 +10,7 @@
 #include "esp_lcd_io_spi.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_idf_version.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -212,7 +213,9 @@ esp_err_t lcd_st7262_init(void) {
                   true, // Use as per your display’s requirements
           },
       .data_width = 16,
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
       .psram_trans_align = 64,
+#endif
       .hsync_gpio_num = LCD_HSYNC_GPIO_NUM,
       .vsync_gpio_num = LCD_VSYNC_GPIO_NUM,
       .de_gpio_num = LCD_DE_GPIO_NUM,

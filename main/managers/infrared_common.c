@@ -79,6 +79,7 @@ InfraredStatus infrared_common_encode(InfraredCommonEncoder* encoder, uint32_t* 
             } else {
                 encoder->state = InfraredCommonEncoderStateEncode;
             }
+            /* fall through */
         case InfraredCommonEncoderStateEncode:
             status = infrared_common_encode_bits(encoder, duration, level);
             if(status == InfraredStatusDone) {

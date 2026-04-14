@@ -107,6 +107,7 @@ static esp_err_t led_strip_rmt_refresh(led_strip_t *strip) {
       rmt_strip->strip_len * rmt_strip->bytes_per_pixel, &tx_conf);
   if (err != ESP_OK) {
     rmt_disable(rmt_strip->rmt_chan);
+    channel_enabled = false;
     return err;
   }
 
@@ -114,6 +115,7 @@ static esp_err_t led_strip_rmt_refresh(led_strip_t *strip) {
   err = rmt_tx_wait_all_done(rmt_strip->rmt_chan, -1);
   if (err != ESP_OK) {
     rmt_disable(rmt_strip->rmt_chan);
+    channel_enabled = false;
     return err;
   }
 

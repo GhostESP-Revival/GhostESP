@@ -1,7 +1,7 @@
 #ifndef PN532_DRIVER_I2C_H
 #define PN532_DRIVER_I2C_H
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 
 #include "pn532_driver.h"
@@ -15,7 +15,7 @@ extern "C"
                                    gpio_num_t scl,
                                    gpio_num_t reset,
                                    gpio_num_t irq,
-                                   i2c_port_t i2c_port_number,
+                                   i2c_port_num_t i2c_port_number,
                                    pn532_io_handle_t io_handle);
 
 #ifdef __cplusplus

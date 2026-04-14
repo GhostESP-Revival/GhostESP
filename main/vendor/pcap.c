@@ -23,10 +23,14 @@ static const char *PCAP_TAG = "PCAP";
 static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len);
 static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
                                          size_t max_len);
+esp_err_t pcap_file_open_in_dir(const char *base_file_name,
+                                const char *dir_path,
+                                pcap_capture_type_t capture_type);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
+static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = "/mnt/ghostesp/pcaps";
 static volatile pcap_capture_type_t s_capture_type = PCAP_CAPTURE_WIFI;
 static volatile pcap_mode_t s_pcap_mode = PCAP_MODE_FILE;
 static uint8_t *pcap_buffer = NULL;
@@ -34,6 +38,14 @@ static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
 static volatile bool s_capture_active = false;
+
+static bool pcap_is_jit_template(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
+#else
+  return false;
+#endif
+}
 
 typedef struct {
   uint8_t packet_type; // HCI packet type (1 byte)
@@ -117,14 +129,34 @@ esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type) {
   }
 }
 
-void get_next_pcap_file_name(char *file_name_buffer, const char *base_name) {
-  int next_index = get_next_pcap_file_index(base_name);
-  snprintf(file_name_buffer, MAX_FILE_NAME_LENGTH,
-           "/mnt/ghostesp/pcaps/%s_%d.pcap", base_name, next_index);
+static void get_next_pcap_file_name(char *file_name_buffer,
+                                    const char *dir_path,
+                                    const char *base_name) {
+  int next_index = get_next_file_index(dir_path, base_name, "pcap");
+  const int dir_limit = 64;
+  const int base_limit = 32;
+  int written = snprintf(file_name_buffer,
+                         MAX_FILE_NAME_LENGTH,
+                         "%.*s/%.*s_%d.pcap",
+                         dir_limit,
+                         dir_path,
+                         base_limit,
+                         base_name,
+                         next_index);
+  if (written < 0 || written >= MAX_FILE_NAME_LENGTH) {
+    file_name_buffer[MAX_FILE_NAME_LENGTH - 1] = '\0';
+  }
 }
 
 esp_err_t pcap_file_open(const char *base_file_name,
                          pcap_capture_type_t capture_type) {
+  return pcap_file_open_in_dir(base_file_name, "/mnt/ghostesp/pcaps",
+                               capture_type);
+}
+
+esp_err_t pcap_file_open_in_dir(const char *base_file_name,
+                                const char *dir_path,
+                                pcap_capture_type_t capture_type) {
   // First ensure PCAP is initialized
   esp_err_t init_ret = pcap_init();
   if (init_ret != ESP_OK) {
@@ -137,12 +169,15 @@ esp_err_t pcap_file_open(const char *base_file_name,
     strncpy(pcap_base_name, base_file_name, sizeof(pcap_base_name) - 1);
     pcap_base_name[sizeof(pcap_base_name) - 1] = '\0';
   }
+  if (dir_path && *dir_path) {
+    strncpy(pcap_dir_path, dir_path, sizeof(pcap_dir_path) - 1);
+    pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
+  } else {
+    strncpy(pcap_dir_path, "/mnt/ghostesp/pcaps", sizeof(pcap_dir_path) - 1);
+    pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
+  }
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  bool jit_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#else
-  bool jit_template = false;
-#endif
+  bool jit_template = pcap_is_jit_template();
 
   /* take mutex to protect pcap_file and buffer_offset during open */
   if (pcap_mutex == NULL) {
@@ -158,8 +193,8 @@ esp_err_t pcap_file_open(const char *base_file_name,
   buffer_offset = 0;
   s_capture_active = false;
 
-  if (sd_card_exists("/mnt/ghostesp/pcaps")) {
-    get_next_pcap_file_name(file_name, base_file_name);
+  if (sd_card_exists(pcap_dir_path)) {
+    get_next_pcap_file_name(file_name, pcap_dir_path, pcap_base_name);
     pcap_file = fopen(file_name, "wb");
     if (!pcap_file) {
       ESP_LOGW(PCAP_TAG, "PCAP file is not open, will flush to serial");
@@ -536,12 +571,8 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
     buffer_offset += actual_length;
   }
 
-  if (pcap_file == NULL) {
-    if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
-      _pcap_flush_wireshark_stream_nolock();
-    } else {
-      _pcap_flush_buffer_to_file_nolock();
-    }
+  if (pcap_file == NULL && s_pcap_mode == PCAP_MODE_WIRESHARK) {
+    _pcap_flush_wireshark_stream_nolock();
   }
   /* if we had allocated a temporary BT buffer earlier it would have been
      pointed to by `packet` (only in the fallback malloc path). Free it now
@@ -611,18 +642,14 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock() {
         fflush(pcap_file);
       }
     } else { // If no file, try JIT mount for somethingsomething, else UART
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-      bool gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#else
-      bool gating_template = false;
-#endif
+      bool gating_template = pcap_is_jit_template();
 
       if (gating_template) {
-        bool display_was_suspended = false;
-        if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
-          if (pcap_file_path[0] == '\0') {
-            get_next_pcap_file_name(pcap_file_path, pcap_base_name);
-          }
+          bool display_was_suspended = false;
+          if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
+            if (pcap_file_path[0] == '\0') {
+            get_next_pcap_file_name(pcap_file_path, pcap_dir_path, pcap_base_name);
+            }
           FILE *f = fopen(pcap_file_path, "ab+");
           if (f) {
             fseek(f, 0, SEEK_END);
@@ -668,6 +695,16 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock() {
   return ESP_OK;
 }
 
+void pcap_discard_buffer(void) {
+  if (pcap_mutex == NULL) {
+    return;
+  }
+  if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+    buffer_offset = 0;
+    xSemaphoreGive(pcap_mutex);
+  }
+}
+
 esp_err_t pcap_flush_buffer_to_file() {
   if (pcap_mutex == NULL) {
     return ESP_OK;
@@ -689,6 +726,22 @@ bool pcap_is_capturing(void) {
 
 bool pcap_is_wireshark_mode(void) {
   return s_pcap_mode == PCAP_MODE_WIRESHARK;
+}
+
+bool pcap_auto_flush_enabled(void) {
+  bool enabled = true;
+
+  if (pcap_mutex == NULL) {
+    return true;
+  }
+
+  if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+    return true;
+  }
+
+  enabled = !(s_pcap_mode == PCAP_MODE_FILE && pcap_file == NULL && pcap_is_jit_template());
+  xSemaphoreGive(pcap_mutex);
+  return enabled;
 }
 
 void pcap_file_close() {

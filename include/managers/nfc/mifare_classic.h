@@ -1,10 +1,10 @@
 #pragma once
+#include "sdkconfig.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "managers/nfc/mifare_attack.h"
-#ifdef CONFIG_NFC_PN532
-#include "pn532.h"
-#endif
+#include "managers/nfc/pn532_compat.h"
 
 typedef enum {
     MFC_UNKNOWN = 0,
