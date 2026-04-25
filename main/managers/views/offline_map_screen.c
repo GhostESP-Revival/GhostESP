@@ -1151,6 +1151,24 @@ static void no_cap_destroy(void) {
 }
 #endif
 
+static void map_show_loading_screen(void) {
+  lv_color_t bg = lv_color_hex(theme_bg());
+  s_root = gui_screen_create_root(NULL, "Maps", bg, LV_OPA_COVER);
+  offline_map_view.root = s_root;
+  s_lbl = lv_label_create(s_root);
+  lv_label_set_text(s_lbl, "Loading map tiles...");
+  lv_obj_set_style_text_color(s_lbl, lv_color_hex(theme_muted()), 0);
+  lv_obj_align(s_lbl, LV_ALIGN_CENTER, 0, 0);
+  /* Present a frame before SD read/decode work blocks. */
+  lv_refr_now(NULL);
+}
+
+static void map_hide_loading_screen(void) {
+  lvgl_obj_del_safe(&s_root);
+  offline_map_view.root = NULL;
+  s_lbl = NULL;
+}
+
 void offline_map_view_create(void) {
 #if !LV_USE_PNG || !LV_USE_FS_STDIO
   (void)TAG;
@@ -1170,6 +1188,7 @@ void offline_map_view_create(void) {
     tile_ram_clear_identity(i);
   }
   s_lbl = NULL;
+  map_show_loading_screen();
 
   bool was_mounted = sd_card_manager.is_initialized;
   esp_err_t m = sd_card_mount_for_flush(&s_jit_suspended);
@@ -1209,6 +1228,7 @@ void offline_map_view_create(void) {
   }
 
   if (show_err) {
+    map_hide_loading_screen();
     lv_color_t bg = lv_color_hex(theme_bg());
     s_root = gui_screen_create_root(NULL, "Maps", bg, LV_OPA_COVER);
     offline_map_view.root = s_root;
@@ -1231,6 +1251,7 @@ void offline_map_view_create(void) {
     return;
   }
 
+  map_hide_loading_screen();
   s_root = gui_screen_create_root(NULL, "Maps", lv_color_hex(theme_bg()), LV_OPA_COVER);
   offline_map_view.root = s_root;
   lv_obj_set_style_pad_all(s_root, 0, 0);
