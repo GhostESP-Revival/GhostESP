@@ -205,7 +205,7 @@ static bool dir_name_is_uint(const char *name, unsigned long *out) {
   return true;
 }
 
-static bool file_name_is_y_png(const char *name, unsigned long *out_y) {
+static bool file_name_is_y_tile(const char *name, unsigned long *out_y) {
   if (!name || !out_y) {
     return false;
   }
@@ -213,7 +213,7 @@ static bool file_name_is_y_png(const char *name, unsigned long *out_y) {
   if (!dot || dot == name) {
     return false;
   }
-  if (strcasecmp(dot, ".png") != 0) {
+  if (strcasecmp(dot, ".png") != 0 && strcasecmp(dot, ".jpg") != 0 && strcasecmp(dot, ".jpeg") != 0) {
     return false;
   }
   char *end = NULL;
@@ -228,7 +228,7 @@ static bool file_name_is_y_png(const char *name, unsigned long *out_y) {
   return true;
 }
 
-/* If any tile PNGs exist at zoom z, set bounding box in tile space (inclusive). */
+/* If any tile images exist at zoom z (.png/.jpg/.jpeg), set bbox in tile space (inclusive). */
 static bool scan_tiles_bbox_at_z(int z, int *min_x, int *min_y, int *max_x, int *max_y, int *out_count) {
   if (!min_x || !min_y || !max_x || !max_y || !out_count) {
     return false;
@@ -279,7 +279,7 @@ static bool scan_tiles_bbox_at_z(int z, int *min_x, int *min_y, int *max_x, int 
     struct dirent *ey;
     while ((ey = readdir(dx)) != NULL && y_n < FOCUS_MAX_Y_FILES && samples < FOCUS_MAX_SAMPLES) {
       unsigned long yu;
-      if (!file_name_is_y_png(ey->d_name, &yu)) {
+      if (!file_name_is_y_tile(ey->d_name, &yu)) {
         continue;
       }
       char fpath[PATH_PLAIN_MAX + 8];
@@ -364,8 +364,21 @@ static void set_tile_path(int slot, int z, int tx, int ty) {
     s_path_lvgl[slot][0] = '\0';
     return;
   }
+  if (!file_exists(s_path_plain[slot])) {
+    int pj = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s" MAP_TILES_REL "/%d/%d/%d.jpg", GHOSTESP_SD_ROOT, z, tx, ty);
+    if (pj < 0 || pj >= PATH_PLAIN_MAX || !file_exists(s_path_plain[slot])) {
+      int pje = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s" MAP_TILES_REL "/%d/%d/%d.jpeg", GHOSTESP_SD_ROOT, z, tx, ty);
+      if (pje < 0 || pje >= PATH_PLAIN_MAX) {
+        s_path_plain[slot][0] = '\0';
+      }
+    }
+  }
 #if LV_USE_PNG && LV_USE_FS_STDIO
-  (void)snprintf(s_path_lvgl[slot], PATH_LVGL_MAX, "%c:%.*s", MAP_FS_CH, (int)(PATH_PLAIN_MAX - 1), s_path_plain[slot]);
+  if (s_path_plain[slot][0] != '\0') {
+    (void)snprintf(s_path_lvgl[slot], PATH_LVGL_MAX, "%c:%.*s", MAP_FS_CH, (int)(PATH_PLAIN_MAX - 1), s_path_plain[slot]);
+  } else {
+    s_path_lvgl[slot][0] = '\0';
+  }
 #else
   s_path_lvgl[slot][0] = '\0';
 #endif
