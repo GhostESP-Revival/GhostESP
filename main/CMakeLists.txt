@@ -44,6 +44,8 @@ list(APPEND app_sources
 )
 # Explicitly include infrared view implementation
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+# Not picked up until CMake reconfigure if relying on GLOB_RECURSE alone; defines offline_map_try_decode_jpeg_to_rgb565_dsc
+list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/offline_map_jpeg_stb.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")

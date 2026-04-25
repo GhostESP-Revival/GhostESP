@@ -2,6 +2,7 @@
 #include "managers/views/ghostchi_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/music_visualizer.h"
+#include "managers/views/offline_map_screen.h"
 #include "managers/views/terminal_screen.h"
 
 #include "managers/settings_manager.h"
@@ -37,6 +38,7 @@ static app_item_t app_items[] = {
     {"Visualizer", &rave, 4, {{0}}, &music_visualizer_view},
     {"Terminal", &terminal_icon, 5, {{0}}, &terminal_view},
     {"Ghostchi", &ghost, 2, {{0}}, &ghostchi_view},
+    {"Maps", &Map, 2, {{0}}, &offline_map_view},
     {"Back", NULL, 0, {{0}}, NULL},
 };
 
@@ -74,6 +76,8 @@ static void refresh_apps_surface_colors(void) {
     apps_surface_color = lv_color_hex(theme_palette_get_surface(theme));
     apps_text_color = lv_color_hex(theme_palette_get_text(theme));
 }
+
+static void select_app_item(int index, bool slide_left);
 
 // Use the same theme palettes as the main menu to color app borders
 static void init_app_colors(void) {
@@ -236,7 +240,6 @@ static void create_apps_grid_menu(void) {
 
     int cols = num_apps < 3 ? num_apps : 3;
     if (cols <= 0) cols = 1;
-    int rows = (num_apps + cols - 1) / cols;
     int margin = 6;
     if (screen_width <= 240 || avail_height <= 120) {
         margin = 0;
