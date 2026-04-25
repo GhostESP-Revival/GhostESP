@@ -512,6 +512,28 @@ static bool map_src_native_dims(const void *src, int *ow, int *oh) {
 
 static void map_hud_update(void);
 
+/* Keep the same map area centered when zoom changes:
+ * center tile coordinate (in old z) is mapped to new z by 2^(dz),
+ * then base top-left is recomputed from that center. */
+static void map_set_zoom_keep_center(int requested_zoom) {
+  int old_z = clamp_i(s_zoom, s_min_z, s_max_z);
+  int new_z = clamp_i(requested_zoom, s_min_z, s_max_z);
+  if (new_z == old_z) {
+    s_zoom = new_z;
+    return;
+  }
+  const double half_grid = (double)MAP_GRID * 0.5; /* 3x3 => 1.5 */
+  const double old_center_tx = (double)s_base_tx + half_grid;
+  const double old_center_ty = (double)s_base_ty + half_grid;
+  const int dz = new_z - old_z;
+  const double scale = ldexp(1.0, dz); /* exact 2^dz */
+  const double new_center_tx = old_center_tx * scale;
+  const double new_center_ty = old_center_ty * scale;
+  s_base_tx = (int)floor(new_center_tx - half_grid);
+  s_base_ty = (int)floor(new_center_ty - half_grid);
+  s_zoom = new_z;
+}
+
 /* After lv_img_set_src: scale the tile to cover the cell (no letterboxing). Use max(z_w,z_h) so
  * the image fills the track; overflow is clipped by the cell (default clip, not OVERFLOW_VISIBLE).
  * Use LV_IMG_SIZE_MODE_REAL (see create) so object size matches zoomed draw area. */
@@ -981,8 +1003,7 @@ static void map_hud_update(void) {
   }
   char line[LBL_MAX];
   const char *mode = s_stream_mode ? "stream" : "file";
-  snprintf(line, sizeof(line), "z%2d  t %3d %3d  %s  hjk pan  [] z  0-4 pan  1 z+  q=back", s_zoom, s_base_tx,
-           s_base_ty, mode);
+  snprintf(line, sizeof(line), "z%2d  t %3d %3d  %s", s_zoom, s_base_tx, s_base_ty, mode);
   lv_label_set_text(s_lbl, line);
 }
 
@@ -1030,10 +1051,10 @@ static void handle_map_input_cb(InputEvent *e) {
     }
     if (k == '[') {
       ESP_LOGI(TAG, "keyboard: [ zoom out");
-      s_zoom = s_zoom - 1;
+      map_set_zoom_keep_center(s_zoom - 1);
     } else if (k == ']') {
       ESP_LOGI(TAG, "keyboard: ] zoom in");
-      s_zoom = s_zoom + 1;
+      map_set_zoom_keep_center(s_zoom + 1);
     } else if (k == LV_KEY_LEFT || k == 'h' || k == 44) {
       ESP_LOGI(TAG, "keyboard: pan west");
       s_base_tx -= 1;
@@ -1070,7 +1091,7 @@ static void handle_map_input_cb(InputEvent *e) {
       s_base_ty += 1;
     } else if (b == 1) {
       ESP_LOGI(TAG, "joystick: %d zoom in", b);
-      s_zoom += 1;
+      map_set_zoom_keep_center(s_zoom + 1);
     } else {
       ESP_LOGI(TAG, "joystick: unhandled %d", b);
       return;
@@ -1085,7 +1106,7 @@ static void handle_map_input_cb(InputEvent *e) {
     }
     int dir = (int)e->data.encoder.direction;
     ESP_LOGI(TAG, "encoder: dir=%d (%s)", dir, dir > 0 ? "zoom in" : "zoom out");
-    s_zoom = (dir > 0) ? (s_zoom + 1) : (s_zoom - 1);
+    map_set_zoom_keep_center((dir > 0) ? (s_zoom + 1) : (s_zoom - 1));
     refresh_tiles();
     return;
   }
