@@ -82,6 +82,10 @@ static bool s_jit_suspended;
 /* Shared display+SD SPI: read PNG into RAM, unmount, then lv_img from lv_img_dsc_t (LV_IMG_SRC_VARIABLE). */
 static bool s_stream_mode;
 static lv_img_dsc_t *s_tile_ram[MAP_GRID * MAP_GRID];
+/** Slippy identity for each RAM dsc (-1 z = no tile / freed). Used to skip SD read when panning. */
+static int s_tile_ram_z[MAP_GRID * MAP_GRID];
+static int s_tile_ram_tx[MAP_GRID * MAP_GRID];
+static int s_tile_ram_ty[MAP_GRID * MAP_GRID];
 static char s_path_plain[9][PATH_PLAIN_MAX];
 static char s_path_lvgl[9][PATH_LVGL_MAX];
 
@@ -726,6 +730,24 @@ static lv_img_dsc_t *alloc_tile_dsc(uint8_t *data, size_t len, const char *path_
   return NULL;
 }
 
+static void tile_ram_clear_identity(int idx) {
+  if (idx < 0 || idx >= MAP_GRID * MAP_GRID) {
+    return;
+  }
+  s_tile_ram_z[idx] = -1;
+  s_tile_ram_tx[idx] = 0;
+  s_tile_ram_ty[idx] = 0;
+}
+
+static void tile_ram_set_identity(int idx, int z, int tx, int ty) {
+  if (idx < 0 || idx >= MAP_GRID * MAP_GRID) {
+    return;
+  }
+  s_tile_ram_z[idx] = z;
+  s_tile_ram_tx[idx] = tx;
+  s_tile_ram_ty[idx] = ty;
+}
+
 static void free_tile_ram_slot(int idx) {
   if (idx < 0 || idx >= MAP_GRID * MAP_GRID) {
     return;
@@ -740,6 +762,7 @@ static void free_tile_ram_slot(int idx) {
   free(raw);
   free(s_tile_ram[idx]);
   s_tile_ram[idx] = NULL;
+  tile_ram_clear_identity(idx);
 }
 
 static void free_all_tile_ram(void) {
@@ -757,8 +780,8 @@ static bool any_stream_tile_loaded(void) {
   return false;
 }
 
-/* Read all 9 cells into s_tile_ram using POSIX fopen; bypasses lv_fs "S:" in lv_img
- * (get_info on VFS can fail on some builds while the same file works for fopen, leaving w=0=grey). */
+/* Read 9 cells into s_tile_ram using POSIX fopen. Reuses existing dsc when (z,x,y) already in RAM
+ * (pan shifts grid: no SD read for tiles still on-screen). Detaches imgs before moving pointers. */
 static void map_tiles_read_into_ram_dsc(void) {
   offline_map_log_build_caps_once();
   s_map_load_seq++;
@@ -776,13 +799,63 @@ static void map_tiles_read_into_ram_dsc(void) {
              s_base_tx, s_base_ty, have);
   }
 #endif
+  for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
+    if (s_imgs[i] && lv_obj_is_valid(s_imgs[i])) {
+      lv_img_set_src(s_imgs[i], NULL);
+    }
+  }
+
+  lv_img_dsc_t *old_ram[MAP_GRID * MAP_GRID];
+  int old_z[MAP_GRID * MAP_GRID];
+  int old_tx[MAP_GRID * MAP_GRID];
+  int old_ty[MAP_GRID * MAP_GRID];
+  bool old_used[MAP_GRID * MAP_GRID];
+  memset(old_used, 0, sizeof(old_used));
+  for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
+    old_ram[i] = s_tile_ram[i];
+    if (old_ram[i] && s_tile_ram_z[i] >= 0) {
+      old_z[i] = s_tile_ram_z[i];
+      old_tx[i] = s_tile_ram_tx[i];
+      old_ty[i] = s_tile_ram_ty[i];
+    } else {
+      old_z[i] = -1;
+      old_tx[i] = 0;
+      old_ty[i] = 0;
+    }
+    s_tile_ram[i] = NULL;
+    tile_ram_clear_identity(i);
+  }
+
+  int n_reused = 0;
   for (int idx = 0; idx < MAP_GRID * MAP_GRID; idx++) {
     int r = idx / MAP_GRID;
     int c = idx % MAP_GRID;
     int tx = s_base_tx + c;
     int ty = s_base_ty + r;
-    set_tile_path(idx, s_zoom, tx, ty);
-    free_tile_ram_slot(idx);
+    const int z = s_zoom;
+    set_tile_path(idx, z, tx, ty);
+
+    bool reused = false;
+    for (int j = 0; j < MAP_GRID * MAP_GRID; j++) {
+      if (!old_ram[j] || old_used[j]) {
+        continue;
+      }
+      if (old_z[j] == z && old_tx[j] == tx && old_ty[j] == ty) {
+        s_tile_ram[idx] = old_ram[j];
+        tile_ram_set_identity(idx, z, tx, ty);
+        old_used[j] = true;
+        reused = true;
+        n_reused++;
+#if GHOST_OFFLINE_MAP_VERBOSE
+        ESP_LOGI(TAG, "map: cell %d tile z=%d (%d,%d) reuse from prev slot %d (no SD read)", idx, z, tx, ty, j);
+#endif
+        break;
+      }
+    }
+    if (reused) {
+      continue;
+    }
+
     if (s_path_plain[idx][0] == '\0') {
 #if GHOST_OFFLINE_MAP_VERBOSE
       ESP_LOGI(TAG, "map: cell %d tile (%d,%d) — empty path (path overflow?)", idx, tx, ty);
@@ -803,11 +876,22 @@ static void map_tiles_read_into_ram_dsc(void) {
       continue;
     }
     s_tile_ram[idx] = dsc;
+    tile_ram_set_identity(idx, z, tx, ty);
 #if GHOST_OFFLINE_MAP_VERBOSE
     ESP_LOGI(TAG, "map: cell %d tile (%d,%d) ram dsc=%p header w=%d h=%d dsz=%u", idx, tx, ty, (void *)dsc,
              (int)dsc->header.w, (int)dsc->header.h, (unsigned)dsc->data_size);
 #endif
   }
+
+  for (int j = 0; j < MAP_GRID * MAP_GRID; j++) {
+    if (!old_ram[j] || old_used[j]) {
+      continue;
+    }
+    void *raw = (void *)(uintptr_t)old_ram[j]->data;
+    free(raw);
+    free(old_ram[j]);
+  }
+
   {
     int n = 0;
     for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
@@ -815,7 +899,8 @@ static void map_tiles_read_into_ram_dsc(void) {
         n++;
       }
     }
-    ESP_LOGI(TAG, "map: load #%u done: %d/%d slots have PNG in RAM", s_map_load_seq, n, MAP_GRID * MAP_GRID);
+    ESP_LOGI(TAG, "map: load #%u done: %d/%d slots in RAM (%d reused, %d read from SD)", s_map_load_seq, n,
+             MAP_GRID * MAP_GRID, n_reused, n - n_reused);
   }
 }
 
@@ -1061,6 +1146,7 @@ void offline_map_view_create(void) {
     s_imgs[i] = NULL;
     s_no_tile_lbl[i] = NULL;
     s_tile_ram[i] = NULL;
+    tile_ram_clear_identity(i);
   }
   s_lbl = NULL;
 
