@@ -66,6 +66,8 @@ static lv_obj_t *s_imgs[MAP_GRID * MAP_GRID];
 /** Shown when a map tile file is missing for that cell. */
 static lv_obj_t *s_no_tile_lbl[MAP_GRID * MAP_GRID];
 static lv_obj_t *s_lbl;
+static lv_obj_t *s_zoom_alert;
+static lv_obj_t *s_zoom_alert_lbl;
 static int s_zoom;
 static int s_map_cell_w;
 static int s_map_cell_h;
@@ -1020,6 +1022,69 @@ static void map_hud_update(void) {
   lv_label_set_text(s_lbl, line);
 }
 
+static void map_zoom_alert_create(void) {
+  if (!s_root || !lv_obj_is_valid(s_root) || s_zoom_alert) {
+    return;
+  }
+  s_zoom_alert = lv_obj_create(s_root);
+  lv_obj_set_size(s_zoom_alert, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_hor(s_zoom_alert, 10, 0);
+  lv_obj_set_style_pad_ver(s_zoom_alert, 6, 0);
+  lv_obj_set_style_radius(s_zoom_alert, 8, 0);
+  lv_obj_set_style_bg_opa(s_zoom_alert, LV_OPA_70, 0);
+  lv_obj_set_style_bg_color(s_zoom_alert, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_border_width(s_zoom_alert, 0, 0);
+  lv_obj_set_style_shadow_width(s_zoom_alert, 0, 0);
+  lv_obj_set_scrollbar_mode(s_zoom_alert, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_clear_flag(s_zoom_alert, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_center(s_zoom_alert);
+  lv_obj_add_flag(s_zoom_alert, LV_OBJ_FLAG_HIDDEN);
+
+  s_zoom_alert_lbl = lv_label_create(s_zoom_alert);
+  lv_label_set_text(s_zoom_alert_lbl, "Zoom");
+  lv_obj_set_style_text_color(s_zoom_alert_lbl, lv_color_white(), 0);
+  lv_obj_center(s_zoom_alert_lbl);
+  lv_obj_move_foreground(s_zoom_alert);
+}
+
+static void map_zoom_alert_show(const char *msg) {
+  if (!s_zoom_alert || !lv_obj_is_valid(s_zoom_alert)) {
+    return;
+  }
+  if (s_zoom_alert_lbl && lv_obj_is_valid(s_zoom_alert_lbl)) {
+    lv_label_set_text(s_zoom_alert_lbl, msg ? msg : "Zoom");
+  }
+  lv_obj_clear_flag(s_zoom_alert, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(s_zoom_alert);
+  lv_refr_now(NULL);
+}
+
+static void map_zoom_alert_hide(void) {
+  if (!s_zoom_alert || !lv_obj_is_valid(s_zoom_alert)) {
+    return;
+  }
+  lv_obj_add_flag(s_zoom_alert, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void map_zoom_loading_show(void) {
+  map_zoom_alert_show(LV_SYMBOL_REFRESH " Loading...");
+}
+
+/* Zoom by delta and keep center. Returns true when zoom changed.
+ * At min/max, shows an alert and skips reload. */
+static bool map_try_zoom_keep_center(int delta) {
+  int old_z = clamp_i(s_zoom, s_min_z, s_max_z);
+  int req_z = old_z + delta;
+  int new_z = clamp_i(req_z, s_min_z, s_max_z);
+  if (new_z == old_z) {
+    map_zoom_alert_show(delta > 0 ? "Max zoom" : "Min zoom");
+    return false;
+  }
+  map_zoom_alert_hide();
+  map_set_zoom_keep_center(new_z);
+  return true;
+}
+
 static void refresh_tiles(void) {
 #if LV_USE_PNG && LV_USE_FS_STDIO
   if (s_stream_mode) {
@@ -1056,6 +1121,7 @@ static void handle_map_input_cb(InputEvent *e) {
     return;
   }
   if (e->type == INPUT_TYPE_KEYBOARD) {
+    bool need_refresh = false;
     uint8_t k = e->data.key_value;
     if (k == LV_KEY_ESC || k == 29 || k == '`' || k == 'q' || k == 'Q') {
       ESP_LOGI(TAG, "keyboard: 0x%02x -> back to apps", (unsigned)k);
@@ -1064,52 +1130,76 @@ static void handle_map_input_cb(InputEvent *e) {
     }
     if (k == '[') {
       ESP_LOGI(TAG, "keyboard: [ zoom out");
-      map_set_zoom_keep_center(s_zoom - 1);
+      need_refresh = map_try_zoom_keep_center(-1);
+      if (need_refresh) {
+        map_zoom_loading_show();
+      }
     } else if (k == ']') {
       ESP_LOGI(TAG, "keyboard: ] zoom in");
-      map_set_zoom_keep_center(s_zoom + 1);
+      need_refresh = map_try_zoom_keep_center(1);
+      if (need_refresh) {
+        map_zoom_loading_show();
+      }
     } else if (k == LV_KEY_LEFT || k == 'h' || k == 44) {
       ESP_LOGI(TAG, "keyboard: pan west");
       s_base_tx -= 1;
+      need_refresh = true;
     } else if (k == LV_KEY_RIGHT || k == 'l' || k == 47) {
       ESP_LOGI(TAG, "keyboard: pan east");
       s_base_tx += 1;
+      need_refresh = true;
     } else if (k == LV_KEY_UP || k == 'k' || k == ';' || k == 59) {
       ESP_LOGI(TAG, "keyboard: pan north");
       s_base_ty -= 1;
+      need_refresh = true;
     } else if (k == LV_KEY_DOWN || k == 'j' || k == 46) {
       ESP_LOGI(TAG, "keyboard: pan south");
       s_base_ty += 1;
+      need_refresh = true;
     } else {
       ESP_LOGI(TAG, "keyboard: unhandled 0x%02x", (unsigned)k);
       return;
     }
-    refresh_tiles();
+    if (need_refresh) {
+      refresh_tiles();
+      map_zoom_alert_hide();
+    }
     return;
   }
   if (e->type == INPUT_TYPE_JOYSTICK) {
+    bool need_refresh = false;
     int b = (int)e->data.joystick_index;
     /* Match terminal: 0/W 1/? 2/N 3/E 4/S — 1=zoom+. */
     if (b == 0) {
       ESP_LOGI(TAG, "joystick: %d pan west", b);
       s_base_tx -= 1;
+      need_refresh = true;
     } else if (b == 3) {
       ESP_LOGI(TAG, "joystick: %d pan east", b);
       s_base_tx += 1;
+      need_refresh = true;
     } else if (b == 2) {
       ESP_LOGI(TAG, "joystick: %d pan north", b);
       s_base_ty -= 1;
+      need_refresh = true;
     } else if (b == 4) {
       ESP_LOGI(TAG, "joystick: %d pan south", b);
       s_base_ty += 1;
+      need_refresh = true;
     } else if (b == 1) {
       ESP_LOGI(TAG, "joystick: %d zoom in", b);
-      map_set_zoom_keep_center(s_zoom + 1);
+      need_refresh = map_try_zoom_keep_center(1);
+      if (need_refresh) {
+        map_zoom_loading_show();
+      }
     } else {
       ESP_LOGI(TAG, "joystick: unhandled %d", b);
       return;
     }
-    refresh_tiles();
+    if (need_refresh) {
+      refresh_tiles();
+      map_zoom_alert_hide();
+    }
     return;
   }
   if (e->type == INPUT_TYPE_ENCODER) {
@@ -1119,8 +1209,11 @@ static void handle_map_input_cb(InputEvent *e) {
     }
     int dir = (int)e->data.encoder.direction;
     ESP_LOGI(TAG, "encoder: dir=%d (%s)", dir, dir > 0 ? "zoom in" : "zoom out");
-    map_set_zoom_keep_center((dir > 0) ? (s_zoom + 1) : (s_zoom - 1));
-    refresh_tiles();
+    if (map_try_zoom_keep_center(dir > 0 ? 1 : -1)) {
+      map_zoom_loading_show();
+      refresh_tiles();
+      map_zoom_alert_hide();
+    }
     return;
   }
   if (e->type == INPUT_TYPE_EXIT_BUTTON) {
@@ -1193,6 +1286,8 @@ void offline_map_view_create(void) {
   s_stream_mode = false;
   s_map_cont = NULL;
   s_hud = NULL;
+  s_zoom_alert = NULL;
+  s_zoom_alert_lbl = NULL;
   for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
     s_cells[i] = NULL;
     s_imgs[i] = NULL;
@@ -1399,6 +1494,7 @@ void offline_map_view_create(void) {
   lv_obj_set_width(s_lbl, w - 8);
   lv_label_set_long_mode(s_lbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_align(s_lbl, LV_ALIGN_LEFT_MID, 0, 0);
+  map_zoom_alert_create();
 
   if (s_stream_mode) {
     stream_apply_to_imgs();
@@ -1441,6 +1537,8 @@ void offline_map_view_destroy(void) {
       s_no_tile_lbl[i] = NULL;
     }
     s_lbl = NULL;
+    s_zoom_alert = NULL;
+    s_zoom_alert_lbl = NULL;
     if (un) {
       sd_card_unmount_after_flush(susp);
     }
