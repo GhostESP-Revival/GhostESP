@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a0b">
+  <title>GhostESP V2</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div>
+          <h1>GhostESP: Revival</h1>
+          <p class="subtitle">Device Control Interface</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="chip" id="api-chip"><span id="api-dot" class="dot"></span><span id="api-status">Checking</span></span>
+        <span class="chip" id="comm-chip"><span id="comm-dot" class="dot"></span><span id="comm-status">GhostLink unknown</span></span>
+        <button class="btn ghost" data-refresh aria-label="Refresh all">Refresh</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+
+      <section id="page-dashboard" class="page active">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Dashboard</h2>
+              <p>Device overview, status and quick actions.</p>
+            </div>
+            <div class="actions">
+              <button class="btn primary" id="dash-refresh-btn">Refresh</button>
+            </div>
+          </div>
+          <div id="dashboard-content">
+            <div class="dash-status-row">
+              <div class="panel dash-card dash-connection">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">DV</div>
+                  <div>
+                    <h3>Device</h3>
+                    <p class="dash-card-sub" id="dash-conn-status">Checking...</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>Model</label><strong id="dash-model">-</strong></div>
+                  <div class="stat"><label>Revision</label><strong id="dash-revision">-</strong></div>
+                  <div class="stat"><label>CPU Cores</label><strong id="dash-cores">-</strong></div>
+                  <div class="stat"><label>IDF Version</label><strong id="dash-idf">-</strong></div>
+                  <div class="stat"><label>Free Heap</label><strong id="dash-heap">-</strong></div>
+                  <div class="stat"><label>Build Config</label><strong id="dash-build">-</strong></div>
+                </div>
+              </div>
+              <div class="panel dash-card dash-wifi-conn">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">WF</div>
+                  <div>
+                    <h3>WiFi Connection</h3>
+                    <p class="dash-card-sub" id="dash-wifi-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>SSID</label><strong id="dash-wifi-ssid">-</strong></div>
+                  <div class="stat"><label>IP Address</label><strong id="dash-wifi-ip">-</strong></div>
+                  <div class="stat"><label>RSSI</label><strong id="dash-wifi-rssi">-</strong></div>
+                  <div class="stat"><label>Channel</label><strong id="dash-wifi-channel">-</strong></div>
+                </div>
+              </div>
+            </div>
+            <div class="dash-status-row">
+              <div class="panel dash-card">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">GL</div>
+                  <div>
+                    <h3>GhostLink</h3>
+                    <p class="dash-card-sub" id="dash-ghostlink-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>State</label><strong id="dash-ghostlink-state">-</strong></div>
+                  <div class="stat"><label>Remote CMD</label><strong id="dash-ghostlink-remote">-</strong></div>
+                </div>
+              </div>
+              <div class="panel dash-card">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">SD</div>
+                  <div>
+                    <h3>SD Card</h3>
+                    <p class="dash-card-sub" id="dash-sd-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>Path</label><strong id="dash-sd-path">-</strong></div>
+                  <div class="stat"><label>Used</label><strong id="dash-sd-used">-</strong></div>
+                </div>
+              </div>
+            </div>
+            <div class="dash-features" id="dash-features"></div>
+            <div class="dash-section" id="dash-recent-section" hidden>
+              <h3>Recent Networks</h3>
+              <div class="dash-recent-list" id="dash-recent-list"></div>
+            </div>
+            <div class="dash-section">
+              <h3>Quick Actions</h3>
+              <div class="dash-quick-actions" id="dash-quick-actions"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-wifi" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>WiFi</h2>
+              <p>Scan, attack, capture and manage WiFi workflows. Risky radio commands warn before running.</p>
+            </div>
+          </div>
+          <div class="tabs" data-tabs="wifi"></div>
+          <div id="wifi-subpages"></div>
+          <div id="wifi-detail" class="feature-detail" hidden></div>
+        </div>
+      </section>
+
+      <section id="page-ble" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Bluetooth Low Energy</h2>
+              <p>BLE scans, spam detection and device tracking. GhostLink preferred for radio-disruptive ops.</p>
+            </div>
+          </div>
+          <div class="menu-list" id="ble-actions"></div>
+          <div id="ble-detail" class="feature-detail" hidden></div>
+        </div>
+      </section>
+
+      <section id="page-files" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Files</h2>
+              <p>Browse, download, delete and upload to the mounted SD filesystem.</p>
+            </div>
+            <div class="actions">
+              <button class="btn ghost" id="up-folder-btn">Up</button>
+              <button class="btn ghost" id="refresh-files-btn">Refresh</button>
+            </div>
+          </div>
+          <div class="status-grid" style="margin-bottom:10px">
+            <div class="stat"><label>Path</label><strong id="file-path">/mnt</strong></div>
+            <div class="stat"><label>SD Used</label><strong id="stat-sd-used">Unknown</strong></div>
+          </div>
+          <div class="progress" title="SD storage" style="margin-bottom:10px"><span id="sd-progress"></span></div>
+          <div class="file-list" id="file-list"><div class="empty">Load files to begin.</div></div>
+          <div style="height:12px"></div>
+          <div class="menu-row upload-row">
+            <div>
+              <h3>Upload File</h3>
+              <p>Uploads into the current folder.</p>
+            </div>
+            <div class="actions">
+              <input type="file" id="upload-input" style="max-width:220px">
+              <button class="btn primary" id="upload-btn">Upload</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-ghostlink" class="page">
+        <div class="grid cols-2">
+          <div class="panel">
+            <div class="panel-title">
+              <div>
+                <h2>GhostLink</h2>
+                <p>Preferred execution path for WiFi / BLE / radio-disruptive commands.</p>
+              </div>
+            </div>
+            <div class="status-grid">
+              <div class="stat"><label>State</label><strong id="comm-state">Unknown</strong></div>
+              <div class="stat"><label>Remote Command</label><strong id="comm-remote">Unknown</strong></div>
+            </div>
+            <div style="height:10px"></div>
+            <div class="actions">
+              <button class="btn" data-command="commstatus">Status</button>
+              <button class="btn" data-command="commdiscovery">Discovery</button>
+              <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">
+              <div>
+                <h2>Remote Command</h2>
+                <p>Send to connected peer using <code>/api/esp_comm/send</code>.</p>
+              </div>
+            </div>
+            <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
+            <div class="terminal-input">
+              <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
+              <button class="btn primary" id="comm-send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Settings</h2>
+              <p>All device settings. Matches the on-device settings registry.</p>
+            </div>
+            <div class="actions">
+              <button class="btn primary" id="save-settings-btn">Save Settings</button>
+            </div>
+          </div>
+          <div class="settings-toolbar">
+            <input type="search" id="settings-search" placeholder="Search settings..." class="settings-search">
+            <button class="btn ghost" id="settings-expand-all">Expand All</button>
+            <button class="btn ghost" id="settings-collapse-all">Collapse All</button>
+          </div>
+          <div id="settings-container"></div>
+          <div style="height:12px"></div>
+          <div class="actions">
+            <button class="btn" id="connect-wifi-btn">Connect WiFi</button>
+            <button class="btn" id="start-portal-btn">Start Portal</button>
+            <button class="btn" id="send-printer-btn">Send to Printer</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-terminal" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Terminal</h2>
+              <p>Raw command access and logs. Risky commands still use the warning flow.</p>
+            </div>
+            <div class="actions">
+              <button class="btn ghost" id="clear-terminal-btn">Clear</button>
+              <button class="btn ghost" id="refresh-logs-btn">Refresh Logs</button>
+            </div>
+          </div>
+          <div class="terminal" id="terminal">Loading logs...</div>
+          <div class="terminal-input">
+            <input id="terminal-input" placeholder="Enter command..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <button class="btn primary" id="terminal-send-btn">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-help" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Help</h2>
+              <p>Command groups and safety guidance.</p>
+            </div>
+          </div>
+          <div class="grid cols-2" id="help-grid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="risk-modal" role="dialog" aria-modal="true" aria-labelledby="risk-title">
+    <div class="modal">
+      <h2 id="risk-title">WebUI may disconnect</h2>
+      <p id="risk-text">This command may stop the AP or use promiscuous/radio mode. If the page disconnects, V2 will try to reconnect and recover logs.</p>
+      <div class="actions">
+        <button class="btn primary" id="risk-ghostlink-btn">Run via GhostLink</button>
+        <button class="btn danger" id="risk-local-btn">Run Locally Anyway</button>
+        <button class="btn ghost" id="risk-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="reconnect" id="reconnect-overlay" role="status" aria-live="polite">
+    <div class="modal">
+      <h2>Reconnecting to GhostESP</h2>
+      <p>The command may have dropped the WebUI. Keep this page open. It will poll the device and recover logs when the AP returns.</p>
+      <div class="progress"><span id="reconnect-progress"></span></div>
+      <div style="height:10px"></div>
+      <div class="actions"><button class="btn ghost" id="dismiss-reconnect-btn">Dismiss</button></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toasts" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+  <script src="commands.js"></script>
+  <script src="parsers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

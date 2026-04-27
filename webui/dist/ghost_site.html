@@ -1,0 +1,2555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a0b">
+  <title>GhostESP V2</title>
+  <style>:root{--bg:#0a0a0b;--panel:#111113;--panel-2:#161618;--panel-3:#1c1c1f;--panel-hover:#1e1e22;--line:rgba(255,255,255,.07);--line-strong:rgba(255,255,255,.16);--text:#ececf1;--muted:#9b9ba3;--dim:#6e6e78;--accent:#e8e8ed;--good:#34d399;--warn:#f59e0b;--bad:#f87171;--blue:#60a5fa;--pink:#f472b6;--radius:12px;--radius-sm:8px;--shadow:0 2px 12px rgba(0,0,0,.45);--shadow-lg:0 8px 32px rgba(0,0,0,.55);--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;--body:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}[hidden]{display:none !important}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);font-family:var(--body);background:var(--bg);overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}button,input,select,textarea{font:inherit}button{color:inherit;background:none;border:none;cursor:pointer}code{font-family:var(--mono);font-size:.88em}.app{width:min(1200px,100%);margin:0 auto;padding:18px}.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;margin-bottom:16px}.brand{display:flex;align-items:center;gap:12px;min-width:0}h1,h2,h3,p{margin:0}h1{font-size:clamp(1.25rem,2.4vw,1.75rem);line-height:1.05;letter-spacing:-.03em}.subtitle{margin-top:4px;color:var(--dim);font-size:.78rem;letter-spacing:.02em}.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}.chip,.badge{display:inline-flex;align-items:center;gap:6px;min-height:26px;border-radius:6px;padding:5px 10px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:.76rem;white-space:nowrap;font-weight:500}.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .3s ease}.dot.good{background:var(--good);box-shadow:0 0 8px rgba(52,211,153,.35)}.dot.warn{background:var(--warn);box-shadow:0 0 8px rgba(245,158,11,.35)}.dot.bad{background:var(--bad);box-shadow:0 0 8px rgba(248,113,113,.35)}.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:start}.nav{position:sticky;top:18px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.nav button{width:100%;border:0;background:transparent;color:var(--muted);border-radius:var(--radius-sm);padding:10px 12px;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.9rem;transition:background .15s ease,color .15s ease,transform .1s ease}.nav button:hover{background:var(--panel-3);color:var(--text)}.nav button:active{transform:scale(.98)}.nav button.active{background:var(--text);color:var(--bg);font-weight:700}.nav small{font-family:var(--mono);opacity:.65;font-size:.7rem}.page{display:none;min-width:0}.page.active{display:block;animation:pageIn .2s cubic-bezier(.22,1,.36,1)}@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.panel,.card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.panel{padding:16px}.panel-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.panel-title h2{font-size:1.05rem;letter-spacing:-.02em}.panel-title p{color:var(--muted);font-size:.84rem;margin-top:4px;line-height:1.4}.grid{display:grid;gap:14px}.grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.card{padding:14px;cursor:pointer;min-height:100px;display:flex;flex-direction:column;justify-content:space-between;transition:border-color .15s ease,background .15s ease,transform .1s ease}.card:hover{border-color:var(--line-strong);background:var(--panel-2);transform:translateY(-1px)}.card:active{transform:translateY(0)}.card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.icon{width:32px;height:32px;border-radius:var(--radius-sm);display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.85rem}.card h3{margin-top:12px;font-size:.95rem}.card p{margin-top:4px;color:var(--muted);font-size:.8rem;line-height:1.4}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .15s ease}.stat:hover{background:var(--panel-hover)}.stat label{display:block;color:var(--dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;font-weight:600}.stat strong{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.btn{border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text);border-radius:var(--radius-sm);padding:8px 12px;cursor:pointer;min-height:34px;font-size:.88rem;font-weight:500;transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}.btn:hover{background:var(--panel-3);border-color:rgba(255,255,255,.28)}.btn:active{transform:scale(.97)}.btn.primary{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.btn.primary:hover{background:#fff;border-color:#fff;box-shadow:0 2px 12px rgba(255,255,255,.12)}.btn.danger{border-color:rgba(248,113,113,.35);color:#fecaca;background:rgba(248,113,113,.08)}.btn.danger:hover{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.5)}.btn.ghost{background:transparent}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none !important}.menu-list{display:grid;gap:10px}.menu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .15s ease,border-color .15s ease}.menu-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.menu-row h3{font-size:.92rem;font-weight:600}.menu-row p{margin-top:3px;color:var(--muted);font-size:.8rem;line-height:1.35}.menu-row code{color:var(--blue);font-size:.82em}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{display:grid;gap:6px}.field label{color:var(--muted);font-size:.78rem;font-weight:500}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);padding:9px 11px;font-size:.88rem;outline:none;transition:border-color .15s ease,box-shadow .15s ease}textarea{min-height:72px;resize:vertical}input:focus,select:focus,textarea:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px rgba(255,255,255,.06)}input[type="search"]{-webkit-appearance:none}input[type="color"]{padding:4px;height:38px;cursor:pointer}input::placeholder,textarea::placeholder{color:var(--dim);opacity:.7}.terminal{min-height:320px;max-height:56vh;overflow:auto;padding:14px;border-radius:var(--radius-sm);background:#060608;border:1px solid var(--line);color:#c8f0d8;font:12px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-width:thin;scrollbar-color:var(--panel-3) transparent}.terminal::-webkit-scrollbar{width:8px}.terminal::-webkit-scrollbar-thumb{background:var(--panel-3);border-radius:4px}.terminal-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2)}table{width:100%;border-collapse:collapse;min-width:640px}th,td{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left;font-size:.82rem}th{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;background:rgba(255,255,255,.03);font-weight:600}tr:last-child td{border-bottom:0}td code{color:#c8d4f0}tr.clickable-row{transition:background .12s ease}tr.clickable-row:hover{background:rgba(255,255,255,.04)}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.tab-btn{border:1px solid var(--line);background:var(--panel-2);color:var(--muted);border-radius:var(--radius-sm);padding:7px 12px;cursor:pointer;font-size:.84rem;font-weight:500;transition:background .15s ease,color .15s ease,border-color .15s ease}.tab-btn:hover{background:var(--panel-3);color:var(--text)}.tab-btn.active{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.subpage{display:none}.subpage.active{display:block;animation:pageIn .18s ease}.feature-detail[hidden]{display:none}.feature-detail{display:block}.feature-detail .table-wrap{margin-top:14px}.detail-toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.detail-toolbar .actions{justify-content:flex-end}.result-list{display:grid;gap:10px}.result-row{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.result-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.result-index{min-width:30px;height:30px;display:grid;place-items:center;border-radius:var(--radius-sm);background:var(--panel-3);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-weight:700;font-size:.85rem}.result-main{min-width:0}.result-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.result-main small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}.file-list{display:grid;gap:10px}.file-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.file-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.file-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.file-row small{color:var(--muted);font-size:.78rem}.toast-stack{position:fixed;right:16px;bottom:16px;z-index:50;display:grid;gap:10px;width:min(360px,calc(100vw - 32px))}.toast{padding:12px 14px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--panel);box-shadow:var(--shadow-lg);color:var(--text);font-size:.88rem;animation:toastIn .3s cubic-bezier(.22,1,.36,1);display:flex;align-items:center;gap:10px}.toast.good{border-color:rgba(52,211,153,.35)}.toast.warn{border-color:rgba(245,158,11,.35)}.toast.bad{border-color:rgba(248,113,113,.35)}@keyframes toastIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}.modal-backdrop,.reconnect{position:fixed;inset:0;z-index:40;display:none;place-items:center;padding:18px;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}.modal-backdrop.show,.reconnect.show{display:grid;animation:fadeIn .2s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.modal{width:min(520px,100%);padding:18px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line-strong);box-shadow:var(--shadow-lg);animation:modalIn .25s cubic-bezier(.22,1,.36,1)}@keyframes modalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}.modal h2{margin-bottom:8px;font-size:1.1rem}.modal p{color:var(--muted);line-height:1.5;margin-bottom:14px;font-size:.88rem}.progress{height:8px;overflow:hidden;border-radius:999px;background:var(--panel-3);border:1px solid var(--line)}.progress>span{display:block;height:100%;width:0;background:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.75));transition:width .25s ease}.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:var(--radius-sm);background:rgba(255,255,255,.03);font-size:.88rem}.warning-note{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.05);color:#fde68a}.settings-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}.settings-search{flex:1 1 220px;min-width:220px;background:var(--panel-2) !important;border-color:var(--line) !important}.settings-search:focus{background:var(--bg) !important}.settings-group{margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--panel-2)}.settings-group-header{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;background:var(--panel-2);transition:background .15s ease;user-select:none}.settings-group-header:hover{background:var(--panel-hover)}.settings-group-header .sg-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-size:.72rem;font-weight:800}.settings-group-header .sg-title{font-size:.9rem;font-weight:600}.settings-group-header .sg-desc{font-size:.75rem;color:var(--muted);margin-top:2px}.settings-group-header .sg-chevron{margin-left:auto;width:20px;height:20px;display:grid;place-items:center;transition:transform .25s cubic-bezier(.22,1,.36,1);color:var(--muted)}.settings-group.open .sg-chevron{transform:rotate(180deg)}.settings-group-body{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(.22,1,.36,1),padding .25s ease;padding:0 14px}.settings-group.open .settings-group-body{max-height:2000px;padding:4px 14px 14px}.settings-group .form-grid{margin-top:4px}.settings-group.highlight{border-color:rgba(96,165,250,.35);box-shadow:0 0 0 2px rgba(96,165,250,.08)}.clickable-row{cursor:pointer}.clickable-row:hover{background:rgba(255,255,255,.04)}.batch-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px;margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);font-size:.88rem}.batch-toolbar .actions{gap:8px}.item-detail{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);padding:16px}.detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}input[type="checkbox"]{width:18px;height:18px;accent-color:var(--text);cursor:pointer}.skeleton{background:linear-gradient(90deg,var(--panel-3) 25%,var(--panel-hover) 50%,var(--panel-3) 75%);background-size:200% 100%;animation:skeleton 1.4s ease infinite;border-radius:var(--radius-sm)}@keyframes skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}.skeleton-text{height:14px;margin-bottom:8px}.skeleton-title{height:18px;width:60%;margin-bottom:12px}.skeleton-row{height:48px;margin-bottom:8px}.spinner{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--text);border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.upload-row{align-items:center}.dash-status-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}.dash-card{padding:16px}.dash-card-header{display:flex;align-items:center;gap:12px}.dash-card-icon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.75rem}.dash-card-header h3{font-size:.95rem;font-weight:600}.dash-card-sub{font-size:.78rem;color:var(--muted);margin-top:2px}.dash-card-sub.good{color:var(--good)}.dash-card-sub.bad{color:var(--bad)}.dash-card-sub.warn{color:var(--warn)}.dash-features{margin-bottom:14px}.dash-section{margin-bottom:14px}.dash-section h3{font-size:.88rem;font-weight:600;margin-bottom:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:.72rem}.dash-feature-chips{display:flex;flex-wrap:wrap;gap:8px}.dash-quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.dash-action-btn{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text);font-size:.88rem;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .1s ease}.dash-action-btn:hover{background:var(--panel-hover);border-color:var(--line-strong);transform:translateY(-1px)}.dash-action-btn:active{transform:translateY(0)}.dash-action-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.7rem;flex-shrink:0}.dash-recent-list{display:grid;gap:8px}.dash-recent-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease}.dash-recent-item:hover{background:var(--panel-hover)}.dash-recent-info{min-width:0}.dash-recent-info strong{display:block;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dash-recent-info small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);font-size:.75rem}@media (max-width:860px){.app{padding:12px}.topbar,.layout,.hero{grid-template-columns:1fr}.nav{position:static;display:flex;overflow-x:auto;gap:6px;padding:8px}.nav button{min-width:max-content;padding:8px 12px}.grid.cols-2,.grid.cols-3,.form-grid,.status-grid{grid-template-columns:1fr}.dash-status-row{grid-template-columns:1fr}.dash-quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-input{grid-template-columns:1fr}.top-actions{justify-content:flex-start}.settings-toolbar{flex-direction:column;align-items:stretch}.settings-search{width:100%}}</style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div>
+          <h1>GhostESP: Revival</h1>
+          <p class="subtitle">Device Control Interface</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="chip" id="api-chip"><span id="api-dot" class="dot"></span><span id="api-status">Checking</span></span>
+        <span class="chip" id="comm-chip"><span id="comm-dot" class="dot"></span><span id="comm-status">GhostLink unknown</span></span>
+        <button class="btn ghost" data-refresh aria-label="Refresh all">Refresh</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+
+      <section id="page-dashboard" class="page active">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Dashboard</h2>
+              <p>Device overview, status and quick actions.</p>
+            </div>
+            <div class="actions">
+              <button class="btn primary" id="dash-refresh-btn">Refresh</button>
+            </div>
+          </div>
+          <div id="dashboard-content">
+            <div class="dash-status-row">
+              <div class="panel dash-card dash-connection">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">DV</div>
+                  <div>
+                    <h3>Device</h3>
+                    <p class="dash-card-sub" id="dash-conn-status">Checking...</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>Model</label><strong id="dash-model">-</strong></div>
+                  <div class="stat"><label>Revision</label><strong id="dash-revision">-</strong></div>
+                  <div class="stat"><label>CPU Cores</label><strong id="dash-cores">-</strong></div>
+                  <div class="stat"><label>IDF Version</label><strong id="dash-idf">-</strong></div>
+                  <div class="stat"><label>Free Heap</label><strong id="dash-heap">-</strong></div>
+                  <div class="stat"><label>Build Config</label><strong id="dash-build">-</strong></div>
+                </div>
+              </div>
+              <div class="panel dash-card dash-wifi-conn">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">WF</div>
+                  <div>
+                    <h3>WiFi Connection</h3>
+                    <p class="dash-card-sub" id="dash-wifi-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>SSID</label><strong id="dash-wifi-ssid">-</strong></div>
+                  <div class="stat"><label>IP Address</label><strong id="dash-wifi-ip">-</strong></div>
+                  <div class="stat"><label>RSSI</label><strong id="dash-wifi-rssi">-</strong></div>
+                  <div class="stat"><label>Channel</label><strong id="dash-wifi-channel">-</strong></div>
+                </div>
+              </div>
+            </div>
+            <div class="dash-status-row">
+              <div class="panel dash-card">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">GL</div>
+                  <div>
+                    <h3>GhostLink</h3>
+                    <p class="dash-card-sub" id="dash-ghostlink-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>State</label><strong id="dash-ghostlink-state">-</strong></div>
+                  <div class="stat"><label>Remote CMD</label><strong id="dash-ghostlink-remote">-</strong></div>
+                </div>
+              </div>
+              <div class="panel dash-card">
+                <div class="dash-card-header">
+                  <div class="dash-card-icon">SD</div>
+                  <div>
+                    <h3>SD Card</h3>
+                    <p class="dash-card-sub" id="dash-sd-status">Unknown</p>
+                  </div>
+                </div>
+                <div class="status-grid" style="margin-top:12px">
+                  <div class="stat"><label>Path</label><strong id="dash-sd-path">-</strong></div>
+                  <div class="stat"><label>Used</label><strong id="dash-sd-used">-</strong></div>
+                </div>
+              </div>
+            </div>
+            <div class="dash-features" id="dash-features"></div>
+            <div class="dash-section" id="dash-recent-section" hidden>
+              <h3>Recent Networks</h3>
+              <div class="dash-recent-list" id="dash-recent-list"></div>
+            </div>
+            <div class="dash-section">
+              <h3>Quick Actions</h3>
+              <div class="dash-quick-actions" id="dash-quick-actions"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-wifi" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>WiFi</h2>
+              <p>Scan, attack, capture and manage WiFi workflows. Risky radio commands warn before running.</p>
+            </div>
+          </div>
+          <div class="tabs" data-tabs="wifi"></div>
+          <div id="wifi-subpages"></div>
+          <div id="wifi-detail" class="feature-detail" hidden></div>
+        </div>
+      </section>
+
+      <section id="page-ble" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Bluetooth Low Energy</h2>
+              <p>BLE scans, spam detection and device tracking. GhostLink preferred for radio-disruptive ops.</p>
+            </div>
+          </div>
+          <div class="menu-list" id="ble-actions"></div>
+          <div id="ble-detail" class="feature-detail" hidden></div>
+        </div>
+      </section>
+
+      <section id="page-files" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Files</h2>
+              <p>Browse, download, delete and upload to the mounted SD filesystem.</p>
+            </div>
+            <div class="actions">
+              <button class="btn ghost" id="up-folder-btn">Up</button>
+              <button class="btn ghost" id="refresh-files-btn">Refresh</button>
+            </div>
+          </div>
+          <div class="status-grid" style="margin-bottom:10px">
+            <div class="stat"><label>Path</label><strong id="file-path">/mnt</strong></div>
+            <div class="stat"><label>SD Used</label><strong id="stat-sd-used">Unknown</strong></div>
+          </div>
+          <div class="progress" title="SD storage" style="margin-bottom:10px"><span id="sd-progress"></span></div>
+          <div class="file-list" id="file-list"><div class="empty">Load files to begin.</div></div>
+          <div style="height:12px"></div>
+          <div class="menu-row upload-row">
+            <div>
+              <h3>Upload File</h3>
+              <p>Uploads into the current folder.</p>
+            </div>
+            <div class="actions">
+              <input type="file" id="upload-input" style="max-width:220px">
+              <button class="btn primary" id="upload-btn">Upload</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-ghostlink" class="page">
+        <div class="grid cols-2">
+          <div class="panel">
+            <div class="panel-title">
+              <div>
+                <h2>GhostLink</h2>
+                <p>Preferred execution path for WiFi / BLE / radio-disruptive commands.</p>
+              </div>
+            </div>
+            <div class="status-grid">
+              <div class="stat"><label>State</label><strong id="comm-state">Unknown</strong></div>
+              <div class="stat"><label>Remote Command</label><strong id="comm-remote">Unknown</strong></div>
+            </div>
+            <div style="height:10px"></div>
+            <div class="actions">
+              <button class="btn" data-command="commstatus">Status</button>
+              <button class="btn" data-command="commdiscovery">Discovery</button>
+              <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">
+              <div>
+                <h2>Remote Command</h2>
+                <p>Send to connected peer using <code>/api/esp_comm/send</code>.</p>
+              </div>
+            </div>
+            <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
+            <div class="terminal-input">
+              <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
+              <button class="btn primary" id="comm-send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Settings</h2>
+              <p>All device settings. Matches the on-device settings registry.</p>
+            </div>
+            <div class="actions">
+              <button class="btn primary" id="save-settings-btn">Save Settings</button>
+            </div>
+          </div>
+          <div class="settings-toolbar">
+            <input type="search" id="settings-search" placeholder="Search settings..." class="settings-search">
+            <button class="btn ghost" id="settings-expand-all">Expand All</button>
+            <button class="btn ghost" id="settings-collapse-all">Collapse All</button>
+          </div>
+          <div id="settings-container"></div>
+          <div style="height:12px"></div>
+          <div class="actions">
+            <button class="btn" id="connect-wifi-btn">Connect WiFi</button>
+            <button class="btn" id="start-portal-btn">Start Portal</button>
+            <button class="btn" id="send-printer-btn">Send to Printer</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-terminal" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Terminal</h2>
+              <p>Raw command access and logs. Risky commands still use the warning flow.</p>
+            </div>
+            <div class="actions">
+              <button class="btn ghost" id="clear-terminal-btn">Clear</button>
+              <button class="btn ghost" id="refresh-logs-btn">Refresh Logs</button>
+            </div>
+          </div>
+          <div class="terminal" id="terminal">Loading logs...</div>
+          <div class="terminal-input">
+            <input id="terminal-input" placeholder="Enter command..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <button class="btn primary" id="terminal-send-btn">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-help" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Help</h2>
+              <p>Command groups and safety guidance.</p>
+            </div>
+          </div>
+          <div class="grid cols-2" id="help-grid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="risk-modal" role="dialog" aria-modal="true" aria-labelledby="risk-title">
+    <div class="modal">
+      <h2 id="risk-title">WebUI may disconnect</h2>
+      <p id="risk-text">This command may stop the AP or use promiscuous/radio mode. If the page disconnects, V2 will try to reconnect and recover logs.</p>
+      <div class="actions">
+        <button class="btn primary" id="risk-ghostlink-btn">Run via GhostLink</button>
+        <button class="btn danger" id="risk-local-btn">Run Locally Anyway</button>
+        <button class="btn ghost" id="risk-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="reconnect" id="reconnect-overlay" role="status" aria-live="polite">
+    <div class="modal">
+      <h2>Reconnecting to GhostESP</h2>
+      <p>The command may have dropped the WebUI. Keep this page open. It will poll the device and recover logs when the AP returns.</p>
+      <div class="progress"><span id="reconnect-progress"></span></div>
+      <div style="height:10px"></div>
+      <div class="actions"><button class="btn ghost" id="dismiss-reconnect-btn">Dismiss</button></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toasts" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+  <script>/**
+ * GhostESP Command Registry
+ * Ported from Android GhostCommand.kt
+ *
+ * Provides type-safe command generation with metadata:
+ * - isRisky: may disconnect WebUI / disrupt radio
+ * - requiresStopFirst: should send 'stop' before this command
+ * - category: UI grouping
+ * - description: human-readable help
+ */
+
+const CMD = {
+  // Core
+  help:            () => ({ cmd: 'help',            risky: false, stopFirst: false, cat: 'System', desc: 'Show help' }),
+  chipinfo:        () => ({ cmd: 'chipinfo',        risky: false, stopFirst: false, cat: 'System', desc: 'Chip information' }),
+  stop:            () => ({ cmd: 'stop',            risky: false, stopFirst: false, cat: 'System', desc: 'Stop all operations' }),
+  reboot:          () => ({ cmd: 'reboot',          risky: true,  stopFirst: false, cat: 'System', desc: 'Reboot device' }),
+  identify:        () => ({ cmd: 'identify',        risky: false, stopFirst: false, cat: 'System', desc: 'Identify device' }),
+  mem:             (sub = 'status') => ({ cmd: sub === 'status' ? 'mem' : `mem ${sub}`, risky: false, stopFirst: false, cat: 'System', desc: 'Memory info' }),
+
+  // WiFi Scan
+  scanAp:          (duration, live) => ({ cmd: live ? 'scanap -live' : duration ? `scanap ${duration}` : 'scanap', risky: true, stopFirst: true, cat: 'WiFi Scan', desc: 'Scan access points' }),
+  scanSta:         () => ({ cmd: 'scansta',         risky: true, stopFirst: true, cat: 'WiFi Scan', desc: 'Scan stations' }),
+  scanAll:         (duration) => ({ cmd: duration ? `scanall ${duration}` : 'scanall', risky: true, stopFirst: true, cat: 'WiFi Scan', desc: 'Combined AP + STA scan' }),
+  stopScan:        () => ({ cmd: 'stopscan',        risky: false, stopFirst: false, cat: 'WiFi Scan', desc: 'Stop WiFi scan' }),
+  listAp:          () => ({ cmd: 'list -a',         risky: false, stopFirst: false, cat: 'WiFi Scan', desc: 'List AP results' }),
+  listSta:         () => ({ cmd: 'list -s',         risky: false, stopFirst: false, cat: 'WiFi Scan', desc: 'List station results' }),
+
+  // WiFi Select
+  selectAp:        (indices) => ({ cmd: `select -a ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select AP by index' }),
+  selectSta:       (indices) => ({ cmd: `select -s ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select station by index' }),
+  connect:         (ssid, pass) => {
+    if (!ssid) return { cmd: 'connect', risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to saved WiFi' };
+    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
+  },
+  disconnect:      () => ({ cmd: 'disconnect',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Disconnect WiFi' }),
+  wifiStatus:      () => ({ cmd: 'wifistatus',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'WiFi connection status' }),
+
+  // WiFi Attacks
+  deauth:          () => ({ cmd: 'attack -d',       risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Deauth attack on selected APs' }),
+  eapol:           () => ({ cmd: 'attack -e',       risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'EAPOL logoff attack' }),
+  stopDeauth:      () => ({ cmd: 'stopdeauth',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop deauth attack' }),
+  beaconSpam:      (mode = 'random') => {
+    const map = { random: '-r', rickroll: '-rr', list: '-l' };
+    return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Beacon spam' };
+  },
+  stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop beacon spam' }),
+  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
+  karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop karma attack' }),
+  saeFlood:        (pass) => ({ cmd: `saeflood ${pass}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
+  stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop SAE flood' }),
+
+  // WiFi Tracking
+  trackAp:         () => ({ cmd: 'trackap',         risky: true, stopFirst: true, cat: 'WiFi Track', desc: 'Track selected AP RSSI' }),
+  trackSta:        () => ({ cmd: 'tracksta',        risky: true, stopFirst: true, cat: 'WiFi Track', desc: 'Track selected station RSSI' }),
+
+  // WiFi Capture
+  capture:         (mode, channel) => {
+    const m = { probe: '-probe', deauth: '-deauth', beacon: '-beacon', raw: '-raw', wps: '-wps', eapol: '-eapol', ieee802154: '-802154' };
+    let c = `capture ${m[mode] || mode}`;
+    if (channel != null) c += ` -c ${channel}`;
+    return { cmd: c, risky: true, stopFirst: true, cat: 'WiFi Capture', desc: `Capture ${mode}` };
+  },
+  stopCapture:     () => ({ cmd: 'capture -stop',   risky: false, stopFirst: false, cat: 'WiFi Capture', desc: 'Stop capture' }),
+  startEapol:      (ch) => ({ cmd: ch != null ? `capture -eapol -c ${ch}` : 'capture -eapol', risky: true, stopFirst: true, cat: 'WiFi Capture', desc: 'Start EAPOL capture' }),
+
+  // Environment
+  sweep:           (stop) => ({ cmd: stop ? 'sweep -s' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
+  pineap:          () => ({ cmd: 'pineap',          risky: true, stopFirst: true, cat: 'Environment', desc: 'Detect WiFi Pineapples' }),
+  congestion:      () => ({ cmd: 'congestion',      risky: false, stopFirst: false, cat: 'Environment', desc: 'Channel congestion' }),
+  listenProbes:    (stop) => ({ cmd: stop ? 'listenprobes -s' : 'listenprobes', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'Listen for probe requests' }),
+
+  // Network
+  scanPorts:       (target, start, end) => {
+    let c = `scanports ${target}`;
+    if (start != null) c += ` ${start}`;
+    if (end != null) c += ` ${end}`;
+    return { cmd: c, risky: false, stopFirst: false, cat: 'Network', desc: 'Port scan' };
+  },
+  scanArp:         () => ({ cmd: 'scanarp',         risky: false, stopFirst: false, cat: 'Network', desc: 'ARP scan local network' }),
+  scanLocal:       () => ({ cmd: 'scanlocal',       risky: false, stopFirst: false, cat: 'Network', desc: 'Local IP lookup' }),
+  scanSsh:         (target) => ({ cmd: `scanssh ${target}`, risky: false, stopFirst: false, cat: 'Network', desc: 'Scan for SSH' }),
+  dhcpStarve:      (stop) => ({ cmd: stop ? 'dhcpstarve -s' : 'dhcpstarve', risky: !stop, stopFirst: !stop, cat: 'Network', desc: 'DHCP starvation' }),
+
+  // Evil Portal
+  startPortal:     (path, ssid, password) => {
+    let c = `startportal ${path || 'default'} "${ssid || 'FreeWiFi'}"`;
+    if (password) c += ` "${password}"`;
+    return { cmd: c, risky: true, stopFirst: true, cat: 'Portal', desc: 'Start evil portal' };
+  },
+  stopPortal:      () => ({ cmd: 'stopportal',      risky: false, stopFirst: false, cat: 'Portal', desc: 'Stop evil portal' }),
+  listPortals:     () => ({ cmd: 'listportals',     risky: false, stopFirst: false, cat: 'Portal', desc: 'List portal files' }),
+
+  // BLE Scan
+  bleScan:         (mode, stop) => {
+    const m = { flipper: '-f', spam: '-ds', airtag: '-a', raw: '-r', gatt: '-g' };
+    return { cmd: stop ? 'blescan -s' : `blescan ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: `BLE scan ${mode}` };
+  },
+  bleSpam:         (mode, stop) => {
+    const m = { apple: '-apple', microsoft: '-ms', samsung: '-samsung', google: '-google', random: '-random' };
+    return { cmd: stop ? 'blespam -s' : `blespam ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Attack', desc: `BLE spam ${mode}` };
+  },
+  listFlippers:    () => ({ cmd: 'listflippers',    risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'List Flipper devices' }),
+  listAirTags:     () => ({ cmd: 'listairtags',     risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'List AirTags' }),
+  listGatt:        () => ({ cmd: 'listgatt',        risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'List GATT devices' }),
+  enumGatt:        () => ({ cmd: 'enumgatt',        risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'Enumerate GATT services' }),
+  selectGatt:      (indices) => ({ cmd: `selectgatt ${indices}`, risky: false, stopFirst: false, cat: 'BLE Select', desc: 'Select GATT device' }),
+  trackGatt:       () => ({ cmd: 'trackgatt',       risky: true, stopFirst: true, cat: 'BLE Track', desc: 'Track GATT device' }),
+  trackFlipper:    (index) => ({ cmd: `selectflipper ${index}`, risky: true, stopFirst: true, cat: 'BLE Track', desc: 'Track Flipper' }),
+  spoofAirTag:     (start) => ({ cmd: start ? 'spoofairtag' : 'stopspoof', risky: start, stopFirst: start, cat: 'BLE Attack', desc: 'Spoof AirTag' }),
+  bleWardrive:     (stop) => ({ cmd: stop ? 'blewardriving -s' : 'blewardriving', risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: 'BLE wardriving' }),
+
+  // NFC
+  chameleonScan:   (timeout) => ({ cmd: `chameleon scan ${timeout || 60}`, risky: true, stopFirst: true, cat: 'NFC', desc: 'Chameleon NFC scan' }),
+  chameleonStop:   () => ({ cmd: 'chameleon scan stop', risky: false, stopFirst: false, cat: 'NFC', desc: 'Stop NFC scan' }),
+
+  // IR
+  irList:          (path) => ({ cmd: path ? `ir list ${path}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
+  irSend:          (remote, btn) => ({ cmd: btn != null ? `ir send ${remote} ${btn}` : `ir send ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Send IR signal' }),
+  irLearn:         (path) => ({ cmd: path ? `ir learn ${path}` : 'ir learn', risky: true, stopFirst: true, cat: 'IR', desc: 'Learn IR signal' }),
+  irDazzler:       (stop) => ({ cmd: stop ? 'ir dazzler stop' : 'ir dazzler', risky: !stop, stopFirst: !stop, cat: 'IR', desc: 'IR dazzler' }),
+  irShow:          (remote) => ({ cmd: `ir show ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Show IR remote buttons' }),
+
+  // BadUSB
+  badusbList:      () => ({ cmd: 'badusb list',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'List BadUSB scripts' }),
+  badusbRun:       (file) => ({ cmd: `badusb run ${file}`, risky: true, stopFirst: true, cat: 'BadUSB', desc: 'Run BadUSB script' }),
+  badusbStop:      () => ({ cmd: 'badusb stop',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Stop BadUSB' }),
+
+  // GPS
+  gpsInfo:         (stop) => ({ cmd: stop ? 'gpsinfo -s' : 'gpsinfo', risky: false, stopFirst: false, cat: 'GPS', desc: 'GPS information' }),
+  startWardrive:   (stop) => ({ cmd: stop ? 'startwd -s' : 'startwd', risky: !stop, stopFirst: !stop, cat: 'GPS', desc: 'Start wardriving' }),
+
+  // SD Card
+  sdStatus:        () => ({ cmd: 'sd status',       risky: false, stopFirst: false, cat: 'Files', desc: 'SD card status' }),
+  sdList:          (path) => ({ cmd: path ? `sd list ${path}` : 'sd list', risky: false, stopFirst: false, cat: 'Files', desc: 'List SD files' }),
+  sdRead:          (path, offset, length) => ({ cmd: `sd read ${path}${offset != null ? ' ' + offset : ''}${length != null ? ' ' + length : ''}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Read SD file' }),
+  sdSize:          (path) => ({ cmd: `sd size ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Get file size' }),
+  sdWrite:         (path, b64) => ({ cmd: `sd write ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Write file' }),
+  sdAppend:        (path, b64) => ({ cmd: `sd append ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Append to file' }),
+  sdMkdir:         (path) => ({ cmd: `sd mkdir ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Create directory' }),
+  sdRm:            (path) => ({ cmd: `sd rm ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Delete file/dir' }),
+
+  // Aerial
+  aerialScan:      (duration, stop) => ({ cmd: stop ? 'aerialstop' : `aerialscan ${duration || 30}`, risky: !stop, stopFirst: !stop, cat: 'Aerial', desc: 'Aerial scan' }),
+  aerialList:      () => ({ cmd: 'aeriallist',      risky: false, stopFirst: false, cat: 'Aerial', desc: 'List aerial devices' }),
+  aerialTrack:     (id) => ({ cmd: `aerialtrack ${id}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Track aerial device' }),
+  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof ${id || 'GHOST-TEST'} ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
+  aerialSpoofStop: () => ({ cmd: 'aerialspoofstop', risky: false, stopFirst: false, cat: 'Aerial', desc: 'Stop aerial spoof' }),
+
+  // Ethernet
+  ethUp:           () => ({ cmd: 'ethup',           risky: false, stopFirst: false, cat: 'Ethernet', desc: 'Ethernet up' }),
+  ethDown:         () => ({ cmd: 'ethdown',         risky: false, stopFirst: false, cat: 'Ethernet', desc: 'Ethernet down' }),
+  ethInfo:         () => ({ cmd: 'ethinfo',         risky: false, stopFirst: false, cat: 'Ethernet', desc: 'Ethernet info' }),
+  ethArp:          () => ({ cmd: 'etharp',          risky: false, stopFirst: false, cat: 'Ethernet', desc: 'Ethernet ARP scan' }),
+
+  // Settings
+  settingsList:    () => ({ cmd: 'settings list',   risky: false, stopFirst: false, cat: 'Settings', desc: 'List all settings' }),
+  settingsGet:     (key) => ({ cmd: `settings get ${key}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Get setting' }),
+  settingsSet:     (key, value) => ({ cmd: `settings set ${key} ${value}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Set setting' }),
+
+  // GhostLink
+  commStatus:      () => ({ cmd: 'commstatus',      risky: false, stopFirst: false, cat: 'GhostLink', desc: 'GhostLink status' }),
+  commDiscovery:   () => ({ cmd: 'commdiscovery',   risky: false, stopFirst: false, cat: 'GhostLink', desc: 'Discover peers' }),
+  commConnect:     (peer) => ({ cmd: `commconnect ${peer}`, risky: false, stopFirst: false, cat: 'GhostLink', desc: 'Connect to peer' }),
+  commSend:        (command, data) => ({ cmd: data ? `commsend ${command} ${data}` : `commsend ${command}`, risky: false, stopFirst: false, cat: 'GhostLink', desc: 'Send via GhostLink' }),
+  commDisconnect:  () => ({ cmd: 'commdisconnect',  risky: false, stopFirst: false, cat: 'GhostLink', desc: 'Disconnect GhostLink' }),
+  commSetPins:     (tx, rx) => ({ cmd: `commsetpins ${tx} ${rx}`, risky: false, stopFirst: false, cat: 'GhostLink', desc: 'Set GhostLink pins' }),
+
+  // Misc
+  dialconnect:     (device, all) => ({ cmd: all ? 'dialconnect all' : device ? `dialconnect ${device}` : 'dialconnect', risky: false, stopFirst: false, cat: 'Misc', desc: 'DIAL connect to TV' }),
+  powerprinter:    (ip, text, fontSize, align) => ({ cmd: `powerprinter ${ip} "${text}" ${fontSize || 16} ${align || 'CM'}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Send to power printer' }),
+  mirror:          (sub) => ({ cmd: `mirror ${sub}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Screen mirror' }),
+  rgbmode:         (mode) => ({ cmd: `rgbmode ${mode}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set RGB mode' }),
+  timezone:        (tz) => ({ cmd: `timezone ${tz}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set timezone' }),
+  apcred:          (ssid, pass, reset) => {
+    if (reset) return { cmd: 'apcred -r', risky: false, stopFirst: false, cat: 'Misc', desc: 'Reset AP creds' };
+    if (ssid && pass) return { cmd: `apcred "${ssid}" "${pass}"`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set AP credentials' };
+    return { cmd: 'apcred', risky: false, stopFirst: false, cat: 'Misc', desc: 'Show AP credentials' };
+  },
+  apenable:        (on) => ({ cmd: `apenable ${on ? 'on' : 'off'}`, risky: true, stopFirst: false, cat: 'Misc', desc: 'Enable/disable AP' }),
+};
+
+/** Registry of UI action definitions for WiFi page groups */
+const WIFI_GROUPS = {
+  'Scan & Select': [
+    { label: 'Scan Access Points',    factory: () => CMD.scanAp(),           refresh: () => CMD.listAp(),   refreshLabel: 'List APs' },
+    { label: 'Scan APs Live',         factory: () => CMD.scanAp(null, true),  refresh: () => CMD.listAp(),   refreshLabel: 'List APs' },
+    { label: 'Scan Stations',         factory: () => CMD.scanSta(),           refresh: () => CMD.listSta(),  refreshLabel: 'List Stations' },
+    { label: 'Scan AP + STA',         factory: () => CMD.scanAll(),           refresh: () => CMD.listAp(),   refreshLabel: 'List APs' },
+    { label: 'List Access Points',    factory: () => CMD.listAp() },
+    { label: 'List Stations',         factory: () => CMD.listSta() },
+  ],
+  'Attacks': [
+    { label: 'Start Deauth Attack',   factory: () => CMD.deauth() },
+    { label: 'Start EAPOL Logoff',    factory: () => CMD.eapol() },
+    { label: 'Beacon Spam - Random',  factory: () => CMD.beaconSpam('random') },
+    { label: 'Beacon Spam - Rickroll',factory: () => CMD.beaconSpam('rickroll') },
+    { label: 'Beacon Spam - List',    factory: () => CMD.beaconSpam('list') },
+    { label: 'Stop Attacks',          factory: () => CMD.stopDeauth() },
+    { label: 'Stop Beacon Spam',      factory: () => CMD.stopSpam() },
+  ],
+  'Capture': [
+    { label: 'Capture Probe',         factory: () => CMD.capture('probe') },
+    { label: 'Capture Deauth',        factory: () => CMD.capture('deauth') },
+    { label: 'Capture Beacon',        factory: () => CMD.capture('beacon') },
+    { label: 'Capture Raw',           factory: () => CMD.capture('raw') },
+    { label: 'Capture WPS',           factory: () => CMD.capture('wps') },
+    { label: 'Stop Capture',          factory: () => CMD.stopCapture() },
+  ],
+  'Environment': [
+    { label: 'Sweep',                 factory: () => CMD.sweep() },
+    { label: 'PineAP Detection',      factory: () => CMD.pineap() },
+    { label: 'Channel Congestion',    factory: () => CMD.congestion() },
+  ],
+  'Network': [
+    { label: 'Scan LAN Devices',      factory: () => CMD.scanPorts('local', null, null) },
+    { label: 'ARP Scan Network',      factory: () => CMD.scanArp() },
+  ],
+  'Evil Portal': [
+    { label: 'Start Evil Portal',     factory: () => CMD.startPortal('default', 'FreeWiFi') },
+    { label: 'Stop Evil Portal',      factory: () => CMD.stopPortal() },
+    { label: 'List Portals',          factory: () => CMD.listPortals() },
+  ],
+  'Connection': [
+    { label: 'WiFi Status',           factory: () => CMD.wifiStatus() },
+    { label: 'Connect Saved WiFi',    factory: () => CMD.connect() },
+    { label: 'Disconnect WiFi',       factory: () => CMD.disconnect() },
+  ],
+  'Misc': [
+    { label: 'TV Cast',               factory: () => CMD.dialconnect() },
+    { label: 'Stop All',              factory: () => CMD.stop() },
+  ]
+};
+
+/** BLE action definitions */
+const BLE_ACTIONS = [
+  { label: 'Detect Devices',    factory: () => CMD.bleScan('spam') },
+  { label: 'Find Flippers',     factory: () => CMD.bleScan('flipper') },
+  { label: 'AirTag Scanner',    factory: () => CMD.bleScan('airtag') },
+  { label: 'Raw BLE Scanner',   factory: () => CMD.bleScan('raw') },
+  { label: 'Stop BLE Scan',     factory: () => CMD.bleScan(null, true) },
+  { label: 'BLE Spam - Apple',  factory: () => CMD.bleSpam('apple') },
+  { label: 'BLE Spam - Microsoft',factory: () => CMD.bleSpam('microsoft') },
+  { label: 'BLE Spam - Samsung',factory: () => CMD.bleSpam('samsung') },
+  { label: 'BLE Spam - Google', factory: () => CMD.bleSpam('google') },
+  { label: 'Stop BLE Spam',     factory: () => CMD.bleSpam(null, true) },
+];
+
+/** Settings schema with categories, descriptions, and validation */
+const SETTINGS_SCHEMA = [
+  {
+    category: 'WiFi',
+    icon: 'WF',
+    description: 'Access Point and Station configuration',
+    fields: [
+      { id: 'ap_ssid',        label: 'AP SSID',            type: 'text',   max: 33,  hint: 'Broadcast network name' },
+      { id: 'ap_password',    label: 'AP Password',        type: 'text',   max: 65,  hint: 'Leave empty for open AP' },
+      { id: 'ap_enabled',     label: 'AP Enabled',         type: 'bool' },
+      { id: 'sta_ssid',       label: 'STA SSID',           type: 'text',   max: 65,  hint: 'Network to connect to' },
+      { id: 'sta_password',   label: 'STA Password',       type: 'text',   max: 65 },
+    ]
+  },
+  {
+    category: 'Portal',
+    icon: 'EP',
+    description: 'Evil Portal captive portal settings',
+    fields: [
+      { id: 'portal_url',       label: 'Portal File Path',   type: 'text',   max: 129, hint: 'e.g. /mnt/ghostesp/portals/default.html' },
+      { id: 'portal_ssid',      label: 'Portal SSID',        type: 'text',   max: 33 },
+      { id: 'portal_password',  label: 'Portal Password',    type: 'text',   max: 65 },
+      { id: 'portal_ap_ssid',   label: 'Portal AP SSID',     type: 'text',   max: 33,  hint: 'SSID for the portal AP' },
+      { id: 'portal_domain',    label: 'Portal Domain',      type: 'text',   max: 65,  hint: 'e.g. ghost.net' },
+      { id: 'portal_offline',   label: 'Portal Offline Mode',type: 'bool' },
+    ]
+  },
+  {
+    category: 'Printer',
+    icon: 'PR',
+    description: 'Thermal printer configuration',
+    fields: [
+      { id: 'printer_ip',        label: 'Printer IP',         type: 'text',   max: 16,  hint: 'e.g. 192.168.1.50' },
+      { id: 'printer_text',      label: 'Printer Text',       type: 'textarea',max: 257, hint: 'Default text to print' },
+      { id: 'printer_font_size', label: 'Printer Font Size',  type: 'number', min: 1, max: 255 },
+      { id: 'printer_alignment', label: 'Printer Alignment',  type: 'enum',   options: [['0','Center Middle'],['1','Top Left'],['2','Top Right'],['3','Bottom Right'],['4','Bottom Left']] },
+    ]
+  },
+  {
+    category: 'Display',
+    icon: 'DP',
+    description: 'Screen, brightness and theme settings',
+    fields: [
+      { id: 'display_timeout', label: 'Display Timeout (ms)', type: 'number', min: 0, hint: '0 = always on' },
+      { id: 'max_bright',      label: 'Max Brightness',       type: 'number', min: 0, max: 100 },
+      { id: 'invert_colors',   label: 'Invert Colors',        type: 'bool' },
+      { id: 'terminal_color',  label: 'Terminal Color',       type: 'color' },
+      { id: 'menu_theme',      label: 'Menu Theme',           type: 'number', min: 0, max: 255, hint: 'Theme index 0-255' },
+    ]
+  },
+  {
+    category: 'RGB',
+    icon: 'RGB',
+    description: 'LED strip and NeoPixel configuration',
+    fields: [
+      { id: 'rgb_mode',        label: 'RGB Mode',           type: 'enum',   options: [['0','Static'],['1','Breath'],['2','Rainbow']] },
+      { id: 'rgb_speed',       label: 'RGB Speed',          type: 'number', min: 0, max: 255 },
+      { id: 'rgb_data_pin',    label: 'RGB Data Pin',       type: 'number' },
+      { id: 'rgb_red_pin',     label: 'RGB Red Pin',        type: 'number' },
+      { id: 'rgb_green_pin',   label: 'RGB Green Pin',      type: 'number' },
+      { id: 'rgb_blue_pin',    label: 'RGB Blue Pin',       type: 'number' },
+      { id: 'neopixel_bright', label: 'NeoPixel Brightness',type: 'number', min: 0, max: 100 },
+    ]
+  },
+  {
+    category: 'System',
+    icon: 'SY',
+    description: 'Firmware behaviour and power management',
+    fields: [
+      { id: 'broadcast_speed',  label: 'Broadcast Speed (ms)', type: 'number', min: 0, max: 65535, hint: 'WebUI update interval' },
+      { id: 'gps_rx_pin',       label: 'GPS RX Pin',           type: 'number' },
+      { id: 'channel_delay',    label: 'Channel Delay',        type: 'number', hint: 'ms between channel hops' },
+      { id: 'power_save',       label: 'Power Save',           type: 'bool' },
+      { id: 'zebra_menus',      label: 'Zebra Menus',          type: 'bool' },
+      { id: 'nav_buttons',      label: 'Nav Buttons',          type: 'bool' },
+      { id: 'menu_layout',      label: 'Menu Layout',          type: 'enum', options: [['0','List'],['1','Grid'],['2','Cards']] },
+      { id: 'infrared_easy',    label: 'Infrared Easy Mode',   type: 'bool' },
+      { id: 'web_auth',         label: 'Web Auth Enabled',     type: 'bool' },
+      { id: 'rts_enabled',      label: 'RTS Enabled',          type: 'bool' },
+      { id: 'third_ctrl',       label: 'Third Control Enabled',type: 'bool' },
+      { id: 'auto_save_scans',  label: 'Auto Save Scans',      type: 'bool' },
+    ]
+  },
+  {
+    category: 'GhostLink',
+    icon: 'GL',
+    description: 'Dual-device serial bridge pin mapping',
+    fields: [
+      { id: 'esp_comm_tx_pin',  label: 'GhostLink TX Pin', type: 'number', hint: 'GPIO for TX' },
+      { id: 'esp_comm_rx_pin',  label: 'GhostLink RX Pin', type: 'number', hint: 'GPIO for RX' },
+    ]
+  },
+  {
+    category: 'Custom',
+    icon: 'CU',
+    description: 'Personalisation and timezone',
+    fields: [
+      { id: 'flappy_name',  label: 'Flappy Name',  type: 'text',  max: 65, hint: 'In-game name' },
+      { id: 'timezone',     label: 'Timezone',     type: 'text',  max: 25, hint: 'e.g. UTC-5' },
+      { id: 'accent_color', label: 'Accent Color', type: 'color' },
+    ]
+  },
+  {
+    category: 'IO Button',
+    icon: 'IO',
+    description: 'Hardware button command mappings',
+    fields: [
+      { id: 'io_btn_p10_cmd', label: 'IO Button P10 Command', type: 'text', max: 129, hint: 'Command on P10 press' },
+      { id: 'io_btn_p11_cmd', label: 'IO Button P11 Command', type: 'text', max: 129, hint: 'Command on P11 press' },
+      { id: 'io_btn_p12_cmd', label: 'IO Button P12 Command', type: 'text', max: 129, hint: 'Command on P12 press' },
+    ]
+  },
+];
+
+/** Helper to build a command string with metadata */
+function buildCommand(factoryResult) {
+  if (!factoryResult || typeof factoryResult !== 'object') return null;
+  if (factoryResult.cmd) return factoryResult;
+  return null;
+}
+
+/** Determine if a raw command string is risky */
+function isRiskyCommand(commandString) {
+  const riskyPatterns = [
+    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i, /^stopscan\b/i,
+    /^attack\b/i, /^beaconspam\b/i, /^stopspam\b/i, /^stopdeauth\b/i,
+    /^capture\b/i, /^listenprobes\b/i, /^pineap\b/i, /^karma\b/i,
+    /^blescan\b/i, /^blespam\b/i, /^blewardriving\b/i,
+    /^startwd\b/i, /^startportal\b/i, /^sweep\b/i, /^dhcpstarve\b/i,
+    /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
+    /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
+    /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
+    /^chameleon scan\b/i, /^reboot\b/i, /^apenable\b/i,
+  ];
+  return riskyPatterns.some(p => p.test(commandString.trim()));
+}
+
+/** Map a command string to its category for UI organisation */
+function commandCategory(commandString) {
+  const c = commandString.trim().toLowerCase();
+  if (c.startsWith('scan') || c.startsWith('list') || c.startsWith('select') || c.startsWith('connect') || c.startsWith('disconnect') || c.startsWith('wifistatus')) return 'WiFi';
+  if (c.startsWith('attack') || c.startsWith('beacon') || c.startsWith('stop') || c.startsWith('karma') || c.startsWith('saeflood')) return 'Attack';
+  if (c.startsWith('capture')) return 'Capture';
+  if (c.startsWith('ble')) return 'BLE';
+  if (c.startsWith('startportal') || c.startsWith('stopportal') || c.startsWith('listportals')) return 'Portal';
+  if (c.startsWith('sd ')) return 'Files';
+  if (c.startsWith('comm')) return 'GhostLink';
+  if (c.startsWith('settings')) return 'Settings';
+  return 'System';
+}</script>
+  <script>/**
+ * GhostESP Response Parsers
+ * Ported from Android GhostResponse.kt
+ *
+ * Pre-compiled regex patterns and robust parse functions for all
+ * firmware output formats. Returns structured data or null.
+ */
+
+const Patterns = {
+  // AP scan (multiline)
+  AP_INDEX:     /^\[(\d+)\]\s*SSID:/m,
+  AP_SSID:      /SSID:\s*([^,\n]+)/,
+  AP_BSSID:     /BSSID:\s*([0-9A-Fa-f:]{17})/,
+  AP_RSSI:      /RSSI:\s*(-?\d+)/,
+  AP_CHANNEL:   /Channel:\s*(\d+)/,
+  AP_SECURITY:  /Security:\s*(\S+)/,
+  AP_PMF:       /PMF:\s*(\S+)/,
+  AP_VENDOR:    /Vendor:\s*(.+?)(?:\n|$)/,
+  AP_BAND:      /Band:\s*(\S+)/,
+
+  // Station
+  STATION_INDEX: /^\[(\d+)\]\s*Station\s*MAC:/m,
+  STATION_MAC:   /Station(?:\s*MAC)?:\s*([0-9A-Fa-f:]{17})/,
+  STATION_VENDOR:/(?:Station|STA)\s*Vendor:\s*([^,\n]+)/,
+  STATION_AP_SSID:/Associated\s*AP:\s*([^,\n]+)/,
+  STATION_AP_BSSID:/AP\s*BSSID:\s*([0-9A-Fa-f:]{17})/,
+  STATION_AP_VENDOR:/AP\s*Vendor:\s*([^,\n]+)/,
+  STATION_RSSI:  /RSSI:\s*(-?\d+)/,
+
+  // BLE
+  BLE_NAME:      /BLE:\s*(.+?)\s*\|/,
+  BLE_RSSI:      /RSSI:\s*(-?\d+)/,
+  BLE_MAC:       /([0-9A-Fa-f:]{17})/,
+
+  // Flipper
+  FLIPPER_INDEX: /^\[(\d+)\]\s*(White|Black|Transparent)?\s*Flipper\s*Found/i,
+  FLIPPER_MAC:   /MAC:\s*([0-9A-Fa-f:]{17})/,
+  FLIPPER_NAME:  /Name:\s*([^,\n]+)/,
+  FLIPPER_RSSI:  /RSSI:\s*(-?\d+)\s*dBm/,
+  FLIPPER_TYPE:  /(White|Black|Transparent)\s*Flipper/i,
+
+  // AirTag
+  AIRTAG_INDEX:  /^\[(\d+)\]\s*AirTag\s*Found/m,
+  AIRTAG_TOTAL:  /Total:\s*(\d+)/,
+  AIRTAG_MAC:    /MAC:\s*([0-9A-Fa-f:]{17})/,
+  AIRTAG_RSSI:   /RSSI:\s*(-?\d+)\s*dBm/,
+  AIRTAG_PAYLOAD:/Payload:\s*([0-9A-Fa-f ]+)/,
+
+  // GATT
+  GATT_INDEX:    /^\[(\d+)\]\s*Name:/m,
+  GATT_NAME:     /Name:\s*([^,\n]*)/,
+  GATT_MAC:      /MAC:\s*([0-9A-Fa-f:]{17})/,
+  GATT_RSSI:     /RSSI:\s*(-?\d+)/,
+  GATT_TYPE:     /Type:\s*([^,\n]+)/,
+
+  // SD
+  SD_FILE:       /SD:FILE:\[(\d+)\]\s+(.+?)\s+(\d+)$/,
+  SD_DIR:        /SD:DIR:\[(\d+)\]\s+(.+)$/,
+  SD_OK:         /^SD:OK(:.*)?$/,
+  SD_ERR:        /^SD:ERR:([^:]+)(?::(.*))?$/,
+  SD_SIZE:       /SD:SIZE:(\d+)/,
+
+  // GPS
+  GPS_FIX:       /Fix:\s*(\S+)/,
+  GPS_SATS:      /Sats:\s*(\d+)(?:\/(\d+))?/,
+  GPS_LAT:       /Lat:\s*(\d+)deg\s+([\d.]+)'([NS])/,
+  GPS_LON:       /Long:\s*(\d+)deg\s+([\d.]+)'([EW])/,
+  GPS_ALT:       /Alt:\s*([\d.]+)m/,
+  GPS_SPEED:     /Speed:\s*([\d.]+)\s*km\/h/,
+  GPS_DIRECTION: /Direction:\s*(\d+)°\s*(\S+)/,
+  GPS_HDOP:      /HDOP:\s*([\d.]+)/,
+
+  // Tracking
+  TRACK_RSSI:    /#####\s+(-?\d+)\s*dBm\s*\(min:(-?\d+)\s+max:(-?\d+)\)/,
+  TRACK_RSSI_GATT:/\[[#]+\]\s*RSSI:\s*(-?\d+)\s*dBm,\s*Min:\s*(-?\d+),\s*Max:\s*(-?\d+)(?:,\s*(CLOSER|FARTHER))?/,
+  TRACK_HEADER:  /===\s*tracking\s+(ap|sta):\s*(.+)\s*===/i,
+  TRACK_BSSID:   /bssid:\s*([0-9A-Fa-f:]{17})/i,
+  TRACK_CHANNEL: /channel:\s*(\d+)/i,
+  TRACK_FLIPPER: /Tracking Flipper (\d+):\s*RSSI\s*(-?\d+)\s*dBm(?:\s*\(([^)]+)\))?/i,
+
+  // Handshake
+  HANDSHAKE_AP:  /AP=([0-9A-Fa-f:]{17})/i,
+  HANDSHAKE_PAIR:/Pair=(\S+)/i,
+
+  // WiFi connection
+  GOT_IP:        /Got IP:\s*(\d+\.\d+\.\d+\.\d+)/,
+  WIFI_CONNECTED:/WiFi\s+Connected/i,
+  WIFI_DISCONN:  /WiFi\s+[Dd]isconnected(?::\s*(.+))?/,
+
+  // WiFi status block
+  WIFI_STATUS_HDR: /===\s*WIFI\s*STATUS\s*===/,
+  WIFI_STATUS_FTR: /===\s*END\s*STATUS\s*===/,
+  WIFI_STATUS_KV:  /^(\w+)=(.*)$/,
+
+  // Chipinfo
+  CHIP_MODEL:      /Model:\s*([^,\s\n]+(?:\s+[^,\s\n]+)*?)(?=\s*(?:[,\n]|$))/,
+  CHIP_REVISION:   /Revision:\s*v?(\d+(?:\.\d+)+)/,
+  CHIP_CORES:      /CPU Cores:\s*(\d+)/,
+  CHIP_FEATURES:   /(?<!Enabled )Features:\s*([^,\n]+)/,
+  CHIP_FREE_HEAP:  /Free Heap:\s*(\d+)/,
+  CHIP_MIN_HEAP:   /Min Free Heap:\s*(\d+)/,
+  CHIP_IDF:        /IDF Version:\s*([^,\s\n]+)/,
+  CHIP_BUILD_CFG:  /Build Config:\s*([^,\n]+)/,
+
+  // IR
+  IR_LEARNED:      /Captured:\s*(\S+)\s+A:0x([0-9A-Fa-f]+)\s+C:0x([0-9A-Fa-f]+)/,
+  IR_LEARNED_RAW:  /Captured RAW signal\s*\((\d+)\s+samples\)/,
+  IR_REMOTE:       /\[(\d+)\]\s*(\S+\.(?:ir|json))/,
+  IR_BUTTON:       /\[(\d+)\]\s*(\S+)(?:\s*\(([^)]+)\))?/,
+
+  // Portal
+  PORTAL_CREDS:    /Captured credentials:\s*(.+)\s*\/\s*(.+)/,
+
+  // Generic
+  ERROR:           /ERROR:\s*(.+)/,
+  SUCCESS:         /^OK:\s*(.+)$/m,
+  GHOSTESP_OK:     /GHOSTESP_OK/,
+  SETTING_KV:      /([\w_]+)\s*=\s*(.+)/,
+
+  // Wardrive
+  WARDRIVE_HEART:  /Wardrive:\s*ap=(\d+)\s+logged=(\d+)\/(\d+)\s+gpsrej=(\d+)\s+ch=(\d+)\s+up=(\d+)m(\d+)s\s+gps=([^/]+)\/(\d+)(?:\s+sats=(\d+))?\s+pending=(\d+)B/,
+
+  // Port scan
+  PORT_SCAN:       /Port\s+(\d+):\s*(\w+)/,
+  ARP_ENTRY:       /(\d+\.\d+\.\d+\.\d+)\s+([0-9A-Fa-f:]{17})/,
+};
+
+const Parsers = {
+  accessPoint(text) {
+    if (!text.includes('[') || !text.includes('SSID:')) return null;
+    const idx = Patterns.AP_INDEX.exec(text)?.[1];
+    if (idx == null) return null;
+    const ssid = (Patterns.AP_SSID.exec(text)?.[1] || '').trim();
+    return {
+      index: idx,
+      ssid: ssid || '(Hidden)',
+      bssid: Patterns.AP_BSSID.exec(text)?.[1] || '??:??:??:??:??:??',
+      rssi: parseInt(Patterns.AP_RSSI.exec(text)?.[1] || '-100', 10),
+      channel: parseInt(Patterns.AP_CHANNEL.exec(text)?.[1] || '-1', 10),
+      security: (Patterns.AP_SECURITY.exec(text)?.[1] || 'Unknown').trim(),
+      vendor: (Patterns.AP_VENDOR.exec(text)?.[1] || '').trim() || null,
+      band: (Patterns.AP_BAND.exec(text)?.[1] || '').trim() || null,
+      pmf: (Patterns.AP_PMF.exec(text)?.[1] || '').trim() || null,
+      isHidden: !ssid || ssid === '(Hidden)',
+    };
+  },
+
+  station(text) {
+    if (!text.includes('Station MAC:') && !text.includes('Station:') && !text.includes('New Station:')) return null;
+    const idx = Patterns.STATION_INDEX.exec(text)?.[1] || String(Parsers._stationCounter++);
+    const mac = Patterns.STATION_MAC.exec(text)?.[1];
+    if (!mac) return null;
+    return {
+      index: idx,
+      mac,
+      vendor: (Patterns.STATION_VENDOR.exec(text)?.[1] || '').trim() || null,
+      associatedApSsid: (Patterns.STATION_AP_SSID.exec(text)?.[1] || '').trim() || null,
+      apBssid: Patterns.STATION_AP_BSSID.exec(text)?.[1] || null,
+      apVendor: (Patterns.STATION_AP_VENDOR.exec(text)?.[1] || '').trim() || null,
+      rssi: parseInt(Patterns.STATION_RSSI.exec(text)?.[1] || '-100', 10),
+    };
+  },
+  _stationCounter: 0,
+  resetStationCounter() { this._stationCounter = 0; },
+
+  bleDevice(line) {
+    if (!line.startsWith('BLE:')) return null;
+    const name = (Patterns.BLE_NAME.exec(line)?.[1] || '').trim() || null;
+    const rssi = parseInt(Patterns.BLE_RSSI.exec(line)?.[1] || '-100', 10);
+    const mac = Patterns.BLE_MAC.exec(line)?.[1] || null;
+    const type = (() => {
+      const n = name || '';
+      if (/Flipper/i.test(n)) return 'FLIPPER_ZERO';
+      if (/AirTag/i.test(n)) return 'AIR_TAG';
+      if (/iPhone/i.test(n)) return 'IPHONE';
+      if (/Samsung/i.test(n)) return 'SAMSUNG';
+      if (/Google/i.test(n)) return 'GOOGLE';
+      return 'GENERIC';
+    })();
+    return { name, mac, rssi, type };
+  },
+
+  flipper(text) {
+    if (!text.includes('Flipper') || !text.includes('Found')) return null;
+    const idx = Patterns.FLIPPER_INDEX.exec(text)?.[1];
+    if (idx == null) return null;
+    return {
+      index: idx,
+      flipperType: (Patterns.FLIPPER_TYPE.exec(text)?.[1] || 'Unknown').trim(),
+      mac: Patterns.FLIPPER_MAC.exec(text)?.[1] || null,
+      name: (Patterns.FLIPPER_NAME.exec(text)?.[1] || '').trim() || null,
+      rssi: parseInt(Patterns.FLIPPER_RSSI.exec(text)?.[1] || '-100', 10),
+    };
+  },
+
+  airTag(text) {
+    if (!text.includes('AirTag')) return null;
+    const idx = Patterns.AIRTAG_INDEX.exec(text)?.[1];
+    if (idx == null) return null;
+    return {
+      index: idx,
+      total: parseInt(Patterns.AIRTAG_TOTAL.exec(text)?.[1] || '1', 10),
+      mac: Patterns.AIRTAG_MAC.exec(text)?.[1] || null,
+      rssi: parseInt(Patterns.AIRTAG_RSSI.exec(text)?.[1] || '-100', 10),
+      payload: (Patterns.AIRTAG_PAYLOAD.exec(text)?.[1] || '').trim() || null,
+    };
+  },
+
+  gattDevice(text) {
+    if (!text.includes('Name:') || !text.includes('MAC:') || text.includes('SSID:')) return null;
+    const idx = Patterns.GATT_INDEX.exec(text)?.[1];
+    if (idx == null) return null;
+    return {
+      index: idx,
+      name: (Patterns.GATT_NAME.exec(text)?.[1] || '').trim() || null,
+      mac: Patterns.GATT_MAC.exec(text)?.[1] || null,
+      rssi: parseInt(Patterns.GATT_RSSI.exec(text)?.[1] || '-100', 10),
+      type: (Patterns.GATT_TYPE.exec(text)?.[1] || '').trim() || null,
+    };
+  },
+
+  sdEntry(line) {
+    if (!line.startsWith('SD:')) return null;
+    const file = Patterns.SD_FILE.exec(line);
+    if (file) return { index: file[1], name: file[2].trim(), isDirectory: false, size: parseInt(file[3], 10) };
+    const dir = Patterns.SD_DIR.exec(line);
+    if (dir) return { index: dir[1], name: dir[2].trim(), isDirectory: true, size: null };
+    return null;
+  },
+
+  wifiStatus(text) {
+    if (!Patterns.WIFI_STATUS_HDR.test(text) && !text.includes('connected=')) return null;
+    const values = {};
+    for (const line of text.split(/\r?\n/)) {
+      const m = Patterns.WIFI_STATUS_KV.exec(line.trim());
+      if (m) values[m[1]] = m[2];
+    }
+    if (!values.connected) return null;
+    return {
+      connected: values.connected === 'true',
+      hasSavedNetwork: values.has_saved_network === 'true',
+      connectedSsid: values.connected_ssid || null,
+      connectedRssi: values.connected_rssi != null ? parseInt(values.connected_rssi, 10) : null,
+      connectedBssid: values.connected_bssid || null,
+      connectedChannel: values.connected_channel != null ? parseInt(values.connected_channel, 10) : null,
+      savedSsid: values.saved_ssid || null,
+    };
+  },
+
+  wifiConnection(text) {
+    if (!text.includes('Got IP:') && !/WiFi\s+Connected/i.test(text) && !/WiFi\s+disconnected/i.test(text)) return null;
+    const ip = Patterns.GOT_IP.exec(text)?.[1];
+    if (ip) return { isConnected: true, ip };
+    if (Patterns.WIFI_CONNECTED.test(text)) return { isConnected: true };
+    const reason = Patterns.WIFI_DISCONN.exec(text)?.[1];
+    if (reason !== undefined) return { isConnected: false, reason: reason || null };
+    return null;
+  },
+
+  chipInfo(text) {
+    const hasInfo = text.includes('Chip Information') || (text.includes('Model:') && text.includes('IDF Version:') && text.includes('CPU Cores:'));
+    if (!hasInfo) return null;
+    const model = Patterns.CHIP_MODEL.exec(text)?.[1]?.trim();
+    if (!model) return null;
+    const features = [];
+    const featureMap = {
+      'Display': 'DISPLAY', 'Touchscreen': 'TOUCHSCREEN', 'Status Display (OLED)': 'STATUS_DISPLAY',
+      'Status Display': 'STATUS_DISPLAY', 'NFC': 'NFC', 'BadUSB': 'BADUSB',
+      'Infrared TX': 'INFRARED_TX', 'Infrared RX': 'INFRARED_RX', 'GPS': 'GPS',
+      'Ethernet': 'ETHERNET', 'Battery (Power Save)': 'BATTERY', 'Battery ADC': 'BATTERY_ADC',
+      'Fuel Gauge': 'FUEL_GAUGE', 'RTC Clock': 'RTC_CLOCK', 'Compass': 'COMPASS',
+      'Accelerometer': 'ACCELEROMETER', 'Joystick': 'JOYSTICK', 'Cardputer': 'CARDPUTER',
+      'T-Deck': 'TDECK', 'Rotary Encoder': 'ROTARY_ENCODER', 'USB Keyboard (Host)': 'USB_KEYBOARD',
+      'Ghost Board': 'GHOST_BOARD', 'S3TWatch': 'S3TWATCH', 'SD Card (SPI)': 'SD_CARD_SPI',
+      'SD Card (MMC)': 'SD_CARD_MMC',
+    };
+    const enabledSection = text.indexOf('Enabled Features:');
+    if (enabledSection !== -1) {
+      const after = text.slice(enabledSection + 'Enabled Features:'.length);
+      for (const seg of after.split(/,\s*|\n/)) {
+        const t = seg.trim();
+        if (featureMap[t]) features.push(featureMap[t]);
+      }
+    }
+    return {
+      model,
+      revision: Patterns.CHIP_REVISION.exec(text)?.[1] || '0.0',
+      cores: parseInt(Patterns.CHIP_CORES.exec(text)?.[1] || '1', 10),
+      features: (Patterns.CHIP_FEATURES.exec(text)?.[1] || 'Unknown').trim(),
+      freeHeap: parseInt(Patterns.CHIP_FREE_HEAP.exec(text)?.[1] || '0', 10),
+      minFreeHeap: parseInt(Patterns.CHIP_MIN_HEAP.exec(text)?.[1] || '0', 10),
+      idfVersion: (Patterns.CHIP_IDF.exec(text)?.[1] || 'Unknown').trim(),
+      buildConfig: (Patterns.CHIP_BUILD_CFG.exec(text)?.[1] || '').trim() || null,
+      enabledFeatures: features,
+    };
+  },
+
+  gpsPosition(text) {
+    if (!text.includes('GPS Info') && !text.includes('Lat:') && !text.includes('Long:')) return null;
+    const fixStr = Patterns.GPS_FIX.exec(text)?.[1] || 'No Fix';
+    const hasFix = /^(3D|2D|Fix)$/i.test(fixStr);
+    const sats = Patterns.GPS_SATS.exec(text);
+    const satsUsed = parseInt(sats?.[1] || '0', 10);
+    const satsInView = parseInt(sats?.[2] || String(satsUsed), 10);
+    const latM = Patterns.GPS_LAT.exec(text);
+    const lonM = Patterns.GPS_LON.exec(text);
+    let lat = 0, lon = 0;
+    if (latM && lonM) {
+      const d1 = parseFloat(latM[1]), m1 = parseFloat(latM[2]);
+      lat = (d1 + m1 / 60) * (latM[3] === 'S' ? -1 : 1);
+      const d2 = parseFloat(lonM[1]), m2 = parseFloat(lonM[2]);
+      lon = (d2 + m2 / 60) * (lonM[3] === 'W' ? -1 : 1);
+    }
+    return {
+      latitude: lat,
+      longitude: lon,
+      altitude: Patterns.GPS_ALT.exec(text)?.[1] ? parseFloat(Patterns.GPS_ALT.exec(text)[1]) : null,
+      speed: Patterns.GPS_SPEED.exec(text)?.[1] ? parseFloat(Patterns.GPS_SPEED.exec(text)[1]) : null,
+      satellites: satsUsed,
+      satellitesInView: satsInView,
+      fix: hasFix,
+      fixType: fixStr,
+      hdop: Patterns.GPS_HDOP.exec(text)?.[1] ? parseFloat(Patterns.GPS_HDOP.exec(text)[1]) : null,
+      direction: Patterns.GPS_DIRECTION.exec(text)?.[1] ? parseInt(Patterns.GPS_DIRECTION.exec(text)[1], 10) : null,
+      directionName: Patterns.GPS_DIRECTION.exec(text)?.[2] || null,
+    };
+  },
+
+  trackData(line) {
+    if (!line.includes('dBm')) return null;
+    const w = Patterns.TRACK_RSSI.exec(line);
+    if (w) {
+      const rssi = parseInt(w[1], 10);
+      return {
+        rssi, minRssi: parseInt(w[2], 10) || rssi, maxRssi: parseInt(w[3], 10) || rssi,
+        direction: line.includes('CLOSER') ? 'CLOSER' : line.includes('FARTHER') ? 'FARTHER' : 'STABLE',
+      };
+    }
+    const g = Patterns.TRACK_RSSI_GATT.exec(line);
+    if (g) {
+      const rssi = parseInt(g[1], 10);
+      return {
+        rssi, minRssi: parseInt(g[2], 10) || rssi, maxRssi: parseInt(g[3], 10) || rssi,
+        direction: g[4] || 'STABLE',
+      };
+    }
+    return null;
+  },
+
+  trackHeader(text) {
+    const h = Patterns.TRACK_HEADER.exec(text);
+    if (!h) {
+      if (/Tracking\s+Device/i.test(text)) {
+        const name = /Name:\s*([^,\n]+)/.exec(text)?.[1]?.trim();
+        const mac = /MAC:\s*([0-9A-Fa-f:]{17})/.exec(text)?.[1];
+        return { isAp: false, targetName: name || null, targetBssid: mac || null, channel: null };
+      }
+      return null;
+    }
+    return {
+      isAp: h[1].toLowerCase() === 'ap',
+      targetName: h[2].trim(),
+      targetBssid: Patterns.TRACK_BSSID.exec(text)?.[1] || null,
+      channel: Patterns.TRACK_CHANNEL.exec(text)?.[1] ? parseInt(Patterns.TRACK_CHANNEL.exec(text)[1], 10) : null,
+    };
+  },
+
+  handshake(text) {
+    if (!/Handshake found/i.test(text)) return null;
+    return {
+      apBssid: Patterns.HANDSHAKE_AP.exec(text)?.[1] || null,
+      pairType: Patterns.HANDSHAKE_PAIR.exec(text)?.[1] || 'Unknown',
+    };
+  },
+
+  flipperTrack(line) {
+    const m = Patterns.TRACK_FLIPPER.exec(line);
+    if (!m) return null;
+    return { index: parseInt(m[1], 10), rssi: parseInt(m[2], 10), proximity: m[3]?.trim() || null };
+  },
+
+  irLearned(line) {
+    const p = Patterns.IR_LEARNED.exec(line);
+    if (p) return { protocol: p[1], address: p[2], command: p[3], rawSamples: null };
+    const r = Patterns.IR_LEARNED_RAW.exec(line);
+    if (r) return { protocol: 'RAW', address: null, command: null, rawSamples: parseInt(r[1], 10) };
+    return null;
+  },
+
+  irRemote(line) {
+    const m = Patterns.IR_REMOTE.exec(line.trim());
+    if (!m) return null;
+    return { index: parseInt(m[1], 10), filename: m[2] };
+  },
+
+  irButton(line) {
+    const trimmed = line.trim();
+    if (/^Signals in\s|^Unique buttons in\s|^IR:\s/.test(trimmed) || !trimmed.startsWith('[')) return null;
+    const m = Patterns.IR_BUTTON.exec(trimmed);
+    if (!m) return null;
+    return { index: parseInt(m[1], 10), name: m[2], protocol: m[3] || null };
+  },
+
+  portalCreds(line) {
+    if (!line.includes('Captured credentials:')) return null;
+    const m = Patterns.PORTAL_CREDS.exec(line);
+    if (!m) return null;
+    return { username: m[1].trim(), password: m[2].trim() };
+  },
+
+  settingValue(line) {
+    const m = Patterns.SETTING_KV.exec(line.trim());
+    if (!m) return null;
+    return { key: m[1], value: m[2].trim() };
+  },
+
+  error(line) {
+    if (!line.startsWith('ERROR:')) return null;
+    return { message: Patterns.ERROR.exec(line)?.[1]?.trim() || 'Unknown error' };
+  },
+
+  success(line) {
+    if (!line.startsWith('OK:')) return null;
+    return { message: Patterns.SUCCESS.exec(line)?.[1]?.trim() || 'OK' };
+  },
+
+  wardriveStats(line) {
+    const m = Patterns.WARDRIVE_HEART.exec(line);
+    if (!m) return null;
+    return {
+      accessPoints: parseInt(m[1], 10),
+      loggedOk: parseInt(m[2], 10),
+      logAttempts: parseInt(m[3], 10),
+      gpsRejected: parseInt(m[4], 10),
+      channel: parseInt(m[5], 10),
+      uptimeMinutes: parseInt(m[6], 10),
+      uptimeSeconds: parseInt(m[7], 10),
+      gpsFixStatus: m[8],
+      gpsSatellites: parseInt(m[9], 10),
+      pendingBytes: parseInt(m[11] || '0', 10),
+    };
+  },
+
+  portScan(line) {
+    const m = Patterns.PORT_SCAN.exec(line);
+    if (!m) return null;
+    return { port: parseInt(m[1], 10), state: m[2] };
+  },
+
+  arpEntry(line) {
+    const m = Patterns.ARP_ENTRY.exec(line);
+    if (!m) return null;
+    return { ip: m[1], mac: m[2] };
+  },
+};
+
+/** Batch parse all access points from full log text */
+function parseAllAccessPoints(text) {
+  const rows = [];
+  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+SSID:)/g);
+  for (const block of blocks) {
+    const ap = Parsers.accessPoint(block);
+    if (ap) rows.push(ap);
+  }
+  return rows;
+}
+
+/** Batch parse all stations from full log text */
+function parseAllStations(text) {
+  Parsers.resetStationCounter();
+  const rows = [];
+  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:Station MAC:|STA:))/g);
+  for (const block of blocks) {
+    const sta = Parsers.station(block);
+    if (sta) rows.push(sta);
+  }
+  return rows;
+}
+
+/** Batch parse BLE devices from log lines */
+function parseAllBleDevices(text) {
+  const rows = [];
+  for (const line of text.split(/\r?\n/)) {
+    const d = Parsers.bleDevice(line.replace(/^RX:\s*/, ''));
+    if (d) rows.push({ ...d, index: String(rows.length) });
+  }
+  return rows;
+}
+
+/** Parse all Flipper devices from log text */
+function parseAllFlippers(text) {
+  const rows = [];
+  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:White|Black|Transparent)?\s*Flipper)/gi);
+  for (const block of blocks) {
+    const f = Parsers.flipper(block);
+    if (f) rows.push(f);
+  }
+  return rows;
+}
+
+/** Parse all AirTags from log text */
+function parseAllAirTags(text) {
+  const rows = [];
+  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*AirTag)/g);
+  for (const block of blocks) {
+    const a = Parsers.airTag(block);
+    if (a) rows.push(a);
+  }
+  return rows;
+}
+
+/** Parse all GATT devices from log text */
+function parseAllGattDevices(text) {
+  const rows = [];
+  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*Name:)/g);
+  for (const block of blocks) {
+    const g = Parsers.gattDevice(block);
+    if (g) rows.push(g);
+  }
+  return rows;
+}
+
+/** Parse all SD entries from log lines */
+function parseAllSdEntries(text) {
+  const rows = [];
+  for (const line of text.split(/\r?\n/)) {
+    const e = Parsers.sdEntry(line.replace(/^RX:\s*/, ''));
+    if (e) rows.push(e);
+  }
+  return rows;
+}
+
+/** Extract output block for a specific command from logs */
+function getOutputBlock(logs, command) {
+  const lines = logs.split(/\r?\n/).map(l => l.trimEnd());
+  const needle = `> ${command}`;
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].replace(/^RX:\s*/, '') === needle) { start = i; break; }
+  }
+  if (start < 0) return [];
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('>') && !line.startsWith('> ')) break;
+    out.push(line);
+  }
+  return out;
+}
+
+/** Generic key=value block parser */
+function parseKeyValueBlock(text, headerRe, footerRe) {
+  const out = [];
+  let inBlock = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    if (headerRe && headerRe.test(line)) { inBlock = true; continue; }
+    if (footerRe && footerRe.test(line)) break;
+    if (!inBlock) continue;
+    const kv = line.match(/^([^=:]+)\s*[=:]\s*(.*)$/);
+    if (kv) out.push({ key: kv[1].trim(), value: kv[2].trim() });
+  }
+  return out;
+}</script>
+  <script>/**
+ * GhostESP V2 WebUI
+ * Refactored to use commands.js and parsers.js for alignment
+ * with the Android companion app logic.
+ */
+
+/* ======================== STATE ======================== */
+const state = {
+  settings: {},
+  comm: { state: 'unknown', connected: false },
+  logs: '',
+  currentPath: '/mnt',
+  pendingRiskCommand: null,
+  lastCommand: '',
+  actionRegistry: {},
+  activeAction: null,
+  activeItem: null,
+  selectedIndices: new Set(),
+  terminalTimer: null,
+  commandHistory: [],
+  historyIndex: -1,
+  isLoading: false,
+  settingsOpen: new Set(),
+  settingsFilter: '',
+};
+
+const pages = [
+  ['dashboard', 'Dashboard', '00'],
+  ['wifi', 'WiFi', '01'],
+  ['ble', 'BLE', '02'],
+  ['files', 'Files', '03'],
+  ['ghostlink', 'GhostLink', '04'],
+  ['settings', 'Settings', '05'],
+  ['terminal', 'Terminal', '06'],
+  ['help', 'Help', '07']
+];
+
+/* ======================== UTILITIES ======================== */
+function $(id) { return document.getElementById(id); }
+function api(path, options) { return fetch(path, options); }
+
+function esc(str) { return String(str || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escapeAttr(str) { return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes, idx = 0;
+  while (value >= 1024 && idx < units.length - 1) { value /= 1024; idx++; }
+  return value.toFixed(idx ? 1 : 0) + ' ' + units[idx];
+}
+
+function toast(message, type = '') {
+  const node = document.createElement('div');
+  node.className = 'toast ' + type;
+  node.textContent = message;
+  $('toasts').appendChild(node);
+  setTimeout(() => {
+    node.style.opacity = '0';
+    node.style.transition = 'opacity .25s ease';
+    setTimeout(() => node.remove(), 280);
+  }, 3400);
+}
+
+function setLoading(el, loading) {
+  if (!el) return;
+  if (loading) {
+    el.dataset.originalText = el.textContent;
+    el.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;width:14px;height:14px;border-width:2px;"></span>' + (el.dataset.originalText || '');
+    el.disabled = true;
+  } else {
+    el.textContent = el.dataset.originalText || el.textContent;
+    el.disabled = false;
+  }
+}
+
+/* ======================== COMMAND WRAPPERS ======================== */
+function isRisky(command) { return isRiskyCommand(command); }
+function canUseGhostLink() { return !!state.comm.connected; }
+
+/* ======================== SHELL BUILDERS ======================== */
+function buildShell() {
+  $('nav').innerHTML = pages.map(([id, label, code], idx) =>
+    `<button class="${idx === 0 ? 'active' : ''}" data-page="${id}" aria-label="${label} page"><span>${label}</span><small>${code}</small></button>`
+  ).join('');
+  document.querySelectorAll('[data-page]').forEach(el =>
+    el.addEventListener('click', () => showPage(el.dataset.page))
+  );
+  buildDashboard();
+  buildWifi();
+  buildBle();
+  buildHelp();
+  buildSettingsForm();
+}
+
+function showPage(page) {
+  const current = document.querySelector('.page.active');
+  const isSame = current && current.id === 'page-' + page;
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  $('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav button').forEach(el =>
+    el.classList.toggle('active', el.dataset.page === page)
+  );
+  if (isSame && state.activeAction) closeAction();
+  if (page === 'files') loadFiles();
+  if (page === 'dashboard') renderDashboard();
+}
+
+/* ======================== WiFi PAGE ======================== */
+function buildWifi() {
+  state.actionRegistry = {};
+  const groups = Object.keys(WIFI_GROUPS);
+  document.querySelector('[data-tabs="wifi"]').innerHTML = groups.map((name, i) =>
+    `<button class="tab-btn ${i === 0 ? 'active' : ''}" data-wifi-tab="${esc(name)}">${esc(name)}</button>`
+  ).join('');
+  $('wifi-subpages').innerHTML = groups.map((name, i) =>
+    `<div class="subpage ${i === 0 ? 'active' : ''}" data-wifi-page="${esc(name)}">
+      <div class="menu-list">${WIFI_GROUPS[name].map(action => actionRow(action, 'wifi')).join('')}</div>
+    </div>`
+  ).join('');
+  document.querySelectorAll('[data-wifi-tab]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      if (state.activeAction) closeAction();
+      document.querySelectorAll('[data-wifi-tab]').forEach(x => x.classList.toggle('active', x === btn));
+      document.querySelectorAll('[data-wifi-page]').forEach(x => x.classList.toggle('active', x.dataset.wifiPage === btn.dataset.wifiTab));
+    })
+  );
+}
+
+function buildBle() {
+  $('ble-actions').innerHTML = BLE_ACTIONS.map(action => actionRow(action, 'ble')).join('');
+}
+
+function buildDashboard() {
+  const quickActions = [
+    { label: 'Scan WiFi', command: CMD.scanAp().cmd, icon: 'WF' },
+    { label: 'Scan BLE', command: CMD.bleScan('spam').cmd, icon: 'BT' },
+    { label: 'Scan Flippers', command: CMD.bleScan('flipper').cmd, icon: 'FL' },
+    { label: 'GPS Info', command: CMD.gpsInfo().cmd, icon: 'GP' },
+    { label: 'WiFi Status', command: CMD.wifiStatus().cmd, icon: 'WS' },
+    { label: 'Stop All', command: CMD.stop().cmd, icon: 'ST' },
+  ];
+  $('dash-quick-actions').innerHTML = quickActions.map(a =>
+    `<button class="btn dash-action-btn" data-command="${escapeAttr(a.command)}">
+      <span class="dash-action-icon">${esc(a.icon)}</span>
+      <span>${esc(a.label)}</span>
+    </button>`
+  ).join('');
+  $('dash-refresh-btn').addEventListener('click', () => {
+    refreshAll().catch(() => {});
+  });
+}
+
+function renderDashboard() {
+  renderDashboardDevice();
+  renderDashboardWifi();
+  renderDashboardGhostLink();
+  renderDashboardSd();
+  renderDashboardFeatures();
+  renderDashboardRecent();
+}
+
+function renderDashboardDevice() {
+  const info = Parsers.chipInfo(state.logs);
+  if (info) {
+    $('dash-conn-status').textContent = 'Connected';
+    $('dash-conn-status').className = 'dash-card-sub good';
+    $('dash-model').textContent = info.model || '-';
+    $('dash-revision').textContent = info.revision || '-';
+    $('dash-cores').textContent = String(info.cores);
+    $('dash-idf').textContent = info.idfVersion || '-';
+    $('dash-heap').textContent = formatBytes(info.freeHeap);
+    $('dash-build').textContent = info.buildConfig || '-';
+  } else {
+    $('dash-conn-status').textContent = 'No chipinfo yet';
+    $('dash-conn-status').className = 'dash-card-sub';
+  }
+}
+
+function renderDashboardWifi() {
+  const ws = Parsers.wifiStatus(state.logs);
+  const conn = Parsers.wifiConnection(state.logs);
+  if (ws && ws.connected) {
+    $('dash-wifi-status').textContent = 'Connected';
+    $('dash-wifi-status').className = 'dash-card-sub good';
+    $('dash-wifi-ssid').textContent = ws.connectedSsid || '-';
+    $('dash-wifi-ip').textContent = conn?.ip || '-';
+    $('dash-wifi-rssi').textContent = ws.connectedRssi != null ? ws.connectedRssi + ' dBm' : '-';
+    $('dash-wifi-channel').textContent = ws.connectedChannel != null ? String(ws.connectedChannel) : '-';
+  } else if (ws) {
+    $('dash-wifi-status').textContent = 'Disconnected';
+    $('dash-wifi-status').className = 'dash-card-sub bad';
+    $('dash-wifi-ssid').textContent = '-';
+    $('dash-wifi-ip').textContent = '-';
+    $('dash-wifi-rssi').textContent = '-';
+    $('dash-wifi-channel').textContent = '-';
+  } else {
+    $('dash-wifi-status').textContent = 'Unknown';
+    $('dash-wifi-status').className = 'dash-card-sub';
+  }
+}
+
+function renderDashboardGhostLink() {
+  const c = state.comm;
+  const label = c.state ? c.state.charAt(0).toUpperCase() + c.state.slice(1) : 'Unknown';
+  $('dash-ghostlink-state').textContent = label;
+  $('dash-ghostlink-remote').textContent = c.is_remote_command ? 'Yes' : 'No';
+  if (c.connected) {
+    $('dash-ghostlink-status').textContent = 'Connected';
+    $('dash-ghostlink-status').className = 'dash-card-sub good';
+  } else if (c.state === 'error') {
+    $('dash-ghostlink-status').textContent = 'Error';
+    $('dash-ghostlink-status').className = 'dash-card-sub bad';
+  } else if (c.state === 'scanning' || c.state === 'handshake') {
+    $('dash-ghostlink-status').textContent = 'Searching...';
+    $('dash-ghostlink-status').className = 'dash-card-sub warn';
+  } else {
+    $('dash-ghostlink-status').textContent = 'Disconnected';
+    $('dash-ghostlink-status').className = 'dash-card-sub';
+  }
+}
+
+function renderDashboardSd() {
+  const sdRows = parseKeyValueBlock(state.logs, /SD\s*Status/i, null);
+  if (sdRows.length) {
+    const map = {};
+    sdRows.forEach(r => map[r.key.toLowerCase()] = r.value);
+    $('dash-sd-status').textContent = map['mounted'] === 'true' ? 'Mounted' : 'Not mounted';
+    $('dash-sd-status').className = 'dash-card-sub ' + (map['mounted'] === 'true' ? 'good' : '');
+    $('dash-sd-path').textContent = map['mount point'] || map['path'] || '/mnt';
+    $('dash-sd-used').textContent = map['used'] || '-';
+  } else {
+    $('dash-sd-status').textContent = 'Unknown';
+    $('dash-sd-status').className = 'dash-card-sub';
+  }
+}
+
+function renderDashboardFeatures() {
+  const info = Parsers.chipInfo(state.logs);
+  const features = info ? info.enabledFeatures : [];
+  const featureLabels = {
+    'DISPLAY': 'Display', 'TOUCHSCREEN': 'Touchscreen', 'STATUS_DISPLAY': 'OLED',
+    'NFC': 'NFC', 'BADUSB': 'BadUSB', 'INFRARED_TX': 'IR TX', 'INFRARED_RX': 'IR RX',
+    'GPS': 'GPS', 'ETHERNET': 'Ethernet', 'BATTERY': 'Battery', 'BATTERY_ADC': 'Battery ADC',
+    'FUEL_GAUGE': 'Fuel Gauge', 'RTC_CLOCK': 'RTC', 'COMPASS': 'Compass',
+    'ACCELEROMETER': 'Accel', 'JOYSTICK': 'Joystick', 'CARDPUTER': 'Cardputer',
+    'TDECK': 'T-Deck', 'ROTARY_ENCODER': 'Rotary', 'USB_KEYBOARD': 'USB KB',
+    'GHOST_BOARD': 'Ghost Board', 'S3TWATCH': 'S3TWatch',
+    'SD_CARD_SPI': 'SD SPI', 'SD_CARD_MMC': 'SD MMC',
+  };
+  if (features.length) {
+    $('dash-features').innerHTML = '<div class="dash-section"><h3>Enabled Features</h3><div class="dash-feature-chips">' +
+      features.map(f => `<span class="chip">${esc(featureLabels[f] || f)}</span>`).join('') + '</div></div>';
+  } else {
+    $('dash-features').innerHTML = '';
+  }
+}
+
+function renderDashboardRecent() {
+  const aps = parseAllAccessPoints(state.logs);
+  const section = $('dash-recent-section');
+  const list = $('dash-recent-list');
+  if (!aps.length) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const recent = aps.slice(-5).reverse();
+  list.innerHTML = recent.map(ap => {
+    const rssiClass = ap.rssi > -50 ? 'good' : ap.rssi > -70 ? 'warn' : 'bad';
+    return `<div class="dash-recent-item">
+      <div class="dash-recent-info">
+        <strong>${esc(ap.ssid || '(Hidden)')}</strong>
+        <small>${esc(ap.bssid)} &middot; Ch ${esc(String(ap.channel))}</small>
+      </div>
+      <span class="chip ${rssiClass}">${esc(String(ap.rssi))} dBm</span>
+    </div>`;
+  }).join('');
+}
+
+function actionRow(action, section) {
+  const meta = action.factory();
+  const label = action.label;
+  const command = meta.cmd;
+  const desc = meta.desc;
+  const risky = meta.risky;
+  const item = registerAction({ section, label, command, desc, risky, refreshCmd: action.refresh?.(), refreshLabel: action.refreshLabel });
+  return `<div class="menu-row">
+    <div>
+      <h3>${esc(label)} ${risky ? '<span class="badge">May disconnect</span>' : ''}</h3>
+      <p>${esc(desc)}</p>
+      <p><code>${esc(command)}</code></p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" data-open-action="${item.id}">Open</button>
+    </div>
+  </div>`;
+}
+
+function registerAction(action) {
+  const id = `${action.section}-${slugify(action.label)}-${slugify(action.command)}`;
+  state.actionRegistry[id] = { ...action, id };
+  return state.actionRegistry[id];
+}
+
+function slugify(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'action';
+}
+
+function openAction(actionId) {
+  const action = state.actionRegistry[actionId];
+  if (!action) return;
+  state.activeAction = action;
+  state.activeItem = null;
+  state.selectedIndices.clear();
+  if (action.section === 'wifi') {
+    $('wifi-subpages').hidden = true;
+    document.querySelector('[data-tabs="wifi"]').hidden = true;
+    $('wifi-detail').hidden = false;
+  } else if (action.section === 'ble') {
+    $('ble-actions').hidden = true;
+    $('ble-detail').hidden = false;
+  }
+  renderActionDetail();
+}
+
+function closeAction() {
+  const section = state.activeAction ? state.activeAction.section : null;
+  state.activeAction = null;
+  state.activeItem = null;
+  state.selectedIndices.clear();
+  if (section === 'wifi') {
+    document.querySelector('[data-tabs="wifi"]').hidden = false;
+    $('wifi-subpages').hidden = false;
+    $('wifi-detail').hidden = true;
+    $('wifi-detail').innerHTML = '';
+  } else if (section === 'ble') {
+    $('ble-actions').hidden = false;
+    $('ble-detail').hidden = true;
+    $('ble-detail').innerHTML = '';
+  }
+}
+
+function backToResults() {
+  state.activeItem = null;
+  renderActionDetail();
+}
+
+function renderActionDetail() {
+  const action = state.activeAction;
+  if (!action) return;
+  const host = $(`${action.section}-detail`);
+  if (!host) return;
+  host.innerHTML = buildActionDetail(action);
+}
+
+function buildActionDetail(action) {
+  const result = state.activeItem ? renderItemDetail(state.activeItem) : renderActionResult(action);
+  const refreshCommand = action.refreshCmd ? action.refreshCmd.cmd : '';
+  const backLabel = state.activeItem ? 'Back to Results' : (action.section === 'wifi' ? 'WiFi' : 'BLE');
+  const categoryBadge = `<span class="badge">${esc(commandCategory(action.command))}</span>`;
+  const safetyBadge = action.risky ? '<span class="badge">May disconnect</span>' : '<span class="badge">Local-safe</span>';
+  return `<div class="detail-toolbar">
+    <div>
+      <button class="btn ghost" data-${state.activeItem ? 'back-results' : 'close-action'}>Back to ${esc(backLabel)}</button>
+    </div>
+    <div class="actions">
+      <button class="btn primary" data-command="${escapeAttr(action.command)}">Run</button>
+      ${refreshCommand && !state.activeItem ? `<button class="btn" data-command="${escapeAttr(refreshCommand)}">${esc(action.refreshLabel || 'Refresh')}</button>` : ''}
+      <button class="btn ghost" data-remote-command="${escapeAttr(action.command)}">Run via GhostLink</button>
+    </div>
+  </div>
+  <div class="panel-title">
+    <div>
+      <h2>${esc(action.label)}</h2>
+      <p>${esc(action.desc)}</p>
+      <p><code>${esc(action.command)}</code></p>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      ${categoryBadge} ${safetyBadge}
+    </div>
+  </div>
+  ${result}`;
+}
+
+function renderActionResult(action) {
+  const cmd = (action.command || '').trim().toLowerCase();
+  if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(parseAllAccessPoints(state.logs));
+  if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(parseAllStations(state.logs));
+  if (/^wifistatus\b/.test(cmd)) {
+    const status = Parsers.wifiStatus(state.logs);
+    const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(state.logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
+    return renderKeyValueTable(rows, 'WiFi Status');
+  }
+  if (/^chipinfo\b/.test(cmd)) {
+    const info = Parsers.chipInfo(state.logs);
+    if (info) return renderDeviceInfo(info);
+    return renderKeyValueTable(parseKeyValueBlock(state.logs, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/), 'Chip Information');
+  }
+  if (/^gpsinfo\b/.test(cmd)) {
+    const gps = Parsers.gpsPosition(state.logs);
+    return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(state.logs, /GPS\s*Info/i, null), 'GPS Information');
+  }
+  if (/^blescan\b/.test(cmd)) {
+    const ble = parseAllBleDevices(state.logs);
+    const flippers = parseAllFlippers(state.logs);
+    const airtags = parseAllAirTags(state.logs);
+    const gatt = parseAllGattDevices(state.logs);
+    const all = [...ble, ...flippers, ...airtags, ...gatt];
+    return renderBleTable(all);
+  }
+  if (/^scanports\b/.test(cmd)) return renderPortTable(parsePortScan(state.logs));
+  if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(state.logs), cmd);
+  if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(state.logs), 'Capture Status');
+  if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(state.logs), cmd);
+  if (/^commstatus\b/.test(cmd)) return renderKeyValueTable(parseCommStatus(state.logs), 'GhostLink Status');
+  if (/^(sweep|pineap|startportal|stopportal|listportals|dialconnect|wardrive|blewardriving)\b/.test(cmd)) return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
+  return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
+}
+
+/* ======================== ITEM DETAIL ======================== */
+function openItem(type, data) {
+  state.activeItem = { type, data };
+  renderActionDetail();
+}
+
+function renderItemDetail(item) {
+  switch (item.type) {
+    case 'ap': return renderApDetail(item.data);
+    case 'station': return renderStationDetail(item.data);
+    case 'ble': return renderBleDetail(item.data);
+    case 'port': return renderPortDetail(item.data);
+    case 'generic': return renderGenericDetail(item.data);
+    default: return '<div class="empty">Unknown item type.</div>';
+  }
+}
+
+function renderApDetail(data) {
+  const isOpen = (data.security || '').toLowerCase().includes('open');
+  return `<div class="item-detail">
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="stat"><label>SSID</label><strong>${esc(data.ssid || '(Hidden)')}</strong></div>
+      <div class="stat"><label>BSSID</label><strong><code>${esc(data.bssid)}</code></strong></div>
+      <div class="stat"><label>RSSI</label><strong>${esc(data.rssi)} dBm</strong></div>
+      <div class="stat"><label>Channel</label><strong>${esc(data.channel)}</strong></div>
+      <div class="stat"><label>Security</label><strong>${esc(data.security)}</strong></div>
+      <div class="stat"><label>Vendor</label><strong>${esc(data.vendor || '-')}</strong></div>
+      ${data.band ? `<div class="stat"><label>Band</label><strong>${esc(data.band)}</strong></div>` : ''}
+      ${data.pmf ? `<div class="stat"><label>PMF</label><strong>${esc(data.pmf)}</strong></div>` : ''}
+    </div>
+    <div class="detail-actions">
+      <button class="btn primary" data-item-action="select-ap" data-index="${escapeAttr(data.index)}">Select AP</button>
+      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn" data-item-action="track-ap">Track AP</button>
+      <button class="btn" data-item-action="connect-ap" data-ssid="${escapeAttr(data.ssid)}">Connect</button>
+    </div>
+    ${!isOpen ? `<div style="margin-top:10px"><input id="ap-connect-pass" placeholder="Password (optional)" style="max-width:260px"></div>` : ''}
+  </div>`;
+}
+
+function renderStationDetail(data) {
+  return `<div class="item-detail">
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="stat"><label>Station MAC</label><strong><code>${esc(data.mac)}</code></strong></div>
+      <div class="stat"><label>STA Vendor</label><strong>${esc(data.vendor || '-')}</strong></div>
+      <div class="stat"><label>AP SSID</label><strong>${esc(data.associatedApSsid || '-')}</strong></div>
+      <div class="stat"><label>AP BSSID</label><strong><code>${esc(data.apBssid || '-')}</code></strong></div>
+      <div class="stat"><label>AP Vendor</label><strong>${esc(data.apVendor || '-')}</strong></div>
+      <div class="stat"><label>RSSI</label><strong>${esc(data.rssi || '-')} dBm</strong></div>
+    </div>
+    <div class="detail-actions">
+      <button class="btn primary" data-item-action="select-sta" data-index="${escapeAttr(data.index)}">Select Station</button>
+      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn" data-item-action="track-sta">Track Station</button>
+    </div>
+  </div>`;
+}
+
+function renderBleDetail(data) {
+  const typeMap = { FLIPPER_ZERO: 'Flipper Zero', AIR_TAG: 'AirTag', IPHONE: 'iPhone', SAMSUNG: 'Samsung', GOOGLE: 'Google', GENERIC: 'Generic' };
+  return `<div class="item-detail">
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="stat"><label>MAC</label><strong><code>${esc(data.mac || '-')}</code></strong></div>
+      <div class="stat"><label>Name</label><strong>${esc(data.name || '-')}</strong></div>
+      <div class="stat"><label>Type</label><strong>${esc(typeMap[data.type] || data.type || '-')}</strong></div>
+      <div class="stat"><label>RSSI</label><strong>${esc(data.rssi || '-')} dBm</strong></div>
+    </div>
+    <div class="detail-actions">
+      <button class="btn" data-item-action="track-ble">Track</button>
+      <button class="btn" data-item-action="spoof-airtag">Spoof AirTag</button>
+      <button class="btn" data-item-action="enum-gatt">Enumerate GATT</button>
+    </div>
+  </div>`;
+}
+
+function renderPortDetail(data) {
+  return `<div class="item-detail">
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="stat"><label>Host</label><strong><code>${esc(data.host)}</code></strong></div>
+      <div class="stat"><label>Port</label><strong>${esc(data.port)}</strong></div>
+      <div class="stat"><label>Protocol</label><strong>${esc(data.proto)}</strong></div>
+    </div>
+    <div class="detail-actions">
+      <button class="btn" data-item-action="copy" data-text="${escapeAttr(data.host + ':' + data.port)}">Copy Host:Port</button>
+    </div>
+  </div>`;
+}
+
+function renderGenericDetail(data) {
+  return `<div class="item-detail">
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="stat"><label>Entry</label><strong>${esc(data.title)}</strong></div>
+      <div class="stat"><label>Detail</label><strong>${esc(data.detail)}</strong></div>
+    </div>
+  </div>`;
+}
+
+function renderDeviceInfo(info) {
+  const rows = [
+    { key: 'Model', value: info.model },
+    { key: 'Revision', value: info.revision },
+    { key: 'CPU Cores', value: String(info.cores) },
+    { key: 'Features', value: info.features },
+    { key: 'Free Heap', value: formatBytes(info.freeHeap) },
+    { key: 'Min Free Heap', value: formatBytes(info.minFreeHeap) },
+    { key: 'IDF Version', value: info.idfVersion },
+    { key: 'Build Config', value: info.buildConfig || '-' },
+    { key: 'Enabled Features', value: info.enabledFeatures.join(', ') || '-' },
+  ];
+  return renderKeyValueTable(rows, 'Chip Information');
+}
+
+function renderGpsInfo(gps) {
+  const rows = [
+    { key: 'Fix', value: gps.fixType },
+    { key: 'Satellites', value: `${gps.satellites} / ${gps.satellitesInView} in view` },
+    { key: 'Latitude', value: gps.latitude.toFixed(6) },
+    { key: 'Longitude', value: gps.longitude.toFixed(6) },
+    { key: 'Altitude', value: gps.altitude != null ? gps.altitude + ' m' : '-' },
+    { key: 'Speed', value: gps.speed != null ? gps.speed + ' km/h' : '-' },
+    { key: 'HDOP', value: gps.hdop != null ? String(gps.hdop) : '-' },
+    { key: 'Direction', value: gps.direction != null ? `${gps.direction}° ${gps.directionName || ''}` : '-' },
+  ];
+  return renderKeyValueTable(rows, 'GPS Position');
+}
+
+/* ======================== PARSER FALLBACKS ======================== */
+function parsePortScan(text) {
+  const rows = [];
+  let currentHost = '';
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    const host = line.match(/^Scanning\s+(.+)\s+tcp/i);
+    if (host) currentHost = host[1];
+    const port = line.match(/^\s{0,4}(?:Port\s+)?(\d+)(?:\s*\(?(tcp|udp)\)?)?/i);
+    if (port) rows.push({ index: String(rows.length), host: currentHost, port: port[1], proto: (port[2] || 'tcp').toUpperCase() });
+    const udp = line.match(/^\s{0,4}UDP\s+(\d+)/i);
+    if (udp) rows.push({ index: String(rows.length), host: currentHost, port: udp[1], proto: 'UDP' });
+  }
+  return rows;
+}
+
+function parseArpScan(text) {
+  const rows = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    const m = line.match(/^\[(\d+)\]\s+(?:IP:\s*)?([0-9.]+)\s*(?:MAC:\s*)?([0-9A-Fa-f:]{17})?/i);
+    if (m) rows.push({ index: m[1], title: m[2], detail: m[3] || '' });
+    else {
+      const m2 = line.match(/^([0-9.]+)\s+([0-9A-Fa-f:]{17})/i);
+      if (m2) rows.push({ index: String(rows.length), title: m2[1], detail: m2[2] });
+    }
+  }
+  return rows;
+}
+
+function parseCaptureStatus(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    if (line.startsWith('>')) continue;
+    const kv = line.match(/^([^=:]+)\s*[=:]\s*(.+)$/);
+    if (kv) out.push({ key: kv[1].trim(), value: kv[2].trim() });
+    else if (/(started|stopped|Saved)/i.test(line)) out.push({ key: 'Status', value: line });
+  }
+  return out;
+}
+
+function parseCongestion(text) {
+  const rows = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    const m = line.match(/^\s*(?:Channel\s*)?(\d+)[\s:=-]+(\d+)/i);
+    if (m) rows.push({ index: String(rows.length), title: 'Channel ' + m[1], detail: m[2] + ' networks' });
+  }
+  return rows;
+}
+
+function parseCommStatus(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^RX:\s*/, '').trim();
+    const kv = line.match(/^([^=:]+)\s*[=:]\s*(.+)$/);
+    if (kv) out.push({ key: kv[1].trim(), value: kv[2].trim() });
+  }
+  return out;
+}
+
+function parseGenericRows(text, command) {
+  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
+  const commandIndex = command ? lines.map(l => l.replace(/^RX:\s*/, '')).lastIndexOf(`> ${command}`) : -1;
+  const output = (commandIndex >= 0 ? lines.slice(commandIndex + 1) : lines.slice(-30))
+    .filter(l => !l.replace(/^RX:\s*/, '').startsWith('>'))
+    .slice(-24);
+  return output.map((line, index) => {
+    const stripped = line.replace(/^RX:\s*/, '').trim();
+    const kv = stripped.match(/^([^=:\n]{2,40})\s*[=:]\s*(.+)$/);
+    return kv
+      ? { index: String(index), title: kv[1].trim(), detail: kv[2].trim() }
+      : { index: String(index), title: stripped, detail: '' };
+  });
+}
+
+/* ======================== RENDERERS ======================== */
+function renderApTable(rows) {
+  if (!rows.length) return '<div class="empty">No AP results yet. Press Scan APs, wait for reconnect if needed, then this page will populate from device logs.</div>';
+  const batch = renderBatchToolbar('ap');
+  const table = `<div class="table-wrap"><table><thead><tr>
+    <th style="width:36px"><input type="checkbox" data-select-all="ap" aria-label="Select all APs"></th>
+    <th>#</th><th>SSID</th><th>BSSID</th><th>RSSI</th><th>Ch</th><th>Security</th><th>Vendor</th>
+  </tr></thead><tbody>${rows.map(row => {
+    const selected = state.selectedIndices.has(row.index);
+    return `<tr class="clickable-row" data-select-item="ap" data-index="${escapeAttr(row.index)}">
+      <td><input type="checkbox" data-select-check="ap" data-index="${escapeAttr(row.index)}" ${selected ? 'checked' : ''} onclick="event.stopPropagation()" aria-label="Select AP ${esc(row.index)}"></td>
+      <td>${esc(row.index)}</td>
+      <td>${esc(row.ssid || '(Hidden)')}</td>
+      <td><code>${esc(row.bssid)}</code></td>
+      <td>${esc(row.rssi)}</td>
+      <td>${esc(row.channel)}</td>
+      <td>${esc(row.security)}</td>
+      <td>${esc(row.vendor || '-')}</td>
+    </tr>`;
+  }).join('')}</tbody></table></div>`;
+  return batch + table;
+}
+
+function renderStationTable(rows) {
+  if (!rows.length) return '<div class="empty">No station results yet. Run the station scan, wait for reconnect if needed, then this page will populate from device logs.</div>';
+  const batch = renderBatchToolbar('station');
+  const table = `<div class="table-wrap"><table><thead><tr>
+    <th style="width:36px"><input type="checkbox" data-select-all="station" aria-label="Select all stations"></th>
+    <th>#</th><th>Station</th><th>STA Vendor</th><th>AP SSID</th><th>AP BSSID</th><th>AP Vendor</th>
+  </tr></thead><tbody>${rows.map(row => {
+    const selected = state.selectedIndices.has(row.index);
+    return `<tr class="clickable-row" data-select-item="station" data-index="${escapeAttr(row.index)}">
+      <td><input type="checkbox" data-select-check="station" data-index="${escapeAttr(row.index)}" ${selected ? 'checked' : ''} onclick="event.stopPropagation()" aria-label="Select station ${esc(row.index)}"></td>
+      <td>${esc(row.index)}</td>
+      <td><code>${esc(row.mac)}</code></td>
+      <td>${esc(row.vendor || '-')}</td>
+      <td>${esc(row.associatedApSsid || '-')}</td>
+      <td><code>${esc(row.apBssid || '-')}</code></td>
+      <td>${esc(row.apVendor || '-')}</td>
+    </tr>`;
+  }).join('')}</tbody></table></div>`;
+  return batch + table;
+}
+
+function renderBatchToolbar(type) {
+  const count = state.selectedIndices.size;
+  if (!count) return '';
+  const label = type === 'ap' ? 'AP' : 'Station';
+  return `<div class="batch-toolbar"><span>${count} ${label}${count > 1 ? 's' : ''} selected</span><div class="actions">
+    <button class="btn danger" data-batch-action="deauth">Deauth Selected</button>
+    <button class="btn ghost" data-batch-action="clear">Clear</button>
+  </div></div>`;
+}
+
+function renderKeyValueTable(rows, caption) {
+  if (!rows.length) return `<div class="empty">No ${esc(caption)} data yet. Run the command to populate.</div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td>${esc(r.key)}</td><td><code>${esc(r.value)}</code></td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function objectToKeyValueRows(value) {
+  return Object.entries(value).map(([key, rowValue]) => ({
+    key,
+    value: rowValue == null ? '-' : String(rowValue),
+  }));
+}
+
+function renderBleTable(rows) {
+  if (!rows.length) return '<div class="empty">No BLE results yet. Run a BLE scan to populate.</div>';
+  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
+    ${rows.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
+      <td>${esc(r.index || String(i))}</td>
+      <td><code>${esc(r.mac || '-')}</code></td>
+      <td>${esc(r.name || '-')}</td>
+      <td>${esc(r.type || '-')}</td>
+      <td>${esc(r.rssi != null ? r.rssi + ' dBm' : '-')}</td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function renderPortTable(rows) {
+  if (!rows.length) return '<div class="empty">No port scan results yet. Run a port scan to populate.</div>';
+  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="clickable-row" data-select-item="port" data-index="${escapeAttr(r.index)}">
+      <td>${esc(r.index)}</td><td><code>${esc(r.host)}</code></td><td>${esc(r.port)}</td><td>${esc(r.proto)}</td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function renderGenericRows(rows, command) {
+  if (!rows.length) return `<div class="empty">No structured output yet for <code>${esc(command)}</code>. Run the action to populate this page.</div>`;
+  return `<div class="result-list">${rows.map(row =>
+    `<div class="result-row clickable-row" data-select-item="generic" data-index="${escapeAttr(row.index)}">
+      <div class="result-index">${esc(row.index)}</div>
+      <div class="result-main"><strong>${esc(row.title)}</strong><small>${esc(row.detail)}</small></div>
+    </div>`
+  ).join('')}</div>`;
+}
+
+function buildHelp() {
+  const groups = [
+    ['WiFi', 'scanap, scansta, list -a, select -a, attack, beaconspam, capture'],
+    ['BLE', 'blescan, blespam, blewardriving, listairtags'],
+    ['GhostLink', 'commstatus, commdiscovery, commconnect, commsend, commdisconnect'],
+    ['Files', 'Use Files page for SD card browse/upload/download/delete'],
+    ['Safety', 'Risky local radio commands may disconnect WebUI. GhostLink is preferred.'],
+    ['Recovery', 'After local disruption, V2 polls APIs and reloads logs when reachable.'],
+  ];
+  $('help-grid').innerHTML = groups.map(([title, body]) =>
+    `<div class="card" style="cursor:default;min-height:auto"><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`
+  ).join('');
+}
+
+/* ======================== SETTINGS (Accordion) ======================== */
+function buildSettingsForm() {
+  const container = $('settings-container');
+  if (!container) return;
+  container.innerHTML = SETTINGS_SCHEMA.map((group, gi) => {
+    const isOpen = state.settingsOpen.has(gi);
+    const fieldsHtml = group.fields.map(field => renderField(field)).join('');
+    return `<div class="settings-group ${isOpen ? 'open' : ''}" data-settings-group="${gi}">
+      <div class="settings-group-header" role="button" tabindex="0" aria-expanded="${isOpen}" aria-controls="sg-body-${gi}">
+        <div class="sg-icon">${esc(group.icon)}</div>
+        <div style="min-width:0">
+          <div class="sg-title">${esc(group.category)}</div>
+          <div class="sg-desc">${esc(group.description)}</div>
+        </div>
+        <div class="sg-chevron" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+      </div>
+      <div class="settings-group-body" id="sg-body-${gi}">
+        <div class="form-grid">${fieldsHtml}</div>
+      </div>
+    </div>`;
+  }).join('');
+  bindSettingsAccordion();
+}
+
+function renderField(field) {
+  let input = '';
+  if (field.type === 'bool') {
+    input = `<input id="${field.id}" type="checkbox">`;
+  } else if (field.type === 'textarea') {
+    input = `<textarea id="${field.id}" rows="2" placeholder="${esc(field.hint || '')}"></textarea>`;
+  } else if (field.type === 'enum') {
+    input = `<select id="${field.id}">${field.options.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select>`;
+  } else if (field.type === 'color') {
+    input = `<input id="${field.id}" type="color" value="#ffffff">`;
+  } else {
+    const attrs = [`placeholder="${esc(field.hint || '')}"`];
+    if (field.min !== undefined) attrs.push(`min="${field.min}"`);
+    if (field.max !== undefined) attrs.push(`max="${field.max}"`);
+    if (field.max) attrs.push(`maxlength="${field.max}"`);
+    input = `<input id="${field.id}" type="${field.type === 'number' ? 'number' : 'text'}" ${attrs.join(' ')}>`;
+  }
+  return `<div class="field" data-field-label="${esc(field.label.toLowerCase())}" data-field-id="${esc(field.id.toLowerCase())}">
+    <label for="${field.id}">${esc(field.label)}</label>
+    ${input}
+  </div>`;
+}
+
+function bindSettingsAccordion() {
+  document.querySelectorAll('.settings-group-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const group = header.closest('.settings-group');
+      const idx = parseInt(group.dataset.settingsGroup, 10);
+      const isOpen = group.classList.toggle('open');
+      header.setAttribute('aria-expanded', String(isOpen));
+      if (isOpen) state.settingsOpen.add(idx); else state.settingsOpen.delete(idx);
+    });
+    header.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
+    });
+  });
+}
+
+function filterSettings(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('.settings-group').forEach(group => {
+    const fields = group.querySelectorAll('.field');
+    let anyMatch = false;
+    fields.forEach(field => {
+      const label = field.dataset.fieldLabel;
+      const id = field.dataset.fieldId;
+      const match = !q || label.includes(q) || id.includes(q);
+      field.style.display = match ? '' : 'none';
+      if (match) anyMatch = true;
+    });
+    group.style.display = anyMatch ? '' : 'none';
+    if (anyMatch && q) {
+      group.classList.add('open', 'highlight');
+      group.querySelector('.settings-group-header').setAttribute('aria-expanded', 'true');
+    } else if (!q) {
+      group.classList.remove('highlight');
+    }
+  });
+}
+
+function expandAllSettings(open) {
+  document.querySelectorAll('.settings-group').forEach((group, idx) => {
+    group.classList.toggle('open', open);
+    group.querySelector('.settings-group-header').setAttribute('aria-expanded', String(open));
+    if (open) state.settingsOpen.add(idx); else state.settingsOpen.delete(idx);
+  });
+}
+
+/* ======================== API & DATA ======================== */
+async function refreshAll() {
+  const refreshBtn = document.querySelector('[data-refresh]');
+  setLoading(refreshBtn, true);
+  try {
+    const [settingsResult, commResult, logsResult] = await Promise.allSettled([loadSettings(), loadCommStatus(), refreshLogs(false)]);
+    loadFiles(false).catch(() => {});
+    if ([settingsResult, commResult, logsResult].some(result => result.status === 'rejected')) {
+      throw new Error('core API unavailable');
+    }
+    $('api-dot').className = 'dot good';
+    $('api-status').textContent = 'Connected';
+    $('api-chip').style.borderColor = 'rgba(52,211,153,.25)';
+    renderDashboard();
+  } catch (e) {
+    $('api-dot').className = 'dot bad';
+    $('api-status').textContent = 'Disconnected';
+    $('api-chip').style.borderColor = 'rgba(248,113,113,.25)';
+  } finally {
+    setLoading(refreshBtn, false);
+  }
+}
+
+async function loadSettings() {
+  const res = await api('/api/settings');
+  if (!res.ok) throw new Error('settings failed');
+  const data = await res.json();
+  state.settings = data;
+  for (const group of SETTINGS_SCHEMA) {
+    for (const field of group.fields) {
+      let value = data[field.id];
+      if (value === undefined || value === null) {
+        if (field.type === 'bool') value = false;
+        else if (field.type === 'number') value = 0;
+        else value = '';
+      }
+      const el = $(field.id);
+      if (!el) continue;
+      if (field.type === 'bool') el.checked = !!value;
+      else if (field.type === 'color') {
+        const hex = typeof value === 'string' ? value.replace(/^0x/i, '#') : (value ? '#' + value.toString(16).padStart(6, '0') : '#ffffff');
+        el.value = hex;
+      } else el.value = String(value);
+    }
+  }
+  setVal('station_ip', data.station_ip || 'Not connected');
+}
+
+function setVal(id, value) { const el = $(id); if (el) el.value = value; }
+function getVal(id) { const el = $(id); return el ? el.value : ''; }
+function getBool(id) { const el = $(id); return el ? !!el.checked : false; }
+
+async function loadCommStatus() {
+  const res = await api('/api/esp_comm/status');
+  if (!res.ok) throw new Error('comm failed');
+  const data = await res.json();
+  state.comm = data;
+  const label = data.state ? data.state.charAt(0).toUpperCase() + data.state.slice(1) : 'Unknown';
+  $('comm-status').textContent = 'GhostLink ' + label;
+  $('comm-state').textContent = label;
+  $('comm-remote').textContent = data.is_remote_command ? 'Yes' : 'No';
+  $('comm-dot').className = 'dot ' + (data.connected ? 'good' : data.state === 'error' ? 'bad' : data.state === 'scanning' || data.state === 'handshake' ? 'warn' : '');
+  const chip = $('comm-chip');
+  if (chip) chip.style.borderColor = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
+}
+
+async function saveSettings() {
+  const btn = $('save-settings-btn');
+  setLoading(btn, true);
+  try {
+    const payload = {};
+    for (const group of SETTINGS_SCHEMA) {
+      for (const field of group.fields) {
+        const el = $(field.id);
+        if (!el) continue;
+        if (field.type === 'bool') payload[field.id] = el.checked;
+        else if (field.type === 'number') payload[field.id] = parseFloat(el.value) || 0;
+        else payload[field.id] = el.value;
+      }
+    }
+    const res = await api('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error('save failed');
+    toast('Settings saved', 'good');
+    await loadSettings();
+  } catch (e) {
+    toast(e.message, 'bad');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+async function runCommand(command, options = {}) {
+  if (!options.skipRisk && isRisky(command)) {
+    showRiskModal(command);
+    return;
+  }
+  state.commandHistory.push(command);
+  state.lastCommand = command;
+  state.historyIndex = state.commandHistory.length;
+  localStorage.setItem('ghost_v2_pending_command', JSON.stringify({ command, at: Date.now() }));
+  appendTerminal('> ' + command + '\n');
+  try {
+    const res = await api('/api/command', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
+    if (!res.ok) throw new Error('command failed');
+    toast('Command sent', 'good');
+    setTimeout(() => refreshLogs(true), 900);
+    if (isRisky(command)) startReconnectWatch();
+  } catch (err) {
+    if (isRisky(command)) startReconnectWatch();
+    else toast('Command failed: ' + err.message, 'bad');
+  }
+}
+
+function showRiskModal(command) {
+  state.pendingRiskCommand = command;
+  $('risk-text').textContent = `"${command}" may stop the AP or use WiFi/BLE promiscuous/radio mode. If the page disconnects, V2 will try to reconnect and recover logs.`;
+  $('risk-ghostlink-btn').disabled = !canUseGhostLink();
+  $('risk-modal').classList.add('show');
+}
+
+function closeRiskModal() {
+  $('risk-modal').classList.remove('show');
+  state.pendingRiskCommand = null;
+}
+
+async function runRemote(command) {
+  appendComm('> ' + command);
+  try {
+    const res = await api('/api/esp_comm/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
+    const data = await res.json();
+    appendComm(data.message || (data.success ? 'Command sent' : 'Failed'));
+    toast(data.success ? 'GhostLink command sent' : 'GhostLink command failed', data.success ? 'good' : 'bad');
+    if (data.success) setTimeout(() => refreshLogs(true), 1200);
+  } catch (err) {
+    appendComm('Error: ' + err.message);
+    toast('GhostLink failed', 'bad');
+  }
+}
+
+function startReconnectWatch() {
+  const overlay = $('reconnect-overlay');
+  overlay.classList.add('show');
+  let attempts = 0;
+  const maxAttempts = 60;
+  const tick = async () => {
+    attempts++;
+    $('reconnect-progress').style.width = Math.min(100, attempts / maxAttempts * 100) + '%';
+    try {
+      const res = await api('/api/logs', { cache: 'no-store' });
+      if (res.ok) {
+        state.logs = await res.text();
+        overlay.classList.remove('show');
+        localStorage.removeItem('ghost_v2_pending_command');
+        renderLogs();
+        renderActiveFeatureView();
+        await Promise.allSettled([loadSettings(), loadCommStatus(), loadFiles(false)]);
+        toast('Reconnected and recovered logs', 'good');
+        return;
+      }
+    } catch (_) {}
+    if (attempts < maxAttempts) setTimeout(tick, 2000);
+    else toast('Reconnect timed out. Try refreshing after the AP returns.', 'warn');
+  };
+  setTimeout(tick, 1500);
+}
+
+async function refreshLogs(parse = false) {
+  const res = await api('/api/logs', { cache: 'no-store' });
+  if (!res.ok) throw new Error('logs failed');
+  state.logs = await res.text();
+  renderLogs();
+  if (parse) {
+    renderActiveFeatureView();
+    renderDashboard();
+  }
+}
+
+function appendTerminal(text) {
+  const t = $('terminal');
+  t.textContent += text;
+  t.scrollTop = t.scrollHeight;
+}
+function renderLogs() {
+  const t = $('terminal');
+  t.textContent = state.logs || 'No logs yet.';
+  t.scrollTop = t.scrollHeight;
+}
+function appendComm(text) {
+  const t = $('comm-terminal');
+  t.textContent += '\n' + text;
+  t.scrollTop = t.scrollHeight;
+}
+
+function renderActiveFeatureView() {
+  if (state.activeAction) renderActionDetail();
+}
+
+/* ======================== FILES ======================== */
+async function loadFiles(showErrors = true) {
+  const list = $('file-list');
+  list.innerHTML = '<div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div>';
+  try {
+    const res = await api('/api/sdcard?path=' + encodeURIComponent(state.currentPath));
+    if (!res.ok) throw new Error('SD card unavailable');
+    const data = await res.json();
+    state.currentPath = data.path || state.currentPath;
+    $('file-path').textContent = state.currentPath;
+    if (data.storage) {
+      $('stat-sd-used').textContent = `${formatBytes(data.storage.used)} / ${formatBytes(data.storage.total)}`;
+      $('sd-progress').style.width = data.storage.total ? ((data.storage.used / data.storage.total) * 100) + '%' : '0';
+    }
+    const files = data.files || [];
+    list.innerHTML = files.length ? files.map(fileRow).join('') : '<div class="empty">This folder is empty.</div>';
+  } catch (err) {
+    list.innerHTML = '<div class="empty">Unable to load files.</div>';
+    if (showErrors) toast(err.message, 'bad');
+  }
+}
+
+function fileRow(item) {
+  const folder = item.type === 'folder';
+  return `<div class="file-row">
+    <div>
+      <strong>${folder ? '[DIR] ' : ''}${esc(item.name)}</strong>
+      <small>${esc(item.path)} ${item.size !== undefined ? ' - ' + formatBytes(item.size) : ''}</small>
+    </div>
+    <div class="actions">
+      ${folder ? `<button class="btn" data-open-path="${escapeAttr(item.path)}">Open</button>` : `<button class="btn" data-download-path="${escapeAttr(item.path)}">Download</button><button class="btn danger" data-delete-path="${escapeAttr(item.path)}">Delete</button>`}
+    </div>
+  </div>`;
+}
+
+async function downloadFile(path) {
+  const res = await api('/api/sdcard/download', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path }) });
+  if (!res.ok) throw new Error('download failed');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = path.split('/').pop() || 'download.bin';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function deleteFile(path) {
+  if (!confirm('Delete ' + path + '?')) return;
+  const res = await api('/api/sdcard?path=' + encodeURIComponent(path), { method: 'DELETE' });
+  if (!res.ok) throw new Error('delete failed');
+  toast('Deleted file', 'good');
+  loadFiles();
+}
+
+async function uploadFile() {
+  const input = $('upload-input');
+  if (!input.files || !input.files[0]) { toast('Choose a file first', 'warn'); return; }
+  const btn = $('upload-btn');
+  setLoading(btn, true);
+  try {
+    const body = new FormData();
+    body.append('file', input.files[0]);
+    const res = await api('/api/sdcard/upload?path=' + encodeURIComponent(state.currentPath), { method: 'POST', body });
+    if (!res.ok) throw new Error(await res.text());
+    input.value = '';
+    toast('Uploaded file', 'good');
+    loadFiles();
+  } catch (e) {
+    toast(e.message, 'bad');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+/* ======================== EVENTS ======================== */
+function bindEvents() {
+  document.body.addEventListener('click', event => {
+    const cmd = event.target.closest('[data-command]');
+    const remote = event.target.closest('[data-remote-command]');
+    const openActionBtn = event.target.closest('[data-open-action]');
+    const closeActionBtn = event.target.closest('[data-close-action]');
+    const backResultsBtn = event.target.closest('[data-back-results]');
+    const openPath = event.target.closest('[data-open-path]');
+    const downloadPath = event.target.closest('[data-download-path]');
+    const deletePath = event.target.closest('[data-delete-path]');
+
+    if (cmd) runCommand(cmd.dataset.command);
+    if (remote) runRemote(remote.dataset.remoteCommand);
+    if (openActionBtn) openAction(openActionBtn.dataset.openAction);
+    if (closeActionBtn) closeAction();
+    if (backResultsBtn) backToResults();
+    if (openPath) { state.currentPath = openPath.dataset.openPath; loadFiles(); }
+    if (downloadPath) downloadFile(downloadPath.dataset.downloadPath).catch(e => toast(e.message, 'bad'));
+    if (deletePath) deleteFile(deletePath.dataset.deletePath).catch(e => toast(e.message, 'bad'));
+
+    const itemRow = event.target.closest('[data-select-item]');
+    if (itemRow && !event.target.closest('input[type="checkbox"]')) {
+      const type = itemRow.dataset.selectItem;
+      const index = itemRow.dataset.index;
+      let data = null;
+      if (type === 'ap') data = parseAllAccessPoints(state.logs).find(r => r.index === index);
+      else if (type === 'station') data = parseAllStations(state.logs).find(r => r.index === index);
+      else if (type === 'ble') data = parseAllBleDevices(state.logs).concat(parseAllFlippers(state.logs), parseAllAirTags(state.logs), parseAllGattDevices(state.logs)).find(r => (r.index || '0') === index);
+      else if (type === 'port') data = parsePortScan(state.logs).find(r => r.index === index);
+      else if (type === 'generic') data = parseGenericRows(state.logs, state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
+      if (data) openItem(type, data);
+      return;
+    }
+
+    const check = event.target.closest('[data-select-check]');
+    if (check) {
+      const idx = check.dataset.index;
+      if (check.checked) state.selectedIndices.add(idx);
+      else state.selectedIndices.delete(idx);
+      renderActionDetail();
+      return;
+    }
+
+    const selectAll = event.target.closest('[data-select-all]');
+    if (selectAll) {
+      const type = selectAll.dataset.selectAll;
+      let rows = [];
+      if (type === 'ap') rows = parseAllAccessPoints(state.logs);
+      else if (type === 'station') rows = parseAllStations(state.logs);
+      if (selectAll.checked) rows.forEach(r => state.selectedIndices.add(r.index));
+      else rows.forEach(r => state.selectedIndices.delete(r.index));
+      renderActionDetail();
+      return;
+    }
+
+    const batch = event.target.closest('[data-batch-action]');
+    if (batch) {
+      const action = batch.dataset.batchAction;
+      if (action === 'clear') { state.selectedIndices.clear(); renderActionDetail(); }
+      else if (action === 'deauth') {
+        const indices = Array.from(state.selectedIndices).join(',');
+        if (!indices) { toast('Nothing selected', 'warn'); return; }
+        runCommand(CMD.deauth().cmd);
+      }
+      return;
+    }
+
+    const itemAction = event.target.closest('[data-item-action]');
+    if (itemAction) {
+      handleItemAction(itemAction.dataset.itemAction, itemAction.dataset);
+      return;
+    }
+  });
+
+  document.querySelectorAll('[data-refresh]').forEach(btn => btn.addEventListener('click', refreshAll));
+  $('refresh-logs-btn').addEventListener('click', () => refreshLogs(true).catch(e => toast(e.message, 'bad')));
+  $('clear-terminal-btn').addEventListener('click', () => { $('terminal').textContent = ''; });
+  $('terminal-send-btn').addEventListener('click', sendTerminal);
+  $('terminal-input').addEventListener('keydown', terminalKeydown);
+  $('save-settings-btn').addEventListener('click', () => saveSettings().catch(e => toast(e.message, 'bad')));
+  $('connect-wifi-btn').addEventListener('click', () => {
+    const ssid = getVal('sta_ssid');
+    const pass = getVal('sta_password');
+    runCommand(ssid ? CMD.connect(ssid, pass).cmd : CMD.connect().cmd);
+  });
+  $('start-portal-btn').addEventListener('click', () => runCommand(CMD.startPortal(getVal('portal_url') || 'default', getVal('portal_ap_ssid') || 'FreeWiFi', getVal('portal_password')).cmd));
+  $('send-printer-btn').addEventListener('click', () => runCommand(CMD.powerprinter(getVal('printer_ip'), getVal('printer_text'), getVal('printer_font_size'), 'CM').cmd));
+  $('refresh-files-btn').addEventListener('click', () => loadFiles());
+  $('up-folder-btn').addEventListener('click', () => {
+    if (state.currentPath !== '/mnt') {
+      state.currentPath = state.currentPath.split('/').slice(0, -1).join('/') || '/mnt';
+      loadFiles();
+    }
+  });
+  $('upload-btn').addEventListener('click', () => uploadFile().catch(e => toast(e.message, 'bad')));
+  $('comm-send-btn').addEventListener('click', () => { const cmd = $('comm-input').value.trim(); if (cmd) { $('comm-input').value = ''; runRemote(cmd); } });
+  $('comm-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('comm-send-btn').click(); });
+  $('comm-disconnect-btn').addEventListener('click', disconnectComm);
+  $('risk-cancel-btn').addEventListener('click', closeRiskModal);
+  $('risk-local-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runCommand(cmd, { skipRisk: true }); });
+  $('risk-ghostlink-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runRemote(cmd); });
+  $('dismiss-reconnect-btn').addEventListener('click', () => $('reconnect-overlay').classList.remove('show'));
+
+  // Settings accordion controls
+  const searchEl = $('settings-search');
+  if (searchEl) {
+    searchEl.addEventListener('input', e => filterSettings(e.target.value));
+  }
+  $('settings-expand-all')?.addEventListener('click', () => expandAllSettings(true));
+  $('settings-collapse-all')?.addEventListener('click', () => expandAllSettings(false));
+}
+
+function handleItemAction(action, dataset) {
+  switch (action) {
+    case 'select-ap': runCommand(CMD.selectAp(dataset.index).cmd); break;
+    case 'select-sta': runCommand(CMD.selectSta(dataset.index).cmd); break;
+    case 'deauth': runCommand(CMD.deauth().cmd); break;
+    case 'track-ap': runCommand(CMD.trackAp().cmd); break;
+    case 'track-sta': runCommand(CMD.trackSta().cmd); break;
+    case 'connect-ap': {
+      const pass = getVal('ap-connect-pass') || '';
+      const ssid = dataset.ssid;
+      if (ssid) runCommand(CMD.connect(ssid, pass).cmd);
+      else toast('No SSID available', 'warn');
+      break;
+    }
+    case 'track-ble': runCommand(CMD.bleScan('spam').cmd); break;
+    case 'spoof-airtag': runCommand(CMD.spoofAirTag(true).cmd); break;
+    case 'enum-gatt': runCommand(CMD.enumGatt().cmd); break;
+    case 'copy': navigator.clipboard.writeText(dataset.text || '').then(() => toast('Copied', 'good')).catch(() => toast('Copy failed', 'bad')); break;
+    default: toast('Action not implemented', 'warn');
+  }
+}
+
+function sendTerminal() {
+  const input = $('terminal-input');
+  const command = input.value.trim();
+  if (!command) return;
+  input.value = '';
+  runCommand(command);
+}
+
+function terminalKeydown(event) {
+  if (event.key === 'Enter') { sendTerminal(); return; }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (state.historyIndex > 0) state.historyIndex--;
+    $('terminal-input').value = state.commandHistory[state.historyIndex] || '';
+  }
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    if (state.historyIndex < state.commandHistory.length) state.historyIndex++;
+    $('terminal-input').value = state.commandHistory[state.historyIndex] || '';
+  }
+}
+
+async function disconnectComm() {
+  const res = await api('/api/esp_comm/control', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ action: 'disconnect' }) });
+  const data = await res.json();
+  appendComm(data.message || 'Disconnected');
+  await loadCommStatus();
+}
+
+function recoverPendingCommand() {
+  const raw = localStorage.getItem('ghost_v2_pending_command');
+  if (!raw) return;
+  try {
+    const pending = JSON.parse(raw);
+    state.lastCommand = pending.command || '';
+    toast('Recovered pending command state; parsing logs', 'warn');
+    refreshLogs(true).catch(() => {});
+  } catch (_) {}
+}
+
+/* ======================== INIT ======================== */
+function init() {
+  buildShell();
+  bindEvents();
+  recoverPendingCommand();
+  refreshAll().catch(() => {
+    $('api-dot').className = 'dot bad';
+    $('api-status').textContent = 'Disconnected';
+    startReconnectWatch();
+  });
+  state.terminalTimer = setInterval(() => {
+    refreshLogs(false).catch(() => {});
+    if (document.querySelector('#page-dashboard.active')) renderDashboard();
+  }, 2000);
+  setInterval(() => loadCommStatus().catch(() => {}), 1500);
+}
+
+init();</script>
+</body>
+</html>
