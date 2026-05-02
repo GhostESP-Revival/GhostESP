@@ -152,5 +152,6 @@ idf_build_get_property(idf_path IDF_PATH)
 target_include_directories(${COMPONENT_LIB} PRIVATE
     "${idf_path}/components/wpa_supplicant/src"
     "${idf_path}/components/wpa_supplicant/esp_supplicant/src"
+    "${CMAKE_SOURCE_DIR}/components/lvgl/src/extra/libs/png"
 )
 

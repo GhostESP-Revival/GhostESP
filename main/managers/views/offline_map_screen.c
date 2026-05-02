@@ -34,8 +34,10 @@
 #endif
 #endif
 
-#define MAP_SOURCE    "satellite"
-#define MAP_TILES_REL "/maps/" MAP_SOURCE "/tiles"
+/* Slippy cache roots on SD: /maps/<style>/tiles/{z}/{x}/{y}.(png|jpg|jpeg).
+ * Style ids are discovered at runtime from subfolders of .../maps that contain maps/<id>/tiles/. */
+#define MAP_STYLES_MAX 64
+#define MAP_STYLE_ID_MAX 80
 
 static const char *TAG = "OfflineMap";
 
@@ -90,6 +92,147 @@ static int s_tile_ram_tx[MAP_GRID * MAP_GRID];
 static int s_tile_ram_ty[MAP_GRID * MAP_GRID];
 static char s_path_plain[9][PATH_PLAIN_MAX];
 static char s_path_lvgl[9][PATH_LVGL_MAX];
+/** Relative to GHOSTESP_SD_ROOT, e.g. "/maps/satellite/tiles". */
+static char s_tiles_rel[96];
+/** strdup'd basenames under maps/, sorted; NULL when count==0. */
+static char **s_map_style_ids;
+static int s_map_style_count;
+static int s_map_style_idx;
+static lv_obj_t *s_map_style_btn;
+static lv_obj_t *s_map_style_btn_lbl;
+/** After style tap (PR): skip paired REL so we do not exit the view. */
+static bool s_map_touch_arm_skip_exit_release;
+
+static void map_styles_free(void) {
+  if (s_map_style_ids) {
+    for (int i = 0; i < s_map_style_count; i++) {
+      free(s_map_style_ids[i]);
+    }
+    free(s_map_style_ids);
+    s_map_style_ids = NULL;
+  }
+  s_map_style_count = 0;
+}
+
+static int map_style_cmp(const void *a, const void *b) {
+  const char *const *pa = (const char *const *)a;
+  const char *const *pb = (const char *const *)b;
+  return strcmp(*pa, *pb);
+}
+
+static bool map_style_entry_name_ok(const char *name) {
+  if (!name || name[0] == '\0') {
+    return false;
+  }
+  if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
+    return false;
+  }
+  if (strchr(name, '/') != NULL) {
+    return false;
+  }
+  return strlen(name) < MAP_STYLE_ID_MAX;
+}
+
+/* Each style is .../maps/<name>/ with a tiles/ subdir (slippy layout). */
+static void map_styles_scan(void) {
+  map_styles_free();
+  if (!sd_card_exists(GHOSTESP_SD_ROOT)) {
+    return;
+  }
+  char maps_dir[sizeof(GHOSTESP_SD_ROOT) + 16];
+  if (snprintf(maps_dir, sizeof(maps_dir), "%s/maps", GHOSTESP_SD_ROOT) >= (int)sizeof(maps_dir)) {
+    return;
+  }
+  DIR *d = opendir(maps_dir);
+  if (!d) {
+    return;
+  }
+  char *tmp[MAP_STYLES_MAX];
+  int n = 0;
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL && n < MAP_STYLES_MAX) {
+    if (!map_style_entry_name_ok(de->d_name)) {
+      continue;
+    }
+    char sub[PATH_PLAIN_MAX];
+    if (snprintf(sub, sizeof(sub), "%s/%s", maps_dir, de->d_name) >= (int)sizeof(sub)) {
+      continue;
+    }
+    struct stat st;
+    if (stat(sub, &st) != 0 || !S_ISDIR(st.st_mode)) {
+      continue;
+    }
+    char tiles_chk[PATH_PLAIN_MAX];
+    if (snprintf(tiles_chk, sizeof(tiles_chk), "%s/tiles", sub) >= (int)sizeof(tiles_chk)) {
+      continue;
+    }
+    if (stat(tiles_chk, &st) != 0 || !S_ISDIR(st.st_mode)) {
+      continue;
+    }
+    char *copy = strdup(de->d_name);
+    if (!copy) {
+      break;
+    }
+    tmp[n++] = copy;
+  }
+  closedir(d);
+  if (n < 1) {
+    for (int i = 0; i < n; i++) {
+      free(tmp[i]);
+    }
+    return;
+  }
+  qsort(tmp, (size_t)n, sizeof(tmp[0]), map_style_cmp);
+  char **ids = (char **)malloc((size_t)n * sizeof(char *));
+  if (!ids) {
+    for (int i = 0; i < n; i++) {
+      free(tmp[i]);
+    }
+    return;
+  }
+  memcpy(ids, tmp, (size_t)n * sizeof(char *));
+  s_map_style_ids = ids;
+  s_map_style_count = n;
+}
+
+static const char *map_style_current_id(void) {
+  if (!s_map_style_ids || s_map_style_count < 1) {
+    return NULL;
+  }
+  if (s_map_style_idx < 0 || s_map_style_idx >= s_map_style_count) {
+    return NULL;
+  }
+  return s_map_style_ids[s_map_style_idx];
+}
+
+static void map_tiles_rel_sync(void) {
+  const char *id = map_style_current_id();
+  if (!id) {
+    s_tiles_rel[0] = '\0';
+    return;
+  }
+  int nn = snprintf(s_tiles_rel, sizeof(s_tiles_rel), "/maps/%s/tiles", id);
+  if (nn < 0 || nn >= (int)sizeof(s_tiles_rel)) {
+    s_tiles_rel[0] = '\0';
+  }
+}
+
+static void map_style_btn_label_refresh(void) {
+  if (!s_map_style_btn_lbl || !lv_obj_is_valid(s_map_style_btn_lbl)) {
+    return;
+  }
+  const char *id = map_style_current_id();
+  lv_label_set_text(s_map_style_btn_lbl, id ? id : "?");
+}
+
+static bool map_point_in_obj(lv_coord_t x, lv_coord_t y, const lv_obj_t *obj) {
+  if (!obj || !lv_obj_is_valid((lv_obj_t *)obj)) {
+    return false;
+  }
+  lv_area_t a;
+  lv_obj_get_coords((lv_obj_t *)obj, &a);
+  return x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2;
+}
 
 void offline_map_view_create(void);
 void offline_map_view_destroy(void);
@@ -138,57 +281,65 @@ static void load_metadata_defaults(void) {
   s_base_ty -= 1;
 }
 
+static bool map_discover_tile_zoom_extent(int *out_zmin, int *out_zmax);
+static void map_zoom_merge_disk_extent(void);
+
 static void load_map_metadata(void) {
   char path[sizeof(GHOSTESP_SD_ROOT) + 128];
-  snprintf(path, sizeof(path), "%s" MAP_TILES_REL "/metadata.json", GHOSTESP_SD_ROOT);
+
+  snprintf(path, sizeof(path), "%s%s/metadata.json", GHOSTESP_SD_ROOT, s_tiles_rel);
   load_metadata_defaults();
-  if (!file_exists(path)) {
-    return;
-  }
-  FILE *f = fopen(path, "rb");
-  if (!f) {
-    return;
-  }
-  char *buf = malloc(META_MAX);
-  if (!buf) {
-    fclose(f);
-    return;
-  }
-  size_t n = fread(buf, 1, META_MAX - 1, f);
-  buf[n] = '\0';
-  fclose(f);
-  cJSON *root = cJSON_Parse(buf);
-  free(buf);
-  if (!root) {
-    return;
-  }
-  cJSON *jz = cJSON_GetObjectItem(root, "minzoom");
-  cJSON *jz2 = cJSON_GetObjectItem(root, "maxzoom");
-  if (cJSON_IsNumber(jz) && cJSON_IsNumber(jz2)) {
-    s_min_z = (int)jz->valuedouble;
-    s_max_z = (int)jz2->valuedouble;
-  }
-  cJSON *b = cJSON_GetObjectItem(root, "bounds");
-  if (cJSON_IsArray(b) && cJSON_GetArraySize(b) >= 4) {
-    const cJSON *jw = cJSON_GetArrayItem(b, 0);
-    const cJSON *js = cJSON_GetArrayItem(b, 1);
-    const cJSON *je = cJSON_GetArrayItem(b, 2);
-    const cJSON *jn = cJSON_GetArrayItem(b, 3);
-    if (cJSON_IsNumber(jw) && cJSON_IsNumber(js) && cJSON_IsNumber(je) && cJSON_IsNumber(jn)) {
-      double w = jw->valuedouble;
-      double s = js->valuedouble;
-      double e = je->valuedouble;
-      double n0 = jn->valuedouble;
-      double mlat = (s + n0) / 2.0;
-      double mlon = (w + e) / 2.0;
-      int tzx = 0, tzy = 0;
-      s_zoom = clamp_i((s_min_z + s_max_z) / 2, s_min_z, s_max_z);
-      latlon_to_tile(mlat, mlon, s_zoom, &tzx, &tzy);
-      s_base_tx = tzx - 1;
-      s_base_ty = tzy - 1;
+
+  cJSON *root = NULL;
+  if (file_exists(path)) {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+      char *buf = malloc(META_MAX);
+      if (buf) {
+        size_t n = fread(buf, 1, META_MAX - 1, f);
+        buf[n] = '\0';
+        fclose(f);
+        root = cJSON_Parse(buf);
+        free(buf);
+      } else {
+        fclose(f);
+      }
     }
   }
-  cJSON_Delete(root);
+
+  if (root) {
+    cJSON *jz = cJSON_GetObjectItem(root, "minzoom");
+    cJSON *jz2 = cJSON_GetObjectItem(root, "maxzoom");
+    if (cJSON_IsNumber(jz) && cJSON_IsNumber(jz2)) {
+      s_min_z = (int)jz->valuedouble;
+      s_max_z = (int)jz2->valuedouble;
+    }
+    /* On-disk z pyramid is authoritative (metadata min/max is often wrong or a template). */
+    map_zoom_merge_disk_extent();
+    cJSON *b = cJSON_GetObjectItem(root, "bounds");
+    if (cJSON_IsArray(b) && cJSON_GetArraySize(b) >= 4) {
+      const cJSON *jw = cJSON_GetArrayItem(b, 0);
+      const cJSON *js = cJSON_GetArrayItem(b, 1);
+      const cJSON *je = cJSON_GetArrayItem(b, 2);
+      const cJSON *jn = cJSON_GetArrayItem(b, 3);
+      if (cJSON_IsNumber(jw) && cJSON_IsNumber(js) && cJSON_IsNumber(je) && cJSON_IsNumber(jn)) {
+        double w = jw->valuedouble;
+        double s = js->valuedouble;
+        double e = je->valuedouble;
+        double n0 = jn->valuedouble;
+        double mlat = (s + n0) / 2.0;
+        double mlon = (w + e) / 2.0;
+        int tzx = 0, tzy = 0;
+        s_zoom = clamp_i((s_min_z + s_max_z) / 2, s_min_z, s_max_z);
+        latlon_to_tile(mlat, mlon, s_zoom, &tzx, &tzy);
+        s_base_tx = tzx - 1;
+        s_base_ty = tzy - 1;
+      }
+    }
+    cJSON_Delete(root);
+  } else {
+    map_zoom_merge_disk_extent();
+  }
 }
 
 static bool dir_name_is_uint(const char *name, unsigned long *out) {
@@ -205,6 +356,98 @@ static bool dir_name_is_uint(const char *name, unsigned long *out) {
   }
   *out = v;
   return true;
+}
+
+/* Zoom level dirs under .../tiles/<z>/ with at least one numeric x column. */
+static bool map_discover_tile_zoom_extent(int *out_zmin, int *out_zmax) {
+  if (!out_zmin || !out_zmax || s_tiles_rel[0] == '\0') {
+    return false;
+  }
+  char root[PATH_PLAIN_MAX];
+  if (snprintf(root, sizeof(root), "%s%s", GHOSTESP_SD_ROOT, s_tiles_rel) >= (int)sizeof(root)) {
+    return false;
+  }
+  DIR *d = opendir(root);
+  if (!d) {
+    return false;
+  }
+  int zmin = INT_MAX;
+  int zmax = INT_MIN;
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL) {
+    unsigned long zu;
+    if (!dir_name_is_uint(de->d_name, &zu)) {
+      continue;
+    }
+    int zi = (int)zu;
+    char zpath[PATH_PLAIN_MAX];
+    if (snprintf(zpath, sizeof(zpath), "%s/%s", root, de->d_name) >= (int)sizeof(zpath)) {
+      continue;
+    }
+    struct stat st;
+    if (stat(zpath, &st) != 0 || !S_ISDIR(st.st_mode)) {
+      continue;
+    }
+    DIR *dz = opendir(zpath);
+    if (!dz) {
+      continue;
+    }
+    bool has_x = false;
+    struct dirent *ex;
+    while ((ex = readdir(dz)) != NULL) {
+      unsigned long xu;
+      if (!dir_name_is_uint(ex->d_name, &xu)) {
+        continue;
+      }
+      has_x = true;
+      break;
+    }
+    closedir(dz);
+    if (!has_x) {
+      continue;
+    }
+    if (zi < zmin) {
+      zmin = zi;
+    }
+    if (zi > zmax) {
+      zmax = zi;
+    }
+  }
+  closedir(d);
+  if (zmin > zmax || zmin == INT_MAX) {
+    return false;
+  }
+  *out_zmin = zmin;
+  *out_zmax = zmax;
+  return true;
+}
+
+/* Set [s_min_z,s_max_z] from on-disk tile dirs under .../tiles/<z>/. Try discovery first; if it
+ * fails, JIT-mount and retry. Relying only on sd_card_exists(root) is wrong when the mount point
+ * exists but the volume is not mounted (stream_mode after unmount, or a stale empty path):
+ * refresh would still mount and load tiles while zoom stayed at metadata 10–12. */
+static void map_zoom_merge_disk_extent(void) {
+  bool susp = false;
+  int dmin = 0;
+  int dmax = 0;
+  bool disk_ok = map_discover_tile_zoom_extent(&dmin, &dmax);
+  if (!disk_ok) {
+    if (sd_card_mount_for_flush(&susp) == ESP_OK) {
+      disk_ok = map_discover_tile_zoom_extent(&dmin, &dmax);
+    }
+  }
+  if (disk_ok) {
+    s_min_z = dmin;
+    s_max_z = dmax;
+  }
+
+  if (s_min_z > s_max_z) {
+    int t = s_min_z;
+    s_min_z = s_max_z;
+    s_max_z = t;
+  }
+  s_zoom = clamp_i(s_zoom, s_min_z, s_max_z);
+  /* Do not unmount here: focus_initial + stream_refresh need SD; refresh unmounts when appropriate. */
 }
 
 static bool file_name_is_y_tile(const char *name, unsigned long *out_y) {
@@ -237,7 +480,7 @@ static bool scan_tiles_bbox_at_z(int z, int *min_x, int *min_y, int *max_x, int 
   }
   *out_count = 0;
   char zpath[PATH_PLAIN_MAX];
-  if (snprintf(zpath, sizeof(zpath), "%s" MAP_TILES_REL "/%d", GHOSTESP_SD_ROOT, z) >= (int)sizeof(zpath)) {
+  if (snprintf(zpath, sizeof(zpath), "%s%s/%d", GHOSTESP_SD_ROOT, s_tiles_rel, z) >= (int)sizeof(zpath)) {
     return false;
   }
   struct stat st;
@@ -360,16 +603,16 @@ static void set_tile_path(int slot, int z, int tx, int ty) {
   if (slot < 0 || slot >= MAP_GRID * MAP_GRID) {
     return;
   }
-  int pl = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s" MAP_TILES_REL "/%d/%d/%d.png", GHOSTESP_SD_ROOT, z, tx, ty);
+  int pl = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s%s/%d/%d/%d.png", GHOSTESP_SD_ROOT, s_tiles_rel, z, tx, ty);
   if (pl < 0 || pl >= PATH_PLAIN_MAX) {
     s_path_plain[slot][0] = '\0';
     s_path_lvgl[slot][0] = '\0';
     return;
   }
   if (!file_exists(s_path_plain[slot])) {
-    int pj = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s" MAP_TILES_REL "/%d/%d/%d.jpg", GHOSTESP_SD_ROOT, z, tx, ty);
+    int pj = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s%s/%d/%d/%d.jpg", GHOSTESP_SD_ROOT, s_tiles_rel, z, tx, ty);
     if (pj < 0 || pj >= PATH_PLAIN_MAX || !file_exists(s_path_plain[slot])) {
-      int pje = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s" MAP_TILES_REL "/%d/%d/%d.jpeg", GHOSTESP_SD_ROOT, z, tx, ty);
+      int pje = snprintf(s_path_plain[slot], PATH_PLAIN_MAX, "%s%s/%d/%d/%d.jpeg", GHOSTESP_SD_ROOT, s_tiles_rel, z, tx, ty);
       if (pje < 0 || pje >= PATH_PLAIN_MAX) {
         s_path_plain[slot][0] = '\0';
       }
@@ -425,6 +668,39 @@ static bool map_png_read_ihdr(const uint8_t *p, size_t len, int *ow, int *oh) {
   return false;
 }
 
+/* PNG IHDR color type: 0 gray, 2 RGB, 3 palette, 4 gray+alpha, 6 RGBA (RFC 2083). */
+static bool map_png_read_ihdr_color_type(const uint8_t *p, size_t len, uint8_t *out_ct) {
+  if (!p || !out_ct || len < 33) {
+    return false;
+  }
+  if (p[0] != 0x89U || p[1] != 0x50U || p[2] != 0x4eU || p[3] != 0x47U) {
+    return false;
+  }
+  size_t o = 8U;
+  for (unsigned n = 0; n < 64U; n++) {
+    if (o + 12U > len) {
+      return false;
+    }
+    uint32_t ch_len = ((uint32_t)p[o] << 24) | ((uint32_t)p[o + 1] << 16) | ((uint32_t)p[o + 2] << 8) | (uint32_t)p[o + 3];
+    if (ch_len > 1U + (uint32_t)MAX_TILE_PNG_BYTES) {
+      return false;
+    }
+    if (o + 12U + (size_t)ch_len > len) {
+      return false;
+    }
+    if (p[o + 4] == 'I' && p[o + 5] == 'H' && p[o + 6] == 'D' && p[o + 7] == 'R') {
+      if (ch_len < 10U) {
+        return false;
+      }
+      const uint8_t *d = p + o + 8U;
+      *out_ct = d[9];
+      return true;
+    }
+    o += 8U + (size_t)ch_len + 4U;
+  }
+  return false;
+}
+
 /* "S:/mnt/…" from LVGL file src → "/mnt/…" for POSIX fopen (same as lv_fs stdio real path). */
 static void map_lv_file_to_plain(const char *lv, char *out, size_t cap) {
   if (!out || cap < 2) {
@@ -463,15 +739,15 @@ static void offline_map_log_build_caps_once(void) {
   }
   s_map_caps_logged = true;
   ESP_LOGI(TAG,
-           "map: caps LV_USE_PNG=%d LV_USE_SJPG=%d LV_USE_FS_STDIO=%d stream_mode=%d root=%s tiles=" GHOSTESP_SD_ROOT
-           MAP_TILES_REL "/{z}/{x}/{y}.png (JPEG data in .png needs SJPG)",
+           "map: caps LV_USE_PNG=%d LV_USE_SJPG=%d LV_USE_FS_STDIO=%d stream_mode=%d root=%s tiles=%s%s/{z}/{x}/{y}.png "
+           "(JPEG data in .png needs SJPG)",
            (int)LV_USE_PNG,
 #if LV_USE_SJPG
            1,
 #else
            0,
 #endif
-           (int)LV_USE_FS_STDIO, s_stream_mode ? 1 : 0, GHOSTESP_SD_ROOT);
+           (int)LV_USE_FS_STDIO, s_stream_mode ? 1 : 0, GHOSTESP_SD_ROOT, GHOSTESP_SD_ROOT, s_tiles_rel);
 }
 
 /* Native pixel size for zoom. Returns true if dimensions are from decoder / IHDR; false if 256×256 guess. */
@@ -574,8 +850,8 @@ static void map_img_set_zoom_for_cell(lv_obj_t *img) {
   if (!have_native) {
     if (!s_map_dims_fallback_warned) {
       s_map_dims_fallback_warned = true;
-      ESP_LOGW(TAG, "map: tile size unknown; zoom uses 256. For JPEG tiles enable CONFIG_LV_USE_SJPG=y. Path: " GHOSTESP_SD_ROOT
-                       MAP_TILES_REL);
+      ESP_LOGW(TAG, "map: tile size unknown; zoom uses 256. For JPEG tiles enable CONFIG_LV_USE_SJPG=y. Path: %s%s",
+               GHOSTESP_SD_ROOT, s_tiles_rel);
     }
   }
   if (iw < 1) {
@@ -692,6 +968,16 @@ static lv_img_dsc_t *alloc_tile_dsc(uint8_t *data, size_t len, const char *path_
   const char *p = path_for_log ? path_for_log : "(ram)";
 
   if (map_bytes_look_like_png(data, len)) {
+#if LV_COLOR_DEPTH == 16
+    uint8_t png_ct = 0xff;
+    if (map_png_read_ihdr_color_type(data, len, &png_ct) && png_ct == 3) {
+      lv_img_dsc_t *decoded = offline_map_try_decode_png_to_rgb565_dsc(data, len, p);
+      if (decoded) {
+        return decoded;
+      }
+      /* Fall through to LVGL compressed path if stb failed. */
+    }
+#endif
     lv_img_dsc_t *d = (lv_img_dsc_t *)calloc(1, sizeof(lv_img_dsc_t));
     if (!d) {
       ESP_LOGW(TAG, "map: alloc lv_img_dsc_t failed (path=%s)", p);
@@ -727,13 +1013,8 @@ static lv_img_dsc_t *alloc_tile_dsc(uint8_t *data, size_t len, const char *path_
   }
 
   if (map_bytes_look_like_jpeg(data, len)) {
-#if LV_COLOR_DEPTH == 16
-    lv_img_dsc_t *decoded = offline_map_try_decode_jpeg_to_rgb565_dsc(data, len, p);
-    if (decoded) {
-      return decoded;
-    }
-    ESP_LOGW(TAG, "map: stb decode failed for %s — trying compressed + SJPG (baseline JPEG only)", p);
-#endif
+    /* Prefer compressed JPEG in RAM (~25 KB/tile) + SJPG decode at draw time. Pre-decoding 9×256×256
+     * RGB565 on the LVGL task (~1.2 MB + deep stb stacks) exhausts heap/stack and can fault after load. */
 #if LV_USE_SJPG
     {
       lv_img_dsc_t *d = (lv_img_dsc_t *)calloc(1, sizeof(lv_img_dsc_t));
@@ -744,14 +1025,17 @@ static lv_img_dsc_t *alloc_tile_dsc(uint8_t *data, size_t len, const char *path_
       }
       d->data_size = (uint32_t)len;
       d->data = data;
-      ESP_LOGI(TAG, "map: JPEG in %s (%u B) — compressed + SJPG/tjpgd (progressive JPEG needs RGB565 path above)", p,
-               (unsigned)len);
       return d;
     }
+#elif LV_COLOR_DEPTH == 16
+    lv_img_dsc_t *decoded = offline_map_try_decode_jpeg_to_rgb565_dsc(data, len, p);
+    if (decoded) {
+      return decoded;
+    }
+    ESP_LOGW(TAG, "map: stb decode failed for %s", p);
+    return NULL;
 #else
-    ESP_LOGE(TAG,
-             "map: %s is JPEG. Enable CONFIG_LV_USE_SJPG=y for baseline JPEG, or use LV_COLOR_DEPTH=16 for stb decode.",
-             p);
+    ESP_LOGE(TAG, "map: %s is JPEG. Enable CONFIG_LV_USE_SJPG=y (recommended) or LV_COLOR_DEPTH=16 for stb.", p);
     free(data);
     return NULL;
 #endif
@@ -1018,7 +1302,8 @@ static void map_hud_update(void) {
   }
   char line[LBL_MAX];
   const char *mode = s_stream_mode ? "stream" : "file";
-  snprintf(line, sizeof(line), "z%2d  t %3d %3d  %s", s_zoom, s_base_tx, s_base_ty, mode);
+  const char *sid = map_style_current_id();
+  snprintf(line, sizeof(line), "%s  z%2d  t %3d %3d  %s", sid ? sid : "?", s_zoom, s_base_tx, s_base_ty, mode);
   lv_label_set_text(s_lbl, line);
 }
 
@@ -1104,6 +1389,23 @@ static void refresh_tiles(void) {
 #endif
 }
 
+static void map_user_cycle_style(void) {
+#if LV_USE_PNG && LV_USE_FS_STDIO
+  if (s_map_style_count < 1) {
+    return;
+  }
+  s_map_style_idx = (s_map_style_idx + 1) % s_map_style_count;
+  map_tiles_rel_sync();
+  load_map_metadata();
+  focus_initial_view_on_existing_tiles();
+  s_map_dims_fallback_warned = false;
+  s_map_caps_logged = false;
+  refresh_tiles();
+  map_style_btn_label_refresh();
+  map_hud_update();
+#endif
+}
+
 static void return_to_apps(void) { display_manager_switch_view(&apps_menu_view); }
 
 static void handle_map_input_cb(InputEvent *e) {
@@ -1114,7 +1416,21 @@ static void handle_map_input_cb(InputEvent *e) {
   if (e->type == INPUT_TYPE_TOUCH) {
     lv_indev_data_t *d = &e->data.touch_data;
     ESP_LOGI(TAG, "touch: state=%d x=%d y=%d", (int)d->state, (int)d->point.x, (int)d->point.y);
+    if (d->state == LV_INDEV_STATE_PR) {
+      if (s_map_style_btn && lv_obj_is_valid(s_map_style_btn) &&
+          map_point_in_obj(d->point.x, d->point.y, s_map_style_btn)) {
+        map_user_cycle_style();
+        s_map_touch_arm_skip_exit_release = true;
+        return;
+      }
+      s_map_touch_arm_skip_exit_release = false;
+      return;
+    }
     if (d->state == LV_INDEV_STATE_REL) {
+      if (s_map_touch_arm_skip_exit_release) {
+        s_map_touch_arm_skip_exit_release = false;
+        return;
+      }
       ESP_LOGI(TAG, "touch: release -> back to apps");
       return_to_apps();
     }
@@ -1126,6 +1442,11 @@ static void handle_map_input_cb(InputEvent *e) {
     if (k == LV_KEY_ESC || k == 29 || k == '`' || k == 'q' || k == 'Q') {
       ESP_LOGI(TAG, "keyboard: 0x%02x -> back to apps", (unsigned)k);
       return_to_apps();
+      return;
+    }
+    if (k == 'm' || k == 'M') {
+      ESP_LOGI(TAG, "keyboard: cycle map style");
+      map_user_cycle_style();
       return;
     }
     if (k == '[') {
@@ -1204,7 +1525,8 @@ static void handle_map_input_cb(InputEvent *e) {
   }
   if (e->type == INPUT_TYPE_ENCODER) {
     if (e->data.encoder.button) {
-      ESP_LOGI(TAG, "encoder: button (ignored)");
+      ESP_LOGI(TAG, "encoder: button -> cycle map style");
+      map_user_cycle_style();
       return;
     }
     int dir = (int)e->data.encoder.direction;
@@ -1243,9 +1565,8 @@ static void no_cap_create(void) {
       "  CONFIG_LV_USE_SJPG=y   (JPEG tiles misnamed .png — common for map caches)\n"
       "  CONFIG_LV_USE_FS_STDIO=y\n"
       "  CONFIG_LV_FS_STDIO_LETTER=83  (S: drive, fopen like rest of app)\n"
-      "On SD, same layout as on PC under ghostesp/maps/:\n"
-      "  " GHOSTESP_SD_ROOT "/maps/<source>/tiles/{z}/{x}/{y}.png\n"
-      "  (this build uses: " MAP_SOURCE ")\n");
+      "On SD: " GHOSTESP_SD_ROOT "/maps/<style>/tiles/{z}/{x}/{y}.png\n"
+      "  Each subfolder of maps/ that contains tiles/ is a style (cycle via HUD button / M / encoder).\n");
   lv_obj_set_style_text_color(s_lbl, lv_color_hex(theme_muted()), 0);
   lv_obj_align(s_lbl, LV_ALIGN_CENTER, 0, 0);
 }
@@ -1286,6 +1607,9 @@ void offline_map_view_create(void) {
   s_stream_mode = false;
   s_map_cont = NULL;
   s_hud = NULL;
+  s_map_style_btn = NULL;
+  s_map_style_btn_lbl = NULL;
+  s_map_touch_arm_skip_exit_release = false;
   s_zoom_alert = NULL;
   s_zoom_alert_lbl = NULL;
   for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
@@ -1309,6 +1633,14 @@ void offline_map_view_create(void) {
   if (m != ESP_OK || !sd_card_exists(GHOSTESP_SD_ROOT)) {
     ESP_LOGW(TAG, "SD not ready: %s", esp_err_to_name(m));
   } else {
+    map_styles_scan();
+    if (s_map_style_count > 0 && s_map_style_idx >= s_map_style_count) {
+      s_map_style_idx = 0;
+    }
+    if (s_map_style_count <= 0) {
+      s_map_style_idx = 0;
+    }
+    map_tiles_rel_sync();
     load_map_metadata();
     focus_initial_view_on_existing_tiles();
   }
@@ -1342,8 +1674,10 @@ void offline_map_view_create(void) {
     offline_map_view.root = s_root;
     s_lbl = lv_label_create(s_root);
     if (m == ESP_ERR_NOT_FOUND) {
-      lv_label_set_text(s_lbl, "Maps: no tile PNGs in " GHOSTESP_SD_ROOT MAP_TILES_REL
-                              " (check z/x/y). Use stream: SD unmounted after read.");
+      char err[PATH_PLAIN_MAX + 80];
+      snprintf(err, sizeof(err), "Maps: no tiles in %s%s (check z/x/y). Use stream: SD unmounted after read.",
+               GHOSTESP_SD_ROOT, s_tiles_rel);
+      lv_label_set_text(s_lbl, err);
     } else {
       lv_label_set_text(s_lbl, "SD not found. Put maps under " GHOSTESP_SD_ROOT " (e.g. ghostesp/maps/... on the card)");
     }
@@ -1489,11 +1823,33 @@ void offline_map_view_create(void) {
   lv_obj_set_style_bg_opa(s_hud, LV_OPA_60, 0);
   lv_obj_set_style_bg_color(s_hud, lv_color_hex(0x000000), 0);
   lv_obj_set_style_pad_left(s_hud, 4, 0);
+  lv_obj_set_style_pad_right(s_hud, 4, 0);
+  lv_obj_set_flex_flow(s_hud, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(s_hud, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(s_hud, 4, 0);
+
+  s_map_style_btn = lv_btn_create(s_hud);
+  /* Touch is handled in handle_map_input_cb (before lv_timer_handler); keep non-clickable so LVGL does not double-fire. */
+  lv_obj_clear_flag(s_map_style_btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_height(s_map_style_btn, 22);
+  lv_obj_set_style_pad_hor(s_map_style_btn, 6, 0);
+  lv_obj_set_style_pad_ver(s_map_style_btn, 0, 0);
+  lv_obj_set_style_radius(s_map_style_btn, 4, 0);
+  lv_obj_set_style_bg_opa(s_map_style_btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_map_style_btn, lv_color_hex(theme_bg()), 0);
+  s_map_style_btn_lbl = lv_label_create(s_map_style_btn);
+  lv_label_set_long_mode(s_map_style_btn_lbl, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_color(s_map_style_btn_lbl, lv_color_hex(theme_muted()), 0);
+  {
+    const char *sid = map_style_current_id();
+    lv_label_set_text(s_map_style_btn_lbl, sid ? sid : "?");
+  }
+  lv_obj_center(s_map_style_btn_lbl);
+
   s_lbl = lv_label_create(s_hud);
+  lv_obj_set_flex_grow(s_lbl, 1);
   lv_obj_set_style_text_color(s_lbl, lv_color_hex(theme_muted()), 0);
-  lv_obj_set_width(s_lbl, w - 8);
   lv_label_set_long_mode(s_lbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
-  lv_obj_align(s_lbl, LV_ALIGN_LEFT_MID, 0, 0);
   map_zoom_alert_create();
 
   if (s_stream_mode) {
@@ -1526,10 +1882,13 @@ void offline_map_view_destroy(void) {
     s_mounted_by_us = false;
     s_jit_suspended = false;
     s_stream_mode = false;
+    map_styles_free();
     free_all_tile_ram();
     lvgl_obj_del_safe(&s_root);
     offline_map_view.root = NULL;
     s_hud = NULL;
+    s_map_style_btn = NULL;
+    s_map_style_btn_lbl = NULL;
     s_map_cont = NULL;
     for (int i = 0; i < MAP_GRID * MAP_GRID; i++) {
       s_cells[i] = NULL;
