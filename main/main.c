@@ -45,6 +45,11 @@
 #include "managers/badusb_manager.h"
 #endif
 
+#ifdef CONFIG_HAS_CAMERA
+#include "managers/motion_detector_manager.h"
+#include "managers/camera_stream_manager.h"
+#endif
+
 #ifdef CONFIG_WITH_SCREEN
 #include "managers/views/splash_screen.h"
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
@@ -457,6 +462,9 @@ void app_main(void) {
     uint8_t country_index = settings_get_wifi_country(&G_Settings);
     const char *country_codes[] = {"US", "GB", "JP", "AU", "CN", "01"};
     if (country_index < sizeof(country_codes) / sizeof(country_codes[0])) {
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        esp_err_t err = esp_wifi_set_country_code(country_codes[country_index], true);
+#else
         wifi_country_t wifi_country = {
             .cc = {country_codes[country_index][0], country_codes[country_index][1], 0},
             .schan = 1,
@@ -464,6 +472,7 @@ void app_main(void) {
             .policy = WIFI_COUNTRY_POLICY_MANUAL
         };
         esp_err_t err = esp_wifi_set_country(&wifi_country);
+#endif
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to set WiFi country: %s", esp_err_to_name(err));
         } else {
@@ -492,6 +501,10 @@ void app_main(void) {
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     mic_visualizer_init();
     mic_visualizer_start();
+#endif
+#ifdef CONFIG_HAS_CAMERA
+    motion_detector_init();
+    camera_stream_init();
 #endif
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
     nrf24_analyzer_register_stream_handler();

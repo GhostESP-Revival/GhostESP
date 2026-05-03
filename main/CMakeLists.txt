@@ -46,6 +46,9 @@ list(APPEND app_sources
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
+# Exclude camera managers until camera support is enabled.
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
 file(GLOB_RECURSE axs15231b_sources "${CMAKE_SOURCE_DIR}/components/axs15231b/*.c")
 file(GLOB m5gfx_sources
@@ -122,6 +125,15 @@ if(CONFIG_HAS_BADUSB)
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badusb_manager.c")
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/hid_script_parser.c")
     list(APPEND required_components esp_tinyusb)
+endif()
+
+# Add motion detector manager when camera is enabled (S3 only)
+if(CONFIG_HAS_CAMERA)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
+    list(APPEND required_components esp32-camera)
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/driver/include")
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/conversions/include")
 endif()
 
 if(CONFIG_HAS_NFC)

@@ -76,6 +76,9 @@ jobs:
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
           - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
+          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip" }
+          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip" }
+          - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
 
     steps:
       - uses: actions/checkout@v4

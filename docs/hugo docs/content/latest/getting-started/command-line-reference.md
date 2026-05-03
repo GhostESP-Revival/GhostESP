@@ -152,6 +152,12 @@ All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `S
 - **`sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>`** — Configure SDIO wiring.
 - **`sd_save_config`** — Persist SD settings to storage.
 
+## Camera
+
+Available on builds with **`CONFIG_HAS_CAMERA`**.
+
+- **`motion ...`** — Motion detector controls for onboard camera builds. See the full [Motion Detector]({{< relref "latest/camera/motion-detector.md" >}}) guide for setup, tuning, SD snapshots, and Discord webhooks.
+
 ## RGB
 
 - **`rgbmode <rainbow|police|strobe|off|color>`** — Run an LED effect immediately.

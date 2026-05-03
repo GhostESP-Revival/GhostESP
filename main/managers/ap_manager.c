@@ -42,6 +42,9 @@ static const char *TAG = "ap_manager";
 #include "esp_heap_caps.h"
 #include "managers/status_display_manager.h"
 #include "managers/auth_digest.h"
+#ifdef CONFIG_HAS_CAMERA
+#include "managers/camera_stream_manager.h"
+#endif
 
 #ifndef IN6_IS_ADDR_V4MAPPED
 #define IN6_IS_ADDR_V4MAPPED(a)                                             \
@@ -1920,6 +1923,11 @@ static esp_err_t load_server_config(void) {
     ADD_URI_HANDLER("/api/esp_comm/status", HTTP_GET, api_esp_comm_status_handler);
     ADD_URI_HANDLER("/api/esp_comm/control", HTTP_POST, api_esp_comm_control_handler);
     ADD_URI_HANDLER("/api/esp_comm/send", HTTP_POST, api_esp_comm_send_handler);
+#ifdef CONFIG_HAS_CAMERA
+    ADD_URI_HANDLER("/camera", HTTP_GET, camera_stream_page_handler);
+    ADD_URI_HANDLER("/camera/stream", HTTP_GET, camera_stream_http_handler);
+    ADD_URI_HANDLER("/camera/api", HTTP_POST, camera_stream_api_handler);
+#endif
 
 #undef ADD_URI_HANDLER
 

@@ -1232,7 +1232,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             display_manager_switch_view(&options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
             submit_text();
-        } else if (c == '\b' || c == '*') {
+        } else if (c == '\b') {
             remove_char_from_buffer();
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);

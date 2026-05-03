@@ -5,6 +5,17 @@
 ### Added
 - Added CC1101 SubGHz (The Wired Hatter's Banshee only atm) support with frequency analyzer, capture/replay and multi-band scanning (315/390/433.92/868.35/915 MHz)
 - Added passive jamming detection engine to the NRF24 frequency analyzer that identifies known 2.4GHz threat signatures in real time during normal spectrum scanning
+- Added support for Seeed Studio XIAO ESP32-S3 Sense with motion detection
+- Added support for Seeed Studio XIAO ESP32-C5
+- Added support for Seeed Studio XIAO ESP32-S3
+- Added live MJPEG camera stream viewable at http://ghostesp.local/camera
+- Added camera motion detector CLI (`motion start/stop/status/threshold/interval/percent/snap/discord/webhook/cooldown`) with configurable sensitivity, SD card JPEG snapshots, and Discord webhook integration
+
+### Fixed
+- Fixed ESP32-C5 not discovering 5GHz channels above UNII-1 (e.g. 149-165) during WiFi scans by using correct country code API at boot
+- Fixed GPS info task stack corruption
+- Fixed Cardputer ADV `*` key being treated as backspace in text entry fields
+- Fixed Poltergeist status display failing to initialize due to I2C port returning ESP_ERR_INVALID_STATE instead of ESP_ERR_NOT_FOUND (#308)
 
 ## Revival v1.9.8
 

@@ -28,6 +28,10 @@
 #endif
 #include "vendor/pcap.h"
 #include "vendor/printer.h"
+#ifdef CONFIG_HAS_CAMERA
+#include "managers/motion_detector_manager.h"
+#include "managers/camera_stream_manager.h"
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #include "managers/zigbee_manager.h"
 #endif
@@ -182,6 +186,10 @@ void handle_wigle_cmd(int argc, char **argv);
 void handle_loadconfig_cmd(int argc, char **argv);
 void handle_nrf24_cmd(int argc, char **argv);
 void handle_subghz_cmd(int argc, char **argv);
+#ifdef CONFIG_HAS_CAMERA
+void handle_motion_cmd(int argc, char **argv);
+void handle_camerastream_cmd(int argc, char **argv);
+#endif
 
 #define MAX_PORTAL_PATH_LEN 128 // reasonable i guess?
 
@@ -4086,6 +4094,9 @@ void handle_help(int argc, char **argv) {
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
+#ifdef CONFIG_HAS_CAMERA
+        , "camera"
+#endif
 #ifdef CONFIG_WITH_ETHERNET
         , "ethernet"
 #endif
@@ -4663,6 +4674,67 @@ void handle_help(int argc, char **argv) {
     }
 #endif
 
+#ifdef CONFIG_HAS_CAMERA
+    if (strcmp(category, "camera") == 0) {
+        glog("\nCamera Commands:\n\n");
+        glog("camerastream start\n");
+        glog("    Description: Start the live camera stream server.\n");
+        glog("    Usage: camerastream start\n");
+        glog("    Access the stream at http://ghostesp.local/camera\n\n");
+        glog("camerastream stop\n");
+        glog("    Description: Stop the camera stream and release the camera.\n");
+        glog("    Usage: camerastream stop\n\n");
+        glog("camerastream status\n");
+        glog("    Description: Show current stream state.\n");
+        glog("    Usage: camerastream status\n\n");
+        glog("camerastream quality <1-100>\n");
+        glog("    Description: Set JPEG compression quality.\n");
+        glog("    Usage: camerastream quality 80\n\n");
+        glog("camerastream resolution <name>\n");
+        glog("    Description: Set camera resolution.\n");
+        glog("    Usage: camerastream resolution SVGA\n");
+        glog("    Options: QQVGA, QVGA, VGA, SVGA, XGA, SXGA, UXGA\n\n");
+        glog("camerastream fps <1-30>\n");
+        glog("    Description: Set target framerate.\n");
+        glog("    Usage: camerastream fps 15\n\n");
+        glog("motion start\n");
+        glog("    Description: Start on-device motion detection.\n");
+        glog("    Usage: motion start\n\n");
+        glog("motion stop\n");
+        glog("    Description: Stop motion detection.\n");
+        glog("    Usage: motion stop\n\n");
+        glog("motion status\n");
+        glog("    Description: Show motion detector state.\n");
+        glog("    Usage: motion status\n\n");
+        glog("motion threshold <1-255>\n");
+        glog("    Description: Set pixel difference threshold.\n");
+        glog("    Usage: motion threshold 30\n\n");
+        glog("motion interval <100-10000>\n");
+        glog("    Description: Set frame interval in milliseconds.\n");
+        glog("    Usage: motion interval 500\n\n");
+        glog("motion percent <1-100>\n");
+        glog("    Description: Set trigger percentage.\n");
+        glog("    Usage: motion percent 10\n\n");
+        glog("motion sample <1-32>\n");
+        glog("    Description: Compare every Nth pixel.\n");
+        glog("    Usage: motion sample 4\n\n");
+        glog("motion snap <on|off>\n");
+        glog("    Description: Enable/disable SD card snapshots.\n");
+        glog("    Usage: motion snap on\n\n");
+        glog("motion image <on|off>\n");
+        glog("    Description: Attach image to Discord alerts.\n");
+        glog("    Usage: motion image on\n\n");
+        glog("motion discord <url|off>\n");
+        glog("    Description: Set or disable Discord webhook URL.\n");
+        glog("    Usage: motion discord https://discord.com/api/webhooks/...\n\n");
+        glog("motion cooldown <ms>\n");
+        glog("    Description: Set minimum time between webhook alerts.\n");
+        glog("    Usage: motion cooldown 60000\n\n");
+        glog("Note: Camera stream and motion detection are mutually exclusive.\n\n");
+        return;
+    }
+#endif
+
     glog("\nGhost ESP Command Categories:\n\n");
 
     glog("  help wifi      - Wi-Fi commands\n");
@@ -4681,6 +4753,9 @@ void handle_help(int argc, char **argv) {
     glog("  help attack    - Attack/flood commands\n");
 #ifdef CONFIG_HAS_INFRARED
     glog("  help ir        - Infrared commands\n");
+#endif
+#ifdef CONFIG_HAS_CAMERA
+    glog("  help camera    - Camera & motion detection commands\n");
 #endif
 #ifdef CONFIG_WITH_ETHERNET
     printf("  help ethernet  - Ethernet commands\n");
@@ -4704,6 +4779,9 @@ void handle_help(int argc, char **argv) {
          "  help attack    - Attack/flood commands\n"
 #ifdef CONFIG_HAS_INFRARED
          "  help ir        - Infrared commands\n"
+#endif
+#ifdef CONFIG_HAS_CAMERA
+         "  help camera    - Camera & motion detection commands\n"
 #endif
 #ifdef CONFIG_WITH_ETHERNET
          "  help ethernet  - Ethernet commands\n"
@@ -4839,7 +4917,7 @@ void handle_gps_info(int argc, char **argv) {
                 return;
             }
             
-            TaskHandle_t created_task = xTaskCreateStatic(gps_info_display_task, "gps_info", stack_size, NULL, 1, gps_task_stack, gps_task_tcb);
+            TaskHandle_t created_task = xTaskCreateStatic(gps_info_display_task, "gps_info", stack_words, NULL, 1, gps_task_stack, gps_task_tcb);
             if (created_task == NULL) {
                 heap_caps_free(gps_task_stack);
                 heap_caps_free(gps_task_tcb);
@@ -9447,6 +9525,10 @@ void register_commands() {
 #ifdef CONFIG_HAS_MIC
     register_command("mic_cal", handle_mic_cal_cmd);
 #endif
+#ifdef CONFIG_HAS_CAMERA
+    register_command("motion", handle_motion_cmd);
+    register_command("camerastream", handle_camerastream_cmd);
+#endif
     register_command("loadconfig", handle_loadconfig_cmd);
 
     esp_comm_manager_set_command_callback(comm_command_callback, NULL);
@@ -9609,3 +9691,171 @@ void handle_get_neopixel_brightness_cmd(int argc, char **argv) {
     uint8_t brightness = settings_get_neopixel_max_brightness(&G_Settings);
     glog("Current neopixel max brightness: %d%%\n", brightness);
 }
+
+#ifdef CONFIG_HAS_CAMERA
+void handle_motion_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("Usage: motion <command> [args]\n");
+        glog("Commands:\n");
+        glog("  motion start           - Start motion detection\n");
+        glog("  motion stop            - Stop motion detection\n");
+        glog("  motion status          - Show current state\n");
+        glog("  motion threshold <1-255>  - Set pixel diff threshold\n");
+        glog("  motion interval <100-10000> - Set interval in ms\n");
+        glog("  motion percent <1-100> - Set trigger percentage\n");
+        glog("  motion sample <1-32>   - Compare every Nth pixel\n");
+        glog("  motion snap <on|off>   - Enable/disable SD snapshots\n");
+        glog("  motion image <on|off>  - Attach image to Discord alert\n");
+        glog("  motion discord <url|off> - Send Discord embed alerts\n");
+        glog("  motion webhook <url|off> - Alias for discord/off\n");
+        glog("  motion cooldown <ms>    - Webhook alert cooldown\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "start") == 0) {
+        camera_stream_stop();
+        esp_err_t ret = motion_detector_start();
+        if (ret == ESP_OK) {
+            glog("[MOTION] Started\n");
+        } else {
+            glog("[MOTION] Failed to start\n");
+        }
+    } else if (strcmp(argv[1], "stop") == 0) {
+        motion_detector_stop();
+    } else if (strcmp(argv[1], "status") == 0) {
+        MotionDetectorState state = motion_detector_get_state();
+        glog("[MOTION] Status:\n");
+        glog("  Running:    %s\n", state.is_running ? "YES" : "NO");
+        glog("  Threshold:  %d\n", state.threshold);
+        glog("  Interval:   %dms\n", state.interval_ms);
+        glog("  Trigger:    %d%%\n", state.trigger_percent);
+        glog("  Sample:     every %d pixel(s)\n", state.sample_step);
+        glog("  PSRAM:      %s\n", state.using_psram ? "YES" : "NO");
+        glog("  Snapshots:  %s\n", state.save_snapshots ? "ON" : "OFF");
+        glog("  Image:      %s\n", state.send_discord_image ? "ON" : "OFF");
+        glog("  Webhook:    %s\n", state.webhook_enabled ? "configured" : "OFF");
+        glog("  Cooldown:   %dms\n", state.webhook_cooldown_ms);
+        glog("  Events:     %d\n", state.motion_count);
+    } else if (strcmp(argv[1], "threshold") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion threshold <1-255>\n");
+            return;
+        }
+        motion_detector_set_threshold(atoi(argv[2]));
+    } else if (strcmp(argv[1], "interval") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion interval <100-10000>\n");
+            return;
+        }
+        motion_detector_set_interval(atoi(argv[2]));
+    } else if (strcmp(argv[1], "percent") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion percent <1-100>\n");
+            return;
+        }
+        motion_detector_set_trigger_percent(atoi(argv[2]));
+    } else if (strcmp(argv[1], "sample") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion sample <1-32>\n");
+            return;
+        }
+        motion_detector_set_sample_step(atoi(argv[2]));
+    } else if (strcmp(argv[1], "snap") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion snap <on|off>\n");
+            return;
+        }
+        motion_detector_set_save_snapshots(strcmp(argv[2], "on") == 0);
+    } else if (strcmp(argv[1], "image") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion image <on|off>\n");
+            return;
+        }
+        motion_detector_set_discord_image(strcmp(argv[2], "on") == 0);
+    } else if (strcmp(argv[1], "discord") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion discord <discord_webhook_url|off>\n");
+            return;
+        }
+        if (strcmp(argv[2], "off") == 0) {
+            motion_detector_clear_webhook();
+        } else {
+            motion_detector_set_webhook(argv[2]);
+        }
+    } else if (strcmp(argv[1], "webhook") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion webhook <url|off>\n");
+            return;
+        }
+        if (strcmp(argv[2], "off") == 0) {
+            motion_detector_clear_webhook();
+        } else {
+            motion_detector_set_webhook(argv[2]);
+        }
+    } else if (strcmp(argv[1], "cooldown") == 0) {
+        if (argc < 3) {
+            glog("Usage: motion cooldown <ms>\n");
+            return;
+        }
+        motion_detector_set_webhook_cooldown(atoi(argv[2]));
+    } else {
+        glog("Unknown motion command: %s\n", argv[1]);
+    }
+}
+
+void handle_camerastream_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("Usage: camerastream <command> [args]\n");
+        glog("Commands:\n");
+        glog("  camerastream start              - Start camera stream\n");
+        glog("  camerastream stop               - Stop camera stream\n");
+        glog("  camerastream status             - Show current state\n");
+        glog("  camerastream quality <1-100>    - Set JPEG quality\n");
+        glog("  camerastream resolution <name>  - Set resolution\n");
+        glog("  camerastream fps <1-30>         - Set target FPS\n");
+        glog("  Resolutions: QQVGA QVGA VGA SVGA XGA SXGA UXGA\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "start") == 0) {
+        esp_err_t ret = camera_stream_start();
+        if (ret == ESP_OK) {
+            glog("[CAM_STREAM] Started - visit http://ghostesp.local/camera\n");
+        } else {
+            glog("[CAM_STREAM] Failed to start\n");
+        }
+    } else if (strcmp(argv[1], "stop") == 0) {
+        camera_stream_stop();
+    } else if (strcmp(argv[1], "status") == 0) {
+        CameraStreamState st = camera_stream_get_state();
+        glog("[CAM_STREAM] Status:\n");
+        glog("  Running:    %s\n", st.is_running ? "YES" : "NO");
+        glog("  Quality:    %d\n", st.quality);
+        glog("  Resolution: %d (config)\n", st.frame_size);
+        glog("  Target FPS: %d\n", st.fps_target);
+        glog("  PSRAM:      %s\n", st.using_psram ? "YES" : "NO");
+        glog("  Client:     %s\n", st.client_count > 0 ? "connected" : "none");
+        glog("  Frames:     %d\n", st.frames_sent);
+    } else if (strcmp(argv[1], "quality") == 0) {
+        if (argc < 3) {
+            glog("Usage: camerastream quality <1-100>\n");
+            return;
+        }
+        camera_stream_set_quality(atoi(argv[2]));
+    } else if (strcmp(argv[1], "resolution") == 0) {
+        if (argc < 3) {
+            glog("Usage: camerastream resolution <QQVGA|QVGA|VGA|SVGA|XGA|SXGA|UXGA>\n");
+            return;
+        }
+        camera_stream_set_framesize(argv[2]);
+    } else if (strcmp(argv[1], "fps") == 0) {
+        if (argc < 3) {
+            glog("Usage: camerastream fps <1-30>\n");
+            return;
+        }
+        camera_stream_set_fps(atoi(argv[2]));
+    } else {
+        glog("Unknown camerastream command: %s\n", argv[1]);
+    }
+}
+#endif

@@ -209,6 +209,8 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">JCMK DevBoardPro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
       <tr><th scope="row">RabbitLabs Minion</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td></tr>
       <tr><th scope="row">Lolin S3 Pro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
+      <tr><th scope="row">XIAO ESP32-S3 Sense</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td></tr>
+      <tr><th scope="row">XIAO ESP32-C5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td></tr>
       <tr><th scope="row">Flipper JCMK GPS</th><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
       <tr><th scope="row">ESP32 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
       <tr><th scope="row">ESP32-S2 (generic)</th><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
@@ -220,6 +222,12 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
     </tbody>
   </table>
 </div>
+
+## Camera Support
+
+- **XIAO ESP32-S3 Sense** currently has the dedicated camera-enabled build and supports the [Motion Detector]({{< relref "latest/camera/motion-detector.md" >}}) feature.
+- The current motion detector implementation uses **QQVGA grayscale** capture for low RAM usage and fast comparisons.
+- **XIAO ESP32-C5** is a supported board config, but it does not include the onboard camera motion detector path used by the S3 Sense build.
 
 ## Vendor Boards
 
@@ -258,6 +266,8 @@ The following table lists the vendor-specific boards supported by GhostESP with 
       <tr><td>RabbitLabs Minion</td><td><code>RabbitLabs_Minion.zip</code></td><td><img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"></td></tr>
       <tr><td>RabbitLabs Phantom</td><td><code>CYD2USB2.4Inch.zip</code></td><td><img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"></td></tr>
       <tr><td>Lolin S3 Pro</td><td><code>Lolin_S3_Pro.zip</code></td><td><img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"></td></tr>
+      <tr><td>Seeed Studio XIAO ESP32-S3 Sense</td><td><code>xiao_esp32s3_sense.zip</code></td><td></td></tr>
+      <tr><td>Seeed Studio XIAO ESP32-C5</td><td><code>xiao_esp32c5.zip</code></td><td></td></tr>
       <tr><td>Flipper JCMK GPS</td><td><code>Flipper_JCMK_GPS.zip</code></td><td><img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"></td></tr>
       <tr><td>JC3248W535EN</td><td><code>JC3248W535EN_LCD.zip</code></td><td></td></tr>
       <tr><td>Wired Hatters ESPRocket</td><td><code>esp32-generic.zip</code></td><td><img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"></td></tr>

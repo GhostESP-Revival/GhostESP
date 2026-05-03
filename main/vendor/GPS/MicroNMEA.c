@@ -781,7 +781,7 @@ nmea_parser_handle_t nmea_parser_init(const nmea_parser_config_t *config) {
     goto err_task_create;
   }
   esp_gps->tsk_hdl = xTaskCreateStatic(
-      nmea_parser_task_entry, "nmea_parser", CONFIG_NMEA_PARSER_TASK_STACK_SIZE * sizeof(StackType_t),
+      nmea_parser_task_entry, "nmea_parser", CONFIG_NMEA_PARSER_TASK_STACK_SIZE,
       esp_gps, CONFIG_NMEA_PARSER_TASK_PRIORITY,
       esp_gps->task_stack, esp_gps->task_tcb);
   if (!esp_gps->tsk_hdl) {

@@ -1247,6 +1247,7 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *coredumps_dir = "/mnt/ghostesp/logs/coredumps";
   const char *debug_dir = "/mnt/ghostesp/debug";
   const char *pcaps_dir = "/mnt/ghostesp/pcaps";
+  const char *captures_dir = "/mnt/ghostesp/captures";
   const char *scans_dir = "/mnt/ghostesp/scans";
   const char *gps_dir = "/mnt/ghostesp/gps";
   const char *games_dir = "/mnt/ghostesp/games";
@@ -1276,6 +1277,9 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(pcaps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(captures_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(scans_dir);

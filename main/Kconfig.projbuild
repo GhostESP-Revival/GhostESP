@@ -837,6 +837,163 @@ menu "Ghost ESP Options"
 
     endmenu
 
+    menu "Camera & Motion Detector Configuration"
+        depends on IDF_TARGET_ESP32S3
+
+        config HAS_CAMERA
+            bool "Enable Camera Support"
+            default n
+            help
+                Enable camera sensor (e.g. OV3660 on XIAO ESP32S3 Sense)
+
+        config CAM_PIN_PWDN
+            int "Camera PWDN Pin"
+            depends on HAS_CAMERA
+            default -1
+            help
+                Power-down pin (-1 if not connected)
+
+        config CAM_PIN_RESET
+            int "Camera RESET Pin"
+            depends on HAS_CAMERA
+            default -1
+            help
+                Reset pin (-1 if not connected)
+
+        config CAM_PIN_XCLK
+            int "Camera XCLK Pin"
+            depends on HAS_CAMERA
+            default 10
+            help
+                Master clock output pin
+
+        config CAM_PIN_SIOD
+            int "Camera SCCB SDA Pin"
+            depends on HAS_CAMERA
+            default 40
+            help
+                SCCB/I2C data pin
+
+        config CAM_PIN_SIOC
+            int "Camera SCCB SCL Pin"
+            depends on HAS_CAMERA
+            default 39
+            help
+                SCCB/I2C clock pin
+
+        config CAM_PIN_D7
+            int "Camera D7 Pin"
+            depends on HAS_CAMERA
+            default 48
+            help
+                Parallel data bit 7
+
+        config CAM_PIN_D6
+            int "Camera D6 Pin"
+            depends on HAS_CAMERA
+            default 11
+            help
+                Parallel data bit 6
+
+        config CAM_PIN_D5
+            int "Camera D5 Pin"
+            depends on HAS_CAMERA
+            default 12
+            help
+                Parallel data bit 5
+
+        config CAM_PIN_D4
+            int "Camera D4 Pin"
+            depends on HAS_CAMERA
+            default 14
+            help
+                Parallel data bit 4
+
+        config CAM_PIN_D3
+            int "Camera D3 Pin"
+            depends on HAS_CAMERA
+            default 16
+            help
+                Parallel data bit 3
+
+        config CAM_PIN_D2
+            int "Camera D2 Pin"
+            depends on HAS_CAMERA
+            default 18
+            help
+                Parallel data bit 2
+
+        config CAM_PIN_D1
+            int "Camera D1 Pin"
+            depends on HAS_CAMERA
+            default 17
+            help
+                Parallel data bit 1
+
+        config CAM_PIN_D0
+            int "Camera D0 Pin"
+            depends on HAS_CAMERA
+            default 15
+            help
+                Parallel data bit 0
+
+        config CAM_PIN_VSYNC
+            int "Camera VSYNC Pin"
+            depends on HAS_CAMERA
+            default 38
+            help
+                Vertical sync pin
+
+        config CAM_PIN_HREF
+            int "Camera HREF Pin"
+            depends on HAS_CAMERA
+            default 47
+            help
+                Horizontal reference pin
+
+        config CAM_PIN_PCLK
+            int "Camera PCLK Pin"
+            depends on HAS_CAMERA
+            default 13
+            help
+                Pixel clock pin
+
+        config MOTION_DETECT_THRESHOLD
+            int "Motion Detection Threshold"
+            depends on HAS_CAMERA
+            default 30
+            help
+                Pixel difference threshold (0-255). Lower = more sensitive.
+
+        config MOTION_DETECT_INTERVAL_MS
+            int "Motion Detection Interval (ms)"
+            depends on HAS_CAMERA
+            default 500
+            help
+                Milliseconds between motion detection frames.
+
+        config MOTION_DETECT_PERCENT
+            int "Motion Detection Trigger Percent"
+            depends on HAS_CAMERA
+            default 10
+            help
+                Percentage of pixels that must change to trigger motion (0-100).
+
+        config MOTION_DETECT_SAMPLE_STEP
+            int "Motion Detection Sample Step"
+            depends on HAS_CAMERA
+            default 4
+            help
+                Compare every Nth pixel. Higher values are faster but less precise.
+
+        config MOTION_WEBHOOK_COOLDOWN_MS
+            int "Motion Webhook Cooldown (ms)"
+            depends on HAS_CAMERA
+            default 60000
+            help
+                Minimum time between webhook alerts.
+    endmenu
+
     menu "Microphone Configuration"
         depends on !CONFIG_USE_NEOPIXEL
 
@@ -1161,4 +1318,5 @@ menu "Ghost ESP Options"
     
     endmenu
     
-endmenu    
+endmenu
+

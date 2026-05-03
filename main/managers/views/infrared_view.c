@@ -3184,10 +3184,12 @@ void create_easy_learn_popup(void)
 #ifdef CONFIG_SPIRAM
     if (ir_learning_task_stack) free(ir_learning_task_stack);
     if (ir_learning_task_tcb) free(ir_learning_task_tcb);
-    ir_learning_task_stack = (StackType_t *)heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    const uint32_t ir_learning_stack_bytes = 8192;
+    const uint32_t ir_learning_stack_words = (ir_learning_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+    ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ir_learning_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (ir_learning_task_stack && ir_learning_task_tcb) {
-        ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", 8192, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);
+        ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", ir_learning_stack_words, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);
     } else {
         if (ir_learning_task_stack) free(ir_learning_task_stack);
         if (ir_learning_task_tcb) free(ir_learning_task_tcb);
@@ -3543,10 +3545,12 @@ static void learn_remote_event_cb(lv_event_t *e) {
 #ifdef CONFIG_SPIRAM
         if (ir_learning_task_stack) free(ir_learning_task_stack);
         if (ir_learning_task_tcb) free(ir_learning_task_tcb);
-        ir_learning_task_stack = (StackType_t *)heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        const uint32_t ir_learning_stack_bytes = 8192;
+        const uint32_t ir_learning_stack_words = (ir_learning_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+        ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         ir_learning_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (ir_learning_task_stack && ir_learning_task_tcb) {
-            ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", 8192, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);
+            ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", ir_learning_stack_words, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);
         } else {
             if (ir_learning_task_stack) free(ir_learning_task_stack);
             if (ir_learning_task_tcb) free(ir_learning_task_tcb);

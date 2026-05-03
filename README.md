@@ -9,7 +9,7 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 
 ## Get Started
 
-1. **Flash your device:** [flasher.ghostesp.net](https://flasher.ghostesp.net)
+1. **Flash your device:** [ghostesp.net/flasher](https://ghostesp.net/flasher)
 
 1. **Community & support:** [Discord](https://discord.gg/5cyNmUMgwh)
 
@@ -124,6 +124,7 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 - Network printer output (`powerprinter`)
 - RGB LED modes
 - Timezone configuration (`timezone`)
+- Camera motion detection with SD card snapshot capture and Discord webhook alerts (XIAO S3 Sense)
 - Rave mode (display builds)
 
 </details>
@@ -212,6 +213,12 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 - Minion
 
 - Sunton 7″
+
+- Seeed XIAO ESP32-S3 Sense
+
+- Seeed XIAO ESP32-S3
+
+- Seeed XIAO ESP32-C5
 </details>
 
 ---

@@ -1239,7 +1239,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #ifdef CONFIG_USE_TDISPLAY_S3
   ESP_LOGI(TAG, "Initializing I2C for touch functionality");
   esp_err_t i2c_ret = i2c_master_get_bus_handle(I2C_NUM_0, &s_touch_i2c_bus);
-  if (i2c_ret == ESP_ERR_NOT_FOUND) {
+  if (i2c_ret == ESP_ERR_NOT_FOUND || i2c_ret == ESP_ERR_INVALID_STATE) {
     i2c_master_bus_config_t i2c_config = {
       .i2c_port = I2C_NUM_0,
       .sda_io_num = 18,
