@@ -7,6 +7,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
 #include "managers/status_display_manager.h"
+#include "core/i18n.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -1419,7 +1420,7 @@ void infrared_view_create(void) {
     lv_obj_set_style_shadow_width(ir_back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ir_back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(ir_back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
     lv_obj_set_style_text_color(back_label, ir_ctrl_text, 0);
     lv_obj_center(back_label);
 
@@ -2504,8 +2505,8 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         lv_coord_t left_x = edge + (btn_w / 2);
         lv_coord_t right_x = -(edge + (btn_w / 2));
 
-        cancel_btn = popup_add_styled_button(popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -10, NULL, config->cancel_cb, NULL);
-        skip_btn = popup_add_styled_button(popup, "Skip", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -10, NULL, config->skip_cb, NULL);
+        cancel_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -10, NULL, config->cancel_cb, NULL);
+        skip_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_SKIP), btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -10, NULL, config->skip_cb, NULL);
         if (type == LEARNING_POPUP_EASY_LEARN) {
             easy_learn_cancel_btn = cancel_btn;
             easy_learn_skip_btn = skip_btn;
@@ -2514,7 +2515,7 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         lv_coord_t btn_w = pw - (2 * edge);
         if (btn_w < 80) btn_w = 80;
         if (btn_w > 160) btn_w = 160;
-        cancel_btn = popup_add_styled_button(popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_MID, 0, -10, NULL, config->cancel_cb, NULL);
+        cancel_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_MID, 0, -10, NULL, config->cancel_cb, NULL);
         if (type == LEARNING_POPUP_STANDARD) {
             learning_cancel_btn = cancel_btn;
         }
@@ -3240,8 +3241,8 @@ void create_signal_preview_popup(void)
     lv_coord_t left_x = edge_btn + (btn_w / 2);
     lv_coord_t right_x = -(edge_btn + (btn_w / 2));
 
-    save_btn = popup_add_styled_button(signal_preview_popup, "Save", btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -5, NULL, signal_preview_save_cb, NULL);
-    cancel_btn = popup_add_styled_button(signal_preview_popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
+    save_btn = popup_add_styled_button(signal_preview_popup, i18n_text(I18N_KEY_SAVE), btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -5, NULL, signal_preview_save_cb, NULL);
+    cancel_btn = popup_add_styled_button(signal_preview_popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
     popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);

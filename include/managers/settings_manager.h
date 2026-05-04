@@ -134,6 +134,7 @@ typedef enum {
     SETTING_MENU_ROUNDED,
     SETTING_EXPORT_SETTINGS_SD,
     SETTING_IMPORT_SETTINGS_SD,
+    SETTING_LANGUAGE,
 } SettingsType;
 
 
@@ -266,6 +267,7 @@ typedef struct {
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
     uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
     bool menu_rounded;              // Rounded corners on menu items
+    uint8_t ui_language;            // i18n_language_t value
 } FSettings;
 
 // Function declarations
@@ -430,6 +432,9 @@ bool settings_get_encoder_invert_direction(const FSettings *settings);
 
 void settings_set_auto_save_scans(FSettings *settings, bool enabled);
 bool settings_get_auto_save_scans(const FSettings *settings);
+
+void settings_set_ui_language(FSettings *settings, uint8_t lang);
+uint8_t settings_get_ui_language(const FSettings *settings);
 
 // Setup wizard settings
 void settings_set_setup_complete(FSettings *settings, bool complete);

@@ -1,0 +1,85 @@
+#ifndef I18N_H
+#define I18N_H
+
+#include <stdint.h>
+
+typedef enum {
+    I18N_LANG_EN = 0,
+    I18N_LANG_HI,
+    I18N_LANG_COUNT
+} i18n_language_t;
+
+typedef enum {
+    I18N_KEY_BACK,
+    I18N_KEY_SETTINGS,
+    I18N_KEY_APPS,
+    I18N_KEY_CLOCK,
+    I18N_KEY_START,
+    I18N_KEY_SKIP,
+    I18N_KEY_FINISH,
+    I18N_KEY_TAP_TO_SELECT,
+    I18N_KEY_SELECT_REGION,
+    I18N_KEY_WELCOME_TITLE,
+    I18N_KEY_WELCOME_DESC,
+    I18N_KEY_DONE,
+    I18N_KEY_APPS_FOUND,
+    I18N_KEY_STA_FOUND,
+    I18N_KEY_SCAN_ALL_RESULTS,
+    I18N_KEY_SELECT_APS,
+    I18N_KEY_SELECT_STATIONS,
+    I18N_KEY_AP_DETAILS,
+    I18N_KEY_STA_DETAILS,
+    I18N_KEY_DISPLAY,
+    I18N_KEY_APPEARANCE,
+    I18N_KEY_LED_RGB,
+    I18N_KEY_NAVIGATION,
+    I18N_KEY_STATUS_DISPLAY,
+    I18N_KEY_NETWORK,
+    I18N_KEY_POWER_SYSTEM,
+    I18N_KEY_WIGLE,
+    I18N_KEY_MIC_RGB,
+    I18N_KEY_GHOSTLINK,
+    I18N_KEY_LANGUAGE,
+    I18N_KEY_WIFI,
+    I18N_KEY_BLE,
+    I18N_KEY_GPS,
+    I18N_KEY_INFRARED,
+    I18N_KEY_NFC,
+    I18N_KEY_NRF24,
+    I18N_KEY_SUBGHZ,
+    I18N_KEY_BADUSB,
+    I18N_KEY_OK,
+    I18N_KEY_CANCEL,
+    I18N_KEY_CLOSE,
+    I18N_KEY_SAVE,
+    I18N_KEY_STOP,
+    I18N_KEY_NEXT,
+    I18N_KEY_MORE,
+    I18N_KEY_DELETE,
+    I18N_KEY_SCROLL,
+    I18N_KEY_PAGE,
+    I18N_KEY_EXIT,
+    I18N_KEY_RENAME,
+    I18N_KEY_LESS,
+    I18N_KEY_WAIT,
+    I18N_KEY_WRITE,
+    I18N_KEY_UPLOAD,
+    I18N_KEY_WIFI_MENU,
+    I18N_KEY_BLE_MENU,
+    I18N_KEY_GPS_MENU,
+    I18N_KEY_COMPASS,
+    I18N_KEY_INFRARED_MENU,
+    I18N_KEY_NFC_MENU,
+    I18N_KEY_NRF24_MENU,
+    I18N_KEY_APPS_MENU,
+    I18N_KEY_ACCELEROMETER,
+    I18N_KEY_COUNT
+} i18n_key_t;
+
+void i18n_set_language(i18n_language_t lang);
+i18n_language_t i18n_get_language(void);
+const char *i18n_text(i18n_key_t key);
+const char *i18n_text_lang(i18n_language_t lang, i18n_key_t key);
+const char *i18n_language_name(i18n_language_t lang);
+
+#endif

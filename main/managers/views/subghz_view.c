@@ -4,6 +4,7 @@
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
 #include "core/esp_comm_manager.h"
+#include "core/i18n.h"
 #include "gui/lvgl_safe.h"
 #include "gui/options_view.h"
 #include "gui/popup.h"
@@ -456,19 +457,19 @@ static void subghz_capture_popup_update_buttons(void) {
         lv_obj_t *lbl = lv_obj_get_child(s_capture_save_btn, 0);
         if (lbl && lv_obj_is_valid(lbl)) {
             if (arming_remote) {
-                lv_label_set_text(lbl, "Wait");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_WAIT));
                 lv_obj_add_state(s_capture_save_btn, LV_STATE_DISABLED);
             } else if (s_capture_ready) {
                 if (s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) {
                     if (capture_stopped_without_data) {
-                        lv_label_set_text(lbl, "Start");
+                        lv_label_set_text(lbl, i18n_text(I18N_KEY_START));
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     } else {
-                        lv_label_set_text(lbl, "Save");
+                        lv_label_set_text(lbl, i18n_text(I18N_KEY_SAVE));
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     }
                 } else {
-                    lv_label_set_text(lbl, "Save");
+                    lv_label_set_text(lbl, i18n_text(I18N_KEY_SAVE));
                     if (s_capture_buffer_valid) {
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     } else {
@@ -476,7 +477,7 @@ static void subghz_capture_popup_update_buttons(void) {
                     }
                 }
             } else {
-                lv_label_set_text(lbl, "Stop");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_STOP));
                 lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
             }
         }
@@ -489,7 +490,7 @@ static void subghz_capture_popup_update_buttons(void) {
                 lv_label_set_text(lbl, s_capture_freq_label);
                 lv_obj_add_state(s_capture_freq_btn, LV_STATE_DISABLED);
             } else if (s_capture_ready && s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) {
-                lv_label_set_text(lbl, "Start");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_START));
                 lv_obj_clear_state(s_capture_freq_btn, LV_STATE_DISABLED);
             } else {
                 lv_label_set_text(lbl, s_capture_freq_label);
@@ -3852,7 +3853,7 @@ void subghz_view_create(void) {
     lv_obj_set_style_shadow_width(s_back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(s_back_btn, subghz_back_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(s_back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
     lv_obj_set_style_text_color(back_label, ctrl_text_color, 0);
     lv_obj_center(back_label);
 

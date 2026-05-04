@@ -14,6 +14,7 @@
 #include "managers/views/keyboard_screen.h"
 #include "core/serial_manager.h"
 #include "core/esp_comm_manager.h"
+#include "core/i18n.h"
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
 #include "esp_log.h"
@@ -364,7 +365,7 @@ static void show_running_popup_ex(const char *script_name, bool waiting_for_usb)
 
     int btn_w = 90, btn_h = 30;
     if (LV_VER_RES <= 240) { btn_w = 80; btn_h = 28; }
-    lv_obj_t *cancel_btn = popup_add_styled_button(badusb_running_popup, "Cancel", btn_w, btn_h,
+    lv_obj_t *cancel_btn = popup_add_styled_button(badusb_running_popup, i18n_text(I18N_KEY_CANCEL), btn_w, btn_h,
                                                    LV_ALIGN_BOTTOM_MID, 0, -10, body_font,
                                                    badusb_cancel_cb, NULL);
     if (cancel_btn) {

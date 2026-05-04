@@ -1,5 +1,6 @@
 #include "managers/views/ghostchi_screen.h"
 
+#include "core/i18n.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
 #include "gui/theme_palette_api.h"
@@ -929,9 +930,9 @@ static void update_ui(lv_timer_t *timer) {
         lv_obj_set_size(s_touch_btn_left, btn_w, btn_h);
         lv_obj_set_size(s_touch_btn_mid, btn_w, btn_h);
         lv_obj_set_size(s_touch_btn_right, btn_w, btn_h);
-        lv_label_set_text(s_touch_btn_left_label, snap.running ? "STOP" : "EXIT");
-        lv_label_set_text(s_touch_btn_mid_label, snap.running ? "STOP" : "START");
-        lv_label_set_text(s_touch_btn_right_label, "PAGE");
+        lv_label_set_text(s_touch_btn_left_label, snap.running ? i18n_text(I18N_KEY_STOP) : i18n_text(I18N_KEY_EXIT));
+        lv_label_set_text(s_touch_btn_mid_label, snap.running ? i18n_text(I18N_KEY_STOP) : i18n_text(I18N_KEY_START));
+        lv_label_set_text(s_touch_btn_right_label, i18n_text(I18N_KEY_PAGE));
         lv_obj_center(s_touch_btn_left_label);
         lv_obj_center(s_touch_btn_mid_label);
         lv_obj_center(s_touch_btn_right_label);
@@ -948,9 +949,9 @@ static void update_ui(lv_timer_t *timer) {
             lv_obj_set_pos(s_encoder_btns[i], enc_btn_x + i * (enc_btn_w + enc_btn_gap), enc_btn_y);
             lv_obj_set_size(s_encoder_btns[i], enc_btn_w, enc_btn_h);
         }
-        lv_label_set_text(s_encoder_btn_labels[0], snap.running ? "STOP" : "EXIT");
-        lv_label_set_text(s_encoder_btn_labels[1], snap.running ? "STOP" : "START");
-        lv_label_set_text(s_encoder_btn_labels[2], "PAGE");
+        lv_label_set_text(s_encoder_btn_labels[0], snap.running ? i18n_text(I18N_KEY_STOP) : i18n_text(I18N_KEY_EXIT));
+        lv_label_set_text(s_encoder_btn_labels[1], snap.running ? i18n_text(I18N_KEY_STOP) : i18n_text(I18N_KEY_START));
+        lv_label_set_text(s_encoder_btn_labels[2], i18n_text(I18N_KEY_PAGE));
         lv_obj_center(s_encoder_btn_labels[0]);
         lv_obj_center(s_encoder_btn_labels[1]);
         lv_obj_center(s_encoder_btn_labels[2]);

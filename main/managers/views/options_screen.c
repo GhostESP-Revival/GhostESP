@@ -1,6 +1,7 @@
 #include "managers/views/options_screen.h"
 #include "core/serial_manager.h"
 #include "core/commandline.h"
+#include "core/i18n.h"
 #include "core/ouis.h"
 #include "managers/display_manager.h"
 #include "gui/options_view.h"
@@ -440,24 +441,45 @@ typedef struct {
     const char *condition_config;
 } SettingsCategory;
 
-static SettingsCategory settings_categories[] = {
-    {"Display",        SETTINGS_CAT_DISPLAY,       false, NULL},
-    {"Appearance",     SETTINGS_CAT_APPEARANCE,    false, NULL},
-    {"LED & RGB",      SETTINGS_CAT_LED_RGB,       false, NULL},
-    {"Navigation",     SETTINGS_CAT_NAVIGATION,    false, NULL},
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-    {"Status Display", SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
-#endif
-    {"Network",        SETTINGS_CAT_NETWORK,       false, NULL},
-    {"Power & System", SETTINGS_CAT_POWER_SYSTEM,  false, NULL},
-    {"WiGLE", SETTINGS_CAT_WIGLE, false, NULL},
+static i18n_key_t settings_category_i18n_key(SettingsCategoryId id) {
+    switch (id) {
+        case SETTINGS_CAT_DISPLAY:        return I18N_KEY_DISPLAY;
+        case SETTINGS_CAT_APPEARANCE:     return I18N_KEY_APPEARANCE;
+        case SETTINGS_CAT_LED_RGB:        return I18N_KEY_LED_RGB;
+        case SETTINGS_CAT_NAVIGATION:     return I18N_KEY_NAVIGATION;
+        case SETTINGS_CAT_STATUS_DISPLAY: return I18N_KEY_STATUS_DISPLAY;
+        case SETTINGS_CAT_NETWORK:        return I18N_KEY_NETWORK;
+        case SETTINGS_CAT_POWER_SYSTEM:   return I18N_KEY_POWER_SYSTEM;
+        case SETTINGS_CAT_WIGLE:          return I18N_KEY_WIGLE;
 #ifdef CONFIG_USE_IO_EXPANDER
-    {"IO Buttons", SETTINGS_CAT_IO_BUTTONS, true, "CONFIG_USE_IO_EXPANDER"},
+        case SETTINGS_CAT_IO_BUTTONS:     return I18N_KEY_GHOSTLINK;
 #endif
 #if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
-    {"MIC Visualizer", SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+        case SETTINGS_CAT_MIC_RGB:        return I18N_KEY_MIC_RGB;
 #endif
-    {"GhostLink", SETTINGS_CAT_GHOSTLINK, false, NULL},
+        case SETTINGS_CAT_GHOSTLINK:      return I18N_KEY_GHOSTLINK;
+        default:                          return I18N_KEY_SETTINGS;
+    }
+}
+
+static SettingsCategory settings_categories[] = {
+    {NULL,             SETTINGS_CAT_DISPLAY,       false, NULL},
+    {NULL,             SETTINGS_CAT_APPEARANCE,    false, NULL},
+    {NULL,             SETTINGS_CAT_LED_RGB,       false, NULL},
+    {NULL,             SETTINGS_CAT_NAVIGATION,    false, NULL},
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+    {NULL,             SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
+#endif
+    {NULL,             SETTINGS_CAT_NETWORK,       false, NULL},
+    {NULL,             SETTINGS_CAT_POWER_SYSTEM,  false, NULL},
+    {NULL,             SETTINGS_CAT_WIGLE,         false, NULL},
+#ifdef CONFIG_USE_IO_EXPANDER
+    {NULL,             SETTINGS_CAT_IO_BUTTONS,    true, "CONFIG_USE_IO_EXPANDER"},
+#endif
+#if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
+    {NULL,             SETTINGS_CAT_MIC_RGB,       true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+#endif
+    {NULL,             SETTINGS_CAT_GHOSTLINK,     false, NULL},
 };
 
 static int current_settings_category = -1;
@@ -772,6 +794,9 @@ static const char *idle_delay_options[] = {"Never", "5s", "10s", "30s"};
 #endif
 static const char *action_options[] = {"Press OK"};
 
+static const char *language_options[] = {"English", "Hindi"};
+#define LANGUAGE_OPTION_COUNT 2
+
 static const char *brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
 };
@@ -822,6 +847,7 @@ static SettingsItem settings_items[] = {
     {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {"Language", SETTING_LANGUAGE, language_options, LANGUAGE_OPTION_COUNT, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     
     {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, RGB_MODE_COUNT, 0, SETTINGS_CAT_LED_RGB, false, NULL},
     {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_LED_RGB, false, NULL},
@@ -1370,23 +1396,23 @@ static void touch_back_button_cb(lv_event_t *e) {
 const char *options_menu_type_to_string(EOptionsMenuType menuType) {
     switch (menuType) {
     case OT_Wifi:
-        return "Wi-Fi";
+        return i18n_text(I18N_KEY_WIFI);
     case OT_Bluetooth:
-        return "BLE";
+        return i18n_text(I18N_KEY_BLE);
     case OT_GPS:
-        return "GPS";
+        return i18n_text(I18N_KEY_GPS);
     case OT_DualComm:
-        return "GhostLink";
+        return i18n_text(I18N_KEY_GHOSTLINK);
     case OT_NRF24:
-        return "NRF24";
+        return i18n_text(I18N_KEY_NRF24);
     case OT_SubGhz:
-        return "SubGHz";
+        return i18n_text(I18N_KEY_SUBGHZ);
     case OT_Settings:
-        return "Settings";
+        return i18n_text(I18N_KEY_SETTINGS);
     case OT_IOButtonPresets:
-        return "IO Button Action";
+        return i18n_text(I18N_KEY_GHOSTLINK);
     case OT_WigleManualUpload:
-        return "WiGLE Upload";
+        return i18n_text(I18N_KEY_WIGLE);
     default:
         return "Unknown";
     }
@@ -1631,7 +1657,7 @@ void options_menu_create() {
     lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, touch_back_button_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
     lv_obj_set_style_text_color(back_label, control_text_color, 0);
     lv_obj_center(back_label);
 
@@ -1778,6 +1804,9 @@ static void load_current_settings_values(void) {
 #endif
             case SETTING_GHOSTLINK_SPLIT_VIEW:
                 settings_items[i].current_value = settings_get_ghostlink_split_view(&G_Settings) ? 1 : 0;
+                break;
+            case SETTING_LANGUAGE:
+                settings_items[i].current_value = (int)settings_get_ui_language(&G_Settings);
                 break;
             default:
                 settings_items[i].current_value = 0;
@@ -2076,7 +2105,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_add_event_cb(close_btn, wigle_help_close_cb, LV_EVENT_CLICKED, NULL);
             
             lv_obj_t *btn_label = lv_label_create(close_btn);
-            lv_label_set_text(btn_label, "Close");
+            lv_label_set_text(btn_label, i18n_text(I18N_KEY_CLOSE));
             lv_obj_center(btn_label);
             lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
             
@@ -2150,6 +2179,11 @@ static void apply_setting_change(int setting_index, int new_value) {
 #endif
         case SETTING_GHOSTLINK_SPLIT_VIEW:
             settings_set_ghostlink_split_view(&G_Settings, new_value == 1);
+            break;
+        case SETTING_LANGUAGE:
+            settings_set_ui_language(&G_Settings, (uint8_t)new_value);
+            i18n_set_language((i18n_language_t)new_value);
+            rebuild_current_menu();
             break;
     }
     
@@ -5365,7 +5399,7 @@ static void wigle_stats_result_async(void *data) {
         lv_label_set_text(wigle_stats_body_label, message);
         if (wigle_stats_close_btn && lv_obj_is_valid(wigle_stats_close_btn)) {
             lv_obj_t *lbl = lv_obj_get_child(wigle_stats_close_btn, 0);
-            if (lbl) lv_label_set_text(lbl, "Close");
+            if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_CLOSE));
         }
     }
     free(data);
@@ -7246,12 +7280,12 @@ static void wigle_show_csv_details_popup(const char *filename) {
     lv_label_set_text(wigle_manual_info_label, details);
 
     wigle_manual_upload_btn = popup_add_styled_button(
-        wigle_manual_popup, "Upload", 90, 32,
+        wigle_manual_popup, i18n_text(I18N_KEY_UPLOAD), 90, 32,
         LV_ALIGN_BOTTOM_LEFT, 10, -8,
         &lv_font_montserrat_12,
         wigle_manual_popup_upload_cb, NULL);
     wigle_manual_close_btn = popup_add_styled_button(
-        wigle_manual_popup, "Cancel", 90, 32,
+        wigle_manual_popup, i18n_text(I18N_KEY_CANCEL), 90, 32,
         LV_ALIGN_BOTTOM_RIGHT, -10, -8,
         &lv_font_montserrat_12,
         wigle_manual_popup_close_cb, NULL);
@@ -7549,28 +7583,28 @@ static void rebuild_current_menu(void) {
         if (current_settings_category >= 0) {
             int cat_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
             if (current_settings_category < cat_count) {
-                options_view_set_title(g_options_view, settings_categories[current_settings_category].name);
+                options_view_set_title(g_options_view, i18n_text(settings_category_i18n_key(settings_categories[current_settings_category].id)));
             } else {
-                options_view_set_title(g_options_view, "Settings");
+                options_view_set_title(g_options_view, i18n_text(I18N_KEY_SETTINGS));
             }
         } else {
-            options_view_set_title(g_options_view, "Settings");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_SETTINGS));
         }
     } else {
         if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_LIST) {
-            options_view_set_title(g_options_view, "APs Found");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_APPS_FOUND));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_DETAILS) {
-            options_view_set_title(g_options_view, "AP Details");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_AP_DETAILS));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_LIST) {
-            options_view_set_title(g_options_view, "Stations Found");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_STA_FOUND));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_DETAILS) {
-            options_view_set_title(g_options_view, "Station Details");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_STA_DETAILS));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
-            options_view_set_title(g_options_view, "Scan All Results");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_SCAN_ALL_RESULTS));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_MULTI_SELECT) {
-            options_view_set_title(g_options_view, "Select APs");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_SELECT_APS));
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_MULTI_SELECT) {
-            options_view_set_title(g_options_view, "Select Stations");
+            options_view_set_title(g_options_view, i18n_text(I18N_KEY_SELECT_STATIONS));
         } else {
             options_view_set_title(g_options_view, options_menu_type_to_string(SelectedMenuType));
         }
@@ -7882,7 +7916,7 @@ static void menu_builder_cb(lv_timer_t *t)
                 int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
                 while (build_item_index < category_count && built_this_tick < BATCH) {
                     SettingsCategory *cat = &settings_categories[build_item_index];
-                    lv_obj_t *btn = options_view_add_item(g_options_view, cat->name, option_event_cb, (void *)(intptr_t)build_item_index);
+                    lv_obj_t *btn = options_view_add_item(g_options_view, i18n_text(settings_category_i18n_key(cat->id)), option_event_cb, (void *)(intptr_t)build_item_index);
                     if (!btn) break;
                     lv_obj_set_user_data(btn, (void *)(intptr_t)build_item_index);
                     lv_obj_set_height(btn, button_height_global * 1.2);

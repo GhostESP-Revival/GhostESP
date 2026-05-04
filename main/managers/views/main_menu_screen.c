@@ -1,4 +1,5 @@
 #include "managers/views/main_menu_screen.h"
+#include "core/i18n.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "lvgl.h"
@@ -899,33 +900,33 @@ static void handle_menu_item_selection(int item_index) {
             
             // Add status display messages for menu navigation
             if (strcmp(menu_actions[i].name, "WiFi") == 0) {
-                status_display_show_status("WiFi Menu");
+                status_display_show_status(i18n_text(I18N_KEY_WIFI_MENU));
             } else if (strcmp(menu_actions[i].name, "BLE") == 0) {
-                status_display_show_status("BLE Menu");
+                status_display_show_status(i18n_text(I18N_KEY_BLE_MENU));
             } else if (strcmp(menu_actions[i].name, "GPS") == 0) {
-                status_display_show_status("GPS Menu");
+                status_display_show_status(i18n_text(I18N_KEY_GPS_MENU));
             } else if (strcmp(menu_actions[i].name, "Compass") == 0) {
-                status_display_show_status("Compass");
+                status_display_show_status(i18n_text(I18N_KEY_COMPASS));
             } else if (strcmp(menu_actions[i].name, "Infrared") == 0) {
-                status_display_show_status("Infrared Menu");
+                status_display_show_status(i18n_text(I18N_KEY_INFRARED_MENU));
             } else if (strcmp(menu_actions[i].name, "NFC") == 0) {
-                status_display_show_status("NFC Menu");
+                status_display_show_status(i18n_text(I18N_KEY_NFC_MENU));
             } else if (strcmp(menu_actions[i].name, "NRF24") == 0) {
-                status_display_show_status("NRF24 Menu");
+                status_display_show_status(i18n_text(I18N_KEY_NRF24_MENU));
             } else if (strcmp(menu_actions[i].name, "SubGHz") == 0) {
-                status_display_show_status("SubGHz");
+                status_display_show_status(i18n_text(I18N_KEY_SUBGHZ));
             } else if (strcmp(menu_actions[i].name, "Apps") == 0) {
-                status_display_show_status("Apps Menu");
+                status_display_show_status(i18n_text(I18N_KEY_APPS_MENU));
             } else if (strcmp(menu_actions[i].name, "Clock") == 0) {
-                status_display_show_status("Clock");
+                status_display_show_status(i18n_text(I18N_KEY_CLOCK));
             } else if (strcmp(menu_actions[i].name, "Settings") == 0) {
-                status_display_show_status("Settings");
+                status_display_show_status(i18n_text(I18N_KEY_SETTINGS));
             } else if (strcmp(menu_actions[i].name, "GhostLink") == 0) {
-                status_display_show_status("GhostLink");
+                status_display_show_status(i18n_text(I18N_KEY_GHOSTLINK));
             } else if (strcmp(menu_actions[i].name, "BadUSB") == 0) {
-                status_display_show_status("BadUSB");
+                status_display_show_status(i18n_text(I18N_KEY_BADUSB));
             } else if (strcmp(menu_actions[i].name, "Accelerometer") == 0) {
-                status_display_show_status("Accelerometer");
+                status_display_show_status(i18n_text(I18N_KEY_ACCELEROMETER));
             }
 
             

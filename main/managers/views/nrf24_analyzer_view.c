@@ -11,6 +11,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
+#include "core/i18n.h"
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -297,7 +298,7 @@ static void nrf24_toggle_pause(void) {
         lv_label_set_text_fmt(s_status_label, "DBG: %s", s_debug_scene_names[s_debug_scene]);
     }
     if (s_toggle_label && lv_obj_is_valid(s_toggle_label)) {
-        lv_label_set_text(s_toggle_label, "Next");
+        lv_label_set_text(s_toggle_label, i18n_text(I18N_KEY_NEXT));
     }
     return;
 #endif

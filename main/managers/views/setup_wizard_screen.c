@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "gui/lvgl_safe.h"
+#include "core/i18n.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -217,17 +218,13 @@ static void show_welcome_screen(void) {
     int btn_y = LV_VER_RES - (USABLE_H * 18 / 100);
     
     lv_obj_t *title = lv_label_create(root);
-    lv_label_set_text(title, "Welcome to GhostESP!");
+    lv_label_set_text(title, i18n_text(I18N_KEY_WELCOME_TITLE));
     lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(title, title_font, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
 
     lv_obj_t *desc = lv_label_create(root);
-    lv_label_set_text(desc, 
-        "In this setup you can:\n"
-        "Configure AP credentials\n"
-        "Set your region\n"
-        "Customize device appearance");
+    lv_label_set_text(desc, i18n_text(I18N_KEY_WELCOME_DESC));
     lv_obj_set_style_text_color(desc, lv_color_hex(0xAAAAAA), 0);
     lv_obj_set_style_text_font(desc, body_font, 0);
     lv_obj_set_style_text_align(desc, LV_TEXT_ALIGN_CENTER, 0);
@@ -249,7 +246,7 @@ static void show_welcome_screen(void) {
     lv_obj_set_size(welcome_start_btn, btn_w, btn_h);
     lv_obj_align(welcome_start_btn, LV_ALIGN_TOP_MID, -btn_offset, btn_y);
     lv_obj_t *start_label = lv_label_create(welcome_start_btn);
-    lv_label_set_text(start_label, "Start");
+    lv_label_set_text(start_label, i18n_text(I18N_KEY_START));
     lv_obj_center(start_label);
     lv_obj_add_event_cb(welcome_start_btn, start_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
@@ -257,7 +254,7 @@ static void show_welcome_screen(void) {
     lv_obj_set_size(welcome_skip_btn, btn_w, btn_h);
     lv_obj_align(welcome_skip_btn, LV_ALIGN_TOP_MID, btn_offset, btn_y);
     lv_obj_t *skip_label = lv_label_create(welcome_skip_btn);
-    lv_label_set_text(skip_label, "Skip");
+    lv_label_set_text(skip_label, i18n_text(I18N_KEY_SKIP));
     lv_obj_center(skip_label);
     lv_obj_add_event_cb(welcome_skip_btn, skip_btn_event_cb, LV_EVENT_CLICKED, NULL);
     
@@ -347,7 +344,7 @@ static void show_option_screen(const char *title_text, const char **options, int
 
     lv_obj_t *hint = lv_label_create(root);
 #ifdef CONFIG_USE_TOUCHSCREEN
-    lv_label_set_text(hint, "Tap to select");
+    lv_label_set_text(hint, i18n_text(I18N_KEY_TAP_TO_SELECT));
 #else
     lv_label_set_text(hint, LV_SYMBOL_UP LV_SYMBOL_DOWN " OK");
 #endif
@@ -394,7 +391,7 @@ static void show_country_screen(void) {
     if (hint_bottom < 3) hint_bottom = 3;
     
     lv_obj_t *title = lv_label_create(root);
-    lv_label_set_text(title, "Select Region");
+    lv_label_set_text(title, i18n_text(I18N_KEY_SELECT_REGION));
     lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(title, title_font, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
@@ -432,7 +429,7 @@ static void show_country_screen(void) {
 
     lv_obj_t *hint = lv_label_create(root);
 #ifdef CONFIG_USE_TOUCHSCREEN
-    lv_label_set_text(hint, "Tap to select");
+    lv_label_set_text(hint, i18n_text(I18N_KEY_TAP_TO_SELECT));
 #else
     lv_label_set_text(hint, LV_SYMBOL_UP LV_SYMBOL_DOWN " OK");
 #endif
@@ -455,7 +452,9 @@ static void show_complete_screen(void) {
     int btn_bottom = USABLE_H * 5 / 100;
     
     lv_obj_t *title = lv_label_create(root);
-    lv_label_set_text(title, LV_SYMBOL_OK " Done!");
+    char done_title[32];
+    snprintf(done_title, sizeof(done_title), LV_SYMBOL_OK " %s", i18n_text(I18N_KEY_DONE));
+    lv_label_set_text(title, done_title);
     lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(title, title_font, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
@@ -506,7 +505,7 @@ static void show_complete_screen(void) {
     lv_obj_align(finish_btn, LV_ALIGN_BOTTOM_MID, 0, -btn_bottom);
     lv_obj_set_style_bg_color(finish_btn, lv_color_hex(0xFFFFFF), 0);
     lv_obj_t *finish_label = lv_label_create(finish_btn);
-    lv_label_set_text(finish_label, "Finish");
+    lv_label_set_text(finish_label, i18n_text(I18N_KEY_FINISH));
     lv_obj_set_style_text_color(finish_label, lv_color_hex(0x000000), 0);
     lv_obj_center(finish_label);
     lv_obj_add_event_cb(finish_btn, finish_btn_event_cb, LV_EVENT_CLICKED, NULL);

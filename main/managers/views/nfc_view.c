@@ -6,6 +6,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
 #include "managers/status_display_manager.h"
+#include "core/i18n.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include "managers/views/error_popup.h"
@@ -243,7 +244,7 @@ static bool has_extra_details(const char *text) {
 static void nfc_reset_more_button_label(void) {
     if (nfc_scan_more_btn && lv_obj_is_valid(nfc_scan_more_btn)) {
         lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
-        if (lbl) lv_label_set_text(lbl, "More");
+        if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_MORE));
     }
     nfc_skip_label_applied = false;
     nfc_details_view_mode = 0;
@@ -698,13 +699,15 @@ static void nfc_set_details_async(void *ptr) {
     // Revert label back to More after bruteforce completes
     if (nfc_scan_more_btn && lv_obj_is_valid(nfc_scan_more_btn)) {
         lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
-        if (lbl) lv_label_set_text(lbl, "More");
+        if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_MORE));
         lv_obj_clear_state(nfc_scan_more_btn, LV_STATE_DISABLED);
     }
     // don't stomp the title here; let scan/progress or details phases set it to avoid flicker
     if (!nfc_details_visible) {
         if (nfc_type_label && lv_obj_is_valid(nfc_type_label)) {
-            lv_label_set_text(nfc_type_label, "Scan complete - press More");
+            char msg[48];
+            snprintf(msg, sizeof(msg), "Scan complete - press %s", i18n_text(I18N_KEY_MORE));
+            lv_label_set_text(nfc_type_label, msg);
         }
     }
     // If already showing details, update label
@@ -725,7 +728,7 @@ static void nfc_set_details_async(void *ptr) {
         lv_obj_clear_flag(nfc_scan_more_btn, LV_OBJ_FLAG_HIDDEN);
         nfc_more_visible = true;
         lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
-        if (lbl) lv_label_set_text(lbl, "More");
+        if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_MORE));
         update_nfc_buttons_layout();
         update_nfc_popup_selection();
     }
@@ -902,7 +905,7 @@ static void nfc_refresh_cu_details_from_cache(void) {
             lv_obj_clear_flag(nfc_scan_more_btn, LV_OBJ_FLAG_HIDDEN);
             nfc_more_visible = true;
             lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
-            if (lbl) lv_label_set_text(lbl, "More");
+            if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_MORE));
             lv_obj_clear_state(nfc_scan_more_btn, LV_STATE_DISABLED);
         }
 
@@ -911,7 +914,9 @@ static void nfc_refresh_cu_details_from_cache(void) {
             lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
         }
         if (!nfc_details_visible && nfc_type_label && lv_obj_is_valid(nfc_type_label)) {
-            lv_label_set_text(nfc_type_label, "Scan complete - press More");
+            char msg[48];
+            snprintf(msg, sizeof(msg), "Scan complete - press %s", i18n_text(I18N_KEY_MORE));
+            lv_label_set_text(nfc_type_label, msg);
         }
 
         // Refresh layout/selection now that button set has changed
@@ -2104,18 +2109,18 @@ static void create_nfc_scan_popup(void) {
     // Cancel button
     int btn_w = 90, btn_h = 34;
     if (LV_VER_RES <= 240) { btn_w = 80; btn_h = 30; }
-    nfc_scan_cancel_btn = popup_add_styled_button(nfc_scan_popup, "Cancel", btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, 10, -8, body_font, nfc_scan_cancel_cb, NULL);
+    nfc_scan_cancel_btn = popup_add_styled_button(nfc_scan_popup, i18n_text(I18N_KEY_CANCEL), btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, 10, -8, body_font, nfc_scan_cancel_cb, NULL);
 
     // More button (hidden until a tag is scanned)
-    nfc_scan_more_btn = popup_add_styled_button(nfc_scan_popup, "More", btn_w, btn_h, LV_ALIGN_BOTTOM_MID, 0, -8, body_font, nfc_scan_more_cb, NULL);
+    nfc_scan_more_btn = popup_add_styled_button(nfc_scan_popup, i18n_text(I18N_KEY_MORE), btn_w, btn_h, LV_ALIGN_BOTTOM_MID, 0, -8, body_font, nfc_scan_more_cb, NULL);
     if (nfc_scan_more_btn) lv_obj_add_flag(nfc_scan_more_btn, LV_OBJ_FLAG_HIDDEN);
 
     // Save button (hidden until a tag is scanned)
-    nfc_scan_save_btn = popup_add_styled_button(nfc_scan_popup, "Save", btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_scan_save_cb, NULL);
+    nfc_scan_save_btn = popup_add_styled_button(nfc_scan_popup, i18n_text(I18N_KEY_SAVE), btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_scan_save_cb, NULL);
     if (nfc_scan_save_btn) lv_obj_add_flag(nfc_scan_save_btn, LV_OBJ_FLAG_HIDDEN);
 
     // Scroll button (hidden until Parsed view)
-    nfc_scan_scroll_btn = popup_add_styled_button(nfc_scan_popup, "Scroll", btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_scan_scroll_cb, NULL);
+    nfc_scan_scroll_btn = popup_add_styled_button(nfc_scan_popup, i18n_text(I18N_KEY_SCROLL), btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_scan_scroll_cb, NULL);
     if (nfc_scan_scroll_btn) lv_obj_add_flag(nfc_scan_scroll_btn, LV_OBJ_FLAG_HIDDEN);
 
     // Initial state: only cancel visible, centered
@@ -2278,19 +2283,19 @@ static void saved_update_button_labels(void) {
         lv_obj_t *lbl = lv_obj_get_child(saved_close_btn, 0);
         if (lbl) {
             if (!saved_has_extra_details) {
-                lv_label_set_text(lbl, "Cancel");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_CANCEL));
             } else {
-                lv_label_set_text(lbl, saved_details_parsed_view ? "Close" : "More");
+                lv_label_set_text(lbl, saved_details_parsed_view ? i18n_text(I18N_KEY_CLOSE) : i18n_text(I18N_KEY_MORE));
             }
         }
     }
     if (saved_rename_btn && lv_obj_is_valid(saved_rename_btn)) {
         lv_obj_t *lbl = lv_obj_get_child(saved_rename_btn, 0);
-        if (lbl) lv_label_set_text(lbl, saved_details_parsed_view ? "Less" : "Rename");
+        if (lbl) lv_label_set_text(lbl, saved_details_parsed_view ? i18n_text(I18N_KEY_LESS) : i18n_text(I18N_KEY_RENAME));
     }
     if (saved_delete_btn && lv_obj_is_valid(saved_delete_btn)) {
         lv_obj_t *lbl = lv_obj_get_child(saved_delete_btn, 0);
-        if (lbl) lv_label_set_text(lbl, saved_details_parsed_view ? "Scroll" : "Delete");
+        if (lbl) lv_label_set_text(lbl, saved_details_parsed_view ? i18n_text(I18N_KEY_SCROLL) : i18n_text(I18N_KEY_DELETE));
     }
 }
 
@@ -2555,7 +2560,7 @@ static void nfc_show_details_view(bool show) {
         }
         if (nfc_scan_more_btn && lv_obj_is_valid(nfc_scan_more_btn)) {
             lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
-            if (lbl) lv_label_set_text(lbl, "More");
+            if (lbl) lv_label_set_text(lbl, i18n_text(I18N_KEY_MORE));
         }
         nfc_details_visible = false;
         nfc_popup_selected = 0; // focus Cancel
@@ -3669,9 +3674,9 @@ static void create_nfc_write_popup(const char *path) {
     int btn_w = 90, btn_h = 34;
     if (LV_HOR_RES <= 240) { btn_w = 80; btn_h = 30; }
 
-    nfc_write_cancel_btn = popup_add_styled_button(nfc_write_popup, "Cancel", btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, 10, -8, body_font, nfc_write_cancel_cb, NULL);
+    nfc_write_cancel_btn = popup_add_styled_button(nfc_write_popup, i18n_text(I18N_KEY_CANCEL), btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, 10, -8, body_font, nfc_write_cancel_cb, NULL);
 
-    nfc_write_go_btn = popup_add_styled_button(nfc_write_popup, "Write", btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_write_go_cb, NULL);
+    nfc_write_go_btn = popup_add_styled_button(nfc_write_popup, i18n_text(I18N_KEY_WRITE), btn_w, btn_h, LV_ALIGN_BOTTOM_RIGHT, -10, -8, body_font, nfc_write_go_cb, NULL);
     if (!g_write_image_valid && nfc_write_go_btn) lv_obj_add_state(nfc_write_go_btn, LV_STATE_DISABLED);
 
     nfc_write_popup_selected = 0;
@@ -4130,7 +4135,7 @@ void nfc_view_create(void) {
     lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
     lv_obj_set_style_text_color(back_label, ctrl_text, 0);
     lv_obj_center(back_label);
 

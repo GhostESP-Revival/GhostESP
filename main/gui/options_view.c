@@ -4,6 +4,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
+#include "core/i18n.h"
 #include "lvgl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -216,7 +217,9 @@ void options_view_add_items(options_view_t *ov, const char **labels, lv_event_cb
 }
 
 lv_obj_t *options_view_add_back_row(options_view_t *ov, lv_event_cb_t on_click, void *user_data) {
-    return options_view_add_item(ov, LV_SYMBOL_LEFT " Back", on_click, user_data);
+    char label[32];
+    snprintf(label, sizeof(label), LV_SYMBOL_LEFT " %s", i18n_text(I18N_KEY_BACK));
+    return options_view_add_item(ov, label, on_click, user_data);
 }
 
 void options_view_trigger_wipe(options_view_t *ov) {
