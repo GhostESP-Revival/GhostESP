@@ -2,6 +2,8 @@
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "lvgl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -13,26 +15,20 @@ uint32_t theme_palette_get_accent(uint8_t theme);
 
 struct scan_status_t {
     lv_obj_t *container;
+    lv_obj_t *card;
+    lv_obj_t *arc;
     lv_obj_t *label;
     lv_obj_t *progress_label;
     lv_timer_t *anim_timer;
-    int anim_dots;
-    char base_message[128];
+    uint16_t arc_angle;
     bool active;
 };
 
-static void anim_timer_cb(lv_timer_t *timer) {
+static void arc_rotate_cb(lv_timer_t *timer) {
     scan_status_t *ss = (scan_status_t *)timer->user_data;
-    if (!ss || !ss->active || !ss->label) return;
-    
-    ss->anim_dots = (ss->anim_dots + 1) % 4;
-    
-    char buf[160];
-    strcpy(buf, ss->base_message);
-    for (int i = 0; i < ss->anim_dots; i++) {
-        strcat(buf, ".");
-    }
-    lv_label_set_text(ss->label, buf);
+    if (!ss || !ss->active || !ss->arc) return;
+    ss->arc_angle = (ss->arc_angle + 8) % 360;
+    lv_arc_set_rotation(ss->arc, ss->arc_angle);
 }
 
 static lv_coord_t get_screen_height(void) {
@@ -59,13 +55,15 @@ scan_status_t *scan_status_create(const char *message) {
     
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
     
     lv_obj_t *parent = lv_layer_top();
     ss->container = lv_obj_create(parent);
     lv_obj_set_size(ss->container, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_pos(ss->container, 0, 20);
-    lv_obj_set_height(ss->container, LV_VER_RES - 20);
+    lv_obj_set_pos(ss->container, 0, GUI_STATUS_BAR_H);
+    lv_obj_set_height(ss->container, LV_VER_RES - GUI_STATUS_BAR_H);
     lv_obj_set_style_bg_color(ss->container, bg, 0);
     lv_obj_set_style_bg_opa(ss->container, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ss->container, 0, 0);
@@ -76,54 +74,79 @@ scan_status_t *scan_status_create(const char *message) {
     lv_obj_add_flag(ss->container, LV_OBJ_FLAG_CLICKABLE);
     
     display_manager_add_status_bar("Scanning");
-    
+
+    int container_h = LV_VER_RES - GUI_STATUS_BAR_H;
+    int card_w = LV_MIN(LV_HOR_RES * 80 / 100, 240);
+    int card_h = LV_MIN(container_h * 70 / 100, 280);
+
+    ss->card = lv_obj_create(ss->container);
+    lv_obj_set_size(ss->card, card_w, card_h);
+    lv_obj_align(ss->card, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(ss->card, bg, 0);
+    lv_obj_set_style_bg_opa(ss->card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ss->card, 0, 0);
+    lv_obj_set_style_radius(ss->card, GUI_RADIUS_LG, 0);
+    lv_obj_set_style_shadow_width(ss->card, 0, 0);
+    lv_obj_set_style_pad_left(ss->card, GUI_GRID * 3, 0);
+    lv_obj_set_style_pad_right(ss->card, GUI_GRID * 3, 0);
+    lv_obj_set_style_pad_top(ss->card, GUI_GRID * 4, 0);
+    lv_obj_set_style_pad_bottom(ss->card, GUI_GRID * 4, 0);
+    lv_obj_set_flex_flow(ss->card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ss->card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(ss->card, GUI_GRID * 2, 0);
+    lv_obj_clear_flag(ss->card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_clip_corner(ss->card, false, 0);
+
+    int arc_size = LV_MIN(card_w, card_h) * 40 / 100;
+    if (arc_size > 56) arc_size = 56;
+    if (arc_size < 28) arc_size = 28;
+
+    ss->arc = lv_arc_create(ss->card);
+    lv_obj_set_size(ss->arc, arc_size, arc_size);
+    lv_arc_set_bg_angles(ss->arc, 0, 360);
+    lv_arc_set_angles(ss->arc, 0, 270);
+    lv_arc_set_rotation(ss->arc, 0);
+    lv_obj_set_style_arc_color(ss->arc, accent, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(ss->arc, 3, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(ss->arc, true, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ss->arc, bg, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ss->arc, 2, LV_PART_MAIN);
+    lv_obj_remove_style(ss->arc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(ss->arc, LV_OBJ_FLAG_CLICKABLE);
+
     const lv_font_t *font = get_font_for_screen();
+    const char *msg = message ? message : "Scanning";
     
-    ss->label = lv_label_create(ss->container);
+    ss->label = lv_label_create(ss->card);
     lv_obj_set_style_text_font(ss->label, font, 0);
     lv_obj_set_style_text_color(ss->label, text, 0);
-    lv_obj_set_width(ss->label, LV_PCT(100));
+    lv_obj_set_width(ss->label, card_w - GUI_GRID * 6);
     lv_label_set_long_mode(ss->label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(ss->label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ss->label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(ss->label, msg);
     
-    if (message) {
-        strncpy(ss->base_message, message, sizeof(ss->base_message) - 1);
-        ss->base_message[sizeof(ss->base_message) - 1] = '\0';
-    } else {
-        strcpy(ss->base_message, "Scanning");
-    }
-    
-    char buf[160];
-    strcpy(buf, ss->base_message);
-    strcat(buf, "...");
-    lv_label_set_text(ss->label, buf);
-    
-    ss->progress_label = lv_label_create(ss->container);
+    ss->progress_label = lv_label_create(ss->card);
     lv_obj_set_style_text_font(ss->progress_label, get_small_font_for_screen(), 0);
     lv_obj_set_style_text_color(ss->progress_label, text, 0);
-    lv_obj_set_width(ss->progress_label, LV_PCT(100));
+    lv_obj_set_width(ss->progress_label, card_w - GUI_GRID * 6);
     lv_label_set_long_mode(ss->progress_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(ss->progress_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ss->progress_label, LV_ALIGN_CENTER, 0, 30);
     lv_label_set_text(ss->progress_label, "");
     lv_obj_add_flag(ss->progress_label, LV_OBJ_FLAG_HIDDEN);
     
-    ss->anim_dots = 3;
     ss->active = true;
     
-    ss->anim_timer = lv_timer_create(anim_timer_cb, 400, ss);
+    ss->anim_timer = lv_timer_create(arc_rotate_cb, 30, ss);
+
+    gui_anim_pop_in(ss->card);
     
     return ss;
 }
 
 void scan_status_update(scan_status_t *ss, const char *message) {
     if (!ss || !ss->active) return;
-    
-    if (message) {
-        strncpy(ss->base_message, message, sizeof(ss->base_message) - 1);
-        ss->base_message[sizeof(ss->base_message) - 1] = '\0';
-        ss->anim_dots = 0;
+    if (ss->label && message) {
+        lv_label_set_text(ss->label, message);
     }
 }
 

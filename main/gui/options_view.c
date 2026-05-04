@@ -2,6 +2,8 @@
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "lvgl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -42,7 +44,7 @@ static inline bool get_menu_rounded(void) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
-    return (ov->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    return gui_font_for_height(ov->btn_h);
 }
 
 static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface, lv_color_t *surface_alt, lv_color_t *text) {
@@ -56,8 +58,8 @@ static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface,
 static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
     if (!item || !lv_obj_is_valid(item)) return;
 
-    lv_obj_t *lbl = NULL;
     uint32_t child_cnt = lv_obj_get_child_cnt(item);
+    lv_obj_t *lbl = NULL;
     for (uint32_t i = 0; i < child_cnt; ++i) {
         lv_obj_t *child = lv_obj_get_child(item, (int32_t)i);
         if (!child) continue;
@@ -85,7 +87,6 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
             if (ud == (void *)1 || ud == (void *)2) {
                 lv_obj_set_style_text_color(child, txt, 0);
             }
-            // Show arrows on selected item (for both touch and non-touch)
             if (ud == (void *)2) {
                 lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
             }
@@ -101,13 +102,10 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
             if (ud == (void *)1 || ud == (void *)2) {
                 lv_obj_set_style_text_color(child, normal_txt, 0);
             }
-            // Handle arrow visibility for non-selected items
             if (ud == (void *)2) {
 #ifdef CONFIG_USE_TOUCHSCREEN
-                // On touch devices, always show all arrows
                 lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
 #else
-                // On non-touch devices, hide arrows on non-selected items
                 lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
 #endif
             }
@@ -122,31 +120,28 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
 
     int w = LV_HOR_RES;
     int h = LV_VER_RES;
-    int STATUS_BAR_HEIGHT = 20;
+    int status_bar_h = GUI_STATUS_BAR_H;
     bool small = (w <= 240 || h <= 240);
-    ov->btn_h = small ? 40 : 55;
+    ov->btn_h = small ? 40 : 48;
 
-    lv_color_t bg;
-    lv_color_t surface;
-    lv_color_t surface_alt;
-    lv_color_t text;
+    lv_color_t bg, surface, surface_alt, text;
     get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
 
     ov->list = lv_list_create(parent);
-    lv_obj_set_size(ov->list, w, h - STATUS_BAR_HEIGHT);
-    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
+    lv_obj_set_size(ov->list, w, h - status_bar_h);
+    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
     lv_obj_set_style_bg_color(ov->list, bg, 0);
-    lv_obj_set_style_pad_all(ov->list, 0, 0);
+    lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
     bool rounded = get_menu_rounded();
-    lv_coord_t item_radius = rounded ? 4 : 0;
+    lv_coord_t item_radius = rounded ? GUI_RADIUS_SM : 0;
 
-    if (rounded) {
-        lv_obj_set_style_pad_row(ov->list, 2, 0);
-        lv_obj_set_style_pad_hor(ov->list, 3, 0);
-    }
+    lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
 
     lv_style_init(&ov->style_item);
     lv_style_set_bg_color(&ov->style_item, surface);
@@ -187,22 +182,20 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
     lv_obj_set_height(btn, ov->btn_h);
     lv_obj_set_style_pad_top(btn, 0, 0);
     lv_obj_set_style_pad_bottom(btn, 0, 0);
-    // Ensure children (label) are vertically centered regardless of internal list layout
     lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(btn, 8, 0);
+    lv_obj_set_style_pad_left(btn, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(btn, GUI_SAFEAREA_VER, 0);
     lv_obj_add_style(btn, get_zebra_style(ov, ov->count), 0);
     if (on_click) lv_obj_add_event_cb(btn, on_click, LV_EVENT_CLICKED, user_data);
-    // Style label like options_screen
     lv_obj_t *lbl = lv_obj_get_child(btn, 0);
     if (lbl) {
         const lv_font_t *font = get_item_font(ov);
-        lv_color_t text;
-        get_theme_surface_colors(NULL, NULL, NULL, &text);
+        lv_color_t text_color;
+        get_theme_surface_colors(NULL, NULL, NULL, &text_color);
         lv_obj_set_style_text_font(lbl, font, 0);
-        // Label inherits vertical centering from parent's flex align
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_style_text_color(lbl, text, 0);
+        lv_obj_set_style_text_color(lbl, text_color, 0);
         lv_label_set_recolor(lbl, true);
         lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_user_data(lbl, (void *)1);
@@ -224,6 +217,11 @@ void options_view_add_items(options_view_t *ov, const char **labels, lv_event_cb
 
 lv_obj_t *options_view_add_back_row(options_view_t *ov, lv_event_cb_t on_click, void *user_data) {
     return options_view_add_item(ov, LV_SYMBOL_LEFT " Back", on_click, user_data);
+}
+
+void options_view_trigger_wipe(options_view_t *ov) {
+    if (!ov || ov->count <= 0) return;
+    gui_anim_list_wipe(ov->list, ov->items, ov->count, GUI_ANIM_TRANSITION);
 }
 
 void options_view_set_selected(options_view_t *ov, int index) {
@@ -281,25 +279,21 @@ void options_view_set_title(options_view_t *ov, const char *title) {
 void options_view_refresh_styles(options_view_t *ov) {
     if (!ov) return;
 
-    lv_color_t bg;
-    lv_color_t surface;
-    lv_color_t surface_alt;
-    lv_color_t text;
+    lv_color_t bg, surface, surface_alt, text;
     get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
 
     bool rounded = get_menu_rounded();
-    lv_coord_t item_radius = rounded ? 4 : 0;
+    lv_coord_t item_radius = rounded ? GUI_RADIUS_SM : 0;
 
     if (ov->list && lv_obj_is_valid(ov->list)) {
         lv_obj_set_style_bg_color(ov->list, bg, 0);
-        if (rounded) {
-            lv_obj_set_style_pad_row(ov->list, 2, 0);
-            lv_obj_set_style_pad_hor(ov->list, 3, 0);
-        } else {
-            lv_obj_set_style_pad_row(ov->list, 0, 0);
-            lv_obj_set_style_pad_hor(ov->list, 0, 0);
-        }
+        lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
+        lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
+        lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
+        lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
+        lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
     }
+
     lv_style_set_bg_color(&ov->style_item, surface);
     lv_style_set_radius(&ov->style_item, item_radius);
     lv_style_set_bg_color(&ov->style_item_alt, surface_alt);
@@ -323,7 +317,6 @@ void options_view_refresh_styles(options_view_t *ov) {
             }
         }
     }
-    // re-apply selection with current theme color
     for (int i = 0; i < ov->count; ++i) {
         apply_selected_style(ov, ov->items[i], i == ov->selected);
     }
@@ -338,8 +331,8 @@ void options_view_relayout_item(options_view_t *ov, lv_obj_t *item) {
     const lv_font_t *font = get_item_font(ov);
     lv_obj_set_style_text_font(lbl, font, 0);
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
-    lv_coord_t left_pad = 8;
-    lv_obj_set_width(lbl, lv_obj_get_width(item) - (2 * left_pad));
+    lv_coord_t left_pad = GUI_SAFEAREA_HOR;
+    lv_obj_set_width(lbl, lv_obj_get_width(item) - left_pad - GUI_SAFEAREA_VER);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, left_pad, 0);
 }
 

@@ -11,6 +11,7 @@
 #include "managers/views/error_popup.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
+#include "gui/design_tokens.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -4086,7 +4087,7 @@ void nfc_view_create(void) {
     menu_container = options_view_get_list(g_nfc_ov);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
-    const int STATUS_BAR_HEIGHT = 20;
+    const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
     const int TOUCH_BAR_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
     int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
     lv_obj_set_size(menu_container, LV_HOR_RES, container_height);

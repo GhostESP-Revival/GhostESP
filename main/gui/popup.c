@@ -3,6 +3,8 @@
 #include "esp_log.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "gui/lvgl_safe.h"
 #include <stdlib.h>
 #include <string.h>
@@ -77,13 +79,16 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 	lv_obj_align(p->container, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_style_bg_color(p->container, popup_get_surface_color(), 0);
 	lv_obj_set_style_border_color(p->container, popup_get_accent_color(), 0);
-	lv_obj_set_style_border_width(p->container, 2, 0);
-	lv_obj_set_style_radius(p->container, 10, 0);
+	lv_obj_set_style_border_width(p->container, 1, 0);
+	lv_obj_set_style_radius(p->container, GUI_RADIUS_MD, 0);
+	lv_obj_set_style_shadow_width(p->container, 12, 0);
+	lv_obj_set_style_shadow_color(p->container, lv_color_hex(0x000000), 0);
+	lv_obj_set_style_shadow_opa(p->container, LV_OPA_30, 0);
 	lv_obj_clear_flag(p->container, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_set_style_pad_top(p->container, 2, 0);
-	lv_obj_set_style_pad_bottom(p->container, 4, 0);
-	lv_obj_set_style_pad_left(p->container, DEFAULT_MARGIN, 0);
-	lv_obj_set_style_pad_right(p->container, DEFAULT_MARGIN, 0);
+	lv_obj_set_style_pad_top(p->container, GUI_SAFEAREA_VER, 0);
+	lv_obj_set_style_pad_bottom(p->container, GUI_SAFEAREA_VER, 0);
+	lv_obj_set_style_pad_left(p->container, GUI_SAFEAREA_HOR, 0);
+	lv_obj_set_style_pad_right(p->container, GUI_SAFEAREA_HOR, 0);
 
 	p->title_label = lv_label_create(p->container);
 	lv_obj_set_style_text_color(p->title_label, popup_get_text_color(), 0);
@@ -142,15 +147,18 @@ lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int he
 	lv_obj_t *container = lv_obj_create(parent);
     	lv_obj_set_size(container, width, height);
 	lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
-	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
+    	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
 	lv_obj_set_style_border_color(container, popup_get_accent_color(), 0);
-    lv_obj_set_style_border_width(container, 2, 0);
-    lv_obj_set_style_radius(container, 10, 0);
+    lv_obj_set_style_border_width(container, 1, 0);
+    lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
+    lv_obj_set_style_shadow_width(container, 12, 0);
+    lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_opa(container, LV_OPA_30, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_top(container, 2, 0);
-    lv_obj_set_style_pad_bottom(container, 4, 0);
-    lv_obj_set_style_pad_left(container, DEFAULT_MARGIN, 0);
-    lv_obj_set_style_pad_right(container, DEFAULT_MARGIN, 0);
+    lv_obj_set_style_pad_top(container, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(container, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_left(container, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(container, GUI_SAFEAREA_HOR, 0);
     lv_obj_move_foreground(container);
     return container;
 }
@@ -244,6 +252,7 @@ void popup_show(popup_t *p) {
 	if (!p || !p->container) return;
 	lv_obj_clear_flag(p->container, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_move_foreground(p->container);
+	gui_anim_pop_in(p->container);
 }
 
 void popup_hide(popup_t *p) {

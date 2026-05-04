@@ -10,6 +10,8 @@
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "managers/views/error_popup.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/options_screen.h"
@@ -206,7 +208,7 @@ static joystick_t enc_button; // we'll treat the push-switch like any other butt
 static joystick_t exit_button; // IO6 exit button
 #endif
 
-#define FADE_DURATION_MS 10
+#define FADE_DURATION_MS GUI_ANIM_TRANSITION
 #define DEFAULT_DISPLAY_TIMEOUT_MS 30000
 #define JOYSTICK_REPEAT_INITIAL_DELAY_MS 350
 #define JOYSTICK_REPEAT_INTERVAL_MS 120
@@ -695,6 +697,13 @@ void display_manager_set_low_i2c_mode(bool on) {
     g_low_i2c_mode = on;
 }
 
+static void slide_set_x(void *var, int32_t v) {
+    lv_obj_t *o = (lv_obj_t *)var;
+    lv_coord_t cur = lv_obj_get_x(o);
+    if (cur == (lv_coord_t)v) return;
+    lv_obj_set_x(o, (lv_coord_t)v);
+}
+
 void fade_out_cb(void *obj, int32_t v) {
   if (obj) {
     lv_obj_set_style_opa(obj, v, LV_PART_MAIN);
@@ -720,34 +729,63 @@ void display_manager_set_rainbow_mode(bool enable) {
     if (rainbow_timer != NULL) {
       lv_timer_del(rainbow_timer);
       rainbow_timer = NULL;
-      // Reset status bar color when leaving rainbow mode
       display_manager_update_status_bar_color();
     }
   }
 }
 
 
+static bool g_use_slide_transition = true;
+
 void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
                               View *view) {
-  lv_anim_t anim;
-  lv_anim_init(&anim);
-  lv_anim_set_var(&anim, obj);
-  lv_anim_set_values(&anim, LV_OPA_COVER, LV_OPA_TRANSP);
-  lv_anim_set_time(&anim, FADE_DURATION_MS);
-  lv_anim_set_exec_cb(&anim, (lv_anim_exec_xcb_t)fade_out_cb);
-  lv_anim_set_ready_cb(&anim, ready_cb);
-  lv_anim_set_user_data(&anim, view);
-  lv_anim_start(&anim);
+  if (g_use_slide_transition && obj && lv_obj_is_valid(obj)) {
+      lv_anim_t anim;
+      lv_anim_init(&anim);
+      lv_anim_set_var(&anim, obj);
+      lv_anim_set_values(&anim, 0, -(LV_HOR_RES / 3));
+      lv_anim_set_time(&anim, GUI_ANIM_TRANSITION);
+      lv_anim_set_path_cb(&anim, gui_anim_path_decel);
+      lv_anim_set_exec_cb(&anim, slide_set_x);
+      lv_anim_set_ready_cb(&anim, ready_cb);
+      lv_anim_set_user_data(&anim, view);
+      lv_anim_start(&anim);
+  } else {
+      lv_anim_t anim;
+      lv_anim_init(&anim);
+      lv_anim_set_var(&anim, obj);
+      lv_anim_set_values(&anim, LV_OPA_COVER, LV_OPA_TRANSP);
+      lv_anim_set_time(&anim, FADE_DURATION_MS);
+      lv_anim_set_exec_cb(&anim, (lv_anim_exec_xcb_t)fade_out_cb);
+      lv_anim_set_ready_cb(&anim, ready_cb);
+      lv_anim_set_user_data(&anim, view);
+      lv_anim_start(&anim);
+  }
 }
 
 void display_manager_fade_in(lv_obj_t *obj) {
-  lv_anim_t anim;
-  lv_anim_init(&anim);
-  lv_anim_set_var(&anim, obj);
-  lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
-  lv_anim_set_time(&anim, FADE_DURATION_MS);
-  lv_anim_set_exec_cb(&anim, (lv_anim_exec_xcb_t)fade_in_cb);
-  lv_anim_start(&anim);
+  if (!obj) return;
+  if (g_use_slide_transition) {
+      lv_obj_set_x(obj, LV_HOR_RES);
+      lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
+
+      lv_anim_t anim;
+      lv_anim_init(&anim);
+      lv_anim_set_var(&anim, obj);
+      lv_anim_set_values(&anim, LV_HOR_RES, 0);
+      lv_anim_set_time(&anim, GUI_ANIM_TRANSITION);
+      lv_anim_set_path_cb(&anim, gui_anim_path_decel);
+      lv_anim_set_exec_cb(&anim, slide_set_x);
+      lv_anim_start(&anim);
+  } else {
+      lv_anim_t anim;
+      lv_anim_init(&anim);
+      lv_anim_set_var(&anim, obj);
+      lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
+      lv_anim_set_time(&anim, FADE_DURATION_MS);
+      lv_anim_set_exec_cb(&anim, (lv_anim_exec_xcb_t)fade_in_cb);
+      lv_anim_start(&anim);
+  }
 }
 
 // recursively set radius for obj and its children (used to avoid mask draws during heavy transitions)
@@ -780,23 +818,21 @@ void fade_out_ready_cb(lv_anim_t *anim) {
     // and can starve the LVGL tick/watchdog during the fade-in.
     if (new_view->name && strcmp(new_view->name, "Keyboard Screen") == 0) {
       if (new_view->root) {
-        // make fully opaque immediately
         lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
-        // temporarily remove rounded radii to avoid expensive mask draws
         set_radius_recursive(new_view->root, 0);
       }
       if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     } else if (new_view->name && strcmp(new_view->name, "Options Screen") == 0 && SelectedMenuType == OT_DualComm) {
       if (new_view->root) {
-        // For the large Dual Comm options list, skip fade-in to keep
-        // LVGL's tick task lightweight.
         lv_obj_set_style_opa(new_view->root, LV_OPA_COVER, 0);
         set_radius_recursive(new_view->root, 0);
       }
       if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     } else {
       display_manager_fade_in(new_view->root);
-      display_manager_fade_in(status_bar);
+      if (status_bar) {
+        lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
+      }
     }
   }
 }
@@ -1029,59 +1065,53 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
         lvgl_obj_del_safe(&old_bar);
     }
     status_bar = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(status_bar, LV_HOR_RES, 20);
+  lv_obj_set_size(status_bar, LV_HOR_RES, GUI_STATUS_BAR_H);
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
   lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
   lv_obj_set_style_border_width(status_bar, 1, LV_PART_MAIN);
   lv_obj_set_style_border_color(status_bar, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
+  lv_obj_set_style_border_opa(status_bar, LV_OPA_40, LV_PART_MAIN);
   lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_radius(status_bar, 0, LV_PART_MAIN);
 
-  // create status bar left container
   lv_obj_t *left_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(left_container);
   lv_obj_set_size(left_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(left_container, LV_FLEX_FLOW_ROW);
-  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, 5, 0);
-  // fill left container
+  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_SAFEAREA_HOR, 0);
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, status_text_color, 0);
-  lv_obj_set_style_text_font(mainlabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(mainlabel, gui_font_title(), 0);
 
-  // Create Status bar right container
   lv_obj_t *right_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(right_container);
-  lv_obj_set_size(right_container, lv_pct(50), 20);
+  lv_obj_set_size(right_container, lv_pct(50), GUI_STATUS_BAR_H);
   lv_obj_set_flex_flow(right_container, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(right_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(right_container, 5, 0);
-  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -5, 0);
-  // add sd status to right container
+  lv_obj_set_style_pad_column(right_container, GUI_GRID, 0);
+  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_SAFEAREA_HOR, 0);
   sd_label = lv_label_create(right_container);
   lv_label_set_text(sd_label, LV_SYMBOL_SD_CARD);
   lv_obj_set_style_text_color(sd_label, status_text_color, 0);
-  lv_obj_set_style_text_font(sd_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(sd_label, gui_font_caption(), 0);
   lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
-  // add ble status to right container
   bt_label = lv_label_create(right_container);
   lv_label_set_text(bt_label, LV_SYMBOL_BLUETOOTH);
   lv_obj_set_style_text_color(bt_label, status_text_color, 0);
-  lv_obj_set_style_text_font(bt_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(bt_label, gui_font_caption(), 0);
   lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
-  // add wifi status to right container
   wifi_label = lv_label_create(right_container);
   lv_label_set_text(wifi_label, LV_SYMBOL_WIFI);
   lv_obj_set_style_text_color(wifi_label, status_text_color, 0);
-  lv_obj_set_style_text_font(wifi_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(wifi_label, gui_font_caption(), 0);
   lv_obj_add_flag(wifi_label, LV_OBJ_FLAG_HIDDEN);
-  // add battery status to right container
   battery_label = lv_label_create(right_container);
   lv_label_set_text(battery_label, "");
   lv_obj_set_style_text_color(battery_label, status_text_color, 0);
-  lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(battery_label, gui_font_caption(), 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
   bool HasBluetooth;

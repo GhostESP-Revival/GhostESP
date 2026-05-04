@@ -881,6 +881,10 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_WIGLE_HELP:
         case SETTING_WIGLE_MANUAL_UPLOAD:
         case SETTING_WIGLE_STATS:
+        case SETTING_LOAD_CONFIG:
+        case SETTING_EXPORT_SETTINGS_SD:
+        case SETTING_IMPORT_SETTINGS_SD:
+        case SETTING_FACTORY_RESET:
              // Actions, not saved
              return;
         case SETTING_SETUP_COMPLETE:

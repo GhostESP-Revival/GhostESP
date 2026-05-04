@@ -4,6 +4,8 @@
 #include "lvgl.h"
 #include "managers/views/app_gallery_screen.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
 #include <stdio.h>
@@ -42,7 +44,7 @@ LV_IMG_DECLARE(subghz);
 
 static const char *TAG = "MainMenu";
 
-#define ANIM_DURATION 40 // Animation duration in milliseconds HIGH: 30, LOW: 120
+#define ANIM_DURATION 60
 
 // Menu layout types
 typedef enum {
@@ -345,7 +347,9 @@ static void animate_nav_button_press(lv_obj_t *btn) {
     if (!label) return;
 
     // Set a temporary highlight color for the label
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFF00), 0);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t highlight = lv_color_hex(theme_palette_get_accent(theme));
+    lv_obj_set_style_text_color(label, highlight, 0);
 
     // Return label to original color after a short delay
     lv_timer_create(restore_label_color_cb, 80, label);
@@ -391,11 +395,12 @@ static void update_menu_item(bool slide_left) {
     int menu_index = visible_index_to_menu_index(selected_item_index, connected);
 
     lv_obj_set_style_bg_color(current_item_obj, menu_surface_color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(current_item_obj, 3, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(current_item_obj, 12, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_item_obj, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(current_item_obj, LV_OPA_40, LV_PART_MAIN);
     lv_obj_set_style_border_width(current_item_obj, 2, LV_PART_MAIN);
     lv_obj_set_style_border_color(current_item_obj, menu_items[menu_index].border_color, LV_PART_MAIN);
-    lv_obj_set_style_radius(current_item_obj, 10, LV_PART_MAIN);
+    lv_obj_set_style_radius(current_item_obj, GUI_RADIUS_LG, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_item_obj, false, 0);
     carousel_cache.border_color = menu_items[menu_index].border_color;
@@ -434,7 +439,7 @@ static void update_menu_item(bool slide_left) {
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
         lv_label_set_text(label, menu_items[menu_index].name);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(label, gui_font_caption(), 0);
         lv_obj_set_style_text_color(label, menu_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         carousel_cache.label = label;
@@ -953,8 +958,8 @@ static void create_grid_menu(void) {
     if (cols <= 0) cols = 1;
     int visible_rows = 2;
 
-    int margin = 6;
-    int status_bar_height = 20;
+    int margin = GUI_GRID;
+    int status_bar_height = GUI_STATUS_BAR_H;
     int avail_height = screen_height - status_bar_height;
     if (avail_height < 60) avail_height = screen_height;
     if (screen_width <= 240 || avail_height <= 120) {
@@ -1016,7 +1021,7 @@ static void create_grid_menu(void) {
         lv_obj_set_style_shadow_opa(grid_cards[i], LV_OPA_50, LV_PART_MAIN);
         lv_obj_set_style_border_width(grid_cards[i], 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(grid_cards[i], menu_items[menu_index].border_color, LV_PART_MAIN);
-        lv_obj_set_style_radius(grid_cards[i], 15, LV_PART_MAIN);
+        lv_obj_set_style_radius(grid_cards[i], GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(grid_cards[i], 0, LV_PART_MAIN);
 
         // Add icon (dynamic sizing to fit with label below)
@@ -1121,7 +1126,7 @@ static void create_list_menu(void) {
         lv_obj_set_style_bg_color(btn, menu_surface_color, LV_PART_MAIN);
         lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(btn, menu_items[menu_index].border_color, LV_PART_MAIN);
-        lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
+        lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, 12, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 6, LV_PART_MAIN);
@@ -1338,7 +1343,7 @@ void main_menu_create(void) {
     display_manager_add_status_bar(LV_HOR_RES > 128 ? "Main Menu" : "");
 
     // Position the menu relative to the status bar
-    int status_bar_height = 20; // set in display_manager_add_status_bar()
+    int status_bar_height = GUI_STATUS_BAR_H;
     if (menu_container) {
         if (current_layout == MENU_LAYOUT_GRID_CARDS) {
         // Position directly below the status bar with no extra gap

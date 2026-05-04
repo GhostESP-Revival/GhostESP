@@ -17,6 +17,7 @@
 #include "managers/dial_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/settings_sd_backup.h"
 #include "managers/wifi_manager.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -7170,6 +7171,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("  settings get <setting>           - Get current value of a setting\n");
         glog("  settings set <setting> <value>   - Set a setting to a value\n");
         glog("  settings reset [setting]         - Reset setting(s) to defaults\n");
+        glog("  settings backup export|import  - Full settings JSON on SD card\n");
         glog("  settings help                    - Show this help\n");
         return;
     }
@@ -7180,6 +7182,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("  settings get <setting>           - Get current value of a setting\n");
         glog("  settings set <setting> <value>   - Set a setting to a value\n");
         glog("  settings reset [setting]         - Reset setting(s) to defaults\n");
+        glog("  settings backup export|import  - Full settings JSON on SD card\n");
         glog("  settings help                    - Show this help\n");
         return;
     }
@@ -7304,6 +7307,29 @@ void handle_settings_cmd(int argc, char **argv) {
         } else {
             glog("Usage: settings reset [setting]\n");
         }
+        return;
+    }
+
+    if (strcmp(argv[1], "backup") == 0) {
+        if (argc < 3) {
+            glog("Usage: settings backup export|import\n");
+            glog("File: %s\n", SETTINGS_SD_BACKUP_PATH);
+            return;
+        }
+        if (strcmp(argv[2], "export") == 0) {
+            esp_err_t e = settings_backup_export_to_sd();
+            glog("settings backup export: %s\n", esp_err_to_name(e));
+            return;
+        }
+        if (strcmp(argv[2], "import") == 0) {
+            esp_err_t e = settings_backup_import_from_sd();
+            if (e == ESP_OK) {
+                settings_backup_apply_runtime_after_import();
+            }
+            glog("settings backup import: %s\n", esp_err_to_name(e));
+            return;
+        }
+        glog("Unknown: use export or import\n");
         return;
     }
 

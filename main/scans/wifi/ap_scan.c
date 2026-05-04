@@ -39,6 +39,30 @@
 // Module tag for logging
 static const char *TAG = "APScan";
 
+static void apply_country_for_scan(void) {
+    static const struct { const char *code; uint8_t schan; uint8_t nchan; } tbl[] = {
+        {"US", 1, 11}, {"GB", 1, 13}, {"JP", 1, 14}, {"AU", 1, 13}, {"CN", 1, 13}, {"01", 1, 11}
+    };
+    uint8_t idx = settings_get_wifi_country(&G_Settings);
+    if (idx >= sizeof(tbl) / sizeof(tbl[0])) idx = 5;
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    esp_err_t err = esp_wifi_set_country_code(tbl[idx].code, true);
+#else
+    wifi_country_t c = {
+        .cc = {tbl[idx].code[0], tbl[idx].code[1], 0},
+        .schan = tbl[idx].schan,
+        .nchan = tbl[idx].nchan,
+        .policy = WIFI_COUNTRY_POLICY_MANUAL
+    };
+    esp_err_t err = esp_wifi_set_country(&c);
+#endif
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Country re-applied: %s", tbl[idx].code);
+    } else {
+        ESP_LOGW(TAG, "Country re-apply failed: %s", esp_err_to_name(err));
+    }
+}
+
 // Scan result storage (exported for legacy compatibility)
 wifi_ap_record_t *scanned_aps = NULL;
 uint16_t ap_count = 0;
@@ -207,6 +231,7 @@ void ap_scan_start(void) {
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
             return;
         }
+        apply_country_for_scan();
     }
 
     err = esp_wifi_set_mode(WIFI_MODE_STA);
@@ -306,6 +331,7 @@ esp_err_t ap_scan_start_async(void) {
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
             return err;
         }
+        apply_country_for_scan();
     }
 
     err = esp_wifi_set_mode(WIFI_MODE_STA);

@@ -8,6 +8,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
+#include "gui/design_tokens.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
@@ -87,15 +88,119 @@ static void init_app_colors(void) {
 
 // Animation callback wrapper
 static void anim_set_x(void *obj, int32_t v) {
-    lv_obj_set_x((lv_obj_t *)obj, (lv_coord_t)v);
+    lv_obj_t *o = (lv_obj_t *)obj;
+    lv_coord_t curr = lv_obj_get_x(o);
+    if (curr == (lv_coord_t)v) return;
+    lv_obj_set_x(o, (lv_coord_t)v);
 }
 
-static void fade_out_ready_cb(lv_anim_t *a) {
-    lv_obj_del((lv_obj_t *)a->var);
+static bool colors_equal(lv_color_t a, lv_color_t b) {
+    return a.full == b.full;
 }
 
 static void anim_set_opa(void *obj, int32_t v) {
-    lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
+    lv_obj_t *o = (lv_obj_t *)obj;
+    lv_opa_t curr = lv_obj_get_style_opa(o, 0);
+    if (curr == (lv_opa_t)v) return;
+    lv_obj_set_style_opa(o, v, 0);
+}
+
+static bool apps_carousel_next_slide_left = false;
+static bool apps_is_animating = false;
+
+typedef struct {
+    lv_obj_t *card;
+    lv_obj_t *icon;
+    lv_obj_t *label;
+    const lv_img_dsc_t *icon_src;
+    const char *label_text;
+    lv_color_t border_color;
+    bool icon_recolor_enabled;
+    int item_index;
+} apps_carousel_cache_t;
+
+static apps_carousel_cache_t apps_carousel_cache = {0};
+
+static void apps_carousel_fade_in_ready_cb(lv_anim_t *a);
+
+static void apps_carousel_fade_out_ready_cb(lv_anim_t *a) {
+    lv_obj_t *obj = (lv_obj_t *)a->var;
+    int start_x = apps_carousel_next_slide_left ? LV_HOR_RES : -LV_HOR_RES;
+
+    apps_carousel_cache.card = obj;
+    int app_idx = selected_app_index;
+
+    lv_color_t new_border = app_items[app_idx].border_color;
+    bool border_changed = !colors_equal(apps_carousel_cache.border_color, new_border);
+    if (border_changed) {
+        lv_obj_set_style_border_color(obj, new_border, LV_PART_MAIN);
+        apps_carousel_cache.border_color = new_border;
+    }
+
+    lv_obj_t *icon = apps_carousel_cache.icon;
+    if (!icon) {
+        icon = lv_obj_get_child(obj, 0);
+        apps_carousel_cache.icon = icon;
+    }
+    if (icon) {
+        const lv_img_dsc_t *new_icon = app_items[app_idx].icon;
+        if (apps_carousel_cache.icon_src != new_icon) {
+            if (new_icon) {
+                lv_img_set_src(icon, new_icon);
+                lv_obj_clear_flag(icon, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(icon, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        apps_carousel_cache.icon_src = new_icon;
+
+        if (new_icon) {
+            if (!apps_carousel_cache.icon_recolor_enabled || border_changed) {
+                lv_obj_set_style_img_recolor(icon, new_border, 0);
+                lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+            }
+            apps_carousel_cache.icon_recolor_enabled = true;
+        }
+    }
+
+    lv_obj_t *label = apps_carousel_cache.label;
+    if (!label) {
+        label = lv_obj_get_child(obj, 1);
+        apps_carousel_cache.label = label;
+    }
+    const char *new_label = app_items[app_idx].name;
+    if (app_items[app_idx].view == NULL) new_label = "< Back";
+    if (label && apps_carousel_cache.label_text != new_label) {
+        lv_label_set_text(label, new_label);
+    }
+    apps_carousel_cache.label_text = new_label;
+    apps_carousel_cache.item_index = selected_app_index;
+
+    lv_obj_set_x(obj, start_x);
+    lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
+
+    lv_anim_t anim_in;
+    lv_anim_init(&anim_in);
+    lv_anim_set_var(&anim_in, obj);
+    lv_anim_set_values(&anim_in, start_x, 0);
+    lv_anim_set_time(&anim_in, ANIM_DURATION);
+    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&anim_in, anim_set_x);
+    lv_anim_start(&anim_in);
+
+    lv_anim_t fade_in;
+    lv_anim_init(&fade_in);
+    lv_anim_set_var(&fade_in, obj);
+    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&fade_in, ANIM_DURATION);
+    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
+    lv_anim_set_ready_cb(&fade_in, apps_carousel_fade_in_ready_cb);
+    lv_anim_start(&fade_in);
+}
+
+static void apps_carousel_fade_in_ready_cb(lv_anim_t *a) {
+    (void)a;
+    apps_is_animating = false;
 }
 
 static void apps_cleanup_layout(void) {
@@ -110,73 +215,65 @@ static void apps_cleanup_layout(void) {
     grid_cards_container = NULL;
 }
 
-/**
- * @brief Updates the displayed app item with animation
- */
 static void update_app_item(bool slide_left) {
-    static lv_obj_t *prev_app_obj = NULL;
+    apps_carousel_next_slide_left = slide_left;
+    apps_is_animating = true;
 
-    // Animate out old item if it exists
     if (current_app_obj) {
-        prev_app_obj = current_app_obj;
-        // Slide out
         lv_anim_t anim_out;
         lv_anim_init(&anim_out);
-        lv_anim_set_var(&anim_out, prev_app_obj);
+        lv_anim_set_var(&anim_out, current_app_obj);
         int end_x = slide_left ? -LV_HOR_RES : LV_HOR_RES;
         lv_anim_set_values(&anim_out, 0, end_x);
         lv_anim_set_time(&anim_out, ANIM_DURATION);
         lv_anim_set_path_cb(&anim_out, lv_anim_path_ease_in_out);
         lv_anim_set_exec_cb(&anim_out, anim_set_x);
-        if (!menu_item_selected) { // Only delete if not selecting
-            lv_anim_set_ready_cb(&anim_out, fade_out_ready_cb);
-        }
+        lv_anim_set_ready_cb(&anim_out, apps_carousel_fade_out_ready_cb);
         lv_anim_start(&anim_out);
 
-        // Fade out
         lv_anim_t fade_out;
         lv_anim_init(&fade_out);
-        lv_anim_set_var(&fade_out, prev_app_obj);
+        lv_anim_set_var(&fade_out, current_app_obj);
         lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
         lv_anim_set_time(&fade_out, ANIM_DURATION);
         lv_anim_set_exec_cb(&fade_out, anim_set_opa);
         lv_anim_start(&fade_out);
+        return;
     }
 
-    // Create new item (off-screen, transparent)
+    int app_idx = selected_app_index;
     current_app_obj = lv_btn_create(apps_container);
+    apps_carousel_cache.card = current_app_obj;
+
     lv_obj_set_style_bg_color(current_app_obj, apps_surface_color, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_app_obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_border_width(current_app_obj, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(current_app_obj, app_items[selected_app_index].border_color, LV_PART_MAIN);
+    lv_obj_set_style_border_color(current_app_obj, app_items[app_idx].border_color, LV_PART_MAIN);
     lv_obj_set_style_radius(current_app_obj, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_app_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_app_obj, false, 0);
+    apps_carousel_cache.border_color = app_items[app_idx].border_color;
+    apps_carousel_cache.item_index = selected_app_index;
 
     int btn_size = LV_MIN(LV_HOR_RES, LV_VER_RES) * 0.6;
     if (LV_HOR_RES <= 128 && LV_VER_RES <= 128) {
         btn_size = 80;
     }
     lv_obj_set_size(current_app_obj, btn_size, btn_size);
-
-    // Start new item off-screen (opposite direction of swipe)
-    int start_x = slide_left ? LV_HOR_RES : -LV_HOR_RES;
     lv_obj_align(current_app_obj, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_opa(current_app_obj, LV_OPA_TRANSP, 0); // Start transparent
 
-    if (app_items[selected_app_index].icon) {
+    if (app_items[app_idx].icon) {
         lv_obj_t *icon = lv_img_create(current_app_obj);
-        lv_img_set_src(icon, app_items[selected_app_index].icon);
-
+        lv_img_set_src(icon, app_items[app_idx].icon);
         const int icon_size = 50;
         lv_img_set_antialias(icon, false);
-        lv_obj_set_style_img_recolor(icon, app_items[selected_app_index].border_color, 0);
+        lv_obj_set_style_img_recolor(icon, app_items[app_idx].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         lv_obj_set_style_clip_corner(icon, false, 0);
 
-        lv_coord_t img_width = app_items[selected_app_index].icon->header.w;
-        lv_coord_t img_height = app_items[selected_app_index].icon->header.h;
+        lv_coord_t img_width = app_items[app_idx].icon->header.w;
+        lv_coord_t img_height = app_items[app_idx].icon->header.h;
         if (img_width > 0 && img_height > 0) {
             int zoom_w = (icon_size * 256) / img_width;
             int zoom_h = (icon_size * 256) / img_height;
@@ -186,46 +283,28 @@ static void update_app_item(bool slide_left) {
         }
         int icon_x_offset = -3;
         int icon_y_offset = -5;
-        if (app_items[selected_app_index].view == &ghostchi_view) {
+        if (app_items[app_idx].view == &ghostchi_view) {
             icon_x_offset = 9;
         }
         int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
         int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
         lv_obj_align(icon, LV_ALIGN_TOP_LEFT, x_pos, y_pos);
+        apps_carousel_cache.icon = icon;
+        apps_carousel_cache.icon_src = app_items[app_idx].icon;
+        apps_carousel_cache.icon_recolor_enabled = true;
     }
 
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_app_obj);
-        const char *label_text = app_items[selected_app_index].name;
-        if (app_items[selected_app_index].view == NULL) {
-            label_text = "< Back";
-        }
+        const char *label_text = app_items[app_idx].name;
+        if (app_items[app_idx].view == NULL) label_text = "< Back";
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
+        apps_carousel_cache.label = label;
+        apps_carousel_cache.label_text = label_text;
     }
-
-    // Animate in new item (slide and fade)
-    lv_anim_t anim_in;
-    lv_anim_init(&anim_in);
-    lv_anim_set_var(&anim_in, current_app_obj);
-    lv_anim_set_values(&anim_in, start_x, 0);
-    lv_anim_set_time(&anim_in, ANIM_DURATION);
-    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
-    lv_anim_set_exec_cb(&anim_in, anim_set_x);
-    lv_anim_start(&anim_in);
-
-    lv_anim_t fade_in;
-    lv_anim_init(&fade_in);
-    lv_anim_set_var(&fade_in, current_app_obj);
-    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_time(&fade_in, ANIM_DURATION);
-    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
-    lv_anim_start(&fade_in);
-
-    // Ensure the new item is fully opaque at the end
-    lv_obj_set_style_opa(current_app_obj, LV_OPA_COVER, 0); // Always fully opaque
 }
 
 static void create_apps_grid_menu(void) {
@@ -434,7 +513,7 @@ static void create_apps_list_menu(void) {
             break;
     }
 
-    int status_bar_height = 20;
+    int status_bar_height = GUI_STATUS_BAR_H;
     if (apps_container) {
 
         if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
@@ -555,6 +634,8 @@ void apps_menu_destroy(void) {
         back_button = NULL;
     }
     apps_cleanup_layout();
+    apps_carousel_cache = (apps_carousel_cache_t){0};
+    apps_is_animating = false;
     lvgl_obj_del_safe(&left_nav_btn);
     lvgl_obj_del_safe(&right_nav_btn);
     // Reset state variables for a clean re-create

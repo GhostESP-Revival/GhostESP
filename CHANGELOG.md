@@ -9,10 +9,23 @@
 - Added support for Seeed Studio XIAO ESP32-C5
 - Added support for Seeed Studio XIAO ESP32-S3
 - Added live MJPEG camera stream viewable at http://ghostesp.local/camera
+- Added SD card backup functionality for settings - @tototo31
 - Added camera motion detector CLI (`motion start/stop/status/threshold/interval/percent/snap/discord/webhook/cooldown`) with configurable sensitivity, SD card JPEG snapshots, and Discord webhook integration
+- Added GUI design token system for consistent spacing, radii, fonts, safe areas and animation timing across all screens
+- Added slide transitions for screen navigation replacing fade transitions
+- Added pop-in animations for popups and scan status card
+- Added spinning arc spinner for scan status overlay replacing animated dots
+
+### Changed
+- Rewrote app gallery carousel to reuse a single card with slide animation instead of creating/destroying objects per swipe
+- Nav button highlight now uses theme accent color instead of hardcoded yellow
+- Status bar uses design token fonts and safe-area-aware padding
+- Tweaked theme palette surface colors across all background shade levels
+- Cleaned up terminal screen build config template conditionals
 
 ### Fixed
-- Fixed ESP32-C5 not discovering 5GHz channels above UNII-1 (e.g. 149-165) during WiFi scans by using correct country code API at boot
+- Fixed ESP32-C5 not discovering 5GHz channels above UNII-1 (e.g. 149-165) during WiFi scans by using correct country code API at boot and re-applying it after WiFi driver reinit during AP scans
+- Fixed RGB LED not turning off when stopping BLE device detection scan
 - Fixed GPS info task stack corruption
 - Fixed Cardputer ADV `*` key being treated as backspace in text entry fields
 - Fixed Poltergeist status display failing to initialize due to I2C port returning ESP_ERR_INVALID_STATE instead of ESP_ERR_NOT_FOUND (#308)

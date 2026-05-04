@@ -44,6 +44,7 @@ list(APPEND app_sources
 )
 # Explicitly include infrared view implementation
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/settings_sd_backup.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 # Exclude camera managers until camera support is enabled.

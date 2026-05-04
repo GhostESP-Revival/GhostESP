@@ -2,6 +2,8 @@
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
+#include "gui/gui_anim.h"
 #include "lvgl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -384,7 +386,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     
     int w = LV_HOR_RES;
     int h = LV_VER_RES;
-    int STATUS_BAR_HEIGHT = 20;
+    int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
 #ifdef CONFIG_USE_TOUCHSCREEN
     int TOUCH_NAV_HEIGHT = 50;
 #else
@@ -398,8 +400,8 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     dv->info_count = 0;
     dv->nav_region = DETAIL_NAV_REGION_INFO;
     
-    lv_color_t bg, surface, surface_alt, text;
-    get_theme_colors(&bg, &surface, &surface_alt, &text, NULL);
+    lv_color_t bg, surface, surface_alt, text, accent;
+    get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
     
     dv->container = lv_obj_create(parent);
     lv_coord_t content_h = h - STATUS_BAR_HEIGHT - TOUCH_NAV_HEIGHT;
@@ -420,7 +422,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     dv->info_panel = lv_obj_create(dv->container);
     lv_obj_set_width(dv->info_panel, LV_PCT(100));
     lv_obj_set_height(dv->info_panel, 0);
-    lv_obj_set_style_bg_color(dv->info_panel, surface, 0);
+    lv_obj_set_style_bg_color(dv->info_panel, surface_alt, 0);
     lv_obj_set_style_bg_opa(dv->info_panel, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(dv->info_panel, 0, 0);
     lv_obj_set_style_pad_top(dv->info_panel, dv->compact_layout ? 0 : 1, 0);
@@ -487,8 +489,8 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_style_set_radius(&dv->style_header, 0);
     
     lv_style_init(&dv->style_divider);
-    lv_style_set_bg_color(&dv->style_divider, text);
-    lv_style_set_bg_opa(&dv->style_divider, LV_OPA_20);
+    lv_style_set_bg_color(&dv->style_divider, accent);
+    lv_style_set_bg_opa(&dv->style_divider, LV_OPA_40);
     lv_style_set_border_width(&dv->style_divider, 0);
     lv_style_set_radius(&dv->style_divider, 0);
     
