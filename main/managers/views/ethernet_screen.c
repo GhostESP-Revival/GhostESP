@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include "core/i18n.h"
 
 #define ETH_MAX_ARP_HOSTS 64
 #define ETH_MAX_PORT_RESULTS 256
@@ -966,16 +967,16 @@ static void build_dashboard(void) {
 #else
     bool poison_running = s_poison.running;
 #endif
-    options_view_add_item(s_action_ov, "Fingerprint Scan",       on_fp_scan,        NULL);
-    options_view_add_item(s_action_ov, "ARP Host Scan",          on_arp_scan,       NULL);
-    options_view_add_item(s_action_ov, "Port Scan (GW)",         on_port_local,     NULL);
-    options_view_add_item(s_action_ov, "Port Scan (All)",        on_port_all,       NULL);
-    options_view_add_item(s_action_ov, "Ping Sweep",             on_ping,           NULL);
+    options_view_add_item(s_action_ov, i18n_text(I18N_KEY_FINGERPRINT_SCAN),       on_fp_scan,        NULL);
+    options_view_add_item(s_action_ov, i18n_text(I18N_KEY_ARP_HOST_SCAN),          on_arp_scan,       NULL);
+    options_view_add_item(s_action_ov, i18n_text(I18N_KEY_PORT_SCAN_GW),         on_port_local,     NULL);
+    options_view_add_item(s_action_ov, i18n_text(I18N_KEY_PORT_SCAN_ALL),        on_port_all,       NULL);
+    options_view_add_item(s_action_ov, i18n_text(I18N_KEY_PING_SWEEP),             on_ping,           NULL);
     if (poison_running) {
-        options_view_add_item(s_action_ov, "Stop ARP Poison",   on_poison_stop,    NULL);
-        options_view_add_item(s_action_ov, "Poison Monitor",    on_poison_monitor, NULL);
+        options_view_add_item(s_action_ov, i18n_text(I18N_KEY_STOP_ARP_POISON),   on_poison_stop,    NULL);
+        options_view_add_item(s_action_ov, i18n_text(I18N_KEY_POISON_MONITOR),    on_poison_monitor, NULL);
     } else {
-        options_view_add_item(s_action_ov, "ARP Poison",        on_poison_start,   NULL);
+        options_view_add_item(s_action_ov, i18n_text(I18N_KEY_ARP_POISON),        on_poison_start,   NULL);
     }
     options_view_add_back_row(s_action_ov, on_back, NULL);
     options_view_set_selected(s_action_ov, 0);
@@ -1012,7 +1013,7 @@ static void build_fp_list(void) {
         options_view_add_item(s_action_ov, label, on_fp_host_selected, (void *)(intptr_t)i);
     }
     if (s_fp.count == 0)
-        options_view_add_item(s_action_ov, "No hosts discovered", NULL, NULL);
+        options_view_add_item(s_action_ov, i18n_text(I18N_KEY_NO_HOSTS), NULL, NULL);
     options_view_add_back_row(s_action_ov, on_back_to_dashboard, NULL);
     // Restore cursor to last viewed host (if returning from detail page)
     int sel = (s_selected_fp_host >= 0 && s_selected_fp_host < s_fp.count)
@@ -1041,7 +1042,7 @@ static void build_arp_list(void) {
         options_view_add_item(s_action_ov, label, on_arp_host_selected, (void *)(intptr_t)i);
     }
     if (s_scan.arp_count == 0)
-        options_view_add_item(s_action_ov, "No hosts found", NULL, NULL);
+        options_view_add_item(s_action_ov, i18n_text(I18N_KEY_NO_HOSTS), NULL, NULL);
     options_view_add_back_row(s_action_ov, on_back_to_dashboard, NULL);
     int sel = (s_selected_arp_host >= 0 && s_selected_arp_host < s_scan.arp_count)
               ? s_selected_arp_host : 0;
@@ -1151,7 +1152,7 @@ static void build_poison_monitor(void) {
     lv_obj_t *hdr = create_card(s_content, 100);
 
     lv_obj_t *hdr_lbl = lv_label_create(hdr);
-    lv_label_set_text(hdr_lbl, "ARP POISON ACTIVE");
+    lv_label_set_text(hdr_lbl, i18n_text(I18N_KEY_ARP_POISON_ACTIVE));
     lv_obj_set_style_text_color(hdr_lbl, lv_color_hex(accent_color), 0);
 
     s_poison_stats_lbl = lv_label_create(hdr);
@@ -1479,7 +1480,7 @@ void ethernet_screen_create(void) {
     lv_obj_set_style_pad_all(s_root, 0, 0);
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    display_manager_add_status_bar("Ethernet");
+    display_manager_add_status_bar(i18n_text(I18N_KEY_ETHERNET));
     ethernet_screen_view.root = s_root;
 
     s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);

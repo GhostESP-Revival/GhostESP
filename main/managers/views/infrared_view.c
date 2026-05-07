@@ -8,6 +8,9 @@
 #include "gui/options_view.h"
 #include "managers/status_display_manager.h"
 #include "core/i18n.h"
+#include "gui/fonts/font_helper.h"
+#include "gui/popup.h"
+#include <dirent.h>
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -72,13 +75,18 @@ static lv_style_t popup_style;
 static bool popup_style_initialized = false;
 #endif
 
-#include "managers/display_manager.h"
+#include "managers/views/infrared_view.h"
 #include "managers/views/main_menu_screen.h"
-#include "gui/popup.h"
-#include "managers/views/keyboard_screen.h"
+#include "managers/display_manager.h"
+#include "core/esp_comm_manager.h"
+#include "core/glog.h"
+#include "core/i18n.h"
+#include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
-#include <lvgl/lvgl.h>
-#include <dirent.h>
+#include "gui/theme_palette_api.h"
+#include "managers/settings_manager.h"
+#include "lvgl.h"
+#include "esp_log.h"
 #include <string.h>
 #include "managers/infrared_manager.h"
 #include "managers/infrared_decoder.h"
@@ -367,9 +375,9 @@ void learned_signal_name_callback(const char *name)
                     options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void *)(intptr_t)i);
                 }
                 
-                options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-                options_view_add_item(g_ir_ov, "Add Signal", add_signal_cb, NULL);
-                lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+                options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+                options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+                lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
                 if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
                 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -652,7 +660,7 @@ static void rebuild_ir_file_list_ui(void) {
     }
 
     if (ir_file_count == 0) {
-        options_view_add_item(g_ir_ov, "No .ir files", placeholder_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_NO_FILES), placeholder_event_cb, NULL);
     }
 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -758,10 +766,10 @@ static void dazzler_event_cb(lv_event_t *e) {
     dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(dazzler_popup);
     
-    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", &lv_font_montserrat_16, 15);
+    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", FONT_16, 15);
     (void)title;
     
-    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, &lv_font_montserrat_14, 45);
+    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, FONT_14, 45);
     lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 45);
     
@@ -1302,14 +1310,14 @@ static void back_event_cb(lv_event_t *e) {
         strcpy(current_dir, "/mnt/ghostesp");
 
         if (g_ir_ov) options_view_clear(g_ir_ov);
-        options_view_add_item(g_ir_ov, "Remotes", remotes_event_cb, NULL);
-        options_view_add_item(g_ir_ov, "Universals", universals_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_REMOTES), remotes_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_UNIVERSALS), universals_event_cb, NULL);
 #ifdef CONFIG_HAS_INFRARED_RX
         is_easy_mode = settings_get_infrared_easy_mode(&G_Settings);
-        options_view_add_item(g_ir_ov, "Learn Remote", learn_remote_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_LEARN_REMOTE), learn_remote_event_cb, NULL);
         options_view_add_item(g_ir_ov, is_easy_mode ? "Easy Learn [X]" : "Easy Learn [ ]", easy_learn_toggle_cb, NULL);
 #endif
-        options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_IR_DAZZLER), dazzler_event_cb, NULL);
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
         ir_add_back_row();
 #endif
@@ -1421,6 +1429,7 @@ void infrared_view_create(void) {
     lv_obj_add_event_cb(ir_back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(ir_back_btn);
     lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
+    lv_obj_set_style_text_font(back_label, FONT_14, 0);
     lv_obj_set_style_text_color(back_label, ir_ctrl_text, 0);
     lv_obj_center(back_label);
 
@@ -2314,9 +2323,9 @@ static void file_event_open(int idx) {
         options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void*)(intptr_t)i);
     }
     
-    options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-    options_view_add_item(g_ir_ov, "Add New Signal", add_signal_cb, NULL);
-    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+    options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+    options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
     if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
     
     num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -2344,7 +2353,7 @@ static void command_event_execute(int idx) {
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *label = lv_label_create(transmitting_popup);
-        lv_label_set_text(label, "Transmitting...");
+        lv_label_set_text(label, i18n_text(I18N_KEY_TRANSMITTING));
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(label);
 
@@ -2521,10 +2530,10 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         }
     }
 
-    lv_obj_t *title_label = popup_create_title_label(popup, config->title, &lv_font_montserrat_16, 20);
+    lv_obj_t *title_label = popup_create_title_label(popup, config->title, FONT_16, 20);
     (void)title_label;
 
-    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, &lv_font_montserrat_14, 60);
+    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, FONT_14, 60);
     // center instruction text horizontally for both modes
     lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(instruction_label, LV_ALIGN_TOP_MID, 0, 60);
@@ -2768,9 +2777,9 @@ void easy_learn_signal_name_callback(void)
                 options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void *)(intptr_t)i);
             }
             
-            options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-            options_view_add_item(g_ir_ov, "Add Signal", add_signal_cb, NULL);
-            lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+            options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+            options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+            lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
             if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
             
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -3245,13 +3254,13 @@ void create_signal_preview_popup(void)
     cancel_btn = popup_add_styled_button(signal_preview_popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
-    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);
+    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", FONT_16, 10);
     
     // Protocol info (use popup helpers for consistent layout)
     lv_coord_t popup_w = lv_obj_get_width(signal_preview_popup);
-    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 32);
-    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 48);
-    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 64);
+    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 32);
+    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 48);
+    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 64);
 
     // Set concise text
     if (!learned_signal.is_raw) {
@@ -3277,7 +3286,7 @@ void create_signal_preview_popup(void)
     // Raw signal info (use popup helper for consistent layout)
     lv_coord_t popup_w2 = lv_obj_get_width(signal_preview_popup);
     lv_coord_t raw_y = !learned_signal.is_raw ? 80 : 64; // if decoded, place below cmd (80), else at cmd position (64)
-    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, &lv_font_montserrat_14, raw_y);
+    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, FONT_14, raw_y);
     if (learned_signal.is_raw) {
         lv_label_set_text_fmt(raw_info, "%d timings", learned_signal.payload.raw.timings_size);
     } else {

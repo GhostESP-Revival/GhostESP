@@ -33,6 +33,7 @@
 #endif
 
 static void handle_menu_item_selection(int item_index);
+static const char *menu_item_name_to_i18n(const char *name);
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
@@ -131,6 +132,24 @@ menu_item_t menu_items[] = {
 
 static int num_items = sizeof(menu_items) / sizeof(menu_items[0]);
 lv_obj_t *current_item_obj = NULL;
+
+static const char *menu_item_name_to_i18n(const char *name) {
+    if (strcmp(name, "WiFi") == 0) return i18n_text(I18N_KEY_WIFI);
+    if (strcmp(name, "BLE") == 0) return i18n_text(I18N_KEY_BLE);
+    if (strcmp(name, "GPS") == 0) return i18n_text(I18N_KEY_GPS);
+    if (strcmp(name, "Infrared") == 0) return i18n_text(I18N_KEY_INFRARED);
+    if (strcmp(name, "NFC") == 0) return i18n_text(I18N_KEY_NFC);
+    if (strcmp(name, "NRF24") == 0) return i18n_text(I18N_KEY_NRF24);
+    if (strcmp(name, "SubGHz") == 0) return i18n_text(I18N_KEY_SUBGHZ);
+    if (strcmp(name, "BadUSB") == 0) return i18n_text(I18N_KEY_BADUSB);
+    if (strcmp(name, "GhostLink") == 0) return i18n_text(I18N_KEY_GHOSTLINK);
+    if (strcmp(name, "Clock") == 0) return i18n_text(I18N_KEY_CLOCK);
+    if (strcmp(name, "Compass") == 0) return i18n_text(I18N_KEY_COMPASS);
+    if (strcmp(name, "Accelerometer") == 0) return i18n_text(I18N_KEY_ACCELEROMETER);
+    if (strcmp(name, "Apps") == 0) return i18n_text(I18N_KEY_APPS);
+    if (strcmp(name, "Settings") == 0) return i18n_text(I18N_KEY_SETTINGS);
+    return name;
+}
 // track slide direction for carousel reuse callback
 static bool carousel_next_slide_left = false;
 
@@ -270,7 +289,7 @@ static void carousel_fade_out_ready_cb(lv_anim_t *a) {
         label = lv_obj_get_child(obj, 1);
         carousel_cache.label = label;
     }
-    const char *new_label = menu_items[menu_index].name;
+    const char *new_label = menu_item_name_to_i18n(menu_items[menu_index].name);
     if (label && carousel_cache.label_text != new_label) {
         lv_label_set_text(label, new_label);
     }
@@ -439,14 +458,14 @@ static void update_menu_item(bool slide_left) {
 
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
-        lv_label_set_text(label, menu_items[menu_index].name);
+        lv_label_set_text(label, menu_item_name_to_i18n(menu_items[menu_index].name));
         lv_obj_set_style_text_font(label, gui_font_caption(), 0);
         lv_obj_set_style_text_color(label, menu_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         carousel_cache.label = label;
     }
 
-    carousel_cache.label_text = menu_items[menu_index].name;
+    carousel_cache.label_text = menu_item_name_to_i18n(menu_items[menu_index].name);
 
     // initial state already visible
     is_animating = false;
@@ -892,6 +911,7 @@ static void handle_menu_item_selection(int item_index) {
     bool connected = esp_comm_manager_is_connected();
     int menu_index = visible_index_to_menu_index(item_index, connected);
     const char *name = menu_items[menu_index].name;
+    const char *display_name = menu_item_name_to_i18n(name);
     const View *target_view = NULL;
     EOptionsMenuType target_type = 0;
     for (int i = 0; i < num_actions; ++i) {
@@ -1059,9 +1079,9 @@ static void create_grid_menu(void) {
 
         // Add label
         lv_obj_t *label = lv_label_create(grid_cards[i]);
-        lv_label_set_text(label, menu_items[menu_index].name);
+        lv_label_set_text(label, menu_item_name_to_i18n(menu_items[menu_index].name));
         // smaller font on small tiles
-        const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+        const lv_font_t *lbl_font = gui_font_caption();
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, menu_text_color, 0);
         // Center label within the card and ensure proper centering of text
@@ -1150,9 +1170,9 @@ static void create_list_menu(void) {
         lv_img_set_zoom(icon, zoom);
 
         lv_obj_t *label = lv_label_create(btn);
-        lv_label_set_text(label, menu_items[menu_index].name);
+        lv_label_set_text(label, menu_item_name_to_i18n(menu_items[menu_index].name));
         lv_obj_set_style_text_color(label, menu_text_color, 0);
-        const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+        const lv_font_t *lbl_font = gui_font_body();
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_flex_grow(label, 1);
@@ -1341,7 +1361,7 @@ void main_menu_create(void) {
         lv_obj_move_foreground(right_nav_btn);
     }
 
-    display_manager_add_status_bar(LV_HOR_RES > 128 ? "Main Menu" : "");
+    display_manager_add_status_bar(LV_HOR_RES > 128 ? i18n_text(I18N_KEY_APPS_MENU) : "");
 
     // Position the menu relative to the status bar
     int status_bar_height = GUI_STATUS_BAR_H;

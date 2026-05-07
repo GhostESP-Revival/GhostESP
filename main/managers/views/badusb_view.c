@@ -14,6 +14,7 @@
 #include "managers/views/keyboard_screen.h"
 #include "core/serial_manager.h"
 #include "core/esp_comm_manager.h"
+#include "core/glog.h"
 #include "core/i18n.h"
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
@@ -381,7 +382,7 @@ static void show_running_popup(const char *script_name) {
 static void badusb_popup_set_running(void) {
     if (!badusb_running_popup || !lv_obj_is_valid(badusb_running_popup)) return;
     if (badusb_popup_title_lbl && lv_obj_is_valid(badusb_popup_title_lbl)) {
-        lv_label_set_text(badusb_popup_title_lbl, "BadUSB Running");
+        lv_label_set_text(badusb_popup_title_lbl, i18n_text(I18N_KEY_BADUSB_RUNNING));
     }
     if (badusb_popup_body_lbl && lv_obj_is_valid(badusb_popup_body_lbl)) {
         char body[80];

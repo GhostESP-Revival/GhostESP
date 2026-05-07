@@ -1,6 +1,7 @@
 #include "managers/views/compass_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/display_manager.h"
+#include "core/i18n.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
@@ -376,7 +377,7 @@ static void compass_timer_cb(lv_timer_t *timer) {
         }
 
         if (!cal_valid) {
-            if (heading_label) lv_label_set_text(heading_label, "Rotate Device...");
+            if (heading_label) lv_label_set_text(heading_label, i18n_text(I18N_KEY_ROTATE_DEVICE));
             return;
         }
 
@@ -430,7 +431,7 @@ static void compass_timer_cb(lv_timer_t *timer) {
 static void compass_event_handler(InputEvent *event) {
     if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_REL) {
         reset_calibration();
-        if (heading_label) lv_label_set_text(heading_label, "Resetting...");
+        if (heading_label) lv_label_set_text(heading_label, i18n_text(I18N_KEY_RESETTING));
     } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {
         display_manager_switch_view(&main_menu_view);
     }
@@ -457,22 +458,22 @@ void compass_create(void) {
     
     // Cardinal direction labels (will be repositioned by update_cardinal_positions)
     lbl_n = lv_label_create(ring);
-    lv_label_set_text(lbl_n, "N");
+    lv_label_set_text(lbl_n, i18n_text(I18N_KEY_NORTH));
     lv_obj_set_style_text_color(lbl_n, lv_color_hex(0xFF4444), 0);  // Red for North
     lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_18, 0);
     
     lbl_s = lv_label_create(ring);
-    lv_label_set_text(lbl_s, "S");
+    lv_label_set_text(lbl_s, i18n_text(I18N_KEY_SOUTH));
     lv_obj_set_style_text_color(lbl_s, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(lbl_s, &lv_font_montserrat_18, 0);
     
     lbl_e = lv_label_create(ring);
-    lv_label_set_text(lbl_e, "E");
+    lv_label_set_text(lbl_e, i18n_text(I18N_KEY_EAST));
     lv_obj_set_style_text_color(lbl_e, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(lbl_e, &lv_font_montserrat_18, 0);
     
     lbl_w = lv_label_create(ring);
-    lv_label_set_text(lbl_w, "W");
+    lv_label_set_text(lbl_w, i18n_text(I18N_KEY_WEST));
     lv_obj_set_style_text_color(lbl_w, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(lbl_w, &lv_font_montserrat_18, 0);
 
@@ -515,7 +516,7 @@ void compass_create(void) {
     update_cardinal_positions(0);  // Start with N at top
     
     heading_label = lv_label_create(content);
-    lv_label_set_text(heading_label, "Initialize...");
+    lv_label_set_text(heading_label, i18n_text(I18N_KEY_INITIALIZE));
     lv_obj_set_style_text_color(heading_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(heading_label, &lv_font_montserrat_18, 0);
     lv_obj_align(heading_label, LV_ALIGN_BOTTOM_MID, 0, -10);

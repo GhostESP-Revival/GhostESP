@@ -2,6 +2,7 @@
 #include "core/serial_manager.h"
 #include "core/commandline.h"
 #include "core/i18n.h"
+#include "gui/fonts/font_helper.h"
 #include "core/ouis.h"
 #include "managers/display_manager.h"
 #include "gui/options_view.h"
@@ -48,6 +49,194 @@ static int wigle_csv_page_offset = 0;
 static bool wigle_csv_has_next_page = false;
 static bool wigle_csv_browser_active = false;
 static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
+
+static const i18n_key_t wifi_attacks_keys[] = {
+    I18N_KEY_WIFI_START_DEAUTH,
+    I18N_KEY_WIFI_START_CHANNEL_SWITCH,
+    I18N_KEY_WIFI_BEACON_SPAM_RANDOM,
+    I18N_KEY_WIFI_BEACON_SPAM_RICKROLL,
+    I18N_KEY_WIFI_BEACON_SPAM_LIST,
+    I18N_KEY_WIFI_START_EAPOL_LOGOFF,
+    I18N_KEY_WIFI_START_GTK_ABUSE,
+    I18N_KEY_WIFI_START_DHCP_STARVE,
+    I18N_KEY_WIFI_STOP_DHCP_STARVE,
+    I18N_KEY_WIFI_START_KARMA,
+    I18N_KEY_WIFI_START_KARMA_CUSTOM_SSIDS,
+    I18N_KEY_WIFI_START_KARMA_CUSTOM_PORTAL,
+    I18N_KEY_WIFI_STOP_KARMA,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_capture_keys[] = {
+    I18N_KEY_WIFI_CAPTURE_PROBE,
+    I18N_KEY_WIFI_CAPTURE_DEAUTH,
+    I18N_KEY_WIFI_CAPTURE_BEACON,
+    I18N_KEY_WIFI_CAPTURE_RAW,
+    I18N_KEY_WIFI_CAPTURE_EAPOL,
+    I18N_KEY_WIFI_CAPTURE_WPS,
+    I18N_KEY_WIFI_CAPTURE_PWN,
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    I18N_KEY_WIFI_CAPTURE_802_15_4,
+    I18N_KEY_WIFI_CAPTURE_802_15_4_CHANNEL,
+#endif
+    I18N_KEY_WIFI_LISTEN_PROBES,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_scan_select_keys[] = {
+    I18N_KEY_WIFI_SCAN_APS,
+    I18N_KEY_WIFI_SCAN_APS_LIVE,
+    I18N_KEY_WIFI_SCAN_STATIONS,
+    I18N_KEY_WIFI_SCAN_AP_STA,
+    I18N_KEY_WIFI_LIST_APS,
+    I18N_KEY_WIFI_LIST_STATIONS,
+    I18N_KEY_WIFI_LIST_AP_STA,
+    I18N_KEY_WIFI_MULTI_SELECT_APS,
+    I18N_KEY_WIFI_MULTI_SELECT_STATIONS,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_environment_keys[] = {
+    I18N_KEY_WIFI_SWEEP,
+    I18N_KEY_WIFI_PINEAP_DETECTION,
+    I18N_KEY_WIFI_CHANNEL_CONGESTION,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_network_keys[] = {
+    I18N_KEY_WIFI_SCAN_LAN_DEVICES,
+    I18N_KEY_WIFI_ARP_SCAN_NETWORK,
+    I18N_KEY_WIFI_SCAN_OPEN_PORTS,
+    I18N_KEY_WIFI_SELECT_LAN,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_evil_portal_keys[] = {
+    I18N_KEY_WIFI_START_EVIL_PORTAL,
+    I18N_KEY_WIFI_START_CUSTOM_EVIL_PORTAL,
+    I18N_KEY_WIFI_STOP_EVIL_PORTAL,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_connection_keys[] = {
+    I18N_KEY_WIFI_CONNECT,
+    I18N_KEY_WIFI_CONNECT_SAVED,
+    I18N_KEY_WIFI_RESET_AP_CREDENTIALS,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_misc_keys[] = {
+    I18N_KEY_WIFI_TV_CAST,
+    I18N_KEY_WIFI_POWER_PRINTER,
+    I18N_KEY_WIFI_TP_LINK_TEST,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t wifi_main_keys[] = {
+    I18N_KEY_WIFI_ATTACKS_MENU,
+    I18N_KEY_WIFI_SCAN_SELECT_MENU,
+    I18N_KEY_WIFI_ENVIRONMENT_MENU,
+    I18N_KEY_WIFI_NETWORK_MENU,
+    I18N_KEY_WIFI_CAPTURE_MENU,
+    I18N_KEY_WIFI_EVIL_PORTAL_MENU,
+    I18N_KEY_WIFI_CONNECTION_MENU,
+    I18N_KEY_WIFI_MISC_MENU,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t dual_comm_wifi_keys[] = {
+    I18N_KEY_WIFI_CONNECT,
+    I18N_KEY_WIFI_CONNECT_SAVED,
+    I18N_KEY_WIFI_RESET_AP_CREDENTIALS,
+    I18N_KEY_WIFI_SET_AP_CREDENTIALS,
+    I18N_KEY_WIFI_ENABLE_AP,
+    I18N_KEY_WIFI_DISABLE_AP,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t dual_comm_attacks_keys[] = {
+    I18N_KEY_WIFI_START_DEAUTH,
+    I18N_KEY_WIFI_START_EAPOL_LOGOFF,
+    I18N_KEY_WIFI_START_DHCP_STARVE,
+    I18N_KEY_WIFI_STOP_DHCP_STARVE,
+    I18N_KEY_WIFI_START_KARMA,
+    I18N_KEY_WIFI_START_KARMA_CUSTOM_SSIDS,
+    I18N_KEY_WIFI_STOP_KARMA,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t dual_comm_capture_keys[] = {
+    I18N_KEY_WIFI_CAPTURE_DEAUTH,
+    I18N_KEY_WIFI_CAPTURE_PROBE,
+    I18N_KEY_WIFI_CAPTURE_BEACON,
+    I18N_KEY_WIFI_CAPTURE_RAW,
+    I18N_KEY_WIFI_CAPTURE_EAPOL,
+    I18N_KEY_WIFI_CAPTURE_WPS,
+    I18N_KEY_WIFI_CAPTURE_PWN,
+    I18N_KEY_WIFI_LISTEN_PROBES,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t dual_comm_tools_keys[] = {
+    I18N_KEY_WIFI_START_EVIL_PORTAL,
+    I18N_KEY_WIFI_STOP_EVIL_PORTAL,
+    I18N_KEY_GPS_START_WARDRIVING,
+    I18N_KEY_GPS_STOP_WARDRIVING,
+    I18N_KEY_WIFI_TV_CAST,
+    I18N_KEY_WIFI_POWER_PRINTER,
+    I18N_KEY_WIFI_SCAN_SSH,
+    I18N_KEY_WIFI_TOGGLE_WEBUI_AP_ONLY,
+    I18N_KEY_COUNT
+};
+
+static const i18n_key_t dual_comm_ble_keys[] = {
+    I18N_KEY_BLE_AIRTAG_SCANNER,
+    I18N_KEY_BLE_LIST_AIRTAGS,
+    I18N_KEY_BLE_SELECT_AIRTAG,
+    I18N_KEY_BLE_SPOOF_SELECTED,
+    I18N_KEY_BLE_STOP_SPOOFING,
+    I18N_KEY_BLE_FIND_FLIPPERS,
+    I18N_KEY_BLE_LIST_FLIPPERS,
+    I18N_KEY_BLE_SELECT_FLIPPER,
+    I18N_KEY_BLE_RAW_SCANNER,
+    I18N_KEY_BLE_SPAM_APPLE,
+    I18N_KEY_BLE_SPAM_MICROSOFT,
+    I18N_KEY_BLE_SPAM_SAMSUNG,
+    I18N_KEY_BLE_SPAM_GOOGLE,
+    I18N_KEY_BLE_SPAM_RANDOM,
+    I18N_KEY_BLE_STOP_SPAM,
+    I18N_KEY_COUNT
+};
+
+static const char* wifi_menu_get_text(const i18n_key_t *keys, int index) {
+    if (keys[index] == I18N_KEY_COUNT) return NULL;
+    return i18n_text(keys[index]);
+}
+
+static char* wifi_attacks_buffer[14];
+static char* wifi_capture_buffer[11];
+static char* wifi_scan_select_buffer[10];
+static char* wifi_environment_buffer[4];
+static char* wifi_network_buffer[5];
+static char* wifi_evil_portal_buffer[4];
+static char* wifi_connection_buffer[4];
+static char* wifi_misc_buffer[4];
+static char* wifi_main_buffer[9];
+static char* dual_comm_wifi_buffer[7];
+static char* dual_comm_attacks_buffer[8];
+static char* dual_comm_capture_buffer[9];
+static char* dual_comm_tools_buffer[9];
+static char* dual_comm_ble_buffer[16];
+
+static const char* wifi_menu_get_options(const i18n_key_t *keys, char **buffer, int max_size) {
+    int i = 0;
+    while (keys[i] != I18N_KEY_COUNT && i < max_size - 1) {
+        buffer[i] = (char*)i18n_text(keys[i]);
+        i++;
+    }
+    buffer[i] = NULL;
+    return (const char*)buffer;
+}
 
 #define AP_LIST_PAGE_SIZE 10
 #define STA_LIST_PAGE_SIZE 10
@@ -535,60 +724,7 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
     return false;
 }
 
-static const char *wifi_attacks_options[] = {
-    "Start Deauth Attack",
-    "Start Channel Switch Attack",
-    "Beacon Spam - Random",
-    "Beacon Spam - Rickroll",
-    "Beacon Spam - List",
-    "Start EAPOL Logoff",
-    "Start GTK Abuse",
-    "Start DHCP-Starve",
-    "Stop DHCP-Starve",
-    "Start Karma Attack",
-    "Start Karma Attack (Custom SSIDs)",
-    "Start Karma Attack (Custom Portal)",
-    "Stop Karma Attack",       
-    NULL
-};
-
-static const char *wifi_capture_options[] = {
-    "Capture Probe", "Capture Deauth", "Capture Beacon", "Capture Raw", "Capture Eapol",
-    "Capture WPS", "Capture PWN",
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    "Capture 802.15.4", "Capture 802.15.4 (Channel)",
-#endif
-    "Listen for Probes", NULL
-};
-
-static const char *wifi_scan_select_options[] = {
-    "Scan Access Points", "Scan APs Live", "Scan Stations", "Scan AP + STA",
-    "List Access Points", "List Stations", "List AP + STA",
-    "Multi-Select APs", "Multi-Select Stations", NULL
-};
-
-static const char *wifi_environment_options[] = {
-    "Sweep", "PineAP Detection", "Channel Congestion", NULL
-};
-
-static const char *wifi_network_options[] = {
-    "Scan LAN Devices", "ARP Scan Network", "Scan Open Ports", "Select LAN", NULL
-};
-
 static void switch_to_settings_category(int cat_idx);
-
-static const char *wifi_evil_portal_options[] = {
-    "Start Evil Portal", "Start Custom Evil Portal", "Stop Evil Portal", NULL
-};
-
-
-static const char *wifi_connection_options[] = {"Connect to WiFi", "Connect to saved WiFi", "Reset AP Credentials", NULL};
-
-static const char *wifi_misc_options[] = {"TV Cast (Dial Connect)", "Power Printer", "TP Link Test", NULL};
-
-static const char *wifi_main_options[] = {
-    "Attacks", "Scan & Select", "Environment", "Network", "Capture", "Evil Portal", "Connection", "Misc", NULL
-};
 
 static const char *gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
                                     "BLE Wardriving",   NULL};
@@ -671,69 +807,6 @@ static const char *dual_comm_scan_options[] = {
     NULL
 };
 
-static const char *dual_comm_wifi_options[] = {
-    "Connect to WiFi",
-    "Connect to saved WiFi",
-    "Reset AP Credentials",
-    "Set AP Credentials",
-    "Enable AP",
-    "Disable AP",
-    NULL
-};
-
-static const char *dual_comm_attacks_options[] = {
-    "Start Deauth Attack",
-    "Start EAPOL Logoff",
-    "Start DHCP-Starve",
-    "Stop DHCP-Starve",
-    "Start Karma Attack",
-    "Start Karma Attack (Custom SSIDs)",
-    "Stop Karma Attack",
-    NULL
-};
-
-static const char *dual_comm_capture_options[] = {
-    "Capture Deauth",
-    "Capture Probe",
-    "Capture Beacon",
-    "Capture Raw",
-    "Capture Eapol",
-    "Capture WPS",
-    "Capture PWN",
-    "Listen for Probes",
-    NULL
-};
-
-static const char *dual_comm_tools_options[] = {
-    "Start Evil Portal",
-    "Stop Evil Portal",
-    "Start Wardriving",
-    "Stop Wardriving",
-    "TV Cast (Dial Connect)",
-    "Power Printer",
-    "Scan SSH",
-    "Toggle WebUI AP Only",
-    NULL
-};
-
-static const char *dual_comm_ble_options[] = {
-    "Start AirTag Scanner",
-    "List AirTags",
-    "Select AirTag",
-    "Spoof Selected AirTag",
-    "Stop Spoofing",
-    "Find Flippers",
-    "List Flippers",
-    "Select Flipper",
-    "Raw BLE Scanner",
-    "BLE Spam - Apple",
-    "BLE Spam - Microsoft",
-    "BLE Spam - Samsung",
-    "BLE Spam - Google",
-    "BLE Spam - Random",
-    "Stop BLE Spam",
-    NULL
-};
 
 static const char *dual_comm_gps_options[] = {
     "GPS Info",
@@ -763,7 +836,7 @@ static const char *dual_comm_ethernet_options[] = {
 static void load_current_settings_values(void);
 
 typedef struct {
-    const char *label;
+    i18n_key_t label_key;
     int setting_type;
     const char **value_options;
     int value_count;
@@ -835,67 +908,66 @@ static const char *mic_contrast_options[] = {
 #endif
 
 static SettingsItem settings_items[] = {
-    {"Display Timeout", SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1, SETTINGS_CAT_DISPLAY, false, NULL},
+    {I18N_KEY_DISPLAY_TIMEOUT, SETTING_DISPLAY_TIMEOUT, timeout_options, 5, 1, SETTINGS_CAT_DISPLAY, false, NULL},
 #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
-    {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL},
+    {I18N_KEY_MAX_BRIGHTNESS, SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL},
 #endif
-    {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL},
+    {I18N_KEY_INVERT_COLORS, SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL},
     
-    {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Language", SETTING_LANGUAGE, language_options, LANGUAGE_OPTION_COUNT, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_MENU_THEME, SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_MENU_LAYOUT, SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_ZEBRA_MENUS, SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_BG_SHADE, SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_ROUNDED_MENUS, SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_TERMINAL_COLOR, SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_LANGUAGE, SETTING_LANGUAGE, language_options, LANGUAGE_OPTION_COUNT, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     
-    {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, RGB_MODE_COUNT, 0, SETTINGS_CAT_LED_RGB, false, NULL},
-    {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_LED_RGB, false, NULL},
+    {I18N_KEY_RGB_MODE, SETTING_RGB_MODE, rgb_mode_options, RGB_MODE_COUNT, 0, SETTINGS_CAT_LED_RGB, false, NULL},
+    {I18N_KEY_NEOPIXEL_BRIGHTNESS, SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_LED_RGB, false, NULL},
     
-    {"Navigation Buttons", SETTING_NAV_BUTTONS, bool_options, 2, 1, SETTINGS_CAT_NAVIGATION, false, NULL},
-    {"Third Control", SETTING_THIRD_CONTROL, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, false, NULL},
+    {I18N_KEY_NAVIGATION_BUTTONS, SETTING_NAV_BUTTONS, bool_options, 2, 1, SETTINGS_CAT_NAVIGATION, false, NULL},
+    {I18N_KEY_THIRD_CONTROL, SETTING_THIRD_CONTROL, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, false, NULL},
 #ifdef CONFIG_USE_ENCODER
-    {"Invert Encoder", SETTING_ENCODER_INVERT, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, true, "CONFIG_USE_ENCODER"},
+    {I18N_KEY_INVERT_ENCODER, SETTING_ENCODER_INVERT, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, true, "CONFIG_USE_ENCODER"},
 #endif
     
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-    {"Idle Animation", SETTING_IDLE_ANIMATION, idle_animation_options, 9, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
-    {"Idle Anim Delay", SETTING_IDLE_ANIM_DELAY, idle_delay_options, 4, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
+    {I18N_KEY_IDLE_ANIMATION, SETTING_IDLE_ANIMATION, idle_animation_options, 9, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
+    {I18N_KEY_IDLE_ANIM_DELAY, SETTING_IDLE_ANIM_DELAY, idle_delay_options, 4, 0, SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
 #endif
     
-    {"Web Auth", SETTING_WEB_AUTH, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
-    {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
-    {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    {I18N_KEY_WEB_AUTH, SETTING_WEB_AUTH, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    {I18N_KEY_AP_ENABLED, SETTING_AP_ENABLED, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
+    {I18N_KEY_WEBUI_AP_ONLY, SETTING_WEBUI_AP_ONLY, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL},
     
-    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_POWER_SAVING_MODE, SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
 #if CONFIG_IDF_TARGET_ESP32S3
-    {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, true, "CONFIG_IDF_TARGET_ESP32S3"},
+    {I18N_KEY_USB_HOST_MODE, SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, true, "CONFIG_IDF_TARGET_ESP32S3"},
 #endif
-    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
-    {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
-    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
-    {"Export Settings SD", SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
-    {"Import Settings SD", SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
-    {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_AUTO_SAVE_SCANS, SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_RUN_SETUP_WIZARD, SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_I2C_BUS_SCAN, SETTING_I2C_SCAN, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_EXPORT_SETTINGS_SD, SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_IMPORT_SETTINGS_SD, SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
+    {I18N_KEY_FACTORY_RESET, SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL},
     
-    {"Auto Upload", SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    {"Donate Data", SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL},
-    {"Load Config from SD", SETTING_LOAD_CONFIG, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    {"Test API Key", SETTING_WIGLE_TEST_API, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    {"Help", SETTING_WIGLE_HELP, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    {"Manual Upload", SETTING_WIGLE_MANUAL_UPLOAD, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    {"View WiGLE Stats", SETTING_WIGLE_STATS, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
-    
+    {I18N_KEY_AUTO_UPLOAD, SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_DONATE_DATA, SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_LOAD_CONFIG_FROM_SD, SETTING_LOAD_CONFIG, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_TEST_API_KEY, SETTING_WIGLE_TEST_API, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_HELP, SETTING_WIGLE_HELP, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_MANUAL_UPLOAD, SETTING_WIGLE_MANUAL_UPLOAD, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
+    {I18N_KEY_VIEW_WIGLE_STATS, SETTING_WIGLE_STATS, action_options, 1, 0, SETTINGS_CAT_WIGLE, false, NULL},
 #if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
-    {"Visualizer Mode", SETTING_MIC_VISUALIZER_MODE, mic_visualizer_mode_options, 6, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Color Mode", SETTING_MIC_COLOR_MODE, mic_color_mode_options, 7, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Sensitivity", SETTING_MIC_SENSITIVITY, mic_sensitivity_options, 10, 4, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Smoothing", SETTING_MIC_SMOOTHING, mic_smoothing_options, 11, 3, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Contrast", SETTING_MIC_CONTRAST, mic_contrast_options, 5, 1, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Mirror Mode", SETTING_MIC_MIRROR_MODE, bool_options, 2, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-    {"Calibrate", SETTING_MIC_CALIBRATE, action_options, 1, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_VISUALIZER_MODE, SETTING_MIC_VISUALIZER_MODE, mic_visualizer_mode_options, 6, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_COLOR_MODE, SETTING_MIC_COLOR_MODE, mic_color_mode_options, 7, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_SENSITIVITY, SETTING_MIC_SENSITIVITY, mic_sensitivity_options, 10, 4, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_SMOOTHING, SETTING_MIC_SMOOTHING, mic_smoothing_options, 11, 3, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_CONTRAST, SETTING_MIC_CONTRAST, mic_contrast_options, 5, 1, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_MIRROR_MODE, SETTING_MIC_MIRROR_MODE, bool_options, 2, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+    {I18N_KEY_CALIBRATE, SETTING_MIC_CALIBRATE, action_options, 1, 0, SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
 #endif
-    {"Split Terminal", SETTING_GHOSTLINK_SPLIT_VIEW, bool_options, 2, 1, SETTINGS_CAT_GHOSTLINK, false, NULL},
+    {I18N_KEY_SPLIT_TERMINAL, SETTING_GHOSTLINK_SPLIT_VIEW, bool_options, 2, 1, SETTINGS_CAT_GHOSTLINK, false, NULL},
 };
 
 #define IO_BTN_EDIT_P10 0x1000
@@ -1159,7 +1231,7 @@ static void decorate_settings_row_with_arrows(lv_obj_t *btn) {
     lv_obj_set_style_pad_left(btn, 8, 0);
     lv_obj_set_style_pad_right(btn, 8, 0);
 
-    const lv_font_t *font = (button_height_global <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *font = (button_height_global <= 40) ? FONT_12 : FONT_14;
     lv_obj_set_style_text_font(left, font, 0);
     lv_obj_set_style_text_font(right, font, 0);
     
@@ -1478,15 +1550,15 @@ void options_menu_create() {
     switch (SelectedMenuType) {
     case OT_Wifi:
         switch (current_wifi_menu_state) {
-            case WIFI_MENU_MAIN: options = wifi_main_options; break;
-            case WIFI_MENU_ATTACKS: options = wifi_attacks_options; break;
-            case WIFI_MENU_SCAN_SELECT: options = wifi_scan_select_options; break;
-            case WIFI_MENU_ENVIRONMENT: options = wifi_environment_options; break;
-            case WIFI_MENU_NETWORK: options = wifi_network_options; break;
-            case WIFI_MENU_CAPTURE: options = wifi_capture_options; break;
-            case WIFI_MENU_EVIL_PORTAL: options = wifi_evil_portal_options; break;
-            case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;
-            case WIFI_MENU_MISC: options = wifi_misc_options; break;
+            case WIFI_MENU_MAIN: options = (const char**)wifi_menu_get_options(wifi_main_keys, wifi_main_buffer, 9); break;
+            case WIFI_MENU_ATTACKS: options = (const char**)wifi_menu_get_options(wifi_attacks_keys, wifi_attacks_buffer, 14); break;
+            case WIFI_MENU_SCAN_SELECT: options = (const char**)wifi_menu_get_options(wifi_scan_select_keys, wifi_scan_select_buffer, 10); break;
+            case WIFI_MENU_ENVIRONMENT: options = (const char**)wifi_menu_get_options(wifi_environment_keys, wifi_environment_buffer, 4); break;
+            case WIFI_MENU_NETWORK: options = (const char**)wifi_menu_get_options(wifi_network_keys, wifi_network_buffer, 5); break;
+            case WIFI_MENU_CAPTURE: options = (const char**)wifi_menu_get_options(wifi_capture_keys, wifi_capture_buffer, 11); break;
+            case WIFI_MENU_EVIL_PORTAL: options = (const char**)wifi_menu_get_options(wifi_evil_portal_keys, wifi_evil_portal_buffer, 4); break;
+            case WIFI_MENU_CONNECTION: options = (const char**)wifi_menu_get_options(wifi_connection_keys, wifi_connection_buffer, 4); break;
+            case WIFI_MENU_MISC: options = (const char**)wifi_menu_get_options(wifi_misc_keys, wifi_misc_buffer, 4); break;
             case WIFI_MENU_EVIL_PORTAL_SELECT:
             {
                 // Portal population is now handled in rebuild_current_menu
@@ -1569,11 +1641,11 @@ void options_menu_create() {
             case DUALCOMM_MENU_MAIN:     options = dual_comm_main_options; break;
             case DUALCOMM_MENU_SESSION:  options = dual_comm_session_options; break;
             case DUALCOMM_MENU_SCAN:     options = dual_comm_scan_options; break;
-            case DUALCOMM_MENU_WIFI:     options = dual_comm_wifi_options; break;
-            case DUALCOMM_MENU_ATTACKS:  options = dual_comm_attacks_options; break;
-            case DUALCOMM_MENU_CAPTURE:  options = dual_comm_capture_options; break;
-            case DUALCOMM_MENU_TOOLS:    options = dual_comm_tools_options; break;
-            case DUALCOMM_MENU_BLE:      options = dual_comm_ble_options; break;
+            case DUALCOMM_MENU_WIFI:     options = (const char**)wifi_menu_get_options(dual_comm_wifi_keys, dual_comm_wifi_buffer, 7); break;
+            case DUALCOMM_MENU_ATTACKS:  options = (const char**)wifi_menu_get_options(dual_comm_attacks_keys, dual_comm_attacks_buffer, 8); break;
+            case DUALCOMM_MENU_CAPTURE:  options = (const char**)wifi_menu_get_options(dual_comm_capture_keys, dual_comm_capture_buffer, 9); break;
+            case DUALCOMM_MENU_TOOLS:    options = (const char**)wifi_menu_get_options(dual_comm_tools_keys, dual_comm_tools_buffer, 9); break;
+            case DUALCOMM_MENU_BLE:      options = (const char**)wifi_menu_get_options(dual_comm_ble_keys, dual_comm_ble_buffer, 16); break;
             case DUALCOMM_MENU_GPS:      options = dual_comm_gps_options; break;
             case DUALCOMM_MENU_ETHERNET: options = dual_comm_ethernet_options; break;
             case DUALCOMM_MENU_KEYBOARD: options = dual_comm_keyboard_options; break;
@@ -1658,6 +1730,7 @@ void options_menu_create() {
     lv_obj_add_event_cb(back_btn, touch_back_button_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(back_btn);
     lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
+    lv_obj_set_style_text_font(back_label, FONT_14, 0);
     lv_obj_set_style_text_color(back_label, control_text_color, 0);
     lv_obj_center(back_label);
 
@@ -2069,9 +2142,9 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_add_flag(wigle_help_popup, LV_OBJ_FLAG_CLICKABLE);
             
             lv_obj_t *title = lv_label_create(wigle_help_popup);
-            lv_label_set_text(title, "WiGLE Setup Help");
+            lv_label_set_text(title, i18n_text(I18N_KEY_WIGLE_SETUP_HELP));
             lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_text_font(title, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(title, FONT_12, 0);
             lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
             
             lv_obj_t *help_scroll = popup_create_scroll_area(wigle_help_popup, popup_w - 16, popup_h - 50, LV_ALIGN_TOP_MID, 0, 25);
@@ -2094,7 +2167,7 @@ static void apply_setting_change(int setting_index, int new_value) {
                 "Needs: GPS, SD card, WiFi, CSV files in /mnt/ghostesp/gps/";
             
             lv_label_set_text(help_label, help_text);
-            lv_obj_set_style_text_font(help_label, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_font(help_label, FONT_10, 0);
             
             lv_obj_t *close_btn = lv_btn_create(wigle_help_popup);
             wigle_help_close_btn = close_btn;
@@ -2124,20 +2197,20 @@ static void apply_setting_change(int setting_index, int new_value) {
                 wigle_stats_popup_open();
                 wigle_set_stats_callback(wigle_stats_result_cb);
                 if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
-                    lv_label_set_text(wigle_stats_body_label, "Stats request already running...\nPress Close to exit.");
+                    lv_label_set_text(wigle_stats_body_label, i18n_text(I18N_KEY_STATS_ALREADY_RUNNING));
                 }
                 return;
             }
             wigle_stats_popup_open();
             if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
-                lv_label_set_text(wigle_stats_body_label, "Loading WiGLE stats...");
+                lv_label_set_text(wigle_stats_body_label, i18n_text(I18N_KEY_LOADING_WIGLE_STATS));
             }
             wigle_set_stats_callback(wigle_stats_result_cb);
             esp_err_t err = wigle_get_stats_async();
             if (err != ESP_OK) {
                 wigle_set_stats_callback(NULL);
                 if (wigle_stats_body_label && lv_obj_is_valid(wigle_stats_body_label)) {
-                    lv_label_set_text(wigle_stats_body_label, "Failed to start stats request");
+                    lv_label_set_text(wigle_stats_body_label, i18n_text(I18N_KEY_FAILED_START_STATS_REQUEST));
                 }
             }
             return;
@@ -2257,7 +2330,7 @@ static void change_setting_value(int setting_index, bool increment) {
         }
         if (label) {
             char buf[128];
-            snprintf(buf, sizeof(buf), "%s: %s", item->label, item->value_options[new_value]);
+            snprintf(buf, sizeof(buf), "%s: %s", i18n_text(item->label_key), item->value_options[new_value]);
             lv_label_set_text(label, buf);
         }
     }
@@ -7163,7 +7236,7 @@ static void wigle_stats_popup_open(void) {
     lv_obj_set_style_bg_color(wigle_stats_popup, lv_color_hex(0x1E1E1E), 0);
     lv_obj_add_flag(wigle_stats_popup, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *title = popup_create_title_label(wigle_stats_popup, "WiGLE Stats", &lv_font_montserrat_12, 5);
+    lv_obj_t *title = popup_create_title_label(wigle_stats_popup, "WiGLE Stats", FONT_12, 5);
     (void)title;
 
     int scroll_h = popup_h - 76;
@@ -7175,20 +7248,20 @@ static void wigle_stats_popup_open(void) {
     lv_obj_set_width(wigle_stats_body_label, popup_w - 24);
     lv_obj_set_style_text_color(wigle_stats_body_label, lv_color_hex(0xCCCCCC), 0);
     lv_obj_set_style_text_font(wigle_stats_body_label,
-                               (LV_VER_RES <= 200) ? &lv_font_montserrat_10 : &lv_font_montserrat_12,
+                               (LV_VER_RES <= 200) ? FONT_10 : FONT_12,
                                0);
     lv_obj_set_style_text_line_space(wigle_stats_body_label, 3, 0);
-    lv_label_set_text(wigle_stats_body_label, "Loading WiGLE stats...");
+    lv_label_set_text(wigle_stats_body_label, i18n_text(I18N_KEY_LOADING_WIGLE_STATS));
 
     wigle_stats_down_btn = popup_add_styled_button(
         wigle_stats_popup, "Down", 88, 32,
         LV_ALIGN_BOTTOM_LEFT, 10, -8,
-        &lv_font_montserrat_12,
+        FONT_12,
         wigle_stats_popup_scroll_down_cb, NULL);
     wigle_stats_close_btn = popup_add_styled_button(
         wigle_stats_popup, "Close", 96, 32,
         LV_ALIGN_BOTTOM_RIGHT, -10, -8,
-        &lv_font_montserrat_12,
+        FONT_12,
         wigle_stats_popup_close_cb, NULL);
 
     lv_obj_t *btns[2] = { wigle_stats_down_btn, wigle_stats_close_btn };
@@ -7223,7 +7296,7 @@ static void wigle_manual_popup_upload_cb(lv_event_t *e) {
     if (err != ESP_OK) {
         wigle_set_manual_upload_callback(NULL);
         if (wigle_manual_info_label && lv_obj_is_valid(wigle_manual_info_label)) {
-            lv_label_set_text(wigle_manual_info_label, "Failed to start upload.");
+            lv_label_set_text(wigle_manual_info_label, i18n_text(I18N_KEY_FAILED_START_UPLOAD));
         }
         return;
     }
@@ -7258,7 +7331,7 @@ static void wigle_show_csv_details_popup(const char *filename) {
     lv_obj_set_style_bg_color(wigle_manual_popup, lv_color_hex(0x1E1E1E), 0);
     lv_obj_add_flag(wigle_manual_popup, LV_OBJ_FLAG_CLICKABLE);
 
-    popup_create_title_label(wigle_manual_popup, "WiGLE Manual Upload", &lv_font_montserrat_12, 5);
+    popup_create_title_label(wigle_manual_popup, "WiGLE Manual Upload", FONT_12, 5);
 
     int info_scroll_h = popup_h - 76;
     if (info_scroll_h < 58) info_scroll_h = 58;
@@ -7269,7 +7342,7 @@ static void wigle_show_csv_details_popup(const char *filename) {
     lv_obj_set_width(wigle_manual_info_label, popup_w - 24);
     lv_obj_set_style_text_color(wigle_manual_info_label, lv_color_hex(0xCCCCCC), 0);
     lv_obj_set_style_text_font(wigle_manual_info_label,
-                               (LV_VER_RES <= 200) ? &lv_font_montserrat_10 : &lv_font_montserrat_12,
+                               (LV_VER_RES <= 200) ? FONT_10 : FONT_12,
                                0);
     lv_obj_set_style_text_line_space(wigle_manual_info_label, 2, 0);
 
@@ -7282,12 +7355,12 @@ static void wigle_show_csv_details_popup(const char *filename) {
     wigle_manual_upload_btn = popup_add_styled_button(
         wigle_manual_popup, i18n_text(I18N_KEY_UPLOAD), 90, 32,
         LV_ALIGN_BOTTOM_LEFT, 10, -8,
-        &lv_font_montserrat_12,
+        FONT_12,
         wigle_manual_popup_upload_cb, NULL);
     wigle_manual_close_btn = popup_add_styled_button(
         wigle_manual_popup, i18n_text(I18N_KEY_CANCEL), 90, 32,
         LV_ALIGN_BOTTOM_RIGHT, -10, -8,
-        &lv_font_montserrat_12,
+        FONT_12,
         wigle_manual_popup_close_cb, NULL);
 
     lv_obj_t *btns[2] = { wigle_manual_upload_btn, wigle_manual_close_btn };
@@ -7435,15 +7508,15 @@ static void rebuild_current_menu(void) {
         switch (SelectedMenuType) {
         case OT_Wifi:
             switch (current_wifi_menu_state) {
-                case WIFI_MENU_MAIN: options = wifi_main_options; break;
-                case WIFI_MENU_ATTACKS: options = wifi_attacks_options; break;
-                case WIFI_MENU_SCAN_SELECT: options = wifi_scan_select_options; break;
-                case WIFI_MENU_ENVIRONMENT: options = wifi_environment_options; break;
-                case WIFI_MENU_NETWORK: options = wifi_network_options; break;
-                case WIFI_MENU_CAPTURE: options = wifi_capture_options; break;
-                case WIFI_MENU_EVIL_PORTAL: options = wifi_evil_portal_options; break;
-                case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;
-                case WIFI_MENU_MISC: options = wifi_misc_options; break;
+                case WIFI_MENU_MAIN: options = (const char**)wifi_menu_get_options(wifi_main_keys, wifi_main_buffer, 9); break;
+                case WIFI_MENU_ATTACKS: options = (const char**)wifi_menu_get_options(wifi_attacks_keys, wifi_attacks_buffer, 14); break;
+                case WIFI_MENU_SCAN_SELECT: options = (const char**)wifi_menu_get_options(wifi_scan_select_keys, wifi_scan_select_buffer, 10); break;
+                case WIFI_MENU_ENVIRONMENT: options = (const char**)wifi_menu_get_options(wifi_environment_keys, wifi_environment_buffer, 4); break;
+                case WIFI_MENU_NETWORK: options = (const char**)wifi_menu_get_options(wifi_network_keys, wifi_network_buffer, 5); break;
+                case WIFI_MENU_CAPTURE: options = (const char**)wifi_menu_get_options(wifi_capture_keys, wifi_capture_buffer, 11); break;
+                case WIFI_MENU_EVIL_PORTAL: options = (const char**)wifi_menu_get_options(wifi_evil_portal_keys, wifi_evil_portal_buffer, 4); break;
+                case WIFI_MENU_CONNECTION: options = (const char**)wifi_menu_get_options(wifi_connection_keys, wifi_connection_buffer, 4); break;
+                case WIFI_MENU_MISC: options = (const char**)wifi_menu_get_options(wifi_misc_keys, wifi_misc_buffer, 4); break;
                 case WIFI_MENU_EVIL_PORTAL_SELECT:
                 {
                     /* JIT-mount on shared-SPI boards before scanning SD */
@@ -7555,11 +7628,11 @@ static void rebuild_current_menu(void) {
                 case DUALCOMM_MENU_MAIN:     options = dual_comm_main_options; break;
                 case DUALCOMM_MENU_SESSION:  options = dual_comm_session_options; break;
                 case DUALCOMM_MENU_SCAN:     options = dual_comm_scan_options; break;
-                case DUALCOMM_MENU_WIFI:     options = dual_comm_wifi_options; break;
-                case DUALCOMM_MENU_ATTACKS:  options = dual_comm_attacks_options; break;
-                case DUALCOMM_MENU_CAPTURE:  options = dual_comm_capture_options; break;
-                case DUALCOMM_MENU_TOOLS:    options = dual_comm_tools_options; break;
-                case DUALCOMM_MENU_BLE:      options = dual_comm_ble_options; break;
+                case DUALCOMM_MENU_WIFI:     options = (const char**)wifi_menu_get_options(dual_comm_wifi_keys, dual_comm_wifi_buffer, 7); break;
+                case DUALCOMM_MENU_ATTACKS:  options = (const char**)wifi_menu_get_options(dual_comm_attacks_keys, dual_comm_attacks_buffer, 8); break;
+                case DUALCOMM_MENU_CAPTURE:  options = (const char**)wifi_menu_get_options(dual_comm_capture_keys, dual_comm_capture_buffer, 9); break;
+                case DUALCOMM_MENU_TOOLS:    options = (const char**)wifi_menu_get_options(dual_comm_tools_keys, dual_comm_tools_buffer, 9); break;
+                case DUALCOMM_MENU_BLE:      options = (const char**)wifi_menu_get_options(dual_comm_ble_keys, dual_comm_ble_buffer, 16); break;
                 case DUALCOMM_MENU_GPS:      options = dual_comm_gps_options; break;
                 case DUALCOMM_MENU_ETHERNET: options = dual_comm_ethernet_options; break;
                 case DUALCOMM_MENU_KEYBOARD: options = dual_comm_keyboard_options; break;
@@ -7986,7 +8059,7 @@ static void menu_builder_cb(lv_timer_t *t)
                         if (current_item_in_category >= build_item_index) {
                             SettingsItem *item = &settings_items[i];
                             char buf[128];
-                            snprintf(buf, sizeof(buf), "%s: %s", item->label, item->value_options[item->current_value]);
+                            snprintf(buf, sizeof(buf), "%s: %s", i18n_text(item->label_key), item->value_options[item->current_value]);
                             lv_obj_t *btn = options_view_add_item(g_options_view, buf, option_event_cb, (void *)(intptr_t)i);
                             if (!btn) break;
                             lv_obj_set_user_data(btn, (void *)(intptr_t)i);

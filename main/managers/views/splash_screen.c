@@ -4,6 +4,7 @@
 #include "managers/views/music_visualizer.h"
 #include "managers/settings_manager.h"
 #include "core/ghostesp_version.h"
+#include "core/i18n.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include <stdio.h>
@@ -38,7 +39,7 @@ void splash_create(void) {
 
 
   lv_obj_t *label1 = lv_label_create(splash_screen);
-  lv_label_set_text(label1, "GhostESP: Revival");
+  lv_label_set_text(label1, i18n_text(I18N_KEY_GHOSTESP_REVIVAL));
   lv_obj_set_style_text_color(label1, lv_color_hex(0xFFFFFF), 0);
   lv_obj_align_to(label1, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   

@@ -7,12 +7,18 @@
 
 #include "managers/views/options_screen.h"
 #include "gui/screen_layout.h"
+#include "managers/views/nrf24_analyzer_view.h"
+#include "managers/views/main_menu_screen.h"
+#include "managers/display_manager.h"
+#include "core/esp_comm_manager.h"
+#include "core/glog.h"
+#include "core/i18n.h"
+#include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
+#include "gui/fonts/font_helper.h"
 #include "managers/settings_manager.h"
-#include "core/esp_comm_manager.h"
-#include "core/i18n.h"
-
+#include "lvgl.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
@@ -262,16 +268,16 @@ static void nrf24_update_pause_ui(void) {
     if (s_status_label && lv_obj_is_valid(s_status_label)) {
         if (s_remote_mode) {
             if (s_remote_error) {
-                lv_label_set_text(s_status_label, "Peer error");
+                lv_label_set_text(s_status_label, i18n_text(I18N_KEY_PEER_ERROR));
             } else if (!esp_comm_manager_is_connected()) {
-                lv_label_set_text(s_status_label, "GhostLink disconnected");
+                lv_label_set_text(s_status_label, i18n_text(I18N_KEY_GHOSTLINK_DISCONNECTED));
             } else if (!s_remote_stream_online) {
-                lv_label_set_text(s_status_label, "Waiting for peer stream...");
+                lv_label_set_text(s_status_label, i18n_text(I18N_KEY_WAITING_PEER_STREAM));
             } else {
                 lv_label_set_text(s_status_label, s_paused ? "Remote scan paused" : "Remote scan active");
             }
         } else if (!s_hw_ready) {
-            lv_label_set_text(s_status_label, "NRF24 init failed");
+            lv_label_set_text(s_status_label, i18n_text(I18N_KEY_NRF24_INIT_FAILED));
         } else {
             lv_label_set_text(s_status_label, s_paused ? "Analyzer paused" : "Analyzer scanning");
         }
@@ -809,7 +815,7 @@ static void nrf24_graph_draw_event(lv_event_t *e) {
     lv_draw_label_dsc_t label_dsc;
     lv_draw_label_dsc_init(&label_dsc);
     label_dsc.color = text;
-    label_dsc.font = &lv_font_montserrat_10;
+    label_dsc.font = FONT_10;
 
     lv_coord_t y_label_x1 = plot_x1 - 18;
     lv_coord_t y_label_x2 = plot_x1 - 2;
@@ -885,7 +891,7 @@ static void nrf24_graph_draw_event(lv_event_t *e) {
         lv_draw_label_dsc_t alert_lbl;
         lv_draw_label_dsc_init(&alert_lbl);
         alert_lbl.color = alert_text;
-        alert_lbl.font = &lv_font_montserrat_10;
+        alert_lbl.font = FONT_10;
 
         const char *jam_str = nrf24_jam_type_str(s_jam_type);
         if (!jam_str) jam_str = "JAMMING";
@@ -1358,15 +1364,15 @@ void nrf24_analyzer_create(void) {
     lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, LV_PART_MAIN);
 
     s_status_label = lv_label_create(s_content);
-    lv_label_set_text(s_status_label, "Initializing analyzer...");
+    lv_label_set_text(s_status_label, i18n_text(I18N_KEY_INITIALIZING_ANALYZER));
     lv_obj_set_style_text_color(s_status_label, text, 0);
-    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_status_label, FONT_12, 0);
     lv_obj_align(s_status_label, LV_ALIGN_TOP_LEFT, 8, 6);
 
     s_freq_label = lv_label_create(s_content);
-    lv_label_set_text(s_freq_label, "Peak CH:000  2.400 GHz  0%");
+    lv_label_set_text(s_freq_label, i18n_text(I18N_KEY_PEAK_CH));
     lv_obj_set_style_text_color(s_freq_label, text, 0);
-    lv_obj_set_style_text_font(s_freq_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_freq_label, FONT_10, 0);
     lv_obj_align(s_freq_label, LV_ALIGN_TOP_LEFT, 8, 24);
 
     int button_h = (LV_VER_RES <= 170) ? 28 : 34;
@@ -1399,7 +1405,7 @@ void nrf24_analyzer_create(void) {
     lv_obj_add_event_cb(s_toggle_btn, nrf24_toggle_btn_cb, LV_EVENT_CLICKED, NULL);
 
     s_toggle_label = lv_label_create(s_toggle_btn);
-    lv_label_set_text(s_toggle_label, "Pause");
+    lv_label_set_text(s_toggle_label, i18n_text(I18N_KEY_PAUSE));
     lv_obj_set_style_text_color(s_toggle_label, text, 0);
     lv_obj_center(s_toggle_label);
 
@@ -1433,7 +1439,7 @@ void nrf24_analyzer_create(void) {
 #ifdef NRF24_JAM_DETECT_DEBUG
     } else {
         if (s_status_label && lv_obj_is_valid(s_status_label)) {
-            lv_label_set_text(s_status_label, "DBG: tap Next to cycle");
+            lv_label_set_text(s_status_label, i18n_text(I18N_KEY_DBG_TAP_NEXT_CYCLE));
         }
         s_hw_ready = true;
         s_debug_active = true;

@@ -7,6 +7,7 @@
 #include "managers/settings_manager.h"
 #include "managers/views/app_gallery_screen.h"
 #include "managers/wifi_manager.h"
+#include "core/i18n.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -93,8 +94,8 @@ static void update_status_text(void) {
         lv_label_set_text(view.status_label, current_track);
         lv_label_set_text(view.endpoint_label, current_artist);
     } else {
-        lv_label_set_text(view.status_label, "VISUALIZER");
-        lv_label_set_text(view.endpoint_label, "USB serial / UDP ready");
+        lv_label_set_text(view.status_label, i18n_text(I18N_KEY_VISUALIZER));
+        lv_label_set_text(view.endpoint_label, i18n_text(I18N_KEY_USB_SERIAL_UDP_READY));
     }
 
     lv_obj_set_style_text_color(view.status_label, theme_text, 0);
@@ -103,7 +104,8 @@ static void update_status_text(void) {
     if (debug_label) {
         if (last_debug_label_tick == 0 || (now - last_debug_label_tick) >= 100) {
             char debug[96];
-            snprintf(debug, sizeof(debug), "frames %lu  %s",
+            snprintf(debug, sizeof(debug), "%s %lu  %s",
+                     i18n_text(I18N_KEY_FRAMES_IDLE),
                      (unsigned long)frame_counter,
                      age < STREAM_STALE_MS ? "streaming" : "idle");
             lv_label_set_text(debug_label, debug);

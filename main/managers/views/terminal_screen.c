@@ -12,12 +12,14 @@
 #include "scans/ble/device_detect_scan.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
+#include "gui/fonts/font_helper.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "core/i18n.h"
 
 extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
@@ -206,7 +208,7 @@ static void update_input_label() {
         if (input_len > 0) {
             lv_label_set_text(input_label, input_buffer);
         } else {
-            lv_label_set_text(input_label, "Type Command...");
+            lv_label_set_text(input_label, i18n_text(I18N_KEY_TYPE_COMMAND));
         }
     }
 }
@@ -709,7 +711,7 @@ void terminal_view_create(void) {
     lv_obj_set_style_border_width(terminal_canvas, 0, 0);
     // Match previous label style
     lv_obj_set_style_text_color(terminal_canvas, lv_color_hex(settings_get_terminal_text_color(&G_Settings)), 0);
-    lv_obj_set_style_text_font(terminal_canvas, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(terminal_canvas, FONT_10, 0);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_draw_event, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
     lv_obj_add_event_cb(terminal_scroller, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
@@ -770,7 +772,7 @@ void terminal_view_create(void) {
     }
 #endif
 
-    display_manager_add_status_bar("Terminal");
+    display_manager_add_status_bar(i18n_text(I18N_KEY_TYPE_COMMAND));
 
     if (!terminal_update_timer) {
         terminal_update_timer = lv_timer_create(process_queued_messages_callback, 30, NULL);
