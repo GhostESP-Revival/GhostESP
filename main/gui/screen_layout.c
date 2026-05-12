@@ -1,5 +1,5 @@
 #include "gui/screen_layout.h"
-
+#include "gui/design_tokens.h"
 #include "managers/display_manager.h"
 
 lv_obj_t *gui_screen_create_root(lv_obj_t *parent, const char *title, lv_color_t bg_color, lv_opa_t bg_opa) {

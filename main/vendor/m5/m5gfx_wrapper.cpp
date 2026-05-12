@@ -5,10 +5,16 @@
 
 M5GFX display;
 
+static lgfx::Panel_ST7789 *g_panel = NULL;
+
 extern "C" void init_m5gfx_display() {
-    auto panel = new lgfx::Panel_ST7789();
-    panel->setRotation(1);
-    display.setPanel(panel);
+    if (g_panel) {
+        delete g_panel;
+        g_panel = NULL;
+    }
+    g_panel = new lgfx::Panel_ST7789();
+    g_panel->setRotation(1);
+    display.setPanel(g_panel);
     display.init();
     display.fillScreen(TFT_BLACK);
 }

@@ -1,6 +1,8 @@
 #include "managers/views/nrf24_analyzer_view.h"
 #include "sdkconfig.h"
 
+/* #define NRF24_JAM_DETECT_DEBUG */
+
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 
 #include "managers/views/options_screen.h"
@@ -14,6 +16,7 @@
 #include "driver/spi_master.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "rom/ets_sys.h"
 
 #include <stdbool.h>
@@ -78,6 +81,66 @@ static uint8_t s_peaks[NRF24_CHANNEL_COUNT];
 static uint8_t s_next_channel = 0;
 static uint32_t s_tick_count = 0;
 static nrf24_control_t s_selected_control = CONTROL_TOGGLE;
+
+#define JAM_DETECT_THRESHOLD     60
+#define JAM_DETECT_MIN_CHANNELS  15
+#define JAM_DETECT_GAP_CHANNELS  8
+#define JAM_DETECT_HISTORY_SIZE  4
+#define JAM_DETECT_CONFIDENCE_TICKS 6
+#define JAM_DETECT_SIMULTANEOUS_THRESHOLD 3
+
+typedef enum {
+    JAM_NONE = 0,
+    JAM_BROADBAND,
+    JAM_SIG_FW_A_BLE,
+    JAM_SIG_FW_A_WIFI,
+    JAM_SIG_FW_A_NRF,
+    JAM_SIG_FW_B_BLE,
+    JAM_SIG_FW_B_WIFI,
+    JAM_SIG_FW_B_NRF,
+    JAM_SIG_FW_B_MULTI,
+    JAM_UNKNOWN_SWEEP
+} jam_type_t;
+
+static jam_type_t s_jam_type = JAM_NONE;
+static uint8_t s_jam_confidence = 0;
+static uint8_t s_jam_strength = 0;
+static int8_t s_jam_peak_ch = -1;
+static uint8_t s_jam_active_count_history[JAM_DETECT_HISTORY_SIZE];
+static uint8_t s_jam_history_idx = 0;
+
+#ifdef NRF24_JAM_DETECT_DEBUG
+typedef enum {
+    DBG_SCENE_IDLE = 0,
+    DBG_SCENE_FW_A_SWEEP,
+    DBG_SCENE_FW_A_BLE,
+    DBG_SCENE_FW_A_WIFI,
+    DBG_SCENE_FW_A_NRF,
+    DBG_SCENE_FW_B_WIFI,
+    DBG_SCENE_FW_B_BLE,
+    DBG_SCENE_FW_B_NRF,
+    DBG_SCENE_FW_B_MULTI,
+    DBG_SCENE_COUNT
+} debug_scene_t;
+
+static const char *s_debug_scene_names[DBG_SCENE_COUNT] = {
+    "IDLE",
+    "FW-A SWEEP ALL",
+    "FW-A BLE ADV",
+    "FW-A WIFI STEP",
+    "FW-A HI-BAND",
+    "FW-B WIFI CONT",
+    "FW-B BLE ADV",
+    "FW-B HI-BAND",
+    "FW-B TRI-RADIO"
+};
+
+static debug_scene_t s_debug_scene = DBG_SCENE_IDLE;
+static uint8_t s_debug_sweep_pos = 0;
+static bool s_debug_active = false;
+
+static void nrf24_debug_inject_levels(void);
+#endif
 
 #ifdef CONFIG_HAS_NRF24
 static void nrf24_hw_stop(void);
@@ -220,6 +283,25 @@ static void nrf24_return_to_menu(void) {
 }
 
 static void nrf24_toggle_pause(void) {
+#ifdef NRF24_JAM_DETECT_DEBUG
+    s_debug_active = true;
+    s_debug_scene = (debug_scene_t)((s_debug_scene + 1) % DBG_SCENE_COUNT);
+    s_jam_confidence = 0;
+    s_jam_type = JAM_NONE;
+    s_jam_strength = 0;
+    s_jam_peak_ch = -1;
+    memset(s_peaks, 0, sizeof(s_peaks));
+    memset(s_jam_active_count_history, 0, sizeof(s_jam_active_count_history));
+    s_jam_history_idx = 0;
+    if (s_status_label && lv_obj_is_valid(s_status_label)) {
+        lv_label_set_text_fmt(s_status_label, "DBG: %s", s_debug_scene_names[s_debug_scene]);
+    }
+    if (s_toggle_label && lv_obj_is_valid(s_toggle_label)) {
+        lv_label_set_text(s_toggle_label, "Next");
+    }
+    return;
+#endif
+
     if (s_remote_mode) {
         if (!esp_comm_manager_is_connected()) {
             nrf24_update_pause_ui();
@@ -428,6 +510,197 @@ void nrf24_analyzer_view_update_remote_state(const char *state) {
     }
 }
 
+static void nrf24_detect_jamming(void) {
+    int active_count = 0;
+    int gap_active = 0;
+    int total_strength = 0;
+    int best_ch = 0;
+    uint8_t best_lvl = 0;
+    int max_consecutive = 0;
+
+    static const uint8_t gap_channels[] = {24, 25, 49, 50, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83};
+
+    // ========================================================================
+    // THREAT SIGNATURE ARRAYS
+    // Mapped from known wild firmware channel-hopping behaviors.
+    // ========================================================================
+
+    // Threat Actor: Firmware A (Known for 5-channel step patterns and
+    // sequential sweeps across the full 2.4GHz band)
+    static const uint8_t fw_a_ble[] = {2, 26, 80};
+    static const uint8_t fw_a_wifi[] = {2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57, 62, 67, 72};
+    static const uint8_t fw_a_nrf[] = {76, 78, 79};
+
+    // Threat Actor: Firmware B (Known for continuous lower-band block sweeps
+    // and simultaneous multi-radio carrier injection)
+    static const uint8_t fw_b_wifi[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    static const uint8_t fw_b_ble[] = {2, 26, 80};
+    static const uint8_t fw_b_nrf[] = {76, 78, 79};
+
+    bool in_run = false;
+    int run_start = 0;
+
+    for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+        if (s_levels[ch] >= JAM_DETECT_THRESHOLD) {
+            active_count++;
+            total_strength += s_levels[ch];
+            if (s_levels[ch] > best_lvl) {
+                best_lvl = s_levels[ch];
+                best_ch = ch;
+            }
+            if (!in_run) {
+                in_run = true;
+                run_start = ch;
+            }
+        } else {
+            if (in_run) {
+                int run_len = ch - run_start;
+                if (run_len > max_consecutive) {
+                    max_consecutive = run_len;
+                }
+                in_run = false;
+            }
+        }
+    }
+    if (in_run) {
+        int run_len = NRF24_CHANNEL_COUNT - run_start;
+        if (run_len > max_consecutive) {
+            max_consecutive = run_len;
+        }
+    }
+
+    for (int i = 0; i < (int)(sizeof(gap_channels) / sizeof(gap_channels[0])); ++i) {
+        if (s_levels[gap_channels[i]] >= JAM_DETECT_THRESHOLD) {
+            gap_active++;
+        }
+    }
+
+    s_jam_active_count_history[s_jam_history_idx % JAM_DETECT_HISTORY_SIZE] = (uint8_t)active_count;
+    s_jam_history_idx++;
+
+    int hist_active = 0;
+    for (int i = 0; i < JAM_DETECT_HISTORY_SIZE; ++i) {
+        hist_active += s_jam_active_count_history[i];
+    }
+    int avg_active = hist_active / JAM_DETECT_HISTORY_SIZE;
+
+    int fw_a_ble_hits = 0;
+    for (int i = 0; i < (int)(sizeof(fw_a_ble) / sizeof(fw_a_ble[0])); ++i) {
+        if (s_levels[fw_a_ble[i]] >= JAM_DETECT_THRESHOLD) fw_a_ble_hits++;
+    }
+
+    int fw_a_wifi_hits = 0;
+    for (int i = 0; i < (int)(sizeof(fw_a_wifi) / sizeof(fw_a_wifi[0])); ++i) {
+        if (s_levels[fw_a_wifi[i]] >= JAM_DETECT_THRESHOLD) fw_a_wifi_hits++;
+    }
+
+    int fw_a_nrf_hits = 0;
+    for (int i = 0; i < (int)(sizeof(fw_a_nrf) / sizeof(fw_a_nrf[0])); ++i) {
+        if (s_levels[fw_a_nrf[i]] >= JAM_DETECT_THRESHOLD) fw_a_nrf_hits++;
+    }
+
+    int fw_b_wifi_hits = 0;
+    int fw_b_wifi_exclusive = 0;
+    for (int i = 0; i < (int)(sizeof(fw_b_wifi) / sizeof(fw_b_wifi[0])); ++i) {
+        if (s_levels[fw_b_wifi[i]] >= JAM_DETECT_THRESHOLD) {
+            fw_b_wifi_hits++;
+            fw_b_wifi_exclusive++;
+        }
+    }
+    for (int ch = 13; ch < NRF24_CHANNEL_COUNT; ++ch) {
+        if (s_levels[ch] >= JAM_DETECT_THRESHOLD) {
+            fw_b_wifi_exclusive = -1;
+            break;
+        }
+    }
+
+    int fw_b_ble_hits = 0;
+    for (int i = 0; i < (int)(sizeof(fw_b_ble) / sizeof(fw_b_ble[0])); ++i) {
+        if (s_levels[fw_b_ble[i]] >= JAM_DETECT_THRESHOLD) fw_b_ble_hits++;
+    }
+
+    int fw_b_nrf_hits = 0;
+    for (int i = 0; i < (int)(sizeof(fw_b_nrf) / sizeof(fw_b_nrf[0])); ++i) {
+        if (s_levels[fw_b_nrf[i]] >= JAM_DETECT_THRESHOLD) fw_b_nrf_hits++;
+    }
+
+    int sim_count = 0;
+    for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+        if (s_levels[ch] >= 90) sim_count++;
+    }
+    bool triple_radio = (sim_count >= JAM_DETECT_SIMULTANEOUS_THRESHOLD && avg_active <= 10);
+
+    jam_type_t detected = JAM_NONE;
+
+    if (gap_active >= JAM_DETECT_GAP_CHANNELS && avg_active >= JAM_DETECT_MIN_CHANNELS) {
+        detected = JAM_BROADBAND;
+    } else if (max_consecutive >= 23 && avg_active >= JAM_DETECT_MIN_CHANNELS) {
+        detected = JAM_BROADBAND;
+    } else if (triple_radio) {
+        if (fw_b_ble_hits == 3 && fw_b_nrf_hits == 3) {
+            detected = JAM_SIG_FW_B_MULTI;
+        } else if (fw_b_wifi_exclusive > 0 && fw_b_nrf_hits == 3) {
+            detected = JAM_SIG_FW_B_MULTI;
+        } else if (fw_b_ble_hits == 3) {
+            detected = JAM_SIG_FW_B_BLE;
+        } else if (fw_b_nrf_hits == 3) {
+            detected = JAM_SIG_FW_B_NRF;
+        } else if (fw_b_wifi_exclusive > 5) {
+            detected = JAM_SIG_FW_B_WIFI;
+        } else {
+            detected = JAM_SIG_FW_B_MULTI;
+        }
+    } else if (fw_b_wifi_exclusive > 5 && avg_active <= 12) {
+        detected = JAM_SIG_FW_B_WIFI;
+    } else if (fw_a_nrf_hits == 3 && gap_active < JAM_DETECT_GAP_CHANNELS) {
+        detected = JAM_SIG_FW_A_NRF;
+    } else if (fw_a_ble_hits == 3 && avg_active <= 5) {
+        detected = JAM_SIG_FW_A_BLE;
+    } else if (fw_a_wifi_hits >= 10 && avg_active >= 10 && gap_active < JAM_DETECT_GAP_CHANNELS) {
+        detected = JAM_SIG_FW_A_WIFI;
+    } else if (avg_active >= JAM_DETECT_MIN_CHANNELS) {
+        detected = JAM_UNKNOWN_SWEEP;
+    }
+
+    if (detected != JAM_NONE) {
+        if (s_jam_type == detected || s_jam_confidence == 0) {
+            s_jam_confidence++;
+            if (s_jam_confidence > JAM_DETECT_CONFIDENCE_TICKS) {
+                s_jam_confidence = JAM_DETECT_CONFIDENCE_TICKS;
+            }
+        } else {
+            s_jam_confidence = 1;
+        }
+        s_jam_type = detected;
+        s_jam_strength = (uint8_t)(active_count > 0 ? total_strength / active_count : 0);
+        s_jam_peak_ch = (int8_t)best_ch;
+    } else {
+        if (s_jam_confidence > 0) {
+            s_jam_confidence--;
+        }
+        if (s_jam_confidence == 0) {
+            s_jam_type = JAM_NONE;
+            s_jam_strength = 0;
+            s_jam_peak_ch = -1;
+        }
+    }
+}
+
+static const char *nrf24_jam_type_str(jam_type_t t) {
+    switch (t) {
+        case JAM_BROADBAND:       return "BROADBAND NOISE";
+        case JAM_SIG_FW_A_BLE:   return "SIG: FW-A BLE ADV";
+        case JAM_SIG_FW_A_WIFI:  return "SIG: FW-A WIFI";
+        case JAM_SIG_FW_A_NRF:   return "SIG: FW-A HI-BAND";
+        case JAM_SIG_FW_B_BLE:   return "SIG: FW-B BLE ADV";
+        case JAM_SIG_FW_B_WIFI:  return "SIG: FW-B WIFI";
+        case JAM_SIG_FW_B_NRF:   return "SIG: FW-B HI-BAND";
+        case JAM_SIG_FW_B_MULTI: return "SIG: FW-B TRI-RADIO";
+        case JAM_UNKNOWN_SWEEP:  return "GENERIC SWEEP";
+        default:                 return NULL;
+    }
+}
+
 static void nrf24_graph_draw_event(lv_event_t *e) {
     lv_obj_t *obj = lv_event_get_target(e);
     if (!obj || obj != s_graph) {
@@ -588,10 +861,113 @@ static void nrf24_graph_draw_event(lv_event_t *e) {
     };
     lv_draw_label(draw_ctx, &label_dsc, &right_txt, "2.525 GHz", NULL);
 
+    if (s_jam_confidence >= JAM_DETECT_CONFIDENCE_TICKS && s_jam_type != JAM_NONE) {
+        lv_color_t alert_bg = lv_color_hex(0xCC0000);
+        lv_color_t alert_text = lv_color_hex(0xFFFFFF);
+
+        lv_draw_rect_dsc_t alert_dsc;
+        lv_draw_rect_dsc_init(&alert_dsc);
+        alert_dsc.bg_opa = 180;
+        alert_dsc.bg_color = alert_bg;
+        alert_dsc.radius = 0;
+        alert_dsc.border_width = 0;
+
+        lv_coord_t alert_h = 14;
+        lv_area_t alert_area = {
+            .x1 = plot_x1,
+            .y1 = plot_y1,
+            .x2 = plot_x2,
+            .y2 = plot_y1 + alert_h
+        };
+        lv_draw_rect(draw_ctx, &alert_dsc, &alert_area);
+
+        lv_draw_label_dsc_t alert_lbl;
+        lv_draw_label_dsc_init(&alert_lbl);
+        alert_lbl.color = alert_text;
+        alert_lbl.font = &lv_font_montserrat_10;
+
+        const char *jam_str = nrf24_jam_type_str(s_jam_type);
+        if (!jam_str) jam_str = "JAMMING";
+
+        lv_area_t alert_txt_area = {
+            .x1 = plot_x1 + 4,
+            .y1 = plot_y1 + 2,
+            .x2 = plot_x2 - 4,
+            .y2 = plot_y1 + alert_h
+        };
+        lv_draw_label(draw_ctx, &alert_lbl, &alert_txt_area, jam_str, NULL);
+
+        if (s_jam_peak_ch >= 0) {
+            lv_coord_t peak_x = plot_x1 + (s_jam_peak_ch * plot_w) / NRF24_CHANNEL_COUNT;
+            lv_draw_rect_dsc_t marker_dsc;
+            lv_draw_rect_dsc_init(&marker_dsc);
+            marker_dsc.bg_opa = 100;
+            marker_dsc.bg_color = alert_bg;
+            marker_dsc.radius = 0;
+            marker_dsc.border_width = 0;
+            lv_area_t marker_area = {
+                .x1 = peak_x - 2,
+                .y1 = plot_y1 + alert_h,
+                .x2 = peak_x + 2,
+                .y2 = plot_y2
+            };
+            lv_draw_rect(draw_ctx, &marker_dsc, &marker_area);
+        }
+    }
+
 }
 
 static void nrf24_timer_cb(lv_timer_t *timer) {
     LV_UNUSED(timer);
+
+#ifdef NRF24_JAM_DETECT_DEBUG
+    if (s_debug_active) {
+        nrf24_debug_inject_levels();
+
+        int best_ch = 0;
+        uint8_t best_level = 0;
+        for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+            if (s_peaks[ch] > best_level) {
+                best_level = s_peaks[ch];
+                best_ch = ch;
+            }
+        }
+
+        if (s_freq_label && lv_obj_is_valid(s_freq_label)) {
+            if (s_jam_confidence >= JAM_DETECT_CONFIDENCE_TICKS) {
+                const char *jam_str = nrf24_jam_type_str(s_jam_type);
+                if (jam_str) {
+                    lv_label_set_text_fmt(s_freq_label, "%s CH:%03d %u%%", jam_str, (int)s_jam_peak_ch, s_jam_strength);
+                } else {
+                    lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, (2400 + best_ch) - 2000, best_level);
+                }
+            } else {
+                lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, (2400 + best_ch) - 2000, best_level);
+            }
+        }
+
+        nrf24_detect_jamming();
+
+        if (s_status_label && lv_obj_is_valid(s_status_label)) {
+            lv_label_set_text_fmt(s_status_label, "DBG: %s [%d/%d]",
+                s_debug_scene_names[s_debug_scene],
+                s_jam_confidence,
+                JAM_DETECT_CONFIDENCE_TICKS);
+        }
+
+        if ((s_tick_count % 4U) == 0U) {
+            for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+                if (s_peaks[ch] > 0) s_peaks[ch]--;
+            }
+        }
+        s_tick_count++;
+
+        if (s_graph && lv_obj_is_valid(s_graph)) {
+            lv_obj_invalidate(s_graph);
+        }
+        return;
+    }
+#endif
 
     if (s_remote_mode) {
         for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
@@ -612,8 +988,19 @@ static void nrf24_timer_cb(lv_timer_t *timer) {
 
         if (s_freq_label && lv_obj_is_valid(s_freq_label)) {
             int mhz = 2400 + best_ch;
-            lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+            if (s_jam_confidence >= JAM_DETECT_CONFIDENCE_TICKS) {
+                const char *jam_str = nrf24_jam_type_str(s_jam_type);
+                if (jam_str) {
+                    lv_label_set_text_fmt(s_freq_label, "%s CH:%03d %u%%", jam_str, (int)s_jam_peak_ch, s_jam_strength);
+                } else {
+                    lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+                }
+            } else {
+                lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+            }
         }
+
+        nrf24_detect_jamming();
 
         nrf24_update_pause_ui();
         if (s_graph && lv_obj_is_valid(s_graph)) {
@@ -676,14 +1063,157 @@ static void nrf24_timer_cb(lv_timer_t *timer) {
 
     if (s_freq_label && lv_obj_is_valid(s_freq_label)) {
         int mhz = 2400 + best_ch;
-        lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+        if (s_jam_confidence >= JAM_DETECT_CONFIDENCE_TICKS) {
+            const char *jam_str = nrf24_jam_type_str(s_jam_type);
+            if (jam_str) {
+                lv_label_set_text_fmt(s_freq_label, "%s CH:%03d %u%%", jam_str, (int)s_jam_peak_ch, s_jam_strength);
+            } else {
+                lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+            }
+        } else {
+            lv_label_set_text_fmt(s_freq_label, "Peak CH:%03d  2.%03d GHz  %u%%", best_ch, mhz - 2000, best_level);
+        }
     }
+
+    nrf24_detect_jamming();
 
     if (s_graph && lv_obj_is_valid(s_graph)) {
         lv_obj_invalidate(s_graph);
     }
 #endif
 }
+
+#ifdef NRF24_JAM_DETECT_DEBUG
+static void nrf24_debug_inject_levels(void) {
+    if (!s_debug_active) return;
+
+    for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+        uint8_t noise = (uint8_t)(esp_timer_get_time() % 11);
+        s_levels[ch] = (uint8_t)((s_levels[ch] * 2 + noise) / 3);
+    }
+
+    s_debug_sweep_pos = (s_debug_sweep_pos + 1) % 126;
+
+    switch (s_debug_scene) {
+        case DBG_SCENE_IDLE:
+            break;
+
+        case DBG_SCENE_FW_A_SWEEP: {
+            for (int ch = 1; ch <= 83; ++ch) {
+                uint8_t base = 85 + (uint8_t)((esp_timer_get_time() + ch * 37) % 16);
+                s_levels[ch] = (uint8_t)((s_levels[ch] + base) / 2);
+                if (s_levels[ch] > 100) s_levels[ch] = 100;
+            }
+            int sweep_center = 1 + (s_debug_sweep_pos % 83);
+            for (int offset = -2; offset <= 2; ++offset) {
+                int ch = sweep_center + offset;
+                if (ch >= 1 && ch < NRF24_CHANNEL_COUNT) {
+                    s_levels[ch] = 95 + (uint8_t)(esp_timer_get_time() % 6);
+                    if (s_levels[ch] > 100) s_levels[ch] = 100;
+                }
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_A_BLE: {
+            static const uint8_t ble_ch[] = {2, 26, 80};
+            for (int i = 0; i < 3; ++i) {
+                s_levels[ble_ch[i]] = 90 + (uint8_t)((esp_timer_get_time() + i * 13) % 11);
+                if (s_levels[ble_ch[i]] > 100) s_levels[ble_ch[i]] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_A_WIFI: {
+            static const uint8_t wifi_ch[] = {2,7,12,17,22,27,32,37,42,47,52,57,62,67,72};
+            int active = s_debug_sweep_pos % 15;
+            for (int i = 0; i < 15; ++i) {
+                uint8_t lvl;
+                if (i == active || i == (active + 1) % 15) {
+                    lvl = 92 + (uint8_t)((esp_timer_get_time() + i * 7) % 9);
+                } else {
+                    lvl = 70 + (uint8_t)((esp_timer_get_time() + i * 17) % 15);
+                }
+                s_levels[wifi_ch[i]] = lvl;
+                if (s_levels[wifi_ch[i]] > 100) s_levels[wifi_ch[i]] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_A_NRF: {
+            static const uint8_t nrf_ch[] = {76, 78, 79};
+            int active = s_debug_sweep_pos % 3;
+            for (int i = 0; i < 3; ++i) {
+                uint8_t lvl;
+                if (i == active) {
+                    lvl = 93 + (uint8_t)(esp_timer_get_time() % 8);
+                } else {
+                    lvl = 75 + (uint8_t)((esp_timer_get_time() + i * 23) % 12);
+                }
+                s_levels[nrf_ch[i]] = lvl;
+                if (s_levels[nrf_ch[i]] > 100) s_levels[nrf_ch[i]] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_B_WIFI: {
+            for (int ch = 1; ch <= 12; ++ch) {
+                uint8_t lvl = 88 + (uint8_t)((esp_timer_get_time() + ch * 11) % 13);
+                s_levels[ch] = lvl;
+                if (s_levels[ch] > 100) s_levels[ch] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_B_BLE: {
+            static const uint8_t ble_ch[] = {2, 26, 80};
+            for (int i = 0; i < 3; ++i) {
+                s_levels[ble_ch[i]] = 93 + (uint8_t)((esp_timer_get_time() + i * 19) % 8);
+                if (s_levels[ble_ch[i]] > 100) s_levels[ble_ch[i]] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_B_NRF: {
+            static const uint8_t nrf_ch[] = {76, 78, 79};
+            for (int i = 0; i < 3; ++i) {
+                s_levels[nrf_ch[i]] = 91 + (uint8_t)((esp_timer_get_time() + i * 29) % 10);
+                if (s_levels[nrf_ch[i]] > 100) s_levels[nrf_ch[i]] = 100;
+            }
+            break;
+        }
+
+        case DBG_SCENE_FW_B_MULTI: {
+            for (int ch = 1; ch <= 12; ++ch) {
+                s_levels[ch] = 82 + (uint8_t)((esp_timer_get_time() + ch * 7) % 12);
+                if (s_levels[ch] > 100) s_levels[ch] = 100;
+            }
+            s_levels[2] = 93;
+            s_levels[26] = 93;
+            s_levels[80] = 93;
+            s_levels[76] = 91;
+            s_levels[78] = 91;
+            s_levels[79] = 91;
+            if (s_levels[2] > 100) s_levels[2] = 100;
+            if (s_levels[26] > 100) s_levels[26] = 100;
+            if (s_levels[80] > 100) s_levels[80] = 100;
+            if (s_levels[76] > 100) s_levels[76] = 100;
+            if (s_levels[78] > 100) s_levels[78] = 100;
+            if (s_levels[79] > 100) s_levels[79] = 100;
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    for (int ch = 0; ch < NRF24_CHANNEL_COUNT; ++ch) {
+        if (s_levels[ch] > s_peaks[ch]) {
+            s_peaks[ch] = s_levels[ch];
+        }
+    }
+}
+#endif
 
 static void nrf24_toggle_btn_cb(lv_event_t *e) {
     LV_UNUSED(e);
@@ -806,6 +1336,17 @@ void nrf24_analyzer_create(void) {
     s_remote_error = false;
     s_hw_ready = false;
     s_selected_control = CONTROL_TOGGLE;
+    s_jam_type = JAM_NONE;
+    s_jam_confidence = 0;
+    s_jam_strength = 0;
+    s_jam_peak_ch = -1;
+    s_jam_history_idx = 0;
+    memset(s_jam_active_count_history, 0, sizeof(s_jam_active_count_history));
+#ifdef NRF24_JAM_DETECT_DEBUG
+    s_debug_scene = DBG_SCENE_IDLE;
+    s_debug_active = false;
+    s_debug_sweep_pos = 0;
+#endif
 
     display_manager_fill_screen(bg);
     s_root = gui_screen_create_root(NULL, "NRF24", bg, LV_OPA_COVER);
@@ -888,7 +1429,15 @@ void nrf24_analyzer_create(void) {
             }
         }
         nrf24_update_pause_ui();
-#ifdef CONFIG_HAS_NRF24
+#ifdef NRF24_JAM_DETECT_DEBUG
+    } else {
+        if (s_status_label && lv_obj_is_valid(s_status_label)) {
+            lv_label_set_text(s_status_label, "DBG: tap Next to cycle");
+        }
+        s_hw_ready = true;
+        s_debug_active = true;
+        s_debug_scene = DBG_SCENE_IDLE;
+#elif defined(CONFIG_HAS_NRF24)
     } else if (nrf24_hw_start() == ESP_OK) {
         s_hw_ready = true;
         nrf24_update_pause_ui();

@@ -32,7 +32,7 @@ typedef struct {
 
 typedef void (*comm_command_callback_t)(const char* command, const char* data, void* user_data);
 
-#define COMM_MAX_STREAM_CHANNELS 8
+#define COMM_MAX_STREAM_CHANNELS 9
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
@@ -40,6 +40,7 @@ typedef void (*comm_command_callback_t)(const char* command, const char* data, v
 #define COMM_STREAM_CHANNEL_NRF24 5
 #define COMM_STREAM_CHANNEL_ETHERNET      6
 #define COMM_STREAM_CHANNEL_MIC_AMPLITUDE 7  // MIC audio data for RGB visualizer
+#define COMM_STREAM_CHANNEL_SUBGHZ 8
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 

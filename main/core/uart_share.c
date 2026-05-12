@@ -22,7 +22,15 @@ static uart_share_state_t* uart_share_state_get(uart_port_t uart_num) {
 
     uart_share_state_t* st = &s_uart_share[uart_num];
     if (!st->mutex) {
-        st->mutex = xSemaphoreCreateMutex();
+        static portMUX_TYPE init_mux = portMUX_INITIALIZER_UNLOCKED;
+        SemaphoreHandle_t new_mutex = xSemaphoreCreateMutex();
+        portENTER_CRITICAL(&init_mux);
+        if (!st->mutex) {
+            st->mutex = new_mutex;
+            new_mutex = NULL;
+        }
+        portEXIT_CRITICAL(&init_mux);
+        if (new_mutex) vSemaphoreDelete(new_mutex);
     }
     st->uart_num = uart_num;
     return st;

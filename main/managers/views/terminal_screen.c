@@ -610,7 +610,7 @@ static void stop_all_operations(void) {
         display_manager_switch_view(&main_menu_view);
     }
 }
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
 void text_box_click_cb(lv_event_t *e){
   ESP_LOGI(TAG, "Text box clicked");
   printf("Text box clicked\n");
@@ -658,20 +658,9 @@ void terminal_view_create(void) {
     bool show_back_btn = false;
     bool show_input_bar = false;
 
-#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-#define TEMPLATE_HAS_TOUCH (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0)
-#else
-#define TEMPLATE_HAS_TOUCH (false)
-#endif
-
-#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-    // Show back button on larger screens and T-Display S3 (320x170)
+#ifdef CONFIG_USE_TOUCHSCREEN
     if ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
-        (LV_HOR_RES == 320 && LV_VER_RES == 170) 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-        || (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0)
-#endif
-    ) {
+        (LV_HOR_RES == 320 && LV_VER_RES == 170)) {
         show_back_btn = true;
         back_button_height = BUTTON_SIZE + BUTTON_PADDING * 2;
     }
@@ -680,9 +669,6 @@ void terminal_view_create(void) {
     show_input_bar = false;
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     show_input_bar = true;
-#endif
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (TEMPLATE_HAS_TOUCH) show_input_bar = true;
 #endif
 
     // Calculate the height for the input area (input box + padding)
@@ -729,14 +715,8 @@ void terminal_view_create(void) {
     lv_obj_add_event_cb(terminal_scroller, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
     update_terminal_label("");
 
-#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-    if (show_back_btn && (
 #ifdef CONFIG_USE_TOUCHSCREEN
-        true
-#else
-        TEMPLATE_HAS_TOUCH
-#endif
-    )) {
+    if (show_back_btn) {
         back_btn = lv_btn_create(terminal_view.root);
         lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
         lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
@@ -756,17 +736,11 @@ void terminal_view_create(void) {
     }
 #endif
 
-#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (show_input_bar) {
         int textbox_width = LV_HOR_RES - 2 * padding;
-    #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-        if (show_back_btn && (
-#ifdef CONFIG_USE_TOUCHSCREEN
-            true
-#else
-            TEMPLATE_HAS_TOUCH
-#endif
-        )) {
+    #ifdef CONFIG_USE_TOUCHSCREEN
+        if (show_back_btn) {
             textbox_width -= BUTTON_SIZE + 2 * BUTTON_PADDING;
         }
     #endif

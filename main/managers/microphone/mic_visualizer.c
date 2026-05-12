@@ -51,6 +51,11 @@ static void mic_visualizer_task(void *arg) {
     ESP_LOGI(TAG, "MIC visualizer task started");
     
     while (mic_visualizer_running) {
+        if (mic_is_paused()) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         size_t bytes_read = 0;
         
         esp_err_t ret = mic_read_samples(samples, CONFIG_MIC_BUFFER_SAMPLES, &bytes_read);
@@ -90,13 +95,13 @@ static void mic_visualizer_task(void *arg) {
         payload[4] = (uint8_t)(amplitude_follower * 255.0f);
         
         // Log periodically
-        if (loop_counter % 50 == 0) {
+        if (loop_counter % 500 == 0) {
             bool cal = !goertzel_is_calibrated();
             if (cal) {
                 ESP_LOGI(TAG, "Calibrating... B=%d L=%d H=%d T=%d",
                          payload[0], payload[1], payload[2], payload[3]);
             } else {
-                ESP_LOGI(TAG, "B=%d L=%d H=%d T=%d amp=%d",
+                ESP_LOGD(TAG, "B=%d L=%d H=%d T=%d amp=%d",
                          payload[0], payload[1], payload[2], payload[3], payload[4]);
             }
         }
@@ -112,8 +117,8 @@ static void mic_visualizer_task(void *arg) {
                 ESP_LOGI(TAG, "GhostLink connected - sending MIC data");
             }
             
-            if (loop_counter % 100 == 0) {
-                ESP_LOGI(TAG, "Sending B=%d L=%d H=%d T=%d A=%d (ok=%d)",
+            if (loop_counter % 1000 == 0) {
+                ESP_LOGD(TAG, "Sending B=%d L=%d H=%d T=%d A=%d (ok=%d)",
                          payload[0], payload[1], payload[2], payload[3], payload[4], send_ok);
             }
         } else if (was_connected) {

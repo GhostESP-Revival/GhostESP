@@ -17,8 +17,6 @@ void main_menu_destroy(void);
 
 void select_menu_item(int index, bool slide_left);
 
-static void handle_menu_item_selection(int item_index);
-
 void handle_hardware_button_press(int ButtonPressed);
 
 extern View main_menu_view;

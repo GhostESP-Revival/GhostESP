@@ -10,6 +10,7 @@ typedef enum {
     OT_GPS,
     OT_DualComm,
     OT_NRF24,
+    OT_SubGhz,
     OT_Settings,
     OT_IOButtonPresets,
     OT_WigleManualUpload

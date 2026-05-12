@@ -39,10 +39,10 @@ typedef enum {
 #define MENU_BG_SHADE_COUNT 4
 
 static const uint32_t s_shade_surfaces[MENU_BG_SHADE_COUNT][THEME_SURFACE_SLOT_COUNT] = {
-    {0x030303, 0x0A0A0A, 0x121212, 0xFFFFFF, 0x707070},  // Darkest
-    {0x0A0A0A, 0x141414, 0x1E1E1E, 0xFFFFFF, 0x808080},  // Darker (default)
-    {0x121212, 0x1C1C1C, 0x282828, 0xFFFFFF, 0x909090},  // Dark
-    {0x1C1C1C, 0x282828, 0x343434, 0xFFFFFF, 0x999999},  // Medium
+    {0x040404, 0x111111, 0x1E1E1E, 0xFFFFFF, 0x707070},
+    {0x080808, 0x1A1A1A, 0x282828, 0xFFFFFF, 0x808080},
+    {0x101010, 0x222222, 0x303030, 0xFFFFFF, 0x909090},
+    {0x181818, 0x2A2A2A, 0x383838, 0xFFFFFF, 0x999999},
 };
 
 static uint8_t theme_palette_clamp(uint8_t theme) {
@@ -76,6 +76,22 @@ uint32_t theme_palette_get(uint8_t theme, int slot) {
     uint32_t accent = s_theme_accents[theme];
     if (slot == 0) {
         return accent;
+    }
+
+    /*
+     * Pastel theme: each slot is a different pastel hue instead of
+     * a tonal ramp of the same color.
+     */
+    if (theme == 1) {
+        static const uint32_t pastel_rainbow[THEME_PALETTE_SLOT_COUNT] = {
+            0xFFCDD2, // pastel pink (base)
+            0xFFE0B2, // pastel peach
+            0xFFF9C4, // pastel yellow
+            0xC8E6C9, // pastel mint
+            0xBBDEFB, // pastel blue
+            0xE1BEE7, // pastel lavender
+        };
+        return pastel_rainbow[slot];
     }
 
     /*
@@ -130,4 +146,21 @@ uint32_t theme_palette_get_text_muted(uint8_t theme) {
 
 bool theme_palette_is_bright(uint8_t theme) {
     return theme_color_luma(theme_palette_get_accent(theme_palette_clamp(theme))) >= 160U;
+}
+
+/*
+ * Themes that are monochrome, muted, or mood-based look better with a single
+ * consistent accent on menu items instead of a tonal ramp.
+ */
+bool theme_palette_is_solid(uint8_t theme) {
+    theme = theme_palette_clamp(theme);
+    static const uint32_t solid_mask =
+        (1u << 0)  |  // Default
+        (1u << 2)  |  // Dark
+        (1u << 3)  |  // Bright
+        (1u << 4)  |  // Solarized
+        (1u << 5)  |  // Monochrome
+        (1u << 15) |  // Cherry Blossom
+        (1u << 16);   // Soft Sand
+    return (solid_mask >> theme) & 1u;
 }

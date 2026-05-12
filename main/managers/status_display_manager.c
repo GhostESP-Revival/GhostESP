@@ -68,7 +68,7 @@ static bool s_oom_logged;
 
 static esp_err_t status_display_init_i2c(void) {
     esp_err_t err = i2c_master_get_bus_handle(STATUS_DISPLAY_I2C_PORT, &s_i2c_bus);
-    if (err == ESP_ERR_NOT_FOUND) {
+    if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_STATE) {
 #if defined(CONFIG_USE_IO_EXPANDER)
         return err;
 #else

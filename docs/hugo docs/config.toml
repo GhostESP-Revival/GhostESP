@@ -16,6 +16,10 @@ enableRobotsTXT = true
   name = "Latest"
 
 [[params.versioning.options]]
+  id = "v1.9.9"
+  name = "v1.9.9"
+
+[[params.versioning.options]]
   id = "v1.9.8"
   name = "v1.9.8"
 
@@ -84,3 +88,8 @@ enableRobotsTXT = true
   name = "Flipper Zero App"
   url = "/latest/flipper-app/"
   weight = 6
+
+[[menu.sidebar]]
+  name = "SubGHz"
+  url = "/latest/subghz/"
+  weight = 7

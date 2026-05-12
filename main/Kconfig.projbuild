@@ -341,6 +341,14 @@ menu "Ghost ESP Options"
                 commands to a paired NRF24-capable peer over GhostLink/commsend.
                 The display device does not scan RF directly - it only provides the UI.
 
+        config HAS_SUBGHZ_REMOTE
+            bool "Enable SubGHz Remote (display controls via GhostLink peer)"
+            default n
+            help
+                Enable SubGHz scanner controls on a display controller that routes
+                commands to a paired CC1101-capable peer over GhostLink/commsend.
+                The display device does not scan RF directly - it only provides the UI.
+
         config HAS_BATTERY
             bool "Enable power saving"
             default n
@@ -677,6 +685,106 @@ menu "Ghost ESP Options"
 
         endmenu
 
+        menu "SubGHz Options"
+
+            config HAS_SUBGHZ
+                bool "Enable SubGHz App (CC1101)"
+                default n
+                help
+                    Enable the SubGHz app menu, popup scanner UI, and CC1101 backend.
+
+            config SUBGHZ_SPI_HOST
+                int "SubGHz SPI Host"
+                range 2 3
+                default 2
+                depends on HAS_SUBGHZ
+                help
+                    SPI host for CC1101 (2 = SPI2_HOST, 3 = SPI3_HOST).
+
+            config SUBGHZ_SPI_MOSI_PIN
+                int "SubGHz MOSI Pin"
+                default 18
+                depends on HAS_SUBGHZ
+                help
+                    GPIO pin for CC1101 MOSI.
+
+            config SUBGHZ_SPI_MISO_PIN
+                int "SubGHz MISO Pin"
+                default 38
+                depends on HAS_SUBGHZ
+                help
+                    GPIO pin for CC1101 MISO.
+
+            config SUBGHZ_SPI_SCK_PIN
+                int "SubGHz SCK Pin"
+                default 40
+                depends on HAS_SUBGHZ
+                help
+                    GPIO pin for CC1101 SCK.
+
+            config SUBGHZ_CSN_PIN
+                int "SubGHz CSN Pin"
+                default 39
+                depends on HAS_SUBGHZ
+                help
+                    GPIO pin for CC1101 CSN (chip select).
+
+            config SUBGHZ_GDO0_PIN
+                int "SubGHz GDO0 Pin"
+                default 41
+                depends on HAS_SUBGHZ
+                help
+                    GPIO pin connected to CC1101 GDO0.
+
+            config SUBGHZ_GDO2_PIN
+                int "SubGHz GDO2 Pin (optional, -1 to disable)"
+                default -1
+                depends on HAS_SUBGHZ
+                help
+                    Optional GPIO pin connected to CC1101 GDO2.
+
+            config SUBGHZ_SPI_CLOCK_HZ
+                int "SubGHz SPI Clock (Hz)"
+                range 500000 10000000
+                default 4000000
+                depends on HAS_SUBGHZ
+                help
+                    SPI clock used to communicate with the CC1101 module.
+
+            config SUBGHZ_BASE_FREQ_MHZ
+                int "SubGHz Base Frequency (MHz * 100)"
+                range 30000 92800
+                default 43392
+                depends on HAS_SUBGHZ
+                help
+                    Base tuning frequency in MHz*100 (e.g. 43392 = 433.92 MHz).
+
+            config SUBGHZ_CHANNEL_STEP_KHZ
+                int "SubGHz Channel Step (kHz)"
+                range 25 500
+                default 200
+                depends on HAS_SUBGHZ
+                help
+                    Approximate channel step shown by the UI while scanning.
+
+            config SUBGHZ_ANALYZER_CHANNELS_PER_TICK
+                int "SubGHz Channels per Tick"
+                range 1 32
+                default 8
+                depends on HAS_SUBGHZ
+                help
+                    Number of channels sampled each scanner task tick.
+
+            config SUBGHZ_ANALYZER_SETTLE_US
+                int "SubGHz Settle Time (us)"
+                range 100 5000
+                default 250
+                depends on HAS_SUBGHZ
+                help
+                    Delay after tuning a channel before reading RSSI.
+
+        endmenu
+
         menu "NFC Options"
 
             config NFC_PN532
@@ -727,6 +835,163 @@ menu "Ghost ESP Options"
 
         endmenu
 
+    endmenu
+
+    menu "Camera & Motion Detector Configuration"
+        depends on IDF_TARGET_ESP32S3
+
+        config HAS_CAMERA
+            bool "Enable Camera Support"
+            default n
+            help
+                Enable camera sensor (e.g. OV3660 on XIAO ESP32S3 Sense)
+
+        config CAM_PIN_PWDN
+            int "Camera PWDN Pin"
+            depends on HAS_CAMERA
+            default -1
+            help
+                Power-down pin (-1 if not connected)
+
+        config CAM_PIN_RESET
+            int "Camera RESET Pin"
+            depends on HAS_CAMERA
+            default -1
+            help
+                Reset pin (-1 if not connected)
+
+        config CAM_PIN_XCLK
+            int "Camera XCLK Pin"
+            depends on HAS_CAMERA
+            default 10
+            help
+                Master clock output pin
+
+        config CAM_PIN_SIOD
+            int "Camera SCCB SDA Pin"
+            depends on HAS_CAMERA
+            default 40
+            help
+                SCCB/I2C data pin
+
+        config CAM_PIN_SIOC
+            int "Camera SCCB SCL Pin"
+            depends on HAS_CAMERA
+            default 39
+            help
+                SCCB/I2C clock pin
+
+        config CAM_PIN_D7
+            int "Camera D7 Pin"
+            depends on HAS_CAMERA
+            default 48
+            help
+                Parallel data bit 7
+
+        config CAM_PIN_D6
+            int "Camera D6 Pin"
+            depends on HAS_CAMERA
+            default 11
+            help
+                Parallel data bit 6
+
+        config CAM_PIN_D5
+            int "Camera D5 Pin"
+            depends on HAS_CAMERA
+            default 12
+            help
+                Parallel data bit 5
+
+        config CAM_PIN_D4
+            int "Camera D4 Pin"
+            depends on HAS_CAMERA
+            default 14
+            help
+                Parallel data bit 4
+
+        config CAM_PIN_D3
+            int "Camera D3 Pin"
+            depends on HAS_CAMERA
+            default 16
+            help
+                Parallel data bit 3
+
+        config CAM_PIN_D2
+            int "Camera D2 Pin"
+            depends on HAS_CAMERA
+            default 18
+            help
+                Parallel data bit 2
+
+        config CAM_PIN_D1
+            int "Camera D1 Pin"
+            depends on HAS_CAMERA
+            default 17
+            help
+                Parallel data bit 1
+
+        config CAM_PIN_D0
+            int "Camera D0 Pin"
+            depends on HAS_CAMERA
+            default 15
+            help
+                Parallel data bit 0
+
+        config CAM_PIN_VSYNC
+            int "Camera VSYNC Pin"
+            depends on HAS_CAMERA
+            default 38
+            help
+                Vertical sync pin
+
+        config CAM_PIN_HREF
+            int "Camera HREF Pin"
+            depends on HAS_CAMERA
+            default 47
+            help
+                Horizontal reference pin
+
+        config CAM_PIN_PCLK
+            int "Camera PCLK Pin"
+            depends on HAS_CAMERA
+            default 13
+            help
+                Pixel clock pin
+
+        config MOTION_DETECT_THRESHOLD
+            int "Motion Detection Threshold"
+            depends on HAS_CAMERA
+            default 30
+            help
+                Pixel difference threshold (0-255). Lower = more sensitive.
+
+        config MOTION_DETECT_INTERVAL_MS
+            int "Motion Detection Interval (ms)"
+            depends on HAS_CAMERA
+            default 500
+            help
+                Milliseconds between motion detection frames.
+
+        config MOTION_DETECT_PERCENT
+            int "Motion Detection Trigger Percent"
+            depends on HAS_CAMERA
+            default 10
+            help
+                Percentage of pixels that must change to trigger motion (0-100).
+
+        config MOTION_DETECT_SAMPLE_STEP
+            int "Motion Detection Sample Step"
+            depends on HAS_CAMERA
+            default 4
+            help
+                Compare every Nth pixel. Higher values are faster but less precise.
+
+        config MOTION_WEBHOOK_COOLDOWN_MS
+            int "Motion Webhook Cooldown (ms)"
+            depends on HAS_CAMERA
+            default 60000
+            help
+                Minimum time between webhook alerts.
     endmenu
 
     menu "Microphone Configuration"
@@ -1053,4 +1318,5 @@ menu "Ghost ESP Options"
     
     endmenu
     
-endmenu    
+endmenu
+

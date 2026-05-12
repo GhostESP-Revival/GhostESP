@@ -15,6 +15,7 @@
 #include "core/serial_manager.h"
 #include "core/esp_comm_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -742,7 +743,7 @@ void badusb_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     int screen_height = LV_VER_RES;
-    const int STATUS_BAR_HEIGHT = 20;
+    const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
     const int BUTTON_AREA_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
     lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
