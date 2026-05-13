@@ -51,6 +51,11 @@ static void mic_visualizer_task(void *arg) {
     ESP_LOGI(TAG, "MIC visualizer task started");
     
     while (mic_visualizer_running) {
+        if (mic_is_paused()) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         size_t bytes_read = 0;
         
         esp_err_t ret = mic_read_samples(samples, CONFIG_MIC_BUFFER_SAMPLES, &bytes_read);

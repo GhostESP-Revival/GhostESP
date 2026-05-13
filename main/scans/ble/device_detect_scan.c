@@ -404,6 +404,10 @@ void ble_device_detect_stop(void) {
     s_tracking.last_log_tick = 0;
     ble_unregister_handler(ble_device_detect_callback);
 
+    if (was_active) {
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    }
+
     if (was_active && ble_is_initialized()) {
         ble_stop();
     }

@@ -105,7 +105,8 @@ typedef enum {
 } html_capture_state_t;
 
 static html_capture_state_t html_capture_state = HTML_STATE_IDLE;
-static char html_capture_buffer[2048];
+static char *html_capture_buffer = NULL;
+#define HTML_CAPTURE_BUF_SIZE 2048
 static size_t html_capture_pos = 0;
 
 // IR capture state
@@ -116,7 +117,8 @@ typedef enum {
 } ir_capture_state_t;
 
 static ir_capture_state_t ir_capture_state = IR_STATE_IDLE;
-static char ir_capture_buffer[2048];
+static char *ir_capture_buffer = NULL;
+#define IR_CAPTURE_BUF_SIZE 2048
 static size_t ir_capture_pos = 0;
 #endif
 
@@ -519,7 +521,8 @@ static void display_prompt(void) {
 static void process_html_line(const char* line) {
 #if CONFIG_HAS_INFRARED
     if (strstr(line, "[IR/BEGIN]") != NULL) {
-        ir_capture_state = IR_STATE_CAPTURING;
+        if (!ir_capture_buffer) ir_capture_buffer = (char *)calloc(1, IR_CAPTURE_BUF_SIZE);
+        ir_capture_state = ir_capture_buffer ? IR_STATE_CAPTURING : IR_STATE_IDLE;
         ir_capture_pos = 0;
         return;
     }
@@ -527,8 +530,8 @@ static void process_html_line(const char* line) {
     if (strstr(line, "[IR/CLOSE]") != NULL) {
         if (ir_capture_state == IR_STATE_CAPTURING) {
             ir_capture_state = IR_STATE_IDLE;
-            if (ir_capture_pos >= sizeof(ir_capture_buffer)) {
-                ir_capture_pos = sizeof(ir_capture_buffer) - 1;
+            if (ir_capture_pos >= IR_CAPTURE_BUF_SIZE) {
+                ir_capture_pos = IR_CAPTURE_BUF_SIZE - 1;
             }
             ir_capture_buffer[ir_capture_pos] = '\0';
             infrared_signal_t sig;
@@ -562,12 +565,13 @@ static void process_html_line(const char* line) {
                 glog("IR inline parse failed\n");
             }
         }
+        if (ir_capture_buffer) { free(ir_capture_buffer); ir_capture_buffer = NULL; }
         return;
     }
 
     if (ir_capture_state == IR_STATE_CAPTURING) {
         size_t line_len = strlen(line);
-        if (ir_capture_pos + line_len + 1 < sizeof(ir_capture_buffer)) {
+        if (ir_capture_buffer && ir_capture_pos + line_len + 1 < IR_CAPTURE_BUF_SIZE) {
             memcpy(ir_capture_buffer + ir_capture_pos, line, line_len);
             ir_capture_pos += line_len;
             ir_capture_buffer[ir_capture_pos++] = '\n';
@@ -577,7 +581,8 @@ static void process_html_line(const char* line) {
 #endif
 
     if (strstr(line, "[HTML/BEGIN]") != NULL) {
-        html_capture_state = HTML_STATE_CAPTURING;
+        if (!html_capture_buffer) html_capture_buffer = (char *)calloc(1, HTML_CAPTURE_BUF_SIZE);
+        html_capture_state = html_capture_buffer ? HTML_STATE_CAPTURING : HTML_STATE_IDLE;
         html_capture_pos = 0;
         glog("HTML capture started\n");
         return;
@@ -589,12 +594,13 @@ static void process_html_line(const char* line) {
             wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
             glog("HTML capture completed (%zu bytes)\n", html_capture_pos);
         }
+        if (html_capture_buffer) { free(html_capture_buffer); html_capture_buffer = NULL; }
         return;
     }
     
     if (html_capture_state == HTML_STATE_CAPTURING) {
         size_t line_len = strlen(line);
-        if (html_capture_pos + line_len + 1 < sizeof(html_capture_buffer)) {
+        if (html_capture_buffer && html_capture_pos + line_len + 1 < HTML_CAPTURE_BUF_SIZE) {
             memcpy(html_capture_buffer + html_capture_pos, line, line_len);
             html_capture_pos += line_len;
             html_capture_buffer[html_capture_pos++] = '\n';

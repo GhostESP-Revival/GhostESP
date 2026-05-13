@@ -46,8 +46,12 @@ list(APPEND app_sources
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
 # Not picked up until CMake reconfigure if relying on GLOB_RECURSE alone; defines offline_map_try_decode_jpeg_to_rgb565_dsc
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/offline_map_jpeg_stb.c")
+list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/settings_sd_backup.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
+# Exclude camera managers until camera support is enabled.
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
 file(GLOB_RECURSE axs15231b_sources "${CMAKE_SOURCE_DIR}/components/axs15231b/*.c")
 file(GLOB m5gfx_sources
@@ -63,7 +67,7 @@ file(GLOB m5gfx_sources
 list(APPEND app_sources ${axs15231b_sources} ${image_sources})
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump esp-tls)
 
 # Optionally add extra include directories
 set(extra_includes "")
@@ -124,6 +128,15 @@ if(CONFIG_HAS_BADUSB)
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badusb_manager.c")
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/hid_script_parser.c")
     list(APPEND required_components esp_tinyusb)
+endif()
+
+# Add motion detector manager when camera is enabled (S3 only)
+if(CONFIG_HAS_CAMERA)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
+    list(APPEND required_components esp32-camera)
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/driver/include")
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/conversions/include")
 endif()
 
 if(CONFIG_HAS_NFC)

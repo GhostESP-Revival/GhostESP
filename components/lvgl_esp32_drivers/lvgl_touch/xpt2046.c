@@ -10,6 +10,8 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
+#include "sdkconfig.h"
 #include "tp_spi.h"
 #include "xpt2046_bitbang.h"
 #include <stddef.h>
@@ -40,6 +42,7 @@ static void xpt2046_corr(int16_t * x, int16_t * y);
 static void xpt2046_avg(int16_t * x, int16_t * y);
 static int16_t xpt2046_cmd(uint8_t cmd);
 static xpt2046_touch_detect_t xpt2048_is_touch_detected();
+static bool xpt2046_is_nm_cyd_c5(void);
 
 /**********************
  *  STATIC VARIABLES
@@ -87,6 +90,12 @@ void xpt2046_init(void)
     gpio_set_level(CONFIG_LV_TOUCH_SPI_CS, 1);
     gpio_set_level(CONFIG_LV_TOUCH_SPI_CLK, 0);
     printf("Initilized...");
+#else
+    if (xpt2046_is_nm_cyd_c5()) {
+    ESP_LOGI(TAG, "XPT2046 using hardware SPI on CS:%d CLK:%d MOSI:%d MISO:%d",
+             CONFIG_LV_TOUCH_SPI_CS, CONFIG_LV_TOUCH_SPI_CLK,
+             CONFIG_LV_TOUCH_SPI_MOSI, CONFIG_LV_TOUCH_SPI_MISO);
+    }
 #endif
 }
 
@@ -99,6 +108,7 @@ bool xpt2046_read(lv_indev_drv_t * drv, lv_indev_data_t * data)
 {
     static int16_t last_x = 0;
     static int16_t last_y = 0;
+    static int64_t last_debug_us = 0;
     bool valid = false;
 
     int16_t x = last_x;
@@ -109,6 +119,8 @@ bool xpt2046_read(lv_indev_drv_t * drv, lv_indev_data_t * data)
 
         x = xpt2046_cmd(CMD_X_READ);
         y = xpt2046_cmd(CMD_Y_READ);
+        int16_t raw_x = x;
+        int16_t raw_y = y;
         ESP_LOGV(TAG, "P(%d,%d)", x, y);
 
         if (x < rawX_min) rawX_min = x;
@@ -163,7 +175,6 @@ static xpt2046_touch_detect_t xpt2048_is_touch_detected()
     // be enough to detect real touches on the panel
     int16_t z = z1 + 4096 - z2;
 
-
     if (z < XPT2046_TOUCH_THRESHOLD)
     {
         return TOUCH_NOT_DETECTED;
@@ -183,6 +194,15 @@ static int16_t xpt2046_cmd(uint8_t cmd)
     tp_spi_read_reg(cmd, data, 2);
     int16_t val = (data[0] << 8) | data[1];
     return val;
+#endif
+}
+
+static bool xpt2046_is_nm_cyd_c5(void)
+{
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0;
+#else
+    return false;
 #endif
 }
 

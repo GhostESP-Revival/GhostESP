@@ -56,6 +56,8 @@ void options_view_relayout_item(options_view_t *ov, lv_obj_t *item);
 // Force re-apply selected style to the currently selected item (useful after modifying its children).
 void options_view_refresh_selected_item(options_view_t *ov);
 
+void options_view_trigger_wipe(options_view_t *ov);
+
 #ifdef __cplusplus
 }
 #endif

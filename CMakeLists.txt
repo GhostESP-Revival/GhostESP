@@ -8,6 +8,7 @@ endif()
 
 # Partition table settings
 add_link_options("-Wl,-z,muldefs")
+add_compile_options(-Wno-error=unused-label)
 
 set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
 add_compile_definitions(HOLD_LIMIT=1000) # For joystick hold duration

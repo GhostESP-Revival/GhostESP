@@ -238,7 +238,9 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    res->stack = alloc_task_stack(stack_bytes);
+    const uint32_t stack_words = (stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+
+    res->stack = alloc_task_stack(stack_words * sizeof(StackType_t));
     res->tcb = alloc_task_tcb();
 
     if (!res->stack || !res->tcb) {
@@ -246,7 +248,7 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    return xTaskCreateStatic(task_fn, name, stack_bytes, arg, priority, res->stack, res->tcb);
+    return xTaskCreateStatic(task_fn, name, stack_words, arg, priority, res->stack, res->tcb);
 }
 
 static StackType_t* alloc_task_stack(size_t stack_bytes) {
@@ -1079,6 +1081,13 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_6;
             resolved_rx = GPIO_NUM_7;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0) {
+        desired_uart = UART_NUM_1;
+        if (((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) ||
+            ((int)tx_pin == 6 && (int)rx_pin == 7)) {
+            resolved_tx = GPIO_NUM_11;
+            resolved_rx = GPIO_NUM_12;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }
@@ -1191,10 +1200,12 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
 
     s_comm_manager->initialized = true;
 
-    s_comm_manager->rx_task_res.stack = alloc_task_stack(4096);
+    const uint32_t rx_stack_bytes = 4096;
+    const uint32_t rx_stack_words = (rx_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+    s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_words * sizeof(StackType_t));
     s_comm_manager->rx_task_res.tcb = alloc_task_tcb();
     if (s_comm_manager->rx_task_res.stack && s_comm_manager->rx_task_res.tcb) {
-        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", 4096,
+        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_words,
                                                            s_comm_manager, 12,
                                                            s_comm_manager->rx_task_res.stack,
                                                            s_comm_manager->rx_task_res.tcb);

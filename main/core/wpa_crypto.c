@@ -28,7 +28,7 @@ static void sha1_hmac(const uint8_t *key, size_t key_len,
     mbedtls_md_hmac(md_info, key, key_len, data, data_len, out);
 }
 
-static void prf(const uint8_t *key, size_t key_len,
+static bool prf(const uint8_t *key, size_t key_len,
                 const uint8_t *data, size_t data_len,
                 uint8_t *out, size_t out_len) {
     uint8_t counter = 0;
@@ -36,7 +36,7 @@ static void prf(const uint8_t *key, size_t key_len,
 
     size_t merged_len = data_len + 1;
     uint8_t *merged = (uint8_t *)malloc(merged_len);
-    if (!merged) return;
+    if (!merged) return false;
     memcpy(merged, data, data_len);
     merged[data_len] = counter;
 
@@ -47,11 +47,11 @@ static void prf(const uint8_t *key, size_t key_len,
     offset += copy;
     free(merged);
 
-    while (offset < out_len) {
+while (offset < out_len) {
         counter++;
         size_t r_len = 20 + data_len + 1;
         uint8_t *r = (uint8_t *)malloc(r_len);
-        if (!r) return;
+        if (!r) return false;
         memcpy(r, hash, 20);
         memcpy(r + 20, data, data_len);
         r[20 + data_len] = counter;
@@ -61,6 +61,7 @@ static void prf(const uint8_t *key, size_t key_len,
         offset += copy;
         free(r);
     }
+    return true;
 }
 
 bool wpa_derive_pmk(const char *ssid, const char *password, uint8_t *pmk_out) {
@@ -111,7 +112,10 @@ bool wpa_derive_ptk(const uint8_t *pmk,
     memcpy(pke + 35, min_nonce, 32);
     memcpy(pke + 67, max_nonce, 32);
 
-    prf(pmk, PMK_LEN, pke, 99, ptk_out, PTK_LEN);
+    if (!prf(pmk, PMK_LEN, pke, 99, ptk_out, PTK_LEN)) {
+        glog("PTK derivation failed: PRF malloc failure\n");
+        return false;
+    }
     return true;
 }
 
