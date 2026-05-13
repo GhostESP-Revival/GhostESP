@@ -342,6 +342,7 @@ static void beacon_spam_task(void *param) {
         vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
     }
     
+    free(param);
     // Clear handle before self-deletion to prevent race condition
     beacon_task_handle = NULL;
     vTaskDelete(NULL);
@@ -372,12 +373,22 @@ void beacon_spam_start(const char *ssid) {
         configure_hidden_ap();
         esp_wifi_start();
         beacon_task_running = true;
-        BaseType_t rc = xTaskCreate(beacon_spam_task, "beacon_task", 2048, (void *)ssid, 5, &beacon_task_handle);
+        char *ssid_copy = ssid ? strdup(ssid) : NULL;
+        if (ssid && !ssid_copy) {
+            glog("Failed to allocate SSID copy\n");
+            status_display_show_status("Beacon Start Failed");
+            beacon_task_running = false;
+            esp_wifi_stop();
+            ap_manager_init();
+            return;
+        }
+        BaseType_t rc = xTaskCreate(beacon_spam_task, "beacon_task", 2048, (void *)ssid_copy, 5, &beacon_task_handle);
         if (rc != pdPASS) {
             glog("Failed to start beacon task (%ld)\n", (long)rc);
             status_display_show_status("Beacon Start Failed");
             beacon_task_running = false;
             beacon_task_handle = NULL;
+            free(ssid_copy);
             esp_wifi_stop();
             ap_manager_init();
             return;

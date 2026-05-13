@@ -6,6 +6,11 @@
 #include "esp_err.h"
 #include "esp_wifi_types.h"
 
+#ifndef DNS_SERVER_HANDLE_T_DEFINED
+typedef struct dns_server_handle *dns_server_handle_t;
+#define DNS_SERVER_HANDLE_T_DEFINED
+#endif
+
 #define RANDOM_SSID_LEN 8
 #define BEACON_INTERVAL 0x0064 // 100 Time Units (TU)
 #define CAPABILITY_INFO 0x0411 // Capability information (ESS)
@@ -198,6 +203,7 @@ void wifi_stations_sniffer_callback(void *buf,
                                     wifi_promiscuous_pkt_type_t type);
 
 void wifi_manager_stop_evil_portal();
+void wifi_manager_stop_evil_portal_keep_wifi(void);
 
 esp_err_t wifi_manager_start_evil_portal(const char *URL, const char *SSID,
                                          const char *Password,
@@ -289,5 +295,7 @@ void wifi_manager_set_karma_portal_file(const char *path);
 void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
+
+dns_server_handle_t dns_handle_take(void);
 
 #endif // WIFI_MANAGER_H

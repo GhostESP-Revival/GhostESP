@@ -79,6 +79,22 @@ uint32_t theme_palette_get(uint8_t theme, int slot) {
     }
 
     /*
+     * Pastel theme: each slot is a different pastel hue instead of
+     * a tonal ramp of the same color.
+     */
+    if (theme == 1) {
+        static const uint32_t pastel_rainbow[THEME_PALETTE_SLOT_COUNT] = {
+            0xFFCDD2, // pastel pink (base)
+            0xFFE0B2, // pastel peach
+            0xFFF9C4, // pastel yellow
+            0xC8E6C9, // pastel mint
+            0xBBDEFB, // pastel blue
+            0xE1BEE7, // pastel lavender
+        };
+        return pastel_rainbow[slot];
+    }
+
+    /*
      * Keep app/menu accents coherent by generating a tonal ramp from one accent.
      * This avoids random multi-hue borders that clash across themes.
      */
@@ -130,4 +146,21 @@ uint32_t theme_palette_get_text_muted(uint8_t theme) {
 
 bool theme_palette_is_bright(uint8_t theme) {
     return theme_color_luma(theme_palette_get_accent(theme_palette_clamp(theme))) >= 160U;
+}
+
+/*
+ * Themes that are monochrome, muted, or mood-based look better with a single
+ * consistent accent on menu items instead of a tonal ramp.
+ */
+bool theme_palette_is_solid(uint8_t theme) {
+    theme = theme_palette_clamp(theme);
+    static const uint32_t solid_mask =
+        (1u << 0)  |  // Default
+        (1u << 2)  |  // Dark
+        (1u << 3)  |  // Bright
+        (1u << 4)  |  // Solarized
+        (1u << 5)  |  // Monochrome
+        (1u << 15) |  // Cherry Blossom
+        (1u << 16);   // Soft Sand
+    return (solid_mask >> theme) & 1u;
 }

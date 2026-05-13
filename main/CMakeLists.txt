@@ -65,7 +65,7 @@ file(GLOB m5gfx_sources
 list(APPEND app_sources ${axs15231b_sources} ${image_sources})
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump esp-tls)
 
 # Optionally add extra include directories
 set(extra_includes "")

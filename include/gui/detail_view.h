@@ -48,6 +48,8 @@ detail_row_type_t detail_view_get_row_type(const detail_view_t *dv, int index);
 
 void detail_view_clear(detail_view_t *dv);
 
+void detail_view_set_bottom_reserved(detail_view_t *dv, lv_coord_t reserved_h);
+
 lv_obj_t *detail_view_get_list(detail_view_t *dv);
 
 lv_obj_t *detail_view_get_info_panel(detail_view_t *dv);

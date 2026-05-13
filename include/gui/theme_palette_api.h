@@ -19,3 +19,4 @@ uint32_t theme_palette_get_text(uint8_t theme);           // Primary text
 uint32_t theme_palette_get_text_muted(uint8_t theme);     // Muted/secondary text
 
 bool theme_palette_is_bright(uint8_t theme);
+bool theme_palette_is_solid(uint8_t theme);

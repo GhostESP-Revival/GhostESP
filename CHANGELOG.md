@@ -3,6 +3,7 @@
 ## Revival v1.9.9
 
 ### Added
+- Added DNS sinkhole with blocklist-based NXDOMAIN blocking, parent-domain matching, CNAME inspection, iOS/DoH bypass canaries, query logging, and PSRAM/no-PSRAM lookup paths
 - Added CC1101 SubGHz (The Wired Hatter's Banshee only atm) support with frequency analyzer, capture/replay and multi-band scanning (315/390/433.92/868.35/915 MHz)
 - Added passive jamming detection engine to the NRF24 frequency analyzer that identifies known 2.4GHz threat signatures in real time during normal spectrum scanning
 - Added support for Seeed Studio XIAO ESP32-S3 Sense with motion detection
@@ -15,20 +16,76 @@
 - Added slide transitions for screen navigation replacing fade transitions
 - Added pop-in animations for popups and scan status card
 - Added spinning arc spinner for scan status overlay replacing animated dots
+- Added Flock Safety camera detector based on bennjordan/flock-you
+- Added "Item Borders" setting to toggle borders on main menu items and defaulted it to off
 
 ### Changed
+- Refactored main menu grid to flex rows with responsive column count and accent-colored selection highlight
+- Replaced carousel text arrows with LVGL symbol arrows and made icon size scale with button size
+- Solid-color themes now use a single consistent accent for all menu item borders instead of a tonal ramp
 - Rewrote app gallery carousel to reuse a single card with slide animation instead of creating/destroying objects per swipe
 - Nav button highlight now uses theme accent color instead of hardcoded yellow
 - Status bar uses design token fonts and safe-area-aware padding
 - Tweaked theme palette surface colors across all background shade levels
 - Cleaned up terminal screen build config template conditionals
+- Removed default LVGL shadow from popup buttons
+- Improved fuel gague handling on the MAX17048 (Banshee), we now check SOC reported % against actual battery voltage
 
 ### Fixed
+- Potentially fixed task stack overflow crashes in `sae_displ` and `eapol_logoff` tasks by making the glog format buffer static
+- Fixed SAE flood not being accessible from the display UI attacks menu (C5/C6 only)
+- Fixed potential division by zero crash in wardrive channel hopping timer when channel list is empty
+- Fixed stack buffer overflow in BLE skimmer PCAP construction when processing oversized advertisement data from malicious BLE devices
+- Fixed TOCTOU race condition in glog and uart_share lazy mutex initialization that could leak mutexes and break mutual exclusion under concurrent startup
+- Fixed silent crypto failure in WPA PRF function where malloc errors produced garbage PTK output without signaling failure to callers
+- Fixed NULL pointer crash in evil portal HTTP server when heap is exhausted during Host header extraction
+- Fixed NULL pointer crash in WebUI settings API when JSON fields contain non-string types (e.g. numbers, null) — all cJSON valuestring accesses now guarded with cJSON_IsString()
+- Fixed path traversal vulnerabilities in WebUI file read, download, and delete handlers allowing `../` bypass of /mnt sandbox
+- Fixed NULL pointer crash in hex_to_lv_color when called with NULL input
+- Fixed out-of-bounds read in SAE flood monitor callback when receiving truncated authentication frames without length validation
+- Fixed race condition on static crypto buffers in SAE flood where monitor callback and flood task could corrupt each other's bignum state
+- Fixed stack overflow in SAE flood monitor callback by deferring heavy mbedTLS operations to the flood task context
+- Fixed use-after-free on global scanned_aps pointer in auto-deauth task — pointer now NULLed after free to prevent dangling access
+- Fixed auto-deauth task blocking the caller permanently by spawning it as a FreeRTOS task instead of calling it directly, with duplicate-spawn guard and proper stop cleanup
+- Fixed use-after-free in beacon spam where raw SSID pointer from command buffer was passed to task without copying — now uses strdup
+- Fixed NULL pointer crash in options_view realloc failure where unchecked return led to guaranteed dereference on OOM
+- Fixed silent out-of-bounds write in detail_view when realloc fails — ensure_capacity now returns bool and callers bail out safely
 - Fixed ESP32-C5 not discovering 5GHz channels above UNII-1 (e.g. 149-165) during WiFi scans by using correct country code API at boot and re-applying it after WiFi driver reinit during AP scans
 - Fixed RGB LED not turning off when stopping BLE device detection scan
 - Fixed GPS info task stack corruption
 - Fixed Cardputer ADV `*` key being treated as backspace in text entry fields
 - Fixed Poltergeist status display failing to initialize due to I2C port returning ESP_ERR_INVALID_STATE instead of ESP_ERR_NOT_FOUND (#308)
+- Fixed T-Deck ST7789 intermittent boot corruption by replacing init sequence with official LilyGo values and ensuring 120ms post-SWRESET delay
+- Removed premature backlight activation in disp_driver_init to prevent garbage frame visibility on cold boot
+- Fixed detail views reserving bottom space for touch controls when no touch control bar is rendered
+- Fixed DIAL device discovery blocking up to 20 seconds by reducing retry count from 10 to 5 and delay from 2s to 1s
+- Fixed memory leak in m5gfx_wrapper where Panel_ST7789 was allocated with new but never deleted on re-init
+- Fixed potential memory leaks in NFC view where ndef_details_result_t was not always freed when display was unavailable
+- Fixed malloc variable declaration issue in wpa_crypto PRF loop (size_t r_len moved inside loop)
+- Fixed O(n²) realloc pattern in infrared file list by implementing exponential growth with capacity tracking
+- Fixed WiFi connection retry having no user feedback by adding terminal status message before 3s delay
+- Fixed NFC touchscreen controls double-firing menu actions
+- Fixed CSV mutex use after free in wardriving close where flush task
+  referenced a deleted semaphore
+- Fixed wardriving scan callback blocking WiFi task forever when flush
+  could not keep up, now capped at 200ms with graceful fallback
+- Fixed dedupe tables leaked when closing without SD card, close path
+  now always frees task, mutex, and dedupe tables
+- Fixed dedupe race where scan callback accessed freed tables during
+  stop, added csv_closing flag to reject new writes during teardown
+- Fixed GPS quality data overwriting coordinates already set by caller
+- Fixed TOCTOU race on nmea_hdl during CSV close by snapshotting handle
+  before dereference
+- Fixed hop counter retaining stale state across start/stop cycles
+- Fixed WiFi raw capture (and other capture modes) always sniffing channel 1 instead of the selected AP's channel
+- Fixed CSV line truncation going undetected by validating line ends
+  with newline after incremental build
+- Fixed count functions racing with close by guarding against csv_closing
+  and NULL mutex
+- Reduced wardriving stack usage by ~462 bytes by replacing escape
+  buffers with direct incremental line build and replacing 150B gps_t
+  snapshot with 60B lightweight copy
+- Fixed inverted touch scroll direction on grid cards main menu layout
 
 ## Revival v1.9.8
 
@@ -1204,4 +1261,3 @@ Lighting:
 - New <https://ghostesp.net> website! - @jaylikesbunda
 - Ghost ESP Flipper App v1.1.8 - @jaylikesbunda
 - Cleanup README.md - @jaylikesbunda
-

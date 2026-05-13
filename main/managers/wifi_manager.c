@@ -148,6 +148,16 @@ int selected_ap_count = 0;
 bool redirect_handled = false;
 httpd_handle_t evilportal_server = NULL;
 dns_server_handle_t dns_handle;
+static portMUX_TYPE dns_handle_mux = portMUX_INITIALIZER_UNLOCKED;
+
+dns_server_handle_t dns_handle_take(void) {
+    portENTER_CRITICAL(&dns_handle_mux);
+    dns_server_handle_t h = dns_handle;
+    dns_handle = NULL;
+    portEXIT_CRITICAL(&dns_handle_mux);
+    return h;
+}
+
 esp_netif_t *wifiAP;
 esp_netif_t *wifiSTA;
 static bool login_done = false;
@@ -603,6 +613,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         }
         
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+
+        {
+            dns_server_handle_t h = dns_handle_take();
+            if (h) stop_dns_server(h);
+        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         glog("Got IP: %s\n", ip4addr_ntoa(&event->ip_info.ip));
@@ -824,6 +839,10 @@ char *get_host_from_req(httpd_req_t *req) {
     size_t buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
     if (buf_len > 1) {
         char *host = malloc(buf_len);
+        if (!host) {
+            httpd_resp_send_500(req);
+            return NULL;
+        }
         if (httpd_req_get_hdr_value_str(req, "Host", host, buf_len) == ESP_OK) {
             printf("Host header found: %s\n", host);
             return host; // Caller must free() this memory
@@ -846,6 +865,11 @@ esp_err_t file_handler(httpd_req_t *req) {
     {
         size_t maxlen = sizeof(local_path) - strlen("/mnt") - 1;
         snprintf(local_path, sizeof(local_path), "/mnt%.*s", (int)maxlen, uri);
+    }
+
+    if (strstr(local_path, "..") != NULL) {
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
     }
 
     // somethingsomething template shares spi bus; sd may be unmounted most of the time
@@ -1318,8 +1342,8 @@ static void portal_stop_services_only(void) {
     login_done = false;
 
     if (dns_handle != NULL) {
-        stop_dns_server(dns_handle);
-        dns_handle = NULL;
+        dns_server_handle_t h = dns_handle_take();
+        if (h) stop_dns_server(h);
     }
 
     if (evilportal_server != NULL) {
@@ -1582,8 +1606,8 @@ void wifi_manager_stop_evil_portal() {
     portal_clear_file_cache();
 
     if (dns_handle != NULL) {
-        stop_dns_server(dns_handle);
-        dns_handle = NULL;
+        dns_server_handle_t h = dns_handle_take();
+        if (h) stop_dns_server(h);
     }
 
     if (evilportal_server != NULL) {
@@ -1603,6 +1627,46 @@ void wifi_manager_stop_evil_portal() {
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     // jit unmount sd if we mounted it for portal start
+    if (portal_sd_jit_mounted) {
+        sd_card_unmount_after_flush(portal_display_suspended);
+        portal_sd_jit_mounted = false;
+        portal_display_suspended = false;
+    }
+
+    wifi_ctrl_unlock();
+}
+
+void wifi_manager_stop_evil_portal_keep_wifi(void) {
+    if (!wifi_ctrl_lock(pdMS_TO_TICKS(2000))) {
+        ESP_LOGE(TAG, "portal stop: wifi ctrl mutex lock failed");
+        return;
+    }
+
+    login_done = false;
+    portal_force_flush_to_sd();
+    current_creds_filename[0] = '\0';
+    current_keystrokes_filename[0] = '\0';
+    
+    wifi_manager_clear_html_buffer();
+    portal_clear_file_cache();
+
+    if (dns_handle != NULL) {
+        dns_server_handle_t h = dns_handle_take();
+        if (h) stop_dns_server(h);
+    }
+
+    if (evilportal_server != NULL) {
+        httpd_stop(evilportal_server);
+        evilportal_server = NULL;
+    }
+
+    // DON'T call wifi_stop_safely() - keep STA connected
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    ap_manager_start_services();
+
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
+
     if (portal_sd_jit_mounted) {
         sd_card_unmount_after_flush(portal_display_suspended);
         portal_sd_jit_mounted = false;
@@ -2019,6 +2083,25 @@ void wifi_manager_select_ap(int index) {
     if (err == ESP_OK) {
         // Update local selected_ap for compatibility with other functions
         ap_scan_get_selection(&selected_ap);
+        // Sync multi-AP selection so capture channel plan can lock to the AP's channel
+        if (selected_aps != NULL) {
+            free(selected_aps);
+            selected_aps = NULL;
+        }
+        wifi_ap_record_t *scan_aps = NULL;
+        int scan_count = 0;
+        ap_scan_get_selected(&scan_aps, &scan_count);
+        if (scan_count > 0 && scan_aps != NULL) {
+            selected_aps = malloc((size_t)scan_count * sizeof(wifi_ap_record_t));
+            if (selected_aps != NULL) {
+                memcpy(selected_aps, scan_aps, (size_t)scan_count * sizeof(wifi_ap_record_t));
+                selected_ap_count = scan_count;
+            } else {
+                selected_ap_count = 0;
+            }
+        } else {
+            selected_ap_count = 0;
+        }
     }
 }
 
@@ -3191,7 +3274,8 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
             esp_wifi_disconnect();
             retry_count++;
             if (retry_count < max_retries) {
-                vTaskDelay(pdMS_TO_TICKS(3000)); // 3 second delay between retries
+                TERMINAL_VIEW_ADD_TEXT("Retrying connection (%d/%d)...\n", retry_count, max_retries);
+                vTaskDelay(pdMS_TO_TICKS(3000));
             }
         }
     }

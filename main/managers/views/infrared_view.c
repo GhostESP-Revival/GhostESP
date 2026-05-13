@@ -112,6 +112,7 @@ static int selected_ir_index = 0;
 static int num_ir_items = 0;
 static char **ir_file_paths = NULL;
 static size_t ir_file_count = 0;
+static size_t ir_file_capacity = 0;
 static infrared_signal_t *signals = NULL;
 static size_t signal_count = 0;
 static bool showing_commands = false;
@@ -543,6 +544,7 @@ static void clear_ir_file_paths(void) {
     free(ir_file_paths);
     ir_file_paths = NULL;
     ir_file_count = 0;
+    ir_file_capacity = 0;
 }
 
 static bool load_ir_file_list_from_dir(const char *dir) {
@@ -562,13 +564,20 @@ static bool load_ir_file_list_from_dir(const char *dir) {
         if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
             char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
             if (turnthistvoff_name) {
-                char **new_paths = realloc(ir_file_paths, (ir_file_count + 1) * sizeof(*ir_file_paths));
-                if (new_paths) {
-                    ir_file_paths = new_paths;
+                if (ir_file_count >= ir_file_capacity) {
+                    size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
+                    char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
+                    if (new_paths) {
+                        ir_file_paths = new_paths;
+                        ir_file_capacity = new_cap;
+                    } else {
+                        free(turnthistvoff_name);
+                        turnthistvoff_name = NULL;
+                    }
+                }
+                if (turnthistvoff_name) {
                     ir_file_paths[ir_file_count] = turnthistvoff_name;
                     ir_file_count++;
-                } else {
-                    free(turnthistvoff_name);
                 }
             }
         }
@@ -604,14 +613,18 @@ static bool load_ir_file_list_from_dir(const char *dir) {
             continue;
         }
 
-        char **new_paths = realloc(ir_file_paths, (ir_file_count + 1) * sizeof(*ir_file_paths));
-        if (!new_paths) {
-            ESP_LOGE(TAG, "Failed to grow IR file list");
-            free(name_copy);
-            continue;
+        if (ir_file_count >= ir_file_capacity) {
+            size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
+            char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
+            if (!new_paths) {
+                ESP_LOGE(TAG, "Failed to grow IR file list");
+                free(name_copy);
+                continue;
+            }
+            ir_file_paths = new_paths;
+            ir_file_capacity = new_cap;
         }
 
-        ir_file_paths = new_paths;
         ir_file_paths[ir_file_count] = name_copy;
         ir_file_count++;
     }
@@ -625,13 +638,20 @@ static bool load_ir_file_list_from_dir(const char *dir) {
     if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
         char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
         if (turnthistvoff_name) {
-            char **new_paths = realloc(ir_file_paths, (ir_file_count + 1) * sizeof(*ir_file_paths));
-            if (new_paths) {
-                ir_file_paths = new_paths;
+            if (ir_file_count >= ir_file_capacity) {
+                size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
+                char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
+                if (new_paths) {
+                    ir_file_paths = new_paths;
+                    ir_file_capacity = new_cap;
+                } else {
+                    free(turnthistvoff_name);
+                    turnthistvoff_name = NULL;
+                }
+            }
+            if (turnthistvoff_name) {
                 ir_file_paths[ir_file_count] = turnthistvoff_name;
                 ir_file_count++;
-            } else {
-                free(turnthistvoff_name);
             }
         }
     }

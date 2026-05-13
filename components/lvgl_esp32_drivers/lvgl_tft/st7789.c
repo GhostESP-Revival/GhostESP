@@ -7,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include <stdbool.h>
+#include <string.h>
 
 #include "esp_log.h"
 
@@ -54,7 +56,31 @@ static void st7789_send_color(void *data, size_t length);
  **********************/
 void st7789_init(void)
 {
-    lcd_init_cmd_t st7789_init_cmds[] = {
+    static const lcd_init_cmd_t st7789_clean_init_cmds[] = {
+        {ST7789_SLPOUT, {0}, 0x80},
+        {ST7789_NORON, {0}, 0},
+        {ST7789_MADCTL, {0x00}, 1},
+        {ST7789_COLMOD, {0x55}, 1},
+        {ST7789_PORCTRL, {0x0c, 0x0c, 0x00, 0x33, 0x33}, 5},
+        {ST7789_GCTRL, {0x75}, 1},
+        {ST7789_VCOMS, {0x1a}, 1},
+        {ST7789_LCMCTRL, {0x2c}, 1},
+        {ST7789_VDVVRHEN, {0x01}, 1},
+        {ST7789_VRHS, {0x13}, 1},
+        {ST7789_VDVSET, {0x20}, 1},
+        {ST7789_FRCTR2, {0x0f}, 1},
+        {ST7789_PWCTRL1, {0xa4, 0xa1}, 2},
+        {ST7789_PVGAMCTRL, {0xd0, 0x0D, 0x14, 0x0D, 0x0D, 0x09, 0x38, 0x44, 0x4E, 0x3A, 0x17, 0x18, 0x2F, 0x30}, 14},
+        {ST7789_NVGAMCTRL, {0xd0, 0x09, 0x0F, 0x08, 0x07, 0x14, 0x37, 0x44, 0x4D, 0x38, 0x15, 0x16, 0x2C, 0x3E}, 14},
+        {ST7789_INVON, {0}, 0},
+        {ST7789_CASET, {0x00, 0x00, 0x00, 0xEF}, 4},
+        {ST7789_RASET, {0x00, 0x00, 0x01, 0x3F}, 4},
+        {ST7789_RAMWR, {0}, 0},
+        {ST7789_DISPON, {0}, 0x80},
+        {0, {0}, 0xff},
+    };
+
+    static const lcd_init_cmd_t st7789_generic_init_cmds[] = {
         {0xCF, {0x00, 0x83, 0X30}, 3},
         {0xED, {0x64, 0x03, 0X12, 0X81}, 4},
         {ST7789_PWCTRL2, {0x85, 0x01, 0x79}, 3},
@@ -65,17 +91,12 @@ void st7789_init(void)
         {ST7789_IDSET, {0x11}, 1},
         {ST7789_VCMOFSET, {0x35, 0x3E}, 2},
         {ST7789_CABCCTRL, {0xBE}, 1},
-#ifdef CONFIG_USE_TDECK
-        {ST7789_MADCTL, {0x00}, 1},
-#endif
         {ST7789_COLMOD, {0x55}, 1},
-
 #if ST7789_INVERT_COLORS == 1
 		{ST7789_INVON, {0}, 0}, // set inverted mode
 #else
  		{ST7789_INVOFF, {0}, 0}, // set non-inverted mode
 #endif
-
         {ST7789_RGBCTRL, {0x00, 0x1B}, 2},
         {0xF2, {0x08}, 1},
         {ST7789_GAMSET, {0x01}, 1},
@@ -87,11 +108,21 @@ void st7789_init(void)
         {ST7789_GCTRL, {0x07}, 1},
         {0xB6, {0x0A, 0x82, 0x27, 0x00}, 4},
         {ST7789_SLPOUT, {0}, 0x80},
-#ifdef CONFIG_USE_TDECK
-        {ST7789_DISPON, {0}, 0x80},
-#endif
         {0, {0}, 0xff},
     };
+
+    bool use_clean_st7789_init = false;
+    bool nm_cyd_c5_panel = false;
+#ifdef CONFIG_USE_TDECK
+    use_clean_st7789_init = true;
+#elif defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    nm_cyd_c5_panel = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0;
+    use_clean_st7789_init = nm_cyd_c5_panel;
+#endif
+
+    const lcd_init_cmd_t *st7789_init_cmds = use_clean_st7789_init
+        ? st7789_clean_init_cmds
+        : st7789_generic_init_cmds;
 
     //Initialize non-SPI GPIOs
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5,0,0)
@@ -118,9 +149,7 @@ void st7789_init(void)
     vTaskDelay(100 / portTICK_PERIOD_MS);
 #else
     st7789_send_cmd(ST7789_SWRESET);
-#ifndef CONFIG_USE_TDECK
     vTaskDelay(120 / portTICK_PERIOD_MS);
-#endif
 #endif
 
     printf("ST7789 initialization.\n");
@@ -137,10 +166,15 @@ void st7789_init(void)
     }
 
     st7789_set_orientation(CONFIG_LV_DISPLAY_ORIENTATION);
-#ifndef CONFIG_USE_TDECK
-    st7789_send_cmd(ST7789_DISPON);
-    vTaskDelay(20 / portTICK_PERIOD_MS);
-#endif
+    if (nm_cyd_c5_panel) {
+        st7789_send_cmd(ST7789_INVOFF);
+        st7789_send_cmd(ST7789_DISPON);
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+    if (!use_clean_st7789_init) {
+        st7789_send_cmd(ST7789_DISPON);
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
 }
 
 /* The ST7789 display controller can drive up to 320*240 displays, when using a 240*240 or 240*135

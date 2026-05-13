@@ -1081,6 +1081,13 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_6;
             resolved_rx = GPIO_NUM_7;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0) {
+        desired_uart = UART_NUM_1;
+        if (((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) ||
+            ((int)tx_pin == 6 && (int)rx_pin == 7)) {
+            resolved_tx = GPIO_NUM_11;
+            resolved_rx = GPIO_NUM_12;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }

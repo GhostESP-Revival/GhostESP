@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 
 #define SUBGHZ_TASK_SLEEP_MS 45
+#define SUBGHZ_WATERFALL_SLEEP_MS 2
 #define SUBGHZ_SNAPSHOT_DIR "/mnt/ghostesp/subghz"
 #define SUBGHZ_SNAPSHOT_EXT ".sub"
 #define SUBGHZ_RAW_TIMEOUT_US 20000
@@ -154,6 +155,7 @@ static TaskHandle_t s_subghz_task = NULL;
 static volatile bool s_stop_requested = false;
 static volatile bool s_paused = false;
 static volatile bool s_stream_to_peer = false;
+static volatile bool s_waterfall_stream_requested = false;
 
 static spi_device_handle_t s_spi_dev = NULL;
 static spi_host_device_t s_spi_host = SPI3_HOST;
@@ -161,6 +163,14 @@ static bool s_spi_bus_initialized_by_us = false;
 
 static uint8_t s_levels[SUBGHZ_SCANNER_CHANNEL_COUNT];
 static uint8_t s_next_channel = 0;
+static uint8_t s_waterfall_line[SUBGHZ_SCANNER_CHANNEL_COUNT];
+static uint8_t s_waterfall_ready_line[SUBGHZ_SCANNER_CHANNEL_COUNT];
+static uint8_t s_waterfall_count = 0;
+static uint8_t s_waterfall_ready_count = 0;
+static uint8_t s_waterfall_freq_idx = 2;
+static uint8_t s_waterfall_ready_freq_idx = 2;
+static uint16_t s_waterfall_seq = 0;
+static bool s_waterfall_ready = false;
 static char s_last_error[96] = "none";
 static SemaphoreHandle_t s_data_mutex = NULL;
 static SemaphoreHandle_t s_radio_mutex = NULL;
@@ -1074,6 +1084,57 @@ static uint8_t subghz_sample_channel(uint8_t ch, int settle_us) {
     return (uint8_t)level;
 }
 
+static uint8_t s_rssi_smooth[SUBGHZ_SCANNER_CHANNEL_COUNT] = {0};
+
+static bool subghz_sample_rssi_waterfall_line(uint8_t *out_levels, uint8_t count) {
+    if (!out_levels || count == 0) {
+        return false;
+    }
+    if (count > SUBGHZ_SCANNER_CHANNEL_COUNT) {
+        count = SUBGHZ_SCANNER_CHANNEL_COUNT;
+    }
+
+    subghz_radio_lock();
+    bool ok = true;
+    for (uint8_t ch = 0; ch < count && ok; ch++) {
+        if (ch == 32) {
+            subghz_radio_unlock();
+            vTaskDelay(pdMS_TO_TICKS(1));
+            subghz_radio_lock();
+        }
+        if (cc1101_write_reg(0x0A, ch) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        if (cc1101_strobe(CC1101_STROBE_SRX) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        ets_delay_us(200);
+        uint8_t raw = 0;
+        if (cc1101_read_status(CC1101_STATUS_RSSI, &raw) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        int8_t raw_signed = (int8_t)raw;
+        int rssi_dbm = (raw_signed / 2) - 74;
+        int level = ((rssi_dbm + 110) * 100) / 70;
+        if (level < 0) level = 0;
+        if (level > 100) level = 100;
+        // light temporal IIR per channel: 75% previous + 25% new
+        // smooths noise without creating cross-frame ghosts like old demod FFT
+        int smooth = ((int)s_rssi_smooth[ch] * 3 + level) / 4;
+        if (smooth < 0) smooth = 0;
+        if (smooth > 100) smooth = 100;
+        s_rssi_smooth[ch] = (uint8_t)smooth;
+        out_levels[ch] = (uint8_t)smooth;
+    }
+    subghz_radio_unlock();
+    return ok;
+}
+
+static uint8_t s_wf_band_idx = 0;
+
 static void subghz_stream_chunk(uint8_t cursor, uint8_t start_ch, uint8_t count) {
     if (!s_stream_to_peer || !esp_comm_manager_is_connected() || count == 0) {
         return;
@@ -1106,6 +1167,45 @@ static void subghz_stream_chunk(uint8_t cursor, uint8_t start_ch, uint8_t count)
     (void)esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_SUBGHZ, pkt, (size_t)(7 + count));
 }
 
+static void subghz_stream_waterfall_line(uint8_t freq_idx, const uint8_t *line, uint8_t count, uint16_t seq) {
+    if (!s_stream_to_peer || !esp_comm_manager_is_connected() || !line || count == 0) {
+        return;
+    }
+    if (count > SUBGHZ_SCANNER_CHANNEL_COUNT) {
+        count = SUBGHZ_SCANNER_CHANNEL_COUNT;
+    }
+
+    if (seq == 1 || (seq % 32U) == 0U) {
+        uint8_t peak = 0;
+        for (uint8_t i = 0; i < count; i++) {
+            if (line[i] > peak) {
+                peak = line[i];
+            }
+        }
+        ESP_LOGI(TAG, "waterfall tx seq=%u freq_idx=%u bins=%u peak=%u", (unsigned)seq, (unsigned)freq_idx, (unsigned)count, (unsigned)peak);
+    }
+
+    uint8_t offset = 0;
+    while (offset < count) {
+        uint8_t chunk = (uint8_t)(count - offset);
+        if (chunk > 32) {
+            chunk = 32;
+        }
+        uint8_t pkt[8 + 32] = {0};
+        pkt[0] = SUBGHZ_STREAM_VERSION;
+        pkt[1] = SUBGHZ_STREAM_WATERFALL_CHUNK;
+        pkt[2] = count;
+        pkt[3] = freq_idx;
+        pkt[4] = (uint8_t)(seq & 0xFF);
+        pkt[5] = (uint8_t)((seq >> 8) & 0xFF);
+        pkt[6] = offset;
+        pkt[7] = chunk;
+        memcpy(pkt + 8, line + offset, chunk);
+        (void)esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_SUBGHZ, pkt, (size_t)(8 + chunk));
+        offset = (uint8_t)(offset + chunk);
+    }
+}
+
 static void subghz_decoder_task(void *arg) {
     (void)arg;
     subghz_edge_t edge;
@@ -1135,15 +1235,23 @@ static void subghz_scan_task(void *arg) {
 
     if (s_data_mutex) {
         xSemaphoreTake(s_data_mutex, portMAX_DELAY);
-        memset(s_levels, 0, sizeof(s_levels));
-        s_next_channel = 0;
-        s_raw_stream_count = 0;
-        s_raw_stream_ptr = NULL;
-        s_raw_capture_pending = false;
+    }
+    memset(s_levels, 0, sizeof(s_levels));
+    memset(s_waterfall_line, 0, sizeof(s_waterfall_line));
+    memset(s_waterfall_ready_line, 0, sizeof(s_waterfall_ready_line));
+    memset(s_rssi_smooth, 0, sizeof(s_rssi_smooth));
+    s_wf_band_idx = 0;
+    s_next_channel = 0;
+    s_waterfall_count = 0;
+    s_waterfall_ready_count = 0;
+    s_waterfall_freq_idx = s_current_freq_idx;
+    s_waterfall_ready_freq_idx = s_current_freq_idx;
+    s_waterfall_ready = false;
+    s_raw_stream_count = 0;
+    s_raw_stream_ptr = NULL;
+    s_raw_capture_pending = false;
+    if (s_data_mutex) {
         xSemaphoreGive(s_data_mutex);
-    } else {
-        memset(s_levels, 0, sizeof(s_levels));
-        s_next_channel = 0;
     }
     s_raw_worklen = 0;
     s_raw_ready = false;
@@ -1197,25 +1305,69 @@ static void subghz_scan_task(void *arg) {
             continue;
         }
 
+        if (s_waterfall_stream_requested) {
+            uint8_t line[SUBGHZ_SCANNER_CHANNEL_COUNT];
+            uint8_t line_freq_idx = s_wf_band_idx;
+            bool line_ready = false;
+            uint16_t line_seq = 0;
+
+            if (subghz_retune_frequency(s_scan_freqs[line_freq_idx]) == ESP_OK) {
+                line_ready = subghz_sample_rssi_waterfall_line(line, SUBGHZ_SCANNER_CHANNEL_COUNT);
+            }
+
+            if (line_ready) {
+                if (s_data_mutex) {
+                    xSemaphoreTake(s_data_mutex, portMAX_DELAY);
+                }
+                memcpy(s_waterfall_ready_line, line, sizeof(s_waterfall_ready_line));
+                memcpy(s_waterfall_line, line, sizeof(s_waterfall_line));
+                memcpy(s_levels, line, sizeof(s_levels));
+                s_waterfall_ready_count = SUBGHZ_SCANNER_CHANNEL_COUNT;
+                s_waterfall_ready_freq_idx = line_freq_idx;
+                s_waterfall_freq_idx = line_freq_idx;
+                s_waterfall_seq++;
+                line_seq = s_waterfall_seq;
+                s_waterfall_ready = true;
+                s_snapshot_cursor = 0;
+                memcpy(s_snapshot_levels, s_levels, sizeof(s_snapshot_levels));
+                s_snapshot_valid = true;
+                if (s_data_mutex) {
+                    xSemaphoreGive(s_data_mutex);
+                }
+                subghz_stream_waterfall_line(line_freq_idx, line, SUBGHZ_SCANNER_CHANNEL_COUNT, line_seq);
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+
+            s_wf_band_idx = (uint8_t)((s_wf_band_idx + 1) % SUBGHZ_FREQ_COUNT);
+
+            vTaskDelay(pdMS_TO_TICKS(SUBGHZ_WATERFALL_SLEEP_MS));
+            continue;
+        }
+
         int channels_per_tick = CONFIG_SUBGHZ_ANALYZER_CHANNELS_PER_TICK;
         int settle_us = CONFIG_SUBGHZ_ANALYZER_SETTLE_US;
         if (channels_per_tick < 1) channels_per_tick = 1;
         if (channels_per_tick > 32) channels_per_tick = 32;
         if (settle_us < 100) settle_us = 100;
 
-        if (s_next_channel == 0) {
+        if (s_next_channel == 0 && s_waterfall_count == 0) {
             if (skip_initial_freq_cycle) {
                 skip_initial_freq_cycle = false;
             } else {
                 uint8_t next_idx = (s_current_freq_idx + 1) % SUBGHZ_FREQ_COUNT;
                 if (subghz_retune_frequency(s_scan_freqs[next_idx]) == ESP_OK) {
                     s_current_freq_idx = next_idx;
-                    ESP_LOGI(TAG, "scan freq: %s", s_scan_freq_labels[next_idx]);
+                    ESP_LOGD(TAG, "scan freq: %s", s_scan_freq_labels[next_idx]);
                 }
             }
         }
 
         uint8_t start_ch = s_next_channel;
+        uint8_t line_copy[SUBGHZ_SCANNER_CHANNEL_COUNT];
+        uint8_t line_count = 0;
+        uint8_t line_freq_idx = 0;
+        uint16_t line_seq = 0;
+        bool line_ready = false;
 
         if (s_data_mutex) {
             xSemaphoreTake(s_data_mutex, portMAX_DELAY);
@@ -1226,6 +1378,25 @@ static void subghz_scan_task(void *arg) {
 
             uint8_t sample = subghz_sample_channel(ch, settle_us);
             s_levels[ch] = (uint8_t)((s_levels[ch] * 3 + sample) / 4);
+            s_waterfall_line[ch] = sample;
+            if (ch + 1 > s_waterfall_count) {
+                s_waterfall_count = (uint8_t)(ch + 1);
+            }
+            if (s_next_channel == 0 && s_waterfall_count >= SUBGHZ_SCANNER_CHANNEL_COUNT) {
+                s_waterfall_count = SUBGHZ_SCANNER_CHANNEL_COUNT;
+                s_waterfall_freq_idx = s_current_freq_idx;
+                s_waterfall_seq++;
+                s_waterfall_ready = true;
+                memcpy(s_waterfall_ready_line, s_waterfall_line, sizeof(s_waterfall_ready_line));
+                s_waterfall_ready_count = s_waterfall_count;
+                s_waterfall_ready_freq_idx = s_waterfall_freq_idx;
+                memcpy(line_copy, s_waterfall_line, sizeof(line_copy));
+                line_count = s_waterfall_count;
+                line_freq_idx = s_waterfall_freq_idx;
+                line_seq = s_waterfall_seq;
+                line_ready = true;
+                s_waterfall_count = 0;
+            }
         }
         uint8_t cursor = s_next_channel;
         if (s_data_mutex) {
@@ -1233,6 +1404,11 @@ static void subghz_scan_task(void *arg) {
         }
 
         subghz_stream_chunk(cursor, start_ch, (uint8_t)channels_per_tick);
+        (void)line_ready;
+        (void)line_copy;
+        (void)line_count;
+        (void)line_freq_idx;
+        (void)line_seq;
         vTaskDelay(pdMS_TO_TICKS(SUBGHZ_TASK_SLEEP_MS));
     }
 
@@ -1257,6 +1433,7 @@ static void subghz_scan_task(void *arg) {
 
 bool subghz_remote_manager_start(bool stream_to_peer) {
     s_stream_to_peer = stream_to_peer;
+    s_waterfall_stream_requested = false;
     s_stop_requested = false;
     s_paused = false;
 
@@ -1286,7 +1463,16 @@ bool subghz_remote_manager_start(bool stream_to_peer) {
     return true;
 }
 
+bool subghz_remote_manager_start_waterfall(bool stream_to_peer) {
+    bool ok = subghz_remote_manager_start(stream_to_peer);
+    if (ok) {
+        s_waterfall_stream_requested = true;
+    }
+    return ok;
+}
+
 void subghz_remote_manager_stop(void) {
+    s_waterfall_stream_requested = false;
     s_stop_requested = true;
 }
 
@@ -1402,6 +1588,41 @@ bool subghz_remote_manager_get_levels(uint8_t *out_levels, size_t max_levels, ui
     }
 
     return true;
+}
+
+bool subghz_remote_manager_take_waterfall_line(uint8_t *out_levels, size_t max_levels, uint8_t *out_count, uint8_t *out_freq_idx, uint16_t *out_seq) {
+    if (!out_levels || max_levels == 0) {
+        return false;
+    }
+
+    if (s_data_mutex) {
+        xSemaphoreTake(s_data_mutex, portMAX_DELAY);
+    }
+
+    bool ready = s_waterfall_ready && s_waterfall_ready_count > 0;
+    if (ready) {
+        size_t copy_len = s_waterfall_ready_count;
+        if (copy_len > max_levels) {
+            copy_len = max_levels;
+        }
+        memcpy(out_levels, s_waterfall_ready_line, copy_len);
+        if (out_count) {
+            *out_count = (uint8_t)copy_len;
+        }
+        if (out_freq_idx) {
+            *out_freq_idx = s_waterfall_ready_freq_idx;
+        }
+        if (out_seq) {
+            *out_seq = s_waterfall_seq;
+        }
+        s_waterfall_ready = false;
+    }
+
+    if (s_data_mutex) {
+        xSemaphoreGive(s_data_mutex);
+    }
+
+    return ready;
 }
 
 bool subghz_remote_manager_take_raw_capture(int32_t *out_durations, size_t max_durations, size_t *out_count) {
@@ -2026,6 +2247,10 @@ bool subghz_remote_manager_start(bool stream_to_peer) {
     (void)stream_to_peer;
     return false;
 }
+bool subghz_remote_manager_start_waterfall(bool stream_to_peer) {
+    (void)stream_to_peer;
+    return false;
+}
 
 void subghz_remote_manager_stop(void) {}
 void subghz_remote_manager_set_paused(bool paused) { (void)paused; }
@@ -2045,6 +2270,20 @@ bool subghz_remote_manager_get_levels(uint8_t *out_levels, size_t max_levels, ui
     (void)max_levels;
     if (out_cursor) {
         *out_cursor = 0;
+    }
+    return false;
+}
+bool subghz_remote_manager_take_waterfall_line(uint8_t *out_levels, size_t max_levels, uint8_t *out_count, uint8_t *out_freq_idx, uint16_t *out_seq) {
+    (void)out_levels;
+    (void)max_levels;
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (out_freq_idx) {
+        *out_freq_idx = 0;
+    }
+    if (out_seq) {
+        *out_seq = 0;
     }
     return false;
 }

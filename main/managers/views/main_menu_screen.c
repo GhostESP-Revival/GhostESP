@@ -195,9 +195,10 @@ static void init_menu_colors(void) {
     refresh_menu_surface_colors();
 
     bool connected = esp_comm_manager_is_connected();
+    bool solid = theme_palette_is_solid(theme);
     for (int visible = 0; visible < num_items; visible++) {
         int menu_index = visible_index_to_menu_index(visible, connected);
-        int slot = visible % THEME_PALETTE_SLOT_COUNT;
+        int slot = solid ? 0 : (visible % THEME_PALETTE_SLOT_COUNT);
         menu_items[menu_index].border_color = lv_color_hex(theme_palette_get(theme, slot));
     }
 }
@@ -398,7 +399,8 @@ static void update_menu_item(bool slide_left) {
     lv_obj_set_style_shadow_width(current_item_obj, 12, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_item_obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_shadow_opa(current_item_obj, LV_OPA_40, LV_PART_MAIN);
-    lv_obj_set_style_border_width(current_item_obj, 2, LV_PART_MAIN);
+    bool show_borders = settings_get_menu_item_borders(&G_Settings);
+    lv_obj_set_style_border_width(current_item_obj, show_borders ? 2 : 0, LV_PART_MAIN);
     lv_obj_set_style_border_color(current_item_obj, menu_items[menu_index].border_color, LV_PART_MAIN);
     lv_obj_set_style_radius(current_item_obj, GUI_RADIUS_LG, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN);
@@ -406,10 +408,15 @@ static void update_menu_item(bool slide_left) {
     carousel_cache.border_color = menu_items[menu_index].border_color;
     carousel_cache.item_index = selected_item_index;
 
-    int btn_size = LV_MIN(LV_HOR_RES, LV_VER_RES) * 0.6;
-    if (LV_HOR_RES <= 128 && LV_VER_RES <= 128) {
-        btn_size = 80;
+    int min_dim = LV_MIN(LV_HOR_RES, LV_VER_RES);
+    int btn_size = min_dim * 0.55f;
+    if (min_dim <= 128) {
+        btn_size = min_dim * 0.62f;
+    } else if (min_dim >= 320) {
+        btn_size = min_dim * 0.42f;
     }
+    if (btn_size > 160) btn_size = 160;
+    if (btn_size < 64) btn_size = 64;
     lv_obj_set_size(current_item_obj, btn_size, btn_size);
 
     // initial state already visible
@@ -420,21 +427,26 @@ static void update_menu_item(bool slide_left) {
     lv_img_set_src(icon, menu_items[menu_index].icon);
     carousel_cache.icon = icon;
     carousel_cache.icon_src = menu_items[menu_index].icon;
-    const int icon_size = 50;
-    lv_obj_set_size(icon, icon_size, icon_size);
-    lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
+    int icon_target = btn_size * 0.38f;
+    if (icon_target < 20) icon_target = 20;
+    if (icon_target > 56) icon_target = 56;
     lv_img_set_antialias(icon, false);
+    lv_coord_t img_w = menu_items[menu_index].icon->header.w;
+    lv_coord_t img_h = menu_items[menu_index].icon->header.h;
+    int zoom_w = (img_w > 0) ? (icon_target * 256) / img_w : 256;
+    int zoom_h = (img_h > 0) ? (icon_target * 256) / img_h : 256;
+    int zoom = LV_MIN(zoom_w, zoom_h);
+    if (zoom > 256) zoom = 256;
+    if (zoom < 64) zoom = 64;
+    lv_img_set_zoom(icon, zoom);
+    lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
     bool recolor_enabled = true;
     if (recolor_enabled) {
         lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
     }
     carousel_cache.icon_recolor_enabled = recolor_enabled;
-    int icon_x_offset = -3;
-    int icon_y_offset = -5;
-    int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
-    int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
-    lv_obj_set_pos(icon, x_pos, y_pos);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
 
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
@@ -545,7 +557,7 @@ static void menu_item_event_handler(InputEvent *event) {
                 if (touch_dragged) {
                     if (current_layout == MENU_LAYOUT_GRID_CARDS) {
                         if (grid_cards_container) {
-                            lv_obj_scroll_by_bounded(grid_cards_container, 0, -dy, LV_ANIM_OFF);
+                            lv_obj_scroll_by_bounded(grid_cards_container, 0, dy, LV_ANIM_OFF);
                         }
                     } else if (current_layout == MENU_LAYOUT_LIST) {
                         if (menu_container) {
@@ -663,7 +675,7 @@ static void menu_item_event_handler(InputEvent *event) {
                 // Handle vertical swipe for grid cards scrolling
                 if (abs(dy) > SWIPE_THRESHOLD && abs(dy) > abs(dx)) {
                     if (grid_cards_container) {
-                        lv_obj_scroll_by_bounded(grid_cards_container, 0, -dy, LV_ANIM_OFF);
+                        lv_obj_scroll_by_bounded(grid_cards_container, 0, dy, LV_ANIM_OFF);
                     }
                     return;
                 }
@@ -777,10 +789,11 @@ void select_menu_item(int index, bool slide_left) {
         update_menu_item(slide_left);
     } else if (current_layout == MENU_LAYOUT_GRID) {
         // Update selection for grid layout
+        bool show_borders = settings_get_menu_item_borders(&G_Settings);
         if (grid_buttons) {
             // Remove highlight from previous selection
             if (selected_item_index >= 0 && selected_item_index < num_items && grid_buttons[selected_item_index]) {
-                lv_obj_set_style_border_width(grid_buttons[selected_item_index], 2, LV_PART_MAIN);
+                lv_obj_set_style_border_width(grid_buttons[selected_item_index], show_borders ? 2 : 0, LV_PART_MAIN);
                 lv_obj_set_style_border_color(grid_buttons[selected_item_index], menu_surface_color, LV_PART_MAIN);
             }
 
@@ -793,6 +806,7 @@ void select_menu_item(int index, bool slide_left) {
         }
     } else if (current_layout == MENU_LAYOUT_GRID_CARDS) {
         // Update selection for Grid card layout
+        bool show_borders_sel = settings_get_menu_item_borders(&G_Settings);
         if (grid_cards) {
             // Remove highlight from previous selection
             if (selected_item_index >= 0 && selected_item_index < num_items && grid_cards[selected_item_index]) {
@@ -800,20 +814,21 @@ void select_menu_item(int index, bool slide_left) {
                 bool connected = esp_comm_manager_is_connected();
                 int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
                 lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[menu_index_prev].border_color, LV_PART_MAIN);
-                lv_obj_set_style_border_width(grid_cards[selected_item_index], 2, LV_PART_MAIN); // Reset to original width
+                lv_obj_set_style_border_width(grid_cards[selected_item_index], show_borders_sel ? 2 : 0, LV_PART_MAIN);
                 lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
                 lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0x000000), LV_PART_MAIN);
                 lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_50, LV_PART_MAIN);
             }
 
-            // Highlight new selection
+            // Highlight new selection with theme accent
             selected_item_index = index;
             if (grid_cards[selected_item_index]) {
-                // Always use prominent white border and larger shadow
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-                lv_obj_set_style_border_width(grid_cards[selected_item_index], 4, LV_PART_MAIN);
-                lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 16, LV_PART_MAIN);
-                lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+                uint8_t theme = settings_get_menu_theme(&G_Settings);
+                lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+                lv_obj_set_style_border_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
+                lv_obj_set_style_border_width(grid_cards[selected_item_index], 3, LV_PART_MAIN);
+                lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 12, LV_PART_MAIN);
+                lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
                 lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
                 
                 // Ensure selected card is visible (handle pagination) without animation
@@ -821,13 +836,14 @@ void select_menu_item(int index, bool slide_left) {
             }
         }
     } else if (current_layout == MENU_LAYOUT_LIST) {
+        bool show_borders_list = settings_get_menu_item_borders(&G_Settings);
         if (list_buttons) {
             if (selected_item_index >= 0 && selected_item_index < num_items && list_buttons[selected_item_index]) {
                 lv_obj_t *old_btn = list_buttons[selected_item_index];
                 bool connected = esp_comm_manager_is_connected();
                 int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
                 lv_obj_set_style_border_color(old_btn, menu_items[menu_index_prev].border_color, LV_PART_MAIN);
-                lv_obj_set_style_border_width(old_btn, 2, LV_PART_MAIN);
+                lv_obj_set_style_border_width(old_btn, show_borders_list ? 2 : 0, LV_PART_MAIN);
             }
             selected_item_index = index;
             if (list_buttons[selected_item_index]) {
@@ -953,7 +969,7 @@ static void create_grid_menu(void) {
     int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
 
-    int cols = 3;
+    int cols = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 : 2;
     if (cols > num_items) cols = num_items;
     if (cols <= 0) cols = 1;
     int visible_rows = 2;
@@ -963,23 +979,25 @@ static void create_grid_menu(void) {
     int avail_height = screen_height - status_bar_height;
     if (avail_height < 60) avail_height = screen_height;
     if (screen_width <= 240 || avail_height <= 120) {
-        margin = 0;
+        margin = 4;
     }
 
     grid_cols = cols;
     grid_rows = (num_items + cols - 1) / cols;
     if (grid_rows <= 0) grid_rows = 1;
 
-    grid_card_width = (screen_width - (cols - 1) * margin) / cols;
+    grid_card_width = (screen_width - (cols + 1) * margin) / cols;
     grid_card_height = (avail_height - (visible_rows - 1) * margin) / visible_rows;
 
-    // Create container for cards (grid-like)
+    // Create container for cards with flex column layout
     grid_cards_container = lv_obj_create(menu_container);
     lv_obj_set_size(grid_cards_container, screen_width, avail_height);
     lv_obj_set_style_bg_opa(grid_cards_container, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(grid_cards_container, 0, 0);
-    lv_obj_set_style_pad_all(grid_cards_container, 0, 0);
-    // Top align within menu container so it sits below the status bar
+    lv_obj_set_style_pad_all(grid_cards_container, margin, 0);
+    lv_obj_set_style_pad_row(grid_cards_container, margin, 0);
+    lv_obj_set_flex_flow(grid_cards_container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(grid_cards_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_align(grid_cards_container, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_scrollbar_mode(grid_cards_container, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_add_flag(grid_cards_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -994,106 +1012,103 @@ static void create_grid_menu(void) {
         return;
     }
 
-    int card_margin = margin;
-    int total_inner_w = cols * grid_card_width + (cols - 1) * card_margin;
-    int w_remainder = screen_width - total_inner_w;
-
     bool connected = esp_comm_manager_is_connected();
+    bool show_borders = settings_get_menu_item_borders(&G_Settings);
+    lv_obj_t *current_row = NULL;
+
     for (int i = 0; i < num_items; i++) {
         int menu_index = visible_index_to_menu_index(i, connected);
-        // Create card
-        grid_cards[i] = lv_btn_create(grid_cards_container);
 
-        int col = i % cols;
-        int row = i / cols;
-        int x = col * (grid_card_width + card_margin);
-        int y = row * (grid_card_height + card_margin);
-        int cw = grid_card_width + ((col == cols - 1) ? w_remainder : 0);
-        int ch = grid_card_height;
-        lv_obj_set_pos(grid_cards[i], x, y);
-        lv_obj_set_size(grid_cards[i], cw, ch);
+        // Start a new flex row every `cols` items
+        if (i % cols == 0) {
+            current_row = lv_obj_create(grid_cards_container);
+            lv_obj_set_width(current_row, LV_PCT(100));
+            lv_obj_set_height(current_row, grid_card_height);
+            lv_obj_set_flex_flow(current_row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(current_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(current_row, margin, 0);
+            lv_obj_set_style_pad_all(current_row, 0, 0);
+            lv_obj_set_style_bg_opa(current_row, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(current_row, 0, 0);
+            lv_obj_set_style_radius(current_row, 0, 0);
+        }
 
-        // Style card (Grid-style with rounded corners and shadows) - use theme colors
+        // Create card inside the current row
+        grid_cards[i] = lv_btn_create(current_row);
+        lv_obj_set_width(grid_cards[i], grid_card_width);
+        lv_obj_set_height(grid_cards[i], LV_PCT(100));
+
+        // Style card
         lv_obj_set_style_bg_color(grid_cards[i], menu_surface_color, LV_PART_MAIN);
-        int shadow_w = (ch <= 50 ? 4 : 8);
+        int shadow_w = (grid_card_height <= 50 ? 4 : 8);
         lv_obj_set_style_shadow_width(grid_cards[i], shadow_w, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(grid_cards[i], lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(grid_cards[i], LV_OPA_50, LV_PART_MAIN);
-        lv_obj_set_style_border_width(grid_cards[i], 2, LV_PART_MAIN);
+        lv_obj_set_style_border_width(grid_cards[i], show_borders ? 2 : 0, LV_PART_MAIN);
         lv_obj_set_style_border_color(grid_cards[i], menu_items[menu_index].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(grid_cards[i], GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(grid_cards[i], 0, LV_PART_MAIN);
 
-        // Add icon (dynamic sizing to fit with label below)
+        // Add icon
         lv_obj_t *icon = lv_img_create(grid_cards[i]);
         lv_img_set_src(icon, menu_items[menu_index].icon);
-        // Dynamic label reserve to ensure text fits without pushing icon off-screen
-        int reserved_for_label = (ch <= 50 ? 14 : 20);
-        int avail_w = (int)(cw * 0.78f);
-        int avail_h = (int)((ch - reserved_for_label) * 0.78f);
-        if (avail_h < 10) avail_h = ch - reserved_for_label;
+        int reserved_for_label = (grid_card_height <= 50 ? 14 : 20);
+        int avail_w = (int)(grid_card_width * 0.78f);
+        int avail_h = (int)((grid_card_height - reserved_for_label) * 0.78f);
+        if (avail_h < 10) avail_h = grid_card_height - reserved_for_label;
         lv_img_set_antialias(icon, false);
 
-        // Color icons according to theme like other layouts
         lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
         lv_obj_set_style_clip_corner(icon, false, 0);
 
-        // Scale icon using zoom to fit into available area
         lv_coord_t img_w = menu_items[menu_index].icon->header.w;
         lv_coord_t img_h = menu_items[menu_index].icon->header.h;
         int zoom_w = (img_w > 0) ? (avail_w * 256) / img_w : 256;
         int zoom_h = (img_h > 0) ? (avail_h * 256) / img_h : 256;
         int zoom = LV_MIN(zoom_w, zoom_h);
-        if (zoom > 256) zoom = 256;      // cap at 1x
-        if (zoom < 64)  zoom = 64;       // don't get too small
+        if (zoom > 256) zoom = 256;
+        if (zoom < 64)  zoom = 64;
         lv_img_set_zoom(icon, zoom);
 
-        // Place icon above center within the icon area to make room for text below
         int icon_draw_h = (img_h * zoom) / 256;
-        int icon_area_h = ch - reserved_for_label;
-        int top_offset = (icon_area_h - icon_draw_h) / 2 - (ch <= 50 ? 15 : 18);
+        int icon_area_h = grid_card_height - reserved_for_label;
+        int top_offset = (icon_area_h - icon_draw_h) / 2 - (grid_card_height <= 50 ? 15 : 18);
         if (top_offset < 0) top_offset = 0;
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
 
         // Add label
         lv_obj_t *label = lv_label_create(grid_cards[i]);
         lv_label_set_text(label, menu_items[menu_index].name);
-        // smaller font on small tiles
-        const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+        const lv_font_t *lbl_font = (grid_card_height <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, menu_text_color, 0);
-        // Center label within the card and ensure proper centering of text
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(label, cw - 8);
+        lv_obj_set_width(label, grid_card_width - 8);
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
 
-        // Add click event
         lv_obj_add_event_cb(grid_cards[i], menu_button_click_handler, LV_EVENT_CLICKED, (void*)(intptr_t)i);
     }
 
-    int selected_menu_index = visible_index_to_menu_index(selected_item_index, connected);
-
-    // Highlight selected card
-    // Highlight selected card
+    // Highlight selected card with theme accent
     if (grid_cards[selected_item_index]) {
-        // Always use prominent white border and larger shadow
-        lv_obj_set_style_border_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-        lv_obj_set_style_border_width(grid_cards[selected_item_index], 4, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 16, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+        lv_obj_set_style_border_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
+        lv_obj_set_style_border_width(grid_cards[selected_item_index], 3, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 12, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
 
         lv_obj_scroll_to_view(grid_cards[selected_item_index], LV_ANIM_OFF);
     }
-
-    // vertical scrolling rows
 }
 
 static void create_list_menu(void) {
     int button_height = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 32 : 44;
     int icon_target = button_height <= 38 ? 20 : 26;
+    bool show_borders = settings_get_menu_item_borders(&G_Settings);
 
     lv_obj_set_flex_flow(menu_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(menu_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1124,7 +1139,7 @@ static void create_list_menu(void) {
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_bg_color(btn, menu_surface_color, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn, show_borders ? 2 : 0, LV_PART_MAIN);
         lv_obj_set_style_border_color(btn, menu_items[menu_index].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
@@ -1302,7 +1317,7 @@ void main_menu_create(void) {
         // Add left arrow icon/text
         // create arrow label only, style it and center within the transparent button
         lv_obj_t *left_label = lv_label_create(left_nav_btn);
-        lv_label_set_text(left_label, "<");
+        lv_label_set_text(left_label, LV_SYMBOL_LEFT);
         // increase arrow size for better visibility
         lv_obj_set_style_text_font(left_label, &lv_font_montserrat_18, 0);
         if (btn_size < 40) {
@@ -1325,7 +1340,7 @@ void main_menu_create(void) {
         
         // Add right arrow icon/text
         lv_obj_t *right_label = lv_label_create(right_nav_btn);
-        lv_label_set_text(right_label, ">");
+        lv_label_set_text(right_label, LV_SYMBOL_RIGHT);
         // increase arrow size for better visibility
         lv_obj_set_style_text_font(right_label, &lv_font_montserrat_18, 0);
         if (btn_size < 40) {

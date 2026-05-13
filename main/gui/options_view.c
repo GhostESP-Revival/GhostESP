@@ -25,12 +25,15 @@ typedef struct options_view_t {
     int btn_h;
 } options_view_t;
 
-static inline void ensure_capacity(options_view_t *ov, int need) {
-    if (ov->capacity >= need) return;
+static inline bool ensure_capacity(options_view_t *ov, int need) {
+    if (ov->capacity >= need) return true;
     int newcap = ov->capacity ? ov->capacity * 2 : 16;
     if (newcap < need) newcap = need;
-    ov->items = (lv_obj_t **)realloc(ov->items, sizeof(lv_obj_t *) * newcap);
+    lv_obj_t **new_items = (lv_obj_t **)realloc(ov->items, sizeof(lv_obj_t *) * newcap);
+    if (!new_items) return false;
+    ov->items = new_items;
     ov->capacity = newcap;
+    return true;
 }
 
 static inline lv_style_t *get_zebra_style(options_view_t *ov, int idx) {
@@ -176,7 +179,7 @@ void options_view_destroy(options_view_t *ov) {
 
 lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_cb_t on_click, void *user_data) {
     if (!ov || !ov->list) return NULL;
-    ensure_capacity(ov, ov->count + 1);
+    if (!ensure_capacity(ov, ov->count + 1)) return NULL;
     lv_obj_t *btn = lv_list_add_btn(ov->list, NULL, label ? label : "");
     if (!btn) return NULL;
     lv_obj_set_height(btn, ov->btn_h);

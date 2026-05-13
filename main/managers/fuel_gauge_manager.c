@@ -825,57 +825,48 @@ bool fuel_gauge_manager_init(void) {
         ESP_LOGI(TAG, "Loaded SOC from NVS: %d%%", s_nvs_soc);
     }
     
-    // Only perform a software reset if the MAX17048 itself experienced a power-on reset.
-    // The POR bit (bit 1 of STATUS register) is set when the chip loses power.
-    // If the ESP resets but the fuel gauge stays powered (e.g. USB still plugged in),
-    // the chip retains its learned ModelGauge state and we should NOT wipe it.
+    // POR bit set means the MAX17048 lost power and its ModelGauge state is already
+    // gone. A software reset + RCOMP + QuickStart gives it a clean slate to rebuild
+    // from. When POR is clear, the chip kept power across ESP reboot — leave it alone.
     uint16_t status = max17048_read_word(MAX17048_REG_STATUS);
-    if (status != 0xFFFF && (status & 0x02)) {
-        ESP_LOGI(TAG, "MAX17048 POR bit set - performing software reset");
+    bool had_por = (status != 0xFFFF && (status & 0x02));
+
+    if (had_por) {
+        ESP_LOGI(TAG, "MAX17048 POR detected - resetting chip (ModelGauge state already lost)");
         max17048_write_word(MAX17048_REG_CMD, 0x5400);
-        vTaskDelay(pdMS_TO_TICKS(50));
-    } else {
-        ESP_LOGI(TAG, "MAX17048 POR bit clear - skipping reset (learned data intact)");
-    }
+        vTaskDelay(pdMS_TO_TICKS(200));
 
-    bool did_reset = (status != 0xFFFF && (status & 0x02));
-
-    if (did_reset) {
-        // Set RCOMP to standard LiPo value (0x97) to stabilize ModelGauge
-        // CONFIG register is at 0x0C. High byte is RCOMP.
         uint16_t config_reg = max17048_read_word(MAX17048_REG_CONFIG);
         if (config_reg != 0xFFFF) {
             uint16_t new_config = (config_reg & 0x00FF) | 0x9700;
             max17048_write_word(MAX17048_REG_CONFIG, new_config);
-            
-            // Verify write
-            uint16_t verify = max17048_read_word(MAX17048_REG_CONFIG);
-            if ((verify & 0xFF00) == 0x9700) {
-                ESP_LOGI(TAG, "RCOMP set successfully: 0x%04X", verify);
-            } else {
-                ESP_LOGW(TAG, "RCOMP write mismatch! Got: 0x%04X", verify);
-            }
+            ESP_LOGI(TAG, "RCOMP set: 0x%04X", max17048_read_word(MAX17048_REG_CONFIG));
         }
 
-        // Quick start to update SOC immediately after reset/config
         uint16_t current_mode = max17048_read_word(MAX17048_REG_MODE);
         if (current_mode != 0xFFFF) {
-            max17048_write_word(MAX17048_REG_MODE, current_mode | 0x4000); // Set QuickStart bit
+            max17048_write_word(MAX17048_REG_MODE, current_mode | 0x4000);
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        // After reset, the chip's SOC is voltage-based and unreliable when plugged in.
-        // Seed last_data from NVS so the hysteresis/smoothing starts from a sane value.
-        if (s_nvs_soc >= 0) {
-            last_data.percentage = (uint8_t)s_nvs_soc;
-            last_data.is_initialized = true;
-            ESP_LOGI(TAG, "Seeding fuel gauge from NVS SOC: %d%%", s_nvs_soc);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    } else {
+        ESP_LOGI(TAG, "MAX17048 POR bit clear (learned data intact)");
+        uint16_t config_reg = max17048_read_word(MAX17048_REG_CONFIG);
+        if (config_reg != 0xFFFF && (config_reg & 0xFF00) != 0x9700) {
+            max17048_write_word(MAX17048_REG_CONFIG, (config_reg & 0x00FF) | 0x9700);
         }
     }
 
-    memset(&last_data, 0, sizeof(last_data));
-    last_data.is_initialized = true;
+    // Seed last_data from NVS so smoothing starts from a sane value
+    if (s_nvs_soc >= 0) {
+        last_data.percentage = (uint8_t)s_nvs_soc;
+        last_data.is_initialized = true;
+        ESP_LOGI(TAG, "Seeding fuel gauge from NVS SOC: %d%%", s_nvs_soc);
+    }
+
+    if (!last_data.is_initialized) {
+        memset(&last_data, 0, sizeof(last_data));
+        last_data.is_initialized = true;
+    }
     is_initialized = true;
 
     ESP_LOGI(TAG, "MAX17048 fuel gauge initialized successfully");
@@ -911,72 +902,68 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
         return false;
     }
 
-    // VCELL: 1 unit = 78.125uV.  (vcell * 78.125) / 1000 = mV
     data->voltage_mv = (uint16_t)((float)vcell * 78.125f / 1000.0f);
-    
-    // SOC Jump detection: 
-    // If we read > 110%, it's likely an uninitialized/reset state (like 0xFE / 254%).
-    // If it's between 100-110%, it's just a full battery calibration offset; cap to 100.
-    uint8_t current_perc = (uint8_t)(soc_raw >> 8);
-    if (current_perc > 110) {
-        if (!last_data.is_initialized) {
-            // Hard fallback for first-run crazy data: force a QuickStart
-            ESP_LOGW(TAG, "Invalid initial SOC 0x%04X. Forcing QuickStart.", soc_raw);
-            uint16_t m = max17048_read_word(MAX17048_REG_MODE);
-            if (m != 0xFFFF) max17048_write_word(MAX17048_REG_MODE, m | 0x4000);
-            data->percentage = (data->voltage_mv > 3700) ? 50 : 0; 
-        } else {
-            ESP_LOGW(TAG, "SOC jump detected (0x%04X), ignoring glitch", soc_raw);
-            data->percentage = last_data.percentage;
-        }
+
+    uint8_t raw_perc = (uint8_t)(soc_raw >> 8);
+
+    // Voltage-based SOC for when the chip's ModelGauge is lost
+    int voltage_soc = -1;
+    if (data->voltage_mv >= 4200) voltage_soc = 100;
+    else if (data->voltage_mv >= 4100) voltage_soc = 85 + ((data->voltage_mv - 4100) * 15) / 100;
+    else if (data->voltage_mv >= 4000) voltage_soc = 70 + ((data->voltage_mv - 4000) * 15) / 100;
+    else if (data->voltage_mv >= 3900) voltage_soc = 55 + ((data->voltage_mv - 3900) * 15) / 100;
+    else if (data->voltage_mv >= 3800) voltage_soc = 40 + ((data->voltage_mv - 3800) * 15) / 100;
+    else if (data->voltage_mv >= 3700) voltage_soc = 25 + ((data->voltage_mv - 3700) * 15) / 100;
+    else if (data->voltage_mv >= 3600) voltage_soc = 10 + ((data->voltage_mv - 3600) * 15) / 100;
+    else if (data->voltage_mv >= 3400) voltage_soc = ((data->voltage_mv - 3400) * 10) / 200;
+    else voltage_soc = 0;
+
+    // Decide which source to trust
+    int trusted_soc;
+
+    if (raw_perc > 100) {
+        trusted_soc = (voltage_soc >= 0) ? voltage_soc : (last_data.is_initialized ? last_data.percentage : 50);
+    } else if (raw_perc == 0) {
+        trusted_soc = (voltage_soc >= 0) ? voltage_soc : (last_data.is_initialized ? last_data.percentage : 0);
     } else {
-        // Capped valid range
-        uint8_t filtered_perc = (current_perc > 100) ? 100 : current_perc;
-        
-        // Glitch rejection: if last reading was high and this is 0, it's almost certainly an I2C error
-        if (last_data.is_initialized && last_data.percentage > 50 && filtered_perc == 0) {
-            ESP_LOGW(TAG, "SOC dropped from %d%% to 0%%, rejecting glitch", last_data.percentage);
-            data->percentage = last_data.percentage;
+        int diff = abs(raw_perc - voltage_soc);
+        if (diff > 20) {
+            trusted_soc = voltage_soc;
         } else {
-            data->percentage = filtered_perc;
-        }
-        
-        // Logically verify SOC against voltage
-        // If voltage > 4.1V but SOC < 20%, the algorithm is clearly lost
-        if (data->voltage_mv > 4100 && data->percentage < 20) {
-            ESP_LOGW(TAG, "SOC/Voltage discrepancy (%d mV but %d%%). Triggering QuickStart.", 
-                     data->voltage_mv, data->percentage);
-            uint16_t m = max17048_read_word(MAX17048_REG_MODE);
-            if (m != 0xFFFF) max17048_write_word(MAX17048_REG_MODE, m | 0x4000);
+            trusted_soc = raw_perc;
         }
     }
 
-    // CRATE: charge/discharge rate in %/hr. 1 unit = 0.208 %/hr
-    int16_t signed_crate = (int16_t)crate_raw;
-    data->current_ma = (int16_t)((float)signed_crate * 0.208f); 
-    
-    // Charging detection refinement:
-    // If voltage is > 4.15V, we are likely charging even if signed_crate is negative (noise/ModelGauge error)
-    // unless it's a very large discharge.
+    // Reject sudden jumps — on battery the voltage barely moves between 5s
+    // polls so the SOC shouldn't either. If it snaps more than 3%, hold.
+    int new_percentage;
+    if (last_data.is_initialized) {
+        int snap = trusted_soc - (int)last_data.percentage;
+        if (snap > 3) new_percentage = last_data.percentage + 1;
+        else if (snap < -3) new_percentage = last_data.percentage - 1;
+        else new_percentage = trusted_soc;
+    } else {
+        new_percentage = trusted_soc;
+    }
+
+    if (new_percentage > 100) new_percentage = 100;
+    if (new_percentage < 0) new_percentage = 0;
+    data->percentage = (uint8_t)new_percentage;
+
+    int16_t signed_crate = (crate_raw != 0xFFFF) ? (int16_t)crate_raw : 0;
+    data->current_ma = (int16_t)((float)signed_crate * 0.208f);
+
     bool voltage_high = (data->voltage_mv > 4150);
     data->is_charging = (signed_crate > 2) || (voltage_high && signed_crate > -50);
-    
+
     data->is_initialized = true;
 
-    // Log the raw and processed values for debugging
-    ESP_LOGD(TAG, "VCELL: %d (%d mV), SOC: 0x%04X (%d%%), CRATE: %d (%d %%/hr), charging: %s",
-             vcell, data->voltage_mv, soc_raw, data->percentage, 
-             signed_crate, (int)(signed_crate * 0.208f),
-             data->is_charging ? "YES" : "NO");
+    ESP_LOGI(TAG, "MAX17048: raw=%d%% v_soc=%d%% out=%d%% %dmV %dmA %s",
+             raw_perc, voltage_soc, data->percentage, data->voltage_mv,
+             data->current_ma, data->is_charging ? "CHG" : "DIS");
 
-    uint16_t config = max17048_read_word(MAX17048_REG_CONFIG);
-    uint16_t mode = max17048_read_word(MAX17048_REG_MODE);
-    ESP_LOGD(TAG, "CONFIG: 0x%04X, MODE: 0x%04X", config, mode);
-
-    // Update cache
     memcpy(&last_data, data, sizeof(fuel_gauge_data_t));
 
-    // Periodically save SOC to NVS so we survive fuel gauge power loss
     uint32_t now = xTaskGetTickCount() / configTICK_RATE_HZ;
     if (now - s_last_nvs_save >= NVS_SAVE_INTERVAL_S) {
         s_last_nvs_save = now;

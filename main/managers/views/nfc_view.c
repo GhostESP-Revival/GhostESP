@@ -8,6 +8,7 @@
 #include "managers/status_display_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "managers/views/error_popup.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
@@ -87,6 +88,10 @@ static options_view_t *g_nfc_ov = NULL;
 void nfc_option_event_cb(lv_event_t *e);
 void nfc_view_input_cb(InputEvent *event);
 
+static void scroll_nfc_up(lv_event_t *e);
+static void scroll_nfc_down(lv_event_t *e);
+static void update_nfc_scroll_buttons_visibility(void);
+
 static lv_obj_t *root = NULL;
 static lv_obj_t *menu_container = NULL;
 static lv_obj_t *scan_btn = NULL;
@@ -106,6 +111,19 @@ static size_t nfc_file_count = 0;
 static bool in_saved_list = false;
 static char **saved_file_paths = NULL;
 static size_t saved_file_count = 0;
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+static bool nfc_touch_started = false;
+static int nfc_touch_start_x = 0;
+static int nfc_touch_start_y = 0;
+#if CONFIG_LV_TOUCH_CONTROLLER_XPT2046
+static const int NFC_SWIPE_THRESHOLD_RATIO = 1;
+#else
+static const int NFC_SWIPE_THRESHOLD_RATIO = 10;
+#endif
+#endif
+static bool nfc_option_invoked = false;
+static unsigned long nfc_created_time_ms = 0;
 
 // NFC write popup
 static lv_obj_t *nfc_write_popup = NULL;
@@ -788,7 +806,7 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
         if (!res) { free(text); return; }
         res->text = text; res->text_len = strlen(text); res->session = nfc_scan_session;
         if (display_manager_is_available()) lv_async_call(nfc_set_details_async, res);
-        else { if (res->text) free(res->text); free(res); }
+        else { free(text); free(res); }
         mfc_set_progress_callback(NULL, NULL);
         return;
     }
@@ -812,7 +830,7 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
         res->session = nfc_scan_session;
         if (display_manager_is_available()) lv_async_call(nfc_set_details_async, res);
         else {
-            if (res->text) free(res->text);
+            free(text);
             free(res);
         }
         return;
@@ -831,7 +849,7 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
         for (uint8_t i = 0; i < uid_len && cap > 3; ++i) { int n = snprintf(w, cap, " %02X", uid[i]); if (n > 0) { w += n; cap -= n; } }
         snprintf(w, cap, "\nNo NDEF data\n");
         if (display_manager_is_available()) lv_async_call(nfc_set_details_async, res);
-        else { if (res->text) free(res->text); free(res); }
+        else { free(res->text); free(res); }
         return;
     }
     char *text = ntag_t2_build_details_from_mem(mem, mem_len, uid, uid_len, model);
@@ -1533,6 +1551,99 @@ void nfc_view_input_cb(InputEvent *event) {
     }
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *d = &event->data.touch_data;
+#ifdef CONFIG_USE_TOUCHSCREEN
+        if (d->state == LV_INDEV_STATE_PR) {
+            if (nfc_scan_popup && lv_obj_is_valid(nfc_scan_popup)) {
+                nfc_touch_started = false;
+                return;
+            }
+            if (nfc_write_popup && lv_obj_is_valid(nfc_write_popup)) {
+                nfc_touch_started = false;
+                return;
+            }
+            if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn) && !lv_obj_has_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN)) {
+                lv_area_t a;
+                lv_obj_get_coords(scroll_up_btn, &a);
+                if (d->point.x >= a.x1 && d->point.x <= a.x2 &&
+                    d->point.y >= a.y1 && d->point.y <= a.y2) {
+                    scroll_nfc_up(NULL);
+                    nfc_touch_started = false;
+                    return;
+                }
+            }
+            if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn) && !lv_obj_has_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN)) {
+                lv_area_t a;
+                lv_obj_get_coords(scroll_down_btn, &a);
+                if (d->point.x >= a.x1 && d->point.x <= a.x2 &&
+                    d->point.y >= a.y1 && d->point.y <= a.y2) {
+                    scroll_nfc_down(NULL);
+                    nfc_touch_started = false;
+                    return;
+                }
+            }
+            if (back_btn && lv_obj_is_valid(back_btn)) {
+                lv_area_t a;
+                lv_obj_get_coords(back_btn, &a);
+                if (d->point.x >= a.x1 && d->point.x <= a.x2 &&
+                    d->point.y >= a.y1 && d->point.y <= a.y2) {
+                    back_event_cb(NULL);
+                    nfc_touch_started = false;
+                    return;
+                }
+            }
+            if (!nfc_touch_started) {
+                nfc_touch_started = true;
+                nfc_touch_start_x = d->point.x;
+                nfc_touch_start_y = d->point.y;
+            }
+            return;
+        }
+        if (d->state == LV_INDEV_STATE_REL) {
+            if (!nfc_touch_started) return;
+            nfc_touch_started = false;
+
+            if (!menu_container || !lv_obj_is_valid(menu_container)) return;
+
+            int dx = d->point.x - nfc_touch_start_x;
+            int dy = d->point.y - nfc_touch_start_y;
+            int thr_y = LV_VER_RES / NFC_SWIPE_THRESHOLD_RATIO;
+            int thr_x = LV_HOR_RES / NFC_SWIPE_THRESHOLD_RATIO;
+
+            lv_area_t cont_area;
+            lv_obj_get_coords(menu_container, &cont_area);
+            bool started_in_container = (nfc_touch_start_x >= cont_area.x1 && nfc_touch_start_x <= cont_area.x2 &&
+                                         nfc_touch_start_y >= cont_area.y1 && nfc_touch_start_y <= cont_area.y2);
+            if (!started_in_container) return;
+
+            if (abs(dy) > thr_y) {
+                lv_obj_scroll_by_bounded(menu_container, 0, dy, LV_ANIM_OFF);
+                update_nfc_scroll_buttons_visibility();
+                return;
+            }
+            if (abs(dx) > thr_x) return;
+
+            if (d->point.x < cont_area.x1 || d->point.x > cont_area.x2 ||
+                d->point.y < cont_area.y1 || d->point.y > cont_area.y2) {
+                return;
+            }
+
+            int cnt = g_nfc_ov ? options_view_get_item_count(g_nfc_ov) : 0;
+            for (int i = 0; i < cnt; ++i) {
+                lv_obj_t *btn = lv_obj_get_child(menu_container, i);
+                if (!btn) continue;
+                lv_area_t a;
+                lv_obj_get_coords(btn, &a);
+                if (d->point.x >= a.x1 && d->point.x <= a.x2 &&
+                    d->point.y >= a.y1 && d->point.y <= a.y2) {
+                    selected_index = i;
+                    if (g_nfc_ov) options_view_set_selected(g_nfc_ov, i);
+                    lv_event_send(btn, LV_EVENT_CLICKED, NULL);
+                    return;
+                }
+            }
+            return;
+        }
+#else
         if (d->state == LV_INDEV_STATE_PR) return;
         int x = d->point.x;
         int y = d->point.y;
@@ -1550,6 +1661,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
         }
         if (in_write_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+#endif
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int btn = event->data.joystick_index;
         if (btn == 2) {
@@ -1592,52 +1704,93 @@ void nfc_view_input_cb(InputEvent *event) {
 }
 
 void nfc_option_event_cb(lv_event_t *e) {
-    // user_data is const char* option
+    if (nfc_option_invoked) return;
+    nfc_option_invoked = true;
+
+    unsigned long now_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
+    if (now_ms - nfc_created_time_ms <= 500) {
+        nfc_option_invoked = false;
+        return;
+    }
+
     const char *opt = (const char *)lv_event_get_user_data(e);
-    if (!opt) return;
+    if (!opt) { nfc_option_invoked = false; return; }
     if (strcmp(opt, "__BACK_OPTION__") == 0) {
         back_event_cb(NULL);
+        nfc_option_invoked = false;
         return;
     }
 
     if (strcmp(opt, "Scan") == 0) {
         create_nfc_scan_popup();
+        nfc_option_invoked = false;
         return;
     }
 
     if (strcmp(opt, "Write") == 0) {
         nfc_enter_write_list();
+        nfc_option_invoked = false;
         return;
     }
 
     if (strcmp(opt, "Saved") == 0) {
         saved_enter_list();
+        nfc_option_invoked = false;
         return;
     }
 
     if (strcmp(opt, "User Keys") == 0) {
         create_keys_popup();
+        nfc_option_invoked = false;
         return;
     }
 
     if (strcmp(opt, "Chameleon Ultra") == 0) {
         create_cu_popup();
+        nfc_option_invoked = false;
         return;
     }
 
-
+    nfc_option_invoked = false;
 }
 
-// touchscreen scroll callbacks
+static void update_nfc_scroll_buttons_visibility(void) {
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (!menu_container || !lv_obj_is_valid(menu_container)) return;
+    lv_obj_update_layout(menu_container);
+    lv_coord_t sb = lv_obj_get_scroll_bottom(menu_container);
+    lv_coord_t st = lv_obj_get_scroll_top(menu_container);
+    bool needs_scroll = (sb > 0) || (st > 0);
+    if (needs_scroll) {
+        if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) {
+            lv_obj_clear_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(scroll_up_btn);
+        }
+        if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) {
+            lv_obj_clear_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(scroll_down_btn);
+        }
+        if (back_btn && lv_obj_is_valid(back_btn)) {
+            lv_obj_move_foreground(back_btn);
+        }
+    } else {
+        if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+        if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
+}
+
 static void scroll_nfc_up(lv_event_t *e) {
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, scroll_amt, LV_ANIM_OFF);
+    update_nfc_scroll_buttons_visibility();
 }
 static void scroll_nfc_down(lv_event_t *e) {
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, -scroll_amt, LV_ANIM_OFF);
+    update_nfc_scroll_buttons_visibility();
 }
 static void back_event_cb(lv_event_t *e) {
     if (in_write_list || in_saved_list) back_to_root_menu();
@@ -2613,6 +2766,7 @@ static void back_to_root_menu(void) {
     num_items = options_view_get_item_count(g_nfc_ov);
     selected_index = 0;
     options_view_set_selected(g_nfc_ov, 0);
+    update_nfc_scroll_buttons_visibility();
 }
 
 static void nfc_enter_write_list(void) {
@@ -2722,7 +2876,7 @@ static void saved_enter_list(void) {
     num_items = options_view_get_item_count(g_nfc_ov);
     selected_index = 0;
     options_view_set_selected(g_nfc_ov, 0);
-    if (did) nfc_sd_end(susp);
+    update_nfc_scroll_buttons_visibility();
 }
 
 static void update_nfc_write_popup_selection(void) {
@@ -4164,18 +4318,14 @@ void nfc_view_create(void) {
     num_items = options_view_get_item_count(g_nfc_ov);
 #endif
 
+    nfc_created_time_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
+    nfc_option_invoked = false;
 #ifdef CONFIG_USE_TOUCHSCREEN
-    if (menu_container && lv_obj_is_valid(menu_container)) {
-        lv_coord_t scroll_bottom = lv_obj_get_scroll_bottom(menu_container);
-        lv_coord_t scroll_top = lv_obj_get_scroll_top(menu_container);
-        if (scroll_bottom > 0 || scroll_top > 0) {
-            if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) lv_obj_clear_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
-            if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) lv_obj_clear_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
-            if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
+    nfc_touch_started = false;
+#endif
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_nfc_scroll_buttons_visibility();
 #endif
 }
 
@@ -4193,6 +4343,10 @@ void nfc_view_destroy(void) {
     cleanup_saved_details_popup(NULL);
     saved_clear_list();
     in_saved_list = false;
+    nfc_option_invoked = false;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    nfc_touch_started = false;
+#endif
 
     if (g_nfc_ov) { options_view_destroy(g_nfc_ov); g_nfc_ov = NULL; }
     lvgl_obj_del_safe(&root);

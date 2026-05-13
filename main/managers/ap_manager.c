@@ -427,6 +427,14 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    if (strstr(file_path, "..") != NULL) {
+        ESP_LOGE(TAG, "Path traversal rejected (..): %s", file_path);
+        cJSON_Delete(json);
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_sendstr(req, "{\"error\": \"Access denied.\"}");
+        return ESP_FAIL;
+    }
+
     FILE *file = fopen(file_path, "rb");
     if (!file) {
         ESP_LOGE(TAG, "Failed to open file: %s", file_path);
@@ -532,6 +540,13 @@ esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
                 ESP_LOGE(TAG, "Path traversal rejected in delete: %s", filepath);
                 httpd_resp_set_status(req, "403 Forbidden");
                 httpd_resp_send(req, "Access denied: path must be under /mnt", HTTPD_RESP_USE_STRLEN);
+                return ESP_FAIL;
+            }
+
+            if (strstr(filepath, "..") != NULL) {
+                ESP_LOGE(TAG, "Path traversal rejected in delete (..): %s", filepath);
+                httpd_resp_set_status(req, "403 Forbidden");
+                httpd_resp_send(req, "Access denied", HTTPD_RESP_USE_STRLEN);
                 return ESP_FAIL;
             }
 
@@ -1459,12 +1474,12 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
     }
 
     cJSON *ap_ssid = cJSON_GetObjectItem(root, "ap_ssid");
-    if (ap_ssid) {
+    if (cJSON_IsString(ap_ssid) && ap_ssid->valuestring) {
         settings_set_ap_ssid(settings, ap_ssid->valuestring);
     }
 
     cJSON *ap_password = cJSON_GetObjectItem(root, "ap_password");
-    if (ap_password) {
+    if (cJSON_IsString(ap_password) && ap_password->valuestring) {
         settings_set_ap_password(settings, ap_password->valuestring);
     }
 
@@ -1494,27 +1509,27 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
 
     // Evil Portal settings
     cJSON *portal_url = cJSON_GetObjectItem(root, "portal_url");
-    if (portal_url) {
+    if (cJSON_IsString(portal_url) && portal_url->valuestring) {
         settings_set_portal_url(settings, portal_url->valuestring);
     }
 
     cJSON *portal_ssid = cJSON_GetObjectItem(root, "portal_ssid");
-    if (portal_ssid) {
+    if (cJSON_IsString(portal_ssid) && portal_ssid->valuestring) {
         settings_set_portal_ssid(settings, portal_ssid->valuestring);
     }
 
     cJSON *portal_password = cJSON_GetObjectItem(root, "portal_password");
-    if (portal_password) {
+    if (cJSON_IsString(portal_password) && portal_password->valuestring) {
         settings_set_portal_password(settings, portal_password->valuestring);
     }
 
     cJSON *portal_ap_ssid = cJSON_GetObjectItem(root, "portal_ap_ssid");
-    if (portal_ap_ssid) {
+    if (cJSON_IsString(portal_ap_ssid) && portal_ap_ssid->valuestring) {
         settings_set_portal_ap_ssid(settings, portal_ap_ssid->valuestring);
     }
 
     cJSON *portal_domain = cJSON_GetObjectItem(root, "portal_domain");
-    if (portal_domain) {
+    if (cJSON_IsString(portal_domain) && portal_domain->valuestring) {
         settings_set_portal_domain(settings, portal_domain->valuestring);
     }
 
@@ -1525,12 +1540,12 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
 
     // Power Printer settings
     cJSON *printer_ip = cJSON_GetObjectItem(root, "printer_ip");
-    if (printer_ip) {
+    if (cJSON_IsString(printer_ip) && printer_ip->valuestring) {
         settings_set_printer_ip(settings, printer_ip->valuestring);
     }
 
     cJSON *printer_text = cJSON_GetObjectItem(root, "printer_text");
-    if (printer_text) {
+    if (cJSON_IsString(printer_text) && printer_text->valuestring) {
         settings_set_printer_text(settings, printer_text->valuestring);
     }
 
@@ -1547,17 +1562,17 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
     }
 
     cJSON *flappy_ghost_name = cJSON_GetObjectItem(root, "flappy_ghost_name");
-    if (flappy_ghost_name) {
+    if (cJSON_IsString(flappy_ghost_name) && flappy_ghost_name->valuestring) {
         settings_set_flappy_ghost_name(settings, flappy_ghost_name->valuestring);
     }
 
     cJSON *time_zone_str_name = cJSON_GetObjectItem(root, "timezone_str");
-    if (time_zone_str_name) {
+    if (cJSON_IsString(time_zone_str_name) && time_zone_str_name->valuestring) {
         settings_set_timezone_str(settings, time_zone_str_name->valuestring);
     }
 
     cJSON *hex_accent_color_str = cJSON_GetObjectItem(root, "hex_accent_color");
-    if (hex_accent_color_str) {
+    if (cJSON_IsString(hex_accent_color_str) && hex_accent_color_str->valuestring) {
         settings_set_accent_color_str(settings, hex_accent_color_str->valuestring);
     }
 

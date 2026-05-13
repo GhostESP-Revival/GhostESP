@@ -1,0 +1,110 @@
+<!doctype html><html lang=en data-theme=auto><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Flipper Zero Companion App · GhostESP Documentation</title><link rel=preconnect href=https://fonts.googleapis.com><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel=stylesheet><link href=https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css rel=stylesheet><link rel=stylesheet href=/css/main.min.333343cc98c92f6015786bf32d605cb6c14c60642eacf8de3b94d3248f97d117.css><link rel=canonical href=/latest/getting-started/flipper-companion-app/><meta name=description content="Control GhostESP from your Flipper Zero device using the official companion app."><meta property="og:site_name" content="GhostESP Documentation"><meta property="og:type" content="article"><meta property="og:title" content="Flipper Zero Companion App"><meta property="og:description" content="Control GhostESP from your Flipper Zero device using the official companion app."><meta property="og:url" content="/v1.9.9/getting-started/flipper-companion-app/"><meta property="og:locale" content="en"><meta property="og:image" content="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png"><meta name=twitter:card content="summary_large_image"><meta name=twitter:title content="Flipper Zero Companion App"><meta name=twitter:description content="Control GhostESP from your Flipper Zero device using the official companion app."><meta name=twitter:image content="/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png"><script async src="https://www.googletagmanager.com/gtag/js?id=G-Q9CNW8QW7K"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date),gtag("config","G-Q9CNW8QW7K")</script><script type=application/ld+json>{"@context":"https://schema.org","@type":"Article","name":"GhostESP Documentation","description":"Control GhostESP from your Flipper Zero device using the official companion app.","url":"\/v1.9.9\/getting-started\/flipper-companion-app\/","author":{"@type":"Organization","name":"GhostESP Team"},"publisher":{"@type":"Organization","name":"GhostESP"},"datePublished":"0001-01-01T00:00:00Z","dateModified":"0001-01-01T00:00:00Z"}</script><script>(function(){const e=localStorage.getItem("ghostesp-theme")||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",e),window.innerWidth>=992&&localStorage.getItem("sidebarState")==="open"&&document.write('<style id="sidebar-pre-init">.sidebar { margin-left: 0; }</style>')})()</script></head><body><header class=topbar><button class=topbar__toggle type=button onclick=toggleSidebar() aria-label="Toggle navigation" aria-expanded=false>
+<svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true"><line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"/><line class="icon-menu__line icon-menu__line--middle" x1="5" y1="12" x2="19" y2="12"/><line class="icon-menu__line icon-menu__line--bottom" x1="5" y1="17" x2="19" y2="17"/></svg>
+</button>
+<a href=/ class=topbar__brand><img src=/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png alt="GhostESP: Revival" class=topbar__logo></a><div class=topbar__actions><button class=topbar__theme type=button data-theme-toggle aria-label="Toggle theme">
+<svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon="" aria-hidden="true"><g class="icon-theme__sun"><circle cx="12" cy="12" r="5"/><g class="icon-theme__sun-rays"><line x1="12" y1="2.5" x2="12" y2="5.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="4.5" y1="12" x2="7.5" y2="12"/><line x1="16.5" y1="12" x2="19.5" y2="12"/><line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/><line x1="5.6" y1="18.4" x2="7.8" y2="16.2"/><line x1="16.2" y1="7.8" x2="18.4" y2="5.6"/></g></g><g class="icon-theme__moon"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></g></svg></button></div></header><div class=app><aside class=sidebar id=sidebar data-current-version=v1.9.9><div class=sidebar__brand><a href=/ class=sidebar__title><img src=/images/ghostesp.1c3d9c47d752a1754fc78c41fddb238546a26cfcf2b07ddfe7a934b15cefba02.png alt="GhostESP: Revival" class=sidebar__logo></a></div><div class=sidebar__version><label for=sidebar-version class=sidebar__version-label>Firmware version</label>
+<select id=sidebar-version class=sidebar__version-select data-version-select><option value=latest>Latest</option><option value=v1.9.9 selected>v1.9.9</option><option value=v1.9.8>v1.9.8</option><option value=v1.9.4>v1.9.4</option><option value=v1.9.3>v1.9.3</option><option value=v1.9>v1.9</option><option value=v1.8.1>v1.8.1</option><option value=v1.8>v1.8</option></select></div><div class=sidebar__search><input type=search placeholder=Search autocomplete=off data-search-input data-search-index=/index.json><div class=sidebar__search-results data-search-results role=listbox></div></div><nav class=sidebar__nav><a href=/v1.9.9/ class="sidebar__link sidebar__link--active">Home</a><div class="sidebar__group group--open"><button class="sidebar__group-toggle sidebar__group-toggle--active" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199getting-started aria-expanded=true aria-controls=collapse-v199getting-started>
+<span>Getting Started</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse show sidebar__group-items" id=collapse-v199getting-started><a href=/v1.9.9/getting-started/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/getting-started/installation-guide/ class=sidebar__sublink>Installation Guide</a>
+<a href=/v1.9.9/getting-started/supported-hardware/ class=sidebar__sublink>Supported Hardware</a>
+<a href=/v1.9.9/getting-started/command-line-reference/ class=sidebar__sublink>CLI Reference</a>
+<a href=/v1.9.9/getting-started/sd-card-config/ class=sidebar__sublink>SD Card Configuration</a>
+<a href=/v1.9.9/getting-started/flipper-companion-app/ class="sidebar__sublink sidebar__sublink--active">Flipper Zero Companion App</a>
+<a href=/v1.9.9/getting-started/dual-communication/ class=sidebar__sublink>GhostLink</a>
+<a href=/v1.9.9/getting-started/screen-mirroring/ class=sidebar__sublink>Screen Mirroring</a>
+<a href=/v1.9.9/getting-started/webui-guide/ class=sidebar__sublink>WebUI</a>
+<a href=/v1.9.9/getting-started/control-app/ class=sidebar__sublink>Control App</a>
+<a href=/v1.9.9/getting-started/faq/ class=sidebar__sublink>FAQ</a>
+<a href=/v1.9.9/getting-started/sd-card/ class=sidebar__sublink>SD Card</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199wifi aria-expanded=false aria-controls=collapse-v199wifi>
+<span>Wi-Fi</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199wifi><a href=/v1.9.9/wifi/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/wifi/basics/ class=sidebar__sublink>Wi-Fi Basics</a>
+<a href=/v1.9.9/wifi/survey/ class=sidebar__sublink>Scanning networks</a>
+<a href=/v1.9.9/wifi/capture/ class=sidebar__sublink>Capturing packets</a>
+<a href=/v1.9.9/wifi/deauth/ class=sidebar__sublink>Deauthentication Attacks</a>
+<a href=/v1.9.9/wifi/wireshark/ class=sidebar__sublink>USB Dongle Mode (Wireshark)</a>
+<a href=/v1.9.9/wifi/handshakes/ class=sidebar__sublink>Capturing handshakes</a>
+<a href=/v1.9.9/wifi/ghostchi/ class=sidebar__sublink>Ghostchi</a>
+<a href=/v1.9.9/wifi/evil-portal/ class=sidebar__sublink>Evil Portal</a>
+<a href=/v1.9.9/wifi/gtk-abuse/ class=sidebar__sublink>GTK Abuse Test</a>
+<a href=/v1.9.9/wifi/karma/ class=sidebar__sublink>Karma Attack</a>
+<a href=/v1.9.9/wifi/dns-sinkhole/ class=sidebar__sublink>DNS Sinkhole</a>
+<a href=/v1.9.9/wifi/aerial-detection/ class=sidebar__sublink>Aerial Detection</a>
+<a href=/v1.9.9/wifi/dial-connect/ class=sidebar__sublink>DIAL Connect</a>
+<a href=/v1.9.9/wifi/flock-detection/ class=sidebar__sublink>Flock Detection</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199gps aria-expanded=false aria-controls=collapse-v199gps>
+<span>GPS & Wardriving</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199gps><a href=/v1.9.9/gps/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/gps/wardriving/ class=sidebar__sublink>Wardriving</a>
+<a href=/v1.9.9/gps/wigle/ class=sidebar__sublink>WiGLE Upload</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199ble aria-expanded=false aria-controls=collapse-v199ble>
+<span>Bluetooth LE</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199ble><a href=/v1.9.9/ble/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/ble/scanning/ class=sidebar__sublink>Scanning</a>
+<a href=/v1.9.9/ble/gatt/ class=sidebar__sublink>GATT Discovery</a>
+<a href=/v1.9.9/ble/attacks/ class=sidebar__sublink>Attacks</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199infrared aria-expanded=false aria-controls=collapse-v199infrared>
+<span>Infrared</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199infrared><a href=/v1.9.9/infrared/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/infrared/learning/ class=sidebar__sublink>Learning Signals</a>
+<a href=/v1.9.9/infrared/transmitting/ class=sidebar__sublink>Transmitting Signals</a>
+<a href=/v1.9.9/infrared/dazzler/ class=sidebar__sublink>IR Dazzler</a>
+<a href=/v1.9.9/infrared/files/ class=sidebar__sublink>Infrared Files</a>
+<a href=/v1.9.9/infrared/hardware/ class=sidebar__sublink>Hardware Support</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199flipper-app aria-expanded=false aria-controls=collapse-v199flipper-app>
+<span>Flipper Zero App</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199flipper-app><a href=/v1.9.9/flipper-app/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/flipper-app/installation/ class=sidebar__sublink>Installation</a>
+<a href=/v1.9.9/flipper-app/connection/ class=sidebar__sublink>Connection Setup</a>
+<a href=/v1.9.9/flipper-app/wifi-features/ class=sidebar__sublink>Wi-Fi Features</a>
+<a href=/v1.9.9/flipper-app/ble-features/ class=sidebar__sublink>BLE Features</a>
+<a href=/v1.9.9/flipper-app/gps-features/ class=sidebar__sublink>GPS Features</a>
+<a href=/v1.9.9/flipper-app/configuration/ class=sidebar__sublink>Configuration & System</a>
+<a href=/v1.9.9/flipper-app/usage/ class=sidebar__sublink>Usage Guide</a>
+<a href=/v1.9.9/flipper-app/troubleshooting/ class=sidebar__sublink>Troubleshooting</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199nrf24 aria-expanded=false aria-controls=collapse-v199nrf24>
+<span>NRF24</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199nrf24><a href=/v1.9.9/nrf24/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/nrf24/analyzer/ class=sidebar__sublink>Frequency Analyzer</a>
+<a href=/v1.9.9/nrf24/setup-and-remote/ class=sidebar__sublink>Setup and Remote Mode</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199subghz aria-expanded=false aria-controls=collapse-v199subghz>
+<span>SubGHz</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199subghz><a href=/v1.9.9/subghz/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/subghz/scanning/ class=sidebar__sublink>Scanning</a>
+<a href=/v1.9.9/subghz/capturing/ class=sidebar__sublink>Capturing Signals</a>
+<a href=/v1.9.9/subghz/waterfall/ class=sidebar__sublink>Waterfall Spectrum Analyzer</a>
+<a href=/v1.9.9/subghz/transmitting/ class=sidebar__sublink>Transmitting Signals</a>
+<a href=/v1.9.9/subghz/freq-analyzer/ class=sidebar__sublink>Frequency Analyzer</a>
+<a href=/v1.9.9/subghz/protocols/ class=sidebar__sublink>Supported Protocols</a>
+<a href=/v1.9.9/subghz/files/ class=sidebar__sublink>Files and Management</a>
+<a href=/v1.9.9/subghz/hardware/ class=sidebar__sublink>Hardware Support</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199nfc aria-expanded=false aria-controls=collapse-v199nfc>
+<span>NFC</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199nfc><a href=/v1.9.9/nfc/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/nfc/chameleon-ultra/ class=sidebar__sublink>Chameleon Ultra</a>
+<a href=/v1.9.9/nfc/scanning/ class=sidebar__sublink>Scanning</a>
+<a href=/v1.9.9/nfc/saving/ class=sidebar__sublink>Saving Tags</a>
+<a href=/v1.9.9/nfc/writing/ class=sidebar__sublink>Writing NTAG</a>
+<a href=/v1.9.9/nfc/supported/ class=sidebar__sublink>Supported Tags</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199camera aria-expanded=false aria-controls=collapse-v199camera>
+<span>Camera</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199camera><a href=/v1.9.9/camera/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/camera/camera-stream/ class=sidebar__sublink>Camera Stream</a>
+<a href=/v1.9.9/camera/motion-detector/ class=sidebar__sublink>Motion Detector</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199apps aria-expanded=false aria-controls=collapse-v199apps>
+<span>Apps</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199apps><a href=/v1.9.9/apps/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/apps/visualizer/ class=sidebar__sublink>Visualizer (Rave Mode)</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199usb aria-expanded=false aria-controls=collapse-v199usb>
+<span>USB</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199usb><a href=/v1.9.9/usb/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/usb/keyboard/ class=sidebar__sublink>Keyboard Control</a>
+<a href=/v1.9.9/usb/badusb/ class=sidebar__sublink>BadUSB</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199ethernet aria-expanded=false aria-controls=collapse-v199ethernet>
+<span>Ethernet</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199ethernet><a href=/v1.9.9/ethernet/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/ethernet/connection/ class=sidebar__sublink>Connection Management</a>
+<a href=/v1.9.9/ethernet/fingerprinting/ class=sidebar__sublink>Network Fingerprinting</a>
+<a href=/v1.9.9/ethernet/scanning/ class=sidebar__sublink>Network Scanning</a>
+<a href=/v1.9.9/ethernet/http/ class=sidebar__sublink>HTTP Requests</a>
+<a href=/v1.9.9/ethernet/arp-poisoning/ class=sidebar__sublink>ARP Poisoning</a></div></div><div class=sidebar__group><button class="sidebar__group-toggle collapsed" type=button data-bs-toggle=collapse data-bs-target=#collapse-v199development aria-expanded=false aria-controls=collapse-v199development>
+<span>Development</span>
+<span class=sidebar__group-icon aria-hidden=true></span></button><div class="collapse sidebar__group-items" id=collapse-v199development><a href=/v1.9.9/development/ class=sidebar__sublink>Overview</a>
+<a href=/v1.9.9/development/environment-setup/ class=sidebar__sublink>Environment Setup</a>
+<a href=/v1.9.9/development/build-py-kconfig/ class=sidebar__sublink>Adjusting build options</a>
+<a href=/v1.9.9/development/custom-board-configs/ class=sidebar__sublink>Custom Board Configurations</a>
+<a href=/v1.9.9/development/hardware-integration/ class=sidebar__sublink>Hardware Integration</a></div></div></nav></aside><div class=content><main class=content__body><article class=doc><header><h1>Flipper Zero Companion App</h1><p>Control GhostESP from your Flipper Zero device using the official companion app.</p></header><aside class=doc__toc><h2>On this page</h2><nav id=TableOfContents><ul><li><a href=#quick-links>Quick Links</a></li></ul></nav></aside><p>The GhostESP Flipper Zero companion app provides a comprehensive graphical interface to control and interact with your GhostESP device directly from your Flipper Zero.</p><blockquote><p><strong>This documentation has been moved to a dedicated <a href=/v1.9.9/flipper-app/>Flipper Zero App</a> section.</strong></p></blockquote><h2 id=quick-links>Quick Links
+<a class=heading-anchor href=#quick-links aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><ul><li><a href=/v1.9.9/flipper-app/installation/>Installation</a> - Install the companion app on your Flipper Zero</li><li><a href=/v1.9.9/flipper-app/connection/>Connection Setup</a> - Hardware and software connection guide</li><li><a href=/v1.9.9/flipper-app/wifi-features/>Wi-Fi Features</a> - Wi-Fi scanning, capture, and attacks</li><li><a href=/v1.9.9/flipper-app/ble-features/>BLE Features</a> - Bluetooth scanning and attacks</li><li><a href=/v1.9.9/flipper-app/gps-features/>GPS Features</a> - GPS tracking and wardriving</li><li><a href=/v1.9.9/flipper-app/configuration/>Configuration</a> - LED, SD card, and system settings</li><li><a href=/v1.9.9/flipper-app/usage/>Usage Guide</a> - Common workflows and navigation</li><li><a href=/v1.9.9/flipper-app/troubleshooting/>Troubleshooting</a> - Solve common issues</li></ul><nav class=doc__nav aria-label="Document navigation"><a class="doc__nav-link doc__nav-link--prev" href=/v1.9.9/getting-started/sd-card-config/><span>← Previous</span>
+<span>SD Card Configuration</span>
+</a><a class="doc__nav-link doc__nav-link--next" href=/v1.9.9/getting-started/dual-communication/><span>Next →</span>
+<span>GhostLink</span></a></nav></article></main><footer class=content__footer><p>website made with love by jay candel &lt;3</p></footer></div></div><div class=sidebar__overlay id=overlay onclick=toggleSidebar()></div><script src=https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js></script><script src=https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js></script><script src=/js/search.ef50286594fda7181140155c44b192feda3337818f68d846b1c63109da0b2251.js defer></script><script src=/js/sidebar.9132b3f444f2ebe86edbf6429f4c0f533f27e02b1ac29f2b450abe1616f06852.js defer></script><script src=/js/theme.0d48f97778d5930c369632719af2ad7eb9f6a039eedd5cc721e5dbda6e9d8925.js defer></script></body></html>

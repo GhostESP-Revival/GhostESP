@@ -132,6 +132,7 @@ typedef enum {
     SETTING_GHOSTLINK_SPLIT_VIEW,
     SETTING_MENU_BG_SHADE,
     SETTING_MENU_ROUNDED,
+    SETTING_MENU_ITEM_BORDERS,
     SETTING_EXPORT_SETTINGS_SD,
     SETTING_IMPORT_SETTINGS_SD,
 } SettingsType;
@@ -266,6 +267,7 @@ typedef struct {
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
     uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
     bool menu_rounded;              // Rounded corners on menu items
+    bool menu_item_borders;          // Borders around main menu items
 } FSettings;
 
 // Function declarations
@@ -498,6 +500,9 @@ void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade);
 uint8_t settings_get_menu_bg_shade(const FSettings *settings);
 void settings_set_menu_rounded(FSettings *settings, bool enabled);
 bool settings_get_menu_rounded(const FSettings *settings);
+
+void settings_set_menu_item_borders(FSettings *settings, bool enabled);
+bool settings_get_menu_item_borders(const FSettings *settings);
 
 extern FSettings G_Settings;
 

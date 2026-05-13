@@ -60,14 +60,15 @@ static inline bool detail_view_should_use_compact_layout(int w, int h) {
     return (w > h && h <= 160);
 }
 
-static inline void ensure_capacity(detail_view_t *dv, int need) {
-    if (dv->capacity >= need) return;
+static inline bool ensure_capacity(detail_view_t *dv, int need) {
+    if (dv->capacity >= need) return true;
     int newcap = dv->capacity ? dv->capacity * 2 : 16;
     if (newcap < need) newcap = need;
     detail_row_t *new_rows = (detail_row_t *)realloc(dv->rows, sizeof(detail_row_t) * newcap);
-    if (!new_rows) return;
+    if (!new_rows) return false;
     dv->rows = new_rows;
     dv->capacity = newcap;
+    return true;
 }
 
 static bool ensure_info_capacity(detail_view_t *dv, int need) {
@@ -387,11 +388,6 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     int w = LV_HOR_RES;
     int h = LV_VER_RES;
     int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
-#ifdef CONFIG_USE_TOUCHSCREEN
-    int TOUCH_NAV_HEIGHT = 50;
-#else
-    int TOUCH_NAV_HEIGHT = 0;
-#endif
     bool small = (w <= 240 || h <= 240);
     dv->compact_layout = detail_view_should_use_compact_layout(w, h);
     dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : 34);
@@ -404,7 +400,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
     
     dv->container = lv_obj_create(parent);
-    lv_coord_t content_h = h - STATUS_BAR_HEIGHT - TOUCH_NAV_HEIGHT;
+    lv_coord_t content_h = h - STATUS_BAR_HEIGHT;
     if (content_h < 60) content_h = 60;
     dv->content_h = content_h;
     lv_obj_set_size(dv->container, w, content_h);
@@ -511,7 +507,7 @@ void detail_view_destroy(detail_view_t *dv) {
 void detail_view_add_info(detail_view_t *dv, const char *label, const char *value) {
     if (!dv || !dv->info_panel) return;
     if (!ensure_info_capacity(dv, dv->info_count + 1)) return;
-    ensure_capacity(dv, dv->count + 1);
+    if (!ensure_capacity(dv, dv->count + 1)) return;
 
     int info_idx = dv->info_count;
     dv->info_items[info_idx].label = detail_strdup(label ? label : "");
@@ -544,7 +540,7 @@ void detail_view_add_infof(detail_view_t *dv, const char *label, const char *fmt
 
 void detail_view_add_action(detail_view_t *dv, const char *label, lv_event_cb_t on_click, void *user_data) {
     if (!dv || !dv->action_list) return;
-    ensure_capacity(dv, dv->count + 1);
+    if (!ensure_capacity(dv, dv->count + 1)) return;
     
     int zebra_idx = 0;
     for (int i = dv->info_count; i < dv->count; i++) {
@@ -615,7 +611,7 @@ void detail_view_add_action(detail_view_t *dv, const char *label, lv_event_cb_t 
 
 void detail_view_add_header(detail_view_t *dv, const char *text) {
     if (!dv || !dv->action_list) return;
-    ensure_capacity(dv, dv->count + 1);
+    if (!ensure_capacity(dv, dv->count + 1)) return;
     
     lv_obj_t *btn = lv_obj_create(dv->action_list);
     if (!btn) return;
@@ -646,7 +642,7 @@ void detail_view_add_header(detail_view_t *dv, const char *text) {
 
 void detail_view_add_divider(detail_view_t *dv) {
     if (!dv || !dv->action_list) return;
-    ensure_capacity(dv, dv->count + 1);
+    if (!ensure_capacity(dv, dv->count + 1)) return;
     
     lv_obj_t *line = lv_obj_create(dv->action_list);
     lv_obj_set_size(line, LV_PCT(100), 2);
@@ -661,7 +657,9 @@ void detail_view_add_divider(detail_view_t *dv) {
 }
 
 lv_obj_t *detail_view_add_back(detail_view_t *dv, lv_event_cb_t on_click, void *user_data) {
+    int prev = dv->count;
     detail_view_add_action(dv, LV_SYMBOL_LEFT " Back", on_click, user_data);
+    if (dv->count == prev) return NULL;
     return dv->rows[dv->count - 1].obj;
 }
 
@@ -780,6 +778,17 @@ void detail_view_clear(detail_view_t *dv) {
     dv->selected = -1;
     dv->first_selectable = -1;
     dv->info_count = 0;
+}
+
+void detail_view_set_bottom_reserved(detail_view_t *dv, lv_coord_t reserved_h) {
+    if (!dv || !dv->container || !lv_obj_is_valid(dv->container)) return;
+    if (reserved_h < 0) reserved_h = 0;
+
+    lv_coord_t content_h = LV_VER_RES - GUI_STATUS_BAR_H - reserved_h;
+    if (content_h < 60) content_h = 60;
+    dv->content_h = content_h;
+    lv_obj_set_height(dv->container, content_h);
+    detail_view_sync_info_canvas(dv);
 }
 
 lv_obj_t *detail_view_get_list(detail_view_t *dv) {

@@ -57,4 +57,19 @@ esp_err_t mic_deinit(void);
  */
 bool mic_is_initialized(void);
 
+/**
+ * @brief Check if microphone is paused
+ */
+bool mic_is_paused(void);
+
+/**
+ * @brief Temporarily disable I2S channel (stops BCLK/WS signals)
+ */
+esp_err_t mic_pause(void);
+
+/**
+ * @brief Re-enable I2S channel after mic_pause()
+ */
+esp_err_t mic_resume(void);
+
 #endif // MIC_DRIVER_H
