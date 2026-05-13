@@ -9,6 +9,7 @@
 static const char *TAG = "MIC_Driver";
 static i2s_chan_handle_t i2s_rx_chan = NULL;
 static bool mic_initialized = false;
+static bool mic_paused = false;
 static mic_config_t mic_cfg;
 
 // DC offset tracking (removes constant bias from signal)
@@ -302,4 +303,32 @@ esp_err_t mic_deinit(void) {
 
 bool mic_is_initialized(void) {
     return mic_initialized;
+}
+
+bool mic_is_paused(void) {
+    return mic_paused;
+}
+
+esp_err_t mic_pause(void) {
+    if (!mic_initialized || mic_paused || i2s_rx_chan == NULL) {
+        return ESP_OK;
+    }
+    esp_err_t ret = i2s_channel_disable(i2s_rx_chan);
+    if (ret == ESP_OK) {
+        mic_paused = true;
+        ESP_LOGI(TAG, "Microphone paused");
+    }
+    return ret;
+}
+
+esp_err_t mic_resume(void) {
+    if (!mic_initialized || !mic_paused || i2s_rx_chan == NULL) {
+        return ESP_OK;
+    }
+    esp_err_t ret = i2s_channel_enable(i2s_rx_chan);
+    if (ret == ESP_OK) {
+        mic_paused = false;
+        ESP_LOGI(TAG, "Microphone resumed");
+    }
+    return ret;
 }

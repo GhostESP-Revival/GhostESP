@@ -226,7 +226,107 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 
 ## ESP32 Firmware Comparison
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/005c96f0-4d0a-4f97-926c-99059dfb9e21" />
+<details>
+<summary><strong>View comparison table</strong></summary>
+
+This comparison is based on GhostESP's feature set and publicly available source for the listed projects. It is not a complete feature list for every firmware. HaleHound and nyanBOX are compared against the latest public source available to us; if newer releases are closed source, this table cannot be independently updated or verified against those builds.
+
+| Feature | GhostESP | Bruce | HaleHound | nyanBOX |
+| --- | --- | --- | --- | --- |
+| Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
+| ESP-IDF-native architecture | [x] |  |  |  |
+| Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
+| Approximate source size | ~211k LOC | ~156k LOC | ~62k LOC | ~17k LOC |
+| Supported board targets | 40+ | 28+ | 5 | 1 |
+| Full LVGL graphical UI | [x] |  |  |  |
+| Web dashboard / REST control | [x] | [x] |  |  |
+| Captive portal web server | [x] | [x] | [x] | [x] |
+| AP / station WiFi scanning | [x] | [x] | [x] | [x] |
+| Deauth / disassoc testing | [x] | [x] | [x] | [x] |
+| Beacon spam | [x] | [x] | [x] | [x] |
+| Karma / probe response attack | [x] | [x] | [x] |  |
+| Handshake / EAPOL capture | [x] | [x] | [x] |  |
+| PMKID capture / export | [x] |  | [x] |  |
+| Live Wireshark USB streaming | [x] |  |  |  |
+| WPA3 / SAE-specific testing | [x] |  |  |  |
+| EAPOL logoff attack | [x] |  |  |  |
+| Channel switch attack | [x] |  |  |  |
+| GTK abuse / client isolation testing | [x] |  |  |  |
+| DHCP starvation | [x] | [x] |  |  |
+| ARP / port / SSH scanners | [x] | [x] |  |  |
+| WiFi OUI vendor lookup | [x] | [x] | [x] |  |
+| PineAP detection | [x] |  |  | [x] |
+| WPS detection / reporting | [x] | [x] |  |  |
+| Pwnagotchi-style automated capture mode | [x] | [x] |  |  |
+| Pwnagotchi detector / spam |  | [x] |  | [x] |
+| GPS WiFi wardriving | [x] | [x] | [x] |  |
+| BLE wardriving | [x] | [x] | [x] |  |
+| WiGLE upload integration | [x] | [x] |  |  |
+| 802.15.4 / Zigbee sweep export | [x] |  |  |  |
+| GhostLink dual-ESP control | [x] |  |  |  |
+| Split-channel wardriving helper | [x] |  |  |  |
+| GhostLink remote radio support | [x] |  |  |  |
+| Drone / OpenDroneID detect | [x] |  |  | [x] |
+| Drone / OpenDroneID spoof | [x] |  |  |  |
+| BLE scanning | [x] | [x] | [x] | [x] |
+| BLE spam modes | [x] | [x] | [x] | [x] |
+| AirTag scan / spoof | [x] | [x] | [x] | [x] |
+| Flipper Zero finder | [x] |  |  | [x] |
+| GATT / service enumeration | [x] |  | [x] |  |
+| BLE stream to Wireshark | [x] |  |  |  |
+| BLE skimmer detection | [x] |  |  | [x] |
+| FastPair / pairing exploit research |  | [x] | [x] | [x] |
+| BLE HID injection / DuckyScript over BLE |  | [x] |  |  |
+| BLE GATT honeypot / cloned peripheral |  |  | [x] | [x] |
+| BLE vulnerability profiling |  | [x] |  |  |
+| Flock / surveillance detector | [x] |  | [x] | [x] |
+| PN532 NFC support | [x] | [x] | [x] |  |
+| Chameleon Ultra support | [x] | [x] |  |  |
+| Chameleon Ultra BLE control | [x] | [x] |  |  |
+| Flipper `.nfc` import/export | [x] |  |  |  |
+| Flipper NFC parser set | [x] |  |  |  |
+| MIFARE Classic default-key attack | [x] | [x] | [x] |  |
+| MIFARE Classic full embedded dictionary | [x] |  |  |  |
+| MIFARE Classic user dictionary file | [x] | [x] |  |  |
+| MIFARE Classic session key reuse / sector sweep | [x] |  |  |  |
+| EMV / payment card reader |  | [x] |  |  |
+| BadUSB / DuckyScript | [x] | [x] |  |  |
+| USB keyboard host mode | [x] |  |  |  |
+| BadUSB VID/PID identity options | [x] | [x] |  |  |
+| IR learn / capture / replay | [x] | [x] |  |  |
+| Flipper `.ir` file support | [x] | [x] |  |  |
+| Universal IR library transmit | [x] | [x] |  |  |
+| CC1101 SubGHz scan / replay | [x] | [x] | [x] |  |
+| CC1101 waterfall spectrum analyzer | [x] | [x] | [x] |  |
+| Flipper `.sub` compatibility | [x] | [x] |  | [x] |
+| SubGHz protocol decoders | [x] | [x] | [x] |  |
+| NRF24 spectrum analyzer | [x] | [x] | [x] | [x] |
+| NRF24 MouseJack |  |  | [x] |  |
+| Passive jamming detection | [x] |  | [x] |  |
+| Active RF jamming shipped | Not shipped | [x] | [x] | [x] |
+| Zigbee / 802.15.4 packet capture | [x] |  |  |  |
+| Ethernet W5500 support | [x] | [x] |  |  |
+| Ethernet ARP poisoning / MITM tools | [x] | [x] |  |  |
+| TLS SNI / HTTP / FTP credential capture over Ethernet | [x] |  |  |  |
+| Camera streaming / motion detection | [x] |  |  |  |
+| Motion alerts with webhook support | [x] |  |  |  |
+| Network printer / PJL output | [x] |  |  |  |
+| DIAL / Chromecast testing | [x] |  |  |  |
+| On-device setup wizard | [x] |  |  |  |
+| Wired screen mirroring | [x] |  |  | [x] |
+| Web screen mirroring |  | [x] |  |  |
+| SD config backup / restore | [x] |  |  |  |
+| Battery monitoring / fuel gauge support | [x] | [x] | [x] |  |
+| Sensor / RTC hardware support | [x] | [x] |  |  |
+| M5 Cardputer keyboard support | [x] | [x] |  |  |
+| Android companion app | [x] |  |  |  |
+| JavaScript app engine |  | [x] |  |  |
+| LoRa support |  | [x] |  |  |
+| FM radio support |  | [x] |  |  |
+
+> GhostESP does not ship active jamming features. Distribution, promotion, sale and use of jamming devices or firmware is illegal in many jurisdictions. 
+
+</details>
 
 
 

@@ -838,6 +838,7 @@ void fade_out_ready_cb(lv_anim_t *anim) {
 }
 
 lv_color_t hex_to_lv_color(const char *hex_str) {
+  if (!hex_str) return lv_color_black();
   if (hex_str[0] == '#') {
     hex_str++;
   }

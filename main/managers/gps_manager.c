@@ -299,6 +299,92 @@ bool gps_manager_get_active_gps_snapshot(gps_t *out_gps, bool *using_peer) {
     return true;
 }
 
+typedef struct {
+    bool valid;
+    gps_fix_t fix;
+    gps_fix_mode_t fix_mode;
+    uint8_t sats_in_use;
+    uint8_t sats_in_view;
+    float latitude;
+    float longitude;
+    float altitude;
+    float dop_h;
+    float dop_p;
+    float dop_v;
+    float speed;
+    float cog;
+    float variation;
+    gps_date_t date;
+    gps_time_t tim;
+} gps_wd_lite_t;
+
+static bool gps_manager_get_wd_lite(gps_wd_lite_t *out, bool *using_peer) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+
+    if (gps_peer_preferred) {
+        taskENTER_CRITICAL(&gps_state_lock);
+        TickType_t last_tick = gps_peer_last_update_tick;
+        if (last_tick != 0) {
+            TickType_t now = xTaskGetTickCount();
+            if ((now - last_tick) <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS)) {
+                const gps_t *src = &gps_peer_fix_snapshot;
+                out->valid = src->valid;
+                out->fix = src->fix;
+                out->fix_mode = src->fix_mode;
+                out->sats_in_use = src->sats_in_use;
+                out->sats_in_view = src->sats_in_view;
+                out->latitude = src->latitude;
+                out->longitude = src->longitude;
+                out->altitude = src->altitude;
+                out->dop_h = src->dop_h;
+                out->dop_p = src->dop_p;
+                out->dop_v = src->dop_v;
+                out->speed = src->speed;
+                out->cog = src->cog;
+                out->variation = src->variation;
+                out->date = src->date;
+                out->tim = src->tim;
+                taskEXIT_CRITICAL(&gps_state_lock);
+                if (using_peer) *using_peer = true;
+                return true;
+            }
+        }
+        taskEXIT_CRITICAL(&gps_state_lock);
+        if (using_peer) *using_peer = true;
+        return false;
+    }
+
+    if (!g_gpsManager.isinitilized || !gps_has_seen_update) {
+        if (using_peer) *using_peer = false;
+        return false;
+    }
+
+    taskENTER_CRITICAL(&gps_state_lock);
+    {
+        const gps_t *src = &gps_local_snapshot;
+        out->valid = src->valid;
+        out->fix = src->fix;
+        out->fix_mode = src->fix_mode;
+        out->sats_in_use = src->sats_in_use;
+        out->sats_in_view = src->sats_in_view;
+        out->latitude = src->latitude;
+        out->longitude = src->longitude;
+        out->altitude = src->altitude;
+        out->dop_h = src->dop_h;
+        out->dop_p = src->dop_p;
+        out->dop_v = src->dop_v;
+        out->speed = src->speed;
+        out->cog = src->cog;
+        out->variation = src->variation;
+        out->date = src->date;
+        out->tim = src->tim;
+    }
+    taskEXIT_CRITICAL(&gps_state_lock);
+    if (using_peer) *using_peer = false;
+    return true;
+}
+
 static bool gps_should_preserve_dualcomm(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
@@ -894,41 +980,35 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    gps_t gps_snapshot = {0};
+    gps_wd_lite_t gps;
+    memset(&gps, 0, sizeof(gps));
     bool using_peer = false;
-    if (!gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer)) {
+    if (!gps_manager_get_wd_lite(&gps, &using_peer)) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Fast non-mutating dedupe check for Wi-Fi observations.
-    // Commit happens only after successful CSV write.
     bool should_commit_wifi_dedupe = false;
     if (!data->ble_data.is_ble_device) {
         if (!csv_wifi_ap_should_log_peek(data->bssid, data->rssi, data->ssid)) {
-            return ESP_OK;  // Silently skip - already logged or signal not better
+            return ESP_OK;
         }
         should_commit_wifi_dedupe = true;
     }
     
-    gps_t *gps = &gps_snapshot;
-
     if (!gps_manager_has_recent_update()) {
         return ESP_ERR_INVALID_STATE;
     }
     
-    // Check GPS validity with caching to reduce CPU overhead on high-volume scanning
     TickType_t now = xTaskGetTickCount();
     bool gps_is_valid;
     
     if (!gps_cache_initialized || (now - last_gps_valid_tick) > pdMS_TO_TICKS(GPS_VALID_CACHE_MS)) {
-        // Cache expired or not initialized - perform full validation
-        gps_is_valid = gps->valid && gps->fix >= GPS_FIX_GPS && 
-                       gps->fix_mode >= GPS_MODE_2D && gps->sats_in_use >= 3;
+        gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS && 
+                       gps.fix_mode >= GPS_MODE_2D && gps.sats_in_use >= 3;
         last_gps_valid_state = gps_is_valid;
         last_gps_valid_tick = now;
         gps_cache_initialized = true;
     } else {
-        // Use cached result
         gps_is_valid = last_gps_valid_state;
     }
     
@@ -936,8 +1016,7 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Validate GPS data
-    if (!is_valid_date(&gps->date)) {
+    if (!is_valid_date(&gps.date)) {
         static TickType_t last_no_date_warn_tick = 0;
         static TickType_t last_bad_date_warn_tick = 0;
         TickType_t now_tick = xTaskGetTickCount();
@@ -951,101 +1030,102 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
             }
         }
 
-        // Only log warning for good GPS fixes
-        if (gps->valid && gps->fix >= GPS_FIX_GPS && gps->fix_mode >= GPS_MODE_2D &&
-            gps->sats_in_use >= 3 &&
+        if (gps.valid && gps.fix >= GPS_FIX_GPS && gps.fix_mode >= GPS_MODE_2D &&
+            gps.sats_in_use >= 3 &&
             (last_bad_date_warn_tick == 0 ||
              (now_tick - last_bad_date_warn_tick) >= pdMS_TO_TICKS(5000))) {
             ESP_LOGW(GPS_TAG,
                      "Invalid date despite good fix (%s source): %04d-%02d-%02d "
                      "(Fix: %d, Mode: %d, Sats: %d)",
                      using_peer ? "peer" : "local",
-                     gps_get_absolute_year(gps->date.year), gps->date.month, gps->date.day,
-                     gps->fix, gps->fix_mode, gps->sats_in_use);
+                     gps_get_absolute_year(gps.date.year), gps.date.month, gps.date.day,
+                     gps.fix, gps.fix_mode, gps.sats_in_use);
             last_bad_date_warn_tick = now_tick;
         }
 
-        // Use cached date for validation
         ESP_LOGD(GPS_TAG, "Using cached date: %04d-%02d-%02d",
                  gps_get_absolute_year(cacheddate.year), cacheddate.month, cacheddate.day);
     } else if (!has_valid_cached_date) {
-        // Valid date - update cache
-        cacheddate = gps->date;
+        cacheddate = gps.date;
         has_valid_cached_date = true;
         ESP_LOGI(GPS_TAG, "Cached valid GPS date: %04d-%02d-%02d",
                  gps_get_absolute_year(cacheddate.year), cacheddate.month, cacheddate.day);
     }
 
-    // Use coordinates from callback if already set and valid (preserves location where AP was seen)
-    // Otherwise use current GPS coordinates as fallback
     bool incoming_coords_valid = (data->latitude != 0.0 || data->longitude != 0.0) &&
                                   data->latitude >= -90.0 && data->latitude <= 90.0 &&
                                   data->longitude >= -180.0 && data->longitude <= 180.0;
     if (!incoming_coords_valid) {
-        data->latitude = gps->latitude;
-        data->longitude = gps->longitude;
+        data->latitude = gps.latitude;
+        data->longitude = gps.longitude;
     }
-    data->altitude = gps->altitude;
-    data->accuracy = gps->dop_h * 5.0;
+    data->altitude = gps.altitude;
+    data->accuracy = gps.dop_h * 5.0;
 
     double log_latitude = data->latitude;
     double log_longitude = data->longitude;
     double log_altitude = data->altitude;
     float log_accuracy = data->accuracy;
 
-    // Initialize GPS quality data to avoid uninitialized fields
-    populate_gps_quality_data(data, gps);
-    data->gps_date = gps->date;
-    data->gps_time = gps->tim;
-    data->gps_date_valid = is_valid_date(&gps->date);
-    data->gps_time_valid = is_valid_time(&gps->tim);
+    data->gps_quality.satellites_used = gps.sats_in_use;
+    data->gps_quality.hdop = gps.dop_h;
+    data->gps_quality.speed = gps.speed;
+    data->gps_quality.course = gps.cog;
+    data->gps_quality.fix_quality = gps.fix;
+    data->gps_quality.magnetic_var = gps.variation;
+    data->gps_quality.has_valid_fix = gps.valid;
+    if (data->latitude == 0.0 && data->longitude == 0.0) {
+        data->latitude = gps.latitude;
+        data->longitude = gps.longitude;
+    }
+    data->gps_date = gps.date;
+    data->gps_time = gps.tim;
+    data->gps_date_valid = is_valid_date(&gps.date);
+    data->gps_time_valid = is_valid_time(&gps.tim);
     data->latitude = log_latitude;
     data->longitude = log_longitude;
     data->altitude = log_altitude;
     data->accuracy = log_accuracy;
 
-    // Check if we have a valid date or cached date - csv_write_data_to_buffer will handle fallback
-    if (!is_valid_date(&gps->date) && !has_valid_cached_date) {
-        if (gps->valid && gps->fix >= GPS_FIX_GPS && gps->fix_mode >= GPS_MODE_2D &&
-            gps->sats_in_use >= 3 &&
+    if (!is_valid_date(&gps.date) && !has_valid_cached_date) {
+        if (gps.valid && gps.fix >= GPS_FIX_GPS && gps.fix_mode >= GPS_MODE_2D &&
+            gps.sats_in_use >= 3 &&
             rand() % 100 == 0) {
             ESP_LOGW(GPS_TAG, "Invalid date despite good fix: %04d-%02d-%02d (Fix:%d Mode:%d Sats:%d)",
-                     gps_get_absolute_year(gps->date.year), gps->date.month, gps->date.day, gps->fix,
-                     gps->fix_mode, gps->sats_in_use);
+                     gps_get_absolute_year(gps.date.year), gps.date.month, gps.date.day, gps.fix,
+                     gps.fix_mode, gps.sats_in_use);
         }
         return ESP_OK;
     }
 
-    // Cache valid date if we don't have one
-    if (is_valid_date(&gps->date) && !has_valid_cached_date) {
-        cacheddate = gps->date;
+    if (is_valid_date(&gps.date) && !has_valid_cached_date) {
+        cacheddate = gps.date;
         has_valid_cached_date = true;
     }
 
-    if (!is_valid_time(&gps->tim)) {
-        ESP_LOGW(GPS_TAG, "Invalid time: %02d:%02d:%02d", gps->tim.hour, gps->tim.minute,
-                 gps->tim.second);
+    if (!is_valid_time(&gps.tim)) {
+        ESP_LOGW(GPS_TAG, "Invalid time: %02d:%02d:%02d", gps.tim.hour, gps.tim.minute,
+                 gps.tim.second);
         return ESP_OK;
     }
 
-    if (gps->latitude < -90.0 || gps->latitude > 90.0 || gps->longitude < -180.0 ||
-        gps->longitude > 180.0) {
-        ESP_LOGW(GPS_TAG, "Out-of-range coords: Lat=%f Lon=%f", gps->latitude, gps->longitude);
+    if (gps.latitude < -90.0 || gps.latitude > 90.0 || gps.longitude < -180.0 ||
+        gps.longitude > 180.0) {
+        ESP_LOGW(GPS_TAG, "Out-of-range coords: Lat=%f Lon=%f", gps.latitude, gps.longitude);
         return ESP_OK;
     }
 
-    if (gps->speed < 0.0 || gps->speed > 340.0) {
-        ESP_LOGW(GPS_TAG, "Out-of-range speed: %f m/s", gps->speed);
+    if (gps.speed < 0.0 || gps.speed > 340.0) {
+        ESP_LOGW(GPS_TAG, "Out-of-range speed: %f m/s", gps.speed);
         return ESP_OK;
     }
 
-    if (gps->dop_h < 0.0 || gps->dop_p < 0.0 || gps->dop_v < 0.0 || gps->dop_h > 50.0 ||
-        gps->dop_p > 50.0 || gps->dop_v > 50.0) {
-        ESP_LOGW(GPS_TAG, "Out-of-range DOP: H=%f P=%f V=%f", gps->dop_h, gps->dop_p, gps->dop_v);
+    if (gps.dop_h < 0.0 || gps.dop_p < 0.0 || gps.dop_v < 0.0 || gps.dop_h > 50.0 ||
+        gps.dop_p > 50.0 || gps.dop_v > 50.0) {
+        ESP_LOGW(GPS_TAG, "Out-of-range DOP: H=%f P=%f V=%f", gps.dop_h, gps.dop_p, gps.dop_v);
         return ESP_OK;
     }
 
-    // Final validation of coordinates that will be written to CSV
     if (data->latitude == 0.0 && data->longitude == 0.0) {
         ESP_LOGD(GPS_TAG, "Skipping log: final coordinates are (0,0)");
         return ESP_OK;
@@ -1061,35 +1141,30 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
         csv_wifi_ap_log_commit(data->bssid, data->rssi, data->ssid);
     }
 
-    // Update display periodically
     static TickType_t last_status_tick = 0;
     if (last_status_tick == 0 || (now - last_status_tick) >= pdMS_TO_TICKS(GPS_STATUS_PERIOD_MS)) {
         last_status_tick = now;
-        // Determine GPS fix status
-        const char *fix_status = (!gps->valid || gps->fix == GPS_FIX_INVALID) ? "No Fix"
-                                 : (gps->fix_mode == GPS_MODE_2D)             ? "Basic"
-                                 : (gps->fix_mode == GPS_MODE_3D)             ? "Locked"
+        const char *fix_status = (!gps.valid || gps.fix == GPS_FIX_INVALID) ? "No Fix"
+                                 : (gps.fix_mode == GPS_MODE_2D)             ? "Basic"
+                                 : (gps.fix_mode == GPS_MODE_3D)             ? "Locked"
                                                                               : "Unknown";
 
-        // Convert speed from m/s to km/h for display with validation
         float speed_kmh = 0.0;
-        if (gps->valid && gps->fix >= GPS_FIX_GPS) { // Only trust speed with a valid fix
-            if (gps->speed >= MIN_SPEED_THRESHOLD && gps->speed <= MAX_SPEED_THRESHOLD) {
-                speed_kmh = gps->speed * 3.6; // Convert m/s to km/h
-            } else if (gps->speed < MIN_SPEED_THRESHOLD && gps->speed >= 0.0) {
-                speed_kmh = 0.0; // Show as stopped if below threshold but not negative
+        if (gps.valid && gps.fix >= GPS_FIX_GPS) {
+            if (gps.speed >= MIN_SPEED_THRESHOLD && gps.speed <= MAX_SPEED_THRESHOLD) {
+                speed_kmh = gps.speed * 3.6;
+            } else if (gps.speed < MIN_SPEED_THRESHOLD && gps.speed >= 0.0) {
+                speed_kmh = 0.0;
             }
-            // Speeds above MAX_SPEED_THRESHOLD remain at 0.0
         }
 
-        // Add newline before status update for better readability
         glog("\n");
         if (data->ble_data.is_ble_device) {
             glog("GPS: %s\nBLE: %lu\nSats: %u/%u\nSpeed: %.1f km/h\nAccuracy: %s\n",
                  fix_status,
                  (unsigned long)csv_get_unique_ble_device_count(),
                  data->gps_quality.satellites_used,
-                 gps->sats_in_view,
+                 gps.sats_in_view,
                  speed_kmh,
                  get_gps_quality_string(data));
         } else {
@@ -1097,7 +1172,7 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
                  fix_status,
                  (unsigned long)csv_get_unique_wifi_ap_count_including_hidden(),
                  data->gps_quality.satellites_used,
-                 gps->sats_in_view,
+                 gps.sats_in_view,
                  speed_kmh,
                  get_gps_quality_string(data));
         }

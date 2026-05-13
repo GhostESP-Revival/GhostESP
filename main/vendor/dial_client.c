@@ -9,8 +9,8 @@
 
 #define DIAL_MULTICAST_IP "239.255.255.250"
 #define DIAL_MULTICAST_PORT 1900
-#define MAX_RETRIES 10
-#define RETRY_DELAY_MS 2000
+#define MAX_RETRIES 5
+#define RETRY_DELAY_MS 1000
 #define RESPONSE_BUFFER_SIZE 1024
 
 static const char *TAG = "DIALClient";

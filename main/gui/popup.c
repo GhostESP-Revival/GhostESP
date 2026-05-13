@@ -181,6 +181,9 @@ lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, i
     lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
     lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
     lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
     lv_obj_set_style_transform_height(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);

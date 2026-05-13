@@ -5,8 +5,12 @@
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
 #include "lvgl.h"
+#include "sdkconfig.h"
 #include <stdlib.h>
 #include <string.h>
+
+#define SCAN_STATUS_ANIM_PERIOD_MS 50
+#define SCAN_STATUS_ANIM_STEP_DEG 12
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
@@ -26,14 +30,23 @@ struct scan_status_t {
 
 static void arc_rotate_cb(lv_timer_t *timer) {
     scan_status_t *ss = (scan_status_t *)timer->user_data;
-    if (!ss || !ss->active || !ss->arc) return;
-    ss->arc_angle = (ss->arc_angle + 8) % 360;
+    if (!ss || !ss->active || !ss->arc || !lv_obj_is_valid(ss->arc)) return;
+
+    ss->arc_angle = (ss->arc_angle + SCAN_STATUS_ANIM_STEP_DEG) % 360;
     lv_arc_set_rotation(ss->arc, ss->arc_angle);
 }
 
 static lv_coord_t get_screen_height(void) {
     lv_obj_t *scr = lv_scr_act();
     return scr ? lv_obj_get_height(scr) : 320;
+}
+
+static bool scan_status_use_pop_in(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0;
+#else
+    return true;
+#endif
 }
 
 static const lv_font_t *get_font_for_screen(void) {
@@ -136,9 +149,14 @@ scan_status_t *scan_status_create(const char *message) {
     
     ss->active = true;
     
-    ss->anim_timer = lv_timer_create(arc_rotate_cb, 30, ss);
+    ss->anim_timer = lv_timer_create(arc_rotate_cb, SCAN_STATUS_ANIM_PERIOD_MS, ss);
 
-    gui_anim_pop_in(ss->card);
+    if (scan_status_use_pop_in()) {
+        gui_anim_pop_in(ss->card);
+    } else {
+        lv_obj_set_style_transform_zoom(ss->card, 256, 0);
+        lv_obj_set_style_opa(ss->card, LV_OPA_COVER, 0);
+    }
     
     return ss;
 }

@@ -27,6 +27,7 @@
 
 #include "disp_spi.h"
 #include "disp_driver.h"
+#include "sdkconfig.h"
 
 #include "../lvgl_helpers.h"
 #include "../lvgl_spi_conf.h"
@@ -86,6 +87,7 @@
  *  STATIC PROTOTYPES
  **********************/
 static void spi_ready (spi_transaction_t *trans);
+static int disp_spi_get_mode(void);
 
 /**********************
  *  STATIC VARIABLES
@@ -122,13 +124,14 @@ esp_err_t disp_spi_add_device(spi_host_device_t host)
 
 esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 {
+    int spi_mode = disp_spi_get_mode();
     ESP_LOGI(TAG, "Adding SPI device");
     ESP_LOGI(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
-        clock_speed_hz, SPI_TFT_SPI_MODE, DISP_SPI_CS);
+        clock_speed_hz, spi_mode, DISP_SPI_CS);
 
     spi_device_interface_config_t devcfg={
         .clock_speed_hz = clock_speed_hz,
-        .mode = SPI_TFT_SPI_MODE,
+        .mode = spi_mode,
         .spics_io_num=DISP_SPI_CS,
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
         .queue_size=SPI_TRANSACTION_POOL_SIZE,
@@ -164,6 +167,16 @@ esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed
 	}
 
     return ESP_OK;
+}
+
+static int disp_spi_get_mode(void)
+{
+#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0) {
+        return 0;
+    }
+#endif
+    return SPI_TFT_SPI_MODE;
 }
 
 void disp_spi_change_device_speed(int clock_speed_hz)

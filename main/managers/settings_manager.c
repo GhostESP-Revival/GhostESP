@@ -97,6 +97,7 @@ static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
 static const char *NVS_MENU_BG_SHADE_KEY = "menu_bg_shd";
 static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
 static const char *NVS_UI_LANGUAGE_KEY = "ui_lang";
+static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
 
 static const char *TAG = "SettingsManager";
 
@@ -216,6 +217,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->menu_bg_shade = 2;
   settings->menu_rounded = true;
   settings->ui_language = 0;
+  settings->menu_item_borders = false;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
   settings->status_idle_timeout_ms = 5000; // default 5s
@@ -714,6 +716,13 @@ void settings_load(FSettings *settings) {
   } else {
     settings->ui_language = 0;
   }
+
+  err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->menu_item_borders = (bool)value_u8;
+  } else {
+    settings->menu_item_borders = false;
+  }
 }
 
 static void update_rainbow_effect(const FSettings *settings) {
@@ -979,6 +988,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, G_Settings.menu_rounded ? 1 : 0);
             key = NVS_MENU_ROUNDED_KEY;
             break;
+        case SETTING_MENU_ITEM_BORDERS:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
+            key = NVS_MENU_ITEM_BORDERS_KEY;
+            break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
             return;
@@ -1151,6 +1164,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, settings->menu_bg_shade);
     nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_UI_LANGUAGE_KEY, settings->ui_language);
+    nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0);
 
     esp_err_t err = nvs_commit(nvsHandle);
     if (err != ESP_OK) {
@@ -1809,4 +1823,14 @@ void settings_set_ui_language(FSettings *settings, uint8_t lang) {
 
 uint8_t settings_get_ui_language(const FSettings *settings) {
   return settings ? settings->ui_language : 0;
+}
+
+void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->menu_item_borders = enabled;
+  }
+}
+
+bool settings_get_menu_item_borders(const FSettings *settings) {
+  return settings ? settings->menu_item_borders : true;
 }

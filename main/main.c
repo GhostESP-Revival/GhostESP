@@ -487,6 +487,12 @@ void app_main(void) {
     {
         int32_t comm_tx = G_Settings.esp_comm_tx_pin;
         int32_t comm_rx = G_Settings.esp_comm_rx_pin;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 && comm_tx == 6 && comm_rx == 7) {
+            comm_tx = 11;
+            comm_rx = 12;
+        }
+#endif
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
     wardriving_register_stream_handler();
