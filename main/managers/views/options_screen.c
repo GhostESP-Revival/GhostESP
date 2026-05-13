@@ -63,7 +63,7 @@ static const char **blocklist_load_page(void);
 static bool wigle_csv_browser_active = false;
 static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 
-static const i18n_key_t wifi_attacks_keys[] = {
+static const i18n_key_t wifi_attacks_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_START_DEAUTH,
     I18N_KEY_WIFI_START_CHANNEL_SWITCH,
     I18N_KEY_WIFI_BEACON_SPAM_RANDOM,
@@ -80,7 +80,7 @@ static const i18n_key_t wifi_attacks_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_capture_keys[] = {
+static const i18n_key_t wifi_capture_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_CAPTURE_PROBE,
     I18N_KEY_WIFI_CAPTURE_DEAUTH,
     I18N_KEY_WIFI_CAPTURE_BEACON,
@@ -96,7 +96,7 @@ static const i18n_key_t wifi_capture_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_scan_select_keys[] = {
+static const i18n_key_t wifi_scan_select_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_SCAN_APS,
     I18N_KEY_WIFI_SCAN_APS_LIVE,
     I18N_KEY_WIFI_SCAN_STATIONS,
@@ -109,14 +109,14 @@ static const i18n_key_t wifi_scan_select_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_environment_keys[] = {
+static const i18n_key_t wifi_environment_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_SWEEP,
     I18N_KEY_WIFI_PINEAP_DETECTION,
     I18N_KEY_WIFI_CHANNEL_CONGESTION,
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_network_keys[] = {
+static const i18n_key_t wifi_network_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_SCAN_LAN_DEVICES,
     I18N_KEY_WIFI_ARP_SCAN_NETWORK,
     I18N_KEY_WIFI_SCAN_OPEN_PORTS,
@@ -124,28 +124,28 @@ static const i18n_key_t wifi_network_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_evil_portal_keys[] = {
+static const i18n_key_t wifi_evil_portal_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_START_EVIL_PORTAL,
     I18N_KEY_WIFI_START_CUSTOM_EVIL_PORTAL,
     I18N_KEY_WIFI_STOP_EVIL_PORTAL,
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_connection_keys[] = {
+static const i18n_key_t wifi_connection_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_CONNECT,
     I18N_KEY_WIFI_CONNECT_SAVED,
     I18N_KEY_WIFI_RESET_AP_CREDENTIALS,
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t wifi_misc_keys[] = {
+static const i18n_key_t wifi_misc_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_TV_CAST,
     I18N_KEY_WIFI_POWER_PRINTER,
     I18N_KEY_WIFI_TP_LINK_TEST,
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t dual_comm_wifi_keys[] = {
+static const i18n_key_t dual_comm_wifi_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_CONNECT,
     I18N_KEY_WIFI_CONNECT_SAVED,
     I18N_KEY_WIFI_RESET_AP_CREDENTIALS,
@@ -155,7 +155,7 @@ static const i18n_key_t dual_comm_wifi_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t dual_comm_attacks_keys[] = {
+static const i18n_key_t dual_comm_attacks_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_START_DEAUTH,
     I18N_KEY_WIFI_START_EAPOL_LOGOFF,
     I18N_KEY_WIFI_START_DHCP_STARVE,
@@ -166,7 +166,7 @@ static const i18n_key_t dual_comm_attacks_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t dual_comm_capture_keys[] = {
+static const i18n_key_t dual_comm_capture_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_CAPTURE_DEAUTH,
     I18N_KEY_WIFI_CAPTURE_PROBE,
     I18N_KEY_WIFI_CAPTURE_BEACON,
@@ -178,7 +178,7 @@ static const i18n_key_t dual_comm_capture_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t dual_comm_tools_keys[] = {
+static const i18n_key_t dual_comm_tools_keys[] __attribute__((unused)) = {
     I18N_KEY_WIFI_START_EVIL_PORTAL,
     I18N_KEY_WIFI_STOP_EVIL_PORTAL,
     I18N_KEY_GPS_START_WARDRIVING,
@@ -190,7 +190,7 @@ static const i18n_key_t dual_comm_tools_keys[] = {
     I18N_KEY_COUNT
 };
 
-static const i18n_key_t dual_comm_ble_keys[] = {
+static const i18n_key_t dual_comm_ble_keys[] __attribute__((unused)) = {
     I18N_KEY_BLE_AIRTAG_SCANNER,
     I18N_KEY_BLE_LIST_AIRTAGS,
     I18N_KEY_BLE_SELECT_AIRTAG,
@@ -730,7 +730,6 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
 
 static void switch_to_settings_category(int cat_idx);
 
-static const char *gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
 static const char * const wifi_dns_sinkhole_options[] = {
     "Start Sinkhole", "Stop Sinkhole", "Sinkhole Status",
     "Download Blocklist", "Toggle Logging", NULL
@@ -939,7 +938,7 @@ static SettingsItem settings_items[] = {
     {I18N_KEY_ZEBRA_MENUS, SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     {I18N_KEY_BG_SHADE, SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL},
     {I18N_KEY_ROUNDED_MENUS, SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
-    {"Item Borders", SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
+    {I18N_KEY_ITEM_BORDERS, SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     {I18N_KEY_TERMINAL_COLOR, SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     {I18N_KEY_LANGUAGE, SETTING_LANGUAGE, language_options, LANGUAGE_OPTION_COUNT, 0, SETTINGS_CAT_APPEARANCE, false, NULL},
     
