@@ -531,6 +531,12 @@ void gps_manager_init(GPSManager *manager) {
         }
     }
 
+    if (current_rx_pin == 0) {
+        ESP_LOGE(GPS_TAG, "No GPS RX pin configured. Set one via 'gpspin <gpio>' command or Kconfig.");
+        glog("No GPS RX pin configured. Use 'gpspin <gpio>' to set one.\n");
+        return;
+    }
+
     glog("GPS RX: IO%d\n", current_rx_pin);
 
     bool preserve_dualcomm = gps_should_preserve_dualcomm();

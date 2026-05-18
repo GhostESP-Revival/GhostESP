@@ -476,6 +476,24 @@ static SettingsCategory settings_categories[] = {
 static int current_settings_category = -1;
 static int settings_submenu_depth = 0;
 
+static int settings_category_index_for_id(SettingsCategoryId cat_id) {
+    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    for (int i = 0; i < category_count; i++) {
+        if (settings_categories[i].id == cat_id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static SettingsCategoryId current_settings_category_id(void) {
+    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    if (current_settings_category < 0 || current_settings_category >= category_count) {
+        return SETTINGS_CAT_COUNT;
+    }
+    return settings_categories[current_settings_category].id;
+}
+
 typedef enum {
     WIFI_MENU_MAIN,
     WIFI_MENU_ATTACKS,
@@ -932,9 +950,7 @@ static const io_btn_preset_t io_btn_presets[] = {
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     {"BadUSB", "view:badusb", &badusb_view},
 #endif
-#ifdef CONFIG_HAS_GPS
     {"GPS", "view:gps", &options_menu_view},
-#endif
 #ifdef CONFIG_HAS_COMPASS
     {"Compass", "view:compass", &compass_view},
 #endif
@@ -3624,7 +3640,7 @@ void option_event_cb(lv_event_t *e) {
                     settings_set_io_btn_p12_cmd(&G_Settings, prefix);
                 }
                 settings_save(&G_Settings);
-                current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+                current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
                 settings_submenu_depth = 1;
                 SelectedMenuType = OT_Settings;
                 is_settings_mode = true;
@@ -5702,7 +5718,7 @@ static void back_event_cb(lv_event_t *e) {
         wigle_csv_free_cache();
         SelectedMenuType = OT_Settings;
         is_settings_mode = true;
-        current_settings_category = SETTINGS_CAT_WIGLE;
+        current_settings_category = settings_category_index_for_id(SETTINGS_CAT_WIGLE);
         settings_submenu_depth = 1;
         rebuild_current_menu();
         return;
@@ -7982,13 +7998,12 @@ static void switch_to_settings_category(int cat_idx) {
      * SAFETY GUARD                                                         *
      *                                                                      *
      * The encoder can highlight the synthetic "← Back" row that is added   *
-     * to the end of the Settings root list when CONFIG_USE_ENCODER is set.*
-     * That row's index is **2**, but there are only two real categories    *
-     * (indices 0 and 1).                                                   *
+     * to the end of the Settings root list when CONFIG_USE_ENCODER is set. *
+     * That row's index is outside the visible category array.              *
      *                                                                      *
      * If we let that bogus index through, the very next LVGL tick in       *
      * menu_builder_cb() dereferences                                        *
-     *     settings_category_indices[current_settings_category]             *
+     *     settings_categories[current_settings_category]                   *
      * which explodes with a LoadProhibited panic.                          *
      *                                                                      *
      * Instead, treat any out-of-range index exactly like a Back press and  *
@@ -8014,7 +8029,7 @@ static void iobtn_p10_kb_cb(const char *text) {
     settings_set_io_btn_p10_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
-    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
     settings_submenu_depth = 1;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
@@ -8024,7 +8039,7 @@ static void iobtn_p11_kb_cb(const char *text) {
     settings_set_io_btn_p11_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
-    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
     settings_submenu_depth = 1;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
@@ -8034,7 +8049,7 @@ static void iobtn_p12_kb_cb(const char *text) {
     settings_set_io_btn_p12_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
-    current_settings_category = SETTINGS_CAT_IO_BUTTONS;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
     settings_submenu_depth = 1;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
@@ -8296,8 +8311,12 @@ static void menu_builder_cb(lv_timer_t *t)
                     all_current_options_processed = true;
                 }
             } else {
+                SettingsCategoryId category_id = current_settings_category_id();
+                if (category_id == SETTINGS_CAT_COUNT) {
+                    all_current_options_processed = true;
+                }
 #ifdef CONFIG_USE_IO_EXPANDER
-                if (current_settings_category == SETTINGS_CAT_IO_BUTTONS) {
+                else if (category_id == SETTINGS_CAT_IO_BUTTONS) {
                     const char *p10 = settings_get_io_btn_p10_cmd(&G_Settings);
                     const char *p11 = settings_get_io_btn_p11_cmd(&G_Settings);
                     const char *p12 = settings_get_io_btn_p12_cmd(&G_Settings);
@@ -8339,14 +8358,14 @@ static void menu_builder_cb(lv_timer_t *t)
                 int items_in_category = 0;
                 
                 for (int i = 0; i < settings_count; i++) {
-                    if (settings_items[i].category_id == current_settings_category) {
+                    if (settings_items[i].category_id == category_id) {
                         items_in_category++;
                     }
                 }
                 
                 int current_item_in_category = 0;
                 for (int i = 0; i < settings_count && built_this_tick < BATCH; i++) {
-                    if (settings_items[i].category_id == current_settings_category) {
+                    if (settings_items[i].category_id == category_id) {
                         if (current_item_in_category >= build_item_index) {
                             SettingsItem *item = &settings_items[i];
                             char buf[128];

@@ -32,6 +32,7 @@
 #endif
 
 static void handle_menu_item_selection(int item_index);
+static void scroll_grid_card_to_view(int item_index);
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
@@ -98,9 +99,7 @@ menu_item_t menu_items[] = {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     {"BLE", &bluetooth, 0, {{0}}},
 #endif
-#ifdef CONFIG_HAS_GPS
     {"GPS", &Map, 2, {{0}}},
-#endif
 #if CONFIG_HAS_INFRARED
     {"Infrared", &infrared, 0, {{0}}}, // main infrared icon
 #endif
@@ -152,6 +151,18 @@ static carousel_card_cache_t carousel_cache = {0};
 
 static int get_total_menu_items(void) {
     return (int)(sizeof(menu_items) / sizeof(menu_items[0]));
+}
+
+static void scroll_grid_card_to_view(int item_index) {
+    if (!grid_cards_container || !grid_cards || item_index < 0 || item_index >= num_items) return;
+    lv_obj_t *card = grid_cards[item_index];
+    if (!card || !lv_obj_is_valid(card)) return;
+
+    lv_obj_t *row = lv_obj_get_parent(card);
+    if (!row || !lv_obj_is_valid(row)) return;
+
+    lv_obj_update_layout(grid_cards_container);
+    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
 }
 
 static int get_dual_comm_menu_index(void) {
@@ -831,8 +842,7 @@ void select_menu_item(int index, bool slide_left) {
                 lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
                 lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
                 
-                // Ensure selected card is visible (handle pagination) without animation
-                lv_obj_scroll_to_view(grid_cards[selected_item_index], LV_ANIM_OFF);
+                scroll_grid_card_to_view(selected_item_index);
             }
         }
     } else if (current_layout == MENU_LAYOUT_LIST) {
@@ -873,9 +883,7 @@ static void handle_menu_item_selection(int item_index) {
         {"BLE", OT_Bluetooth, &options_menu_view},
 #endif
         {"WiFi", OT_Wifi, &options_menu_view},
-#ifdef CONFIG_HAS_GPS
         {"GPS", OT_GPS, &options_menu_view},
-#endif
 #ifdef CONFIG_HAS_COMPASS
         {"Compass", 0, &compass_view},
 #endif
@@ -1101,7 +1109,7 @@ static void create_grid_menu(void) {
         lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
 
-        lv_obj_scroll_to_view(grid_cards[selected_item_index], LV_ANIM_OFF);
+        scroll_grid_card_to_view(selected_item_index);
     }
 }
 

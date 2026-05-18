@@ -1,5 +1,14 @@
 # Ghost ESP Changelog
 
+## Revival v1.9.10
+
+- Fixed Settings submenus on Cardputer ADV showing shifted content from Network onward when Status Display is not compiled in
+- Fixed Cardputer grid card navigation not scrolling down when keyboard/encoder selection moves below the visible rows
+- Fixed the darkest menu background shade appearing green on RGB565 displays by using true black for that shade
+- Fixed NULL pointer crash in LVGL display refresh during WiFi scan by disabling pop-in zoom animation
+- Fixed potential boot hang on splash screen with no SD card inserted on shared-SPI boards
+- Removed compile-time GPS menu gate. GPS menu is now always visible since the RX pin can be set at runtime via `gpspin` command
+
 ## Revival v1.9.9
 
 ### Added

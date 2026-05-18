@@ -7136,9 +7136,7 @@ void handle_chip_info_cmd(int argc, char **argv) {
 #ifdef CONFIG_HAS_INFRARED_RX
     glog("    Infrared RX\n");
 #endif
-#ifdef CONFIG_HAS_GPS
     glog("    GPS\n");
-#endif
 #ifdef CONFIG_WITH_ETHERNET
     glog("    Ethernet\n");
 #endif

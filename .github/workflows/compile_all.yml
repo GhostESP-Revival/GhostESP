@@ -1,9 +1,6 @@
 name: Compile Ghost ESP
 
 on:
-  push:
-    paths-ignore:
-      - "firmware-manifest.json"
   pull_request:
   workflow_dispatch:
     inputs:
@@ -12,9 +9,10 @@ on:
         required: true
         type: choice
         options:
+          - "build-only"
           - "prerelease"
           - "all"
-        default: "prerelease"
+        default: "build-only"
       releaseVersion:
         description: "Release tag (e.g. v1.7.2). Leave empty to auto-generate"
         required: false
@@ -186,7 +184,7 @@ jobs:
   update_manifest_for_commit:
     name: Update Commit Manifest (push)
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
     runs-on: ubuntu-latest
 
     steps:

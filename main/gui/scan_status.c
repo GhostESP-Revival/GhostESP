@@ -42,11 +42,7 @@ static lv_coord_t get_screen_height(void) {
 }
 
 static bool scan_status_use_pop_in(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") != 0;
-#else
-    return true;
-#endif
+    return false;
 }
 
 static const lv_font_t *get_font_for_screen(void) {
