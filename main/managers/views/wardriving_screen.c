@@ -15,6 +15,7 @@
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -102,23 +103,26 @@ static uint32_t error_color = 0xFF4444;
 #define WD_DBG_RF_NAV_SEEN      (1u << 15)
 
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_14;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_18;
-    return &lv_font_montserrat_24;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_14);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_18);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_14 : (fs == 1 ? &lv_font_montserrat_18 : &lv_font_montserrat_24);
+    return fs == 0 ? &lv_font_montserrat_18 : (fs == 1 ? &lv_font_montserrat_24 : &lv_font_montserrat_24);
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_12;
-    return &lv_font_montserrat_14;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
 }
 
 static const lv_font_t *get_small_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
 }
 
 static const char *get_fix_status_string(gps_t *gps) {

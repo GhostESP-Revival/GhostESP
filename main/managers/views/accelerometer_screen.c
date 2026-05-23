@@ -5,6 +5,7 @@
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "lvgl.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -476,7 +477,7 @@ void accelerometer_create(void) {
         lv_obj_t *tick_lbl = lv_label_create(content);
         lv_label_set_text_fmt(tick_lbl, "%d", i);
         lv_obj_set_style_text_color(tick_lbl, lv_color_hex(0x888888), 0);
-        lv_obj_set_style_text_font(tick_lbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(tick_lbl, accessibility_get_font_small(), 0);
         int lbl_r = gauge_r - 24;
         int lbl_x = gauge_cx + (int)(cosf(angle_rad) * lbl_r);
         int lbl_y = gauge_cy - (int)(sinf(angle_rad) * lbl_r) - 15;
@@ -505,43 +506,43 @@ void accelerometer_create(void) {
     g_label = lv_label_create(content);
     lv_label_set_text(g_label, "0.00");
     lv_obj_set_style_text_color(g_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(g_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(g_label, accessibility_get_font_display(), 0);
     lv_obj_align(g_label, LV_ALIGN_CENTER, 0, 15);
 
     lv_obj_t *unit_label = lv_label_create(content);
     lv_label_set_text(unit_label, "G");
     lv_obj_set_style_text_color(unit_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(unit_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(unit_label, accessibility_get_font_body(), 0);
     lv_obj_align(unit_label, LV_ALIGN_CENTER, 0, 38);
 
     orient_label = lv_label_create(content);
     lv_label_set_text(orient_label, "Flat (Face Up)  Shake:0.0");
     lv_obj_set_style_text_color(orient_label, lv_color_hex(0x44DD44), 0);
-    lv_obj_set_style_text_font(orient_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(orient_label, accessibility_get_font_small(), 0);
     lv_obj_align(orient_label, LV_ALIGN_BOTTOM_MID, 0, -55);
 
     peak_label = lv_label_create(content);
     lv_label_set_text(peak_label, "Peak: 0.00 G");
     lv_obj_set_style_text_color(peak_label, lv_color_hex(0xFFAA00), 0);
-    lv_obj_set_style_text_font(peak_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(peak_label, accessibility_get_font_small(), 0);
     lv_obj_align(peak_label, LV_ALIGN_BOTTOM_MID, 0, -42);
 
     speed_label = lv_label_create(content);
     lv_label_set_text(speed_label, "NO GPS: 0.0 km/h | 0.0 mph");
     lv_obj_set_style_text_color(speed_label, lv_color_hex(0x00CCFF), 0);
-    lv_obj_set_style_text_font(speed_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(speed_label, accessibility_get_font_small(), 0);
     lv_obj_align(speed_label, LV_ALIGN_BOTTOM_MID, 0, -29);
 
     tilt_label = lv_label_create(content);
     lv_label_set_text(tilt_label, "Pitch:0.0deg  Roll:0.0deg");
     lv_obj_set_style_text_color(tilt_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(tilt_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(tilt_label, accessibility_get_font_small(), 0);
     lv_obj_align(tilt_label, LV_ALIGN_BOTTOM_MID, 0, -16);
 
     xyz_label = lv_label_create(content);
     lv_label_set_text(xyz_label, "X:0.00  Y:0.00  Z:0.00");
     lv_obj_set_style_text_color(xyz_label, lv_color_hex(0x555555), 0);
-    lv_obj_set_style_text_font(xyz_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(xyz_label, accessibility_get_font_small(), 0);
     lv_obj_align(xyz_label, LV_ALIGN_BOTTOM_MID, 0, -3);
 
     first_sample = true;

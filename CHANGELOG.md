@@ -1,5 +1,41 @@
 # Ghost ESP Changelog
 
+## Revival v2.0
+
+ - Added PIN lock screen with lock on wake and auto-lock settings
+ - Added WiFi Airspace Monitor with realtime packet/threat insights, fast channel hopping, and suspect device cards
+ - Changed lockscreen unlock behavior to return to the view that was active before auto-lock or wake-lock
+ - Reduced status bar title font size to body font for a cleaner compact look
+ - Added toast notification system
+- Polished status bar with cleaner accent border, brighter title with truncation, softer semantic status colors
+- Changed startup logo to new logo and removed "GhostESP: Revival" text from splash screen
+- Removed border from popups
+- Polished detail view to match main menu styling
+- Polished number pad screen with theme-aware lockscreen-style numpad grid
+- Fixed number pad touchscreen input and replaced the DEL label with the LVGL backspace symbol
+- Polished keyboard screen with theme-aware key styling and accent highlights
+- Fixed apps gallery not respecting the "Item Borders" setting
+- Skipping the setup wizard now defaults the main menu layout to List instead of Carousel
+- Increased LVGL display refresh target from 30 FPS to 60 FPS
+- Added accessibility settings:
+  - Font size (Small/Normal/Large)
+  - High contrast mode
+  - Reduced motion
+  - Input repeat speed (Slow/Normal/Fast)
+- Added epilepsy warning toggle to disable flashing LED effect popups
+- Updated all UI screens to use accessibility-aware fonts and theme overrides
+- Fixed LoadProhibited crash after deferred SD card init failure — added NULL check for `sd_card_init()` return in deferred init task and nulled `sd_card_manager.card` on mount failure to prevent dangling pointer dereference
+- Fixed STA not reconnecting after BLE/Chameleon suspend when AP was running, added bounded auto-reconnect (5 retries with backoff) on involuntary WiFi disconnects, and fixed stale `manual_disconnect` flag in cancel/disconnect paths
+
+## Revival v1.9.10
+
+- Fixed Settings submenus on Cardputer ADV showing shifted content from Network onward when Status Display is not compiled in
+- Fixed Cardputer grid card navigation not scrolling down when keyboard/encoder selection moves below the visible rows
+- Fixed the darkest menu background shade appearing green on RGB565 displays by using true black for that shade
+- Fixed NULL pointer crash in LVGL display refresh during WiFi scan by disabling pop-in zoom animation
+- Fixed potential boot hang on splash screen with no SD card inserted on shared-SPI boards
+- Removed compile-time GPS menu gate. GPS menu is now always visible since the RX pin can be set at runtime via `gpspin` command
+
 ## Revival v1.9.9
 
 ### Added

@@ -10,6 +10,7 @@
 #include "gui/screen_layout.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/subghz_decoders.h"
@@ -2071,7 +2072,7 @@ static void subghz_fa_graph_draw_event(lv_event_t *e) {
         lv_draw_label_dsc_t lbl;
         lv_draw_label_dsc_init(&lbl);
         lbl.color = (b == s_fa_active_band) ? text : text_muted;
-        lbl.font = &lv_font_montserrat_10;
+        lbl.font = accessibility_get_font_small();
         lv_area_t lbl_area = { .x1 = bx1 - 2, .y1 = plot_y2 + 2, .x2 = bx2 + 2, .y2 = coords.y2 - 1 };
         lv_draw_label(draw_ctx, &lbl, &lbl_area, band_labels[b], NULL);
     }
@@ -2188,10 +2189,10 @@ static void subghz_open_freq_analyzer_popup(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
 
-    const lv_font_t *title_font = tiny ? &lv_font_montserrat_10 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = tiny ? accessibility_get_font_small() : accessibility_get_font_body();
     popup_create_title_label(s_fa_popup, "Freq Analyzer", title_font, tiny ? 2 : 6);
 
-    const lv_font_t *freq_font = tiny ? &lv_font_montserrat_10 : &lv_font_montserrat_16;
+    const lv_font_t *freq_font = tiny ? accessibility_get_font_small() : accessibility_get_font_title();
     s_fa_freq_label = lv_label_create(s_fa_popup);
     lv_label_set_text(s_fa_freq_label, "---.--- MHz");
     lv_obj_set_style_text_color(s_fa_freq_label, text, 0);
@@ -2225,12 +2226,12 @@ static void subghz_open_freq_analyzer_popup(void) {
         s_fa_history_label = lv_label_create(s_fa_popup);
         lv_label_set_text(s_fa_history_label, "History:");
         lv_obj_set_style_text_color(s_fa_history_label, text, 0);
-        lv_obj_set_style_text_font(s_fa_history_label, small ? &lv_font_montserrat_8 : &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(s_fa_history_label, small ? accessibility_get_font_small() : accessibility_get_font_small(), 0);
         lv_obj_align(s_fa_history_label, LV_ALIGN_TOP_LEFT, 8, graph_top + graph_h + 4);
         lv_obj_set_style_max_height(s_fa_history_label, history_h, 0);
     }
 
-    const lv_font_t *btn_font = tiny ? &lv_font_montserrat_8 : (small ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    const lv_font_t *btn_font = tiny ? accessibility_get_font_small() : (small ? accessibility_get_font_small() : accessibility_get_font_body());
     int btn_w = tiny ? 40 : (small ? 58 : 68);
     s_fa_start_btn = popup_add_styled_button(
         s_fa_popup, "Start", btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, tiny ? 2 : 8, btn_margin, btn_font, subghz_fa_start_btn_cb, NULL);
@@ -2944,27 +2945,27 @@ static void subghz_open_capture_popup(void) {
              s_capture_freq_label);
 
     const char *title = (s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) ? "Raw Capture" : "Capture";
-    popup_create_title_label(s_capture_popup, title, &lv_font_montserrat_16, 8);
+    popup_create_title_label(s_capture_popup, title, accessibility_get_font_body(), 8);
     s_capture_status_label = popup_create_body_label(
         s_capture_popup,
         "Waiting for signal...",
         popup_w - 20,
         false,
-        &lv_font_montserrat_12,
+        accessibility_get_font_small(),
         32);
     s_capture_signal_label = popup_create_body_label(
         s_capture_popup,
         "Signal threshold: 65%",
         popup_w - 20,
         true,
-        &lv_font_montserrat_12,
+        accessibility_get_font_small(),
         52);
     lv_obj_set_style_text_align(s_capture_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_align(s_capture_signal_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_max_height(s_capture_signal_label, 60, 0);
     lv_obj_set_scrollbar_mode(s_capture_signal_label, LV_SCROLLBAR_MODE_AUTO);
 
-    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
     s_capture_save_btn = popup_add_styled_button(
         s_capture_popup,
         "Stop",
@@ -3147,17 +3148,17 @@ static void subghz_open_saved_popup(void) {
     s_saved_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(s_saved_popup);
 
-    s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", &lv_font_montserrat_16, 8);
+    s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", accessibility_get_font_body(), 8);
     s_saved_status_label = popup_create_body_label(
         s_saved_popup,
         "Loading...",
         popup_w - 20,
         true,
-        &lv_font_montserrat_12,
+        accessibility_get_font_small(),
         38);
     lv_obj_set_style_text_align(s_saved_status_label, LV_TEXT_ALIGN_CENTER, 0);
 
-    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
     s_saved_replay_btn = popup_add_styled_button(
         s_saved_popup,
         "Replay",

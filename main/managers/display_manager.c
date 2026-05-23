@@ -10,6 +10,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
 #include "managers/views/error_popup.h"
@@ -26,6 +27,8 @@
 #include "managers/views/subghz_view.h"
 #endif
 #include "managers/views/app_gallery_screen.h"
+#include "managers/views/lockscreen.h"
+#include "managers/views/splash_screen.h"
 #include "managers/encoder_manager.h"
 #include <stdlib.h>
 #include <string.h>
@@ -190,6 +193,7 @@ lv_obj_t *battery_label = NULL;
 lv_obj_t *mainlabel = NULL;
 
 View *display_manager_previous_view = NULL;
+static View *s_lockscreen_return_view = NULL;
 
 bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
@@ -211,10 +215,44 @@ static joystick_t exit_button; // IO6 exit button
 
 #define FADE_DURATION_MS GUI_ANIM_TRANSITION
 #define DEFAULT_DISPLAY_TIMEOUT_MS 30000
-#define JOYSTICK_REPEAT_INITIAL_DELAY_MS 350
-#define JOYSTICK_REPEAT_INTERVAL_MS 120
 
 uint32_t display_timeout_ms = DEFAULT_DISPLAY_TIMEOUT_MS;
+
+static inline uint32_t get_joystick_repeat_initial_delay(void) {
+    switch (settings_get_input_repeat_speed(&G_Settings)) {
+        case 0: return 600;  // Slow
+        case 1: return 350;  // Normal
+        case 2: return 150;  // Fast
+        default: return 350;
+    }
+}
+
+static inline uint32_t get_joystick_repeat_interval(void) {
+    switch (settings_get_input_repeat_speed(&G_Settings)) {
+        case 0: return 250;  // Slow
+        case 1: return 120;  // Normal
+        case 2: return 60;   // Fast
+        default: return 120;
+    }
+}
+
+static inline uint32_t get_tdeck_repeat_delay(void) {
+    switch (settings_get_input_repeat_speed(&G_Settings)) {
+        case 0: return 800;  // Slow
+        case 1: return 500;  // Normal
+        case 2: return 200;  // Fast
+        default: return 500;
+    }
+}
+
+static inline uint32_t get_tdeck_repeat_rate(void) {
+    switch (settings_get_input_repeat_speed(&G_Settings)) {
+        case 0: return 200;  // Slow
+        case 1: return 100;  // Normal
+        case 2: return 50;   // Fast
+        default: return 100;
+    }
+}
 
 static uint16_t original_beacon_interval = 100;
 
@@ -740,6 +778,18 @@ static bool g_use_slide_transition = true;
 
 void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
                               View *view) {
+  if (settings_get_reduced_motion(&G_Settings)) {
+    // Skip animation - set final state immediately
+    lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
+    if (ready_cb) {
+      lv_anim_t anim;
+      lv_anim_init(&anim);
+      lv_anim_set_var(&anim, obj);
+      lv_anim_set_user_data(&anim, view);
+      ready_cb(&anim);
+    }
+    return;
+  }
   if (g_use_slide_transition && obj && lv_obj_is_valid(obj)) {
       lv_anim_t anim;
       lv_anim_init(&anim);
@@ -766,6 +816,11 @@ void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
 
 void display_manager_fade_in(lv_obj_t *obj) {
   if (!obj) return;
+  if (settings_get_reduced_motion(&G_Settings)) {
+    // Skip animation - set final state immediately
+    lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
+    return;
+  }
   if (g_use_slide_transition) {
       lv_obj_set_x(obj, LV_HOR_RES);
       lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
@@ -921,7 +976,6 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   // set status bar icon colors based on power save mode and AP state
   uint8_t theme = settings_get_menu_theme(&G_Settings);
   lv_color_t default_color = lv_color_hex(theme_palette_get_text_muted(theme));
-  lv_color_t gray_color = lv_color_hex(0x808080); // Gray for inactive state
   
   // WiFi icon color logic
   if (wifi_label && lv_obj_is_valid(wifi_label)) {
@@ -929,21 +983,20 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
       bool ap_should_be_active = settings_get_ap_enabled(&G_Settings) && !power_save_enabled;
       
       if (!ap_should_be_active) {
-          // AP is disabled or power saving is on - show gray
-          lv_obj_set_style_text_color(wifi_label, gray_color, 0);
+          lv_obj_set_style_text_color(wifi_label, default_color, 0);
       } else if (wifi_manager_is_evil_portal_active()) {
-          lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x0000FF), 0);
+          lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x60A5FA), 0);
       } else if (is_ap_active) {
-          lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x00FF00), 0);
+          lv_obj_set_style_text_color(wifi_label, lv_color_hex(0x22C55E), 0);
       } else {
           lv_obj_set_style_text_color(wifi_label, default_color, 0);
       }
   }
   
   if (power_save_enabled) {
-    lv_color_t orange_color = lv_color_hex(0xFFA500); // orange like apple uses
+    lv_color_t amber_color = lv_color_hex(0xF59E0B);
     if (battery_label && lv_obj_is_valid(battery_label)) {
-      lv_obj_set_style_text_color(battery_label, orange_color, 0);
+      lv_obj_set_style_text_color(battery_label, amber_color, 0);
     }
   } else {
     if (bt_label && lv_obj_is_valid(bt_label)) {
@@ -972,9 +1025,9 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
       }
 
       if (is_charging) {
-        battery_color = lv_color_hex(0x00FF00); // Green if charging
+        battery_color = lv_color_hex(0x22C55E);
       } else if (batteryPercentage <= 20) {
-        battery_color = lv_color_hex(0xFF0000); // Red if 20% or below
+        battery_color = lv_color_hex(0xEF4444);
       }
       lv_obj_set_style_text_color(battery_label, battery_color, 0);
     }
@@ -1020,13 +1073,14 @@ void display_manager_update_status_bar_color(void) {
   lv_color_t accent_color = lv_color_hex(theme_palette_get_accent(theme));
   lv_color_t status_bg_color = lv_color_hex(theme_palette_get_surface_alt(theme));
   lv_color_t text_color = lv_color_hex(theme_palette_get_text_muted(theme));
+  lv_color_t primary_text = lv_color_hex(theme_palette_get_text(theme));
   
   lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_style_border_color(status_bar, accent_color, LV_PART_MAIN);
 
   // Reset all status bar label colors when leaving rainbow mode
   if (mainlabel && lv_obj_is_valid(mainlabel)) {
-    lv_obj_set_style_text_color(mainlabel, text_color, 0);
+    lv_obj_set_style_text_color(mainlabel, primary_text, 0);
   }
   if (wifi_label && lv_obj_is_valid(wifi_label)) {
     lv_obj_set_style_text_color(wifi_label, text_color, 0);
@@ -1072,7 +1126,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-  lv_obj_set_style_border_width(status_bar, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_width(status_bar, 2, LV_PART_MAIN);
   lv_obj_set_style_border_color(status_bar, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
   lv_obj_set_style_border_opa(status_bar, LV_OPA_40, LV_PART_MAIN);
   lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
@@ -1085,8 +1139,10 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_SAFEAREA_HOR, 0);
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
-  lv_obj_set_style_text_color(mainlabel, status_text_color, 0);
-  lv_obj_set_style_text_font(mainlabel, gui_font_title(), 0);
+  lv_obj_set_style_text_color(mainlabel, lv_color_hex(theme_palette_get_text(theme)), 0);
+  lv_label_set_long_mode(mainlabel, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR * 2);
+  lv_obj_set_style_text_font(mainlabel, accessibility_get_font_body(), 0);
 
   lv_obj_t *right_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(right_container);
@@ -1098,22 +1154,22 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   sd_label = lv_label_create(right_container);
   lv_label_set_text(sd_label, LV_SYMBOL_SD_CARD);
   lv_obj_set_style_text_color(sd_label, status_text_color, 0);
-  lv_obj_set_style_text_font(sd_label, gui_font_caption(), 0);
+  lv_obj_set_style_text_font(sd_label, accessibility_get_font_small(), 0);
   lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
   bt_label = lv_label_create(right_container);
   lv_label_set_text(bt_label, LV_SYMBOL_BLUETOOTH);
   lv_obj_set_style_text_color(bt_label, status_text_color, 0);
-  lv_obj_set_style_text_font(bt_label, gui_font_caption(), 0);
+  lv_obj_set_style_text_font(bt_label, accessibility_get_font_small(), 0);
   lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
   wifi_label = lv_label_create(right_container);
   lv_label_set_text(wifi_label, LV_SYMBOL_WIFI);
   lv_obj_set_style_text_color(wifi_label, status_text_color, 0);
-  lv_obj_set_style_text_font(wifi_label, gui_font_caption(), 0);
+  lv_obj_set_style_text_font(wifi_label, accessibility_get_font_small(), 0);
   lv_obj_add_flag(wifi_label, LV_OBJ_FLAG_HIDDEN);
   battery_label = lv_label_create(right_container);
   lv_label_set_text(battery_label, "");
   lv_obj_set_style_text_color(battery_label, status_text_color, 0);
-  lv_obj_set_style_text_font(battery_label, gui_font_caption(), 0);
+  lv_obj_set_style_text_font(battery_label, accessibility_get_font_small(), 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
   bool HasBluetooth;
@@ -1315,9 +1371,14 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 3] __attribute__((aligned(4)));
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Use a single buffer on ESP32-C5 sized to provide a responsive feel on 240x320 displays */
-  /* width * 8 gives ~8 lines of buffer which balances responsiveness and RAM use */
+#if defined(CONFIG_SPIRAM)
+  /* PSRAM available: dual buffer for smoother 60Hz rendering */
+  static lv_color_t buf1[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
+  static lv_color_t buf2[CONFIG_TFT_WIDTH * 20] __attribute__((aligned(4)));
+#else
+  /* No PSRAM: small single buffer to save internal RAM */
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 5] __attribute__((aligned(4)));
+#endif
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   static lv_color_t buf1[CONFIG_TFT_WIDTH * 10] __attribute__((aligned(4)));
 #else
@@ -1344,8 +1405,15 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   /* single buffer mode: small buffer for low-memory cardputer */
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 2);
-#elif defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32S2)
-  /* single buffer mode: use width * 5 for responsive drawing without excessive RAM */
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_SPIRAM)
+  /* dual buffer with PSRAM for smooth 60Hz */
+  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
+#else
+  /* single buffer, no PSRAM */
+  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
+#endif
+#elif defined(CONFIG_IDF_TARGET_ESP32S2)
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
@@ -1617,6 +1685,24 @@ void display_manager_switch_view(View *view) {
   lv_async_call(dm_run_on_lvgl_async_cb, call);
 }
 
+void display_manager_show_lockscreen(void) {
+  if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+    s_lockscreen_return_view = dm.current_view;
+  } else {
+    s_lockscreen_return_view = NULL;
+  }
+  lockscreen_reset_input();
+  display_manager_switch_view(&lockscreen_view);
+}
+
+View *display_manager_get_lockscreen_return_view(void) {
+  return s_lockscreen_return_view;
+}
+
+void display_manager_clear_lockscreen_return_view(void) {
+  s_lockscreen_return_view = NULL;
+}
+
 void display_manager_destroy_current_view(void) {
   if (dm.current_view) {
     if (dm.current_view->destroy) {
@@ -1746,7 +1832,17 @@ void set_backlight_brightness(uint8_t percentage) {
 
         return;
     } else {
+        bool was_off = is_backlight_off;
         is_backlight_dimmed = false;      // <— also clear whenever we restore brightness
+        is_backlight_off = false;
+
+        // Lockscreen on wake
+        if (was_off && settings_get_lockscreen_enabled(&G_Settings) &&
+            settings_get_lockscreen_wake_lock(&G_Settings) &&
+            dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+            display_manager_show_lockscreen();
+        }
+
         if (status_update_timer)   lv_timer_resume(status_update_timer);
         if (status_update_timer)   lv_timer_set_period(status_update_timer, 1000);
         if (lvgl_task_handle)      vTaskResume(lvgl_task_handle);
@@ -1864,8 +1960,6 @@ void hardware_input_task(void *pvParameters) {
   static uint32_t tdeck_repeat_start_ms = 0;
   static bool tdeck_repeat_active = false;
   static char tdeck_repeat_char = 0;
-  static const uint32_t TDECK_REPEAT_DELAY_MS = 500;   // Initial delay before repeat
-  static const uint32_t TDECK_REPEAT_RATE_MS = 100;    // Repeat rate
 
   gpio_set_direction(46, GPIO_MODE_INPUT);
   
@@ -1930,9 +2024,10 @@ void hardware_input_task(void *pvParameters) {
               ESP_LOGD(TAG, "T-Deck key pressed: '%c'", current_char);
               
               touch_active = true;
-              if (is_backlight_dimmed) {
+              if (is_backlight_dimmed || is_backlight_off) {
                 set_backlight_brightness(100);
                 is_backlight_dimmed = false;
+                is_backlight_off = false;
                 vTaskDelay(pdMS_TO_TICKS(20));
               }
               
@@ -1954,7 +2049,7 @@ void hardware_input_task(void *pvParameters) {
         if (key_pressed && tdeck_repeat_char != 0) {
           if (!tdeck_repeat_active) {
             // Check if initial delay has passed
-            if (now_ms - tdeck_repeat_start_ms >= TDECK_REPEAT_DELAY_MS) {
+            if (now_ms - tdeck_repeat_start_ms >= get_tdeck_repeat_delay()) {
               tdeck_repeat_active = true;
               tdeck_repeat_start_ms = now_ms; // Reset for repeat rate
               
@@ -1962,7 +2057,7 @@ void hardware_input_task(void *pvParameters) {
             }
           } else {
             // Check if repeat rate has passed
-            if (now_ms - tdeck_repeat_start_ms >= TDECK_REPEAT_RATE_MS) {
+            if (now_ms - tdeck_repeat_start_ms >= get_tdeck_repeat_rate()) {
               tdeck_repeat_start_ms = now_ms; // Reset for next repeat
               
               ESP_LOGD(TAG, "T-Deck key repeat: '%c'", current_char);
@@ -2010,10 +2105,10 @@ void hardware_input_task(void *pvParameters) {
     if (encoder_peek_direction(&g_encoder) != ENCODER_DIR_NONE) {
         // treat an encoder turn as "touch"
         last_touch_time = xTaskGetTickCount();
-        if (is_backlight_dimmed) {
+        if (is_backlight_dimmed || is_backlight_off) {
           set_backlight_brightness(100);
           is_backlight_dimmed = false;
-          // Don't send input event when waking from dimmed state
+          is_backlight_off = false;
         } else {
           const int max_encoder_events_per_tick = 4;
           for (int i = 0; i < max_encoder_events_per_tick; i++) {
@@ -2042,10 +2137,10 @@ void hardware_input_task(void *pvParameters) {
     if (joystick_just_pressed(&enc_button)) {
         // treat an encoder click as "touch"
         last_touch_time = xTaskGetTickCount();
-        if (is_backlight_dimmed) {
+        if (is_backlight_dimmed || is_backlight_off) {
           set_backlight_brightness(100);
           is_backlight_dimmed = false;
-          // Don't send input event when waking from dimmed state
+          is_backlight_off = false;
         } else {
           // Only send input event if display was already active
           InputEvent ev = {
@@ -2062,9 +2157,10 @@ void hardware_input_task(void *pvParameters) {
         // check IO6 exit button (TEmbed C1101 only)
         if (joystick_just_pressed(&exit_button)) {
             last_touch_time = xTaskGetTickCount();
-            if (is_backlight_dimmed) {
+            if (is_backlight_dimmed || is_backlight_off) {
               set_backlight_brightness(100);
               is_backlight_dimmed = false;
+              is_backlight_off = false;
             } else {
               InputEvent ev = {
                   .type = INPUT_TYPE_EXIT_BUTTON,
@@ -2174,11 +2270,10 @@ void hardware_input_task(void *pvParameters) {
         if (key_value != 0) {
           bool skip_event = false;
           last_touch_time = xTaskGetTickCount();
-          if (is_backlight_dimmed) {
-            // CARDPUTER wake logic is keypress-to-wake, which is desired.
-            // No changes needed here as it's separate from S3T-Watch touch logic.
+          if (is_backlight_dimmed || is_backlight_off) {
             set_backlight_brightness(100);
             is_backlight_dimmed = false;
+            is_backlight_off = false;
             skip_event = true;
             vTaskDelay(pdMS_TO_TICKS(20));
           }
@@ -2254,9 +2349,10 @@ void hardware_input_task(void *pvParameters) {
           trackball_last_event_ms = now_ms;
           last_touch_time = xTaskGetTickCount();
           
-          if (is_backlight_dimmed) {
+          if (is_backlight_dimmed || is_backlight_off) {
             set_backlight_brightness(100);
             is_backlight_dimmed = false;
+            is_backlight_off = false;
           } else {
             InputEvent event;
             event.type = INPUT_TYPE_JOYSTICK;
@@ -2346,7 +2442,7 @@ void hardware_input_task(void *pvParameters) {
         }
 
         if (i == 0 || i == 2 || i == 3 || i == 4) {
-          joystick_repeat_next_ms[i] = dm_now_ms() + JOYSTICK_REPEAT_INITIAL_DELAY_MS;
+          joystick_repeat_next_ms[i] = dm_now_ms() + get_joystick_repeat_initial_delay();
         }
         continue;
       }
@@ -2369,7 +2465,7 @@ void hardware_input_task(void *pvParameters) {
         event.data.joystick_pressed = true;
 
         if (xQueueSend(input_queue, &event, 0) == pdTRUE) {
-          joystick_repeat_next_ms[i] = now_ms + JOYSTICK_REPEAT_INTERVAL_MS;
+          joystick_repeat_next_ms[i] = now_ms + get_joystick_repeat_interval();
         }
       }
     }
@@ -2381,7 +2477,7 @@ void hardware_input_task(void *pvParameters) {
         if (io_manager_get_cached_button_states(&states) == ESP_OK) {
             if (states.b1 && !prev_b1) {
                 last_touch_time = xTaskGetTickCount();
-                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                if (is_backlight_dimmed || is_backlight_off) { set_backlight_brightness(100); is_backlight_dimmed = false; is_backlight_off = false; }
                 const char *cmd = settings_get_io_btn_p10_cmd(&G_Settings);
                 if (cmd && cmd[0] != '\0') {
                     if (strncmp(cmd, "view:", 5) == 0) {
@@ -2431,7 +2527,7 @@ void hardware_input_task(void *pvParameters) {
             }
             if (states.b2 && !prev_b2) {
                 last_touch_time = xTaskGetTickCount();
-                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                if (is_backlight_dimmed || is_backlight_off) { set_backlight_brightness(100); is_backlight_dimmed = false; is_backlight_off = false; }
                 const char *cmd = settings_get_io_btn_p11_cmd(&G_Settings);
                 if (cmd && cmd[0] != '\0') {
                     if (strncmp(cmd, "view:", 5) == 0) {
@@ -2481,7 +2577,7 @@ void hardware_input_task(void *pvParameters) {
             }
             if (states.b3 && !prev_b3) {
                 last_touch_time = xTaskGetTickCount();
-                if (is_backlight_dimmed) { set_backlight_brightness(100); is_backlight_dimmed = false; }
+                if (is_backlight_dimmed || is_backlight_off) { set_backlight_brightness(100); is_backlight_dimmed = false; is_backlight_off = false; }
                 const char *cmd = settings_get_io_btn_p12_cmd(&G_Settings);
                 if (cmd && cmd[0] != '\0') {
                     if (strncmp(cmd, "view:", 5) == 0) {
@@ -2744,6 +2840,19 @@ void lvgl_tick_task(void *arg) {
           }
           last_mon = now;
       }
+
+      // Auto-lock timeout check
+      if (settings_get_lockscreen_enabled(&G_Settings)) {
+          uint16_t auto_lock_sec = settings_get_lockscreen_timeout_sec(&G_Settings);
+          if (auto_lock_sec > 0) {
+              if (now - last_touch_time > pdMS_TO_TICKS(auto_lock_sec * 1000u)) {
+                  if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+                      display_manager_show_lockscreen();
+                  }
+              }
+          }
+      }
+
       vTaskDelay(tick_interval);
   }
   vTaskDelete(NULL);

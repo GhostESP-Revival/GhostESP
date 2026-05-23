@@ -132,9 +132,20 @@ typedef enum {
     SETTING_GHOSTLINK_SPLIT_VIEW,
     SETTING_MENU_BG_SHADE,
     SETTING_MENU_ROUNDED,
+    SETTING_EPILEPSY_WARNING,
+    SETTING_FONT_SIZE,
+    SETTING_REDUCED_MOTION,
+    SETTING_INPUT_REPEAT_SPEED,
+    SETTING_HIGH_CONTRAST,
     SETTING_MENU_ITEM_BORDERS,
     SETTING_EXPORT_SETTINGS_SD,
     SETTING_IMPORT_SETTINGS_SD,
+    // Lockscreen settings
+    SETTING_LOCKSCREEN_ENABLED,
+    SETTING_LOCKSCREEN_WAKE,
+    SETTING_LOCKSCREEN_TYPE,
+    SETTING_LOCKSCREEN_TIMEOUT,
+    SETTING_LOCKSCREEN_CHANGE_PIN,
 } SettingsType;
 
 
@@ -267,7 +278,19 @@ typedef struct {
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
     uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
     bool menu_rounded;              // Rounded corners on menu items
+    bool epilepsy_warning_enabled;  // Show warning before flashing LED effects
+    uint8_t font_size;              // 0=Small, 1=Normal, 2=Large
+    bool reduced_motion;            // Disable animations
+    uint8_t input_repeat_speed;     // 0=Slow, 1=Normal, 2=Fast
+    bool high_contrast;             // High contrast color overrides
     bool menu_item_borders;          // Borders around main menu items
+
+    // Lockscreen settings
+    bool lockscreen_enabled;
+    uint8_t lockscreen_type;        // 1=PIN; kept for persisted settings compatibility
+    char lockscreen_obfuscated[32]; // Length-prefixed obfuscated PIN blob
+    uint16_t lockscreen_timeout_sec;   // Auto-lock after inactivity (0=off)
+    bool lockscreen_wake_lock;        // Lock on wake-from-sleep
 } FSettings;
 
 // Function declarations
@@ -500,9 +523,31 @@ void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade);
 uint8_t settings_get_menu_bg_shade(const FSettings *settings);
 void settings_set_menu_rounded(FSettings *settings, bool enabled);
 bool settings_get_menu_rounded(const FSettings *settings);
+void settings_set_epilepsy_warning_enabled(FSettings *settings, bool enabled);
+bool settings_get_epilepsy_warning_enabled(const FSettings *settings);
 
+void settings_set_font_size(FSettings *settings, uint8_t size);
+uint8_t settings_get_font_size(const FSettings *settings);
+void settings_set_reduced_motion(FSettings *settings, bool enabled);
+bool settings_get_reduced_motion(const FSettings *settings);
+void settings_set_input_repeat_speed(FSettings *settings, uint8_t speed);
+uint8_t settings_get_input_repeat_speed(const FSettings *settings);
+void settings_set_high_contrast(FSettings *settings, bool enabled);
+bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
+
+// Lockscreen getters and setters
+void settings_set_lockscreen_enabled(FSettings *settings, bool enabled);
+bool settings_get_lockscreen_enabled(const FSettings *settings);
+void settings_set_lockscreen_type(FSettings *settings, uint8_t type);
+uint8_t settings_get_lockscreen_type(const FSettings *settings);
+void settings_set_lockscreen_obfuscated(FSettings *settings, const char *obf);
+const char *settings_get_lockscreen_obfuscated(const FSettings *settings);
+void settings_set_lockscreen_timeout_sec(FSettings *settings, uint16_t sec);
+uint16_t settings_get_lockscreen_timeout_sec(const FSettings *settings);
+void settings_set_lockscreen_wake_lock(FSettings *settings, bool enabled);
+bool settings_get_lockscreen_wake_lock(const FSettings *settings);
 
 extern FSettings G_Settings;
 

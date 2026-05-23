@@ -53,6 +53,8 @@ list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
+list(APPEND image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/lock.c")
+list(REMOVE_DUPLICATES image_sources)
 file(GLOB_RECURSE axs15231b_sources "${CMAKE_SOURCE_DIR}/components/axs15231b/*.c")
 file(GLOB m5gfx_sources
     "${CMAKE_SOURCE_DIR}/components/M5GFX/src/*.cpp"

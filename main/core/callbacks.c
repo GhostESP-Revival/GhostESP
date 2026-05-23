@@ -23,6 +23,7 @@
 #include <esp_timer.h>  // For esp_timer_get_time
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "gui/toast.h"
 
 // prototypes for static inline helpers
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
@@ -1423,6 +1424,7 @@ static esp_err_t start_wardrive_channel_hopping(void) {
     err = esp_timer_start_periodic(wardrive_hop_timer, (uint64_t)interval_ms * 1000ULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start wardrive hop timer: %s", esp_err_to_name(err));
+        toast_show("Wardrive hop failed", TOAST_ERROR);
         return err;
     }
     ESP_LOGI(TAG,

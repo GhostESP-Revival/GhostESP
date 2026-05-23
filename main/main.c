@@ -333,6 +333,20 @@ cleanup:
 }
 #endif
 
+static void deferred_sd_init_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI(TAG, "Deferred SD Card init starting");
+    if (sd_card_init() != ESP_OK) {
+        ESP_LOGW(TAG, "Deferred SD Card init failed, skipping coredump autosave");
+        vTaskDelete(NULL);
+        return;
+    }
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    coredump_autosave_on_boot();
+#endif
+    vTaskDelete(NULL);
+}
+
 void app_main(void) {
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
@@ -573,11 +587,11 @@ void app_main(void) {
     }
 #endif
 
-    MEASURE_INIT_RAM("SD Card init", sd_card_init());
-
-#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
-    coredump_autosave_on_boot();
-#endif
+    // Deferred SD card init: run in a background task so the shared-SPI
+    // suspend/resume does not freeze the splash-screen animation.  The task
+    // sleeps long enough for the splash transition (900 ms hold + margin).
+    xTaskCreate(deferred_sd_init_task, "SD Init", 6144, NULL,
+                tskIDLE_PRIORITY + 1, NULL);
 
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {

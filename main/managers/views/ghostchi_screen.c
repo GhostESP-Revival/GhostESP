@@ -7,6 +7,7 @@
 #include "managers/ghostchi_activity.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/views/app_gallery_screen.h"
 #include "managers/views/error_popup.h"
 
@@ -1264,21 +1265,21 @@ void ghostchi_create(void) {
 
     s_bubble_label = lv_label_create(s_content);
     lv_label_set_long_mode(s_bubble_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(s_bubble_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_bubble_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(s_bubble_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_bg_opa(s_bubble_label, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_bubble_label, 0, 0);
 
     s_state_label = lv_label_create(s_content);
-    lv_obj_set_style_text_font(s_state_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_state_label, accessibility_get_font_title(), 0);
     lv_obj_set_style_text_color(s_state_label, lv_color_hex(color_text), 0);
 
     s_reason_label = lv_label_create(s_content);
-    lv_obj_set_style_text_font(s_reason_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_reason_label, accessibility_get_font_body(), 0);
     lv_obj_set_style_text_color(s_reason_label, lv_color_hex(color_muted), 0);
 
     s_hint_label = lv_label_create(s_content);
-    lv_obj_set_style_text_font(s_hint_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_hint_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(s_hint_label, lv_color_hex(color_muted), 0);
 
     s_touch_btn_left = lv_btn_create(s_content);
@@ -1314,9 +1315,9 @@ void ghostchi_create(void) {
     lv_obj_center(s_touch_btn_left_label);
     lv_obj_center(s_touch_btn_mid_label);
     lv_obj_center(s_touch_btn_right_label);
-    lv_obj_set_style_text_font(s_touch_btn_left_label, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_font(s_touch_btn_mid_label, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_font(s_touch_btn_right_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_touch_btn_left_label, accessibility_get_font_small(), 0);
+    lv_obj_set_style_text_font(s_touch_btn_mid_label, accessibility_get_font_small(), 0);
+    lv_obj_set_style_text_font(s_touch_btn_right_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(s_touch_btn_left_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_color(s_touch_btn_mid_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_color(s_touch_btn_right_label, lv_color_hex(0xFFFFFF), 0);
@@ -1333,18 +1334,18 @@ void ghostchi_create(void) {
         lv_obj_clear_flag(s_encoder_btns[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(s_encoder_btns[i], LV_OBJ_FLAG_HIDDEN);
         s_encoder_btn_labels[i] = lv_label_create(s_encoder_btns[i]);
-        lv_obj_set_style_text_font(s_encoder_btn_labels[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(s_encoder_btn_labels[i], accessibility_get_font_small(), 0);
         lv_obj_set_style_text_color(s_encoder_btn_labels[i], lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(s_encoder_btn_labels[i]);
     }
 
     for (int i = 0; i < 6; ++i) {
         s_stats[i][0] = lv_label_create(s_content);
-        lv_obj_set_style_text_font(s_stats[i][0], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(s_stats[i][0], accessibility_get_font_small(), 0);
         lv_obj_set_style_text_color(s_stats[i][0], lv_color_hex(color_muted), 0);
         lv_obj_set_style_text_align(s_stats[i][0], LV_TEXT_ALIGN_RIGHT, 0);
         s_stats[i][1] = lv_label_create(s_content);
-        lv_obj_set_style_text_font(s_stats[i][1], is_portrait_layout() ? &lv_font_montserrat_10 : &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(s_stats[i][1], is_portrait_layout() ? accessibility_get_font_small() : accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(s_stats[i][1], lv_color_hex(color_text), 0);
         lv_obj_set_style_text_align(s_stats[i][1], LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(s_stats[i][1], LV_LABEL_LONG_CLIP);
@@ -1372,12 +1373,12 @@ void ghostchi_create(void) {
     lv_obj_clear_flag(s_xp_fill, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     s_xp_left_label = lv_label_create(s_content);
-    lv_obj_set_style_text_font(s_xp_left_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_xp_left_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(s_xp_left_label, lv_color_hex(color_text), 0);
     lv_obj_add_flag(s_xp_left_label, LV_OBJ_FLAG_HIDDEN);
 
     s_xp_right_label = lv_label_create(s_content);
-    lv_obj_set_style_text_font(s_xp_right_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_xp_right_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(s_xp_right_label, lv_color_hex(color_muted), 0);
     lv_obj_add_flag(s_xp_right_label, LV_OBJ_FLAG_HIDDEN);
 

@@ -5,6 +5,7 @@
 #ifdef CONFIG_WITH_ETHERNET
 
 #include "managers/ethernet_manager.h"
+#include "gui/toast.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_eth.h"
@@ -53,6 +54,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
         s_eth_connected = true;
         esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
         ESP_LOGI(TAG, "Ethernet Link Up");
+        toast_show("Ethernet connected", TOAST_SUCCESS);
         ESP_LOGI(TAG, "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
                  mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
@@ -64,6 +66,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     case ETHERNET_EVENT_DISCONNECTED:
         s_eth_connected = false;
         ESP_LOGI(TAG, "Ethernet Link Down");
+        toast_show("Ethernet disconnected", TOAST_WARN);
         break;
     case ETHERNET_EVENT_START:
         ESP_LOGI(TAG, "Ethernet Started");
@@ -129,6 +132,7 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
     esp_netif_t *netif = event->esp_netif;
 
     ESP_LOGI(TAG, "Ethernet Got IP Address");
+    toast_show("Ethernet IP assigned", TOAST_SUCCESS);
     ESP_LOGI(TAG, "~~~~~~~~~~~");
     ESP_LOGI(TAG, "ETHIP:" IPSTR, IP2STR(&ip_info->ip));
     ESP_LOGI(TAG, "ETHMASK:" IPSTR, IP2STR(&ip_info->netmask));

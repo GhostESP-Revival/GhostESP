@@ -8,6 +8,7 @@
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
 #include "managers/sd_card_manager.h"
+#include "gui/toast.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -759,6 +760,9 @@ void pcap_file_close() {
       fclose(pcap_file);
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
+      if (pcap_file_path[0] != '\0') {
+        toast_show("PCAP saved", TOAST_SUCCESS);
+      }
     }
 
     s_capture_active = false;

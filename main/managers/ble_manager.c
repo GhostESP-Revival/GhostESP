@@ -264,6 +264,7 @@ static void ble_resume_networking(void) {
 
         esp_err_t err = ap_manager_init();
         if (err == ESP_OK) {
+            wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
         } else {
             ESP_LOGE(TAG_BLE, "Failed to reinit AP manager: 0x%X", (unsigned int)err);

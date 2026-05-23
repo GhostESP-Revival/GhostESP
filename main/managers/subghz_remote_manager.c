@@ -23,6 +23,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include "gui/toast.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1924,11 +1925,13 @@ tx_cleanup:
         ESP_LOGE(TAG, "TX failed: %s", esp_err_to_name(err));
         subghz_set_last_error("tx failed");
         subghz_hw_stop();
+        toast_show("SubGHz TX failed", TOAST_ERROR);
         return false;
     }
     subghz_hw_stop();
     subghz_set_last_error("none");
     ESP_LOGI(TAG, "TX complete");
+    toast_show("SubGHz TX complete", TOAST_SUCCESS);
     return true;
 }
 

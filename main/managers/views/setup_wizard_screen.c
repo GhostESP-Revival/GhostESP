@@ -4,6 +4,7 @@
 #include "managers/settings_manager.h"
 #include "managers/display_manager.h"
 #include "gui/screen_layout.h"
+#include "gui/accessibility_fonts.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "gui/lvgl_safe.h"
@@ -23,6 +24,8 @@ typedef enum {
     SETUP_STEP_THEME,
     SETUP_STEP_MENU_LAYOUT,
     SETUP_STEP_TERMINAL_COLOR,
+    SETUP_STEP_EPILEPSY_WARNING,
+    SETUP_STEP_ACCESSIBILITY,
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     SETUP_STEP_IDLE_ANIMATION,
 #endif
@@ -70,6 +73,10 @@ static uint8_t temp_menu_layout = 0;
 static uint8_t temp_terminal_color = 0;
 static uint8_t temp_timezone = 0;
 static uint8_t temp_display_timeout = 0;
+static uint8_t temp_epilepsy_warning = 1;
+static uint8_t temp_font_size = 1;
+static uint8_t temp_reduced_motion = 0;
+static uint8_t temp_high_contrast = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static uint8_t temp_idle_animation = 0;
 #endif
@@ -104,6 +111,18 @@ static const uint32_t terminal_color_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0
 static const char *idle_animation_options[] = {"Game of Life", "Ghost", "Starfield", "HUD", "Matrix", "Flying Ghosts", "Spiral", "Falling Leaves", "Bouncing Text"};
 #define IDLE_ANIMATION_COUNT 9
 #endif
+
+static const char *epilepsy_warning_options[] = {"Off", "On"};
+#define EPILEPSY_WARNING_COUNT 2
+
+static const char *font_size_options[] = {"Small", "Normal", "Large"};
+#define FONT_SIZE_COUNT 3
+
+static const char *repeat_speed_options[] = {"Slow", "Normal", "Fast"};
+#define REPEAT_SPEED_COUNT 3
+
+static const char *accessibility_bool_options[] = {"Off", "On"};
+#define ACCESSIBILITY_BOOL_COUNT 2
 
 static void setup_wizard_create(void);
 static void setup_wizard_destroy(void);
@@ -194,16 +213,18 @@ static void update_welcome_btn_focus(void) {
 #define USABLE_W LV_HOR_RES
 
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_12;
-    if (LV_VER_RES <= 280) return &lv_font_montserrat_14;
-    return &lv_font_montserrat_16;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    if (LV_VER_RES <= 280) return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
+    return fs == 0 ? &lv_font_montserrat_14 : (fs == 1 ? &lv_font_montserrat_16 : &lv_font_montserrat_18);
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 200) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 200) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_14);
+    return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
 }
 
 static void show_welcome_screen(void) {
@@ -466,23 +487,27 @@ static void show_complete_screen(void) {
              "AP: %s | Region: %s\n"
              "Theme: %s | Menu: %s\n"
              "Terminal: %s\n"
-             "Animation: %s",
+             "Animation: %s\n"
+             "Epilepsy Warn: %s",
              temp_ap_ssid[0] ? temp_ap_ssid : "(default)",
              wifi_countries[selected_country_index].name,
              theme_options[temp_theme],
              menu_layout_options[temp_menu_layout],
              terminal_color_options[temp_terminal_color],
-             idle_animation_options[temp_idle_animation]);
+             idle_animation_options[temp_idle_animation],
+             temp_epilepsy_warning ? "On" : "Off");
 #else
     snprintf(summary, sizeof(summary),
              "AP: %s | Region: %s\n"
              "Theme: %s | Menu: %s\n"
-             "Terminal: %s",
+             "Terminal: %s\n"
+             "Epilepsy Warn: %s",
              temp_ap_ssid[0] ? temp_ap_ssid : "(default)",
              wifi_countries[selected_country_index].name,
              theme_options[temp_theme],
              menu_layout_options[temp_menu_layout],
-             terminal_color_options[temp_terminal_color]);
+             terminal_color_options[temp_terminal_color],
+             temp_epilepsy_warning ? "On" : "Off");
 #endif
 
     lv_obj_t *info = lv_label_create(root);
@@ -557,6 +582,10 @@ static void finish_setup(void) {
     settings_set_menu_theme(&G_Settings, temp_theme);
     settings_set_menu_layout(&G_Settings, temp_menu_layout);
     settings_set_terminal_text_color(&G_Settings, terminal_color_values[temp_terminal_color]);
+    settings_set_epilepsy_warning_enabled(&G_Settings, temp_epilepsy_warning == 1);
+    settings_set_font_size(&G_Settings, temp_font_size);
+    settings_set_high_contrast(&G_Settings, temp_high_contrast == 1);
+    settings_set_reduced_motion(&G_Settings, temp_reduced_motion == 1);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     settings_set_status_idle_animation(&G_Settings, (IdleAnimation)temp_idle_animation);
 #endif
@@ -573,6 +602,7 @@ static void skip_setup(void) {
     
     ESP_LOGI(TAG, "Skipping setup wizard");
     settings_set_setup_complete(&G_Settings, true);
+    settings_set_menu_layout(&G_Settings, 2);
     settings_save(&G_Settings);
     display_manager_switch_view(&main_menu_view);
 }
@@ -664,6 +694,16 @@ static void setup_wizard_create(void) {
             show_option_screen("Terminal Color", terminal_color_options, TERMINAL_COLOR_COUNT, temp_terminal_color);
             break;
         }
+        case SETUP_STEP_EPILEPSY_WARNING:
+            temp_epilepsy_warning = settings_get_epilepsy_warning_enabled(&G_Settings) ? 1 : 0;
+            show_option_screen("Epilepsy Warning", epilepsy_warning_options, EPILEPSY_WARNING_COUNT, temp_epilepsy_warning);
+            break;
+        case SETUP_STEP_ACCESSIBILITY:
+            temp_font_size = settings_get_font_size(&G_Settings);
+            temp_high_contrast = settings_get_high_contrast(&G_Settings);
+            temp_reduced_motion = settings_get_reduced_motion(&G_Settings);
+            show_option_screen("Accessibility", font_size_options, FONT_SIZE_COUNT, temp_font_size);
+            break;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         case SETUP_STEP_IDLE_ANIMATION:
             temp_idle_animation = (uint8_t)settings_get_status_idle_animation(&G_Settings);
@@ -792,6 +832,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -812,16 +854,22 @@ static void setup_wizard_input_callback(InputEvent *event) {
                                     next_step = SETUP_STEP_TERMINAL_COLOR;
                                     prev_step = SETUP_STEP_THEME;
                                 } else if (current_step == SETUP_STEP_TERMINAL_COLOR) {
+                                    next_step = SETUP_STEP_EPILEPSY_WARNING;
+                                    prev_step = SETUP_STEP_MENU_LAYOUT;
+                                } else if (current_step == SETUP_STEP_EPILEPSY_WARNING) {
+                                    next_step = SETUP_STEP_ACCESSIBILITY;
+                                    prev_step = SETUP_STEP_TERMINAL_COLOR;
+                                } else if (current_step == SETUP_STEP_ACCESSIBILITY) {
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                     next_step = SETUP_STEP_IDLE_ANIMATION;
 #else
                                     next_step = SETUP_STEP_COMPLETE;
 #endif
-                                    prev_step = SETUP_STEP_MENU_LAYOUT;
+                                    prev_step = SETUP_STEP_EPILEPSY_WARNING;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                 } else if (current_step == SETUP_STEP_IDLE_ANIMATION) {
                                     next_step = SETUP_STEP_COMPLETE;
-                                    prev_step = SETUP_STEP_TERMINAL_COLOR;
+                                    prev_step = SETUP_STEP_ACCESSIBILITY;
 #endif
                                 }
                                 
@@ -948,7 +996,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
         }
 #endif
     } else if ((current_step == SETUP_STEP_TIMEZONE || current_step == SETUP_STEP_DISPLAY_TIMEOUT || current_step == SETUP_STEP_THEME || current_step == SETUP_STEP_MENU_LAYOUT ||
-                current_step == SETUP_STEP_TERMINAL_COLOR
+                current_step == SETUP_STEP_TERMINAL_COLOR || current_step == SETUP_STEP_EPILEPSY_WARNING || current_step == SETUP_STEP_ACCESSIBILITY
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 || current_step == SETUP_STEP_IDLE_ANIMATION
 #endif
@@ -975,18 +1023,26 @@ static void setup_wizard_input_callback(InputEvent *event) {
             prev_step = SETUP_STEP_THEME;
         } else if (current_step == SETUP_STEP_TERMINAL_COLOR) {
             count = TERMINAL_COLOR_COUNT;
+            next_step = SETUP_STEP_EPILEPSY_WARNING;
+            prev_step = SETUP_STEP_MENU_LAYOUT;
+        } else if (current_step == SETUP_STEP_EPILEPSY_WARNING) {
+            count = EPILEPSY_WARNING_COUNT;
+            next_step = SETUP_STEP_ACCESSIBILITY;
+            prev_step = SETUP_STEP_TERMINAL_COLOR;
+        } else if (current_step == SETUP_STEP_ACCESSIBILITY) {
+            count = FONT_SIZE_COUNT;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             next_step = SETUP_STEP_IDLE_ANIMATION;
 #else
             next_step = SETUP_STEP_COMPLETE;
 #endif
-            prev_step = SETUP_STEP_MENU_LAYOUT;
+            prev_step = SETUP_STEP_EPILEPSY_WARNING;
         }
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         else if (current_step == SETUP_STEP_IDLE_ANIMATION) {
             count = IDLE_ANIMATION_COUNT;
             next_step = SETUP_STEP_COMPLETE;
-            prev_step = SETUP_STEP_TERMINAL_COLOR;
+            prev_step = SETUP_STEP_ACCESSIBILITY;
         }
 #endif
 
@@ -1004,6 +1060,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1027,6 +1085,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1050,6 +1110,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1090,6 +1152,10 @@ void setup_wizard_reset_and_open(void) {
     temp_theme = 0;
     temp_menu_layout = 0;
     temp_terminal_color = 0;
+    temp_epilepsy_warning = 1;
+    temp_font_size = 1;
+    temp_reduced_motion = 0;
+    temp_high_contrast = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     temp_idle_animation = 0;
 #endif

@@ -47,7 +47,11 @@ static inline bool get_menu_rounded(void) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
-    return gui_font_for_height(ov->btn_h);
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (ov->btn_h <= 40) {
+        return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    }
+    return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
 }
 
 static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface, lv_color_t *surface_alt, lv_color_t *text) {

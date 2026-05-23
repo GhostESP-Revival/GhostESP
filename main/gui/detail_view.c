@@ -1,6 +1,7 @@
 #include "gui/detail_view.h"
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
@@ -14,7 +15,12 @@ uint32_t theme_palette_get_surface(uint8_t theme);
 uint32_t theme_palette_get_surface_alt(uint8_t theme);
 uint32_t theme_palette_get_text(uint8_t theme);
 uint32_t theme_palette_get_accent(uint8_t theme);
+uint32_t theme_palette_get_text_muted(uint8_t theme);
 bool theme_palette_is_bright(uint8_t theme);
+
+static inline bool get_menu_rounded(void) {
+    return settings_get_menu_rounded(&G_Settings);
+}
 
 typedef struct {
     lv_obj_t *obj;
@@ -52,6 +58,7 @@ struct detail_view_t {
     detail_info_item_t *info_items;
     int info_capacity;
     lv_coord_t content_h;
+    lv_coord_t item_radius;
     bool compact_layout;
     detail_nav_region_t nav_region;
 };
@@ -112,13 +119,13 @@ static inline lv_style_t *get_zebra_style(detail_view_t *dv, int idx) {
 }
 
 static inline const lv_font_t *get_item_font(const detail_view_t *dv) {
-    if (dv->compact_layout) return &lv_font_montserrat_10;
-    return (dv->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    if (dv->compact_layout) return accessibility_get_font_small();
+    return (dv->btn_h <= 40) ? accessibility_get_font_body() : accessibility_get_font_title();
 }
 
 static inline const lv_font_t *get_value_font(const detail_view_t *dv) {
-    if (dv->compact_layout) return &lv_font_montserrat_10;
-    return (dv->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    if (dv->compact_layout) return accessibility_get_font_small();
+    return (dv->btn_h <= 40) ? accessibility_get_font_body() : accessibility_get_font_title();
 }
 
 static inline lv_coord_t get_info_row_height(const detail_view_t *dv) {
@@ -228,8 +235,9 @@ static void detail_view_info_draw_event(lv_event_t *e) {
     lv_area_t obj_coords;
     lv_obj_get_coords(obj, &obj_coords);
 
-    lv_color_t surface, surface_alt, text;
-    get_theme_colors(NULL, &surface, &surface_alt, &text, NULL);
+    lv_color_t bg, surface, surface_alt, text;
+    get_theme_colors(&bg, &surface, &surface_alt, &text, NULL);
+    lv_color_t text_muted = lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings)));
 
     lv_draw_rect_dsc_t row_dsc;
     lv_draw_rect_dsc_init(&row_dsc);
@@ -243,8 +251,8 @@ static void detail_view_info_draw_event(lv_event_t *e) {
     lv_draw_label_dsc_t label_dsc;
     lv_draw_label_dsc_init(&label_dsc);
     label_dsc.font = get_item_font(dv);
-    label_dsc.color = text;
-    label_dsc.opa = LV_OPA_70;
+    label_dsc.color = text_muted;
+    label_dsc.opa = LV_OPA_COVER;
     label_dsc.flag = LV_TEXT_FLAG_EXPAND;
 
     lv_draw_label_dsc_t value_dsc;
@@ -273,7 +281,7 @@ static void detail_view_info_draw_event(lv_event_t *e) {
             .x2 = obj_coords.x2,
             .y2 = y2
         };
-        row_dsc.bg_color = (zebra && (i % 2 != 0)) ? surface_alt : surface;
+        row_dsc.bg_color = (zebra && (i % 2 != 0)) ? surface_alt : bg;
         lv_draw_rect(draw_ctx, &row_dsc, &row_area);
 
         const char *label = dv->info_items[i].label ? dv->info_items[i].label : "";
@@ -391,6 +399,8 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     bool small = (w <= 240 || h <= 240);
     dv->compact_layout = detail_view_should_use_compact_layout(w, h);
     dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : 34);
+    bool rounded = get_menu_rounded();
+    dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     dv->selected = -1;
     dv->first_selectable = -1;
     dv->info_count = 0;
@@ -415,13 +425,17 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_flex_flow(dv->container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(dv->container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     
+    lv_coord_t info_pad_h = dv->compact_layout ? 2 : GUI_SAFEAREA_HOR;
+    
     dv->info_panel = lv_obj_create(dv->container);
     lv_obj_set_width(dv->info_panel, LV_PCT(100));
     lv_obj_set_height(dv->info_panel, 0);
-    lv_obj_set_style_bg_color(dv->info_panel, surface_alt, 0);
+    lv_obj_set_style_bg_color(dv->info_panel, bg, 0);
     lv_obj_set_style_bg_opa(dv->info_panel, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(dv->info_panel, 0, 0);
     lv_obj_set_style_pad_top(dv->info_panel, dv->compact_layout ? 0 : 1, 0);
+    lv_obj_set_style_pad_left(dv->info_panel, info_pad_h, 0);
+    lv_obj_set_style_pad_right(dv->info_panel, info_pad_h, 0);
     lv_obj_set_style_pad_row(dv->info_panel, 0, 0);
     lv_obj_set_style_border_width(dv->info_panel, 0, 0);
     lv_obj_set_style_radius(dv->info_panel, 0, 0);
@@ -443,16 +457,19 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_clear_flag(dv->info_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(dv->info_canvas, detail_view_info_draw_event, LV_EVENT_DRAW_MAIN, dv);
     
+    lv_coord_t action_pad_h = dv->compact_layout ? 2 : GUI_SAFEAREA_HOR;
+    lv_coord_t action_pad_v = dv->compact_layout ? 1 : GUI_SAFEAREA_VER;
+    lv_coord_t action_row_gap = dv->compact_layout ? 1 : GUI_GRID;
+    
     dv->action_list = lv_obj_create(dv->container);
     lv_obj_set_width(dv->action_list, LV_PCT(100));
     lv_obj_set_flex_grow(dv->action_list, 1);
-    lv_obj_set_style_bg_color(dv->action_list, surface, 0);
-    lv_obj_set_style_pad_all(dv->action_list, 0, 0);
-    lv_obj_set_style_pad_top(dv->action_list, 0, 0);
-    lv_obj_set_style_pad_bottom(dv->action_list, 0, 0);
-    lv_obj_set_style_pad_left(dv->action_list, 0, 0);
-    lv_obj_set_style_pad_right(dv->action_list, 0, 0);
-    lv_obj_set_style_pad_row(dv->action_list, 0, 0);
+    lv_obj_set_style_bg_color(dv->action_list, bg, 0);
+    lv_obj_set_style_pad_top(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_left(dv->action_list, action_pad_h, 0);
+    lv_obj_set_style_pad_right(dv->action_list, action_pad_h, 0);
+    lv_obj_set_style_pad_row(dv->action_list, action_row_gap, 0);
     lv_obj_set_style_pad_column(dv->action_list, 0, 0);
     lv_obj_set_style_border_width(dv->action_list, 0, 0);
     lv_obj_set_style_radius(dv->action_list, 0, 0);
@@ -465,30 +482,30 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_style_set_bg_color(&dv->style_item, surface);
     lv_style_set_bg_opa(&dv->style_item, LV_OPA_COVER);
     lv_style_set_border_width(&dv->style_item, 0);
-    lv_style_set_radius(&dv->style_item, 0);
+    lv_style_set_radius(&dv->style_item, dv->item_radius);
     
     lv_style_init(&dv->style_item_alt);
     lv_style_set_bg_color(&dv->style_item_alt, surface_alt);
     lv_style_set_bg_opa(&dv->style_item_alt, LV_OPA_COVER);
     lv_style_set_border_width(&dv->style_item_alt, 0);
-    lv_style_set_radius(&dv->style_item_alt, 0);
+    lv_style_set_radius(&dv->style_item_alt, dv->item_radius);
     
     lv_style_init(&dv->style_selected);
     lv_style_set_bg_opa(&dv->style_selected, LV_OPA_COVER);
-    lv_style_set_radius(&dv->style_selected, 0);
+    lv_style_set_radius(&dv->style_selected, dv->item_radius);
     lv_style_set_bg_grad_dir(&dv->style_selected, LV_GRAD_DIR_NONE);
     
     lv_style_init(&dv->style_header);
     lv_style_set_bg_color(&dv->style_header, surface);
     lv_style_set_bg_opa(&dv->style_header, LV_OPA_30);
     lv_style_set_border_width(&dv->style_header, 0);
-    lv_style_set_radius(&dv->style_header, 0);
+    lv_style_set_radius(&dv->style_header, dv->item_radius);
     
     lv_style_init(&dv->style_divider);
     lv_style_set_bg_color(&dv->style_divider, accent);
     lv_style_set_bg_opa(&dv->style_divider, LV_OPA_40);
     lv_style_set_border_width(&dv->style_divider, 0);
-    lv_style_set_radius(&dv->style_divider, 0);
+    lv_style_set_radius(&dv->style_divider, dv->item_radius);
     
     display_manager_add_status_bar("Details");
     
@@ -556,10 +573,9 @@ void detail_view_add_action(detail_view_t *dv, const char *label, lv_event_cb_t 
     lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_top(btn, 0, 0);
     lv_obj_set_style_pad_bottom(btn, 0, 0);
-    lv_obj_set_style_pad_left(btn, dv->compact_layout ? 6 : 8, 0);
-    lv_obj_set_style_pad_right(btn, dv->compact_layout ? 6 : 8, 0);
+    lv_obj_set_style_pad_left(btn, dv->compact_layout ? 4 : GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_right(btn, dv->compact_layout ? 4 : GUI_SAFEAREA_VER, 0);
     lv_obj_set_style_border_width(btn, 0, 0);
-    lv_obj_set_style_radius(btn, 0, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_style(btn, get_zebra_style(dv, zebra_idx), 0);
     
@@ -619,7 +635,6 @@ void detail_view_add_header(detail_view_t *dv, const char *text) {
     lv_obj_set_width(btn, LV_PCT(100));
     lv_obj_set_height(btn, dv->btn_h);
     lv_obj_set_style_border_width(btn, 0, 0);
-    lv_obj_set_style_radius(btn, 0, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_style(btn, &dv->style_header, 0);
@@ -627,7 +642,7 @@ void detail_view_add_header(detail_view_t *dv, const char *text) {
     lv_obj_t *lbl = lv_label_create(btn);
     if (lbl) {
         lv_label_set_text(lbl, text ? text : "");
-        const lv_font_t *font = dv->compact_layout ? &lv_font_montserrat_10 : ((dv->btn_h <= 40) ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+        const lv_font_t *font = dv->compact_layout ? accessibility_get_font_small() : ((dv->btn_h <= 40) ? accessibility_get_font_body() : accessibility_get_font_title());
         lv_obj_set_style_text_font(lbl, font, 0);
         lv_color_t txt;
         get_theme_colors(NULL, NULL, NULL, &txt, NULL);
@@ -645,8 +660,12 @@ void detail_view_add_divider(detail_view_t *dv) {
     if (!ensure_capacity(dv, dv->count + 1)) return;
     
     lv_obj_t *line = lv_obj_create(dv->action_list);
-    lv_obj_set_size(line, LV_PCT(100), 2);
+    lv_obj_set_size(line, LV_PCT(100), dv->compact_layout ? 2 : 1);
     lv_obj_add_style(line, &dv->style_divider, 0);
+    if (!dv->compact_layout) {
+        lv_obj_set_style_pad_left(line, GUI_SAFEAREA_VER, 0);
+        lv_obj_set_style_pad_right(line, GUI_SAFEAREA_VER, 0);
+    }
     lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(line, LV_OBJ_FLAG_SCROLLABLE);
     
@@ -807,19 +826,40 @@ lv_obj_t *detail_view_get_selected_obj(detail_view_t *dv) {
 void detail_view_refresh_styles(detail_view_t *dv) {
     if (!dv) return;
     
-    lv_color_t bg, surface, surface_alt, text;
-    get_theme_colors(&bg, &surface, &surface_alt, &text, NULL);
+    lv_color_t bg, surface, surface_alt, text, accent;
+    get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
+    
+    bool rounded = get_menu_rounded();
+    dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     
     lv_obj_set_style_bg_color(dv->container, bg, 0);
-    lv_obj_set_style_bg_color(dv->info_panel, surface, 0);
-    lv_obj_set_style_bg_color(dv->action_list, surface, 0);
+    lv_obj_set_style_bg_color(dv->info_panel, bg, 0);
+    lv_obj_set_style_bg_color(dv->action_list, bg, 0);
+    
+    lv_coord_t action_pad_h = dv->compact_layout ? 2 : GUI_SAFEAREA_HOR;
+    lv_coord_t action_pad_v = dv->compact_layout ? 1 : GUI_SAFEAREA_VER;
+    lv_coord_t action_row_gap = dv->compact_layout ? 1 : GUI_GRID;
+    lv_obj_set_style_pad_top(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_left(dv->action_list, action_pad_h, 0);
+    lv_obj_set_style_pad_right(dv->action_list, action_pad_h, 0);
+    lv_obj_set_style_pad_row(dv->action_list, action_row_gap, 0);
+    
+    lv_coord_t info_pad_h = dv->compact_layout ? 2 : GUI_SAFEAREA_HOR;
+    lv_obj_set_style_pad_left(dv->info_panel, info_pad_h, 0);
+    lv_obj_set_style_pad_right(dv->info_panel, info_pad_h, 0);
     
     lv_style_set_bg_color(&dv->style_item, surface);
+    lv_style_set_radius(&dv->style_item, dv->item_radius);
     lv_style_set_bg_color(&dv->style_item_alt, surface_alt);
+    lv_style_set_radius(&dv->style_item_alt, dv->item_radius);
+    lv_style_set_radius(&dv->style_selected, dv->item_radius);
     lv_style_set_bg_color(&dv->style_header, surface);
     lv_style_set_bg_opa(&dv->style_header, LV_OPA_30);
+    lv_style_set_radius(&dv->style_header, dv->item_radius);
     lv_style_set_bg_color(&dv->style_divider, text);
     lv_style_set_bg_opa(&dv->style_divider, LV_OPA_20);
+    lv_style_set_radius(&dv->style_divider, dv->item_radius);
 
     detail_view_sync_info_canvas(dv);
     
@@ -834,6 +874,9 @@ void detail_view_refresh_styles(detail_view_t *dv) {
             lv_obj_add_style(obj, get_zebra_style(dv, zebra_idx), 0);
             zebra_idx++;
             
+            lv_obj_set_style_pad_left(obj, dv->compact_layout ? 4 : GUI_SAFEAREA_VER, 0);
+            lv_obj_set_style_pad_right(obj, dv->compact_layout ? 4 : GUI_SAFEAREA_VER, 0);
+            
             uint32_t child_cnt = lv_obj_get_child_cnt(obj);
             for (uint32_t c = 0; c < child_cnt; c++) {
                 lv_obj_t *child = lv_obj_get_child(obj, (int32_t)c);
@@ -841,6 +884,9 @@ void detail_view_refresh_styles(detail_view_t *dv) {
                     lv_obj_set_style_text_color(child, text, 0);
                 }
             }
+        } else if (dv->rows[i].type == DETAIL_ROW_DIVIDER) {
+            lv_obj_set_style_pad_left(obj, dv->compact_layout ? 0 : GUI_SAFEAREA_VER, 0);
+            lv_obj_set_style_pad_right(obj, dv->compact_layout ? 0 : GUI_SAFEAREA_VER, 0);
         }
     }
     

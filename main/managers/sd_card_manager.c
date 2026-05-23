@@ -23,6 +23,7 @@
 #include "freertos/task.h"
 #include "managers/status_display_manager.h"
 #include "managers/display_manager.h"
+#include "gui/toast.h"
 #include "lvgl_tft/disp_spi.h"
 
 #define MAX_PORTALS 32
@@ -327,6 +328,7 @@ static esp_err_t mount_virtual_storage(void) {
     esp_err_t ret = esp_vfs_fat_spiflash_mount_rw_wl("/mnt", "storage", &mount_config, &s_wl_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount virtual storage: %s", esp_err_to_name(ret));
+        toast_show("Virtual storage mount failed", TOAST_ERROR);
         return ret;
     }
 
@@ -334,6 +336,7 @@ static esp_err_t mount_virtual_storage(void) {
     ESP_LOGI(TAG, "Virtual storage mounted successfully at /mnt");
     s_mount_type = MOUNT_VIRTUAL;
     status_display_show_status("Virtual SD OK");
+    toast_show("Virtual storage mounted", TOAST_SUCCESS);
     return ESP_OK;
 }
 
@@ -485,7 +488,7 @@ esp_err_t sd_card_init(void) {
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
                                 &sd_card_manager.card);
-  if (ret != ESP_OK) {
+    if (ret != ESP_OK) {
     if (ret == ESP_FAIL) {
       printf("Failed to mount filesystem. If you want the card to be "
              "formatted, set format_if_mount_failed = true.\n");
@@ -494,6 +497,8 @@ esp_err_t sd_card_init(void) {
              "pull-up resistors in place.\n",
              esp_err_to_name(ret));
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
@@ -501,6 +506,7 @@ esp_err_t sd_card_init(void) {
   s_mount_type = MOUNT_SDMMC;
   sdmmc_card_print_info(sd_card_manager.card);
   printf("SD card initialized successfully\n");
+  toast_show("SD card mounted", TOAST_SUCCESS);
 
   sd_card_setup_directory_structure();
 
@@ -548,12 +554,15 @@ esp_err_t sd_card_init(void) {
              "pull-up resistors in place.\n",
              esp_err_to_name(ret));
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
   sd_card_manager.is_initialized = true;
   sdmmc_card_print_info(sd_card_manager.card);
   printf("SD card initialized successfully\n");
+  toast_show("SD card mounted", TOAST_SUCCESS);
 
   sd_card_setup_directory_structure();
 
@@ -847,6 +856,8 @@ esp_err_t sd_card_init(void) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
@@ -854,6 +865,7 @@ esp_err_t sd_card_init(void) {
   s_mount_type = MOUNT_SPI;
   sdmmc_card_print_info(sd_card_manager.card);
   printf("SD card initialized successfully in SPI mode.\n");
+  toast_show("SD card mounted", TOAST_SUCCESS);
 
   sd_card_setup_directory_structure();
 
@@ -875,6 +887,7 @@ esp_err_t sd_card_init(void) {
       // Restore backup config if init failed with loaded pins
       sd_card_manager = backup_config;
       printf("SD Card init failed with loaded pins. Check configuration.\n");
+      toast_show("SD mount failed", TOAST_ERROR);
       // Optionally: attempt init with known defaults here as a fallback?
       return ret;
   }
@@ -882,6 +895,7 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.is_initialized = true;
   sdmmc_card_print_info(sd_card_manager.card);
   printf("SD card initialized successfully\n");
+  toast_show("SD card mounted", TOAST_SUCCESS);
 
   sd_card_setup_directory_structure();
 
@@ -1070,9 +1084,11 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
         break;
       case SD_UNMOUNT_CONTEXT_USER:
         status_display_show_status("SD Unmounted");
+        toast_show("SD card unmounted", TOAST_INFO);
         break;
       case SD_UNMOUNT_CONTEXT_ERROR:
         status_display_show_status("SD Error");
+        toast_show("SD unmount error", TOAST_WARN);
         break;
       case SD_UNMOUNT_CONTEXT_SHUTDOWN:
         break;
@@ -1099,9 +1115,11 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
         break;
       case SD_UNMOUNT_CONTEXT_USER:
         status_display_show_status("SD Unmounted");
+        toast_show("SD card unmounted", TOAST_INFO);
         break;
       case SD_UNMOUNT_CONTEXT_ERROR:
         status_display_show_status("SD Error");
+        toast_show("SD unmount error", TOAST_WARN);
         break;
       case SD_UNMOUNT_CONTEXT_SHUTDOWN:
         // Don't show status during shutdown

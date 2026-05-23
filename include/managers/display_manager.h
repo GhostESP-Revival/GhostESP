@@ -68,6 +68,7 @@ extern View compass_view;
 extern View accelerometer_view;
 extern View wardriving_view;
 extern View ethernet_screen_view;
+extern View lockscreen_view;
 extern View *display_manager_previous_view;
 
 /* Function prototypes */
@@ -86,6 +87,21 @@ bool display_manager_register_view(View *view);
  * @brief Switch to a new view.
  */
 void display_manager_switch_view(View *view);
+
+/**
+ * @brief Switch to the lockscreen and remember the current view for unlock.
+ */
+void display_manager_show_lockscreen(void);
+
+/**
+ * @brief Return view captured when entering the lockscreen, or NULL.
+ */
+View *display_manager_get_lockscreen_return_view(void);
+
+/**
+ * @brief Clear the captured lockscreen return view.
+ */
+void display_manager_clear_lockscreen_return_view(void);
 
 void apply_power_management_config(bool power_save_enabled);
 

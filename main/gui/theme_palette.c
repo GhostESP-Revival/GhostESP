@@ -39,7 +39,7 @@ typedef enum {
 #define MENU_BG_SHADE_COUNT 4
 
 static const uint32_t s_shade_surfaces[MENU_BG_SHADE_COUNT][THEME_SURFACE_SLOT_COUNT] = {
-    {0x040404, 0x111111, 0x1E1E1E, 0xFFFFFF, 0x707070},
+    {0x000000, 0x111111, 0x1E1E1E, 0xFFFFFF, 0x707070},
     {0x080808, 0x1A1A1A, 0x282828, 0xFFFFFF, 0x808080},
     {0x101010, 0x222222, 0x303030, 0xFFFFFF, 0x909090},
     {0x181818, 0x2A2A2A, 0x383838, 0xFFFFFF, 0x999999},
@@ -113,12 +113,27 @@ uint32_t theme_palette_get(uint8_t theme, int slot) {
 }
 
 uint32_t theme_palette_get_accent(uint8_t theme) {
+    if (settings_get_high_contrast(&G_Settings)) {
+        return 0xFFFF00; // Bright yellow for maximum contrast
+    }
     return s_theme_accents[theme_palette_clamp(theme)];
 }
 
 static uint32_t theme_surface_get(uint8_t theme, theme_surface_slot_t slot) {
     (void)theme;
     if (slot < 0 || slot >= THEME_SURFACE_SLOT_COUNT) slot = THEME_SURFACE_BG;
+
+    if (settings_get_high_contrast(&G_Settings)) {
+        static const uint32_t high_contrast_surfaces[THEME_SURFACE_SLOT_COUNT] = {
+            0x000000,  // BG: pure black
+            0x000000,  // Surface: pure black
+            0x1A1A1A,  // SurfaceAlt: near-black
+            0xFFFFFF,  // Text: pure white
+            0xCCCCCC   // TextMuted: light gray
+        };
+        return high_contrast_surfaces[slot];
+    }
+
     uint8_t shade = settings_get_menu_bg_shade(&G_Settings);
     if (shade >= MENU_BG_SHADE_COUNT) shade = 1;
     return s_shade_surfaces[shade][slot];
@@ -145,6 +160,9 @@ uint32_t theme_palette_get_text_muted(uint8_t theme) {
 }
 
 bool theme_palette_is_bright(uint8_t theme) {
+    if (settings_get_high_contrast(&G_Settings)) {
+        return true; // Yellow accent is bright; selected text should be dark.
+    }
     return theme_color_luma(theme_palette_get_accent(theme_palette_clamp(theme))) >= 160U;
 }
 

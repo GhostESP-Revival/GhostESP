@@ -54,6 +54,7 @@ void wifi_deauth_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_pwn_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type);
+void wifi_airspace_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);

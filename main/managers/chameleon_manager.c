@@ -149,6 +149,7 @@ static void chameleon_resume_ap(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
         esp_err_t err_init = ap_manager_init();
         if (err_init == ESP_OK) {
+            wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
         }
         if (err_init != ESP_OK) {

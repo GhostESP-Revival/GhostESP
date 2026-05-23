@@ -6,6 +6,7 @@
 #include "managers/views/terminal_screen.h"
 
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/theme_palette_api.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
@@ -21,7 +22,11 @@ uint32_t theme_palette_get_text(uint8_t theme);
 
 static const char *TAG = "AppGalleryScreen";
 
-#define ANIM_DURATION 60 // ms, use the same value in both files
+static inline int get_app_anim_duration(void) {
+    return settings_get_reduced_motion(&G_Settings) ? 0 : 60;
+}
+
+#define ANIM_DURATION get_app_anim_duration()
 
 lv_obj_t *apps_container;
 static lv_obj_t *current_app_obj = NULL;
@@ -252,7 +257,7 @@ static void update_app_item(bool slide_left) {
     lv_obj_set_style_bg_color(current_app_obj, apps_surface_color, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(current_app_obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_border_width(current_app_obj, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_width(current_app_obj, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
     lv_obj_set_style_border_color(current_app_obj, app_items[app_idx].border_color, LV_PART_MAIN);
     lv_obj_set_style_radius(current_app_obj, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_app_obj, 0, LV_PART_MAIN);
@@ -303,7 +308,7 @@ static void update_app_item(bool slide_left) {
         const char *label_text = app_items[app_idx].name;
         if (app_items[app_idx].view == NULL) label_text = "< Back";
         lv_label_set_text(label, label_text);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(label, accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         apps_carousel_cache.label = label;
@@ -367,7 +372,7 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_style_shadow_width(card, 6, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_set_style_shadow_opa(card, LV_OPA_40, LV_PART_MAIN);
-        lv_obj_set_style_border_width(card, 2, LV_PART_MAIN);
+        lv_obj_set_style_border_width(card, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
         lv_obj_set_style_border_color(card, app_items[i].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(card, 15, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
@@ -407,7 +412,7 @@ static void create_apps_grid_menu(void) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
-        const lv_font_t *lbl_font = (ch <= 50 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+        const lv_font_t *lbl_font = accessibility_get_font_small();
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
 
@@ -445,7 +450,7 @@ static void create_apps_list_menu(void) {
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_bg_color(btn, apps_surface_color, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
         lv_obj_set_style_border_color(btn, app_items[i].border_color, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
@@ -480,7 +485,7 @@ static void create_apps_list_menu(void) {
         }
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
-        const lv_font_t *lbl_font = (button_height <= 38) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+        const lv_font_t *lbl_font = accessibility_get_font_body();
         lv_obj_set_style_text_font(label, lbl_font, 0);
 
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
@@ -566,9 +571,9 @@ static void create_apps_list_menu(void) {
 
         lv_obj_t *left_label = lv_label_create(left_nav_btn);
         lv_label_set_text(left_label, "<");
-        lv_obj_set_style_text_font(left_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(left_label, accessibility_get_font_display(), 0);
         if (btn_size < 40) {
-            lv_obj_set_style_text_font(left_label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(left_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(left_label, apps_text_color, 0);
         lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
@@ -584,9 +589,9 @@ static void create_apps_list_menu(void) {
 
         lv_obj_t *right_label = lv_label_create(right_nav_btn);
         lv_label_set_text(right_label, ">");
-        lv_obj_set_style_text_font(right_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(right_label, accessibility_get_font_display(), 0);
         if (btn_size < 40) {
-            lv_obj_set_style_text_font(right_label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(right_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(right_label, apps_text_color, 0);
         lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
@@ -659,7 +664,7 @@ static void select_app_item(int index, bool slide_left) {
     if (apps_layout == APPS_LAYOUT_GRID_CARDS && apps_grid_cards) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
             lv_obj_t *old = apps_grid_cards[selected_app_index];
-            lv_obj_set_style_border_width(old, 2, LV_PART_MAIN);
+            lv_obj_set_style_border_width(old, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
             lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
         }
         selected_app_index = index;
@@ -675,7 +680,7 @@ static void select_app_item(int index, bool slide_left) {
     if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_list_buttons[selected_app_index]) {
             lv_obj_t *old = apps_list_buttons[selected_app_index];
-            lv_obj_set_style_border_width(old, 2, LV_PART_MAIN);
+            lv_obj_set_style_border_width(old, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
             lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
         }
         selected_app_index = index;

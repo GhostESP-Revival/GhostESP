@@ -2,11 +2,14 @@
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/setup_wizard_screen.h"
 #include "managers/views/music_visualizer.h"
+#include "managers/views/lockscreen.h"
 #include "managers/settings_manager.h"
 #include "core/ghostesp_version.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include <stdio.h>
+
+extern const lv_img_dsc_t ghostesplogo;
 
 lv_obj_t *splash_screen;
 lv_obj_t *img;
@@ -14,7 +17,11 @@ lv_obj_t *img;
 static void fade_anim_cb(void *var, int32_t opacity);
 static void fade_out_cb(void *var);
 
-#define SPLASH_HOLD_MS 900
+static inline int get_splash_hold_ms(void) {
+    return settings_get_reduced_motion(&G_Settings) ? 50 : 900;
+}
+
+#define SPLASH_HOLD_MS get_splash_hold_ms()
 
 void splash_create(void) {
 
@@ -31,31 +38,25 @@ void splash_create(void) {
     lv_img_set_zoom(img, 384); //256 is 1x zoom - 384 is 1.5x
   }
   else {
-    lv_img_set_src(img, &Ghost_ESP);
+    lv_img_set_src(img, &ghostesplogo);
   }
   
   lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
 
 
   lv_obj_t *label1 = lv_label_create(splash_screen);
-  lv_label_set_text(label1, "GhostESP: Revival");
+  lv_label_set_text(label1, GHOSTESP_VERSION);
   lv_obj_set_style_text_color(label1, lv_color_hex(0xFFFFFF), 0);
   lv_obj_align_to(label1, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   
   lv_obj_t *label2 = lv_label_create(splash_screen);
-  lv_label_set_text(label2, GHOSTESP_VERSION);
-  lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align_to(label2, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
-  
-  lv_obj_t *label3 = lv_label_create(splash_screen);
-  // Special naming for somethingsomething template
   const char *build_name = CONFIG_BUILD_CONFIG_TEMPLATE;
   if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
     build_name = "The Banshee";
   }
-  lv_label_set_text_fmt(label3, "%s", build_name);
-  lv_obj_set_style_text_color(label3, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align_to(label3, label2, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+  lv_label_set_text_fmt(label2, "%s", build_name);
+  lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align_to(label2, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 
   lv_anim_t fade_anim;
   lv_anim_init(&fade_anim);
@@ -75,8 +76,12 @@ static void fade_anim_cb(void *var, int32_t opacity) {
 }
 
 static void fade_out_cb(void *var) {
+  (void)var;
   if (!settings_get_setup_complete(&G_Settings)) {
     display_manager_switch_view(&setup_wizard_view);
+  } else if (settings_get_lockscreen_enabled(&G_Settings)) {
+    lockscreen_reset_input();
+    display_manager_switch_view(&lockscreen_view);
   } else {
     display_manager_switch_view(&main_menu_view);
   }

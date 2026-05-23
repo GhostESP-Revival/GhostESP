@@ -78,12 +78,11 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 	lv_obj_set_size(p->container, width, height);
 	lv_obj_align(p->container, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_style_bg_color(p->container, popup_get_surface_color(), 0);
-	lv_obj_set_style_border_color(p->container, popup_get_accent_color(), 0);
-	lv_obj_set_style_border_width(p->container, 1, 0);
+	lv_obj_set_style_border_width(p->container, 0, 0);
 	lv_obj_set_style_radius(p->container, GUI_RADIUS_MD, 0);
-	lv_obj_set_style_shadow_width(p->container, 12, 0);
+	lv_obj_set_style_shadow_width(p->container, 8, 0);
 	lv_obj_set_style_shadow_color(p->container, lv_color_hex(0x000000), 0);
-	lv_obj_set_style_shadow_opa(p->container, LV_OPA_30, 0);
+	lv_obj_set_style_shadow_opa(p->container, LV_OPA_20, 0);
 	lv_obj_clear_flag(p->container, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_style_pad_top(p->container, GUI_SAFEAREA_VER, 0);
 	lv_obj_set_style_pad_bottom(p->container, GUI_SAFEAREA_VER, 0);
@@ -92,16 +91,19 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 
 	p->title_label = lv_label_create(p->container);
 	lv_obj_set_style_text_color(p->title_label, popup_get_text_color(), 0);
+	lv_obj_set_style_text_font(p->title_label, gui_font_title(), 0);
 	lv_obj_align(p->title_label, LV_ALIGN_TOP_MID, 0, 10);
 
 	p->body_label = lv_label_create(p->container);
 	lv_obj_set_style_text_color(p->body_label, popup_get_text_muted_color(), 0);
+	lv_obj_set_style_text_font(p->body_label, gui_font_body(), 0);
 	lv_obj_align(p->body_label, LV_ALIGN_CENTER, 0, -8);
 
 	p->btn_container = lv_obj_create(p->container);
 	lv_obj_set_size(p->btn_container, width - (DEFAULT_MARGIN * 2), 40);
 	lv_obj_align(p->btn_container, LV_ALIGN_BOTTOM_MID, 0, -8);
-	lv_obj_set_style_bg_color(p->btn_container, popup_get_surface_alt_color(), 0);
+	lv_obj_set_style_bg_opa(p->btn_container, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(p->btn_container, 0, 0);
 	lv_obj_clear_flag(p->btn_container, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_style_pad_all(p->btn_container, 0, 0);
 
@@ -148,12 +150,11 @@ lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int he
     	lv_obj_set_size(container, width, height);
 	lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
     	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
-	lv_obj_set_style_border_color(container, popup_get_accent_color(), 0);
-    lv_obj_set_style_border_width(container, 1, 0);
+    lv_obj_set_style_border_width(container, 0, 0);
     lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
-    lv_obj_set_style_shadow_width(container, 12, 0);
+    lv_obj_set_style_shadow_width(container, 8, 0);
     lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(container, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_opa(container, LV_OPA_20, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_top(container, GUI_SAFEAREA_VER, 0);
     lv_obj_set_style_pad_bottom(container, GUI_SAFEAREA_VER, 0);
@@ -167,32 +168,23 @@ lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, i
     if (!container) return NULL;
     lv_obj_t *btn = lv_btn_create(container);
     lv_obj_set_size(btn, btn_w, btn_h);
-    lv_color_t bg = popup_get_surface_alt_color();
-    lv_color_t border = popup_get_text_muted_color();
 
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_height(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_height(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_align(btn, align, x_ofs, y_ofs);
     if (cb) lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label_text ? label_text : "");
     if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
     lv_obj_center(lbl);
     return btn;
 }
@@ -200,7 +192,7 @@ lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, i
 lv_obj_t *popup_create_title_label(lv_obj_t *container, const char *title, const lv_font_t *font, lv_coord_t y_ofs) {
     if (!container) return NULL;
     lv_obj_t *lbl = lv_label_create(container);
-    if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_font(lbl, font ? font : gui_font_title(), 0);
     lv_obj_set_style_text_color(lbl, popup_get_text_color(), 0);
     lv_label_set_text(lbl, title ? title : "");
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y_ofs);
@@ -212,7 +204,7 @@ lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coor
     lv_obj_t *lbl = lv_label_create(container);
     if (width > 0) lv_obj_set_width(lbl, width);
     if (wrap) lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-    if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_font(lbl, font ? font : gui_font_body(), 0);
     lv_obj_set_style_text_color(lbl, popup_get_text_muted_color(), 0);
     lv_label_set_text(lbl, text ? text : "");
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y_ofs);
@@ -235,12 +227,13 @@ lv_obj_t *popup_add_button(popup_t *p, const char *label, lv_event_cb_t event_cb
 	int btn_w = (p->width - (DEFAULT_MARGIN * 2) - 8) / 2; // default width for up to 2 buttons
 	lv_obj_set_size(btn, btn_w, 32);
 	lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), 0);
-	lv_obj_set_style_border_color(btn, popup_get_text_muted_color(), 0);
-	lv_obj_set_style_border_width(btn, 1, 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_set_style_radius(btn, GUI_RADIUS_SM, 0);
 	lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, user_data);
 
 	lv_obj_t *lbl = lv_label_create(btn);
 	lv_label_set_text(lbl, label ? label : "");
+	lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
 	lv_obj_center(lbl);
 
 	// position buttons horizontally
@@ -288,7 +281,7 @@ void popup_set_button_selected(lv_obj_t *btn, bool selected) {
     if (selected) {
 		lv_color_t accent = popup_get_accent_color();
 		lv_obj_set_style_bg_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
-		lv_obj_set_style_border_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 		lv_obj_t *lbl = lv_obj_get_child(btn, 0);
 		if (lbl) {
 			if (popup_theme_is_bright()) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
@@ -296,9 +289,9 @@ void popup_set_button_selected(lv_obj_t *btn, bool selected) {
 		}
     } else {
 		lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
-		lv_obj_set_style_border_color(btn, popup_get_text_muted_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, popup_get_text_color(), 0);
+        if (lbl) lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
     }
 }
 

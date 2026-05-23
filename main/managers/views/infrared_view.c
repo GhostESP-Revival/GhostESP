@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "managers/views/keyboard_screen.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
+#include "managers/views/error_popup.h"
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
 #include "managers/status_display_manager.h"
@@ -777,10 +779,10 @@ static void dazzler_event_cb(lv_event_t *e) {
     dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(dazzler_popup);
     
-    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", &lv_font_montserrat_16, 15);
+    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", accessibility_get_font_body(), 15);
     (void)title;
     
-    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, &lv_font_montserrat_14, 45);
+    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, accessibility_get_font_small(), 45);
     lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 45);
     
@@ -2358,6 +2360,10 @@ static void command_event_execute(int idx) {
         }
         if (idx < 0 || idx >= uni_command_count) return;
 
+        if (settings_get_epilepsy_warning_enabled(&G_Settings)) {
+            error_popup_create("EPILEPSY WARNING\nRGB LED will flash\nduring IR transmission");
+        }
+
         transmitting_popup = popup_create_container(lv_scr_act(), 200, 60);
         lv_obj_center(transmitting_popup);
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
@@ -2540,10 +2546,10 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         }
     }
 
-    lv_obj_t *title_label = popup_create_title_label(popup, config->title, &lv_font_montserrat_16, 20);
+    lv_obj_t *title_label = popup_create_title_label(popup, config->title, accessibility_get_font_body(), 20);
     (void)title_label;
 
-    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, &lv_font_montserrat_14, 60);
+    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, accessibility_get_font_small(), 60);
     // center instruction text horizontally for both modes
     lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(instruction_label, LV_ALIGN_TOP_MID, 0, 60);
@@ -3264,13 +3270,13 @@ void create_signal_preview_popup(void)
     cancel_btn = popup_add_styled_button(signal_preview_popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
-    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", &lv_font_montserrat_16, 10);
+    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", accessibility_get_font_body(), 10);
     
     // Protocol info (use popup helpers for consistent layout)
     lv_coord_t popup_w = lv_obj_get_width(signal_preview_popup);
-    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 32);
-    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 48);
-    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, &lv_font_montserrat_14, 64);
+    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 32);
+    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 48);
+    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 64);
 
     // Set concise text
     if (!learned_signal.is_raw) {
@@ -3296,7 +3302,7 @@ void create_signal_preview_popup(void)
     // Raw signal info (use popup helper for consistent layout)
     lv_coord_t popup_w2 = lv_obj_get_width(signal_preview_popup);
     lv_coord_t raw_y = !learned_signal.is_raw ? 80 : 64; // if decoded, place below cmd (80), else at cmd position (64)
-    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, &lv_font_montserrat_14, raw_y);
+    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, accessibility_get_font_small(), raw_y);
     if (learned_signal.is_raw) {
         lv_label_set_text_fmt(raw_info, "%d timings", learned_signal.payload.raw.timings_size);
     } else {

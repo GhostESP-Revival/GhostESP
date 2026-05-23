@@ -6,6 +6,7 @@
 #include "managers/gps_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/wigle_manager.h"
+#include "gui/toast.h"
 #include "managers/views/terminal_screen.h"
 #include "sys/time.h"
 #include "vendor/GPS/MicroNMEA.h"
@@ -1036,6 +1037,7 @@ void csv_file_close() {
                 wigle_queue_add(csv_file_path);
             }
         }
+        toast_show("GPS log saved", TOAST_SUCCESS);
     }
     buffer_offset = 0;
     csv_header_pending_uart = false;
@@ -1292,6 +1294,7 @@ void csv_file_close_fast() {
                 wigle_queue_add(csv_file_path);
             }
         }
+        toast_show("GPS log saved", TOAST_SUCCESS);
     }
     if (csv_mutex != NULL) {
         vSemaphoreDelete(csv_mutex);

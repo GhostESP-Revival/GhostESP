@@ -6,6 +6,7 @@
 #include "managers/display_manager.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/options_view.h"
 #include "gui/screen_layout.h"
 #include "gui/popup.h"
@@ -338,8 +339,8 @@ static void show_running_popup_ex(const char *script_name, bool waiting_for_usb)
 
     badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
+    const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
 
     const char *title = waiting_for_usb ? "Waiting for USB..." : "BadUSB Running";
     badusb_popup_title_lbl = popup_create_title_label(badusb_running_popup, title, title_font, 12);

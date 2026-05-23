@@ -2,6 +2,7 @@
 #include "managers/views/main_menu_screen.h"
 #include "managers/display_manager.h"
 #include "gui/screen_layout.h"
+#include "gui/accessibility_fonts.h"
 #include "lvgl.h"
 #include <time.h>
 #include "managers/settings_manager.h"
@@ -168,21 +169,21 @@ void clock_create(void) {
     bool show_year_tz;
 
     if (content_h < 80) {
-        time_font      = &lv_font_montserrat_18;
-        secondary_font = &lv_font_montserrat_10;
-        small_font     = &lv_font_montserrat_10;
+        time_font      = accessibility_get_font_display();
+        secondary_font = accessibility_get_font_small();
+        small_font     = accessibility_get_font_small();
         row_gap        = 2;
         show_year_tz   = false;
     } else if (content_h < 120) {
-        time_font      = &lv_font_montserrat_24;
-        secondary_font = &lv_font_montserrat_12;
-        small_font     = &lv_font_montserrat_10;
+        time_font      = accessibility_get_font_display();
+        secondary_font = accessibility_get_font_body();
+        small_font     = accessibility_get_font_small();
         row_gap        = 4;
         show_year_tz   = true;
     } else {
-        time_font      = &lv_font_montserrat_40;
-        secondary_font = &lv_font_montserrat_14;
-        small_font     = &lv_font_montserrat_12;
+        time_font      = accessibility_get_font_display();
+        secondary_font = accessibility_get_font_body();
+        small_font     = accessibility_get_font_body();
         row_gap        = 6;
         show_year_tz   = true;
     }

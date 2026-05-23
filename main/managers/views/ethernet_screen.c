@@ -7,6 +7,7 @@
 #include "gui/detail_view.h"
 #include "gui/scan_status.h"
 #include "gui/screen_layout.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/options_view.h"
 #include "gui/theme_palette_api.h"
 #include "gui/lvgl_safe.h"
@@ -622,7 +623,7 @@ static void populate_poison_content(int sec) {
         lv_obj_t *item = lv_list_add_btn(s_poison_content_list, NULL,
                                          "Press SELECT to stop ARP poison");
         lv_obj_set_style_text_color(item, lv_color_hex(0xFF4444), 0);
-        lv_obj_set_style_text_font(item, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(item, accessibility_get_font_small(), 0);
         lv_obj_add_event_cb(item, on_poison_stop, LV_EVENT_CLICKED, NULL);
         return;
     }
@@ -640,7 +641,7 @@ static void populate_poison_content(int sec) {
         lv_obj_t *item = lv_list_add_btn(s_poison_content_list, NULL, text);
         lv_obj_set_style_bg_color(item, lv_color_hex(card_color), 0);
         lv_obj_set_style_bg_opa(item, LV_OPA_COVER, 0);
-        lv_obj_set_style_text_font(item, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(item, accessibility_get_font_small(), 0);
         lv_obj_set_style_text_color(item, lv_color_hex(text_color), 0);
         lv_obj_set_style_pad_ver(item, 4, 0);
     }
@@ -649,7 +650,7 @@ static void populate_poison_content(int sec) {
         lv_obj_set_style_bg_color(item, lv_color_hex(card_color), 0);
         lv_obj_set_style_bg_opa(item, LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(item, lv_color_hex(muted_color), 0);
-        lv_obj_set_style_text_font(item, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(item, accessibility_get_font_small(), 0);
     }
     if (sec < 3) s_poison_prev[sec] = cnt;
 }
@@ -1160,7 +1161,7 @@ static void build_poison_monitor(void) {
              s_poison.host_count, s_poison.domain_count, s_poison.cookie_count, s_poison.cred_count);
     lv_label_set_text(s_poison_stats_lbl, stats);
     lv_obj_set_style_text_color(s_poison_stats_lbl, lv_color_hex(muted_color), 0);
-    lv_obj_set_style_text_font(s_poison_stats_lbl, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_poison_stats_lbl, accessibility_get_font_small(), 0);
 
     // ── Tab bar ──────────────────────────────────────────────────────────────
     lv_obj_t *tab_bar = lv_obj_create(s_content);
@@ -1177,7 +1178,7 @@ static void build_poison_monitor(void) {
     for (int i = 0; i < 4; i++) {
         lv_obj_t *lbl = lv_label_create(tab_bar);
         lv_label_set_text(lbl, tab_names[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(lbl, accessibility_get_font_small(), 0);
         // i==0 active, i==3 Stop (dimmed red inactive)
         uint32_t col = (i == 0) ? accent_color
                      : (i == 3) ? 0x883333
