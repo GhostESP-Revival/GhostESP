@@ -16,7 +16,9 @@
 
 #include "attacks/ethernet/eth_arp_poison.h"
 #include "managers/ethernet_manager.h"
+#include "core/arp_scan_save.h"
 #include "core/glog.h"
+#include "scans/wifi/arp_scan.h"
 #include "core/esp_comm_manager.h"
 #include "esp_netif.h"
 #include "lwip/netif.h"
@@ -854,6 +856,28 @@ esp_err_t eth_arp_poison_start(void)
     }
 
     glog("[ARP Poison] Found %d hosts\n", s_host_count);
+
+    if (s_host_count > 0) {
+        arp_host_t save_hosts[MAX_HOSTS];
+        for (int i = 0; i < s_host_count; i++) {
+            ip4addr_ntoa_r(&s_hosts[i].ip, save_hosts[i].ip, sizeof(save_hosts[i].ip));
+            memcpy(save_hosts[i].mac, s_hosts[i].mac, 6);
+            save_hosts[i].is_active = true;
+        }
+
+        char saved_path[128];
+        arp_scan_save_input_t save_in = {
+            .subnet_prefix = subnet_prefix,
+            .iface = ARP_SCAN_IFACE_ETHERNET_POISON,
+            .scanner_ip = our_ip_str,
+            .hosts = save_hosts,
+            .host_count = (size_t)s_host_count,
+            .force_save = false,
+            .write_csv = false,
+        };
+        esp_err_t save_err = arp_scan_save_results(&save_in, saved_path, sizeof(saved_path));
+        arp_scan_save_report_status(save_err, saved_path[0] ? saved_path : NULL);
+    }
 
     xTaskCreate(arp_poison_task, "arp_poison", 2048, NULL, 5, &s_poison_task);
     xTaskCreate(dns_proxy_task,  "dns_proxy",  4096, NULL, 6, &s_dns_task);

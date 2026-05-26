@@ -43,6 +43,9 @@
 #endif
 #ifdef CONFIG_WITH_ETHERNET
 #include "managers/ethernet_manager.h"
+#include "core/arp_scan_save.h"
+#include "scans/wifi/arp_scan.h"
+#include "scans/ethernet/eth_arp_scan.h"
 #include "managers/ethernet/eth_comm_handler.h"
 #include "managers/ethernet/eth_fingerprint.h"
 #include "managers/ethernet/eth_utils.h"
@@ -2039,6 +2042,16 @@ void handle_eth_info_cmd(int argc, char **argv) {
 }
 
 void handle_eth_arp_cmd(int argc, char **argv) {
+    bool force_save = false;
+    bool write_csv = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0) {
+            force_save = true;
+        } else if (strcmp(argv[i], "--csv") == 0) {
+            write_csv = true;
+        }
+    }
+
     // Ensure Ethernet interface is initialized
     if (!ensure_eth_interface_up()) {
         return;
@@ -2078,88 +2091,66 @@ void handle_eth_arp_cmd(int argc, char **argv) {
 
     // Calculate subnet prefix (e.g., "192.168.1.")
     char subnet_prefix[16];
-    uint32_t ip = ip_info.ip.addr;
-    uint32_t netmask = ip_info.netmask.addr;
-    uint32_t network = ip & netmask;
-    
-    snprintf(subnet_prefix, sizeof(subnet_prefix), "%d.%d.%d.",
-             (int)((network >> 0) & 0xFF),
-             (int)((network >> 8) & 0xFF),
-             (int)((network >> 16) & 0xFF));
+    if (!eth_arp_build_subnet_prefix(ip_info.ip.addr, ip_info.netmask.addr,
+                                     subnet_prefix, sizeof(subnet_prefix))) {
+        glog("Failed to build subnet prefix\n");
+        return;
+    }
 
     g_eth_scan_cancel = false;
     glog("Starting ARP scan on Ethernet network %s0/24\n", subnet_prefix);
     glog("Scanning network using ARP requests...\n");
 
-    const int START_HOST = 1;
-    const int END_HOST = 254;
-    const int batch_size = 10;
-    int num_found = 0;
+    arp_host_t hosts[254];
+    int progress_current = 0;
+    eth_arp_scan_params_t scan_params = {
+        .lwip_netif = lwip_netif,
+        .subnet_prefix = subnet_prefix,
+        .hosts = hosts,
+        .max_hosts = sizeof(hosts) / sizeof(hosts[0]),
+        .found_count = 0,
+        .cancel = &g_eth_scan_cancel,
+        .progress_current = &progress_current,
+        .progress_total = ETH_ARP_SCAN_END_HOST - ETH_ARP_SCAN_START_HOST + 1,
+    };
 
-    // Scan the subnet in batches
-    for (int batch_start = START_HOST; batch_start <= END_HOST && !g_eth_scan_cancel; batch_start += batch_size) {
-        int batch_end = (batch_start + batch_size - 1 > END_HOST) ? END_HOST : batch_start + batch_size - 1;
-        
-        // Send batch of ARP requests
-        for (int host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
-            char current_ip[26];
-            snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-            
-            // Parse IP address
-            ip4_addr_t target_addr;
-            if (ip4addr_aton(current_ip, &target_addr)) {
-                // Send ARP request using lwIP
-                etharp_request(lwip_netif, &target_addr);
-            }
-            vTaskDelay(pdMS_TO_TICKS(10)); // Small delay between requests
-        }
-        if (g_eth_scan_cancel) break;
-        
-        // Wait for responses to arrive
-        for (int i = 0; i < 5 && !g_eth_scan_cancel; i++) {
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        
-        // Check ARP table for this batch
-        for (int host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
-            char current_ip[26];
-            snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-            
-            // Parse IP address
-            ip4_addr_t target_addr;
-            if (!ip4addr_aton(current_ip, &target_addr)) {
-                continue;
-            }
-            
-            // Search ARP table
-            struct eth_addr *eth_ret = NULL;
-            const ip4_addr_t *ip_ret = NULL;
-            s8_t arp_idx = etharp_find_addr(lwip_netif, &target_addr, &eth_ret, &ip_ret);
-            
-            if (arp_idx >= 0 && eth_ret) {
-                num_found++;
-                glog("  %-15s %02x:%02x:%02x:%02x:%02x:%02x\n",
-                     current_ip,
-                     eth_ret->addr[0], eth_ret->addr[1], eth_ret->addr[2],
-                     eth_ret->addr[3], eth_ret->addr[4], eth_ret->addr[5]);
-            }
-        }
-        
-        // Progress update
-        if (batch_end % 50 == 0 || batch_end == END_HOST) {
-            glog("Progress: Scanned %d/%d hosts, found %d active hosts\n", 
-                 batch_end - START_HOST + 1, END_HOST - START_HOST + 1, num_found);
-        }
+    eth_arp_scan_subnet_common(&scan_params);
+
+    for (size_t i = 0; i < scan_params.found_count; i++) {
+        glog("  %-15s %02x:%02x:%02x:%02x:%02x:%02x\n",
+             hosts[i].ip,
+             hosts[i].mac[0], hosts[i].mac[1], hosts[i].mac[2],
+             hosts[i].mac[3], hosts[i].mac[4], hosts[i].mac[5]);
     }
+
+    glog("Progress: Scanned %d/%d hosts, found %zu active hosts\n",
+         progress_current, scan_params.progress_total, scan_params.found_count);
 
     glog("\n=== ARP Scan Summary ===\n");
     glog("Network: %s0/24\n", subnet_prefix);
-    glog("Hosts scanned: %d (1-254)\n", END_HOST - START_HOST + 1);
-    glog("Active hosts found: %d\n", num_found);
-    if (num_found > 0) {
-        glog("Success rate: %.1f%%\n", (float)num_found / (END_HOST - START_HOST + 1) * 100.0f);
+    glog("Hosts scanned: %d (1-254)\n", scan_params.progress_total);
+    glog("Active hosts found: %zu\n", scan_params.found_count);
+    if (scan_params.found_count > 0) {
+        glog("Success rate: %.1f%%\n",
+             (float)scan_params.found_count / scan_params.progress_total * 100.0f);
     }
     glog("=======================\n");
+
+    char scanner_ip[16];
+    esp_ip4addr_ntoa(&ip_info.ip, scanner_ip, sizeof(scanner_ip));
+
+    char saved_path[128];
+    arp_scan_save_input_t save_in = {
+        .subnet_prefix = subnet_prefix,
+        .iface = ARP_SCAN_IFACE_ETHERNET,
+        .scanner_ip = scanner_ip,
+        .hosts = hosts,
+        .host_count = scan_params.found_count,
+        .force_save = force_save,
+        .write_csv = write_csv,
+    };
+    esp_err_t save_err = arp_scan_save_results(&save_in, saved_path, sizeof(saved_path));
+    arp_scan_save_report_status(save_err, saved_path[0] ? saved_path : NULL);
 }
 
 void handle_eth_ports_cmd(int argc, char **argv) {
@@ -3959,8 +3950,17 @@ void handle_scan_ports(int argc, char **argv) {
 }
 
 void handle_scan_arp(int argc, char **argv) {
+    arp_scan_run_options_t opts = {0};
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0) {
+            opts.force_save = true;
+        } else if (strcmp(argv[i], "--csv") == 0) {
+            opts.write_csv = true;
+        }
+    }
+
     glog("Starting ARP scan on local network...\n");
-    wifi_manager_arp_scan_subnet();
+    wifi_manager_arp_scan_subnet_ex(&opts);
     status_display_show_status("ARP Scan");
 }
 
@@ -4421,7 +4421,8 @@ void handle_help(int argc, char **argv) {
         glog("        (no range) : Scan common ports (default)\n\n");
         glog("scanarp\n");
         glog("    Description: Perform ARP scan on local network to discover active hosts\n");
-        glog("    Usage: scanarp\n\n");
+        glog("    Usage: scanarp [-s] [--csv]\n");
+        glog("    Options: -s force save to SD; --csv also write CSV file\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -4616,7 +4617,8 @@ void handle_help(int argc, char **argv) {
         printf("    Discovers: Apple devices, Chromecasts, printers, Windows PCs, routers, smart TVs\n\n");
         printf("etharp\n");
         printf("    Description: Perform ARP scan on local Ethernet network.\n");
-        printf("    Usage: etharp\n");
+        printf("    Usage: etharp [-s] [--csv]\n");
+        printf("    Options: -s force save to SD; --csv also write CSV file\n");
         printf("    Scans: Local subnet (1-254) to discover active hosts\n\n");
         printf("ethports\n");
         printf("    Description: Scan TCP ports on a target IP address.\n");

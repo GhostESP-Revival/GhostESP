@@ -4,6 +4,9 @@
 
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet_manager.h"
+#include "core/arp_scan_save.h"
+#include "scans/wifi/arp_scan.h"
+#include "scans/ethernet/eth_arp_scan.h"
 #include "core/glog.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,7 +25,6 @@
 #include <fcntl.h>
 
 // esp_netif_get_netif_impl is an internal ESP-IDF function not in public headers.
-// Forward-declare it the same way eth_arp_poison.c does at its line 43.
 void *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
 
 static const char *TAG = "EthScanAsync";
@@ -61,14 +63,11 @@ static const char *port_to_service(uint16_t port) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ARP scan task
-// Mirrors handle_eth_arp_cmd: sends ARP requests in batches of 10 across the
-// local /24 subnet derived from the interface IP & netmask, then reads the
-// lwIP ARP table and stores hits in s_results.arp_hosts[].
-// ---------------------------------------------------------------------------
 static void arp_scan_task(void *arg) {
     ESP_LOGI(TAG, "ARP scan task started");
+
+    char subnet_prefix[16] = {0};
+    char scanner_ip[16] = {0};
 
     if (!ethernet_manager_is_connected()) {
         ESP_LOGW(TAG, "Ethernet not connected, aborting ARP scan");
@@ -82,6 +81,8 @@ static void arp_scan_task(void *arg) {
             goto done;
         }
 
+        esp_ip4addr_ntoa(&ip_info.ip, scanner_ip, sizeof(scanner_ip));
+
         esp_netif_t *eth_netif = ethernet_manager_get_netif();
         if (eth_netif == NULL) {
             ESP_LOGW(TAG, "No netif, aborting ARP scan");
@@ -94,83 +95,65 @@ static void arp_scan_task(void *arg) {
             goto done;
         }
 
-        // Build subnet prefix exactly as commandline.c does: use network = ip & netmask
-        // The lwIP addresses are stored in little-endian byte order (addr byte 0 = octet 0).
-        uint32_t ip       = ip_info.ip.addr;
-        uint32_t netmask  = ip_info.netmask.addr;
-        uint32_t network  = ip & netmask;
-
-        char subnet_prefix[16];
-        snprintf(subnet_prefix, sizeof(subnet_prefix), "%d.%d.%d.",
-                 (int)((network >>  0) & 0xFF),
-                 (int)((network >>  8) & 0xFF),
-                 (int)((network >> 16) & 0xFF));
+        if (!eth_arp_build_subnet_prefix(ip_info.ip.addr, ip_info.netmask.addr,
+                                         subnet_prefix, sizeof(subnet_prefix))) {
+            ESP_LOGW(TAG, "Failed to build subnet prefix");
+            goto done;
+        }
 
         ESP_LOGI(TAG, "ARP scan: %s0/24", subnet_prefix);
 
-        const int START_HOST = 1;
-        const int END_HOST   = 254;
-        const int batch_size = 10;
+        arp_host_t hosts[64];
+        int progress_current = 0;
+        eth_arp_scan_params_t scan_params = {
+            .lwip_netif = lwip_netif,
+            .subnet_prefix = subnet_prefix,
+            .hosts = hosts,
+            .max_hosts = sizeof(hosts) / sizeof(hosts[0]),
+            .found_count = 0,
+            .cancel = &s_cancelled,
+            .progress_current = &progress_current,
+            .progress_total = ETH_ARP_SCAN_END_HOST - ETH_ARP_SCAN_START_HOST + 1,
+        };
 
-        s_results.progress_total   = END_HOST - START_HOST + 1;
-        s_results.progress_current = 0;
+        s_results.progress_total = scan_params.progress_total;
+        eth_arp_scan_subnet_common(&scan_params);
 
-        for (int batch_start = START_HOST;
-             batch_start <= END_HOST && !s_cancelled;
-             batch_start += batch_size) {
-
-            int batch_end = batch_start + batch_size - 1;
-            if (batch_end > END_HOST) batch_end = END_HOST;
-
-            // Send ARP requests for this batch
-            for (int host = batch_start; host <= batch_end && !s_cancelled; host++) {
-                char current_ip[26];
-                snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-
-                ip4_addr_t target_addr;
-                if (ip4addr_aton(current_ip, &target_addr)) {
-                    etharp_request(lwip_netif, &target_addr);
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-
-            if (s_cancelled) break;
-
-            // Wait for ARP replies (5 × 50 ms = 250 ms)
-            for (int i = 0; i < 5 && !s_cancelled; i++) {
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-
-            // Check ARP table for each host in the batch
-            for (int host = batch_start; host <= batch_end && !s_cancelled; host++) {
-                char current_ip[26];
-                snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-
-                ip4_addr_t target_addr;
-                if (!ip4addr_aton(current_ip, &target_addr)) {
-                    continue;
-                }
-
-                struct eth_addr    *eth_ret = NULL;
-                const ip4_addr_t   *ip_ret  = NULL;
-                s8_t arp_idx = etharp_find_addr(lwip_netif, &target_addr, &eth_ret, &ip_ret);
-
-                if (arp_idx >= 0 && eth_ret) {
-                    if (s_results.arp_count < 64) {
-                        eth_arp_result_t *r = &s_results.arp_hosts[s_results.arp_count];
-                        strlcpy(r->ip_str, current_ip, sizeof(r->ip_str));
-                        memcpy(r->mac, eth_ret->addr, 6);
-                        r->hostname[0] = '\0'; // hostname resolution not attempted
-                        s_results.arp_count++;
-                    }
-                }
-
-                s_results.progress_current = host - START_HOST + 1;
-            }
+        s_results.arp_count = (int)scan_params.found_count;
+        s_results.progress_current = progress_current;
+        for (int i = 0; i < s_results.arp_count && i < 64; i++) {
+            eth_arp_result_t *r = &s_results.arp_hosts[i];
+            strlcpy(r->ip_str, hosts[i].ip, sizeof(r->ip_str));
+            memcpy(r->mac, hosts[i].mac, 6);
+            r->hostname[0] = '\0';
         }
     }
 
 done:
+    if (subnet_prefix[0] && !s_cancelled) {
+        arp_host_t hosts[64];
+        size_t count = 0;
+        for (int i = 0; i < s_results.arp_count && i < 64; i++) {
+            strlcpy(hosts[i].ip, s_results.arp_hosts[i].ip_str, sizeof(hosts[i].ip));
+            memcpy(hosts[i].mac, s_results.arp_hosts[i].mac, 6);
+            hosts[i].is_active = true;
+            count++;
+        }
+
+        char saved_path[128];
+        arp_scan_save_input_t save_in = {
+            .subnet_prefix = subnet_prefix,
+            .iface = ARP_SCAN_IFACE_ETHERNET,
+            .scanner_ip = scanner_ip[0] ? scanner_ip : NULL,
+            .hosts = count > 0 ? hosts : NULL,
+            .host_count = count,
+            .force_save = false,
+            .write_csv = false,
+        };
+        esp_err_t save_err = arp_scan_save_results(&save_in, saved_path, sizeof(saved_path));
+        arp_scan_save_report_status(save_err, saved_path[0] ? saved_path : NULL);
+    }
+
     s_results.done = true;
     s_done         = true;
     s_running      = false;
@@ -178,7 +161,6 @@ done:
     ESP_LOGI(TAG, "ARP scan done: %d hosts found", s_results.arp_count);
     vTaskDelete(NULL);
 }
-
 // ---------------------------------------------------------------------------
 // Port scan task
 // Mirrors handle_eth_ports_cmd:

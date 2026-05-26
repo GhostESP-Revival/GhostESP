@@ -28,6 +28,7 @@
 // Local mode: device has physical ethernet hardware
 #ifdef CONFIG_WITH_ETHERNET
 #define ETH_HAS_LOCAL 1
+#include "core/arp_scan_save.h"
 #include "managers/ethernet_manager.h"
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet/eth_fingerprint.h"
@@ -1042,6 +1043,16 @@ static void build_arp_list(void) {
     }
     if (s_scan.arp_count == 0)
         options_view_add_item(s_action_ov, "No hosts found", NULL, NULL);
+#ifdef ETH_HAS_LOCAL
+    {
+        const char *saved = arp_scan_save_last_path();
+        if (saved && saved[0]) {
+            char save_label[96];
+            snprintf(save_label, sizeof(save_label), "Saved: %s", saved);
+            options_view_add_item(s_action_ov, save_label, NULL, NULL);
+        }
+    }
+#endif
     options_view_add_back_row(s_action_ov, on_back_to_dashboard, NULL);
     int sel = (s_selected_arp_host >= 0 && s_selected_arp_host < s_scan.arp_count)
               ? s_selected_arp_host : 0;

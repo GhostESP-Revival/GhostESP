@@ -49,11 +49,24 @@ arp_scanner_ctx_t *arp_scanner_init(void);
 void arp_scanner_cleanup(arp_scanner_ctx_t *ctx);
 
 /**
+ * @brief Scan run options for ARP subnet scan
+ */
+typedef struct {
+    bool force_save;
+    bool write_csv;
+} arp_scan_run_options_t;
+
+/**
  * @brief Scan subnet for active hosts using ARP
  * 
  * @return true on success, false on failure
  */
 bool arp_scan_subnet(void);
+
+/**
+ * @brief Scan subnet with optional save flags
+ */
+bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts);
 
 /**
  * @brief Print ARP scan results

@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include "scans/wifi/arp_scan.h"
 
 #ifndef DNS_SERVER_HANDLE_T_DEFINED
 typedef struct dns_server_handle *dns_server_handle_t;
@@ -240,6 +241,7 @@ bool scan_ip_udp_port_range(const char *target_ip, uint16_t start_port,
 
 // ARP scan functions (wrapper that delegates to arp_scan module)
 bool wifi_manager_arp_scan_subnet(void);
+bool wifi_manager_arp_scan_subnet_ex(const arp_scan_run_options_t *opts);
 
 extern const uint16_t COMMON_PORTS[];
 extern const size_t NUM_PORTS;

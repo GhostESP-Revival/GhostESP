@@ -25,6 +25,20 @@ When initialized, GhostESP creates the following directory structure:
 └── nfc/            # NFC card data (if enabled)
 ```
 
+### Scan results (`scans/`)
+
+When **Auto Save Scans** is enabled (default), text scan outputs are written under `/mnt/ghostesp/scans/` with auto-incrementing filenames:
+
+| Command | Filename pattern |
+|---------|------------------|
+| `scanarp` | `arp_scan_wifi_<N>.txt` (optional `.csv` with `--csv`) |
+| `etharp` | `arp_scan_eth_<N>.txt` (optional `.csv` with `--csv`) |
+| ARP poison host discovery | `arp_scan_eth_poison_<N>.txt` |
+
+Use `-s` to save even when auto-save is disabled. Saved files include interface, subnet, scanner IP, timestamp, and OUI vendor when available.
+
+Disable auto-save with `set auto_save_scans false` or from **Settings → Auto Save Scans** on display builds.
+
 ## Web Serial Interface
 
 For the easiest file management experience, use the **Web Serial Interface** at:

@@ -2546,6 +2546,10 @@ bool wifi_manager_arp_scan_subnet(void) {
     return arp_scan_subnet();
 }
 
+bool wifi_manager_arp_scan_subnet_ex(const arp_scan_run_options_t *opts) {
+    return arp_scan_subnet_ex(opts);
+}
+
 // Wrapper function that delegates to port_scan module
 void scan_ports_on_host(const char *target_ip, host_result_t *result) {
     // Cast host_result_t to port_scan_result_t since they have the same structure
