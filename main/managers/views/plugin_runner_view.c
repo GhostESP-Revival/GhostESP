@@ -29,7 +29,10 @@ static lv_timer_t *s_launch_timer = NULL;
 #define PLUGIN_RUNNER_OUTPUT_BUF_SIZE 2048
 static char *s_output_buf = NULL;
 static bool s_touch_started = false;
+static bool s_touch_scrolling = false;
 static lv_point_t s_touch_start = {0};
+static lv_point_t s_touch_last = {0};
+static lv_obj_t *s_touch_scroll_target = NULL;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
@@ -274,13 +277,37 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
 
     const lv_indev_data_t *data = &event->data.touch_data;
     if (data->state == LV_INDEV_STATE_PR) {
-        s_touch_started = true;
-        s_touch_start = data->point;
+        if (!s_touch_started) {
+            s_touch_started = true;
+            s_touch_scrolling = false;
+            s_touch_start = data->point;
+            s_touch_last = data->point;
+            s_touch_scroll_target = NULL;
+            return false;
+        }
+        int total_dx = data->point.x - s_touch_start.x;
+        int total_dy = data->point.y - s_touch_start.y;
+        int dy = data->point.y - s_touch_last.y;
+        s_touch_last = data->point;
+        if ((s_touch_scrolling || (abs(total_dy) > PLUGIN_RUNNER_SCROLL_THRESHOLD && abs(total_dy) >= abs(total_dx))) && dy != 0) {
+            if (!s_touch_scroll_target) s_touch_scroll_target = find_scrollable_at(&s_touch_start);
+            if (!s_touch_scroll_target) s_touch_scroll_target = find_scrollable_at(&data->point);
+            if (s_touch_scroll_target && lv_obj_is_valid(s_touch_scroll_target)) {
+                s_touch_scrolling = true;
+                lv_obj_scroll_by_bounded(s_touch_scroll_target, 0, dy, LV_ANIM_OFF);
+                return true;
+            }
+        }
         return false;
     }
 
     if (data->state != LV_INDEV_STATE_REL || !s_touch_started) return false;
     s_touch_started = false;
+    s_touch_scroll_target = NULL;
+    if (s_touch_scrolling) {
+        s_touch_scrolling = false;
+        return true;
+    }
 
     int dx = data->point.x - s_touch_start.x;
     int dy = data->point.y - s_touch_start.y;
@@ -380,6 +407,8 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
+    s_touch_scrolling = false;
+    s_touch_scroll_target = NULL;
     s_root = gui_screen_create_root(NULL, "SD App", lv_color_hex(0x121212), LV_OPA_COVER);
     plugin_runner_view.root = s_root;
     display_manager_add_status_bar("SD App");
@@ -439,6 +468,8 @@ void plugin_runner_view_destroy(void) {
     s_title = NULL;
     s_output = NULL;
     s_touch_started = false;
+    s_touch_scrolling = false;
+    s_touch_scroll_target = NULL;
     free(s_output_buf);
     s_output_buf = NULL;
     plugin_runner_view.root = NULL;

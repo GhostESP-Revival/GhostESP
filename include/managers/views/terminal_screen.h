@@ -10,6 +10,10 @@ extern View terminal_view;
 extern lv_timer_t *terminal_update_timer;
 
 void terminal_view_add_text(const char *text);
+size_t terminal_view_log_count(void);
+bool terminal_view_log_get(size_t index, char *out, size_t out_len);
+size_t terminal_view_log_count(void);
+bool terminal_view_log_get(size_t index, char *out, size_t out_len);
 
 void terminal_view_create(void);
 

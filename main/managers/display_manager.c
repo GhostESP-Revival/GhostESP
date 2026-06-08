@@ -63,10 +63,10 @@ uint32_t theme_palette_get_text_muted(uint8_t theme);
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE_SOMETHINGSOMETHING) || defined(CONFIG_BUILD_CONFIG_TEMPLATE_SOMETHINGSOMETHING2)
 #define LVGL_TICK_TASK_STACK_SIZE 8192
 #else
-#define LVGL_TICK_TASK_STACK_SIZE 5120
+#define LVGL_TICK_TASK_STACK_SIZE 8192
 #endif
 #else
-#define LVGL_TICK_TASK_STACK_SIZE 5120
+#define LVGL_TICK_TASK_STACK_SIZE 8192
 #endif
 #else
 #define LVGL_TICK_TASK_STACK_SIZE 8192
@@ -1940,7 +1940,8 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Audio Player") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
-          strcmp(view_name, "SD Browser") == 0);
+          strcmp(view_name, "SD Browser") == 0 ||
+          strcmp(view_name, "GhostScript Runner") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include "managers/nfc/ndef.h"
+#include "managers/ghostscript_runtime.h"
 #include <stdbool.h>
 
 static size_t append_str(char **p, size_t *cap, const char *s) {
@@ -619,6 +620,12 @@ char* ndef_build_details_from_message(const uint8_t* ndef_msg,
         if (flags & 0x40) break;
     }
 
+    char nfc_payload[64];
+    int off = snprintf(nfc_payload, sizeof(nfc_payload), "%s|", card_label ? card_label : "NTAG2xx");
+    for (uint8_t i = 0; i < uid_len && off < (int)sizeof(nfc_payload) - 4; ++i)
+        off += snprintf(nfc_payload + off, sizeof(nfc_payload) - off, "%02X", uid[i]);
+    ghostscript_emit_event_escaped("nfc_tag", nfc_payload);
+
     return out;
 }
 
@@ -649,6 +656,12 @@ char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
     // trim trailing newlines
     while (w > out && (*(w - 1) == '\n' || *(w - 1) == '\r')) { *(--w) = '\0'; cap++; }
     append_str(&w, &cap, "\n");
+
+    char nfc_payload[64];
+    int off = snprintf(nfc_payload, sizeof(nfc_payload), "%s|", card_label ? card_label : "TAG");
+    for (uint8_t i = 0; i < uid_len && off < (int)sizeof(nfc_payload) - 4; ++i)
+        off += snprintf(nfc_payload + off, sizeof(nfc_payload) - off, "%02X", uid[i]);
+    ghostscript_emit_event_escaped("nfc_tag", nfc_payload);
 
     return out;
 }

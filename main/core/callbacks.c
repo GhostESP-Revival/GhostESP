@@ -6,6 +6,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -833,6 +834,10 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
                          e->ap[0], e->ap[1], e->ap[2], e->ap[3], e->ap[4], e->ap[5]);
                 glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
                      ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
+                char hs_payload[40];
+                snprintf(hs_payload, sizeof(hs_payload), "%s|%s/%s",
+                    ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
+                ghostscript_emit_event("handshake_captured", hs_payload);
                 // reset to avoid duplicate notifications for same replay
                 e->ap_msg = 0;
                 e->sta_msg = 0;

@@ -16,6 +16,7 @@
 #include "host/util/util.h"
 #include "store/config/ble_store_config.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/views/terminal_screen.h"
 #include "host/ble_gatt.h"
 #include "core/glog.h"
@@ -180,12 +181,22 @@ int ble_gap_event_general(struct ble_gap_event *event, void *arg) {
         if ((disc_log_counter % 10) == 0) {
             ghostchi_manager_add_xp(2);
         }
+        char ble_mac[18];
+        snprintf(ble_mac, sizeof(ble_mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+            event->disc.addr.val[0], event->disc.addr.val[1], event->disc.addr.val[2],
+            event->disc.addr.val[3], event->disc.addr.val[4], event->disc.addr.val[5]);
+        if (!ghostscript_runtime_mark_ble_seen(event->disc.addr.val)) {
+            char ble_payload[32];
+            snprintf(ble_payload, sizeof(ble_payload), "%s|%d", ble_mac, event->disc.rssi);
+            ghostscript_emit_event("ble_device", ble_payload);
+        }
         notify_handlers(event, event->disc.length_data);
         ble_cb_busy = false;
     } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         if (ble_disc_complete_sem != NULL) {
             xSemaphoreGive(ble_disc_complete_sem);
         }
+        ghostscript_emit_event("ble_scan_done", "");
     }
 
     return 0;

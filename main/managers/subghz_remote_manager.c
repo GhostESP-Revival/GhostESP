@@ -1,6 +1,7 @@
 #include "managers/subghz_remote_manager.h"
 #include "managers/subghz_decoders.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "sdkconfig.h"
 
 #ifdef CONFIG_HAS_SUBGHZ
@@ -406,6 +407,11 @@ static void subghz_finalize_raw_capture(bool allow_short_capture) {
     s_raw_active = false;
     s_raw_ready = allow_short_capture ? (s_raw_completed_len > 0) : (s_raw_completed_len > 8);
     s_raw_isr_buf_idx = 1 - s_raw_isr_buf_idx;
+    if (s_raw_ready) {
+        char sub_payload[24];
+        snprintf(sub_payload, sizeof(sub_payload), "%u", (unsigned)s_raw_completed_len);
+        ghostscript_emit_event("subghz_captured", sub_payload);
+    }
 }
 
 static void subghz_prepare_raw_capture_for_stream(void) {

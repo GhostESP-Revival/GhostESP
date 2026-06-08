@@ -97,6 +97,7 @@ void* esp_netif_get_netif_impl(esp_netif_t *esp_netif);
 #include "esp_wifi.h"
 #include "managers/default_portal.h"
 #include "core/glog.h"
+#include "managers/ghostscript_runtime.h"
 #include "core/dns_server.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -307,6 +308,9 @@ static void handle_capture_export(const char *arg) {
     }
     glog("Exported %s\nPMKID: %d  M2/M3: %d\n", out_path, pmkid, handshakes);
     status_display_show_status("Export hc22000");
+    char pk_payload[48];
+    snprintf(pk_payload, sizeof(pk_payload), "%d|%d", pmkid, handshakes);
+    ghostscript_emit_event("pmkid_exported", pk_payload);
     if (jit_mounted) sd_card_unmount_after_flush(display_suspended);
 }
 
@@ -7249,6 +7253,10 @@ void handle_comm_setpins(int argc, char **argv) {
 
 static void comm_command_callback(const char* command, const char* data, void* user_data) {
     static char full_command[128];
+    char comm_payload[160];
+    snprintf(comm_payload, sizeof(comm_payload), "%s|%s",
+        command ? command : "", data ? data : "");
+    ghostscript_emit_event_escaped("comm_command", comm_payload);
     
 #ifdef CONFIG_WITH_ETHERNET
     if (eth_comm_handler_handle_command(command, data)) {
@@ -8030,11 +8038,20 @@ static void ir_rx_learn_task(void *arg) {
         if (infrared_manager_rx_receive(&sig, timeout_sec * 1000)) {
             if (sig.is_raw) {
                 glog("Captured RAW signal (%zu samples)\n", sig.payload.raw.timings_size);
+                char ir_payload[48];
+                snprintf(ir_payload, sizeof(ir_payload), "raw|%zu", sig.payload.raw.timings_size);
+                ghostscript_emit_event("ir_signal", ir_payload);
             } else {
-                glog("Captured: %s A:0x%lX C:0x%lX\n", 
+                glog("Captured: %s A:0x%lX C:0x%lX\n",
                      sig.payload.message.protocol,
                      (unsigned long)sig.payload.message.address,
                      (unsigned long)sig.payload.message.command);
+                char ir_payload[96];
+                snprintf(ir_payload, sizeof(ir_payload), "%s|%lu|%lu",
+                    sig.payload.message.protocol,
+                    (unsigned long)sig.payload.message.address,
+                    (unsigned long)sig.payload.message.command);
+                ghostscript_emit_event_escaped("ir_signal", ir_payload);
             }
 
             if (path[0] == '\0') {

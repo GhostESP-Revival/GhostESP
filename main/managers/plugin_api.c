@@ -1,5 +1,6 @@
 #include "managers/plugin_api.h"
 #include "managers/plugin_api_internal.h"
+#include "managers/ghostscript_runtime.h"
 
 #include "core/serial_manager.h"
 #include "core/glog.h"
@@ -18,6 +19,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "scans/ble/device_detect_scan.h"
+#include "scans/ble/gatt_scan.h"
 #include "scans/wifi/ap_scan.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -95,6 +97,13 @@ static void plugin_scan_task(void *arg) {
 
 static SemaphoreHandle_t s_async_scan_sem = NULL;
 static bool s_async_scan_result = false;
+static volatile bool s_plugin_async_scan_active = false;
+static int64_t s_plugin_async_scan_start_ms = 0;
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+#define PLUGIN_SCRIPT_SCAN_MIN_MS 6000
+#else
+#define PLUGIN_SCRIPT_SCAN_MIN_MS 5000
+#endif
 
 static void plugin_async_scan_start_task(void *arg) {
     display_manager_suspend_lvgl_task();
@@ -714,7 +723,9 @@ static bool plugin_api_nfc_stop(void) {
 static bool plugin_api_ble_start_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    return ble_start_scanning();
+    ghostscript_runtime_reset_ble_seen();
+    gatt_scan_start();
+    return true;
 #else
     return false;
 #endif
@@ -861,6 +872,7 @@ static bool plugin_api_wifi_start_scan(void) {
 
 static bool plugin_api_wifi_stop_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_WIFI)) return false;
+    s_plugin_async_scan_active = false;
     // wifi_manager_start_scan() is blocking and already collects results.
     // Calling wifi_manager_stop_scan() here would attempt a second stop,
     // find 0 APs (scan already consumed), and clobber ap_count to 0,
@@ -891,6 +903,7 @@ static bool plugin_api_wifi_scan_get_ap(uint16_t index, ghostesp_wifi_ap_info_t 
 
 static bool plugin_api_wifi_start_scan_async(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_WIFI)) return false;
+    s_plugin_async_scan_active = false;
     plugin_wifi_clear_scan_results();
     if (!s_async_scan_sem) s_async_scan_sem = xSemaphoreCreateBinary();
     if (!s_async_scan_sem) return false;
@@ -898,20 +911,31 @@ static bool plugin_api_wifi_start_scan_async(void) {
     BaseType_t ok = xTaskCreate(plugin_async_scan_start_task, "async_scan", 8192, NULL, 5, NULL);
     if (ok != pdPASS) return false;
     xSemaphoreTake(s_async_scan_sem, portMAX_DELAY);
+    if (s_async_scan_result) {
+        s_plugin_async_scan_active = true;
+        s_plugin_async_scan_start_ms = esp_timer_get_time() / 1000;
+    }
     return s_async_scan_result;
 }
 
 static bool plugin_api_wifi_scan_check_done(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_WIFI)) return true;
+    if (!s_plugin_async_scan_active) return true;
+    int64_t elapsed_ms = (esp_timer_get_time() / 1000) - s_plugin_async_scan_start_ms;
+    if (elapsed_ms < PLUGIN_SCRIPT_SCAN_MIN_MS) return false;
     return ap_scan_check_done();
 }
 
 static void plugin_api_wifi_finish_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_WIFI)) return;
+    s_plugin_async_scan_active = false;
     if (!s_async_finish_sem) s_async_finish_sem = xSemaphoreCreateBinary();
     if (!s_async_finish_sem) {
         ap_scan_finish_async();
         plugin_wifi_snapshot_scan_results();
+        char count_str[16];
+        snprintf(count_str, sizeof(count_str), "%u", (unsigned)plugin_ap_count);
+        ghostscript_runtime_dispatch_event(ghostscript_runtime_get_active(), "wifi_scan_done", count_str);
         return;
     }
     xSemaphoreTake(s_async_finish_sem, 0);
@@ -919,9 +943,15 @@ static void plugin_api_wifi_finish_scan(void) {
     if (ok != pdPASS) {
         ap_scan_finish_async();
         plugin_wifi_snapshot_scan_results();
+        char count_str[16];
+        snprintf(count_str, sizeof(count_str), "%u", (unsigned)plugin_ap_count);
+        ghostscript_runtime_dispatch_event(ghostscript_runtime_get_active(), "wifi_scan_done", count_str);
         return;
     }
     xSemaphoreTake(s_async_finish_sem, portMAX_DELAY);
+    char count_str[16];
+    snprintf(count_str, sizeof(count_str), "%u", (unsigned)plugin_ap_count);
+    ghostscript_runtime_dispatch_event(ghostscript_runtime_get_active(), "wifi_scan_done", count_str);
 }
 
 static uint16_t plugin_api_wifi_scan_quick(void) {
@@ -1694,6 +1724,21 @@ bool plugin_api_is_active(void) {
 
 void plugin_api_release(void) {
     plugin_api_lock();
+
+    /* Safety: stop hardware that a misbehaving script may have left running. */
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    if (ble_is_initialized()) {
+        ble_stop();
+    }
+#endif
+    if (s_plugin_live_scan_active) {
+        s_plugin_live_scan_active = false;
+        wifi_manager_stop_monitor_mode();
+        esp_wifi_stop();
+        ap_manager_start_services();
+    }
+    s_plugin_async_scan_active = false;
+
     plugin_api_lowlevel_release();
     s_api_active = false;
     s_permissions = 0;
