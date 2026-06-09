@@ -7,6 +7,9 @@
 - Added `badusb type_char` CLI command for typing single ASCII characters
 - Made BadUSB keyboard startup async so GhostLink doesn't block
 - Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+- Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+- Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan from the CLI or on-device menu
 
 ## Revival v2.0-pre4
 

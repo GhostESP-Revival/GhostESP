@@ -58,6 +58,11 @@ static void sd_spi_bus_release_if_tracked(void);
 #endif
 #include "managers/display_manager.h"
 static bool s_display_spi_suspended_flag = false;
+/* Tracks whether the display panel's SPI device is currently attached to the bus.
+ * Set true on boot after disp_spi_add_device() succeeds; cleared on suspend. Lets
+ * the resume path skip a redundant lvgl_spi_driver_init() when the bus is still
+ * initialized from a prior flush. */
+static bool s_display_panel_attached = false;
 
 static bool display_sd_spi_pins_match(void) {
 #if defined(CONFIG_LV_DISP_SPI_MOSI) && defined(CONFIG_LV_DISP_SPI_CLK)
@@ -95,16 +100,20 @@ static bool display_spi_suspend_for_sd(void) {
   if (s_display_spi_suspended_flag) {
     return true;  /* already suspended — idempotent, matches resume_after_sd guard */
   }
-  /* pause lvgl refresh to stop flush() while we steal the bus */
+  /* Stop LVGL from queuing new flushes. */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
     if (refr) lv_timer_pause(refr);
   }
-  /* wait all pending transactions, drop device, free bus */
-  display_manager_suspend_lvgl_task();
+  /* Drain in-flight SPI transactions BEFORE suspending the LVGL task.
+   * Suspending the task mid-flush leaves the SPI peripheral holding a
+   * half-finished DMA descriptor; on C5 this produces a visible tear
+   * or "stuck" pixel row until the next resume cycle. */
   disp_wait_for_pending_transactions();
+  display_manager_suspend_lvgl_task();
   disp_spi_remove_device();
+  s_display_panel_attached = false;
   spi_bus_free(TFT_SPI_HOST);
   /* assert CS high so that panel stays quiet */
   #ifdef CONFIG_LV_DISP_SPI_CS
@@ -120,36 +129,32 @@ static void display_spi_resume_after_sd(void) {
   if (!s_display_spi_suspended_flag) {
     return;
   }
-  esp_err_t ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
-                              SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
-  if (ret == ESP_OK) {
-    esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
-    if (add_ret != ESP_OK) {
-      ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
-    }
-  } else if (ret == ESP_ERR_INVALID_STATE) {
-    if (s_spi_bus_initialized && s_spi_host_id == TFT_SPI_HOST) {
-      ESP_LOGW("sd_card", "display_spi_resume: SD still owns display SPI host, releasing before retry");
-      sd_spi_bus_release_if_tracked();
-      ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
-                                 SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
-      if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
-        esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
-        if (add_ret != ESP_OK) {
-          ESP_LOGE("sd_card", "display_spi_resume: add device failed after retry: %s", esp_err_to_name(add_ret));
-        }
-      } else {
-        ESP_LOGE("sd_card", "display_spi_resume: retry bus init failed: %s", esp_err_to_name(ret));
-      }
-    } else {
-      ESP_LOGW("sd_card", "display_spi_resume: display SPI bus already initialized, re-adding display device");
+  if (s_display_panel_attached) {
+    /* Already attached: nothing to do (shouldn't normally hit this, but
+     * guards against double-resume). */
+    ESP_LOGD("sd_card", "display_spi_resume: panel already attached, skipping reinit");
+  } else {
+    esp_err_t ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
+                                SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
+    if (ret == ESP_OK) {
       esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
       if (add_ret != ESP_OK) {
         ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
+      } else {
+        s_display_panel_attached = true;
       }
+    } else if (ret == ESP_ERR_INVALID_STATE) {
+      /* Bus is already initialized (by SD or by an earlier flush) — just
+       * re-attach the panel device. */
+      esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
+      if (add_ret != ESP_OK) {
+        ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
+      } else {
+        s_display_panel_attached = true;
+      }
+    } else {
+      ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
     }
-  } else {
-    ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
   }
   /* resume lvgl refresh */
   lv_disp_t *disp = lv_disp_get_default();
@@ -268,7 +273,11 @@ static sd_card_cached_stats_t s_cached_stats = { .valid = false, .used_pct = 0 }
 
 static SemaphoreHandle_t sd_card_get_jit_mutex(void) {
     if (s_sd_jit_mutex == NULL) {
-        s_sd_jit_mutex = xSemaphoreCreateMutex();
+        /* Recursive: callers like options_screen / commandline can hold
+         * jit_mount across a nested flush (e.g. flush triggered by another
+         * flush). A plain mutex would deadlock; a recursive one just bumps
+         * the lock count. */
+        s_sd_jit_mutex = xSemaphoreCreateRecursiveMutex();
     }
     return s_sd_jit_mutex;
 }
@@ -911,7 +920,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   if (jit_mutex == NULL) {
     return ESP_ERR_NO_MEM;
   }
-  if (xSemaphoreTake(jit_mutex, portMAX_DELAY) != pdTRUE) {
+  if (xSemaphoreTakeRecursive(jit_mutex, portMAX_DELAY) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
   // If already mounted, nothing to do
@@ -919,7 +928,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     if (s_sd_jit_mount_depth > 0) {
       ++s_sd_jit_mount_depth;
     }
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return ESP_OK;
   }
 
@@ -955,7 +964,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     esp_err_t bus_ret = spi_bus_initialize(host_id, &bus_config, dmabus);
     if (bus_ret != ESP_OK && bus_ret != ESP_ERR_INVALID_STATE) {
       if (display_was_suspended && *display_was_suspended) display_spi_resume_after_sd();
-      xSemaphoreGive(jit_mutex);
+      xSemaphoreGiveRecursive(jit_mutex);
       return bus_ret;
     }
     if (bus_ret == ESP_OK) {
@@ -984,7 +993,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   if (ret != ESP_OK) {
     sd_spi_bus_release_if_tracked();
     if (display_was_suspended && *display_was_suspended) display_spi_resume_after_sd();
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return ret;
   }
   sd_card_manager.is_initialized = true;
@@ -994,11 +1003,11 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sd_card_update_cached_stats();
   s_next_unmount_tick = xTaskGetTickCount() + pdMS_TO_TICKS(300);
   status_display_show_status("SD Active");
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
   return ESP_OK;
 #else
   // For SDMMC, if not mounted try normal init path quickly
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
   return sd_card_init();
 #endif
 }
@@ -1011,12 +1020,12 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   if (jit_mutex == NULL) {
     return;
   }
-  if (xSemaphoreTake(jit_mutex, portMAX_DELAY) != pdTRUE) {
+  if (xSemaphoreTakeRecursive(jit_mutex, portMAX_DELAY) != pdTRUE) {
     return;
   }
 
   if (s_sd_jit_mount_depth == 0) {
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return;
   }
 
@@ -1029,7 +1038,7 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
     }
   }
 
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
 
   if (resume_display) {
     display_spi_resume_after_sd();

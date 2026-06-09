@@ -3418,11 +3418,53 @@ void wifi_manager_get_scan_results_data(uint16_t *count, wifi_ap_record_t **aps)
 
 esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     ap_manager_stop_services();
+
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
         printf("Failed to set WiFi mode for timed scan: %s\n", esp_err_to_name(err));
-        return err;
+        goto cleanup;
     }
+
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        printf("Failed to start WiFi for timed scan: %s\n", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true
+    };
+
+    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
+
+    printf("WiFi Scan started\n");
+    printf("Please wait %d Seconds...\n", seconds);
+    TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
+    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n");
+
+    err = esp_wifi_scan_start(&scan_config, false);
+    if (err != ESP_OK) {
+        printf("WiFi scan failed to start: %s\n", esp_err_to_name(err));
+        TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(seconds * 1000));
+
+    wifi_manager_stop_scan();
+    err = esp_wifi_stop();
+    if (err != ESP_OK) {
+        printf("Failed to stop WiFi after timed scan: %s\n", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+cleanup:
+    ap_manager_start_services();
+    return err;
+}
 
     err = esp_wifi_start();
     if (err != ESP_OK) {

@@ -565,6 +565,11 @@ void station_scan_stop(void) {
     // Stop monitor mode
     esp_wifi_set_promiscuous(false);
 
+    // If station_scan_start ran the initial-AP-scan path, it called
+    // ap_manager_stop_services() and never restored the AP. Restore it now
+    // so the WebUI comes back regardless of which caller invoked stop.
+    ap_manager_start_services();
+
     glog("Station Scan Stopped. Found %d stations.\n", station_count);
 }
 

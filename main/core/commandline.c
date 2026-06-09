@@ -475,6 +475,12 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     esp_err_t stop_err = esp_wifi_stop();
     esp_err_t start_err = esp_wifi_start();
 
+    // Live AP scan and timed scan both call ap_manager_stop_services() on
+    // entry, so this function is the only thing that brings the AP back for
+    // those flows. Always restore AP services before returning, regardless
+    // of whether the Wi-Fi driver restart succeeded.
+    ap_manager_start_services();
+
     if (stop_err != ESP_OK || start_err != ESP_OK) {
         glog("WiFi scan stop completed with recovery errors (stop=%s, start=%s).\n",
              esp_err_to_name(stop_err), esp_err_to_name(start_err));

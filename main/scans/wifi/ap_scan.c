@@ -235,7 +235,7 @@ void ap_scan_start(void) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
             blocking_scan_in_progress = false;
-            return;
+            goto cleanup;
         }
         apply_country_for_scan();
     }
@@ -245,14 +245,14 @@ void ap_scan_start(void) {
         ESP_LOGE(TAG, "Failed to set STA mode: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi mode set failed: %s\n", esp_err_to_name(err));
         blocking_scan_in_progress = false;
-        return;
+        goto cleanup;
     }
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start Wi-Fi: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi start failed: %s\n", esp_err_to_name(err));
         blocking_scan_in_progress = false;
-        return;
+        goto cleanup;
     }
 
     wifi_scan_config_t scan_config = {
@@ -286,21 +286,24 @@ void ap_scan_start(void) {
         TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
         log_heap_status(TAG, "scan_start_failed");
         blocking_scan_in_progress = false;
-        return;
+        goto cleanup;
     }
 
     ap_scan_stop();
     blocking_scan_in_progress = false;
     log_heap_status(TAG, "scan_start_post");
     esp_wifi_stop();
-    ap_manager_start_services();
 
-    // Restore saved static color if no RGB effect is running
-    if (rgb_effect_task_handle == NULL) {
-        RGBMode mode = settings_get_rgb_mode(&G_Settings);
-        if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
-            mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
-            rgb_manager_apply_static_from_settings();
+cleanup:
+    ap_manager_start_services();
+    if (err == ESP_OK) {
+        // Restore saved static color if no RGB effect is running
+        if (rgb_effect_task_handle == NULL) {
+            RGBMode mode = settings_get_rgb_mode(&G_Settings);
+            if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
+                mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
+                rgb_manager_apply_static_from_settings();
+            }
         }
     }
 }
@@ -342,7 +345,7 @@ esp_err_t ap_scan_start_async(void) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
             async_scan_in_progress = false;
-            return err;
+            goto cleanup;
         }
         apply_country_for_scan();
     }
@@ -352,14 +355,14 @@ esp_err_t ap_scan_start_async(void) {
         ESP_LOGE(TAG, "Failed to set STA mode: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi mode set failed: %s\n", esp_err_to_name(err));
         async_scan_in_progress = false;
-        return err;
+        goto cleanup;
     }
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start Wi-Fi: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi start failed: %s\n", esp_err_to_name(err));
         async_scan_in_progress = false;
-        return err;
+        goto cleanup;
     }
 
     wifi_scan_config_t scan_config = {
@@ -397,12 +400,15 @@ esp_err_t ap_scan_start_async(void) {
         TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
         log_heap_status(TAG, "async_scan_start_failed");
         async_scan_in_progress = false;
-        return err;
+        goto cleanup;
     }
 
     async_scan_start_time = esp_timer_get_time();
     log_heap_status(TAG, "async_scan_started");
-    return ESP_OK;
+
+cleanup:
+    ap_manager_start_services();
+    return err;
 }
 
 bool ap_scan_is_running(void) {
