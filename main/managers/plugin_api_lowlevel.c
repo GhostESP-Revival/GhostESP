@@ -27,6 +27,7 @@
 #endif
 
 #ifdef CONFIG_HAS_BADUSB
+#include "managers/badusb_manager.h"
 #include "managers/hid_script_parser.h"
 #include "tinyusb.h"
 #include "class/hid/hid_device.h"
@@ -1396,12 +1397,12 @@ bool plugin_api_usb_hid_keyboard_send(const char *text) {
         uint8_t keycode = 0, modifier = 0;
         if (!hid_ascii_to_keycode(*p, &keycode, &modifier)) continue;
         int timeout = 100;
-        while (!tud_hid_ready() && timeout-- > 0) vTaskDelay(pdMS_TO_TICKS(1));
-        if (!tud_hid_ready()) return false;
+        while (!tud_hid_n_ready(0) && timeout-- > 0) vTaskDelay(pdMS_TO_TICKS(1));
+        if (!tud_hid_n_ready(0)) return false;
         uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
-        tud_hid_keyboard_report(0, modifier, keycodes);
+        tud_hid_n_keyboard_report(0, 0, modifier, keycodes);
         vTaskDelay(pdMS_TO_TICKS(5));
-        tud_hid_keyboard_report(0, 0, NULL);
+        tud_hid_n_keyboard_report(0, 0, 0, NULL);
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     return true;
@@ -1413,11 +1414,7 @@ bool plugin_api_usb_hid_keyboard_send(const char *text) {
 bool plugin_api_usb_hid_mouse_move(int dx, int dy, uint8_t buttons) {
     if (!has_permission(PLUGIN_PERMISSION_USB)) return false;
 #ifdef CONFIG_HAS_BADUSB
-    int timeout = 100;
-    while (!tud_hid_ready() && timeout-- > 0) vTaskDelay(pdMS_TO_TICKS(1));
-    if (!tud_hid_ready()) return false;
-    tud_hid_mouse_report(0, buttons, (int8_t)dx, (int8_t)dy, 0, 0);
-    return true;
+    return badusb_hid_mouse_send((int8_t)dx, (int8_t)dy, buttons);
 #else
     (void)dx; (void)dy; (void)buttons;
     return false;

@@ -37,7 +37,14 @@
 #endif
 #define BUF_SIZE (512)
 #define SERIAL_BUFFER_SIZE 512
-#define SERIAL_TASK_STACK_SIZE 5120
+#define SERIAL_TASK_STACK_SIZE_INTERNAL 5120
+#define SERIAL_TASK_STACK_SIZE_PSRAM 8192
+
+#if defined(CONFIG_SPIRAM)
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
+#else
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_INTERNAL
+#endif
 
 static StackType_t *s_serial_task_stack = NULL;
 static StaticTask_t *s_serial_task_buffer = NULL;
@@ -945,7 +952,7 @@ void serial_manager_init() {
     s_serial_task_stack = NULL;
     s_serial_task_buffer = NULL;
 #endif
-  task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE, NULL, 2, &s_serial_task_handle);
+  task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE_INTERNAL, NULL, 2, &s_serial_task_handle);
 #if defined(CONFIG_SPIRAM)
   }
 #endif
@@ -994,8 +1001,18 @@ int handle_serial_command(const char *input) {
   if (strncmp(input, "peer:", 5) == 0) {
     const char* actual_command = input + 5;
     esp_comm_manager_set_remote_command_flag(true);
-    glog("Received command from peer: %s\n", actual_command);
-    glog("Executing received command: %s\n", actual_command);
+    bool quiet_badusb_setting =
+        strncmp(actual_command, "badusb set_", 11) == 0 ||
+        strncmp(actual_command, "badusb exec ", 12) == 0 ||
+        strcmp(actual_command, "badusb keyboard_start") == 0 ||
+        strcmp(actual_command, "badusb keyboard_stop") == 0 ||
+        strcmp(actual_command, "badusb jiggle_start") == 0 ||
+        strcmp(actual_command, "badusb jiggle_stop") == 0 ||
+        strcmp(actual_command, "badusb stop") == 0;
+    if (!quiet_badusb_setting) {
+      glog("Received command from peer: %s\n", actual_command);
+      glog("Executing received command: %s\n", actual_command);
+    }
     int result = handle_serial_command(actual_command);
     esp_comm_manager_set_remote_command_flag(false);
     return result;

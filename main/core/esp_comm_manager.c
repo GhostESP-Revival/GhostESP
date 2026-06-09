@@ -1474,7 +1474,8 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
 
     bool result = send_packet(&packet);
     bool quiet_audio_status = (strcmp(command, "audio") == 0 && data && strncmp(data, "state ", 6) == 0);
-    if (result && !quiet_audio_status) {
+    bool quiet_badusb_status = (strcmp(command, "badusb") == 0 && data && strncmp(data, "status ", 7) == 0);
+    if (result && !quiet_audio_status && !quiet_badusb_status) {
         printf("Sent command: %s %s\n", command, data ? data : "");
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s %s\n", command, data ? data : "");

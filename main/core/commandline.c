@@ -8570,18 +8570,26 @@ static void badusb_strip_quotes(char *text) {
 
 void handle_badusb_cmd(int argc, char **argv) {
 #ifdef CONFIG_HAS_BADUSB
+    bool remote_request = esp_comm_manager_is_remote_command();
+
     if (argc < 2) {
-        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout>\n");
-        glog("  badusb run <filename>  - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
-        glog("  badusb list            - List available scripts\n");
-        glog("  badusb stop            - Stop current execution\n");
-        glog("  badusb exec <size>     - Prepare to receive a script via stream\n");
-        glog("  badusb set_vid <hex>   - Set USB VID for next run\n");
-        glog("  badusb set_pid <hex>   - Set USB PID for next run\n");
-        glog("  badusb set_mfr <text>  - Set USB manufacturer for next run\n");
-        glog("  badusb set_prod <text> - Set USB product for next run\n");
-        glog("  badusb set_rand <0|1>  - Toggle USB detail randomization\n");
-        glog("  badusb set_layout <n>  - Set keyboard layout for next run\n");
+        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop>\n");
+        glog("  badusb run <filename>       - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
+        glog("  badusb list                 - List available scripts\n");
+        glog("  badusb stop                 - Stop current execution\n");
+        glog("  badusb exec <size>          - Prepare to receive a script via stream\n");
+        glog("  badusb set_vid <hex>        - Set USB VID for next run\n");
+        glog("  badusb set_pid <hex>        - Set USB PID for next run\n");
+        glog("  badusb set_mfr <text>       - Set USB manufacturer for next run\n");
+        glog("  badusb set_prod <text>      - Set USB product for next run\n");
+        glog("  badusb set_rand <0|1>       - Toggle USB detail randomization\n");
+        glog("  badusb set_layout <n>       - Set keyboard layout for next run\n");
+        glog("  badusb type <text>          - Type text through active keyboard mode\n");
+        glog("  badusb keysend <mod> <key>  - Send a single keypress (HID codes)\n");
+        glog("  badusb jiggle_start         - Start mouse jiggler\n");
+        glog("  badusb jiggle_stop          - Stop mouse jiggler\n");
+        glog("  badusb keyboard_start       - Start USB keyboard mode\n");
+        glog("  badusb keyboard_stop        - Stop USB keyboard mode\n");
         return;
     }
 
@@ -8628,12 +8636,12 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         size_t size = (size_t)atoi(argv[2]);
         esp_err_t ret = badusb_manager_prepare_receive(size);
-        if (ret != ESP_OK) {
+        if (ret != ESP_OK && !remote_request) {
             glog("BadUSB: Failed to prepare receive\n");
         }
     } else if (strcmp(sub, "stop") == 0) {
         badusb_manager_stop();
-        glog("BadUSB: Stopped\n");
+        if (!remote_request) glog("BadUSB: Stopped\n");
     } else if (strcmp(sub, "set_vid") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_vid <hex>\n");
@@ -8641,7 +8649,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint16_t vid = (uint16_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_vid(&G_Settings, vid);
-        glog("BadUSB: VID set\n");
+        if (!remote_request) glog("BadUSB: VID set\n");
     } else if (strcmp(sub, "set_pid") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_pid <hex>\n");
@@ -8649,7 +8657,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint16_t pid = (uint16_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_pid(&G_Settings, pid);
-        glog("BadUSB: PID set\n");
+        if (!remote_request) glog("BadUSB: PID set\n");
     } else if (strcmp(sub, "set_mfr") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_mfr <text>\n");
@@ -8659,7 +8667,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         badusb_join_args(value, sizeof(value), argc, argv, 2);
         badusb_strip_quotes(value);
         settings_set_badusb_manufacturer(&G_Settings, value);
-        glog("BadUSB: Manufacturer set\n");
+        if (!remote_request) glog("BadUSB: Manufacturer set\n");
     } else if (strcmp(sub, "set_prod") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_prod <text>\n");
@@ -8669,7 +8677,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         badusb_join_args(value, sizeof(value), argc, argv, 2);
         badusb_strip_quotes(value);
         settings_set_badusb_product(&G_Settings, value);
-        glog("BadUSB: Product set\n");
+        if (!remote_request) glog("BadUSB: Product set\n");
     } else if (strcmp(sub, "set_rand") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_rand <0|1>\n");
@@ -8677,7 +8685,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         bool enabled = atoi(argv[2]) != 0;
         settings_set_badusb_randomize(&G_Settings, enabled);
-        glog("BadUSB: Randomize set to %u\n", enabled ? 1 : 0);
+        if (!remote_request) glog("BadUSB: Randomize set to %u\n", enabled ? 1 : 0);
     } else if (strcmp(sub, "set_layout") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_layout <n>\n");
@@ -8685,7 +8693,80 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint8_t layout = (uint8_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_kb_layout(&G_Settings, layout);
-        glog("BadUSB: Layout set to %u\n", layout);
+        if (!remote_request) glog("BadUSB: Layout set to %u\n", layout);
+    } else if (strcmp(sub, "keysend") == 0) {
+        if (argc < 4) {
+            glog("Usage: badusb keysend <modifier> <keycode>\n");
+            return;
+        }
+        uint8_t mod = (uint8_t)strtol(argv[2], NULL, 0);
+        uint8_t key = (uint8_t)strtol(argv[3], NULL, 0);
+        if (!badusb_manager_send_keypress(mod, key)) {
+            glog("BadUSB: Failed to send key (is HID active?)\n");
+        } else {
+            glog("BadUSB: Key sent (mod=0x%02X key=0x%02X)\n", mod, key);
+        }
+    } else if (strcmp(sub, "type") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb type <text>\n");
+            return;
+        }
+        char value[256];
+        badusb_join_args(value, sizeof(value), argc, argv, 2);
+        badusb_strip_quotes(value);
+        if (!badusb_manager_is_active()) {
+            esp_err_t ret = badusb_manager_keyboard_mode_start();
+            if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+                glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+                return;
+            }
+        }
+        if (!badusb_manager_send_text(value)) {
+            glog("BadUSB: Failed to type text\n");
+        } else {
+            glog("BadUSB: Typed %u chars\n", (unsigned)strlen(value));
+        }
+    } else if (strcmp(sub, "type_char") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb type_char <ascii>\n");
+            return;
+        }
+        int code = (int)strtol(argv[2], NULL, 0);
+        if (code < 1 || code > 126) {
+            glog("BadUSB: Invalid ASCII code\n");
+            return;
+        }
+        if (!badusb_manager_is_active()) {
+            esp_err_t ret = badusb_manager_keyboard_mode_start();
+            if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+                glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+                return;
+            }
+        }
+        char one[2] = {(char)code, '\0'};
+        if (!badusb_manager_send_text(one)) {
+            glog("BadUSB: Failed to type char\n");
+        }
+    } else if (strcmp(sub, "jiggle_start") == 0) {
+        esp_err_t ret = badusb_manager_mouse_jiggle_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start jiggler: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Mouse jiggler started\n");
+        }
+    } else if (strcmp(sub, "jiggle_stop") == 0) {
+        badusb_manager_mouse_jiggle_stop();
+        glog("BadUSB: Mouse jiggler stopped\n");
+    } else if (strcmp(sub, "keyboard_start") == 0) {
+        esp_err_t ret = badusb_manager_keyboard_mode_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Keyboard mode started\n");
+        }
+    } else if (strcmp(sub, "keyboard_stop") == 0) {
+        badusb_manager_keyboard_mode_stop();
+        glog("BadUSB: Keyboard mode stopped\n");
     } else if (strcmp(sub, "status") == 0) {
         // Status update from peer - forward to view
 #ifdef CONFIG_WITH_SCREEN

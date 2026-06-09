@@ -1,5 +1,13 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre5
+
+- Added USB Keyboard Mode for forwarding on-device keystrokes over usb
+- Added mouse jiggler to BadUSB
+- Added `badusb type_char` CLI command for typing single ASCII characters
+- Made BadUSB keyboard startup async so GhostLink doesn't block
+- Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+
 ## Revival v2.0-pre4
 
 ### Added

@@ -2274,6 +2274,7 @@ static void create_nfc_scan_popup(void) {
         y_offset = 10; // Account for status bar
     }
     nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (nfc_scan_popup) lv_obj_add_flag(nfc_scan_popup, LV_OBJ_FLAG_CLICKABLE);
 
     // Fonts
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
@@ -2994,6 +2995,7 @@ static void create_keys_popup(void) {
         y_offset = 10;
     }
     keys_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (keys_popup) lv_obj_add_flag(keys_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -3300,6 +3302,7 @@ static void create_cu_popup(void) {
         y_offset = 10;
     }
     cu_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (cu_popup) lv_obj_add_flag(cu_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -3825,6 +3828,7 @@ static void create_nfc_write_popup(const char *path) {
         y_offset = 10;
     }
     nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (nfc_write_popup) lv_obj_add_flag(nfc_write_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -4037,6 +4041,7 @@ static void create_saved_details_popup(const char *path) {
         y_offset = 10;
     }
     saved_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (saved_popup) lv_obj_add_flag(saved_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
