@@ -112,7 +112,7 @@ static void copy_json_string(cJSON *root, const char *key, char *dst, size_t dst
     }
 }
 
-static uint32_t permission_from_string(const char *value) {
+static plugin_permission_t permission_from_string(const char *value) {
     if (!value) return 0;
     if (strcmp(value, "ui") == 0) return PLUGIN_PERMISSION_UI;
     if (strcmp(value, "storage") == 0) return PLUGIN_PERMISSION_STORAGE;
@@ -146,6 +146,7 @@ static uint32_t permission_from_string(const char *value) {
     if (strcmp(value, "audio") == 0 || strcmp(value, "mic") == 0 || strcmp(value, "microphone") == 0) return PLUGIN_PERMISSION_AUDIO;
     if (strcmp(value, "settings") == 0) return PLUGIN_PERMISSION_SETTINGS;
     if (strcmp(value, "zigbee") == 0 || strcmp(value, "ieee802154") == 0) return PLUGIN_PERMISSION_ZIGBEE;
+    if (strcmp(value, "nrf24") == 0) return PLUGIN_PERMISSION_NRF24;
     return 0;
 }
 
@@ -345,11 +346,10 @@ static void load_app_state(plugin_app_manifest_t *out) {
 
     if (launch_pending) {
         out->launch_failure_count++;
-        out->quarantined = out->launch_failure_count >= PLUGIN_APP_QUARANTINE_THRESHOLD;
-        write_app_state_by_id(out->id, out->launch_failure_count, out->quarantined, false,
-                              out->quarantined ? "app did not exit cleanly" : "app launch interrupted");
+        write_app_state_by_id(out->id, out->launch_failure_count, false, false, "app launch interrupted");
     } else {
-        out->quarantined = was_quarantined || out->launch_failure_count >= PLUGIN_APP_QUARANTINE_THRESHOLD;
+        out->quarantined = false;
+        if (was_quarantined) write_app_state_by_id(out->id, out->launch_failure_count, false, false, "");
     }
 }
 
@@ -420,7 +420,15 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     if (cJSON_IsArray(permissions)) {
         cJSON *perm = NULL;
         cJSON_ArrayForEach(perm, permissions) {
-            if (cJSON_IsString(perm)) out->permissions |= permission_from_string(perm->valuestring);
+            if (cJSON_IsString(perm)) {
+                plugin_permission_t permission = permission_from_string(perm->valuestring);
+                if (!permission) {
+                    snprintf(out->error, sizeof(out->error), "unknown permission: %.64s", perm->valuestring);
+                    cJSON_Delete(root);
+                    return false;
+                }
+                out->permissions |= permission;
+            }
         }
     }
 
@@ -430,7 +438,7 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     if (out->storage_scope[0] == '\0') {
         strncpy(out->storage_scope, PLUGIN_APP_STORAGE_SCOPE_APP, sizeof(out->storage_scope) - 1);
     }
-    out->allow_absolute_storage = true;
+    out->allow_absolute_storage = strcmp(out->storage_scope, PLUGIN_APP_STORAGE_SCOPE_GHOSTESP) == 0;
     if (!is_safe_id(out->id)) {
         snprintf(out->error, sizeof(out->error), "invalid id");
         return false;

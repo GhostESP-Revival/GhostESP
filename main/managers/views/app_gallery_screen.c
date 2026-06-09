@@ -305,7 +305,7 @@ static void add_loaded_plugin_app_items(void) {
         app_items[num_apps].icon = &GESPAppGallery;
         app_items[num_apps].palette_index = 3;
         app_items[num_apps].view = &plugin_runner_view;
-        app_items[num_apps].disabled = app->quarantined;
+        app_items[num_apps].disabled = false;
         strncpy(app_items[num_apps].plugin_id, app->id, sizeof(app_items[num_apps].plugin_id) - 1);
         strncpy(app_items[num_apps].accent_color, app->accent_color, sizeof(app_items[num_apps].accent_color) - 1);
         num_apps++;
@@ -1213,12 +1213,6 @@ static void handle_app_item_selection(int item_index) {
     }
 
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
-
-    if (app_items[item_index].disabled) {
-        ESP_LOGW(TAG, "App %s is quarantined and will not launch", app_items[item_index].name);
-        toast_show_duration("App disabled after launch failures", TOAST_WARN, 2200);
-        return;
-    }
 
     if (app_items[item_index].plugin_id[0] != '\0') {
         char msg[64];

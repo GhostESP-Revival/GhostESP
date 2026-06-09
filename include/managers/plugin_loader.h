@@ -23,7 +23,7 @@ typedef struct {
     void *handle;
     bool running;
     plugin_app_state_t state;
-    uint32_t permissions;
+    plugin_permission_t permissions;
     uint32_t last_tick_ms;
     char app_data_path[PLUGIN_APP_PATH_MAX];
 } plugin_loaded_app_t;

@@ -9786,9 +9786,8 @@ static void handle_apps_cmd(int argc, char **argv) {
         for (int i = 0; i < count; ++i) {
             const plugin_app_manifest_t *app = plugin_manager_get(i);
             if (!app) continue;
-            glog("  %s - %s v%s [%s]%s%s\n", app->id, app->name, app->version[0] ? app->version : "?",
+            glog("  %s - %s v%s [%s]%s\n", app->id, app->name, app->version[0] ? app->version : "?",
                  app->target[0] ? app->target : "any",
-                 app->quarantined ? " [quarantined]" : "",
                  app->launch_failure_count > 0 ? " [failures]" : "");
         }
         return;
@@ -9805,11 +9804,10 @@ static void handle_apps_cmd(int argc, char **argv) {
             glog("app not found: %s\n", argv[2]);
             return;
         }
-        glog("id: %s\nname: %s\nversion: %s\nauthor: %s\ntarget: %s\nentry: %s\napi: %u\nfailures: %lu\nquarantined: %s\n",
+        glog("id: %s\nname: %s\nversion: %s\nauthor: %s\ntarget: %s\nentry: %s\napi: %u\nfailures: %lu\n",
              app->id, app->name, app->version, app->author, app->target, app->entry,
               (unsigned)app->api_version,
-              (unsigned long)app->launch_failure_count,
-              app->quarantined ? "yes" : "no");
+              (unsigned long)app->launch_failure_count);
         return;
     }
 

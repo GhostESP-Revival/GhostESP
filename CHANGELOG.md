@@ -10,6 +10,10 @@
 - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
 - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
 - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan from the CLI or on-device menu
+- Tightened native SD app storage scope and path checks
+- Made native SD app launch failures diagnostic-only instead of quarantining apps
+- Added a separate `nrf24` native SD app permission
+- Added small native SD app helpers for capability checks and SubGHz replay
 
 ## Revival v2.0-pre4
 

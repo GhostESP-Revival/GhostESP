@@ -539,6 +539,10 @@ typedef struct ghostesp_api {
     bool (*wifi_live_scan_start)(void);
     void (*wifi_live_scan_stop)(void);
     bool (*wifi_live_scan_active)(void);
+
+    bool (*has_permission)(const char *permission);
+    bool (*has_feature)(const char *feature);
+    bool (*subghz_transmit_file)(const char *app_relative_path);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)
@@ -561,7 +565,7 @@ typedef struct ghostesp_app {
 typedef const ghostesp_app_t *(*ghostesp_app_init_fn)(const ghostesp_api_t *api);
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
-                                     uint32_t permissions,
+                                     uint64_t permissions,
                                      size_t memory_limit,
                                      bool allow_absolute_storage);
 const char *plugin_api_current_target(void);

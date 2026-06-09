@@ -155,7 +155,7 @@ static void untrack_socket(int sock) {
     for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) if (s_sockets[i] == sock) s_sockets[i] = -1;
 }
 
-static bool has_permission(uint32_t permission) {
+static bool has_permission(plugin_permission_t permission) {
     return plugin_api_internal_has_permission(permission);
 }
 
@@ -1187,7 +1187,7 @@ bool plugin_api_ble_gatt_server_stop(void) {
 }
 
 bool plugin_api_nrf24_start(bool stream_to_peer) {
-    if (!has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
+    if (!has_permission(PLUGIN_PERMISSION_NRF24)) return false;
 #ifdef CONFIG_HAS_NRF24
     return nrf24_remote_manager_start(stream_to_peer);
 #else
@@ -1197,14 +1197,14 @@ bool plugin_api_nrf24_start(bool stream_to_peer) {
 }
 
 void plugin_api_nrf24_stop(void) {
-    if (!has_permission(PLUGIN_PERMISSION_SUBGHZ)) return;
+    if (!has_permission(PLUGIN_PERMISSION_NRF24)) return;
 #ifdef CONFIG_HAS_NRF24
     nrf24_remote_manager_stop();
 #endif
 }
 
 bool plugin_api_nrf24_is_running(void) {
-    if (!has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
+    if (!has_permission(PLUGIN_PERMISSION_NRF24)) return false;
 #ifdef CONFIG_HAS_NRF24
     return nrf24_remote_manager_is_running();
 #else
@@ -1213,7 +1213,7 @@ bool plugin_api_nrf24_is_running(void) {
 }
 
 bool plugin_api_nrf24_is_paused(void) {
-    if (!has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
+    if (!has_permission(PLUGIN_PERMISSION_NRF24)) return false;
 #ifdef CONFIG_HAS_NRF24
     return nrf24_remote_manager_is_paused();
 #else
@@ -1222,7 +1222,7 @@ bool plugin_api_nrf24_is_paused(void) {
 }
 
 void plugin_api_nrf24_set_paused(bool paused) {
-    if (!has_permission(PLUGIN_PERMISSION_SUBGHZ)) return;
+    if (!has_permission(PLUGIN_PERMISSION_NRF24)) return;
 #ifdef CONFIG_HAS_NRF24
     nrf24_remote_manager_set_paused(paused);
 #else
