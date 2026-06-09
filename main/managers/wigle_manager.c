@@ -10,6 +10,7 @@
 #include "managers/sd_card_manager.h"
 #include "core/glog.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "mbedtls/base64.h"
@@ -153,18 +154,91 @@ static void wigle_unmount_if_needed(bool did_mount, bool display_was_suspended) 
     }
 }
 
+/* In-RAM cache of the uploaded-history file so wigle_uploaded_check() does
+ * not have to linearly re-walk the SD-resident log on every call (was O(N)
+ * per file, which stalled the upload loop on long wardriving sessions).
+ * Real basenames (e.g. "biscuit_wardrive_20260423_151052.csv") are <40 chars;
+ * ",<size up to 10 digits>\n" pads to <55, so 64 B/row is enough. 32 rows
+ * covers a typical multi-session boot with plenty of headroom.
+ *
+ * The cache is heap-allocated on first use (PSRAM preferred, internal RAM
+ * fallback) so the file contributes zero BSS. Only a single pointer to the
+ * cache struct lives in BSS. If allocation fails we silently fall back to
+ * a direct SD scan on every check. */
+#define WIGLE_UPLOADED_CACHE_ROWS 32
+#define WIGLE_UPLOADED_CACHE_ROW  64
+
+typedef struct {
+    int  n;
+    bool loaded;
+    char rows[WIGLE_UPLOADED_CACHE_ROWS][WIGLE_UPLOADED_CACHE_ROW];
+} wigle_uploaded_cache_t;
+
+static wigle_uploaded_cache_t *s_wigle_cache = NULL;
+
+static wigle_uploaded_cache_t *wigle_uploaded_cache_get(void) {
+    if (s_wigle_cache) return s_wigle_cache;
+    s_wigle_cache = heap_caps_calloc(1, sizeof(wigle_uploaded_cache_t),
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_wigle_cache) {
+        s_wigle_cache = heap_caps_calloc(1, sizeof(wigle_uploaded_cache_t),
+                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    return s_wigle_cache;
+}
+
+static void wigle_uploaded_cache_load(void) {
+    wigle_uploaded_cache_t *c = wigle_uploaded_cache_get();
+    if (!c) return;
+    c->n = 0;
+    FILE *f = fopen(WIGLE_UPLOADED_FILE, "r");
+    if (!f) {
+        c->loaded = true;
+        return;
+    }
+    char line[WIGLE_UPLOADED_CACHE_ROW];
+    while (c->n < WIGLE_UPLOADED_CACHE_ROWS && fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (!line[0]) continue;
+        strncpy(c->rows[c->n], line, sizeof(c->rows[0]) - 1);
+        c->rows[c->n][sizeof(c->rows[0]) - 1] = '\0';
+        c->n++;
+    }
+    fclose(f);
+    c->loaded = true;
+}
+
 /* Check if file (basename,size) was already uploaded. File format: basename,size\n */
 static bool wigle_uploaded_check(const char *basename, long size) {
-    FILE *f = fopen(WIGLE_UPLOADED_FILE, "r");
-    if (!f) return false;
-    char line[160];
     char expect[160];
     snprintf(expect, sizeof(expect), "%s,%ld", basename, size);
+    wigle_uploaded_cache_t *c = wigle_uploaded_cache_get();
+    if (c && !c->loaded) {
+        wigle_uploaded_cache_load();
+    }
+    if (c) {
+        for (int i = 0; i < c->n; i++) {
+            if (strcmp(c->rows[i], expect) == 0) {
+                return true;
+            }
+        }
+    }
+    /* Cache miss (or no cache): fall back to a one-shot SD scan in case the
+     * on-disk log has more entries than the in-RAM cache, and learn the new
+     * entry if found and a cache is available. */
+    FILE *f = fopen(WIGLE_UPLOADED_FILE, "r");
+    if (!f) return false;
+    char line[WIGLE_UPLOADED_CACHE_ROW];
     bool found = false;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = '\0';
         if (strcmp(line, expect) == 0) {
             found = true;
+            if (c && c->n < WIGLE_UPLOADED_CACHE_ROWS) {
+                strncpy(c->rows[c->n], line, sizeof(c->rows[0]) - 1);
+                c->rows[c->n][sizeof(c->rows[0]) - 1] = '\0';
+                c->n++;
+            }
             break;
         }
     }
@@ -181,6 +255,11 @@ static void wigle_uploaded_add(const char *basename, long size) {
     }
     fprintf(f, "%s,%ld\n", basename, size);
     fclose(f);
+    wigle_uploaded_cache_t *c = wigle_uploaded_cache_get();
+    if (c && c->n < WIGLE_UPLOADED_CACHE_ROWS) {
+        snprintf(c->rows[c->n], sizeof(c->rows[0]), "%s,%ld", basename, size);
+        c->n++;
+    }
 }
 
 /* Wigle rejects files with only pre-header + header (no data rows) */

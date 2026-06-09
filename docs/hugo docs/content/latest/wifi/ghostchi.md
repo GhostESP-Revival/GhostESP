@@ -54,7 +54,7 @@ Ghostchi persists a learning table (`learn.bin`) with up to 32 BSSID entries acr
 
 The table uses LRU eviction when full. APs with 3+ failures in the last 90 seconds get put on a per-target cooldown and skipped entirely during selection. This prevents the ghost from thrashing on uncatchable targets.
 
-Session aggregates (total sessions, handshakes, attempts, failures) are stored separately in `state.bin` and survive reboots.
+Session aggregates (total sessions, handshakes, attempts, failures, XP, and activity counters) are stored separately in `state.bin` and survive reboots.
 
 ## Your ghost
 
@@ -79,13 +79,41 @@ Each mood has its own sprite: happy for idle, angry when locked onto a target, e
 
 ### XP and levels
 
-The ghost earns XP and levels up (1-10) based on activity:
+The ghost earns XP from everything you do on the device and levels up (1-50). Your current level is always visible in the status bar and tapping it opens the Ghostchi view. A toast notification appears on level up.
 
-```
-XP = (sessions * 10) + (attempts * 3) + (captures * 24)
-```
+XP sources:
 
-Captures are worth the most by far. Level thresholds ramp up from 18 XP at level 2 to 762 XP at max level.
+| Action | XP |
+|--------|-----|
+| Handshake captured | 24 |
+| GPS fix acquired | 15 |
+| Ghostchi session start | 10 |
+| BadUSB script executed | 8 |
+| NFC card read (Chameleon) | 8 |
+| Drone detected (aerial) | 8 |
+| PCAP file saved | 6 |
+| SubGHz signal transmitted | 5 |
+| BLE scan started | 5 |
+| New AP learned | 5 |
+| Plugin launched | 5 |
+| Evil portal started | 5 |
+| Flappy Ghost game over | 5 |
+| IR signal transmitted | 4 |
+| Wardriving WiFi AP logged | 4 |
+| WiFi AP scan started | 3 |
+| WiFi STA connected | 3 |
+| Target attempt (ghostchi) | 3 |
+| Wardriving BLE logged | 3 |
+| Station scan started | 3 |
+| Port scan started | 3 |
+| Beacon spam started | 3 |
+| BLE spam started | 3 |
+| Manual deauth started | 3 |
+| BLE device discovered | 2 |
+| Deauth burst (ghostchi) | 2 |
+| Settings saved | 1 |
+
+Level thresholds ramp from 10 XP (level 2) to 25,000 XP (level 50) on a smooth quadratic curve. The level badge in the status bar shows your level on every screen.
 
 ### Speech bubbles
 
@@ -135,7 +163,7 @@ Each session appends to its own PCAP file and flushes it cleanly when stopped. C
 
 ## Quick start
 
-1. Open **Menu -> WiFi -> Ghostchi**.
+1. Open **Menu -> Apps -> Ghostchi**.
 2. Make sure an SD card is mounted. The ghost will tell you if it's blocked.
 3. Start a session. The ghost takes over from there.
 4. Leave it running. It will sweep, lock, listen, and adapt.

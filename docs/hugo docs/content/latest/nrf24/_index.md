@@ -2,7 +2,7 @@
 title: "NRF24"
 description: "NRF24L01 frequency analyzer with jamming detection and GhostLink remote control"
 keywords: ["NRF24", "NRF24L01", "2.4GHz", "frequency analyzer", "jamming detection", "GhostLink"]
-weight: 35
+weight: 130
 aliases:
   - "/nrf24/"
 ---

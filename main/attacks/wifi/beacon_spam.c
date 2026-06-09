@@ -16,6 +16,7 @@
 #include "attacks/wifi/beacon_spam.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/settings_manager.h"
@@ -369,6 +370,7 @@ void beacon_spam_start(const char *ssid) {
         ap_manager_stop_services();
         glog("Starting beacon transmission...\n");
         status_display_show_status("Beacon Starting");
+        ghostchi_manager_add_xp(3);
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP)); // Set AP mode for 802.11 TX
         configure_hidden_ap();
         esp_wifi_start();

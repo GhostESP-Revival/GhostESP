@@ -24,6 +24,7 @@ typedef enum {
 
 typedef struct {
   InputType type;
+  bool is_touch_move;
   union {
     struct {
       int joystick_index;
@@ -40,7 +41,7 @@ typedef struct {
 #define INPUT_ITEM_SIZE sizeof(InputEvent)
 extern QueueHandle_tt input_queue;
 
-#define MUTEX_TIMEOUT_MS 100
+#define MUTEX_TIMEOUT_MS 10
 
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
 #define RENDERING_TASK_PRIORITY (15)
@@ -66,8 +67,10 @@ extern View number_pad_view;
 extern View keyboard_view;
 extern View compass_view;
 extern View accelerometer_view;
+extern View enviii_view;
 extern View wardriving_view;
 extern View ethernet_screen_view;
+extern View lockscreen_view;
 extern View *display_manager_previous_view;
 
 /* Function prototypes */
@@ -86,6 +89,31 @@ bool display_manager_register_view(View *view);
  * @brief Switch to a new view.
  */
 void display_manager_switch_view(View *view);
+
+/**
+ * @brief Switch to a new view on the LVGL task and wait for the first refresh.
+ */
+bool display_manager_switch_view_and_wait_for_refresh(View *view);
+
+/**
+ * @brief Initialize slower display-adjacent peripherals after the first UI frame.
+ */
+void display_manager_init_deferred_peripherals(void);
+
+/**
+ * @brief Switch to the lockscreen and remember the current view for unlock.
+ */
+void display_manager_show_lockscreen(void);
+
+/**
+ * @brief Return view captured when entering the lockscreen, or NULL.
+ */
+View *display_manager_get_lockscreen_return_view(void);
+
+/**
+ * @brief Clear the captured lockscreen return view.
+ */
+void display_manager_clear_lockscreen_return_view(void);
 
 void apply_power_management_config(bool power_save_enabled);
 
@@ -136,6 +164,40 @@ void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+
+/* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
+ * instead of running it on every touch sample. The accumulator is flushed
+ * once per LVGL tick (10ms) inside processEvent, which collapses up to
+ * ~100 touch samples/sec into a handful of scroll+repaint operations. */
+void display_manager_queue_scroll(lv_obj_t *target, int32_t dy);
+
+/* Apply any pending scroll immediately. Safe to call repeatedly. */
+void display_manager_flush_pending_scroll(void);
+
+/* Touch drag state machine for live-drag scrolling. Each view maintains
+ * a `touch_drag_t` (typically file-static), supplies the scroll target on
+ * each call, and reads `was_dragged` from the release return to suppress
+ * its own tap handling. The global `touch_drag_scroll` setting gates
+ * behavior: ON = per-sample live updates, OFF = single scroll on release
+ * using the total drag distance (release-on-release). */
+typedef struct {
+    bool started;
+    bool dragged;
+    int drag_axis;
+    int start_x, start_y;
+    int last_x, last_y;
+    lv_obj_t *release_target;
+} touch_drag_t;
+
+void touch_drag_reset(touch_drag_t *d);
+void touch_drag_begin(touch_drag_t *d, const lv_indev_data_t *data);
+/* On touch move. Resolves drag axis, applies live drag (or remembers the
+ * target for release). Returns the scroll target that was used, or NULL. */
+lv_obj_t *touch_drag_update(touch_drag_t *d, const lv_indev_data_t *data, lv_obj_t *scroll_target);
+/* On touch release. Applies release-on-release if appropriate. Returns
+ * true if a drag was in progress (caller should suppress its tap/click
+ * handling) OR if a release-on-release scroll was applied. */
+bool touch_drag_release(touch_drag_t *d, const lv_indev_data_t *data);
 
 LV_IMG_DECLARE(Ghost_ESP);
 LV_IMG_DECLARE(Map);

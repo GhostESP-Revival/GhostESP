@@ -6,6 +6,7 @@
 #include "managers/chameleon_manager.h"
 #include "managers/nfc/mifare_attack.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostchi_manager.h"
 
 #ifdef CONFIG_NFC_CHAMELEON
 #include "host/ble_hs.h"
@@ -149,6 +150,7 @@ static void chameleon_resume_ap(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
         esp_err_t err_init = ap_manager_init();
         if (err_init == ESP_OK) {
+            wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
         }
         if (err_init != ESP_OK) {
@@ -2254,6 +2256,7 @@ bool chameleon_manager_read_hf_card(void) {
     g_cached_details_text = chameleon_manager_build_cached_details();
     g_cached_details_session++;
     
+    ghostchi_manager_add_xp(8);
     return true;
 }
 
@@ -3101,6 +3104,7 @@ bool chameleon_manager_read_ntag_card(void) {
         g_cached_details_text = chameleon_manager_build_cached_details();
         g_cached_details_session++;
     }
+    if (g_last_ntag_dump.valid) ghostchi_manager_add_xp(8);
     return g_last_ntag_dump.valid;
 }
 

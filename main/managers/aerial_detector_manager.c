@@ -10,6 +10,7 @@
 //
 #include "managers/aerial_detector_manager.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "core/glog.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -1015,6 +1016,7 @@ static void notify_callback(AerialDevice *device) {
     if (user_callback) {
         user_callback(device, user_callback_data);
     }
+    ghostchi_manager_add_xp(8);
     
     // emit tracker-style update for the tracked device
     if (device && device->is_tracked) {

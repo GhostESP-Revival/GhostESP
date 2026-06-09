@@ -22,6 +22,25 @@ bool wifi_channels_is_5ghz(uint8_t channel) {
     return channel > 14;
 }
 
+bool wifi_channels_is_dfs(uint8_t channel) {
+    return channel >= 52 && channel <= 144;
+}
+
+bool wifi_channels_is_safe_monitor_channel(uint8_t channel) {
+    if (channel >= 1 && channel <= 14) {
+        return true;
+    }
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (channel >= 36 && channel <= 48) {
+        return true;
+    }
+    if (channel >= 149 && channel <= 165) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 const char* wifi_channels_get_band_name(uint8_t channel) {
     return wifi_channels_is_5ghz(channel) ? "5GHz" : "2.4GHz";
 }

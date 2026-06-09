@@ -22,8 +22,27 @@ bool badusb_has_vsense(void);
 // Returns true if VBUS is detected (pin HIGH), or always true if no VSENSE pin
 bool badusb_vsense_connected(void);
 
-// Stream receive for remote script execution (C5 → S3)
+// Stream receive for remote script execution (C5 -> S3)
 esp_err_t badusb_manager_prepare_receive(size_t size);
 void badusb_manager_register_stream_handler(void);
+
+// Send a mouse HID report (dx, dy are relative movement, buttons is bitmask)
+bool badusb_hid_mouse_send(int8_t dx, int8_t dy, uint8_t buttons);
+
+// Mouse jiggler: moves mouse periodically to keep PC awake
+esp_err_t badusb_manager_mouse_jiggle_start(void);
+esp_err_t badusb_manager_mouse_jiggle_stop(void);
+bool badusb_manager_is_jiggling(void);
+
+// Keyboard mode: real-time key forwarding via COMM_STREAM_CHANNEL_KEYBOARD
+esp_err_t badusb_manager_keyboard_mode_start(void);
+esp_err_t badusb_manager_keyboard_mode_stop(void);
+bool badusb_manager_is_keyboard_mode(void);
+
+// Send a single keypress (requires active HID device - keyboard mode or script mode)
+bool badusb_manager_send_keypress(uint8_t modifier, uint8_t keycode);
+
+// Type text through the active HID keyboard device
+bool badusb_manager_send_text(const char *text);
 
 #endif

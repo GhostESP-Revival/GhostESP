@@ -5,6 +5,7 @@
 #include "managers/badusb_manager.h"
 #include "managers/badusb_builtin_script.h"
 #include "managers/hid_script_parser.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
 #include "core/glog.h"
@@ -23,11 +24,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <dirent.h>
 
 static const char *TAG = "badusb";
 
-static const uint8_t hid_report_descriptor[] = {
+static const uint8_t hid_keyboard_report_desc[] = {
     0x05, 0x01,       // Usage Page (Generic Desktop)
     0x09, 0x06,       // Usage (Keyboard)
     0xA1, 0x01,       // Collection (Application)
@@ -51,6 +53,36 @@ static const uint8_t hid_report_descriptor[] = {
     0x29, 0x65,       //   Usage Maximum (101)
     0x81, 0x00,       //   Input (Data, Array) -- Key arrays (6 keys)
     0xC0              // End Collection
+};
+
+static const uint8_t hid_mouse_report_desc[] = {
+    0x05, 0x01,       // Usage Page (Generic Desktop)
+    0x09, 0x02,       // Usage (Mouse)
+    0xA1, 0x01,       // Collection (Application)
+    0x09, 0x01,       //   Usage (Pointer)
+    0xA1, 0x00,       //   Collection (Physical)
+    0x05, 0x09,       //     Usage Page (Buttons)
+    0x19, 0x01,       //     Usage Minimum (1)
+    0x29, 0x03,       //     Usage Maximum (3)
+    0x15, 0x00,       //     Logical Minimum (0)
+    0x25, 0x01,       //     Logical Maximum (1)
+    0x75, 0x01,       //     Report Size (1)
+    0x95, 0x03,       //     Report Count (3)
+    0x81, 0x02,       //     Input (Data, Variable, Absolute) -- 3 buttons
+    0x75, 0x05,       //     Report Size (5)
+    0x95, 0x01,       //     Report Count (1)
+    0x81, 0x01,       //     Input (Constant) -- 5-bit padding
+    0x05, 0x01,       //     Usage Page (Generic Desktop)
+    0x09, 0x30,       //     Usage (X)
+    0x09, 0x31,       //     Usage (Y)
+    0x09, 0x38,       //     Usage (Wheel)
+    0x15, 0x81,       //     Logical Minimum (-127)
+    0x25, 0x7F,       //     Logical Maximum (127)
+    0x75, 0x08,       //     Report Size (8)
+    0x95, 0x03,       //     Report Count (3)
+    0x81, 0x06,       //     Input (Data, Variable, Relative) -- X, Y, Wheel
+    0xC0,             //   End Collection (Physical)
+    0xC0              // End Collection (Application)
 };
 
 static bool s_initialized = false;
@@ -78,16 +110,28 @@ static tusb_desc_device_t device_descriptor = {
 };
 
 enum {
-    ITF_NUM_HID,
+    ITF_NUM_HID_KEYBOARD,
+    ITF_NUM_HID_MOUSE,
     ITF_NUM_TOTAL
 };
 
-#define BADUSB_CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
-#define EPNUM_HID           0x81
+enum {
+    HID_INSTANCE_KEYBOARD,
+    HID_INSTANCE_MOUSE,
+};
+
+#define EPNUM_HID_KEYBOARD  0x81
+#define EPNUM_HID_MOUSE     0x82
+
+// Each TUD_HID_DESC_LEN is 9+7+7 = 23 bytes
+#define BADUSB_CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN)
 
 static const uint8_t configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, BADUSB_CONFIG_TOTAL_LEN, 0x00, 100),
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(hid_report_descriptor), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KEYBOARD, 0, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(hid_keyboard_report_desc), EPNUM_HID_KEYBOARD, CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_MOUSE, 0, HID_ITF_PROTOCOL_MOUSE,
+                       sizeof(hid_mouse_report_desc), EPNUM_HID_MOUSE, CFG_TUD_HID_EP_BUFSIZE, 10),
 };
 
 static char mfr_string[33] = "Ghost ESP";
@@ -101,8 +145,8 @@ static const char *string_descriptors[] = {
 };
 
 const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
-    (void)instance;
-    return hid_report_descriptor;
+    if (instance == ITF_NUM_HID_MOUSE) return hid_mouse_report_desc;
+    return hid_keyboard_report_desc;
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
@@ -123,12 +167,12 @@ static bool badusb_send_key(uint8_t modifiers, uint8_t keycode, void *ctx) {
     uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
 
     int timeout = 100;
-    while (!tud_hid_ready() && timeout-- > 0) {
+    while (!tud_hid_n_ready(ITF_NUM_HID_KEYBOARD) && timeout-- > 0) {
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    if (!tud_hid_ready()) return false;
+    if (!tud_hid_n_ready(ITF_NUM_HID_KEYBOARD)) return false;
 
-    tud_hid_keyboard_report(0, modifiers, keycodes);
+    tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, modifiers, keycodes);
     vTaskDelay(pdMS_TO_TICKS(MIN_KEY_DELAY_MS));
     return true;
 }
@@ -146,7 +190,7 @@ static bool badusb_send_string(const char *text, size_t len, void *ctx) {
         }
 
         badusb_send_key(modifier, keycode, ctx);
-        tud_hid_keyboard_report(0, 0, NULL);
+        tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, 0, NULL);
         vTaskDelay(pdMS_TO_TICKS(MIN_KEY_DELAY_MS));
     }
     return true;
@@ -163,8 +207,8 @@ static void badusb_delay(uint32_t ms, void *ctx) {
 
 static bool badusb_release_keys(void *ctx) {
     (void)ctx;
-    if (!tud_hid_ready()) return false;
-    tud_hid_keyboard_report(0, 0, NULL);
+    if (!tud_hid_n_ready(ITF_NUM_HID_KEYBOARD)) return false;
+    tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, 0, NULL);
     vTaskDelay(pdMS_TO_TICKS(MIN_KEY_DELAY_MS));
     return true;
 }
@@ -176,6 +220,244 @@ static const hid_transport_t usb_transport = {
     .release_keys = badusb_release_keys,
     .ctx          = NULL,
 };
+
+// --- Forward declarations ---
+static esp_err_t badusb_install_driver(void);
+static esp_err_t badusb_wait_for_mount(void);
+static void keyboard_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
+static volatile bool s_keyboard_mode = false;
+
+static esp_err_t badusb_wait_for_vbus(const char *status_after_connect) {
+    if (badusb_has_vsense() && !badusb_vsense_connected()) {
+        ESP_LOGI(TAG, "Waiting for VBUS...");
+        if (esp_comm_manager_is_connected()) {
+            esp_comm_manager_send_command("badusb", "status waiting");
+        }
+        while (!badusb_vsense_connected() && !s_stop_requested) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        if (s_stop_requested) return ESP_ERR_INVALID_STATE;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (status_after_connect && esp_comm_manager_is_connected()) {
+        char status[32];
+        snprintf(status, sizeof(status), "status %s", status_after_connect);
+        esp_comm_manager_send_command("badusb", status);
+    }
+    return ESP_OK;
+}
+
+// --- Mouse HID ---
+
+bool badusb_hid_mouse_send(int8_t dx, int8_t dy, uint8_t buttons) {
+    if (!s_active) return false;
+    int timeout = 100;
+    while (!tud_hid_n_ready(HID_INSTANCE_MOUSE) && timeout-- > 0) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!tud_hid_n_ready(HID_INSTANCE_MOUSE)) return false;
+
+    // Descriptor is boot mouse: buttons, X, Y, wheel. Send exactly 4 bytes.
+    uint8_t report[4] = {buttons, (uint8_t)dx, (uint8_t)dy, 0};
+    return tud_hid_n_report(HID_INSTANCE_MOUSE, 0, report, sizeof(report));
+}
+
+// --- Mouse Jiggler ---
+
+static TaskHandle_t s_jiggler_task = NULL;
+static TaskHandle_t s_mode_start_task = NULL;
+static volatile bool s_jiggler_stop = false;
+
+static void mouse_jiggler_task(void *arg) {
+    (void)arg;
+    s_jiggler_stop = false;
+    int8_t dx = 8;
+
+    glog("BadUSB: Mouse jiggler started\n");
+    if (esp_comm_manager_is_connected()) {
+        esp_comm_manager_send_command("badusb", "status jiggling");
+    }
+
+    while (!s_jiggler_stop) {
+        badusb_hid_mouse_send(dx, 0, 0);
+        dx = -dx;  // Alternate direction each tick
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    glog("BadUSB: Mouse jiggler stopped\n");
+    if (esp_comm_manager_is_connected()) {
+        esp_comm_manager_send_command("badusb", "status done");
+    }
+    s_jiggler_task = NULL;
+    vTaskDelete(NULL);
+}
+
+typedef enum {
+    BADUSB_START_JIGGLER = 1,
+    BADUSB_START_KEYBOARD = 2,
+} badusb_start_mode_t;
+
+static void badusb_mode_start_task(void *arg) {
+    badusb_start_mode_t mode = (badusb_start_mode_t)(uintptr_t)arg;
+
+    s_stop_requested = false;
+    esp_err_t ret = badusb_wait_for_vbus(NULL);
+    if (ret == ESP_OK) {
+        badusb_manager_apply_settings();
+        ret = badusb_install_driver();
+    }
+    if (ret == ESP_OK) {
+        s_active = true;
+        ret = badusb_wait_for_mount();
+    }
+
+    if (ret == ESP_OK && mode == BADUSB_START_JIGGLER) {
+        if (xTaskCreate(mouse_jiggler_task, "mouse_jiggle", 4096, NULL, 5, &s_jiggler_task) != pdPASS) {
+            ret = ESP_FAIL;
+        }
+    } else if (ret == ESP_OK && mode == BADUSB_START_KEYBOARD) {
+        s_keyboard_mode = true;
+        esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_KEYBOARD, keyboard_stream_rx_cb, NULL);
+        glog("BadUSB: Keyboard mode started\n");
+        if (esp_comm_manager_is_connected()) {
+            esp_comm_manager_send_command("badusb", "status keyboard");
+        }
+    }
+
+    if (ret != ESP_OK) {
+        glog("BadUSB: Failed to start mode: %s\n", esp_err_to_name(ret));
+        if (s_driver_installed) {
+            tinyusb_driver_uninstall();
+            s_driver_installed = false;
+        }
+        s_active = false;
+        s_keyboard_mode = false;
+        if (esp_comm_manager_is_connected()) {
+            esp_comm_manager_send_command("badusb", "status done");
+        }
+    }
+
+    s_mode_start_task = NULL;
+    vTaskDelete(NULL);
+}
+
+esp_err_t badusb_manager_mouse_jiggle_start(void) {
+    if (s_mode_start_task) return ESP_ERR_INVALID_STATE;
+    if (s_jiggler_task) return ESP_ERR_INVALID_STATE;
+    if (s_active) return ESP_ERR_INVALID_STATE;
+
+    if (xTaskCreate(badusb_mode_start_task, "badusb_mode", 6144,
+                    (void *)(uintptr_t)BADUSB_START_JIGGLER, 5, &s_mode_start_task) != pdPASS) {
+        s_mode_start_task = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t badusb_manager_mouse_jiggle_stop(void) {
+    s_stop_requested = true;
+    s_jiggler_stop = true;
+    for (int i = 0; i < 100 && s_mode_start_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    // Give the task time to exit
+    for (int i = 0; i < 50 && s_jiggler_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (s_driver_installed) {
+        tinyusb_driver_uninstall();
+        s_driver_installed = false;
+    }
+    s_active = false;
+    return ESP_OK;
+}
+
+bool badusb_manager_is_jiggling(void) {
+    return s_jiggler_task != NULL;
+}
+
+// --- Keyboard Mode (real-time key forwarding) ---
+
+static void keyboard_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data) {
+    (void)channel;
+    (void)user_data;
+    if (!s_keyboard_mode || !data || length < 3) return;
+
+    // Payload: [flags] [modifier] [keycode]
+    // flags bit 0 = release event
+    bool is_release = (data[0] & 0x01) != 0;
+    uint8_t modifier = data[1];
+    uint8_t keycode = data[2];
+
+    if (is_release) {
+        tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, 0, NULL);
+    } else {
+        uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
+        tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, modifier, keycodes);
+    }
+}
+
+esp_err_t badusb_manager_keyboard_mode_start(void) {
+    if (s_mode_start_task) return ESP_ERR_INVALID_STATE;
+    if (s_active || s_keyboard_mode) return ESP_ERR_INVALID_STATE;
+
+    if (xTaskCreate(badusb_mode_start_task, "badusb_mode", 6144,
+                    (void *)(uintptr_t)BADUSB_START_KEYBOARD, 5, &s_mode_start_task) != pdPASS) {
+        s_mode_start_task = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t badusb_manager_keyboard_mode_stop(void) {
+    s_stop_requested = true;
+    for (int i = 0; i < 100 && s_mode_start_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    s_keyboard_mode = false;
+    if (s_driver_installed) {
+        tinyusb_driver_uninstall();
+        s_driver_installed = false;
+    }
+    s_active = false;
+    glog("BadUSB: Keyboard mode stopped\n");
+    if (esp_comm_manager_is_connected()) {
+        esp_comm_manager_send_command("badusb", "status done");
+    }
+    return ESP_OK;
+}
+
+bool badusb_manager_is_keyboard_mode(void) {
+    return s_keyboard_mode;
+}
+
+bool badusb_manager_send_keypress(uint8_t modifier, uint8_t keycode) {
+    if (!s_active) return false;
+    int timeout = 100;
+    while (!tud_hid_n_ready(ITF_NUM_HID_KEYBOARD) && timeout-- > 0) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!tud_hid_n_ready(ITF_NUM_HID_KEYBOARD)) return false;
+
+    uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
+    tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, modifier, keycodes);
+    vTaskDelay(pdMS_TO_TICKS(MIN_KEY_DELAY_MS));
+    tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, 0, NULL);
+    return true;
+}
+
+bool badusb_manager_send_text(const char *text) {
+    if (!text) return false;
+    for (int i = 0; i < 300 && !s_active; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (!s_active) return false;
+    size_t len = strlen(text);
+    if (len == 0) return true;
+    bool ok = badusb_send_string(text, len, NULL);
+    badusb_release_keys(NULL);
+    return ok;
+}
 
 esp_err_t badusb_manager_init(void) {
     if (s_initialized) return ESP_OK;
@@ -302,6 +584,8 @@ esp_err_t badusb_manager_start(void) {
 
 esp_err_t badusb_manager_stop(void) {
     s_stop_requested = true;
+    s_keyboard_mode = false;
+    s_jiggler_stop = true;
     s_active = false;
     ESP_LOGI(TAG, "BadUSB stopped");
     return ESP_OK;
@@ -422,6 +706,7 @@ esp_err_t badusb_manager_execute_file(const char *path) {
         free(params);
         return ESP_FAIL;
     }
+    ghostchi_manager_add_xp(8);
 
     return ESP_OK;
 }
@@ -461,25 +746,27 @@ static size_t s_script_size = 0;
 static size_t s_script_offset = 0;
 
 esp_err_t badusb_manager_prepare_receive(size_t size) {
+    bool remote_request = esp_comm_manager_is_remote_command();
+
     if (s_script_buf) {
         free(s_script_buf);
         s_script_buf = NULL;
     }
 
     if (size == 0 || size > 65536) {
-        glog("BadUSB: Invalid script size: %zu\n", size);
+        if (!remote_request) glog("BadUSB: Invalid script size: %zu\n", size);
         return ESP_ERR_INVALID_ARG;
     }
 
     s_script_buf = malloc(size + 1);
     if (!s_script_buf) {
-        glog("BadUSB: Failed to allocate %zu bytes for script\n", size + 1);
+        if (!remote_request) glog("BadUSB: Failed to allocate %zu bytes for script\n", size + 1);
         return ESP_ERR_NO_MEM;
     }
 
     s_script_size = size;
     s_script_offset = 0;
-    glog("BadUSB: Ready to receive %zu byte script\n", size);
+    if (!remote_request) glog("BadUSB: Ready to receive %zu byte script\n", size);
     return ESP_OK;
 }
 
