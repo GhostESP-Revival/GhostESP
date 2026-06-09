@@ -6,6 +6,7 @@
 #include "managers/display_manager.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/options_view.h"
 #include "gui/screen_layout.h"
 #include "gui/popup.h"
@@ -73,6 +74,8 @@ static BadUsbMenuState current_menu_state = BADUSB_MENU_MAIN;
 
 static const char *badusb_main_options[] = {
     "Run Script",
+    "USB Keyboard",
+    "Mouse Jiggler",
     "Settings",
     "< Back",
     NULL
@@ -290,6 +293,30 @@ static void badusb_prod_kb_cb(const char *text) {
     display_manager_switch_view(&badusb_view);
 }
 
+static void badusb_type_kb_cb(const char *text) {
+    keyboard_view_set_submit_callback(NULL);
+    keyboard_view_set_immediate_callback(NULL);
+    display_manager_switch_view(&badusb_view);
+}
+
+static void badusb_key_immediate_cb(char c) {
+    char cmd[32];
+    if (c == '\b') {
+        snprintf(cmd, sizeof(cmd), "keysend 0 0x2A");
+    } else {
+        snprintf(cmd, sizeof(cmd), "type_char %u", (unsigned char)c);
+    }
+#ifdef CONFIG_HAS_BADUSB_REMOTE
+    esp_comm_manager_send_command("badusb", cmd);
+#elif defined(CONFIG_HAS_BADUSB)
+    if (c == '\b') badusb_manager_send_keypress(0, 0x2A);
+    else {
+        char one[2] = {c, '\0'};
+        badusb_manager_send_text(one);
+    }
+#endif
+}
+
 static void badusb_cancel_cb(lv_event_t *e) {
     (void)e;
     bool remote = badusb_is_remote();
@@ -338,8 +365,8 @@ static void show_running_popup_ex(const char *script_name, bool waiting_for_usb)
 
     badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
 
-    const lv_font_t *title_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    const lv_font_t *body_font = (LV_VER_RES <= 240) ? &lv_font_montserrat_12 : &lv_font_montserrat_14;
+    const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
+    const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
 
     const char *title = waiting_for_usb ? "Waiting for USB..." : "BadUSB Running";
     badusb_popup_title_lbl = popup_create_title_label(badusb_running_popup, title, title_font, 12);
@@ -428,6 +455,24 @@ void badusb_view_update_status(const char *status) {
         }
     } else if (strcmp(status, "running") == 0) {
         badusb_popup_set_running();
+    } else if (strcmp(status, "jiggling") == 0) {
+        if (!badusb_running_popup || !lv_obj_is_valid(badusb_running_popup)) {
+            show_running_popup_ex("Mouse Jiggler", false);
+        }
+        if (badusb_popup_title_lbl && lv_obj_is_valid(badusb_popup_title_lbl)) {
+            lv_label_set_text(badusb_popup_title_lbl, "Mouse Jiggler");
+        }
+        if (badusb_popup_body_lbl && lv_obj_is_valid(badusb_popup_body_lbl)) {
+            lv_label_set_text(badusb_popup_body_lbl, "Jiggling mouse...");
+        }
+    } else if (strcmp(status, "keyboard") == 0) {
+        // Keyboard mode uses keyboard_view directly; do not cover it with a popup.
+        if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
+            lv_obj_del(badusb_running_popup);
+            badusb_running_popup = NULL;
+        }
+        badusb_popup_title_lbl = NULL;
+        badusb_popup_body_lbl = NULL;
     } else if (strcmp(status, "done") == 0) {
         badusb_popup_set_done();
     }
@@ -591,6 +636,58 @@ static void handle_option(const char *option) {
             }
             current_menu_state = BADUSB_MENU_SCRIPT_SELECT;
             rebuild_menu();
+        } else if (strcmp(option, "USB Keyboard") == 0) {
+            if (remote && !esp_comm_manager_is_connected()) {
+                error_popup_create("Not connected to peer");
+                return;
+            }
+            if (remote) {
+#ifdef CONFIG_HAS_BADUSB_REMOTE
+                esp_comm_manager_send_command("badusb", "keyboard_start");
+                keyboard_view_set_return_view(&badusb_view);
+                keyboard_view_set_submit_callback(badusb_type_kb_cb);
+                keyboard_view_set_immediate_callback(badusb_key_immediate_cb);
+                keyboard_view_set_placeholder("Type text to send...");
+                keyboard_view_set_initial_text("");
+                keyboard_view_set_start_caps(false);
+                display_manager_switch_view(&keyboard_view);
+#endif
+            } else {
+#ifdef CONFIG_HAS_BADUSB
+                esp_err_t ret = badusb_manager_keyboard_mode_start();
+                if (ret != ESP_OK) {
+                    error_popup_create("Failed to start keyboard");
+                    return;
+                }
+                keyboard_view_set_return_view(&badusb_view);
+                keyboard_view_set_submit_callback(badusb_type_kb_cb);
+                keyboard_view_set_immediate_callback(badusb_key_immediate_cb);
+                keyboard_view_set_placeholder("Type text to send...");
+                keyboard_view_set_initial_text("");
+                keyboard_view_set_start_caps(false);
+                display_manager_switch_view(&keyboard_view);
+#endif
+            }
+        } else if (strcmp(option, "Mouse Jiggler") == 0) {
+            if (remote && !esp_comm_manager_is_connected()) {
+                error_popup_create("Not connected to peer");
+                return;
+            }
+            if (remote) {
+#ifdef CONFIG_HAS_BADUSB_REMOTE
+                esp_comm_manager_send_command("badusb", "jiggle_start");
+                show_running_popup_ex("Mouse Jiggler", false);
+#endif
+            } else {
+#ifdef CONFIG_HAS_BADUSB
+                esp_err_t ret = badusb_manager_mouse_jiggle_start();
+                if (ret != ESP_OK) {
+                    error_popup_create("Failed to start jiggler");
+                    return;
+                }
+                show_running_popup_ex("Mouse Jiggler", false);
+#endif
+            }
         } else if (strcmp(option, "< Back") == 0) {
             go_back();
         }
@@ -649,7 +746,7 @@ static void handle_option(const char *option) {
             bool ok = is_builtin ? badusb_send_builtin_to_peer()
                                  : badusb_send_script_to_peer(option);
             if (ok) {
-                show_running_popup_ex(option, true);
+                show_running_popup(option);
             }
 #endif
         } else {

@@ -775,13 +775,8 @@ class ESP32ControlGUI(QMainWindow):
                 self.flash_status.setText("Please select a merged .bin file.")
                 return
             
-            # Determine boot offset based on chip type (for merged files, we flash at boot offset)
-            if chip in ["esp32s2", "esp32"]:
-                flash_offset = "0x1000"
-            elif chip in ["esp32s3", "esp32c3", "esp32c5", "esp32c6"]:
-                flash_offset = "0x0"
-            else:
-                flash_offset = "0x1000"  # Default/fallback
+            # Full merged images include their own internal offsets and start at flash address 0.
+            flash_offset = "0x0"
 
             self.flash_status.setText(f"Flashing merged .bin ({chip})... Please wait.")
             self.flash_console.clear()

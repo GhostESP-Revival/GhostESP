@@ -32,7 +32,7 @@ typedef struct {
 
 typedef void (*comm_command_callback_t)(const char* command, const char* data, void* user_data);
 
-#define COMM_MAX_STREAM_CHANNELS 9
+#define COMM_MAX_STREAM_CHANNELS 10
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
@@ -41,6 +41,7 @@ typedef void (*comm_command_callback_t)(const char* command, const char* data, v
 #define COMM_STREAM_CHANNEL_ETHERNET      6
 #define COMM_STREAM_CHANNEL_MIC_AMPLITUDE 7  // MIC audio data for RGB visualizer
 #define COMM_STREAM_CHANNEL_SUBGHZ 8
+#define COMM_STREAM_CHANNEL_AUDIO 9          // MP3 audio stream for DAC playback
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 
@@ -60,6 +61,7 @@ void esp_comm_manager_set_remote_command_flag(bool is_remote);
 bool esp_comm_manager_is_remote_command(void);
 
 bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t length);
+bool esp_comm_manager_send_stream_wait(uint8_t channel, const uint8_t* data, size_t length, uint32_t wait_ms);
 bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callback_t callback, void* user_data);
 
 #endif // ESP_COMM_MANAGER_H

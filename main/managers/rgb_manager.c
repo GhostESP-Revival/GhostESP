@@ -162,11 +162,9 @@ static void get_mic_palette_color(uint8_t position, uint8_t intensity,
             break;
         }
         case MIC_COLOR_SINGLE_HUE: {
-            // Single hue with varying saturation/brightness
-            uint8_t hue = 0; // Could be configurable, default to red
-            // Simple HSV to RGB for red hue
+            // Single hue (warm orange-red) with varying brightness
             *r = intensity;
-            *g = (position * intensity) / 510; // Half green
+            *g = (uint8_t)(((uint16_t)intensity * 60u) / 255u);
             *b = 0;
             break;
         }
@@ -284,9 +282,9 @@ static void get_mic_reactive_color(uint8_t base_position,
     uint8_t centroid = get_band_centroid_position(bands);
     static const uint8_t anchors[4] = {24, 96, 168, 240};
 
-    uint16_t reactive_position = (uint16_t)base_position * (255u - local_mix);
-    reactive_position += (uint16_t)centroid * (128u + (local_mix / 2u));
-    reactive_position += (uint16_t)anchors[dominant] * (96u + (local_mix / 2u));
+    uint32_t reactive_position = (uint32_t)base_position * (255u - local_mix);
+    reactive_position += (uint32_t)centroid * (128u + (local_mix / 2u));
+    reactive_position += (uint32_t)anchors[dominant] * (96u + (local_mix / 2u));
     reactive_position /= 255u + (128u + (local_mix / 2u)) + (96u + (local_mix / 2u));
 
     get_mic_palette_color((uint8_t)reactive_position, intensity, r, g, b);
@@ -346,7 +344,8 @@ static void render_4band_spectrum(uint8_t bands[4], uint8_t amplitude, int num_l
             uint32_t remaining = local_height - led_threshold;
             if (remaining > 255u) remaining = 255u;
             uint8_t tip_fade = (uint8_t)remaining;
-            uint8_t distance_fade = (uint8_t)(255u - ((uint32_t)i * 96u / effective_leds));
+            uint32_t df_raw = 255u - ((uint32_t)i * 96u / effective_leds);
+            uint8_t distance_fade = (df_raw > 255u) ? 0u : (uint8_t)df_raw;
             uint8_t intensity = (uint8_t)(((uint32_t)brightness * (64u + tip_fade) * distance_fade) / (255u * 255u));
 
             uint8_t r, g, b;
@@ -375,7 +374,7 @@ static void render_vu_meter(uint8_t bands[4], uint8_t amplitude, int num_leds) {
     static float vu_level = 0.0f;
     static float vu_peak = 0.0f;
     static uint32_t vu_peak_hold_until = 0;
-    static MicVisualizerMode last_vu_mode = MIC_MODE_4BAND_SPECTRUM;
+    static MicVisualizerMode last_vu_mode = MIC_MODE_COUNT;
     MicVisualizerMode current_mode = settings_get_mic_visualizer_mode(&G_Settings);
     if (current_mode != last_vu_mode) {
         vu_level = 0.0f;
@@ -449,7 +448,7 @@ static void render_vu_meter(uint8_t bands[4], uint8_t amplitude, int num_leds) {
  */
 static uint8_t peak_value = 0;
 static uint32_t last_peak_time = 0;
-static MicVisualizerMode last_peak_mode = MIC_MODE_4BAND_SPECTRUM;
+static MicVisualizerMode last_peak_mode = MIC_MODE_COUNT;
 
 static void render_peak_meter(uint8_t bands[4], uint8_t amplitude, int num_leds) {
     MicVisualizerMode current_mode = settings_get_mic_visualizer_mode(&G_Settings);
@@ -482,7 +481,7 @@ static void render_peak_meter(uint8_t bands[4], uint8_t amplitude, int num_leds)
     } else {
         uint32_t hold_ms = 100 + (smoothing * 12);
         if (now - last_peak_time > hold_ms) {
-            float decay = 0.14f + (float)(10 - (smoothing > 10 ? 10 : smoothing)) * 0.01f;
+            float decay = 0.04f + (float)(10 - (smoothing > 10 ? 10 : smoothing)) * 0.02f;
             peak_value = (uint8_t)((float)peak_value * (1.0f - decay));
         }
     }
@@ -523,7 +522,7 @@ static void render_peak_meter(uint8_t bands[4], uint8_t amplitude, int num_leds)
  */
 static uint8_t waveform_buffer[64] = {0};
 static uint8_t waveform_idx = 0;
-static MicVisualizerMode last_waveform_mode = MIC_MODE_4BAND_SPECTRUM;
+static MicVisualizerMode last_waveform_mode = MIC_MODE_COUNT;
 
 static void render_waveform(uint8_t bands[4], uint8_t amplitude, int num_leds) {
     MicVisualizerMode current_mode = settings_get_mic_visualizer_mode(&G_Settings);
@@ -573,7 +572,7 @@ static void render_waveform(uint8_t bands[4], uint8_t amplitude, int num_leds) {
         int led_idx = scaled / 255u;
         uint8_t frac = (uint8_t)(scaled % 255u);
 
-        uint8_t age_fade = (uint8_t)(((uint16_t)age * 255u) / 63u);
+        uint8_t age_fade = (uint8_t)(((uint16_t)(63 - age) * 255u) / 63u);
         uint8_t intensity = (uint8_t)(((uint32_t)get_mic_brightness_u8(amplitude) * age_fade) / 255u);
         if (intensity == 0) {
             continue;
@@ -662,7 +661,7 @@ static void render_kaleidoscope(uint8_t bands[4], uint8_t amplitude, int num_led
  * @brief Render bloom effect (center-expanding trails)
  */
 static uint8_t bloom_buffer[160] = {0};
-static MicVisualizerMode last_bloom_mode = MIC_MODE_4BAND_SPECTRUM;
+static MicVisualizerMode last_bloom_mode = MIC_MODE_COUNT;
 
 static void render_bloom(uint8_t bands[4], uint8_t amplitude, int num_leds) {
     uint8_t contrast = settings_get_mic_contrast(&G_Settings);
@@ -690,9 +689,9 @@ static void render_bloom(uint8_t bands[4], uint8_t amplitude, int num_leds) {
     }
 
     // Decay all pixels in right half
-    uint8_t decay = 230 - (smoothing * 2);
+    uint16_t decay = 130u + (uint16_t)smoothing;
     for (int i = center; i < num_leds; i++) {
-        bloom_buffer[i] = ((uint16_t)bloom_buffer[i] * decay) / 256;
+        bloom_buffer[i] = (uint8_t)(((uint32_t)bloom_buffer[i] * decay) / 256u);
     }
 
     // Inject new energy at center (additive, clamped)
@@ -774,12 +773,16 @@ void rgb_manager_mic_amplitude_handler(uint8_t channel, const uint8_t* data,
     if (num_leds > 160) num_leds = 160; // Limit to prevent buffer overflow
     
     // Asymmetric smoothing: instant attack (beat hits immediately), slow release (no snap-to-black)
+    // Release rate is controlled by the user smoothing setting (0-100).
+    // smoothing=0 → /2 (50% release, quick), smoothing=100 → /20 (5% release, very slow)
     static uint8_t band_smooth[4] = {0};
+    uint8_t smoothing = settings_get_mic_smoothing(&G_Settings);
+    uint8_t release_div = 2u + (smoothing / 5);  // 2..22
     for (int i = 0; i < 4; i++) {
         if (bands[i] >= band_smooth[i]) {
             band_smooth[i] = bands[i];                                      // instant attack
         } else {
-            band_smooth[i] = band_smooth[i] - ((band_smooth[i] - bands[i]) / 6); // ~17% release
+            band_smooth[i] = band_smooth[i] - ((band_smooth[i] - bands[i]) / release_div);
         }
         bands[i] = band_smooth[i];
     }
@@ -1073,12 +1076,6 @@ void knightrider_task(void *pvParameter) {
   }
   rgb_manager_apply_static_from_settings();
   vTaskDelete(NULL);
-}
-
-void clamp_rgb(uint8_t *r, uint8_t *g, uint8_t *b) {
-  (void)r;
-  (void)g;
-  (void)b;
 }
 
 void rgb_manager_power_transition_begin(void) {

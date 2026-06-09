@@ -8,6 +8,8 @@
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
 #include "managers/sd_card_manager.h"
+#include "managers/ghostchi_manager.h"
+#include "gui/toast.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define RADIOTAP_HEADER_LEN 8
 
@@ -38,6 +41,310 @@ static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
 static volatile bool s_capture_active = false;
+
+#define HCX_MAX_SSIDS 8
+#define HCX_MAX_M2 4
+#define HCX_MAX_M3 4
+#define HCX_EAPOL_MAX 128
+
+typedef struct {
+  uint8_t bssid[6];
+  uint8_t ssid[32];
+  uint8_t ssid_len;
+} hcx_ssid_entry_t;
+
+typedef struct {
+  uint8_t ap[6];
+  uint8_t sta[6];
+  uint64_t replay;
+  uint8_t mic[16];
+  uint8_t eapol[HCX_EAPOL_MAX];
+  size_t eapol_len;
+} hcx_m2_entry_t;
+
+typedef struct {
+  uint8_t ap[6];
+  uint8_t sta[6];
+  uint64_t replay;
+  uint8_t anonce[32];
+} hcx_m3_entry_t;
+
+typedef struct {
+  hcx_ssid_entry_t ssids[HCX_MAX_SSIDS];
+  int ssid_count;
+  hcx_m2_entry_t m2[HCX_MAX_M2];
+  int m2_count;
+  hcx_m3_entry_t m3[HCX_MAX_M3];
+  int m3_count;
+  int pmkid_count;
+  int handshake_count;
+  FILE *out;
+} hcx_state_t;
+
+static void hcx_hex(FILE *out, const uint8_t *data, size_t len) {
+  static const char hex[] = "0123456789abcdef";
+  for (size_t i = 0; i < len; i++) {
+    fputc(hex[data[i] >> 4], out);
+    fputc(hex[data[i] & 0x0f], out);
+  }
+}
+
+static bool hcx_mac_equal(const uint8_t *a, const uint8_t *b) {
+  return memcmp(a, b, 6) == 0;
+}
+
+static const hcx_ssid_entry_t *hcx_find_ssid(const hcx_state_t *st, const uint8_t *bssid) {
+  for (int i = 0; i < st->ssid_count; i++) {
+    if (hcx_mac_equal(st->ssids[i].bssid, bssid)) return &st->ssids[i];
+  }
+  return NULL;
+}
+
+static void hcx_store_ssid(hcx_state_t *st, const uint8_t *bssid, const uint8_t *ssid, uint8_t ssid_len) {
+  if (ssid_len == 0 || ssid_len > 32) return;
+  hcx_ssid_entry_t *e = NULL;
+  for (int i = 0; i < st->ssid_count; i++) {
+    if (hcx_mac_equal(st->ssids[i].bssid, bssid)) {
+      e = &st->ssids[i];
+      break;
+    }
+  }
+  if (!e) {
+    if (st->ssid_count < HCX_MAX_SSIDS) {
+      e = &st->ssids[st->ssid_count++];
+    } else {
+      e = &st->ssids[0];
+    }
+  }
+  memcpy(e->bssid, bssid, 6);
+  memcpy(e->ssid, ssid, ssid_len);
+  e->ssid_len = ssid_len;
+}
+
+static void hcx_write_essid_hex(FILE *out, const hcx_state_t *st, const uint8_t *ap) {
+  const hcx_ssid_entry_t *ssid = hcx_find_ssid(st, ap);
+  if (ssid) hcx_hex(out, ssid->ssid, ssid->ssid_len);
+}
+
+static bool hcx_extract_wifi_frame(const uint8_t *pkt, size_t pkt_len, const uint8_t **frame, size_t *frame_len) {
+  if (pkt_len < RADIOTAP_HEADER_LEN) return false;
+  uint16_t rt_len = pkt[2] | (pkt[3] << 8);
+  if (rt_len < RADIOTAP_HEADER_LEN || rt_len >= pkt_len) return false;
+  *frame = pkt + rt_len;
+  *frame_len = pkt_len - rt_len;
+  return *frame_len >= 24;
+}
+
+static uint64_t hcx_read_replay(const uint8_t *p) {
+  uint64_t v = 0;
+  for (int i = 0; i < 8; i++) v = (v << 8) | p[i];
+  return v;
+}
+
+static bool hcx_store_m2(hcx_state_t *st, const uint8_t *ap, const uint8_t *sta,
+                         uint64_t replay, const uint8_t *mic, const uint8_t *eapol, size_t eapol_len) {
+  if (eapol_len > HCX_EAPOL_MAX) return false;
+  hcx_m2_entry_t *e = &st->m2[st->m2_count % HCX_MAX_M2];
+  st->m2_count++;
+  memcpy(e->ap, ap, 6);
+  memcpy(e->sta, sta, 6);
+  memcpy(e->mic, mic, 16);
+  e->replay = replay;
+  e->eapol_len = eapol_len;
+  memcpy(e->eapol, eapol, e->eapol_len);
+  if (e->eapol_len >= 97) memset(e->eapol + 81, 0, 16);
+  return true;
+}
+
+static void hcx_try_write_handshake(hcx_state_t *st, const hcx_m2_entry_t *m2, const uint8_t *anonce) {
+  if (m2->eapol_len == 0) return;
+  st->handshake_count++;
+  if (!st->out) return;
+  fprintf(st->out, "WPA*02*");
+  hcx_hex(st->out, m2->mic, 16);
+  fputc('*', st->out);
+  hcx_hex(st->out, m2->ap, 6);
+  fputc('*', st->out);
+  hcx_hex(st->out, m2->sta, 6);
+  fputc('*', st->out);
+  hcx_write_essid_hex(st->out, st, m2->ap);
+  fputc('*', st->out);
+  hcx_hex(st->out, anonce, 32);
+  fputc('*', st->out);
+  hcx_hex(st->out, m2->eapol, m2->eapol_len);
+  fprintf(st->out, "*02\n");
+}
+
+static void hcx_store_m3(hcx_state_t *st, const uint8_t *ap, const uint8_t *sta,
+                         uint64_t replay, const uint8_t *anonce) {
+  for (int i = 0; i < st->m2_count && i < HCX_MAX_M2; i++) {
+    hcx_m2_entry_t *m2 = &st->m2[i];
+    if (hcx_mac_equal(m2->ap, ap) && hcx_mac_equal(m2->sta, sta) &&
+        (m2->replay == replay || m2->replay + 1 == replay)) {
+      hcx_try_write_handshake(st, m2, anonce);
+      return;
+    }
+  }
+  hcx_m3_entry_t *e = &st->m3[st->m3_count % HCX_MAX_M3];
+  st->m3_count++;
+  memcpy(e->ap, ap, 6);
+  memcpy(e->sta, sta, 6);
+  memcpy(e->anonce, anonce, 32);
+  e->replay = replay;
+}
+
+static void hcx_try_pair_pending_m3(hcx_state_t *st, const hcx_m2_entry_t *m2) {
+  for (int i = 0; i < st->m3_count && i < HCX_MAX_M3; i++) {
+    hcx_m3_entry_t *m3 = &st->m3[i];
+    if (hcx_mac_equal(m2->ap, m3->ap) && hcx_mac_equal(m2->sta, m3->sta) &&
+        (m2->replay == m3->replay || m2->replay + 1 == m3->replay)) {
+      hcx_try_write_handshake(st, m2, m3->anonce);
+      return;
+    }
+  }
+}
+
+static void hcx_process_mgmt(hcx_state_t *st, const uint8_t *frame, size_t len) {
+  uint8_t subtype = (frame[0] >> 4) & 0x0f;
+  if (subtype != 8 && subtype != 5) return;
+  size_t pos = 36;
+  while (pos + 2 <= len) {
+    uint8_t id = frame[pos];
+    uint8_t elen = frame[pos + 1];
+    if (pos + 2 + elen > len) break;
+    if (id == 0) {
+      hcx_store_ssid(st, frame + 16, frame + pos + 2, elen);
+      return;
+    }
+    pos += 2 + elen;
+  }
+}
+
+static void hcx_write_pmkid(hcx_state_t *st, const uint8_t *ap, const uint8_t *sta, const uint8_t *pmkid) {
+  st->pmkid_count++;
+  if (!st->out) return;
+  fprintf(st->out, "WPA*01*");
+  hcx_hex(st->out, pmkid, 16);
+  fputc('*', st->out);
+  hcx_hex(st->out, ap, 6);
+  fputc('*', st->out);
+  hcx_hex(st->out, sta, 6);
+  fputc('*', st->out);
+  hcx_write_essid_hex(st->out, st, ap);
+  fprintf(st->out, "***\n");
+}
+
+static void hcx_process_data(hcx_state_t *st, const uint8_t *frame, size_t len) {
+  uint16_t fc = frame[0] | (frame[1] << 8);
+  bool qos = (((fc >> 4) & 0x0f) & 0x08) != 0;
+  bool to_ds = (fc >> 8) & 0x01;
+  bool from_ds = (fc >> 9) & 0x01;
+  size_t hdr_len = 24 + ((to_ds && from_ds) ? 6 : 0) + (qos ? 2 : 0);
+  if (len < hdr_len + 8 + 99) return;
+  const uint8_t *llc = frame + hdr_len;
+  if (llc[0] != 0xaa || llc[1] != 0xaa || llc[2] != 0x03) return;
+  if (((llc[6] << 8) | llc[7]) != 0x888e) return;
+  const uint8_t *eapol = llc + 8;
+  size_t avail = len - hdr_len - 8;
+  size_t eapol_len = 4 + ((eapol[2] << 8) | eapol[3]);
+  if (eapol_len > avail || eapol_len < 99) return;
+  uint16_t key_info = (eapol[5] << 8) | eapol[6];
+  bool has_mic = (key_info & 0x0100) != 0;
+  bool is_pairwise = (key_info & 0x0008) != 0;
+  bool is_install = (key_info & 0x0040) != 0;
+  bool is_ack = (key_info & 0x0080) != 0;
+  bool is_secure = (key_info & 0x0200) != 0;
+  const uint8_t *addr1 = frame + 4;
+  const uint8_t *addr2 = frame + 10;
+  const uint8_t *ap = is_ack ? addr2 : addr1;
+  const uint8_t *sta = is_ack ? addr1 : addr2;
+  uint64_t replay = hcx_read_replay(eapol + 9);
+  const uint8_t *nonce = eapol + 17;
+  const uint8_t *mic = eapol + 81;
+
+  if (is_pairwise && has_mic && !is_ack && !is_install && !is_secure) {
+    if (hcx_store_m2(st, ap, sta, replay, mic, eapol, eapol_len)) {
+      hcx_try_pair_pending_m3(st, &st->m2[(st->m2_count - 1) % HCX_MAX_M2]);
+    }
+  } else if (is_pairwise && has_mic && is_ack && is_install) {
+    hcx_store_m3(st, ap, sta, replay, nonce);
+  }
+
+  if (eapol_len >= 99) {
+    uint16_t key_data_len = (eapol[97] << 8) | eapol[98];
+    size_t pos = 99;
+    size_t end = pos + key_data_len;
+    if (end > eapol_len) end = eapol_len;
+    while (pos + 6 <= end) {
+      uint8_t eid = eapol[pos];
+      uint8_t elen = eapol[pos + 1];
+      if (pos + 2 + elen > end) break;
+      if (eid == 0xdd && elen >= 20 && memcmp(eapol + pos + 2, "\x00\x0f\xac\x04", 4) == 0) {
+        hcx_write_pmkid(st, ap, sta, eapol + pos + 6);
+      }
+      pos += 2 + elen;
+    }
+  }
+}
+
+static esp_err_t hcx_scan_pcap(const char *path, FILE *out, int *pmkid_count, int *handshake_count) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return ESP_FAIL;
+  pcap_global_header_t gh;
+  if (fread(&gh, 1, sizeof(gh), f) != sizeof(gh) || gh.network != DLT_IEEE802_11_RADIO) {
+    fclose(f);
+    return ESP_ERR_INVALID_ARG;
+  }
+  hcx_state_t st = { .out = out };
+  uint8_t *buf = malloc(2048);
+  if (!buf) {
+    fclose(f);
+    return ESP_ERR_NO_MEM;
+  }
+  pcap_packet_header_t ph;
+  while (fread(&ph, 1, sizeof(ph), f) == sizeof(ph)) {
+    if (ph.incl_len == 0 || ph.incl_len > 2048) {
+      fseek(f, ph.incl_len, SEEK_CUR);
+      continue;
+    }
+    if (fread(buf, 1, ph.incl_len, f) != ph.incl_len) break;
+    const uint8_t *frame = NULL;
+    size_t frame_len = 0;
+    if (!hcx_extract_wifi_frame(buf, ph.incl_len, &frame, &frame_len)) continue;
+    uint8_t type = (frame[0] >> 2) & 0x03;
+    if (type == 0) hcx_process_mgmt(&st, frame, frame_len);
+    else if (type == 2) hcx_process_data(&st, frame, frame_len);
+    if (!out && (st.pmkid_count + st.handshake_count) > 0) break;
+  }
+  free(buf);
+  fclose(f);
+  if (pmkid_count) *pmkid_count = st.pmkid_count;
+  if (handshake_count) *handshake_count = st.handshake_count;
+  return ESP_OK;
+}
+
+bool pcap_has_hc22000_material(const char *path) {
+  int pmkid = 0;
+  int handshake = 0;
+  if (!path || hcx_scan_pcap(path, NULL, &pmkid, &handshake) != ESP_OK) return false;
+  return (pmkid + handshake) > 0;
+}
+
+esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_path_len,
+                              int *pmkid_count, int *handshake_count) {
+  if (!pcap_path || !out_path || out_path_len == 0) return ESP_ERR_INVALID_ARG;
+  snprintf(out_path, out_path_len, "%s", pcap_path);
+  char *dot = strrchr(out_path, '.');
+  if (dot) snprintf(dot, out_path_len - (size_t)(dot - out_path), ".hc22000");
+  else strncat(out_path, ".hc22000", out_path_len - strlen(out_path) - 1);
+  FILE *out = fopen(out_path, "w");
+  if (!out) return ESP_FAIL;
+  esp_err_t ret = hcx_scan_pcap(pcap_path, out, pmkid_count, handshake_count);
+  fclose(out);
+  if (ret != ESP_OK) return ret;
+  if (pmkid_count && handshake_count && (*pmkid_count + *handshake_count) == 0) return ESP_ERR_NOT_FOUND;
+  return ESP_OK;
+}
 
 static bool pcap_is_jit_template(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -759,6 +1066,10 @@ void pcap_file_close() {
       fclose(pcap_file);
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
+      if (pcap_file_path[0] != '\0') {
+        toast_show("PCAP saved", TOAST_SUCCESS);
+        ghostchi_manager_add_xp(6);
+      }
     }
 
     s_capture_active = false;

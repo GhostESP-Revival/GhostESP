@@ -16,6 +16,7 @@
 #include "core/glog.h"
 #include "core/utils.h"
 #include "managers/ap_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
@@ -23,6 +24,8 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +74,7 @@ uint16_t ap_count = 0;
 static wifi_ap_record_t selected_ap;
 static wifi_ap_record_t *selected_aps = NULL;
 static int selected_ap_count = 0;
+static bool blocking_scan_in_progress = false;
 
 // External dependencies
 extern RGBManager_t rgb_manager;
@@ -203,6 +207,7 @@ static void print_ap_entry_formatted(uint16_t idx, const wifi_ap_record_t *rec, 
 // ============================================================================
 
 void ap_scan_start(void) {
+    blocking_scan_in_progress = true;
     log_heap_status(TAG, "scan_start_pre");
     status_display_show_status("WiFi Scanning...");
 
@@ -229,7 +234,8 @@ void ap_scan_start(void) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
-            return;
+            blocking_scan_in_progress = false;
+            goto cleanup;
         }
         apply_country_for_scan();
     }
@@ -238,13 +244,15 @@ void ap_scan_start(void) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set STA mode: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi mode set failed: %s\n", esp_err_to_name(err));
-        return;
+        blocking_scan_in_progress = false;
+        goto cleanup;
     }
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start Wi-Fi: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi start failed: %s\n", esp_err_to_name(err));
-        return;
+        blocking_scan_in_progress = false;
+        goto cleanup;
     }
 
     wifi_scan_config_t scan_config = {
@@ -277,20 +285,25 @@ void ap_scan_start(void) {
         printf("WiFi scan failed to start: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
         log_heap_status(TAG, "scan_start_failed");
-        return;
+        blocking_scan_in_progress = false;
+        goto cleanup;
     }
 
     ap_scan_stop();
+    blocking_scan_in_progress = false;
     log_heap_status(TAG, "scan_start_post");
     esp_wifi_stop();
-    ap_manager_start_services();
 
-    // Restore saved static color if no RGB effect is running
-    if (rgb_effect_task_handle == NULL) {
-        RGBMode mode = settings_get_rgb_mode(&G_Settings);
-        if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
-            mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
-            rgb_manager_apply_static_from_settings();
+cleanup:
+    ap_manager_start_services();
+    if (err == ESP_OK) {
+        // Restore saved static color if no RGB effect is running
+        if (rgb_effect_task_handle == NULL) {
+            RGBMode mode = settings_get_rgb_mode(&G_Settings);
+            if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
+                mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
+                rgb_manager_apply_static_from_settings();
+            }
         }
     }
 }
@@ -304,8 +317,10 @@ static int64_t async_scan_start_time = 0;
 #endif
 
 esp_err_t ap_scan_start_async(void) {
+    async_scan_in_progress = true;
     log_heap_status(TAG, "async_scan_start");
     status_display_show_status("WiFi Scanning...");
+    ghostchi_manager_add_xp(3);
 
     if (selected_aps != NULL) {
         free(selected_aps);
@@ -329,7 +344,8 @@ esp_err_t ap_scan_start_async(void) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
-            return err;
+            async_scan_in_progress = false;
+            goto cleanup;
         }
         apply_country_for_scan();
     }
@@ -338,13 +354,15 @@ esp_err_t ap_scan_start_async(void) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set STA mode: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi mode set failed: %s\n", esp_err_to_name(err));
-        return err;
+        async_scan_in_progress = false;
+        goto cleanup;
     }
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start Wi-Fi: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi start failed: %s\n", esp_err_to_name(err));
-        return err;
+        async_scan_in_progress = false;
+        goto cleanup;
     }
 
     wifi_scan_config_t scan_config = {
@@ -371,24 +389,37 @@ esp_err_t ap_scan_start_async(void) {
 #endif
 
     err = esp_wifi_scan_start(&scan_config, false);
+    if (err == ESP_ERR_WIFI_STATE) {
+        ESP_LOGW(TAG, "STA busy, forcing disconnect before scan retry");
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(250));
+        err = esp_wifi_scan_start(&scan_config, false);
+    }
     if (err != ESP_OK) {
         printf("WiFi scan failed to start: %s", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
         log_heap_status(TAG, "async_scan_start_failed");
-        return err;
+        async_scan_in_progress = false;
+        goto cleanup;
     }
 
-    async_scan_in_progress = true;
     async_scan_start_time = esp_timer_get_time();
     log_heap_status(TAG, "async_scan_started");
-    return ESP_OK;
+
+cleanup:
+    ap_manager_start_services();
+    return err;
 }
 
 bool ap_scan_is_running(void) {
-    return async_scan_in_progress;
+    return async_scan_in_progress || blocking_scan_in_progress;
 }
 
 bool ap_scan_check_done(void) {
+    if (blocking_scan_in_progress) {
+        return false;
+    }
+
     if (!async_scan_in_progress) {
         return true;
     }

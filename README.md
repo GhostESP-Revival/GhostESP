@@ -1,7 +1,7 @@
 
 <img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
 
-GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing tool. Built on ESP-IDF.
+An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 
 **⭐️ Enjoying GhostESP? Please give the repo a star!**
 
@@ -14,8 +14,6 @@ GhostESP turns your ESP32 into a powerful, cheap and helpful wireless testing to
 1. **Community & support:** [Discord](https://discord.gg/5cyNmUMgwh)
 
 1. **Learn more:** [Documentation](https://docs.ghostesp.net) • [Official Website](https://ghostesp.net)
-
-> **Making content about GhostESP?** Check out the [Press Kit](https://github.com/jaylikesbunda/Ghost_ESP/blob/Development-deki/presskit.zip) for resources.
 
 ---
 

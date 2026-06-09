@@ -24,7 +24,7 @@ void detail_view_add_info(detail_view_t *dv, const char *label, const char *valu
 
 void detail_view_add_infof(detail_view_t *dv, const char *label, const char *fmt, ...);
 
-void detail_view_add_action(detail_view_t *dv, const char *label, lv_event_cb_t on_click, void *user_data);
+lv_obj_t *detail_view_add_action(detail_view_t *dv, const char *label, lv_event_cb_t on_click, void *user_data);
 
 void detail_view_add_header(detail_view_t *dv, const char *text);
 

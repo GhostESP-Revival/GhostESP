@@ -1,5 +1,6 @@
 #include "managers/subghz_remote_manager.h"
 #include "managers/subghz_decoders.h"
+#include "managers/ghostchi_manager.h"
 #include "sdkconfig.h"
 
 #ifdef CONFIG_HAS_SUBGHZ
@@ -23,6 +24,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include "gui/toast.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1453,10 +1455,34 @@ bool subghz_remote_manager_start(bool stream_to_peer) {
         return false;
     }
 
-    BaseType_t ok = xTaskCreate(subghz_scan_task, "subghz_scan", 4096, NULL, 5, &s_subghz_task);
-    if (ok != pdPASS) {
-        subghz_set_last_error("task create failed");
-        return false;
+    // Allocate task stack from PSRAM to save internal RAM
+    const uint32_t stack_size = 4096;
+    StackType_t *stack_buf = (StackType_t *)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!stack_buf) {
+        ESP_LOGW(TAG, "PSRAM stack alloc failed, falling back to internal");
+        BaseType_t ok = xTaskCreate(subghz_scan_task, "subghz_scan", stack_size, NULL, 5, &s_subghz_task);
+        if (ok != pdPASS) {
+            subghz_set_last_error("task create failed");
+            return false;
+        }
+    } else {
+        StaticTask_t *task_buf = (StaticTask_t *)malloc(sizeof(StaticTask_t));
+        if (!task_buf) {
+            free(stack_buf);
+            BaseType_t ok = xTaskCreate(subghz_scan_task, "subghz_scan", stack_size, NULL, 5, &s_subghz_task);
+            if (ok != pdPASS) {
+                subghz_set_last_error("task create failed");
+                return false;
+            }
+        } else {
+            s_subghz_task = xTaskCreateStatic(subghz_scan_task, "subghz_scan", stack_size, NULL, 5, stack_buf, task_buf);
+            if (!s_subghz_task) {
+                free(stack_buf);
+                free(task_buf);
+                subghz_set_last_error("task create failed");
+                return false;
+            }
+        }
     }
 
     subghz_set_last_error("none");
@@ -1924,11 +1950,14 @@ tx_cleanup:
         ESP_LOGE(TAG, "TX failed: %s", esp_err_to_name(err));
         subghz_set_last_error("tx failed");
         subghz_hw_stop();
+        toast_show("SubGHz TX failed", TOAST_ERROR);
         return false;
     }
     subghz_hw_stop();
     subghz_set_last_error("none");
     ESP_LOGI(TAG, "TX complete");
+    toast_show("SubGHz TX complete", TOAST_SUCCESS);
+    ghostchi_manager_add_xp(5);
     return true;
 }
 

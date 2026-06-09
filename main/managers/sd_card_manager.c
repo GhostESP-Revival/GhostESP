@@ -23,6 +23,7 @@
 #include "freertos/task.h"
 #include "managers/status_display_manager.h"
 #include "managers/display_manager.h"
+#include "gui/toast.h"
 #include "lvgl_tft/disp_spi.h"
 
 #define MAX_PORTALS 32
@@ -57,6 +58,11 @@ static void sd_spi_bus_release_if_tracked(void);
 #endif
 #include "managers/display_manager.h"
 static bool s_display_spi_suspended_flag = false;
+/* Tracks whether the display panel's SPI device is currently attached to the bus.
+ * Set true on boot after disp_spi_add_device() succeeds; cleared on suspend. Lets
+ * the resume path skip a redundant lvgl_spi_driver_init() when the bus is still
+ * initialized from a prior flush. */
+static bool s_display_panel_attached = false;
 
 static bool display_sd_spi_pins_match(void) {
 #if defined(CONFIG_LV_DISP_SPI_MOSI) && defined(CONFIG_LV_DISP_SPI_CLK)
@@ -94,16 +100,20 @@ static bool display_spi_suspend_for_sd(void) {
   if (s_display_spi_suspended_flag) {
     return true;  /* already suspended — idempotent, matches resume_after_sd guard */
   }
-  /* pause lvgl refresh to stop flush() while we steal the bus */
+  /* Stop LVGL from queuing new flushes. */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
     if (refr) lv_timer_pause(refr);
   }
-  /* wait all pending transactions, drop device, free bus */
-  display_manager_suspend_lvgl_task();
+  /* Drain in-flight SPI transactions BEFORE suspending the LVGL task.
+   * Suspending the task mid-flush leaves the SPI peripheral holding a
+   * half-finished DMA descriptor; on C5 this produces a visible tear
+   * or "stuck" pixel row until the next resume cycle. */
   disp_wait_for_pending_transactions();
+  display_manager_suspend_lvgl_task();
   disp_spi_remove_device();
+  s_display_panel_attached = false;
   spi_bus_free(TFT_SPI_HOST);
   /* assert CS high so that panel stays quiet */
   #ifdef CONFIG_LV_DISP_SPI_CS
@@ -119,36 +129,32 @@ static void display_spi_resume_after_sd(void) {
   if (!s_display_spi_suspended_flag) {
     return;
   }
-  esp_err_t ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
-                              SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
-  if (ret == ESP_OK) {
-    esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
-    if (add_ret != ESP_OK) {
-      ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
-    }
-  } else if (ret == ESP_ERR_INVALID_STATE) {
-    if (s_spi_bus_initialized && s_spi_host_id == TFT_SPI_HOST) {
-      ESP_LOGW("sd_card", "display_spi_resume: SD still owns display SPI host, releasing before retry");
-      sd_spi_bus_release_if_tracked();
-      ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
-                                 SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
-      if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
-        esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
-        if (add_ret != ESP_OK) {
-          ESP_LOGE("sd_card", "display_spi_resume: add device failed after retry: %s", esp_err_to_name(add_ret));
-        }
-      } else {
-        ESP_LOGE("sd_card", "display_spi_resume: retry bus init failed: %s", esp_err_to_name(ret));
-      }
-    } else {
-      ESP_LOGW("sd_card", "display_spi_resume: display SPI bus already initialized, re-adding display device");
+  if (s_display_panel_attached) {
+    /* Already attached: nothing to do (shouldn't normally hit this, but
+     * guards against double-resume). */
+    ESP_LOGD("sd_card", "display_spi_resume: panel already attached, skipping reinit");
+  } else {
+    esp_err_t ret = lvgl_spi_driver_init(TFT_SPI_HOST, DISP_SPI_MISO, DISP_SPI_MOSI, DISP_SPI_CLK,
+                                SPI_BUS_MAX_TRANSFER_SZ, 1, DISP_SPI_IO2, DISP_SPI_IO3);
+    if (ret == ESP_OK) {
       esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
       if (add_ret != ESP_OK) {
         ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
+      } else {
+        s_display_panel_attached = true;
       }
+    } else if (ret == ESP_ERR_INVALID_STATE) {
+      /* Bus is already initialized (by SD or by an earlier flush) — just
+       * re-attach the panel device. */
+      esp_err_t add_ret = disp_spi_add_device(TFT_SPI_HOST);
+      if (add_ret != ESP_OK) {
+        ESP_LOGE("sd_card", "display_spi_resume: add device failed: %s", esp_err_to_name(add_ret));
+      } else {
+        s_display_panel_attached = true;
+      }
+    } else {
+      ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
     }
-  } else {
-    ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
   }
   /* resume lvgl refresh */
   lv_disp_t *disp = lv_disp_get_default();
@@ -253,10 +259,10 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 #endif
 
 static void sd_spi_bus_release_if_tracked(void) {
-  ESP_LOGI(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
+  ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
            s_spi_bus_initialized, s_spi_host_id);
   if (s_spi_bus_initialized && s_spi_host_id >= 0) {
-    ESP_LOGI(TAG, "Freeing SPI bus host %d", s_spi_host_id);
+    ESP_LOGD(TAG, "Freeing SPI bus host %d", s_spi_host_id);
     spi_bus_free(s_spi_host_id);
     s_spi_bus_initialized = false;
     s_spi_host_id = -1;
@@ -267,7 +273,11 @@ static sd_card_cached_stats_t s_cached_stats = { .valid = false, .used_pct = 0 }
 
 static SemaphoreHandle_t sd_card_get_jit_mutex(void) {
     if (s_sd_jit_mutex == NULL) {
-        s_sd_jit_mutex = xSemaphoreCreateMutex();
+        /* Recursive: callers like options_screen / commandline can hold
+         * jit_mount across a nested flush (e.g. flush triggered by another
+         * flush). A plain mutex would deadlock; a recursive one just bumps
+         * the lock count. */
+        s_sd_jit_mutex = xSemaphoreCreateRecursiveMutex();
     }
     return s_sd_jit_mutex;
 }
@@ -327,6 +337,7 @@ static esp_err_t mount_virtual_storage(void) {
     esp_err_t ret = esp_vfs_fat_spiflash_mount_rw_wl("/mnt", "storage", &mount_config, &s_wl_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount virtual storage: %s", esp_err_to_name(ret));
+        toast_show("Virtual storage mount failed", TOAST_ERROR);
         return ret;
     }
 
@@ -334,6 +345,7 @@ static esp_err_t mount_virtual_storage(void) {
     ESP_LOGI(TAG, "Virtual storage mounted successfully at /mnt");
     s_mount_type = MOUNT_VIRTUAL;
     status_display_show_status("Virtual SD OK");
+    toast_show("Virtual storage mounted", TOAST_SUCCESS);
     return ESP_OK;
 }
 
@@ -485,7 +497,7 @@ esp_err_t sd_card_init(void) {
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
                                 &sd_card_manager.card);
-  if (ret != ESP_OK) {
+    if (ret != ESP_OK) {
     if (ret == ESP_FAIL) {
       printf("Failed to mount filesystem. If you want the card to be "
              "formatted, set format_if_mount_failed = true.\n");
@@ -494,6 +506,8 @@ esp_err_t sd_card_init(void) {
              "pull-up resistors in place.\n",
              esp_err_to_name(ret));
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
@@ -548,6 +562,8 @@ esp_err_t sd_card_init(void) {
              "pull-up resistors in place.\n",
              esp_err_to_name(ret));
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
@@ -685,7 +701,7 @@ esp_err_t sd_card_init(void) {
     .sclk_io_num = sd_card_manager.spi_clk_pin,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    .max_transfer_sz = 8192,
+    .max_transfer_sz = 4096,
   };
   gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
   gpio_set_level(sd_card_manager.spi_cs_pin, 1);
@@ -847,6 +863,8 @@ esp_err_t sd_card_init(void) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
+    sd_card_manager.card = NULL;
+    toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
 
@@ -875,6 +893,7 @@ esp_err_t sd_card_init(void) {
       // Restore backup config if init failed with loaded pins
       sd_card_manager = backup_config;
       printf("SD Card init failed with loaded pins. Check configuration.\n");
+      toast_show("SD mount failed", TOAST_ERROR);
       // Optionally: attempt init with known defaults here as a fallback?
       return ret;
   }
@@ -892,11 +911,16 @@ esp_err_t sd_card_init(void) {
 esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   SemaphoreHandle_t jit_mutex = sd_card_get_jit_mutex();
 
+  if (!s_sd_log_levels_tuned) {
+    esp_log_level_set("sdspi_transaction", ESP_LOG_WARN);
+    s_sd_log_levels_tuned = true;
+  }
+
   if (display_was_suspended) *display_was_suspended = false;
   if (jit_mutex == NULL) {
     return ESP_ERR_NO_MEM;
   }
-  if (xSemaphoreTake(jit_mutex, portMAX_DELAY) != pdTRUE) {
+  if (xSemaphoreTakeRecursive(jit_mutex, portMAX_DELAY) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
   // If already mounted, nothing to do
@@ -904,7 +928,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     if (s_sd_jit_mount_depth > 0) {
       ++s_sd_jit_mount_depth;
     }
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return ESP_OK;
   }
 
@@ -922,7 +946,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
     .miso_io_num = sd_card_manager.spi_miso_pin,
     .sclk_io_num = sd_card_manager.spi_clk_pin,
-    .max_transfer_sz = 8192,
+    .max_transfer_sz = 4096,
   };
 
   gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
@@ -940,7 +964,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     esp_err_t bus_ret = spi_bus_initialize(host_id, &bus_config, dmabus);
     if (bus_ret != ESP_OK && bus_ret != ESP_ERR_INVALID_STATE) {
       if (display_was_suspended && *display_was_suspended) display_spi_resume_after_sd();
-      xSemaphoreGive(jit_mutex);
+      xSemaphoreGiveRecursive(jit_mutex);
       return bus_ret;
     }
     if (bus_ret == ESP_OK) {
@@ -969,7 +993,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   if (ret != ESP_OK) {
     sd_spi_bus_release_if_tracked();
     if (display_was_suspended && *display_was_suspended) display_spi_resume_after_sd();
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return ret;
   }
   sd_card_manager.is_initialized = true;
@@ -979,11 +1003,11 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sd_card_update_cached_stats();
   s_next_unmount_tick = xTaskGetTickCount() + pdMS_TO_TICKS(300);
   status_display_show_status("SD Active");
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
   return ESP_OK;
 #else
   // For SDMMC, if not mounted try normal init path quickly
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
   return sd_card_init();
 #endif
 }
@@ -996,12 +1020,12 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   if (jit_mutex == NULL) {
     return;
   }
-  if (xSemaphoreTake(jit_mutex, portMAX_DELAY) != pdTRUE) {
+  if (xSemaphoreTakeRecursive(jit_mutex, portMAX_DELAY) != pdTRUE) {
     return;
   }
 
   if (s_sd_jit_mount_depth == 0) {
-    xSemaphoreGive(jit_mutex);
+    xSemaphoreGiveRecursive(jit_mutex);
     return;
   }
 
@@ -1014,7 +1038,7 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
     }
   }
 
-  xSemaphoreGive(jit_mutex);
+  xSemaphoreGiveRecursive(jit_mutex);
 
   if (resume_display) {
     display_spi_resume_after_sd();
@@ -1057,7 +1081,9 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     if (s_mount_type == MOUNT_SPI) {
       sd_spi_bus_release_if_tracked();
     }
-    printf("SD card unmounted\n");
+    if (context != SD_UNMOUNT_CONTEXT_JIT) {
+      printf("SD card unmounted\n");
+    }
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
@@ -1070,9 +1096,11 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
         break;
       case SD_UNMOUNT_CONTEXT_USER:
         status_display_show_status("SD Unmounted");
+        toast_show("SD card unmounted", TOAST_INFO);
         break;
       case SD_UNMOUNT_CONTEXT_ERROR:
         status_display_show_status("SD Error");
+        toast_show("SD unmount error", TOAST_WARN);
         break;
       case SD_UNMOUNT_CONTEXT_SHUTDOWN:
         break;
@@ -1085,7 +1113,9 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
     sd_spi_bus_release_if_tracked();
-    printf("SD card unmounted\n");
+    if (context != SD_UNMOUNT_CONTEXT_JIT) {
+      printf("SD card unmounted\n");
+    }
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
@@ -1099,9 +1129,11 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
         break;
       case SD_UNMOUNT_CONTEXT_USER:
         status_display_show_status("SD Unmounted");
+        toast_show("SD card unmounted", TOAST_INFO);
         break;
       case SD_UNMOUNT_CONTEXT_ERROR:
         status_display_show_status("SD Error");
+        toast_show("SD unmount error", TOAST_WARN);
         break;
       case SD_UNMOUNT_CONTEXT_SHUTDOWN:
         // Don't show status during shutdown
@@ -1272,6 +1304,9 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *scans_dir = "/mnt/ghostesp/scans";
   const char *gps_dir = "/mnt/ghostesp/gps";
   const char *games_dir = "/mnt/ghostesp/games";
+  const char *apps_dir = "/mnt/ghostesp/apps";
+  const char *themes_dir = "/mnt/ghostesp/themes";
+  const char *active_theme_dir = "/mnt/ghostesp/themes/active";
   const char *evil_portal_dir = "/mnt/ghostesp/evil_portal";
   const char *evil_portal_portals_dir = "/mnt/ghostesp/evil_portal/portals"; 
   const char *universals_dir = "/mnt/ghostesp/infrared/universals";
@@ -1283,6 +1318,15 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(games_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(apps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(themes_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(active_theme_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(gps_dir);
@@ -1343,6 +1387,12 @@ esp_err_t sd_card_setup_directory_structure() {
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
   const char *subghz_dir = "/mnt/ghostesp/subghz";
   ret = ensure_sd_dir_exists(subghz_dir);
+  if (ret != ESP_OK) return ret;
+#endif
+
+#ifdef CONFIG_HAS_AUDIO_PLAYER
+  const char *audio_dir = "/mnt/ghostesp/audio";
+  ret = ensure_sd_dir_exists(audio_dir);
   if (ret != ESP_OK) return ret;
 #endif
 

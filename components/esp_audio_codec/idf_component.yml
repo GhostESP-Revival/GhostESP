@@ -1,0 +1,30 @@
+dependencies:
+  idf:
+    version: '>=4.4'
+description: Espressif audio encoder and decoder
+issues: https://github.com/espressif/esp-adf/issues
+repository: git://github.com/espressif/esp-adf-libs.git
+repository_info:
+  commit_sha: 3bb83597d07b604e1ab5b78dd4370a28d6fa802d
+  path: esp_audio_codec
+tags:
+- multimedia
+- audio_codec
+- encoder
+- decoder
+- mp3
+- aac
+- amr
+- flac
+- wav
+- m4a
+- opus
+- pcm
+- adpcm
+- sbc
+- lc3
+- alac
+- g711
+- vorbis
+url: https://github.com/espressif/esp-adf-libs/tree/master/esp_audio_codec
+version: 2.5.0

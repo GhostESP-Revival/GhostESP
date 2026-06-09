@@ -1,9 +1,6 @@
 name: Compile Ghost ESP
 
 on:
-  push:
-    paths-ignore:
-      - "firmware-manifest.json"
   pull_request:
   workflow_dispatch:
     inputs:
@@ -12,9 +9,10 @@ on:
         required: true
         type: choice
         options:
+          - "build-only"
           - "prerelease"
           - "all"
-        default: "prerelease"
+        default: "build-only"
       releaseVersion:
         description: "Release tag (e.g. v1.7.2). Leave empty to auto-generate"
         required: false
@@ -186,7 +184,7 @@ jobs:
   update_manifest_for_commit:
     name: Update Commit Manifest (push)
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
     runs-on: ubuntu-latest
 
     steps:
@@ -276,17 +274,19 @@ jobs:
             fp.write("\n")
           PY
 
-      - name: Commit root manifest
-        env:
-          BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          git add firmware-manifest.json
-          if git diff --cached --quiet; then
-            echo "Manifest unchanged; no commit needed."
-          else
-            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${GITHUB_SHA::7} [skip ci]"
-            git push origin "HEAD:${BRANCH}"
-          fi
+      # - name: Commit root manifest
+      #   env:
+      #     BRANCH: ${{ github.event.repository.default_branch }}
+      #   run: |
+      #     git add firmware-manifest.json
+      #     if git diff --cached --quiet; then
+      #       echo "Manifest unchanged; no commit needed."
+      #     else
+      #       git fetch origin "${BRANCH}"
+      #       git reset --soft FETCH_HEAD
+      #       git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${GITHUB_SHA::7} [skip ci]"
+      #       git push origin "HEAD:${BRANCH}"
+      #     fi
 
   upload_prerelease:
     name: Create Pre-release and Upload Artifacts
@@ -401,18 +401,20 @@ jobs:
             fp.write("\n")
           PY
 
-      - name: Commit Root Manifest to Repository
-        env:
-          TAG: ${{ steps.pre_release_info.outputs.tag_name }}
-          BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          git add firmware-manifest.json
-          if git diff --cached --quiet; then
-            echo "Manifest unchanged; no commit needed."
-          else
-            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
-            git push origin "HEAD:${BRANCH}"
-          fi
+      # - name: Commit Root Manifest to Repository
+      #   env:
+      #     TAG: ${{ steps.pre_release_info.outputs.tag_name }}
+      #     BRANCH: ${{ github.event.repository.default_branch }}
+      #   run: |
+      #     git add firmware-manifest.json
+      #     if git diff --cached --quiet; then
+      #       echo "Manifest unchanged; no commit needed."
+      #     else
+      #       git fetch origin "${BRANCH}"
+      #       git reset --soft FETCH_HEAD
+      #       git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
+      #       git push origin "HEAD:${BRANCH}"
+      #     fi
 
       - name: Create GitHub Pre-Release and Upload Assets
         env:
@@ -563,18 +565,20 @@ jobs:
             fp.write("\n")
           PY
 
-      - name: Commit Root Manifest to Repository
-        env:
-          TAG: ${{ steps.release_info.outputs.tag_name }}
-          BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          git add firmware-manifest.json
-          if git diff --cached --quiet; then
-            echo "Manifest unchanged; no commit needed."
-          else
-            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
-            git push origin "HEAD:${BRANCH}"
-          fi
+      # - name: Commit Root Manifest to Repository
+      #   env:
+      #     TAG: ${{ steps.release_info.outputs.tag_name }}
+      #     BRANCH: ${{ github.event.repository.default_branch }}
+      #   run: |
+      #     git add firmware-manifest.json
+      #     if git diff --cached --quiet; then
+      #       echo "Manifest unchanged; no commit needed."
+      #     else
+      #       git fetch origin "${BRANCH}"
+      #       git reset --soft FETCH_HEAD
+      #       git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update firmware manifest for ${TAG} [skip ci]"
+      #       git push origin "HEAD:${BRANCH}"
+      #     fi
 
       - name: Create GitHub Release and Upload Assets
         env:

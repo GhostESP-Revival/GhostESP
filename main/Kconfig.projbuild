@@ -1214,6 +1214,38 @@ menu "Ghost ESP Options"
 
     endmenu
 
+    menu "ENV-III Sensor Configuration"
+
+    config HAS_ENVIII
+        bool "Enable ENV-III App"
+        default n
+        help
+            Enable ENV-III application using SHT30 and QMP6988 sensors.
+
+    config ENVIII_SHT30_I2C_ADDR
+        hex "SHT30 I2C Address"
+        default 0x44
+        depends on HAS_ENVIII
+        help
+            I2C address of the SHT30 temperature/humidity sensor.
+
+    config ENVIII_QMP6988_I2C_ADDR
+        hex "QMP6988 I2C Address"
+        default 0x70
+        depends on HAS_ENVIII
+        help
+            I2C address of the QMP6988 pressure sensor.
+
+    config ENVIII_I2C_PORT
+        int "ENV-III I2C Port"
+        range 0 1
+        default 0
+        depends on HAS_ENVIII
+        help
+            Select the I2C controller port used for ENV-III sensors.
+
+    endmenu
+
     menu "Accelerometer Configuration"
 
     config HAS_ACCELEROMETER
@@ -1238,7 +1270,39 @@ menu "Ghost ESP Options"
             Select the I2C controller port used for the accelerometer.
 
     endmenu
-    
+
+    menu "Native SD Apps"
+
+    config ENABLE_NATIVE_SD_APPS
+        bool "Enable native apps loaded from SD"
+        default y
+        depends on IDF_TARGET_ESP32 || IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C61 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32C5
+        select ELF_LOADER
+        select ELF_DYNAMIC_LOAD_SHARED_OBJECT
+        help
+            Enable Flipper-style native apps loaded from /mnt/ghostesp/apps.
+            Apps are trusted native code loaded with Espressif's ELF loader.
+
+    config NATIVE_SD_APPS_REQUIRE_TARGET_MATCH
+        bool "Require native app target match"
+        default y
+        depends on ENABLE_NATIVE_SD_APPS
+        help
+            Reject apps built for a different ESP chip target.
+
+    config NATIVE_SD_APP_MAX_COUNT
+        int "Maximum number of SD apps to scan"
+        default 4 if !SPIRAM
+        default 32
+        range 1 32
+        depends on ENABLE_NATIVE_SD_APPS
+        help
+            Maximum number of native SD apps that can be registered.
+            Lower values save RAM on devices without PSRAM.
+            Default is 8 for no-PSRAM builds, 32 for PSRAM builds.
+
+    endmenu
+
     menu "SPI and MMC Configuration"
     
     config USING_SPI
@@ -1318,5 +1382,101 @@ menu "Ghost ESP Options"
     
     endmenu
     
+    menu "Audio & DAC Configuration"
+
+        menu "Audio Player (C5 Display)"
+            config HAS_AUDIO_PLAYER
+                bool "Enable Audio Player App"
+                default n
+                depends on WITH_SCREEN && USING_SPI && HAS_TLV320DAC_I2C
+                help
+                    Enable MP3 audio player UI and SD card streaming over GhostLink.
+
+            config AUDIO_FILES_PATH
+                string "Audio Files Directory"
+                default "/mnt/ghostesp/audio"
+                depends on HAS_AUDIO_PLAYER
+                help
+                    Directory on SD card to scan for MP3 files.
+        endmenu
+
+        menu "TLV320DAC3100 DAC (I2C Control - C5)"
+            config HAS_TLV320DAC_I2C
+                bool "Enable TLV320DAC3100 I2C Control"
+                default n
+                depends on USE_IO_EXPANDER
+                help
+                    Enable I2C control of TLV320DAC3100 DAC on ESP32-C5.
+
+            config TLV320DAC_I2C_ADDR
+                hex "TLV320DAC3100 I2C Address"
+                default 0x18
+                depends on HAS_TLV320DAC_I2C
+                help
+                    I2C address of the TLV320DAC3100 (default 0x18).
+
+            config TLV320DAC_I2C_SDA_PIN
+                int "TLV320DAC SDA Pin"
+                default 6
+                depends on HAS_TLV320DAC_I2C
+                help
+                    GPIO pin for TLV320DAC3100 I2C SDA.
+
+            config TLV320DAC_I2C_SCL_PIN
+                int "TLV320DAC SCL Pin"
+                default 7
+                depends on HAS_TLV320DAC_I2C
+                help
+                    GPIO pin for TLV320DAC3100 I2C SCL.
+
+            config TLV320DAC_RESET_IO_EXPANDER_PIN
+                int "DAC Reset IO Expander Pin (P13 = bit 3 on port1)"
+                default 3
+                depends on HAS_TLV320DAC_I2C
+                help
+                    Bit index on IO expander port 1 for DAC RESET line.
+                    P13 on the TCA9539RTWR corresponds to bit 3 of port 1.
+        endmenu
+
+        menu "TLV320DAC3100 DAC (I2S Audio - S3)"
+            config HAS_TLV320DAC_I2S
+                bool "Enable TLV320DAC3100 I2S Audio Output"
+                default n
+                depends on IDF_TARGET_ESP32S3
+                help
+                    Enable I2S master output to TLV320DAC3100 on ESP32-S3.
+
+            config TLV320DAC_I2S_DIN_PIN
+                int "I2S DIN Pin (Data to DAC)"
+                default 1
+                depends on HAS_TLV320DAC_I2S
+                help
+                    I2S data output pin connected to TLV320DAC3100 DIN.
+
+            config TLV320DAC_I2S_WCLK_PIN
+                int "I2S WCLK/LRCLK Pin"
+                default 45
+                depends on HAS_TLV320DAC_I2S
+                help
+                    I2S word clock (LRCLK) pin.
+
+            config TLV320DAC_I2S_BCLK_PIN
+                int "I2S BCLK Pin"
+                default 46
+                depends on HAS_TLV320DAC_I2S
+                help
+                    I2S bit clock pin.
+
+            config TLV320DAC_SAMPLE_RATE
+                int "Default I2S Sample Rate"
+                default 44100
+                depends on HAS_TLV320DAC_I2S
+                help
+                    Default I2S sample rate in Hz. The MP3 decoder will auto-detect
+                    the actual rate from the MP3 file and configure the DAC accordingly.
+        endmenu
+
+    endmenu
+
 endmenu
 

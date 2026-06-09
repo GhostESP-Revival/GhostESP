@@ -1,5 +1,138 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre5
+
+- Added USB Keyboard Mode for forwarding on-device keystrokes over usb
+- Added mouse jiggler to BadUSB
+- Added `badusb type_char` CLI command for typing single ASCII characters
+- Made BadUSB keyboard startup async so GhostLink doesn't block
+- Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+- Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+- Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan from the CLI or on-device menu
+- Tightened native SD app storage scope and path checks
+- Made native SD app launch failures diagnostic-only instead of quarantining apps
+- Added a separate `nrf24` native SD app permission
+- Added small native SD app helpers for capability checks and SubGHz replay
+
+## Revival v2.0-pre4
+
+### Added
+ - Added 5 new Ghostchi images. "Banshee" by @pr3
+ - Added a small progress bar to the boot screen so SD mount, asset pack load, and app scan no longer happen while using the device
+ - Added an SD Browser app for paginated file/folder browsing, rename, and delete actions
+ - Added Ghostchi activity counters to state file
+ - Added level-up toast notification
+ - Added more Display Timeout options: 15s, 2m, and 5m
+ - Added on-device PCAP browser with hc22000 markers under WiFi > Capture
+ - Added PCAP to hc22000 export on displays
+ - Added persistent level badge in the status bar visible on every screen
+ - Added Settings > Info with a read-only device, runtime, build, and credits page sourced from `chipinfo`
+ - Added Wardriving settings for per-chip hop intervals and weighted 5GHz channel hopping, synced over GhostLink
+
+### Changed
+ - Apps Gallery now renders the asset pack background image
+ - Cached the DualComm line check per row to keep the split-view terminal smooth
+ - Expanded Ghostchi levels from 10 to 50 with a smooth quadratic curve
+ - Expanded Ghostchi XP system from 3 sources to 27 across WiFi, BLE, GPS, IR, NFC, SubGHz, BadUSB, attacks, scans, games, plugins, and settings
+ - Larger lockscreen numpad on taller displays
+ - Lockscreen numpad keys are now solid with proper contrast on focused buttons
+ - Lockscreen prompt and PIN dots have a dark backdrop for readability
+ - Lockscreen shows the asset pack background instead of a solid color
+ - Made command lookup case-insensitive (`SCANAP` now works)
+ - Made Ghostchi passive by default, added a passive/aggressive mode toggle on pages 1 & 2 of the Ghostchi view
+ - Moved Clock, Compass, ENV-III, and Accelerometer from the main menu to the Apps Gallery
+ - Plugin icons now recolor to their manifest accent color, unless overridden by an asset pack
+ - Reduced `sd tree` walker memory from ~16 KB to ~600 B and made it work on devices without PSRAM
+ - Reduced the brief white screen before splash by keeping the backlight off until the first splash frame is drawn
+ - Removed "SD card mounted" toast during boot
+ - Replaced on/off settings rows with iOS style toggles for a slightly nicer feel
+ - Slimmed and rounded the terminal's bottom touch controls to match the rest of the UI
+ - Stopped logging unknown commands to command history so typos no longer pollute arrow-up
+ - Themed the terminal's input bar and back button via the palette instead of hardcoded colors
+
+### Fixed
+ - Fixed `chameleon` (no args) double-printing its help on the on-screen terminal
+ - Fixed `help` (no args) printing the category list twice
+ - Fixed `select -a 1,2,3` corrupting later `select` calls by switching to a re-entrant, non-mutating tokenizer
+ - Fixed audio decode task leaking decoder buffers on deinit by adding a self-exit semaphore so the task can free its own state
+ - Fixed audio receiver ring buffer producer/consumer race by serializing `head`/`tail` updates with a `portMUX`
+ - Fixed BLE stack restart racing NimBLE stop/deinit
+ - Fixed DIAL bind overflowing `gsession`/`SID`/`listID` with server-controlled bytes
+ - Fixed DNS sinkhole silently clobbering forward ring slot 0 under load
+ - Fixed duplicate `powerprinter` entry in `help printer`
+ - Fixed Invert Colors setting not refreshing the screen until something else triggered a redraw
+ - Fixed Waveshare 7-inch (ESP32-S3-Touch-LCD-7) backlight and touch
+ - Fixed Wigle "already uploaded" check stalling uploads on long histories by caching the on-disk log in RAM
+
+## Revival v2.0-pre3
+
+ - Added custom asset packs loaded from SD with custom icons, colors, and backgrounds.
+ - Refactored main menu layout sizing and made portrait grid screens more compact
+ - Added live drag scrolling (gated by the new "Touch Drag Scroll" setting. falls back to release on release when off)
+ - Added "Touch Drag Scroll" toggle in Settings > Appearance (default ON, when off scrolling still works but updates only on release)
+ - Reorganized docs sidebar into Wireless/Sensors/Apps & I/O/Developer categories and polished sidebar UI
+ - Fixed integer overflow in mic visualizer reactive color calculation causing incorrect colors at high volumes
+ - Fixed mic visualizer bloom and peak meter decay being inverted (higher smoothing = faster decay)
+ - Fixed mic visualizer waveform trail rendering backwards (oldest samples were brightest)
+ - Fixed mic visualizer spectrum distance fade underflow on strips longer than ~60 LEDs
+ - Wired up mic smoothing setting to band release rate so it affects all visualizer modes
+ - Fixed mic visualizer mode state not resetting on first frame when starting in default mode
+ - Moved NRF24, SubGHz, and MIC visualizer task stacks to PSRAM to fix internal RAM exhaustion
+ - Moved Goertzel ring buffers and MIC sample buffer to PSRAM to free up internal RAM
+ - Bumped GhostBT to v0.2.2
+
+## Revival v2.0-pre2
+
+ - Added WiFi Airspace Monitor with realtime packet/threat insights, fast channel hopping, and suspect device cards
+ - Added native SD apps loaded from the SD card with permissions, scoped storage, and launch-failure quarantine
+ - Added App Gallery for discovering and launching SD apps with custom icons and accent colors
+ - Added `apps` CLI to list, reload, inspect, launch, stop, and reset native SD apps
+ - Added Ghost Build Tool (`gbt`) for scaffolding, building, and packaging apps and firmware
+ - Added native app SDK/docs and example apps for Device Inspector and ESP32 Finder
+ - Lockscreen unlock now returns to the view that was active before auto-lock or wake-lock
+ - Reduced status bar title font size to body font for a cleaner look
+ - Fixed apps gallery list view icon misalignment and tiling artifact
+ - Polished setup wizard styling and removed default button/card shadows
+ - Added Home WiFi credential setup and clarified Device AP vs Home WiFi prompts
+ - Fixed LoadProhibited crash on deferred SD card init failure
+ - WiFi now auto-reconnects after BLE/Chameleon suspend, with bounded retry on involuntary disconnects
+ - Added ENV-III sensor support (temperature, humidity, pressure) with on-screen UI - @Billi-Green
+ - Added TLV320DAC3100 audio driver and Audio Player app with headphone detection and volume control - @Billi-Green
+ - Moved Ethernet to a standalone main menu item - @Billi-Green
+ - Added touch handling to ethernet view
+
+## Revival v2.0-pre1
+
+ - Added PIN lock screen with lock on wake and auto-lock settings
+ - Added toast notification system
+ - Polished status bar with cleaner accent border, brighter title with truncation, softer semantic status colors
+ - Changed startup logo to new logo and removed "GhostESP: Revival" text from splash screen
+ - Removed border from popups
+ - Polished detail view to match main menu styling
+ - Polished number pad screen with theme-aware lockscreen-style numpad grid
+ - Fixed number pad touchscreen input
+ - Replaced DEL label with the backspace symbol
+ - Polished keyboard screen with theme-aware key styling and accent highlights
+ - Fixed apps gallery not respecting the "Item Borders" setting
+ - Skipping the setup wizard now defaults the main menu to List layout
+ - Increased LVGL display refresh target from 30 FPS to 60 FPS
+ - Added accessibility settings:
+   - Font size (Small/Normal/Large)
+   - High contrast mode
+   - Reduced motion
+   - Input repeat speed (Slow/Normal/Fast)
+ - Added epilepsy warning toggle (disables flashing LED effect popups)
+
+## Revival v1.9.10
+
+- Fixed Settings submenus on Cardputer ADV showing shifted content from Network onward when Status Display is not compiled in
+- Fixed Cardputer grid card navigation not scrolling down when keyboard/encoder selection moves below the visible rows
+- Fixed the darkest menu background shade appearing green on RGB565 displays by using true black for that shade
+- Fixed NULL pointer crash in LVGL display refresh during WiFi scan by disabling pop-in zoom animation
+- Fixed potential boot hang on splash screen with no SD card inserted on shared-SPI boards
+- Removed compile-time GPS menu gate. GPS menu is now always visible since the RX pin can be set at runtime via `gpspin` command
+
 ## Revival v1.9.9
 
 ### Added
@@ -39,17 +172,17 @@
 - Fixed TOCTOU race condition in glog and uart_share lazy mutex initialization that could leak mutexes and break mutual exclusion under concurrent startup
 - Fixed silent crypto failure in WPA PRF function where malloc errors produced garbage PTK output without signaling failure to callers
 - Fixed NULL pointer crash in evil portal HTTP server when heap is exhausted during Host header extraction
-- Fixed NULL pointer crash in WebUI settings API when JSON fields contain non-string types (e.g. numbers, null) — all cJSON valuestring accesses now guarded with cJSON_IsString()
+- Fixed NULL pointer crash in WebUI settings API when JSON fields contain non-string types (e.g. numbers, null) - all cJSON valuestring accesses now guarded with cJSON_IsString()
 - Fixed path traversal vulnerabilities in WebUI file read, download, and delete handlers allowing `../` bypass of /mnt sandbox
 - Fixed NULL pointer crash in hex_to_lv_color when called with NULL input
 - Fixed out-of-bounds read in SAE flood monitor callback when receiving truncated authentication frames without length validation
 - Fixed race condition on static crypto buffers in SAE flood where monitor callback and flood task could corrupt each other's bignum state
 - Fixed stack overflow in SAE flood monitor callback by deferring heavy mbedTLS operations to the flood task context
-- Fixed use-after-free on global scanned_aps pointer in auto-deauth task — pointer now NULLed after free to prevent dangling access
+- Fixed use-after-free on global scanned_aps pointer in auto-deauth task - pointer now NULLed after free to prevent dangling access
 - Fixed auto-deauth task blocking the caller permanently by spawning it as a FreeRTOS task instead of calling it directly, with duplicate-spawn guard and proper stop cleanup
-- Fixed use-after-free in beacon spam where raw SSID pointer from command buffer was passed to task without copying — now uses strdup
+- Fixed use-after-free in beacon spam where raw SSID pointer from command buffer was passed to task without copying - now uses strdup
 - Fixed NULL pointer crash in options_view realloc failure where unchecked return led to guaranteed dereference on OOM
-- Fixed silent out-of-bounds write in detail_view when realloc fails — ensure_capacity now returns bool and callers bail out safely
+- Fixed silent out-of-bounds write in detail_view when realloc fails - ensure_capacity now returns bool and callers bail out safely
 - Fixed ESP32-C5 not discovering 5GHz channels above UNII-1 (e.g. 149-165) during WiFi scans by using correct country code API at boot and re-applying it after WiFi driver reinit during AP scans
 - Fixed RGB LED not turning off when stopping BLE device detection scan
 - Fixed GPS info task stack corruption
@@ -752,9 +885,9 @@
 
 - **New Board Support**
   - LilyGo TEmbed C1101
-  - LilyGo TDeck — @tototo31
+  - LilyGo TDeck - @tototo31
   - LilyGo TDisplay S3 Touch
-  - AITRIP CYD / ESP2432S028R — @tototo31
+  - AITRIP CYD / ESP2432S028R - @tototo31
   - JCMK DevBoard Pro
   - Rabbit Labs Minion
 

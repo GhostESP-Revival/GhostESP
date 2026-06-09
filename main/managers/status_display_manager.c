@@ -8,6 +8,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
@@ -46,6 +47,7 @@ static i2c_master_dev_handle_t s_display_dev;
 static bool s_i2c_bus_owned;
 static uint8_t *s_buffer;
 #define STATUS_BUFFER_SIZE (128 * 8)
+#define STATUS_ANIM_TASK_STACK_BYTES 3072
 static char s_line1[24];
 static char s_line2[24];
 static const int SCALE_Y = 2; // simple vertical scaling factor
@@ -61,6 +63,8 @@ static const TickType_t STATUS_UPDATE_MIN_INTERVAL_TICKS = pdMS_TO_TICKS(500);
 static TickType_t s_last_status_update_tick;
 static int s_anim_frame;
 static TaskHandle_t s_anim_task;
+static StackType_t *s_anim_task_stack;
+static StaticTask_t *s_anim_task_tcb;
 static TickType_t s_next_anim_allowed_tick;
 static TickType_t s_oom_backoff_until;
 static bool s_oom_logged;
@@ -475,7 +479,22 @@ void status_display_init(void) {
     // create animation worker task
     s_next_anim_allowed_tick = 0;
     if (s_anim_task == NULL) {
-        xTaskCreate(status_display_anim_task, "status_anim", 2048, NULL, tskIDLE_PRIORITY + 1, &s_anim_task);
+        s_anim_task_stack = heap_caps_malloc(STATUS_ANIM_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_anim_task_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (s_anim_task_stack && s_anim_task_tcb) {
+            s_anim_task = xTaskCreateStatic(status_display_anim_task, "status_anim",
+                                           STATUS_ANIM_TASK_STACK_BYTES, NULL,
+                                           tskIDLE_PRIORITY + 1,
+                                           s_anim_task_stack, s_anim_task_tcb);
+            ESP_LOGI(TAG, "status animation task stack allocated from PSRAM: %d bytes", STATUS_ANIM_TASK_STACK_BYTES);
+        } else {
+            free(s_anim_task_stack);
+            free(s_anim_task_tcb);
+            s_anim_task_stack = NULL;
+            s_anim_task_tcb = NULL;
+            xTaskCreate(status_display_anim_task, "status_anim", STATUS_ANIM_TASK_STACK_BYTES,
+                        NULL, tskIDLE_PRIORITY + 1, &s_anim_task);
+        }
     }
     ESP_LOGI(TAG, "status display ready");
 }

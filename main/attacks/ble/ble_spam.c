@@ -11,6 +11,7 @@
 
 #include "attacks/ble/ble_spam.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "core/glog.h"
@@ -748,6 +749,7 @@ void ble_spam_start(ble_spam_type_t type) {
         glog("Spam already running, stopping first...\n");
         ble_spam_stop();
     }
+    ghostchi_manager_add_xp(3);
 
     if (spam_task_handle != NULL) {
         if (eTaskGetState(spam_task_handle) != eDeleted) {
