@@ -542,10 +542,25 @@ esp_err_t bind_session_id(Device *device) {
   char *lid_item = result.listId;
 
   if (gsession_item && sid_item) {
-    strcpy(device->gsession, gsession_item);
-    strcpy(device->SID, sid_item);
-    if (lid_item && lid_item) {
-      strcpy(device->listID, lid_item);
+    if (strnlen(gsession_item, sizeof(device->gsession)) >= sizeof(device->gsession) ||
+        strnlen(sid_item,     sizeof(device->SID))     >= sizeof(device->SID)     ||
+        (lid_item && strnlen(lid_item, sizeof(device->listID)) >= sizeof(device->listID))) {
+      ESP_LOGE(TAG, "Bind response field exceeds buffer; aborting bind");
+      esp_http_client_cleanup(client);
+      free(resp_buf.buffer);
+      free(encoded_loungeIdToken);
+      free(encoded_UUID);
+      free(encoded_zx);
+      free(encoded_name);
+      free(zx);
+      free(url_params);
+      free(full_url);
+      return ESP_FAIL;
+    }
+    snprintf(device->gsession, sizeof(device->gsession), "%s", gsession_item);
+    snprintf(device->SID,     sizeof(device->SID),     "%s", sid_item);
+    if (lid_item) {
+      snprintf(device->listID, sizeof(device->listID), "%s", lid_item);
     }
     ESP_LOGI(TAG, "Session bound successfully.");
   } else {

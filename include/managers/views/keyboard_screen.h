@@ -7,7 +7,9 @@
 extern View keyboard_view;
 
 typedef void (*KeyboardSubmitCallback)(const char *text);
+typedef void (*KeyboardImmediateCallback)(char c);
 void keyboard_view_set_submit_callback(KeyboardSubmitCallback cb);
+void keyboard_view_set_immediate_callback(KeyboardImmediateCallback cb);
 void keyboard_view_set_placeholder(const char *text);
 /** Prefill the keyboard input with text (e.g. for editing). Max 127 chars. */
 void keyboard_view_set_initial_text(const char *text);

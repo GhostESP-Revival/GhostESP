@@ -6,6 +6,7 @@
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "lvgl.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -460,22 +461,22 @@ void compass_create(void) {
     lbl_n = lv_label_create(ring);
     lv_label_set_text(lbl_n, i18n_text(I18N_KEY_NORTH));
     lv_obj_set_style_text_color(lbl_n, lv_color_hex(0xFF4444), 0);  // Red for North
-    lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_n, accessibility_get_font_title(), 0);
     
     lbl_s = lv_label_create(ring);
     lv_label_set_text(lbl_s, i18n_text(I18N_KEY_SOUTH));
     lv_obj_set_style_text_color(lbl_s, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lbl_s, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_s, accessibility_get_font_title(), 0);
     
     lbl_e = lv_label_create(ring);
     lv_label_set_text(lbl_e, i18n_text(I18N_KEY_EAST));
     lv_obj_set_style_text_color(lbl_e, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lbl_e, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_e, accessibility_get_font_title(), 0);
     
     lbl_w = lv_label_create(ring);
     lv_label_set_text(lbl_w, i18n_text(I18N_KEY_WEST));
     lv_obj_set_style_text_color(lbl_w, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lbl_w, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_w, accessibility_get_font_title(), 0);
 
     // Apply animation times for smoother interpolation
     lv_obj_set_style_anim_time(lbl_n, 50, 0);
@@ -518,7 +519,7 @@ void compass_create(void) {
     heading_label = lv_label_create(content);
     lv_label_set_text(heading_label, i18n_text(I18N_KEY_INITIALIZE));
     lv_obj_set_style_text_color(heading_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(heading_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(heading_label, accessibility_get_font_title(), 0);
     lv_obj_align(heading_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     
     reset_calibration();

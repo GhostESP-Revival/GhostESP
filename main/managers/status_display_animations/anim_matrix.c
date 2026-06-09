@@ -9,9 +9,9 @@
 #define MATRIX_COLS 64
 
 typedef struct {
-    int head_y;
-    int speed;
-    int tail;
+    int16_t head_y;
+    int8_t speed;
+    uint8_t tail;
 } MatrixCol;
 
 static MatrixCol s_cols[MATRIX_COLS];

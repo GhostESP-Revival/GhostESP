@@ -21,6 +21,7 @@ extern EOptionsMenuType SelectedMenuType;
 
 void options_menu_create(void);
 void options_menu_destroy(void);
+void options_menu_refresh_theme(void);
 void option_event_cb(lv_event_t *e);
 void handle_option_directly(const char *Selected_Option);
 

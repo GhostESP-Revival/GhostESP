@@ -6,7 +6,9 @@
 #include "esp_log.h"
 #include "esp_wifi.h" // For internet connectivity check
 #include "lvgl.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/views/flappy_ghost_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "core/i18n.h"
@@ -120,7 +122,7 @@ void set_game_settings(int height) {
     settings.flap_strength = -8.0f;
     settings.pipe_gap_ratio = 0.2f; // 20% of screen height
     settings.bird_size = 24;
-    settings.score_font = &lv_font_montserrat_14;
+    settings.score_font = accessibility_get_font_small();
     settings.ground_height = (int)(height * 0.1f); // 10% of screen height
     break;
   case SCREEN_SIZE_MEDIUM:
@@ -130,7 +132,7 @@ void set_game_settings(int height) {
     settings.flap_strength = -10.0f;
     settings.pipe_gap_ratio = 0.3f; // 30% of screen height
     settings.bird_size = 32;
-    settings.score_font = &lv_font_montserrat_16;
+    settings.score_font = accessibility_get_font_body();
     settings.ground_height = (int)(height * 0.1f); // 10% of screen height
     break;
   case SCREEN_SIZE_LARGE:
@@ -140,7 +142,7 @@ void set_game_settings(int height) {
     settings.flap_strength = -12.0f;
     settings.pipe_gap_ratio = 0.35f; // 35% of screen height
     settings.bird_size = 40;
-    settings.score_font = &lv_font_montserrat_24;
+    settings.score_font = accessibility_get_font_title();
     settings.ground_height = (int)(height * 0.1f); // 10% of screen height
     break;
   }
@@ -375,7 +377,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
     lv_obj_t *game_over_label = lv_obj_get_child(game_over_container, -1);
 
     if (event->type == INPUT_TYPE_TOUCH) {
-      ESP_LOGI(TAG, "Touch event");
+      ESP_LOGD(TAG, "Touch event");
       int touch_x = event->data.touch_data.point.x;
       int touch_y = event->data.touch_data.point.y;
 
@@ -411,7 +413,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
       bird_velocity = settings.flap_strength;
     }
   } else if (event->type == INPUT_TYPE_TOUCH) {
-    ESP_LOGI(TAG, "Touch event");
+    ESP_LOGD(TAG, "Touch event");
     bird_velocity = settings.flap_strength;
   } else if (event->type == INPUT_TYPE_KEYBOARD) { // dummy for handling keyboard input while playing
       ESP_LOGW(TAG, "keyboard event; unhandled");
@@ -520,6 +522,7 @@ void flappy_bird_game_over() {
   if (is_game_over)
     return; // Prevent multiple triggers
   is_game_over = true;
+  ghostchi_manager_add_xp(5);
 
   // Create a semi-transparent overlay
   lv_obj_t *game_over_container = lv_obj_create(flappy_bird_view.root);

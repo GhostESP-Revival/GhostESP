@@ -1,0 +1,172 @@
+menu "Audio Codec Configuration"
+    menu "Audio Decoder Configuration"
+        config AUDIO_DECODER_AAC_SUPPORT
+            bool "Support AAC Decoder"
+            default y
+            help
+                Enable this option to register AAC decoder
+
+        config AUDIO_DECODER_MP3_SUPPORT
+            bool "Support MP3 Decoder"
+            default y
+            help
+                Enable this option to register MP3 decoder
+        
+        config AUDIO_DECODER_G711_SUPPORT
+            bool "Support G711 Decoder"
+            default y
+            help
+                Enable this option to register G711 A-Law and U-Law decoder
+
+        config AUDIO_DECODER_AMRNB_SUPPORT
+            bool "Support AMR-NB Decoder"
+            default y
+            help
+                Enable this option to register AMR-NB decoder
+        
+        config AUDIO_DECODER_AMRWB_SUPPORT
+            bool "Support AMR-WB Decoder"
+            default y
+            help
+                Enable this option to register AMR-WB decoder
+
+        config AUDIO_DECODER_FLAC_SUPPORT
+            bool "Support FLAC Decoder"
+            default y
+            help
+                Enable this option to register FLAC decoder
+
+        config AUDIO_DECODER_OPUS_SUPPORT
+            bool "Support OPUS Decoder"
+            default y
+            help
+                Enable this option to register OPUS decoder
+
+        config AUDIO_DECODER_VORBIS_SUPPORT
+            bool "Support VORBIS Decoder"
+            default y
+            help
+                Enable this option to register VORBIS decoder
+
+        config AUDIO_DECODER_ADPCM_SUPPORT
+            bool "Support ADPCM Decoder"
+            default y
+            help
+                Enable this option to register IMA-ADPCM decoder
+        config AUDIO_DECODER_ALAC_SUPPORT
+            bool "Support ALAC Decoder"
+            default y
+            help
+                Enable this option to register ALAC decoder
+        config AUDIO_DECODER_PCM_SUPPORT
+            bool "Support PCM Decoder"
+            default y
+            help
+                Enable this option to register PCM decoder
+        config AUDIO_DECODER_SBC_SUPPORT
+            bool "Support SBC Decoder"
+            default y
+            help
+                Enable this option to register SBC decoder
+        config AUDIO_DECODER_LC3_SUPPORT
+            bool "Support LC3 Decoder"
+            default y
+            help
+                Enable this option to register LC3 decoder
+        config AUDIO_DECODER_G722_SUPPORT
+            bool "Support G722 Decoder"
+            default y
+            help
+                Enable this option to register G722 decoder
+    endmenu
+
+    menu "Audio Simple Decoder Configuration"
+        config AUDIO_SIMPLE_DEC_WAV_SUPPORT
+            bool "Support WAV Container"
+            default y
+            help
+                Support decode audio frame from WAV container
+
+        config AUDIO_SIMPLE_DEC_M4A_SUPPORT
+            bool "Support MP4 Container"
+            default y
+            help
+                Support decode audio frame from MP4 container
+        
+        config AUDIO_SIMPLE_DEC_TS_SUPPORT
+            bool "Support TS Container"
+            default y
+            help
+                Support decode audio frame from TS container
+        
+        config AUDIO_SIMPLE_DEC_OGG_SUPPORT
+            bool "Support OGG Container"
+            default y
+            help
+                Support decode audio frame from OGG container
+    endmenu
+
+    menu "Audio Encoder Configuration"
+        config AUDIO_ENCODER_AAC_SUPPORT
+            bool "Support AAC Encoder"
+            default y
+            help
+                Enable this option to register AAC Encoder
+
+        config AUDIO_ENCODER_G711_SUPPORT
+            bool "Support G711 Encoder"
+            default y
+            help
+                Enable this option to register G711 A-Law and U-Law encoder
+
+        config AUDIO_ENCODER_AMRNB_SUPPORT
+            bool "Support AMR-NB Encoder"
+            default y
+            help
+                Enable this option to register AMR-NB encoder
+        
+        config AUDIO_ENCODER_AMRWB_SUPPORT
+            bool "Support AMR-WB Encoder"
+            default y
+            help
+                Enable this option to register AMR-WB encoder
+
+        config AUDIO_ENCODER_OPUS_SUPPORT
+            bool "Support OPUS Encoder"
+            default y
+            help
+                Enable this option to register OPUS encoder
+
+        config AUDIO_ENCODER_ADPCM_SUPPORT
+            bool "Support ADPCM Encoder"
+            default y
+            help
+                Enable this option to register IMA-ADPCM encoder
+        config AUDIO_ENCODER_ALAC_SUPPORT
+            bool "Support ALAC Encoder"
+            default y
+            help
+                Enable this option to register ALAC encoder
+        config AUDIO_ENCODER_PCM_SUPPORT
+            bool "Support PCM Encoder"
+            default y
+            help
+                Enable this option to register PCM encoder
+        config AUDIO_ENCODER_SBC_SUPPORT
+            bool "Support SBC Encoder"
+            default y
+            help
+                Enable this option to register SBC encoder
+        config AUDIO_ENCODER_LC3_SUPPORT
+            bool "Support LC3 Encoder"
+            default y
+            help
+                Enable this option to register LC3 encoder
+        config AUDIO_ENCODER_G722_SUPPORT
+            bool "Support G722 Encoder"
+            default y
+            help
+                Enable this option to register G722 encoder
+    endmenu
+    
+ endmenu

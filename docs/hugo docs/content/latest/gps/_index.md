@@ -2,7 +2,7 @@
 title: "GPS & Wardriving"
 description: "Overview of GhostESP's GPS and wardriving capabilities"
 keywords: ["GPS", "wardriving", "wigle", "location", "mapping"]
-weight: 22
+weight: 300
 aliases:
   - "/gps/"
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Ethernet"
 description: "Overview of GhostESP's Ethernet capabilities"
-weight: 70
+weight: 510
 aliases:
   - "/ethernet/"
 ---

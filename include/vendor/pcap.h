@@ -66,5 +66,8 @@ bool pcap_auto_flush_enabled(void);
 void pcap_file_close();
 void pcap_wireshark_stop(void);
 void pcap_discard_buffer(void);
+bool pcap_has_hc22000_material(const char *path);
+esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_path_len,
+                              int *pmkid_count, int *handshake_count);
 
 #endif

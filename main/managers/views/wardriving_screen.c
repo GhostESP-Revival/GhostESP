@@ -16,6 +16,7 @@
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -103,23 +104,26 @@ static uint32_t error_color = 0xFF4444;
 #define WD_DBG_RF_NAV_SEEN      (1u << 15)
 
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_14;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_18;
-    return &lv_font_montserrat_24;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_14);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_18);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_14 : (fs == 1 ? &lv_font_montserrat_18 : &lv_font_montserrat_24);
+    return fs == 0 ? &lv_font_montserrat_18 : (fs == 1 ? &lv_font_montserrat_24 : &lv_font_montserrat_24);
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_12;
-    return &lv_font_montserrat_14;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
 }
 
 static const lv_font_t *get_small_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
 }
 
 static const char *get_fix_status_string(gps_t *gps) {
@@ -578,8 +582,14 @@ void wardriving_view_create(void) {
         if (esp_comm_manager_is_connected()) {
             char helper_args[256] = "--helper";
             char helper_plan_csv[192] = {0};
+            uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
+            bool weighted = settings_get_wd_weighted_5g(&G_Settings);
             if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                snprintf(helper_args, sizeof(helper_args), "--helper --channels %s", helper_plan_csv);
+                snprintf(helper_args, sizeof(helper_args), "--helper --channels %s --hop %u%s",
+                         helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
+            } else {
+                snprintf(helper_args, sizeof(helper_args), "--helper --hop %u%s",
+                         (unsigned)hop_ms, weighted ? " --weighted" : "");
             }
             peer_helper_ok = esp_comm_manager_send_command("startwd", helper_args);
             glog(peer_helper_ok
