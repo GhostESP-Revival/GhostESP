@@ -266,13 +266,6 @@ static size_t s_remote_raw_expected = 0;
 static size_t s_remote_raw_received = 0;
 static subghz_decoded_signal_t s_remote_decoded = {0};
 
-static int subghz_normalize_decoded_bits(const char *protocol, int bits) {
-    if (protocol && strcmp(protocol, "KeeLoq") == 0 && bits >= 64) {
-        return 64;
-    }
-    return bits;
-}
-
 #define SUBGHZ_CAPTURE_SIGNAL_THRESHOLD 65
 #define SUBGHZ_CAPTURE_SIGNAL_HITS      2
 #define SUBGHZ_SNAPSHOT_DIR             "/mnt/ghostesp/subghz"

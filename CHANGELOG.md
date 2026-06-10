@@ -10,6 +10,7 @@
 - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
 - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
 - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan from the CLI or on-device menu
+- Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
 - Tightened native SD app storage scope and path checks
 - Made native SD app launch failures diagnostic-only instead of quarantining apps
 - Added a separate `nrf24` native SD app permission

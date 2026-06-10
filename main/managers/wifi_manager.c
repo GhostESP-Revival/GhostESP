@@ -3443,7 +3443,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
     TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n");
+    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n", seconds);
 
     err = esp_wifi_scan_start(&scan_config, false);
     if (err != ESP_OK) {
@@ -3464,45 +3464,6 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
 cleanup:
     ap_manager_start_services();
     return err;
-}
-
-    err = esp_wifi_start();
-    if (err != ESP_OK) {
-        printf("Failed to start WiFi for timed scan: %s\n", esp_err_to_name(err));
-        return err;
-    }
-
-    wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true
-    };
-
-    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
-
-    printf("WiFi Scan started\n");
-    printf("Please wait %d Seconds...\n", seconds);
-    TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n", seconds);
-
-    err = esp_wifi_scan_start(&scan_config, false);
-    if (err != ESP_OK) {
-        printf("WiFi scan failed to start: %s\n", esp_err_to_name(err));
-        TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
-        return err;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(seconds * 1000));
-
-    wifi_manager_stop_scan();
-    err = esp_wifi_stop();
-    if (err != ESP_OK) {
-        printf("Failed to stop WiFi after timed scan: %s\n", esp_err_to_name(err));
-        return err;
-    }
-    // ESP_ERROR_CHECK(ap_manager_start_services()); // Removed: Rely on caller (handle_combined_scan) to restart AP services
-    return ESP_OK;
 }
 
 // Station scan channel hopping functions moved to station_scan.c module
