@@ -2,10 +2,9 @@
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
-#include "gui/asset_pack.h"
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
-#include "gui/ios_toggle.h"
+#include "core/i18n.h"
 #include "lvgl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -49,11 +48,7 @@ static inline bool get_menu_rounded(void) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
-    uint8_t fs = settings_get_font_size(&G_Settings);
-    if (ov->btn_h <= 40) {
-        return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
-    }
-    return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
+    return gui_font_for_height(ov->btn_h);
 }
 
 static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface, lv_color_t *surface_alt, lv_color_t *text) {
@@ -140,7 +135,6 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_size(ov->list, w, h - status_bar_h);
     lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
     lv_obj_set_style_bg_color(ov->list, bg, 0);
-    lv_obj_set_style_bg_opa(ov->list, asset_pack_get_background_tile() ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
     lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
     lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
@@ -207,7 +201,6 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_set_style_text_color(lbl, text_color, 0);
         lv_label_set_recolor(lbl, true);
-        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_user_data(lbl, (void *)1);
     }
@@ -227,7 +220,9 @@ void options_view_add_items(options_view_t *ov, const char **labels, lv_event_cb
 }
 
 lv_obj_t *options_view_add_back_row(options_view_t *ov, lv_event_cb_t on_click, void *user_data) {
-    return options_view_add_item(ov, LV_SYMBOL_LEFT " Back", on_click, user_data);
+    char label[32];
+    snprintf(label, sizeof(label), LV_SYMBOL_LEFT " %s", i18n_text(I18N_KEY_BACK));
+    return options_view_add_item(ov, label, on_click, user_data);
 }
 
 void options_view_trigger_wipe(options_view_t *ov) {
@@ -298,7 +293,6 @@ void options_view_refresh_styles(options_view_t *ov) {
 
     if (ov->list && lv_obj_is_valid(ov->list)) {
         lv_obj_set_style_bg_color(ov->list, bg, 0);
-        lv_obj_set_style_bg_opa(ov->list, asset_pack_get_background_tile() ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
         lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
         lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
@@ -326,9 +320,6 @@ void options_view_refresh_styles(options_view_t *ov) {
             void *ud = lv_obj_get_user_data(child);
             if (ud == (void *)1 || ud == (void *)2) {
                 lv_obj_set_style_text_color(child, text, 0);
-            } else if (ud == IOS_TOGGLE_USER_DATA) {
-                // Theme change: re-apply the toggle's on-state color.
-                ios_toggle_refresh_style(child);
             }
         }
     }

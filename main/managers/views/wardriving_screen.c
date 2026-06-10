@@ -9,6 +9,7 @@
 #include "core/callbacks.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
+#include "core/i18n.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -243,7 +244,7 @@ static void update_display_cb(lv_timer_t *timer) {
     bool have_active_gps = gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer);
 
     if (!g_gpsManager.isinitilized && !have_active_gps && !peer_preferred) {
-        if (lbl_fix_status) lv_label_set_text(lbl_fix_status, "No GPS");
+        if (lbl_fix_status) lv_label_set_text(lbl_fix_status, i18n_text(I18N_KEY_NO_GPS));
         if (lbl_fix_icon) lv_label_set_text(lbl_fix_icon, LV_SYMBOL_CLOSE);
         if (lbl_fix_icon) lv_obj_set_style_text_color(lbl_fix_icon, lv_color_hex(error_color), 0);
         if (lbl_sats) lv_label_set_text(lbl_sats, "--/--");
@@ -253,7 +254,7 @@ static void update_display_cb(lv_timer_t *timer) {
         if (lbl_coords) lv_label_set_text(lbl_coords, "---'N  ---'E");
         if (lbl_accuracy) lv_label_set_text(lbl_accuracy, "--");
         if (lbl_altitude) lv_label_set_text(lbl_altitude, "---m");
-        if (lbl_link_mode) lv_label_set_text(lbl_link_mode, "Standalone");
+        if (lbl_link_mode) lv_label_set_text(lbl_link_mode, i18n_text(I18N_KEY_STANDALONE));
         return;
     }
 
@@ -644,13 +645,13 @@ void wardriving_view_create(void) {
     lv_obj_set_style_text_color(lbl_fix_icon, lv_color_hex(warn_color), 0);
     
     lbl_fix_status = lv_label_create(status_card);
-    lv_label_set_text(lbl_fix_status, "Initializing");
+    lv_label_set_text(lbl_fix_status, i18n_text(I18N_KEY_INITIALIZING));
     lv_obj_set_style_text_font(lbl_fix_status, title_font, 0);
     lv_obj_set_style_text_color(lbl_fix_status, lv_color_hex(text_color), 0);
     set_label_long_mode(lbl_fix_status);
 
     lbl_sd_status = lv_label_create(status_card);
-    lv_label_set_text(lbl_sd_status, "No SD");
+    lv_label_set_text(lbl_sd_status, i18n_text(I18N_KEY_NO_SD));
     lv_obj_set_style_text_font(lbl_sd_status, small_font, 0);
     lv_obj_set_style_text_color(lbl_sd_status, lv_color_hex(error_color), 0);
     lv_obj_add_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
@@ -668,7 +669,7 @@ void wardriving_view_create(void) {
     
     lv_obj_t *sats_card = create_card(stats_row, 48);
     lv_obj_t *sats_label = lv_label_create(sats_card);
-    lv_label_set_text(sats_label, "Sats");
+    lv_label_set_text(sats_label, i18n_text(I18N_KEY_SATS));
     lv_obj_set_style_text_font(sats_label, small_font, 0);
     lv_obj_set_style_text_color(sats_label, lv_color_hex(dim_color), 0);
     lbl_sats = lv_label_create(sats_card);
@@ -698,7 +699,7 @@ void wardriving_view_create(void) {
     
     lv_obj_t *speed_card = create_card(speed_row, 48);
     lv_obj_t *speed_title = lv_label_create(speed_card);
-    lv_label_set_text(speed_title, "Speed (km/h)");
+    lv_label_set_text(speed_title, i18n_text(I18N_KEY_SPEED_KMH));
     lv_obj_set_style_text_font(speed_title, small_font, 0);
     lv_obj_set_style_text_color(speed_title, lv_color_hex(dim_color), 0);
     lbl_speed = lv_label_create(speed_card);
@@ -708,17 +709,17 @@ void wardriving_view_create(void) {
     
     lv_obj_t *mode_card = create_card(speed_row, 48);
     lv_obj_t *mode_title = lv_label_create(mode_card);
-    lv_label_set_text(mode_title, "Mode");
+    lv_label_set_text(mode_title, i18n_text(I18N_KEY_MODE));
     lv_obj_set_style_text_font(mode_title, small_font, 0);
     lv_obj_set_style_text_color(mode_title, lv_color_hex(dim_color), 0);
     lbl_link_mode = lv_label_create(mode_card);
-    lv_label_set_text(lbl_link_mode, "Standalone");
+    lv_label_set_text(lbl_link_mode, i18n_text(I18N_KEY_STANDALONE));
     lv_obj_set_style_text_font(lbl_link_mode, body_font, 0);
     lv_obj_set_style_text_color(lbl_link_mode, lv_color_hex(accent_color), 0);
     
     lv_obj_t *coords_card = create_card(content, 100);
     lv_obj_t *coords_title = lv_label_create(coords_card);
-    lv_label_set_text(coords_title, "Position");
+    lv_label_set_text(coords_title, i18n_text(I18N_KEY_POSITION));
     lv_obj_set_style_text_font(coords_title, small_font, 0);
     lv_obj_set_style_text_color(coords_title, lv_color_hex(dim_color), 0);
     lbl_coords = lv_label_create(coords_card);
@@ -740,7 +741,7 @@ void wardriving_view_create(void) {
     
     lv_obj_t *alt_card = create_card(bottom_row, 48);
     lv_obj_t *alt_title = lv_label_create(alt_card);
-    lv_label_set_text(alt_title, "GPS Debug");
+    lv_label_set_text(alt_title, i18n_text(I18N_KEY_GPS_DEBUG));
     lv_obj_set_style_text_font(alt_title, small_font, 0);
     lv_obj_set_style_text_color(alt_title, lv_color_hex(dim_color), 0);
     lbl_altitude = lv_label_create(alt_card);
@@ -750,7 +751,7 @@ void wardriving_view_create(void) {
     
     lv_obj_t *acc_card = create_card(bottom_row, 48);
     lv_obj_t *acc_title = lv_label_create(acc_card);
-    lv_label_set_text(acc_title, "HDOP");
+    lv_label_set_text(acc_title, i18n_text(I18N_KEY_HDOP));
     lv_obj_set_style_text_font(acc_title, small_font, 0);
     lv_obj_set_style_text_color(acc_title, lv_color_hex(dim_color), 0);
     lbl_accuracy = lv_label_create(acc_card);

@@ -4,11 +4,13 @@
 #include "esp_log.h"
 #include "managers/views/keyboard_screen.h"
 #include "managers/settings_manager.h"
-#include "gui/accessibility_fonts.h"
-#include "managers/views/error_popup.h"
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
 #include "managers/status_display_manager.h"
+#include "core/i18n.h"
+#include "gui/fonts/font_helper.h"
+#include "gui/popup.h"
+#include <dirent.h>
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -73,13 +75,18 @@ static lv_style_t popup_style;
 static bool popup_style_initialized = false;
 #endif
 
-#include "managers/display_manager.h"
+#include "managers/views/infrared_view.h"
 #include "managers/views/main_menu_screen.h"
-#include "gui/popup.h"
-#include "managers/views/keyboard_screen.h"
+#include "managers/display_manager.h"
+#include "core/esp_comm_manager.h"
+#include "core/glog.h"
+#include "core/i18n.h"
+#include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
-#include <lvgl/lvgl.h>
-#include <dirent.h>
+#include "gui/theme_palette_api.h"
+#include "managers/settings_manager.h"
+#include "lvgl.h"
+#include "esp_log.h"
 #include <string.h>
 #include "managers/infrared_manager.h"
 #include "managers/infrared_decoder.h"
@@ -369,9 +376,9 @@ void learned_signal_name_callback(const char *name)
                     options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void *)(intptr_t)i);
                 }
                 
-                options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-                options_view_add_item(g_ir_ov, "Add Signal", add_signal_cb, NULL);
-                lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+                options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+                options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+                lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
                 if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
                 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -494,7 +501,9 @@ static lv_obj_t *ir_scroll_down_btn = NULL;
 static lv_obj_t *ir_back_btn = NULL;
 #endif
 
-static touch_drag_t ir_touch_drag = {0};
+static bool ir_touch_started = false;
+static int ir_touch_start_x = 0;
+static int ir_touch_start_y = 0;
 #define IR_SWIPE_THRESHOLD_RATIO 10
 
 #ifdef CONFIG_USE_TOUCHSCREEN
@@ -671,7 +680,7 @@ static void rebuild_ir_file_list_ui(void) {
     }
 
     if (ir_file_count == 0) {
-        options_view_add_item(g_ir_ov, "No .ir files", placeholder_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_NO_FILES), placeholder_event_cb, NULL);
     }
 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -777,10 +786,10 @@ static void dazzler_event_cb(lv_event_t *e) {
     dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(dazzler_popup);
     
-    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", accessibility_get_font_body(), 15);
+    lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", FONT_16, 15);
     (void)title;
     
-    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, accessibility_get_font_small(), 45);
+    lv_obj_t *info = popup_create_body_label(dazzler_popup, "Emitting IR...", popup_w - 20, true, FONT_14, 45);
     lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 45);
     
@@ -1321,14 +1330,14 @@ static void back_event_cb(lv_event_t *e) {
         strcpy(current_dir, "/mnt/ghostesp");
 
         if (g_ir_ov) options_view_clear(g_ir_ov);
-        options_view_add_item(g_ir_ov, "Remotes", remotes_event_cb, NULL);
-        options_view_add_item(g_ir_ov, "Universals", universals_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_REMOTES), remotes_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_UNIVERSALS), universals_event_cb, NULL);
 #ifdef CONFIG_HAS_INFRARED_RX
         is_easy_mode = settings_get_infrared_easy_mode(&G_Settings);
-        options_view_add_item(g_ir_ov, "Learn Remote", learn_remote_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_LEARN_REMOTE), learn_remote_event_cb, NULL);
         options_view_add_item(g_ir_ov, is_easy_mode ? "Easy Learn [X]" : "Easy Learn [ ]", easy_learn_toggle_cb, NULL);
 #endif
-        options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
+        options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_IR_DAZZLER), dazzler_event_cb, NULL);
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
         ir_add_back_row();
 #endif
@@ -1439,7 +1448,8 @@ void infrared_view_create(void) {
     lv_obj_set_style_shadow_width(ir_back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ir_back_btn, back_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(ir_back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
+    lv_obj_set_style_text_font(back_label, FONT_14, 0);
     lv_obj_set_style_text_color(back_label, ir_ctrl_text, 0);
     lv_obj_center(back_label);
 
@@ -1788,72 +1798,64 @@ void infrared_view_input_cb(InputEvent *event) {
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     ir_select_item(selected_ir_index - 1);
-                    touch_drag_reset(&ir_touch_drag);
+                    ir_touch_started = false;
                     return;
                 }
             }
-
+            
             if (ir_scroll_down_btn && lv_obj_is_valid(ir_scroll_down_btn)) {
                 lv_area_t area;
                 lv_obj_get_coords(ir_scroll_down_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     ir_select_item(selected_ir_index + 1);
-                    touch_drag_reset(&ir_touch_drag);
+                    ir_touch_started = false;
                     return;
                 }
             }
-
+            
             if (ir_back_btn && lv_obj_is_valid(ir_back_btn)) {
                 lv_area_t area;
                 lv_obj_get_coords(ir_back_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     back_event_cb(NULL);
-                    touch_drag_reset(&ir_touch_drag);
+                    ir_touch_started = false;
                     return;
                 }
             }
 #endif
 
-            if (!ir_touch_drag.started) {
-                touch_drag_begin(&ir_touch_drag, data);
-            } else {
-                // Move event - apply live drag or remember target for release
-                lv_area_t list_area;
-                lv_obj_get_coords(list, &list_area);
-                bool started_in_list = (ir_touch_drag.start_x >= list_area.x1 && ir_touch_drag.start_x <= list_area.x2 &&
-                                         ir_touch_drag.start_y >= list_area.y1 && ir_touch_drag.start_y <= list_area.y2);
-                if (started_in_list) {
-                    touch_drag_update(&ir_touch_drag, data, list);
-                }
+            if (!ir_touch_started) {
+                ir_touch_started = true;
+                ir_touch_start_x = (int)data->point.x;
+                ir_touch_start_y = (int)data->point.y;
             }
             return;
         }
 
         if (data->state == LV_INDEV_STATE_REL) {
-            if (!ir_touch_drag.started) return;
+            if (!ir_touch_started) return;
+            ir_touch_started = false;
 
-            int start_x = ir_touch_drag.start_x;
-            int start_y = ir_touch_drag.start_y;
-            int dx = (int)data->point.x - start_x;
-            int dy = (int)data->point.y - start_y;
-
-            // Let the shared touch_drag helper handle release-on-release
-            // (it applies a single scroll when the live setting is off) and
-            // tell us if a drag was in progress so we can skip tap handling.
-            bool was_dragged = touch_drag_release(&ir_touch_drag, data);
-            if (was_dragged) return;
+            int dx = (int)data->point.x - ir_touch_start_x;
+            int dy = (int)data->point.y - ir_touch_start_y;
 
             int thr_y = LV_VER_RES / IR_SWIPE_THRESHOLD_RATIO;
             int thr_x = LV_HOR_RES / IR_SWIPE_THRESHOLD_RATIO;
 
             lv_area_t list_area;
             lv_obj_get_coords(list, &list_area);
-            bool started_in_list = (start_x >= list_area.x1 && start_x <= list_area.x2 &&
-                                     start_y >= list_area.y1 && start_y <= list_area.y2);
-
+            bool started_in_list = (ir_touch_start_x >= list_area.x1 && ir_touch_start_x <= list_area.x2 &&
+                                     ir_touch_start_y >= list_area.y1 && ir_touch_start_y <= list_area.y2);
+            
             if (started_in_list) {
+                // vertical swipe = scroll
+                if (abs(dy) > thr_y) {
+                    lv_obj_scroll_by_bounded(list, 0, dy, LV_ANIM_OFF);
+                    return;
+                }
+
                 if (abs(dx) > thr_x) return;
 
                 // thirds-control special behavior
@@ -2341,9 +2343,9 @@ static void file_event_open(int idx) {
         options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void*)(intptr_t)i);
     }
     
-    options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-    options_view_add_item(g_ir_ov, "Add New Signal", add_signal_cb, NULL);
-    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+    options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+    options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
     if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
     
     num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -2366,16 +2368,12 @@ static void command_event_execute(int idx) {
         }
         if (idx < 0 || idx >= uni_command_count) return;
 
-        if (settings_get_epilepsy_warning_enabled(&G_Settings)) {
-            error_popup_create("EPILEPSY WARNING\nRGB LED will flash\nduring IR transmission");
-        }
-
         transmitting_popup = popup_create_container(lv_scr_act(), 200, 60);
         lv_obj_center(transmitting_popup);
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *label = lv_label_create(transmitting_popup);
-        lv_label_set_text(label, "Transmitting...");
+        lv_label_set_text(label, i18n_text(I18N_KEY_TRANSMITTING));
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(label);
 
@@ -2536,8 +2534,8 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         lv_coord_t left_x = edge + (btn_w / 2);
         lv_coord_t right_x = -(edge + (btn_w / 2));
 
-        cancel_btn = popup_add_styled_button(popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -10, NULL, config->cancel_cb, NULL);
-        skip_btn = popup_add_styled_button(popup, "Skip", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -10, NULL, config->skip_cb, NULL);
+        cancel_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -10, NULL, config->cancel_cb, NULL);
+        skip_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_SKIP), btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -10, NULL, config->skip_cb, NULL);
         if (type == LEARNING_POPUP_EASY_LEARN) {
             easy_learn_cancel_btn = cancel_btn;
             easy_learn_skip_btn = skip_btn;
@@ -2546,16 +2544,16 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         lv_coord_t btn_w = pw - (2 * edge);
         if (btn_w < 80) btn_w = 80;
         if (btn_w > 160) btn_w = 160;
-        cancel_btn = popup_add_styled_button(popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_MID, 0, -10, NULL, config->cancel_cb, NULL);
+        cancel_btn = popup_add_styled_button(popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_MID, 0, -10, NULL, config->cancel_cb, NULL);
         if (type == LEARNING_POPUP_STANDARD) {
             learning_cancel_btn = cancel_btn;
         }
     }
 
-    lv_obj_t *title_label = popup_create_title_label(popup, config->title, accessibility_get_font_body(), 20);
+    lv_obj_t *title_label = popup_create_title_label(popup, config->title, FONT_16, 20);
     (void)title_label;
 
-    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, accessibility_get_font_small(), 60);
+    instruction_label = popup_create_body_label(popup, config->instruction, config->width - 20, true, FONT_14, 60);
     // center instruction text horizontally for both modes
     lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(instruction_label, LV_ALIGN_TOP_MID, 0, 60);
@@ -2799,9 +2797,9 @@ void easy_learn_signal_name_callback(void)
                 options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void *)(intptr_t)i);
             }
             
-            options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-            options_view_add_item(g_ir_ov, "Add Signal", add_signal_cb, NULL);
-            lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+            options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_RENAME_REMOTE), rename_remote_cb, NULL);
+            options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_ADD_SIGNAL), add_signal_cb, NULL);
+            lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, i18n_text(I18N_KEY_DELETE_REMOTE), delete_remote_cb, NULL);
             if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
             
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -3272,17 +3270,17 @@ void create_signal_preview_popup(void)
     lv_coord_t left_x = edge_btn + (btn_w / 2);
     lv_coord_t right_x = -(edge_btn + (btn_w / 2));
 
-    save_btn = popup_add_styled_button(signal_preview_popup, "Save", btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -5, NULL, signal_preview_save_cb, NULL);
-    cancel_btn = popup_add_styled_button(signal_preview_popup, "Cancel", btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
+    save_btn = popup_add_styled_button(signal_preview_popup, i18n_text(I18N_KEY_SAVE), btn_w, 30, LV_ALIGN_BOTTOM_LEFT, left_x, -5, NULL, signal_preview_save_cb, NULL);
+    cancel_btn = popup_add_styled_button(signal_preview_popup, i18n_text(I18N_KEY_CANCEL), btn_w, 30, LV_ALIGN_BOTTOM_RIGHT, right_x, -5, NULL, signal_preview_cancel_cb, NULL);
     
     // Title
-    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", accessibility_get_font_body(), 10);
+    popup_create_title_label(signal_preview_popup, "IR Signal Decoded", FONT_16, 10);
     
     // Protocol info (use popup helpers for consistent layout)
     lv_coord_t popup_w = lv_obj_get_width(signal_preview_popup);
-    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 32);
-    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 48);
-    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, accessibility_get_font_small(), 64);
+    protocol_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 32);
+    address_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 48);
+    command_label = popup_create_body_label(signal_preview_popup, "", popup_w - 20, false, FONT_14, 64);
 
     // Set concise text
     if (!learned_signal.is_raw) {
@@ -3308,7 +3306,7 @@ void create_signal_preview_popup(void)
     // Raw signal info (use popup helper for consistent layout)
     lv_coord_t popup_w2 = lv_obj_get_width(signal_preview_popup);
     lv_coord_t raw_y = !learned_signal.is_raw ? 80 : 64; // if decoded, place below cmd (80), else at cmd position (64)
-    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, accessibility_get_font_small(), raw_y);
+    lv_obj_t *raw_info = popup_create_body_label(signal_preview_popup, "", popup_w2 - 20, false, FONT_14, raw_y);
     if (learned_signal.is_raw) {
         lv_label_set_text_fmt(raw_info, "%d timings", learned_signal.payload.raw.timings_size);
     } else {

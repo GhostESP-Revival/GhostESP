@@ -824,7 +824,7 @@ static void keyboard_create() {
     lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
 #endif
     
-    display_manager_add_status_bar("Keyboard");
+    display_manager_add_status_bar(i18n_text(I18N_KEY_KEYBOARD));
 
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     if (!keyboard_build_timer) {

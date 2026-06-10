@@ -4,13 +4,14 @@
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
 #include "core/esp_comm_manager.h"
+#include "core/i18n.h"
 #include "gui/lvgl_safe.h"
 #include "gui/options_view.h"
 #include "gui/popup.h"
 #include "gui/screen_layout.h"
 #include "gui/theme_palette_api.h"
+#include "gui/fonts/font_helper.h"
 #include "managers/settings_manager.h"
-#include "gui/accessibility_fonts.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/subghz_decoders.h"
@@ -24,7 +25,6 @@
 #endif
 
 #include "esp_log.h"
-#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -127,7 +127,9 @@ static lv_obj_t *s_back_row = NULL;
 static lv_obj_t *s_scroll_up_btn = NULL;
 static lv_obj_t *s_scroll_down_btn = NULL;
 static lv_obj_t *s_back_btn = NULL;
-static touch_drag_t s_touch_drag = {0};
+static bool s_touch_started = false;
+static int s_touch_start_x = 0;
+static int s_touch_start_y = 0;
 #endif
 
 static lv_obj_t *s_popup = NULL;
@@ -479,7 +481,7 @@ static void subghz_capture_reset_state_for_new_attempt(void) {
 static void subghz_capture_apply_waiting_ui(bool arming_remote) {
     if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
         if (arming_remote) {
-            lv_label_set_text(s_capture_status_label, "Arming remote capture...");
+            lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_ARMING_REMOTE_CAPTURE));
         } else if (s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) {
             char status[64];
             snprintf(status, sizeof(status), "Raw: %s", s_capture_freq_label);
@@ -523,19 +525,19 @@ static void subghz_capture_popup_update_buttons(void) {
         lv_obj_t *lbl = lv_obj_get_child(s_capture_save_btn, 0);
         if (lbl && lv_obj_is_valid(lbl)) {
             if (arming_remote) {
-                lv_label_set_text(lbl, "Wait");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_WAIT));
                 lv_obj_add_state(s_capture_save_btn, LV_STATE_DISABLED);
             } else if (s_capture_ready) {
                 if (s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) {
                     if (capture_stopped_without_data) {
-                        lv_label_set_text(lbl, "Start");
+                        lv_label_set_text(lbl, i18n_text(I18N_KEY_START));
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     } else {
-                        lv_label_set_text(lbl, "Save");
+                        lv_label_set_text(lbl, i18n_text(I18N_KEY_SAVE));
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     }
                 } else {
-                    lv_label_set_text(lbl, "Save");
+                    lv_label_set_text(lbl, i18n_text(I18N_KEY_SAVE));
                     if (s_capture_buffer_valid) {
                         lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
                     } else {
@@ -543,7 +545,7 @@ static void subghz_capture_popup_update_buttons(void) {
                     }
                 }
             } else {
-                lv_label_set_text(lbl, "Stop");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_STOP));
                 lv_obj_clear_state(s_capture_save_btn, LV_STATE_DISABLED);
             }
         }
@@ -556,7 +558,7 @@ static void subghz_capture_popup_update_buttons(void) {
                 lv_label_set_text(lbl, s_capture_freq_label);
                 lv_obj_add_state(s_capture_freq_btn, LV_STATE_DISABLED);
             } else if (s_capture_ready && s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) {
-                lv_label_set_text(lbl, "Start");
+                lv_label_set_text(lbl, i18n_text(I18N_KEY_START));
                 lv_obj_clear_state(s_capture_freq_btn, LV_STATE_DISABLED);
             } else {
                 lv_label_set_text(lbl, s_capture_freq_label);
@@ -586,7 +588,7 @@ static void subghz_saved_popup_refresh_text(void) {
     }
 
     if (s_saved_file_count <= 0 || !s_saved_file_paths) {
-        lv_label_set_text(s_saved_status_label, "No captures on SD\n/mnt/ghostesp/subghz");
+        lv_label_set_text(s_saved_status_label, i18n_text(I18N_KEY_NO_CAPTURES_ON_SD));
         if (s_saved_replay_btn && lv_obj_is_valid(s_saved_replay_btn)) {
             lv_obj_add_state(s_saved_replay_btn, LV_STATE_DISABLED);
         }
@@ -871,10 +873,10 @@ static void subghz_back_to_root_menu(void) {
 
     options_view_clear(s_ov);
     options_view_set_title(s_ov, "SubGHz");
-    s_scan_row = options_view_add_item(s_ov, "Capture", subghz_scan_row_cb, NULL);
-    s_raw_capture_row = options_view_add_item(s_ov, "Raw Capture", subghz_raw_capture_row_cb, NULL);
-    s_capture_row = options_view_add_item(s_ov, "Saved", subghz_capture_row_cb, NULL);
-    s_freq_analyzer_row = options_view_add_item(s_ov, "Freq Analyzer", subghz_freq_analyzer_row_cb, NULL);
+    s_scan_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_CAPTURE), subghz_scan_row_cb, NULL);
+    s_raw_capture_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_RAW_CAPTURE), subghz_raw_capture_row_cb, NULL);
+    s_capture_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_SAVED), subghz_capture_row_cb, NULL);
+    s_freq_analyzer_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_FREQ_ANALYZER), subghz_freq_analyzer_row_cb, NULL);
     s_waterfall_row = options_view_add_item(s_ov, "Waterfall", subghz_waterfall_row_cb, NULL);
     s_back_row = options_view_add_back_row(s_ov, subghz_back_row_cb, NULL);
     options_view_set_selected(s_ov, 0);
@@ -966,7 +968,7 @@ static void subghz_saved_list_reload(void) {
     }
 
     if (s_saved_file_count == 0) {
-        options_view_add_item(s_ov, "No .sub files", NULL, NULL);
+        options_view_add_item(s_ov, i18n_text(I18N_KEY_NO_FILES), NULL, NULL);
     } else {
         for (int i = start; i < end; i++) {
             const char *name = strrchr(s_saved_file_paths[i], '/');
@@ -976,10 +978,10 @@ static void subghz_saved_list_reload(void) {
     }
 
     if (s_saved_page > 0) {
-        options_view_add_item(s_ov, "< Prev Page", subghz_saved_list_prev_page_cb, NULL);
+        options_view_add_item(s_ov, i18n_text(I18N_KEY_PREV_PAGE), subghz_saved_list_prev_page_cb, NULL);
     }
     if (s_saved_page < max_page) {
-        options_view_add_item(s_ov, "Next Page >", subghz_saved_list_next_page_cb, NULL);
+        options_view_add_item(s_ov, i18n_text(I18N_KEY_NEXT_PAGE), subghz_saved_list_next_page_cb, NULL);
     }
     s_back_row = options_view_add_back_row(s_ov, subghz_back_row_cb, NULL);
     options_view_set_selected(s_ov, 0);
@@ -1574,16 +1576,16 @@ static void subghz_refresh_status_labels(void) {
 
     if (s_remote_mode) {
         if (s_remote_error) {
-            lv_label_set_text(s_status_label, "Peer error");
+            lv_label_set_text(s_status_label, i18n_text(I18N_KEY_PEER_ERROR));
         } else if (!esp_comm_manager_is_connected()) {
-            lv_label_set_text(s_status_label, "GhostLink disconnected");
+            lv_label_set_text(s_status_label, i18n_text(I18N_KEY_GHOSTLINK_DISCONNECTED));
         } else if (!s_remote_stream_online) {
-            lv_label_set_text(s_status_label, "Waiting for peer stream...");
+            lv_label_set_text(s_status_label, i18n_text(I18N_KEY_WAITING_PEER_STREAM));
         } else {
             lv_label_set_text(s_status_label, s_remote_paused ? "Remote scan paused" : "Remote scan active");
         }
     } else if (!subghz_remote_manager_is_running()) {
-        lv_label_set_text(s_status_label, "Scanner stopped");
+        lv_label_set_text(s_status_label, i18n_text(I18N_KEY_SCANNER_STOPPED));
     } else {
         lv_label_set_text(s_status_label,
                           subghz_remote_manager_is_paused() ? "Scanner paused" : "Scanner active");
@@ -1822,7 +1824,7 @@ static void subghz_capture_continue_waiting(void) {
             s_capture_ready = true;
             s_capture_popup_selected = SUBGHZ_CAPTURE_POPUP_BACK;
             if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
-                lv_label_set_text(s_capture_status_label, "Failed to arm remote capture");
+                lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_FAILED_ARM_REMOTE_CAPTURE));
             }
             subghz_capture_popup_update_buttons();
             return;
@@ -2064,7 +2066,7 @@ static void subghz_fa_graph_draw_event(lv_event_t *e) {
         lv_draw_label_dsc_t lbl;
         lv_draw_label_dsc_init(&lbl);
         lbl.color = (b == s_fa_active_band) ? text : text_muted;
-        lbl.font = accessibility_get_font_small();
+        lbl.font = FONT_10;
         lv_area_t lbl_area = { .x1 = bx1 - 2, .y1 = plot_y2 + 2, .x2 = bx2 + 2, .y2 = coords.y2 - 1 };
         lv_draw_label(draw_ctx, &lbl, &lbl_area, band_labels[b], NULL);
     }
@@ -2181,10 +2183,10 @@ static void subghz_open_freq_analyzer_popup(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
 
-    const lv_font_t *title_font = tiny ? accessibility_get_font_small() : accessibility_get_font_body();
+    const lv_font_t *title_font = tiny ? FONT_10 : FONT_14;
     popup_create_title_label(s_fa_popup, "Freq Analyzer", title_font, tiny ? 2 : 6);
 
-    const lv_font_t *freq_font = tiny ? accessibility_get_font_small() : accessibility_get_font_title();
+    const lv_font_t *freq_font = tiny ? FONT_10 : FONT_16;
     s_fa_freq_label = lv_label_create(s_fa_popup);
     lv_label_set_text(s_fa_freq_label, "---.--- MHz");
     lv_obj_set_style_text_color(s_fa_freq_label, text, 0);
@@ -2216,14 +2218,14 @@ static void subghz_open_freq_analyzer_popup(void) {
 
     if (show_history) {
         s_fa_history_label = lv_label_create(s_fa_popup);
-        lv_label_set_text(s_fa_history_label, "History:");
+        lv_label_set_text(s_fa_history_label, i18n_text(I18N_KEY_HISTORY));
         lv_obj_set_style_text_color(s_fa_history_label, text, 0);
-        lv_obj_set_style_text_font(s_fa_history_label, small ? accessibility_get_font_small() : accessibility_get_font_small(), 0);
+        lv_obj_set_style_text_font(s_fa_history_label, small ? FONT_8 : FONT_10, 0);
         lv_obj_align(s_fa_history_label, LV_ALIGN_TOP_LEFT, 8, graph_top + graph_h + 4);
         lv_obj_set_style_max_height(s_fa_history_label, history_h, 0);
     }
 
-    const lv_font_t *btn_font = tiny ? accessibility_get_font_small() : (small ? accessibility_get_font_small() : accessibility_get_font_body());
+    const lv_font_t *btn_font = tiny ? FONT_8 : (small ? FONT_10 : FONT_12);
     int btn_w = tiny ? 40 : (small ? 58 : 68);
     s_fa_start_btn = popup_add_styled_button(
         s_fa_popup, "Start", btn_w, btn_h, LV_ALIGN_BOTTOM_LEFT, tiny ? 2 : 8, btn_margin, btn_font, subghz_fa_start_btn_cb, NULL);
@@ -2629,12 +2631,9 @@ static void subghz_open_waterfall_popup(void) {
     free(s_wf_fb);
     free(s_wf_line);
     free(s_wf_prev_row);
-    s_wf_fb = heap_caps_calloc((size_t)s_wf_fb_w * (size_t)s_wf_fb_h, sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_wf_line = heap_caps_calloc((size_t)s_wf_fb_w, sizeof(uint8_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_wf_prev_row = heap_caps_calloc((size_t)s_wf_fb_w, sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_wf_fb) s_wf_fb = calloc((size_t)s_wf_fb_w * (size_t)s_wf_fb_h, sizeof(lv_color_t));
-    if (!s_wf_line) s_wf_line = calloc((size_t)s_wf_fb_w, sizeof(uint8_t));
-    if (!s_wf_prev_row) s_wf_prev_row = calloc((size_t)s_wf_fb_w, sizeof(lv_color_t));
+    s_wf_fb = calloc((size_t)s_wf_fb_w * (size_t)s_wf_fb_h, sizeof(lv_color_t));
+    s_wf_line = calloc((size_t)s_wf_fb_w, sizeof(uint8_t));
+    s_wf_prev_row = calloc((size_t)s_wf_fb_w, sizeof(lv_color_t));
     if (s_wf_fb && s_wf_line) {
         lv_color_t black = lv_color_black();
         for (int i = 0; i < s_wf_fb_w * s_wf_fb_h; i++) {
@@ -2818,10 +2817,10 @@ static void subghz_capture_primary_btn_cb(lv_event_t *e) {
                 s_capture_stop_deadline_us = esp_timer_get_time() + 1500000LL;
                 ESP_LOGI(TAG, "waiting for remote raw stream stop_deadline=%lld", (long long)s_capture_stop_deadline_us);
                 if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
-                    lv_label_set_text(s_capture_status_label, "Waiting for raw capture...");
+                    lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_WAITING_RAW_CAPTURE));
                 }
                 if (s_capture_signal_label && lv_obj_is_valid(s_capture_signal_label)) {
-                    lv_label_set_text(s_capture_signal_label, "Finishing remote raw capture");
+                    lv_label_set_text(s_capture_signal_label, i18n_text(I18N_KEY_FINISHING_REMOTE_RAW_CAPTURE));
                 }
                 subghz_capture_popup_update_buttons();
                 return;
@@ -2850,7 +2849,7 @@ static void subghz_capture_primary_btn_cb(lv_event_t *e) {
             s_capture_waiting_signal = false;
             s_capture_popup_selected = SUBGHZ_CAPTURE_POPUP_SAVE;
             if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
-                lv_label_set_text(s_capture_status_label, "No signal captured");
+                lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_NO_SIGNAL_CAPTURED));
             }
             subghz_capture_popup_update_buttons();
         }
@@ -2940,27 +2939,27 @@ static void subghz_open_capture_popup(void) {
              s_capture_freq_label);
 
     const char *title = (s_capture_mode == SUBGHZ_CAPTURE_MODE_RAW) ? "Raw Capture" : "Capture";
-    popup_create_title_label(s_capture_popup, title, accessibility_get_font_body(), 8);
+    popup_create_title_label(s_capture_popup, title, FONT_16, 8);
     s_capture_status_label = popup_create_body_label(
         s_capture_popup,
         "Waiting for signal...",
         popup_w - 20,
         false,
-        accessibility_get_font_small(),
+        FONT_12,
         32);
     s_capture_signal_label = popup_create_body_label(
         s_capture_popup,
         "Signal threshold: 65%",
         popup_w - 20,
         true,
-        accessibility_get_font_small(),
+        FONT_12,
         52);
     lv_obj_set_style_text_align(s_capture_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_align(s_capture_signal_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_max_height(s_capture_signal_label, 60, 0);
     lv_obj_set_scrollbar_mode(s_capture_signal_label, LV_SCROLLBAR_MODE_AUTO);
 
-    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
+    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? FONT_12 : FONT_14;
     s_capture_save_btn = popup_add_styled_button(
         s_capture_popup,
         "Stop",
@@ -3098,7 +3097,7 @@ static void subghz_capture_mark_ready_with_decoded(const subghz_decoded_signal_t
     s_capture_preview_cursor = s_cursor;
 
     if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
-        lv_label_set_text(s_capture_status_label, "Signal decoded");
+        lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_SIGNAL_DECODED));
     }
     if (s_capture_signal_label && lv_obj_is_valid(s_capture_signal_label) && decoded) {
         char msg[256];
@@ -3143,17 +3142,17 @@ static void subghz_open_saved_popup(void) {
     s_saved_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
     lv_obj_center(s_saved_popup);
 
-    s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", accessibility_get_font_body(), 8);
+    s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", FONT_16, 8);
     s_saved_status_label = popup_create_body_label(
         s_saved_popup,
         "Loading...",
         popup_w - 20,
         true,
-        accessibility_get_font_small(),
+        FONT_12,
         38);
     lv_obj_set_style_text_align(s_saved_status_label, LV_TEXT_ALIGN_CENTER, 0);
 
-    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
+    const lv_font_t *btn_font = (LV_VER_RES <= 240) ? FONT_12 : FONT_14;
     s_saved_replay_btn = popup_add_styled_button(
         s_saved_popup,
         "Replay",
@@ -3447,7 +3446,7 @@ static void subghz_timer_cb(lv_timer_t *timer) {
             s_capture_waiting_signal = false;
             s_capture_popup_selected = SUBGHZ_CAPTURE_POPUP_SAVE;
             if (s_capture_status_label && lv_obj_is_valid(s_capture_status_label)) {
-                lv_label_set_text(s_capture_status_label, "No signal captured");
+                lv_label_set_text(s_capture_status_label, i18n_text(I18N_KEY_NO_SIGNAL_CAPTURED));
             }
             subghz_capture_popup_update_buttons();
         }
@@ -4352,74 +4351,64 @@ static void subghz_input_handler(InputEvent *event) {
                 if (d->point.x >= area.x1 && d->point.x <= area.x2 &&
                     d->point.y >= area.y1 && d->point.y <= area.y2) {
                     options_view_move_selection(s_ov, -1);
-                    touch_drag_reset(&s_touch_drag);
+                    s_touch_started = false;
                     return;
                 }
             }
-
+            
             if (s_scroll_down_btn && lv_obj_is_valid(s_scroll_down_btn)) {
                 lv_area_t area;
                 lv_obj_get_coords(s_scroll_down_btn, &area);
                 if (d->point.x >= area.x1 && d->point.x <= area.x2 &&
                     d->point.y >= area.y1 && d->point.y <= area.y2) {
                     options_view_move_selection(s_ov, 1);
-                    touch_drag_reset(&s_touch_drag);
+                    s_touch_started = false;
                     return;
                 }
             }
-
+            
             if (s_back_btn && lv_obj_is_valid(s_back_btn)) {
                 lv_area_t area;
                 lv_obj_get_coords(s_back_btn, &area);
                 if (d->point.x >= area.x1 && d->point.x <= area.x2 &&
                     d->point.y >= area.y1 && d->point.y <= area.y2) {
                     subghz_back_btn_cb(NULL);
-                    touch_drag_reset(&s_touch_drag);
+                    s_touch_started = false;
                     return;
                 }
             }
 
-            if (!s_touch_drag.started) {
-                touch_drag_begin(&s_touch_drag, d);
-            } else {
-                // Move event - apply live drag or remember target for release
-                lv_obj_t *list = options_view_get_list(s_ov);
-                if (list && lv_obj_is_valid(list)) {
-                    lv_area_t list_area;
-                    lv_obj_get_coords(list, &list_area);
-                    bool started_in_list = (s_touch_drag.start_x >= list_area.x1 && s_touch_drag.start_x <= list_area.x2 &&
-                                                 s_touch_drag.start_y >= list_area.y1 && s_touch_drag.start_y <= list_area.y2);
-                    if (started_in_list) {
-                        touch_drag_update(&s_touch_drag, d, list);
-                    }
-                }
+            if (!s_touch_started) {
+                s_touch_started = true;
+                s_touch_start_x = (int)d->point.x;
+                s_touch_start_y = (int)d->point.y;
             }
             return;
         }
 
         if (d->state == LV_INDEV_STATE_REL) {
-            if (!s_touch_drag.started) return;
+            if (!s_touch_started) return;
+            s_touch_started = false;
 
-            int start_x = s_touch_drag.start_x;
-            int start_y = s_touch_drag.start_y;
-            int dx = (int)d->point.x - start_x;
+            int dx = (int)d->point.x - s_touch_start_x;
+            int dy = (int)d->point.y - s_touch_start_y;
 
+            int thr_y = LV_VER_RES / SUBGHZ_SWIPE_THRESHOLD_RATIO;
             int thr_x = LV_HOR_RES / SUBGHZ_SWIPE_THRESHOLD_RATIO;
-
-            // Let the shared touch_drag helper handle release-on-release
-            // (it applies a single scroll when the live setting is off) and
-            // tell us if a drag was in progress so we can skip tap handling.
-            bool was_dragged = touch_drag_release(&s_touch_drag, d);
-            if (was_dragged) return;
 
             lv_obj_t *list = options_view_get_list(s_ov);
             if (list && lv_obj_is_valid(list)) {
                 lv_area_t list_area;
                 lv_obj_get_coords(list, &list_area);
-                bool started_in_list = (start_x >= list_area.x1 && start_x <= list_area.x2 &&
-                                             start_y >= list_area.y1 && start_y <= list_area.y2);
-
+                bool started_in_list = (s_touch_start_x >= list_area.x1 && s_touch_start_x <= list_area.x2 &&
+                                         s_touch_start_y >= list_area.y1 && s_touch_start_y <= list_area.y2);
+                
                 if (started_in_list) {
+                    if (abs(dy) > thr_y) {
+                        lv_obj_scroll_by_bounded(list, 0, dy, LV_ANIM_OFF);
+                        return;
+                    }
+
                     if (abs(dx) > thr_x) return;
 
                     if (settings_get_thirds_control_enabled(&G_Settings)) {
@@ -4435,6 +4424,8 @@ static void subghz_input_handler(InputEvent *event) {
                             }
                         }
                     }
+                } else {
+                    if (abs(dy) > thr_y || abs(dx) > thr_x) return;
                 }
             }
         }
@@ -4538,7 +4529,13 @@ void subghz_view_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
 
-    s_root = gui_screen_create_root(NULL, NULL, bg, LV_OPA_TRANSP);
+    s_root = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(s_root, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_root, bg, 0);
+    lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);
+    lv_obj_set_style_radius(s_root, 0, 0);
+    lv_obj_set_style_pad_all(s_root, 0, 0);
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
     subghz_view.root = s_root;
@@ -4554,10 +4551,10 @@ void subghz_view_create(void) {
     lv_obj_align(list, LV_ALIGN_TOP_LEFT, 0, STATUS_BAR_HEIGHT);
 #endif
 
-    s_scan_row = options_view_add_item(s_ov, "Capture", subghz_scan_row_cb, NULL);
-    s_raw_capture_row = options_view_add_item(s_ov, "Raw Capture", subghz_raw_capture_row_cb, NULL);
-    s_capture_row = options_view_add_item(s_ov, "Saved", subghz_capture_row_cb, NULL);
-    s_freq_analyzer_row = options_view_add_item(s_ov, "Freq Analyzer", subghz_freq_analyzer_row_cb, NULL);
+    s_scan_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_CAPTURE), subghz_scan_row_cb, NULL);
+    s_raw_capture_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_RAW_CAPTURE), subghz_raw_capture_row_cb, NULL);
+    s_capture_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_SAVED), subghz_capture_row_cb, NULL);
+    s_freq_analyzer_row = options_view_add_item(s_ov, i18n_text(I18N_KEY_FREQ_ANALYZER), subghz_freq_analyzer_row_cb, NULL);
     s_waterfall_row = options_view_add_item(s_ov, "Waterfall", subghz_waterfall_row_cb, NULL);
     s_back_row = options_view_add_back_row(s_ov, subghz_back_row_cb, NULL);
     options_view_set_selected(s_ov, 0);
@@ -4598,7 +4595,8 @@ void subghz_view_create(void) {
     lv_obj_set_style_shadow_width(s_back_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(s_back_btn, subghz_back_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(s_back_btn);
-    lv_label_set_text(back_label, "Back");
+    lv_label_set_text(back_label, i18n_text(I18N_KEY_BACK));
+    lv_obj_set_style_text_font(back_label, FONT_14, 0);
     lv_obj_set_style_text_color(back_label, ctrl_text_color, 0);
     lv_obj_center(back_label);
 
@@ -4659,7 +4657,7 @@ void subghz_view_destroy(void) {
     s_scroll_up_btn = NULL;
     s_scroll_down_btn = NULL;
     s_back_btn = NULL;
-    touch_drag_reset(&s_touch_drag);
+    s_touch_started = false;
 #endif
 
     lvgl_obj_del_safe(&s_root);

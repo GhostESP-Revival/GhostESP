@@ -4,12 +4,12 @@
 #include "lvgl.h"
 #include "managers/display_manager.h"
 #include "mbedtls/base64.h"  // For base64 decoding
-#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include <esp_log.h>
 #include <string.h>
 #include <time.h>
 #include <nvs.h>
+#include "core/i18n.h"
 
 #define S_TAG "SETTINGS"
 
@@ -96,25 +96,8 @@ static const char *NVS_MIC_MIRROR_MODE_KEY = "mic_mirror";
 static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
 static const char *NVS_MENU_BG_SHADE_KEY = "menu_bg_shd";
 static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
-static const char *NVS_EPILEPSY_WARNING_KEY = "epil_warn";
-static const char *NVS_FONT_SIZE_KEY = "font_size";
-static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
-static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
-static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
+static const char *NVS_UI_LANGUAGE_KEY = "ui_lang";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
-static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
-
-// Lockscreen NVS keys
-static const char *NVS_LOCKSCREEN_ENABLED_KEY = "ls_en";
-static const char *NVS_LOCKSCREEN_TYPE_KEY = "ls_type";
-static const char *NVS_LOCKSCREEN_OBF_KEY = "ls_obf";
-static const char *NVS_LOCKSCREEN_TIMEOUT_KEY = "ls_tout";
-static const char *NVS_LOCKSCREEN_WAKE_KEY = "ls_wake";
-
-// Wardriving NVS keys
-static const char *NVS_WD_HOP_PRIMARY_KEY = "wd_hop_prim";
-static const char *NVS_WD_HOP_HELPER_KEY = "wd_hop_help";
-static const char *NVS_WD_WEIGHTED_5G_KEY = "wd_w5g";
 
 static const char *TAG = "SettingsManager";
 
@@ -147,6 +130,7 @@ void settings_init(FSettings *settings) {
   err = nvs_open("storage", NVS_READWRITE, &nvsHandle);
   if (err == ESP_OK) {
     settings_load(settings);
+    i18n_set_language((i18n_language_t)settings->ui_language);
     printf("Settings loaded successfully.\n");
     settings_print_nvs_stats();
   } else {
@@ -232,26 +216,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->ghostlink_split_view = true; // Default to split view
   settings->menu_bg_shade = 2;
   settings->menu_rounded = true;
-  settings->epilepsy_warning_enabled = true;
-  settings->font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
-  settings->reduced_motion = false;
-  settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
-  settings->high_contrast = false;
+  settings->ui_language = 0;
   settings->menu_item_borders = false;
-  settings->touch_drag_scroll = true;
-
-  // Wardriving defaults
-  settings->wd_hop_primary_ms = 100;
-  settings->wd_hop_helper_ms = 100;
-  settings->wd_weighted_5g = true;
-
-  // Lockscreen defaults (disabled by default)
-  settings->lockscreen_enabled = false;
-  settings->lockscreen_type = 1;         // PIN-only for now
-  memset(settings->lockscreen_obfuscated, 0, sizeof(settings->lockscreen_obfuscated));
-  settings->lockscreen_timeout_sec = 0;    // Off
-  settings->lockscreen_wake_lock = true;  // Default to locking on wake
-
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
   settings->status_idle_timeout_ms = 5000; // default 5s
@@ -743,83 +709,19 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_rounded = (bool)value_u8;
   }
-  err = nvs_get_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, &value_u8);
+
+  err = nvs_get_u8(nvsHandle, NVS_UI_LANGUAGE_KEY, &value_u8);
   if (err == ESP_OK) {
-    settings->epilepsy_warning_enabled = (bool)value_u8;
+    settings->ui_language = value_u8;
   } else {
-    settings->epilepsy_warning_enabled = true; // Default to enabled
+    settings->ui_language = 0;
   }
 
-  err = nvs_get_u8(nvsHandle, NVS_FONT_SIZE_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->font_size = value_u8;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->reduced_motion = (bool)value_u8;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->input_repeat_speed = value_u8;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->high_contrast = (bool)value_u8;
-  }
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->touch_drag_scroll = (bool)value_u8;
-  }
-
-  // Load lockscreen settings
-  err = nvs_get_u8(nvsHandle, NVS_LOCKSCREEN_ENABLED_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->lockscreen_enabled = (bool)value_u8;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_LOCKSCREEN_TYPE_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->lockscreen_type = value_u8;
-  }
-  size_t blob_size = sizeof(settings->lockscreen_obfuscated);
-  err = nvs_get_blob(nvsHandle, NVS_LOCKSCREEN_OBF_KEY, settings->lockscreen_obfuscated, &blob_size);
-  if (err != ESP_OK) {
-    memset(settings->lockscreen_obfuscated, 0, sizeof(settings->lockscreen_obfuscated));
-  }
-  settings->lockscreen_type = 1;
-  uint8_t lockscreen_stored_len = (uint8_t)settings->lockscreen_obfuscated[0];
-  bool lockscreen_configured = (lockscreen_stored_len & 0x80) != 0 &&
-                               (lockscreen_stored_len & 0x7F) > 0 &&
-                               (lockscreen_stored_len & 0x7F) < sizeof(settings->lockscreen_obfuscated);
-  if (settings->lockscreen_enabled && !lockscreen_configured) {
-    settings->lockscreen_enabled = false;
-  }
-  value_u16 = 0;
-  err = nvs_get_u16(nvsHandle, NVS_LOCKSCREEN_TIMEOUT_KEY, &value_u16);
-  if (err == ESP_OK) {
-    settings->lockscreen_timeout_sec = value_u16;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_LOCKSCREEN_WAKE_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->lockscreen_wake_lock = (bool)value_u8;
-  }
-
-  // Load wardriving settings
-  uint16_t value_u16_wd = 0;
-  err = nvs_get_u16(nvsHandle, NVS_WD_HOP_PRIMARY_KEY, &value_u16_wd);
-  if (err == ESP_OK) {
-    settings->wd_hop_primary_ms = value_u16_wd;
-  }
-  err = nvs_get_u16(nvsHandle, NVS_WD_HOP_HELPER_KEY, &value_u16_wd);
-  if (err == ESP_OK) {
-    settings->wd_hop_helper_ms = value_u16_wd;
-  }
-  err = nvs_get_u8(nvsHandle, NVS_WD_WEIGHTED_5G_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->wd_weighted_5g = (bool)value_u8;
+  } else {
+    settings->menu_item_borders = false;
   }
 }
 
@@ -1086,65 +988,9 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, G_Settings.menu_rounded ? 1 : 0);
             key = NVS_MENU_ROUNDED_KEY;
             break;
-        case SETTING_EPILEPSY_WARNING:
-            err = nvs_set_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, G_Settings.epilepsy_warning_enabled ? 1 : 0);
-            key = NVS_EPILEPSY_WARNING_KEY;
-            break;
-        case SETTING_FONT_SIZE:
-            err = nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, G_Settings.font_size);
-            key = NVS_FONT_SIZE_KEY;
-            break;
-        case SETTING_REDUCED_MOTION:
-            err = nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, G_Settings.reduced_motion ? 1 : 0);
-            key = NVS_REDUCED_MOTION_KEY;
-            break;
-        case SETTING_INPUT_REPEAT_SPEED:
-            err = nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, G_Settings.input_repeat_speed);
-            key = NVS_INPUT_REPEAT_SPEED_KEY;
-            break;
-        case SETTING_HIGH_CONTRAST:
-            err = nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, G_Settings.high_contrast ? 1 : 0);
-            key = NVS_HIGH_CONTRAST_KEY;
-            break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
-            break;
-        case SETTING_TOUCH_DRAG_SCROLL:
-            err = nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, G_Settings.touch_drag_scroll ? 1 : 0);
-            key = NVS_TOUCH_DRAG_SCROLL_KEY;
-            break;
-        case SETTING_LOCKSCREEN_ENABLED:
-            err = nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_ENABLED_KEY, G_Settings.lockscreen_enabled ? 1 : 0);
-            key = NVS_LOCKSCREEN_ENABLED_KEY;
-            break;
-        case SETTING_LOCKSCREEN_WAKE:
-            err = nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_WAKE_KEY, G_Settings.lockscreen_wake_lock ? 1 : 0);
-            key = NVS_LOCKSCREEN_WAKE_KEY;
-            break;
-        case SETTING_LOCKSCREEN_TYPE:
-            err = nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_TYPE_KEY, G_Settings.lockscreen_type);
-            key = NVS_LOCKSCREEN_TYPE_KEY;
-            break;
-        case SETTING_LOCKSCREEN_TIMEOUT:
-            err = nvs_set_u16(nvsHandle, NVS_LOCKSCREEN_TIMEOUT_KEY, G_Settings.lockscreen_timeout_sec);
-            key = NVS_LOCKSCREEN_TIMEOUT_KEY;
-            break;
-        case SETTING_LOCKSCREEN_CHANGE_PIN:
-            err = nvs_set_blob(nvsHandle, NVS_LOCKSCREEN_OBF_KEY, G_Settings.lockscreen_obfuscated, sizeof(G_Settings.lockscreen_obfuscated));
-            key = NVS_LOCKSCREEN_OBF_KEY;
-            break;
-        case SETTING_WD_HOP_PRIMARY:
-            err = nvs_set_u16(nvsHandle, NVS_WD_HOP_PRIMARY_KEY, G_Settings.wd_hop_primary_ms);
-            key = NVS_WD_HOP_PRIMARY_KEY;
-            break;
-        case SETTING_WD_HOP_HELPER:
-            err = nvs_set_u16(nvsHandle, NVS_WD_HOP_HELPER_KEY, G_Settings.wd_hop_helper_ms);
-            key = NVS_WD_HOP_HELPER_KEY;
-            break;
-        case SETTING_WD_WEIGHTED_5G:
-            err = nvs_set_u8(nvsHandle, NVS_WD_WEIGHTED_5G_KEY, G_Settings.wd_weighted_5g ? 1 : 0);
-            key = NVS_WD_WEIGHTED_5G_KEY;
             break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
@@ -1317,31 +1163,13 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, settings->ghostlink_split_view ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, settings->menu_bg_shade);
     nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0);
-    nvs_set_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, settings->epilepsy_warning_enabled ? 1 : 0);
-    nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, settings->font_size);
-    nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, settings->reduced_motion ? 1 : 0);
-    nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed);
-    nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_UI_LANGUAGE_KEY, settings->ui_language);
     nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0);
-    nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0);
-
-    // Save lockscreen settings
-    nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_ENABLED_KEY, settings->lockscreen_enabled ? 1 : 0);
-    nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_TYPE_KEY, settings->lockscreen_type);
-    nvs_set_blob(nvsHandle, NVS_LOCKSCREEN_OBF_KEY, settings->lockscreen_obfuscated, sizeof(settings->lockscreen_obfuscated));
-    nvs_set_u16(nvsHandle, NVS_LOCKSCREEN_TIMEOUT_KEY, settings->lockscreen_timeout_sec);
-    nvs_set_u8(nvsHandle, NVS_LOCKSCREEN_WAKE_KEY, settings->lockscreen_wake_lock ? 1 : 0);
-
-    // Save wardriving settings
-    nvs_set_u16(nvsHandle, NVS_WD_HOP_PRIMARY_KEY, settings->wd_hop_primary_ms);
-    nvs_set_u16(nvsHandle, NVS_WD_HOP_HELPER_KEY, settings->wd_hop_helper_ms);
-    nvs_set_u8(nvsHandle, NVS_WD_WEIGHTED_5G_KEY, settings->wd_weighted_5g ? 1 : 0);
 
     esp_err_t err = nvs_commit(nvsHandle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to commit settings_save: %s", esp_err_to_name(err));
     }
-    ghostchi_manager_add_xp(1);
 }
 
 void settings_set_ap_ssid(FSettings *settings, const char *ssid) {
@@ -1728,12 +1556,11 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 2) layout = 0;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 2 ? settings->menu_layout : 0;
+    return settings->menu_layout;
 }
 
 // Neopixel brightness settings
@@ -1988,54 +1815,14 @@ bool settings_get_menu_rounded(const FSettings *settings) {
   return settings ? settings->menu_rounded : false;
 }
 
-void settings_set_epilepsy_warning_enabled(FSettings *settings, bool enabled) {
+void settings_set_ui_language(FSettings *settings, uint8_t lang) {
   if (settings) {
-    settings->epilepsy_warning_enabled = enabled;
+    settings->ui_language = lang;
   }
 }
 
-bool settings_get_epilepsy_warning_enabled(const FSettings *settings) {
-  return settings ? settings->epilepsy_warning_enabled : true;
-}
-
-void settings_set_font_size(FSettings *settings, uint8_t size) {
-  if (settings) {
-    settings->font_size = size;
-  }
-}
-
-uint8_t settings_get_font_size(const FSettings *settings) {
-  return settings ? settings->font_size : 1;
-}
-
-void settings_set_reduced_motion(FSettings *settings, bool enabled) {
-  if (settings) {
-    settings->reduced_motion = enabled;
-  }
-}
-
-bool settings_get_reduced_motion(const FSettings *settings) {
-  return settings ? settings->reduced_motion : false;
-}
-
-void settings_set_input_repeat_speed(FSettings *settings, uint8_t speed) {
-  if (settings) {
-    settings->input_repeat_speed = speed;
-  }
-}
-
-uint8_t settings_get_input_repeat_speed(const FSettings *settings) {
-  return settings ? settings->input_repeat_speed : 1;
-}
-
-void settings_set_high_contrast(FSettings *settings, bool enabled) {
-  if (settings) {
-    settings->high_contrast = enabled;
-  }
-}
-
-bool settings_get_high_contrast(const FSettings *settings) {
-  return settings ? settings->high_contrast : false;
+uint8_t settings_get_ui_language(const FSettings *settings) {
+  return settings ? settings->ui_language : 0;
 }
 
 void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
@@ -2046,71 +1833,4 @@ void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
 
 bool settings_get_menu_item_borders(const FSettings *settings) {
   return settings ? settings->menu_item_borders : true;
-}
-
-void settings_set_touch_drag_scroll(FSettings *settings, bool enabled) {
-  if (settings) {
-    settings->touch_drag_scroll = enabled;
-  }
-}
-
-bool settings_get_touch_drag_scroll(const FSettings *settings) {
-  return settings ? settings->touch_drag_scroll : true;
-}
-
-// Lockscreen getters and setters
-void settings_set_lockscreen_enabled(FSettings *settings, bool enabled) {
-  if (settings) settings->lockscreen_enabled = enabled;
-}
-bool settings_get_lockscreen_enabled(const FSettings *settings) {
-  return settings ? settings->lockscreen_enabled : false;
-}
-void settings_set_lockscreen_type(FSettings *settings, uint8_t type) {
-  if (settings) settings->lockscreen_type = type;
-}
-uint8_t settings_get_lockscreen_type(const FSettings *settings) {
-  return settings ? settings->lockscreen_type : 0;
-}
-void settings_set_lockscreen_obfuscated(FSettings *settings, const char *obf) {
-  if (!settings || !obf) return;
-  memcpy(settings->lockscreen_obfuscated, obf, sizeof(settings->lockscreen_obfuscated));
-}
-const char *settings_get_lockscreen_obfuscated(const FSettings *settings) {
-  return settings ? settings->lockscreen_obfuscated : "";
-}
-void settings_set_lockscreen_timeout_sec(FSettings *settings, uint16_t sec) {
-  if (settings) settings->lockscreen_timeout_sec = sec;
-}
-uint16_t settings_get_lockscreen_timeout_sec(const FSettings *settings) {
-  return settings ? settings->lockscreen_timeout_sec : 0;
-}
-void settings_set_lockscreen_wake_lock(FSettings *settings, bool enabled) {
-  if (settings) settings->lockscreen_wake_lock = enabled;
-}
-bool settings_get_lockscreen_wake_lock(const FSettings *settings) {
-  return settings ? settings->lockscreen_wake_lock : true;
-}
-
-// Wardriving settings
-void settings_set_wd_hop_primary_ms(FSettings *settings, uint16_t ms) {
-  if (ms < 50) ms = 50;
-  if (ms > 500) ms = 500;
-  if (settings) settings->wd_hop_primary_ms = ms;
-}
-uint16_t settings_get_wd_hop_primary_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_primary_ms : 100;
-}
-void settings_set_wd_hop_helper_ms(FSettings *settings, uint16_t ms) {
-  if (ms < 50) ms = 50;
-  if (ms > 500) ms = 500;
-  if (settings) settings->wd_hop_helper_ms = ms;
-}
-uint16_t settings_get_wd_hop_helper_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_helper_ms : 100;
-}
-void settings_set_wd_weighted_5g(FSettings *settings, bool enabled) {
-  if (settings) settings->wd_weighted_5g = enabled;
-}
-bool settings_get_wd_weighted_5g(const FSettings *settings) {
-  return settings ? settings->wd_weighted_5g : true;
 }

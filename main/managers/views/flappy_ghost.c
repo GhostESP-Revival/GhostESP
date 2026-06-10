@@ -11,6 +11,7 @@
 #include "gui/accessibility_fonts.h"
 #include "managers/views/flappy_ghost_screen.h"
 #include "managers/views/main_menu_screen.h"
+#include "core/i18n.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -537,7 +538,7 @@ void flappy_bird_game_over() {
 
   // Create "Game Over" label with scaled font
   lv_obj_t *game_over_label = lv_label_create(game_over_container);
-  lv_label_set_text(game_over_label, "Game Over!");
+  lv_label_set_text(game_over_label, i18n_text(I18N_KEY_GAME_OVER));
   lv_obj_set_style_text_color(game_over_label, lv_color_hex(0xFFFF00), 0);
   lv_obj_set_style_text_font(game_over_label, settings.score_font,
                              0); // Reuse score_font for simplicity
@@ -547,7 +548,7 @@ void flappy_bird_game_over() {
   if (settings.pipe_speed > 3) {
     // Create "Retry" label
     lv_obj_t *retry_label = lv_label_create(game_over_container);
-    lv_label_set_text(retry_label, "Tap to Retry");
+    lv_label_set_text(retry_label, i18n_text(I18N_KEY_TAP_TO_RETRY));
     lv_obj_set_style_text_color(retry_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(retry_label, settings.score_font, 0);
     lv_obj_align(retry_label, LV_ALIGN_CENTER, 0, 20);
