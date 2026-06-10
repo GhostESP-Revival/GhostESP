@@ -1284,8 +1284,10 @@ void apply_power_management_config(bool power_save_enabled) {
       .freq_hz = 5000, // 5 kHz
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Auto-select best clock for current power mode
   };
-  ledc_timer_config(&ledc_timer);
-  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s", power_save_enabled ? "enabled" : "disabled");
+  esp_err_t timer_err = ledc_timer_config(&ledc_timer);
+  uint32_t current_duty = ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s, timer_err=%s, current_duty=%lu",
+           power_save_enabled ? "enabled" : "disabled", esp_err_to_name(timer_err), (unsigned long)current_duty);
 #endif
 
   // control ap based on power save mode and AP enabled setting
@@ -1994,11 +1996,15 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
+        ESP_LOGI(TAG, "BL PWM: scaled_pct=%d, raw_duty=%lu", percentage, (unsigned long)duty);
 #if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
         duty = ((1 << LEDC_TIMER_10_BIT) - 1) - duty;
+        if (duty == 0) duty = 1;
+        ESP_LOGI(TAG, "BL PWM: active-low inverted, final_duty=%lu", (unsigned long)duty);
 #endif
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        esp_err_t err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        ESP_LOGI(TAG, "BL PWM: ledc_update_duty returned %s", esp_err_to_name(err));
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping PWM backlight");
     }
@@ -2033,9 +2039,10 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 }
 
 void set_backlight_brightness(uint8_t percentage) {
+    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
+    ESP_LOGI(TAG, "set_backlight_brightness: input=%d%%, max_brightness_setting=%d%%", percentage, max_brightness);
     display_manager_set_backlight_raw(percentage);
 
-    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
     percentage = (percentage * max_brightness) / 100;
     if (percentage > 100) percentage = 100;
 
