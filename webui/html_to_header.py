@@ -34,13 +34,13 @@ def main():
     try:
         from htmlmin import minify as html_minify
         from csscompressor import compress as css_compress
-        import jsmin
+        import rjsmin as jsmin
     except ImportError:
         print("Error: Required libraries not found. Installing them now...")
         install_dependencies()
         from htmlmin import minify as html_minify
         from csscompressor import compress as css_compress
-        import jsmin
+        import rjsmin as jsmin
 
     try:
         with open(html_path, 'r', encoding='utf-8') as f:
@@ -51,6 +51,16 @@ def main():
 
     print(f"Original HTML size: {len(html_content)} bytes")
 
+    try:
+        htmlmin_safe = html_minify(html_content,
+                                   remove_comments=True,
+                                   remove_empty_space=True,
+                                   remove_all_empty_space=False,
+                                   reduce_boolean_attributes=True)
+    except Exception as e:
+        print(f"Warning: Error minifying HTML: {e}")
+        htmlmin_safe = html_content
+
     def minify_css(match):
         css_content = match.group(1)
         try:
@@ -60,7 +70,7 @@ def main():
             print(f"Warning: Error minifying CSS: {e}")
             return match.group(0)
 
-    html_content = re.sub(r'<style>(.*?)</style>', minify_css, html_content, flags=re.DOTALL)
+    htmlmin_safe = re.sub(r'<style>(.*?)</style>', minify_css, htmlmin_safe, flags=re.DOTALL)
 
     def minify_js(match):
         js_content = match.group(1)
@@ -71,18 +81,7 @@ def main():
             print(f"Warning: Error minifying JavaScript: {e}")
             return match.group(0)
 
-    minified_html = re.sub(r'<script>(.*?)</script>', minify_js, html_content, flags=re.DOTALL)
-
-    try:
-        minified_html = html_minify(minified_html,
-                                    remove_comments=True,
-                                    remove_empty_space=True,
-                                    remove_all_empty_space=False,
-                                    reduce_boolean_attributes=True)
-    except Exception as e:
-        print(f"Warning: Error minifying HTML: {e}")
-        print("Using original HTML content...")
-        minified_html = html_content
+    minified_html = re.sub(r'<script>(.*?)</script>', minify_js, htmlmin_safe, flags=re.DOTALL)
 
     minified_bytes = minified_html.encode('utf-8')
     print(f"Minified HTML size: {len(minified_bytes)} bytes")
@@ -111,7 +110,7 @@ const unsigned char ghost_site_html_gz[{len(gz_bytes)}UL] = {{
 def install_dependencies():
     import subprocess
 
-    dependencies = ["htmlmin", "csscompressor", "jsmin"]
+    dependencies = ["htmlmin", "csscompressor", "rjsmin"]
 
     try:
         for dep in dependencies:

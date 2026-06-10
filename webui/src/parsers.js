@@ -147,7 +147,7 @@ const Parsers = {
 
   station(text) {
     if (!text.includes('Station MAC:') && !text.includes('Station:') && !text.includes('New Station:')) return null;
-    const idx = Patterns.STATION_INDEX.exec(text)?.[1] || String(Parsers._stationCounter++);
+    const idx = Patterns.STATION_INDEX.exec(text)?.[1];
     const mac = Patterns.STATION_MAC.exec(text)?.[1];
     if (!mac) return null;
     return {
@@ -162,6 +162,15 @@ const Parsers = {
   },
   _stationCounter: 0,
   resetStationCounter() { this._stationCounter = 0; },
+
+  stationWithFallbackIndex(text) {
+    const result = this.station(text);
+    if (!result) return null;
+    if (result.index == null) {
+      result.index = String(this._stationCounter++);
+    }
+    return result;
+  },
 
   bleDevice(line) {
     if (!line.startsWith('BLE:')) return null;
@@ -471,7 +480,7 @@ function parseAllStations(text) {
   const rows = [];
   const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:Station MAC:|STA:))/g);
   for (const block of blocks) {
-    const sta = Parsers.station(block);
+    const sta = Parsers.stationWithFallbackIndex(block);
     if (sta) rows.push(sta);
   }
   return rows;

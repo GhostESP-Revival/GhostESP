@@ -11,14 +11,24 @@
   <div class="app">
     <header class="topbar">
       <div class="brand">
-        <div>
-          <h1>GhostESP: Revival</h1>
-          <p class="subtitle">Device Control Interface</p>
+        <div class="brand-mark" aria-hidden="true">G</div>
+        <div class="brand-text">
+          <span class="brand-name">GhostESP</span>
+          <span class="brand-sep">/</span>
+          <span class="brand-ver">Revival</span>
         </div>
       </div>
       <div class="top-actions">
-        <span class="chip" id="api-chip"><span id="api-dot" class="dot"></span><span id="api-status">Checking</span></span>
-        <span class="chip" id="comm-chip"><span id="comm-dot" class="dot"></span><span id="comm-status">GhostLink unknown</span></span>
+        <div class="status-cluster" aria-label="Connection status">
+          <span class="status-dot" id="api-chip" title="API: checking">
+            <span id="api-dot" class="dot"></span>
+            <span class="sr-only" id="api-status">Checking</span>
+          </span>
+          <span class="status-dot" id="comm-chip" title="GhostLink: unknown">
+            <span id="comm-dot" class="dot"></span>
+            <span class="sr-only" id="comm-status">GhostLink unknown</span>
+          </span>
+        </div>
         <button class="btn ghost" data-refresh aria-label="Refresh all">Refresh</button>
       </div>
     </header>
@@ -135,7 +145,8 @@
               <p>BLE scans, spam detection and device tracking. GhostLink preferred for radio-disruptive ops.</p>
             </div>
           </div>
-          <div class="menu-list" id="ble-actions"></div>
+          <div class="tabs" data-tabs="ble"></div>
+          <div id="ble-subpages"></div>
           <div id="ble-detail" class="feature-detail" hidden></div>
         </div>
       </section>
@@ -173,38 +184,28 @@
       </section>
 
       <section id="page-ghostlink" class="page">
-        <div class="grid cols-2">
-          <div class="panel">
-            <div class="panel-title">
-              <div>
-                <h2>GhostLink</h2>
-                <p>Preferred execution path for WiFi / BLE / radio-disruptive commands.</p>
-              </div>
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Remote Command</h2>
+              <p>Send to connected peer using <code>/api/esp_comm/send</code>. Responses from the peer appear in the terminal below.</p>
             </div>
-            <div class="status-grid">
-              <div class="stat"><label>State</label><strong id="comm-state">Unknown</strong></div>
-              <div class="stat"><label>Remote Command</label><strong id="comm-remote">Unknown</strong></div>
-            </div>
-            <div style="height:10px"></div>
             <div class="actions">
-              <button class="btn" data-command="commstatus">Status</button>
-              <button class="btn" data-command="commdiscovery">Discovery</button>
-              <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+              <span class="chip" id="comm-status-chip"><span id="comm-dot" class="dot"></span><span id="comm-state">Unknown</span></span>
+              <span class="badge" id="comm-remote-badge">Remote: No</span>
             </div>
           </div>
-
-          <div class="panel">
-            <div class="panel-title">
-              <div>
-                <h2>Remote Command</h2>
-                <p>Send to connected peer using <code>/api/esp_comm/send</code>.</p>
-              </div>
-            </div>
-            <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
-            <div class="terminal-input">
-              <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
-              <button class="btn primary" id="comm-send-btn">Send</button>
-            </div>
+          <div class="actions" style="margin-bottom:12px;flex-wrap:wrap">
+            <button class="btn" data-command="commstatus">Status</button>
+            <button class="btn" data-command="commdiscovery">Discovery</button>
+            <button class="btn primary" id="comm-connect-btn">Connect to Peer</button>
+            <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+            <span class="comm-pending" id="comm-pending" hidden><span class="spinner"></span><span>waiting for peer response…</span></span>
+          </div>
+          <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
+          <div class="terminal-input">
+            <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
+            <button class="btn primary" id="comm-send-btn">Send</button>
           </div>
         </div>
       </section>
@@ -214,7 +215,7 @@
           <div class="panel-title">
             <div>
               <h2>Settings</h2>
-              <p>All device settings. Matches the on-device settings registry.</p>
+              <p>Device configuration. Search jumps to matching fields. Unsaved changes are highlighted in blue.</p>
             </div>
             <div class="actions">
               <button class="btn primary" id="save-settings-btn">Save Settings</button>
@@ -225,12 +226,21 @@
             <button class="btn ghost" id="settings-expand-all">Expand All</button>
             <button class="btn ghost" id="settings-collapse-all">Collapse All</button>
           </div>
+          <nav class="settings-tabs" id="settings-tabs" aria-label="Settings sections"></nav>
           <div id="settings-container"></div>
           <div style="height:12px"></div>
-          <div class="actions">
+          <div class="actions" style="flex-wrap:wrap">
             <button class="btn" id="connect-wifi-btn">Connect WiFi</button>
             <button class="btn" id="start-portal-btn">Start Portal</button>
             <button class="btn" id="send-printer-btn">Send to Printer</button>
+            <button class="btn" id="set-rgb-pins-btn">Apply RGB Pins</button>
+          </div>
+          <div style="height:10px"></div>
+          <div class="actions" style="flex-wrap:wrap">
+            <button class="btn ghost" id="settings-reset-all-btn">Reset All to Defaults</button>
+            <button class="btn ghost" id="settings-backup-export-btn">Backup to SD</button>
+            <button class="btn ghost" id="settings-backup-import-btn">Restore from SD</button>
+            <button class="btn danger" id="reboot-btn">Reboot Device</button>
           </div>
         </div>
       </section>
@@ -252,18 +262,6 @@
             <input id="terminal-input" placeholder="Enter command..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
             <button class="btn primary" id="terminal-send-btn">Send</button>
           </div>
-        </div>
-      </section>
-
-      <section id="page-help" class="page">
-        <div class="panel">
-          <div class="panel-title">
-            <div>
-              <h2>Help</h2>
-              <p>Command groups and safety guidance.</p>
-            </div>
-          </div>
-          <div class="grid cols-2" id="help-grid"></div>
         </div>
       </section>
     </main>

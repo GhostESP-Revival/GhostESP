@@ -19,9 +19,18 @@ const state = {
   terminalTimer: null,
   commandHistory: [],
   historyIndex: -1,
+  commHistory: [],
+  commHistoryIndex: -1,
   isLoading: false,
   settingsOpen: new Set(),
   settingsFilter: '',
+  reconnectActive: false,
+  bleFilter: 'ALL',
+  dashboardAutoPopulated: false,
+  commLogOffset: 0,
+  commPending: 0,
+  commPendingTimer: null,
+  parseCache: { logs: null, aps: null, stations: null, ble: null, flippers: null, airtags: null, gatt: null, ports: null },
 };
 
 const pages = [
@@ -32,7 +41,6 @@ const pages = [
   ['ghostlink', 'GhostLink', '04'],
   ['settings', 'Settings', '05'],
   ['terminal', 'Terminal', '06'],
-  ['help', 'Help', '07']
 ];
 
 /* ======================== UTILITIES ======================== */
@@ -78,6 +86,14 @@ function setLoading(el, loading) {
 function isRisky(command) { return isRiskyCommand(command); }
 function canUseGhostLink() { return !!state.comm.connected; }
 
+async function runCommandSequence(commands) {
+  for (const command of commands) {
+    await new Promise(resolve => {
+      runCommand(command, { skipRisk: true, onComplete: resolve });
+    });
+  }
+}
+
 /* ======================== SHELL BUILDERS ======================== */
 function buildShell() {
   $('nav').innerHTML = pages.map(([id, label, code], idx) =>
@@ -89,7 +105,6 @@ function buildShell() {
   buildDashboard();
   buildWifi();
   buildBle();
-  buildHelp();
   buildSettingsForm();
 }
 
@@ -128,7 +143,22 @@ function buildWifi() {
 }
 
 function buildBle() {
-  $('ble-actions').innerHTML = BLE_ACTIONS.map(action => actionRow(action, 'ble')).join('');
+  const groups = Object.keys(BLE_GROUPS);
+  document.querySelector('[data-tabs="ble"]').innerHTML = groups.map((name, i) =>
+    `<button class="tab-btn ${i === 0 ? 'active' : ''}" data-ble-tab="${esc(name)}">${esc(name)}</button>`
+  ).join('');
+  $('ble-subpages').innerHTML = groups.map((name, i) =>
+    `<div class="subpage ${i === 0 ? 'active' : ''}" data-ble-page="${esc(name)}">
+      <div class="menu-list">${BLE_GROUPS[name].map(action => actionRow(action, 'ble')).join('')}</div>
+    </div>`
+  ).join('');
+  document.querySelectorAll('[data-ble-tab]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      if (state.activeAction) closeAction();
+      document.querySelectorAll('[data-ble-tab]').forEach(x => x.classList.toggle('active', x === btn));
+      document.querySelectorAll('[data-ble-page]').forEach(x => x.classList.toggle('active', x.dataset.blePage === btn.dataset.bleTab));
+    })
+  );
 }
 
 function buildDashboard() {
@@ -257,7 +287,7 @@ function renderDashboardFeatures() {
 }
 
 function renderDashboardRecent() {
-  const aps = parseAllAccessPoints(state.logs);
+  const { aps } = cachedParse(state.logs);
   const section = $('dash-recent-section');
   const list = $('dash-recent-list');
   if (!aps.length) {
@@ -287,7 +317,7 @@ function actionRow(action, section) {
   const item = registerAction({ section, label, command, desc, risky, refreshCmd: action.refresh?.(), refreshLabel: action.refreshLabel });
   return `<div class="menu-row">
     <div>
-      <h3>${esc(label)} ${risky ? '<span class="badge">May disconnect</span>' : ''}</h3>
+      <h3 class="title-row">${esc(label)}${risky ? '<span class="badge warn">May disconnect</span>' : ''}</h3>
       <p>${esc(desc)}</p>
       <p><code>${esc(command)}</code></p>
     </div>
@@ -313,12 +343,14 @@ function openAction(actionId) {
   state.activeAction = action;
   state.activeItem = null;
   state.selectedIndices.clear();
+  state.bleFilter = 'ALL';
   if (action.section === 'wifi') {
     $('wifi-subpages').hidden = true;
     document.querySelector('[data-tabs="wifi"]').hidden = true;
     $('wifi-detail').hidden = false;
   } else if (action.section === 'ble') {
-    $('ble-actions').hidden = true;
+    $('ble-subpages').hidden = true;
+    document.querySelector('[data-tabs="ble"]').hidden = true;
     $('ble-detail').hidden = false;
   }
   renderActionDetail();
@@ -329,13 +361,15 @@ function closeAction() {
   state.activeAction = null;
   state.activeItem = null;
   state.selectedIndices.clear();
+  state.bleFilter = 'ALL';
   if (section === 'wifi') {
     document.querySelector('[data-tabs="wifi"]').hidden = false;
     $('wifi-subpages').hidden = false;
     $('wifi-detail').hidden = true;
     $('wifi-detail').innerHTML = '';
   } else if (section === 'ble') {
-    $('ble-actions').hidden = false;
+    document.querySelector('[data-tabs="ble"]').hidden = false;
+    $('ble-subpages').hidden = false;
     $('ble-detail').hidden = true;
     $('ble-detail').innerHTML = '';
   }
@@ -358,8 +392,8 @@ function buildActionDetail(action) {
   const result = state.activeItem ? renderItemDetail(state.activeItem) : renderActionResult(action);
   const refreshCommand = action.refreshCmd ? action.refreshCmd.cmd : '';
   const backLabel = state.activeItem ? 'Back to Results' : (action.section === 'wifi' ? 'WiFi' : 'BLE');
-  const categoryBadge = `<span class="badge">${esc(commandCategory(action.command))}</span>`;
-  const safetyBadge = action.risky ? '<span class="badge">May disconnect</span>' : '<span class="badge">Local-safe</span>';
+  const categoryBadge = `<span class="badge mono">${esc(commandCategory(action.command))}</span>`;
+  const safetyBadge = action.risky ? '<span class="badge warn">May disconnect</span>' : '<span class="badge good">Local-safe</span>';
   return `<div class="detail-toolbar">
     <div>
       <button class="btn ghost" data-${state.activeItem ? 'back-results' : 'close-action'}>Back to ${esc(backLabel)}</button>
@@ -385,8 +419,9 @@ function buildActionDetail(action) {
 
 function renderActionResult(action) {
   const cmd = (action.command || '').trim().toLowerCase();
-  if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(parseAllAccessPoints(state.logs));
-  if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(parseAllStations(state.logs));
+  const cache = cachedParse(state.logs);
+  if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(cache.aps);
+  if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(cache.stations);
   if (/^wifistatus\b/.test(cmd)) {
     const status = Parsers.wifiStatus(state.logs);
     const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(state.logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
@@ -402,14 +437,11 @@ function renderActionResult(action) {
     return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(state.logs, /GPS\s*Info/i, null), 'GPS Information');
   }
   if (/^blescan\b/.test(cmd)) {
-    const ble = parseAllBleDevices(state.logs);
-    const flippers = parseAllFlippers(state.logs);
-    const airtags = parseAllAirTags(state.logs);
-    const gatt = parseAllGattDevices(state.logs);
+    const { ble, flippers, airtags, gatt } = cachedParse(state.logs);
     const all = [...ble, ...flippers, ...airtags, ...gatt];
     return renderBleTable(all);
   }
-  if (/^scanports\b/.test(cmd)) return renderPortTable(parsePortScan(state.logs));
+  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(state.logs).ports);
   if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(state.logs), cmd);
   if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(state.logs), 'Capture Status');
   if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(state.logs), cmd);
@@ -437,6 +469,7 @@ function renderItemDetail(item) {
 
 function renderApDetail(data) {
   const isOpen = (data.security || '').toLowerCase().includes('open');
+  const passId = `ap-connect-pass-${data.index}`;
   return `<div class="item-detail">
     <div class="status-grid" style="margin-bottom:10px">
       <div class="stat"><label>SSID</label><strong>${esc(data.ssid || '(Hidden)')}</strong></div>
@@ -450,11 +483,11 @@ function renderApDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-ap" data-index="${escapeAttr(data.index)}">Select AP</button>
-      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn danger" data-item-action="deauth" data-index="${escapeAttr(data.index)}">Deauth</button>
       <button class="btn" data-item-action="track-ap">Track AP</button>
       <button class="btn" data-item-action="connect-ap" data-ssid="${escapeAttr(data.ssid)}">Connect</button>
     </div>
-    ${!isOpen ? `<div style="margin-top:10px"><input id="ap-connect-pass" placeholder="Password (optional)" style="max-width:260px"></div>` : ''}
+    ${!isOpen ? `<div style="margin-top:10px"><input id="${passId}" placeholder="Password (optional)" style="max-width:260px"></div>` : ''}
   </div>`;
 }
 
@@ -470,7 +503,7 @@ function renderStationDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-sta" data-index="${escapeAttr(data.index)}">Select Station</button>
-      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn danger" data-item-action="deauth-sta" data-index="${escapeAttr(data.index)}">Deauth</button>
       <button class="btn" data-item-action="track-sta">Track Station</button>
     </div>
   </div>`;
@@ -669,8 +702,9 @@ function renderBatchToolbar(type) {
   const count = state.selectedIndices.size;
   if (!count) return '';
   const label = type === 'ap' ? 'AP' : 'Station';
+  const action = type === 'ap' ? 'deauth' : null;
   return `<div class="batch-toolbar"><span>${count} ${label}${count > 1 ? 's' : ''} selected</span><div class="actions">
-    <button class="btn danger" data-batch-action="deauth">Deauth Selected</button>
+    ${action ? `<button class="btn danger" data-batch-action="${action}">Deauth Selected</button>` : '<span class="chip warn">Firmware only supports single-station deauth</span>'}
     <button class="btn ghost" data-batch-action="clear">Clear</button>
   </div></div>`;
 }
@@ -691,8 +725,19 @@ function objectToKeyValueRows(value) {
 
 function renderBleTable(rows) {
   if (!rows.length) return '<div class="empty">No BLE results yet. Run a BLE scan to populate.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
+  const filters = ['ALL', 'FLIPPER_ZERO', 'AIR_TAG', 'GATT', 'GENERIC'];
+  const activeFilter = state.bleFilter || 'ALL';
+  const filtered = activeFilter === 'ALL' ? rows : rows.filter(r => (r.type || 'GENERIC') === activeFilter);
+  const chips = filters.map(f => {
+    const count = f === 'ALL' ? rows.length : rows.filter(r => (r.type || 'GENERIC') === f).length;
+    if (f !== 'ALL' && !count) return '';
+    const active = f === activeFilter ? ' active' : '';
+    return `<button class="tab-btn${active}" data-ble-filter="${f}">${esc(f.replace('_', ' '))} (${count})</button>`;
+  }).filter(Boolean).join('');
+  const filterBar = `<div class="tabs" style="margin-bottom:10px">${chips}</div>`;
+  if (!filtered.length) return filterBar + '<div class="empty">No devices match the current filter.</div>';
+  return filterBar + `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
+    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
       <td>${esc(r.index || String(i))}</td>
       <td><code>${esc(r.mac || '-')}</code></td>
       <td>${esc(r.name || '-')}</td>
@@ -721,50 +766,71 @@ function renderGenericRows(rows, command) {
   ).join('')}</div>`;
 }
 
-function buildHelp() {
-  const groups = [
-    ['WiFi', 'scanap, scansta, list -a, select -a, attack, beaconspam, capture'],
-    ['BLE', 'blescan, blespam, blewardriving, listairtags'],
-    ['GhostLink', 'commstatus, commdiscovery, commconnect, commsend, commdisconnect'],
-    ['Files', 'Use Files page for SD card browse/upload/download/delete'],
-    ['Safety', 'Risky local radio commands may disconnect WebUI. GhostLink is preferred.'],
-    ['Recovery', 'After local disruption, V2 polls APIs and reloads logs when reachable.'],
-  ];
-  $('help-grid').innerHTML = groups.map(([title, body]) =>
-    `<div class="card" style="cursor:default;min-height:auto"><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`
-  ).join('');
-}
-
 /* ======================== SETTINGS (Accordion) ======================== */
 function buildSettingsForm() {
   const container = $('settings-container');
-  if (!container) return;
+  const tabs = $('settings-tabs');
+  if (!container || !tabs) return;
+  const DEFAULT_OPEN = new Set([0, 1]);
   container.innerHTML = SETTINGS_SCHEMA.map((group, gi) => {
-    const isOpen = state.settingsOpen.has(gi);
+    const isOpen = state.settingsOpen.has(gi) || (state.settingsOpen.size === 0 && DEFAULT_OPEN.has(gi));
     const fieldsHtml = group.fields.map(field => renderField(field)).join('');
-    return `<div class="settings-group ${isOpen ? 'open' : ''}" data-settings-group="${gi}">
+    return `<div class="settings-group ${isOpen ? 'open' : ''}" data-settings-group="${gi}" id="settings-group-${gi}">
       <div class="settings-group-header" role="button" tabindex="0" aria-expanded="${isOpen}" aria-controls="sg-body-${gi}">
         <div class="sg-icon">${esc(group.icon)}</div>
-        <div style="min-width:0">
-          <div class="sg-title">${esc(group.category)}</div>
+        <div class="sg-meta">
+          <div class="sg-title">${esc(group.category)} <span class="sg-count">${group.fields.length}</span></div>
           <div class="sg-desc">${esc(group.description)}</div>
         </div>
+        <div class="sg-summary" id="sg-summary-${gi}"></div>
         <div class="sg-chevron" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </div>
       </div>
       <div class="settings-group-body" id="sg-body-${gi}">
-        <div class="form-grid">${fieldsHtml}</div>
+        <div class="form-grid form-grid--mixed">${fieldsHtml}</div>
       </div>
     </div>`;
   }).join('');
+  tabs.innerHTML = SETTINGS_SCHEMA.map((group, gi) =>
+    `<a class="settings-tab" href="#settings-group-${gi}" data-tab-group="${gi}"><span class="settings-tab-icon">${esc(group.icon)}</span><span>${esc(group.category)}</span></a>`
+  ).join('');
   bindSettingsAccordion();
+  bindSettingsTabs();
+  updateSettingsSummaries();
+}
+
+function updateSettingsSummaries() {
+  SETTINGS_SCHEMA.forEach((group, gi) => {
+    const summary = $('sg-summary-' + gi);
+    if (!summary) return;
+    const bits = group.fields.slice(0, 2).map(f => {
+      const v = readSettingDisplay(f);
+      return v ? `${esc(f.label)}: <strong>${esc(v)}</strong>` : '';
+    }).filter(Boolean);
+    summary.innerHTML = bits.join(' &middot; ');
+  });
+}
+
+function readSettingDisplay(field) {
+  const el = $(field.id);
+  if (!el) return '';
+  if (field.type === 'bool') return el.checked ? 'On' : 'Off';
+  if (field.type === 'color') return el.value || '';
+  if (field.type === 'enum') {
+    const opt = field.options.find(([v]) => v === el.value);
+    return opt ? opt[1] : el.value;
+  }
+  const v = el.value;
+  if (v == null || v === '') return '';
+  return v.length > 24 ? v.slice(0, 24) + '…' : v;
 }
 
 function renderField(field) {
   let input = '';
+  const wide = field.type === 'text' || field.type === 'textarea' || field.type === 'color';
   if (field.type === 'bool') {
-    input = `<input id="${field.id}" type="checkbox">`;
+    input = `<label class="switch" for="${field.id}"><input id="${field.id}" type="checkbox"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span></label>`;
   } else if (field.type === 'textarea') {
     input = `<textarea id="${field.id}" rows="2" placeholder="${esc(field.hint || '')}"></textarea>`;
   } else if (field.type === 'enum') {
@@ -778,7 +844,7 @@ function renderField(field) {
     if (field.max) attrs.push(`maxlength="${field.max}"`);
     input = `<input id="${field.id}" type="${field.type === 'number' ? 'number' : 'text'}" ${attrs.join(' ')}>`;
   }
-  return `<div class="field" data-field-label="${esc(field.label.toLowerCase())}" data-field-id="${esc(field.id.toLowerCase())}">
+  return `<div class="field ${wide ? 'field--wide' : ''}" data-field-label="${esc(field.label.toLowerCase())}" data-field-id="${esc(field.id.toLowerCase())}">
     <label for="${field.id}">${esc(field.label)}</label>
     ${input}
   </div>`;
@@ -829,6 +895,25 @@ function expandAllSettings(open) {
   });
 }
 
+function bindSettingsTabs() {
+  document.querySelectorAll('.settings-tab').forEach(tab => {
+    tab.addEventListener('click', e => {
+      e.preventDefault();
+      const idx = parseInt(tab.dataset.tabGroup, 10);
+      const group = $('settings-group-' + idx);
+      if (!group) return;
+      document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('active', t === tab));
+      if (!group.classList.contains('open')) {
+        group.classList.add('open');
+        group.querySelector('.settings-group-header').setAttribute('aria-expanded', 'true');
+        state.settingsOpen.add(idx);
+      }
+      const offset = group.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: offset, behavior: 'smooth' });
+    });
+  });
+}
+
 /* ======================== API & DATA ======================== */
 async function refreshAll() {
   const refreshBtn = document.querySelector('[data-refresh]');
@@ -850,6 +935,22 @@ async function refreshAll() {
   } finally {
     setLoading(refreshBtn, false);
   }
+}
+
+const DASHBOARD_AUTO_QUERIES = [
+  { cmd: 'chipinfo',   has: (logs) => Parsers.chipInfo(logs) != null },
+  { cmd: 'wifistatus', has: (logs) => /===\s*WIFI\s*STATUS\s*===/.test(logs) },
+];
+
+function populateDashboardIfStale() {
+  if (state.dashboardAutoPopulated) return;
+  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(state.logs || ''));
+  if (!missing.length) {
+    state.dashboardAutoPopulated = true;
+    return;
+  }
+  state.dashboardAutoPopulated = true;
+  missing.forEach(({ cmd }) => runCommand(cmd));
 }
 
 async function loadSettings() {
@@ -874,12 +975,42 @@ async function loadSettings() {
       } else el.value = String(value);
     }
   }
-  setVal('station_ip', data.station_ip || 'Not connected');
+  updateSettingsSummaries();
+  document.querySelectorAll('#settings-container input, #settings-container select, #settings-container textarea').forEach(el => {
+    el.addEventListener('input', updateSettingsSummaries);
+    el.addEventListener('change', updateSettingsSummaries);
+  });
 }
 
-function setVal(id, value) { const el = $(id); if (el) el.value = value; }
 function getVal(id) { const el = $(id); return el ? el.value : ''; }
 function getBool(id) { const el = $(id); return el ? !!el.checked : false; }
+
+function cachedParse(logs) {
+  if (state.parseCache.logs === logs) {
+    return {
+      aps: state.parseCache.aps,
+      stations: state.parseCache.stations,
+      ble: state.parseCache.ble,
+      flippers: state.parseCache.flippers,
+      airtags: state.parseCache.airtags,
+      gatt: state.parseCache.gatt,
+      ports: state.parseCache.ports,
+    };
+  }
+  const aps = parseAllAccessPoints(logs);
+  const stations = parseAllStations(logs);
+  const ble = parseAllBleDevices(logs);
+  const flippers = parseAllFlippers(logs);
+  const airtags = parseAllAirTags(logs);
+  const gatt = parseAllGattDevices(logs);
+  const ports = parsePortScan(logs);
+  state.parseCache = { logs, aps, stations, ble, flippers, airtags, gatt, ports };
+  return { aps, stations, ble, flippers, airtags, gatt, ports };
+}
+
+function invalidateParseCache() {
+  state.parseCache = { logs: null, aps: null, stations: null, ble: null, flippers: null, airtags: null, gatt: null, ports: null };
+}
 
 async function loadCommStatus() {
   const res = await api('/api/esp_comm/status');
@@ -888,11 +1019,19 @@ async function loadCommStatus() {
   state.comm = data;
   const label = data.state ? data.state.charAt(0).toUpperCase() + data.state.slice(1) : 'Unknown';
   $('comm-status').textContent = 'GhostLink ' + label;
-  $('comm-state').textContent = label;
-  $('comm-remote').textContent = data.is_remote_command ? 'Yes' : 'No';
+  const cs = $('comm-state');
+  if (cs) cs.textContent = label;
+  const cr = $('comm-remote-badge');
+  if (cr) {
+    cr.textContent = data.is_remote_command ? 'Remote: Yes' : 'Remote: No';
+    cr.className = 'badge ' + (data.is_remote_command ? 'warn' : '');
+  }
   $('comm-dot').className = 'dot ' + (data.connected ? 'good' : data.state === 'error' ? 'bad' : data.state === 'scanning' || data.state === 'handshake' ? 'warn' : '');
+  const chipBorder = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
   const chip = $('comm-chip');
-  if (chip) chip.style.borderColor = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
+  if (chip) chip.style.borderColor = chipBorder;
+  const sc = $('comm-status-chip');
+  if (sc) sc.style.borderColor = chipBorder;
 }
 
 async function saveSettings() {
@@ -935,10 +1074,16 @@ async function runCommand(command, options = {}) {
     if (!res.ok) throw new Error('command failed');
     toast('Command sent', 'good');
     setTimeout(() => refreshLogs(true), 900);
-    if (isRisky(command)) startReconnectWatch();
+    if (isRisky(command)) {
+      startReconnectWatch();
+    } else {
+      localStorage.removeItem('ghost_v2_pending_command');
+    }
+    if (typeof options.onComplete === 'function') options.onComplete();
   } catch (err) {
     if (isRisky(command)) startReconnectWatch();
     else toast('Command failed: ' + err.message, 'bad');
+    if (typeof options.onComplete === 'function') options.onComplete(err);
   }
 }
 
@@ -955,21 +1100,89 @@ function closeRiskModal() {
 }
 
 async function runRemote(command) {
+  if (isRisky(command)) {
+    const ok = confirm(`"${command}" is a radio-disruptive or risky command. Send it to the GhostLink peer anyway?`);
+    if (!ok) return;
+  }
   appendComm('> ' + command);
+  setCommPending(true);
   try {
     const res = await api('/api/esp_comm/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
     const data = await res.json();
-    appendComm(data.message || (data.success ? 'Command sent' : 'Failed'));
-    toast(data.success ? 'GhostLink command sent' : 'GhostLink command failed', data.success ? 'good' : 'bad');
-    if (data.success) setTimeout(() => refreshLogs(true), 1200);
+    if (!data.success) {
+      appendComm('Error: ' + (data.message || 'send failed'), { kind: 'error' });
+      toast('GhostLink command failed', 'bad');
+      setCommPending(false);
+    } else {
+      toast('GhostLink command sent', 'good');
+      state.commLogOffset = (state.logs || '').length;
+      setTimeout(() => refreshLogs(true).then(pollPeerResponses).catch(() => setCommPending(false)), 800);
+    }
   } catch (err) {
-    appendComm('Error: ' + err.message);
+    appendComm('Error: ' + err.message, { kind: 'error' });
     toast('GhostLink failed', 'bad');
+    setCommPending(false);
   }
+}
+
+function setCommPending(on) {
+  const el = $('comm-pending');
+  if (el) el.hidden = !on;
+  if (state.commPendingTimer) { clearTimeout(state.commPendingTimer); state.commPendingTimer = null; }
+  if (on) {
+    state.commPending = (state.commPending || 0) + 1;
+    state.commPendingTimer = setTimeout(() => {
+      if (state.commPending > 0) {
+        appendComm('(no peer response within 12s)', { kind: 'error' });
+      }
+      setCommPending(false);
+    }, 12000);
+  } else {
+    state.commPending = 0;
+  }
+}
+
+function pollPeerResponses() {
+  if (!state.logs) return;
+  if (state.commLogOffset === 0 || state.commLogOffset > state.logs.length) {
+    state.commLogOffset = state.logs.length;
+    return;
+  }
+  const slice = state.logs.slice(state.commLogOffset);
+  if (!slice) return;
+  const lines = slice.split('\n');
+  let appended = false;
+  for (const raw of lines) {
+    let body = null;
+    let kind = 'response';
+    let m = raw.match(/^RX:\s?(.*)$/);
+    if (m) {
+      body = m[1];
+    } else {
+      m = raw.match(/^ESP Comm Response:\s?(.*)$/);
+      if (m) body = m[1];
+    }
+    if (body != null) {
+      appendComm(body || '(empty response)', { kind });
+      appended = true;
+      continue;
+    }
+    if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed/i.test(raw) || /E:\s*esp_comm/i.test(raw)) {
+      appendComm(raw.replace(/^E:\s*/, ''), { kind: 'error' });
+      appended = true;
+    }
+  }
+  state.commLogOffset = state.logs.length;
+  if (appended) setCommPending(false);
 }
 
 function startReconnectWatch() {
   const overlay = $('reconnect-overlay');
+  if (state.reconnectActive) {
+    overlay.classList.add('show');
+    return;
+  }
+  state.reconnectActive = true;
   overlay.classList.add('show');
   let attempts = 0;
   const maxAttempts = 60;
@@ -980,17 +1193,24 @@ function startReconnectWatch() {
       const res = await api('/api/logs', { cache: 'no-store' });
       if (res.ok) {
         state.logs = await res.text();
+        invalidateParseCache();
         overlay.classList.remove('show');
+        state.reconnectActive = false;
         localStorage.removeItem('ghost_v2_pending_command');
         renderLogs();
         renderActiveFeatureView();
         await Promise.allSettled([loadSettings(), loadCommStatus(), loadFiles(false)]);
+        state.dashboardAutoPopulated = false;
+        populateDashboardIfStale();
         toast('Reconnected and recovered logs', 'good');
         return;
       }
     } catch (_) {}
     if (attempts < maxAttempts) setTimeout(tick, 2000);
-    else toast('Reconnect timed out. Try refreshing after the AP returns.', 'warn');
+    else {
+      state.reconnectActive = false;
+      toast('Reconnect timed out. Try refreshing after the AP returns.', 'warn');
+    }
   };
   setTimeout(tick, 1500);
 }
@@ -998,7 +1218,11 @@ function startReconnectWatch() {
 async function refreshLogs(parse = false) {
   const res = await api('/api/logs', { cache: 'no-store' });
   if (!res.ok) throw new Error('logs failed');
-  state.logs = await res.text();
+  const newLogs = await res.text();
+  if (newLogs !== state.logs) {
+    state.logs = newLogs;
+    invalidateParseCache();
+  }
   renderLogs();
   if (parse) {
     renderActiveFeatureView();
@@ -1016,9 +1240,14 @@ function renderLogs() {
   t.textContent = state.logs || 'No logs yet.';
   t.scrollTop = t.scrollHeight;
 }
-function appendComm(text) {
+function appendComm(text, opts) {
   const t = $('comm-terminal');
-  t.textContent += '\n' + text;
+  const line = document.createElement('div');
+  if (opts && opts.kind === 'response') line.className = 'peer-response';
+  else if (opts && opts.kind === 'error') line.className = 'peer-error';
+  line.textContent = text;
+  t.appendChild(line);
+  while (t.childElementCount > 500) t.removeChild(t.firstChild);
   t.scrollTop = t.scrollHeight;
 }
 
@@ -1043,7 +1272,7 @@ async function loadFiles(showErrors = true) {
     const files = data.files || [];
     list.innerHTML = files.length ? files.map(fileRow).join('') : '<div class="empty">This folder is empty.</div>';
   } catch (err) {
-    list.innerHTML = '<div class="empty">Unable to load files.</div>';
+    list.innerHTML = '<div class="empty">SD card not accessible.<br><small>Check that an SD card is inserted and the configured pins match your board. Run <code>sd status</code> in the Terminal to verify.</small></div>';
     if (showErrors) toast(err.message, 'bad');
   }
 }
@@ -1127,10 +1356,11 @@ function bindEvents() {
       const type = itemRow.dataset.selectItem;
       const index = itemRow.dataset.index;
       let data = null;
-      if (type === 'ap') data = parseAllAccessPoints(state.logs).find(r => r.index === index);
-      else if (type === 'station') data = parseAllStations(state.logs).find(r => r.index === index);
-      else if (type === 'ble') data = parseAllBleDevices(state.logs).concat(parseAllFlippers(state.logs), parseAllAirTags(state.logs), parseAllGattDevices(state.logs)).find(r => (r.index || '0') === index);
-      else if (type === 'port') data = parsePortScan(state.logs).find(r => r.index === index);
+      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(state.logs);
+      if (type === 'ap') data = aps.find(r => r.index === index);
+      else if (type === 'station') data = stations.find(r => r.index === index);
+      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index);
+      else if (type === 'port') data = ports.find(r => r.index === index);
       else if (type === 'generic') data = parseGenericRows(state.logs, state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
       if (data) openItem(type, data);
       return;
@@ -1149,8 +1379,9 @@ function bindEvents() {
     if (selectAll) {
       const type = selectAll.dataset.selectAll;
       let rows = [];
-      if (type === 'ap') rows = parseAllAccessPoints(state.logs);
-      else if (type === 'station') rows = parseAllStations(state.logs);
+      const cache = cachedParse(state.logs);
+      if (type === 'ap') rows = cache.aps;
+      else if (type === 'station') rows = cache.stations;
       if (selectAll.checked) rows.forEach(r => state.selectedIndices.add(r.index));
       else rows.forEach(r => state.selectedIndices.delete(r.index));
       renderActionDetail();
@@ -1162,9 +1393,10 @@ function bindEvents() {
       const action = batch.dataset.batchAction;
       if (action === 'clear') { state.selectedIndices.clear(); renderActionDetail(); }
       else if (action === 'deauth') {
-        const indices = Array.from(state.selectedIndices).join(',');
-        if (!indices) { toast('Nothing selected', 'warn'); return; }
-        runCommand(CMD.deauth().cmd);
+        const indices = Array.from(state.selectedIndices);
+        if (!indices.length) { toast('Nothing selected', 'warn'); return; }
+        const selectCmd = CMD.selectAp(indices.join(',')).cmd;
+        runCommandSequence([selectCmd, CMD.stopDeauth().cmd, 'stop', CMD.deauth().cmd]);
       }
       return;
     }
@@ -1172,6 +1404,13 @@ function bindEvents() {
     const itemAction = event.target.closest('[data-item-action]');
     if (itemAction) {
       handleItemAction(itemAction.dataset.itemAction, itemAction.dataset);
+      return;
+    }
+
+    const bleFilter = event.target.closest('[data-ble-filter]');
+    if (bleFilter) {
+      state.bleFilter = bleFilter.dataset.bleFilter;
+      renderActionDetail();
       return;
     }
   });
@@ -1182,13 +1421,44 @@ function bindEvents() {
   $('terminal-send-btn').addEventListener('click', sendTerminal);
   $('terminal-input').addEventListener('keydown', terminalKeydown);
   $('save-settings-btn').addEventListener('click', () => saveSettings().catch(e => toast(e.message, 'bad')));
+  $('settings-reset-all-btn')?.addEventListener('click', () => {
+    if (confirm('Reset ALL settings to firmware defaults? This will restart the AP if AP creds are reset.')) {
+      runCommand(CMD.settingsReset().cmd);
+    }
+  });
+  $('settings-backup-export-btn')?.addEventListener('click', () => runCommand(CMD.settingsBackupExport().cmd));
+  $('settings-backup-import-btn')?.addEventListener('click', () => {
+    if (confirm('Import settings from SD card backup? This will overwrite current settings.')) {
+      runCommand(CMD.settingsBackupImport().cmd);
+    }
+  });
+  $('reboot-btn')?.addEventListener('click', () => {
+    if (confirm('Reboot the device now? The WebUI will be unavailable until the device restarts.')) {
+      runCommand(CMD.reboot().cmd);
+    }
+  });
+  $('set-rgb-pins-btn')?.addEventListener('click', () => {
+    const data = getVal('rgb_data_pin');
+    const r = getVal('rgb_red_pin');
+    const g = getVal('rgb_green_pin');
+    const b = getVal('rgb_blue_pin');
+    runCommand(`setrgbpins ${data} ${r} ${g} ${b}`);
+  });
   $('connect-wifi-btn').addEventListener('click', () => {
     const ssid = getVal('sta_ssid');
     const pass = getVal('sta_password');
-    runCommand(ssid ? CMD.connect(ssid, pass).cmd : CMD.connect().cmd);
+    const cmd = ssid ? CMD.connect(ssid, pass).cmd : CMD.connect().cmd;
+    if (ssid) runCommand(cmd);
+    else runCommand(cmd);
   });
-  $('start-portal-btn').addEventListener('click', () => runCommand(CMD.startPortal(getVal('portal_url') || 'default', getVal('portal_ap_ssid') || 'FreeWiFi', getVal('portal_password')).cmd));
-  $('send-printer-btn').addEventListener('click', () => runCommand(CMD.powerprinter(getVal('printer_ip'), getVal('printer_text'), getVal('printer_font_size'), 'CM').cmd));
+  $('start-portal-btn').addEventListener('click', () => {
+    const cmd = CMD.startPortal(getVal('portal_url') || 'default', getVal('portal_ap_ssid') || 'FreeWiFi', getVal('portal_password')).cmd;
+    runCommand(cmd);
+  });
+  $('send-printer-btn').addEventListener('click', () => {
+    const cmd = CMD.powerprinter(getVal('printer_ip'), getVal('printer_text'), getVal('printer_font_size'), 'CM').cmd;
+    runCommand(cmd);
+  });
   $('refresh-files-btn').addEventListener('click', () => loadFiles());
   $('up-folder-btn').addEventListener('click', () => {
     if (state.currentPath !== '/mnt') {
@@ -1197,13 +1467,40 @@ function bindEvents() {
     }
   });
   $('upload-btn').addEventListener('click', () => uploadFile().catch(e => toast(e.message, 'bad')));
-  $('comm-send-btn').addEventListener('click', () => { const cmd = $('comm-input').value.trim(); if (cmd) { $('comm-input').value = ''; runRemote(cmd); } });
-  $('comm-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('comm-send-btn').click(); });
+  $('comm-send-btn').addEventListener('click', () => {
+    const cmd = $('comm-input').value.trim();
+    if (cmd) {
+      $('comm-input').value = '';
+      state.commHistory.push(cmd);
+      state.commHistoryIndex = state.commHistory.length;
+      runRemote(cmd);
+    }
+  });
+  $('comm-connect-btn')?.addEventListener('click', () => {
+    const peer = prompt('Peer name (from commdiscovery list):', '');
+    if (peer && peer.trim()) runCommand(CMD.commConnect(peer.trim()).cmd);
+  });
+  $('comm-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { $('comm-send-btn').click(); return; }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (state.commHistoryIndex > 0) state.commHistoryIndex--;
+      $('comm-input').value = state.commHistory[state.commHistoryIndex] || '';
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (state.commHistoryIndex < state.commHistory.length) state.commHistoryIndex++;
+      $('comm-input').value = state.commHistory[state.commHistoryIndex] || '';
+    }
+  });
   $('comm-disconnect-btn').addEventListener('click', disconnectComm);
   $('risk-cancel-btn').addEventListener('click', closeRiskModal);
   $('risk-local-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runCommand(cmd, { skipRisk: true }); });
   $('risk-ghostlink-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runRemote(cmd); });
-  $('dismiss-reconnect-btn').addEventListener('click', () => $('reconnect-overlay').classList.remove('show'));
+  $('dismiss-reconnect-btn').addEventListener('click', () => {
+    $('reconnect-overlay').classList.remove('show');
+    state.reconnectActive = false;
+  });
 
   // Settings accordion controls
   const searchEl = $('settings-search');
@@ -1218,11 +1515,12 @@ function handleItemAction(action, dataset) {
   switch (action) {
     case 'select-ap': runCommand(CMD.selectAp(dataset.index).cmd); break;
     case 'select-sta': runCommand(CMD.selectSta(dataset.index).cmd); break;
-    case 'deauth': runCommand(CMD.deauth().cmd); break;
+    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd]); break;
+    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd]); break;
     case 'track-ap': runCommand(CMD.trackAp().cmd); break;
     case 'track-sta': runCommand(CMD.trackSta().cmd); break;
     case 'connect-ap': {
-      const pass = getVal('ap-connect-pass') || '';
+      const pass = getVal(`ap-connect-pass-${dataset.index}`) || '';
       const ssid = dataset.ssid;
       if (ssid) runCommand(CMD.connect(ssid, pass).cmd);
       else toast('No SSID available', 'warn');
@@ -1271,7 +1569,11 @@ function recoverPendingCommand() {
   try {
     const pending = JSON.parse(raw);
     state.lastCommand = pending.command || '';
-    toast('Recovered pending command state; parsing logs', 'warn');
+    if (pending.at && Date.now() - pending.at < 5 * 60 * 1000) {
+      toast('Recovered pending command state; parsing logs', 'warn');
+    } else {
+      localStorage.removeItem('ghost_v2_pending_command');
+    }
     refreshLogs(true).catch(() => {});
   } catch (_) {}
 }
@@ -1287,8 +1589,9 @@ function init() {
     startReconnectWatch();
   });
   state.terminalTimer = setInterval(() => {
-    refreshLogs(false).catch(() => {});
+    refreshLogs(false).then(pollPeerResponses).catch(() => {});
     if (document.querySelector('#page-dashboard.active')) renderDashboard();
+    populateDashboardIfStale();
   }, 2000);
   setInterval(() => loadCommStatus().catch(() => {}), 1500);
 }

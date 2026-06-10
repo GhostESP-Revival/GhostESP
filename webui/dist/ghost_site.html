@@ -5,20 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0a0a0b">
   <title>GhostESP V2</title>
-  <style>:root{--bg:#0a0a0b;--panel:#111113;--panel-2:#161618;--panel-3:#1c1c1f;--panel-hover:#1e1e22;--line:rgba(255,255,255,.07);--line-strong:rgba(255,255,255,.16);--text:#ececf1;--muted:#9b9ba3;--dim:#6e6e78;--accent:#e8e8ed;--good:#34d399;--warn:#f59e0b;--bad:#f87171;--blue:#60a5fa;--pink:#f472b6;--radius:12px;--radius-sm:8px;--shadow:0 2px 12px rgba(0,0,0,.45);--shadow-lg:0 8px 32px rgba(0,0,0,.55);--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;--body:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}[hidden]{display:none !important}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);font-family:var(--body);background:var(--bg);overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}button,input,select,textarea{font:inherit}button{color:inherit;background:none;border:none;cursor:pointer}code{font-family:var(--mono);font-size:.88em}.app{width:min(1200px,100%);margin:0 auto;padding:18px}.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;margin-bottom:16px}.brand{display:flex;align-items:center;gap:12px;min-width:0}h1,h2,h3,p{margin:0}h1{font-size:clamp(1.25rem,2.4vw,1.75rem);line-height:1.05;letter-spacing:-.03em}.subtitle{margin-top:4px;color:var(--dim);font-size:.78rem;letter-spacing:.02em}.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}.chip,.badge{display:inline-flex;align-items:center;gap:6px;min-height:26px;border-radius:6px;padding:5px 10px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:.76rem;white-space:nowrap;font-weight:500}.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .3s ease}.dot.good{background:var(--good);box-shadow:0 0 8px rgba(52,211,153,.35)}.dot.warn{background:var(--warn);box-shadow:0 0 8px rgba(245,158,11,.35)}.dot.bad{background:var(--bad);box-shadow:0 0 8px rgba(248,113,113,.35)}.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:start}.nav{position:sticky;top:18px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.nav button{width:100%;border:0;background:transparent;color:var(--muted);border-radius:var(--radius-sm);padding:10px 12px;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.9rem;transition:background .15s ease,color .15s ease,transform .1s ease}.nav button:hover{background:var(--panel-3);color:var(--text)}.nav button:active{transform:scale(.98)}.nav button.active{background:var(--text);color:var(--bg);font-weight:700}.nav small{font-family:var(--mono);opacity:.65;font-size:.7rem}.page{display:none;min-width:0}.page.active{display:block;animation:pageIn .2s cubic-bezier(.22,1,.36,1)}@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.panel,.card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.panel{padding:16px}.panel-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.panel-title h2{font-size:1.05rem;letter-spacing:-.02em}.panel-title p{color:var(--muted);font-size:.84rem;margin-top:4px;line-height:1.4}.grid{display:grid;gap:14px}.grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.card{padding:14px;cursor:pointer;min-height:100px;display:flex;flex-direction:column;justify-content:space-between;transition:border-color .15s ease,background .15s ease,transform .1s ease}.card:hover{border-color:var(--line-strong);background:var(--panel-2);transform:translateY(-1px)}.card:active{transform:translateY(0)}.card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.icon{width:32px;height:32px;border-radius:var(--radius-sm);display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.85rem}.card h3{margin-top:12px;font-size:.95rem}.card p{margin-top:4px;color:var(--muted);font-size:.8rem;line-height:1.4}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .15s ease}.stat:hover{background:var(--panel-hover)}.stat label{display:block;color:var(--dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;font-weight:600}.stat strong{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.btn{border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text);border-radius:var(--radius-sm);padding:8px 12px;cursor:pointer;min-height:34px;font-size:.88rem;font-weight:500;transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease}.btn:hover{background:var(--panel-3);border-color:rgba(255,255,255,.28)}.btn:active{transform:scale(.97)}.btn.primary{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.btn.primary:hover{background:#fff;border-color:#fff;box-shadow:0 2px 12px rgba(255,255,255,.12)}.btn.danger{border-color:rgba(248,113,113,.35);color:#fecaca;background:rgba(248,113,113,.08)}.btn.danger:hover{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.5)}.btn.ghost{background:transparent}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none !important}.menu-list{display:grid;gap:10px}.menu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .15s ease,border-color .15s ease}.menu-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.menu-row h3{font-size:.92rem;font-weight:600}.menu-row p{margin-top:3px;color:var(--muted);font-size:.8rem;line-height:1.35}.menu-row code{color:var(--blue);font-size:.82em}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{display:grid;gap:6px}.field label{color:var(--muted);font-size:.78rem;font-weight:500}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);padding:9px 11px;font-size:.88rem;outline:none;transition:border-color .15s ease,box-shadow .15s ease}textarea{min-height:72px;resize:vertical}input:focus,select:focus,textarea:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px rgba(255,255,255,.06)}input[type="search"]{-webkit-appearance:none}input[type="color"]{padding:4px;height:38px;cursor:pointer}input::placeholder,textarea::placeholder{color:var(--dim);opacity:.7}.terminal{min-height:320px;max-height:56vh;overflow:auto;padding:14px;border-radius:var(--radius-sm);background:#060608;border:1px solid var(--line);color:#c8f0d8;font:12px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-width:thin;scrollbar-color:var(--panel-3) transparent}.terminal::-webkit-scrollbar{width:8px}.terminal::-webkit-scrollbar-thumb{background:var(--panel-3);border-radius:4px}.terminal-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2)}table{width:100%;border-collapse:collapse;min-width:640px}th,td{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left;font-size:.82rem}th{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;background:rgba(255,255,255,.03);font-weight:600}tr:last-child td{border-bottom:0}td code{color:#c8d4f0}tr.clickable-row{transition:background .12s ease}tr.clickable-row:hover{background:rgba(255,255,255,.04)}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.tab-btn{border:1px solid var(--line);background:var(--panel-2);color:var(--muted);border-radius:var(--radius-sm);padding:7px 12px;cursor:pointer;font-size:.84rem;font-weight:500;transition:background .15s ease,color .15s ease,border-color .15s ease}.tab-btn:hover{background:var(--panel-3);color:var(--text)}.tab-btn.active{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.subpage{display:none}.subpage.active{display:block;animation:pageIn .18s ease}.feature-detail[hidden]{display:none}.feature-detail{display:block}.feature-detail .table-wrap{margin-top:14px}.detail-toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.detail-toolbar .actions{justify-content:flex-end}.result-list{display:grid;gap:10px}.result-row{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.result-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.result-index{min-width:30px;height:30px;display:grid;place-items:center;border-radius:var(--radius-sm);background:var(--panel-3);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-weight:700;font-size:.85rem}.result-main{min-width:0}.result-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.result-main small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}.file-list{display:grid;gap:10px}.file-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.file-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.file-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.file-row small{color:var(--muted);font-size:.78rem}.toast-stack{position:fixed;right:16px;bottom:16px;z-index:50;display:grid;gap:10px;width:min(360px,calc(100vw - 32px))}.toast{padding:12px 14px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--panel);box-shadow:var(--shadow-lg);color:var(--text);font-size:.88rem;animation:toastIn .3s cubic-bezier(.22,1,.36,1);display:flex;align-items:center;gap:10px}.toast.good{border-color:rgba(52,211,153,.35)}.toast.warn{border-color:rgba(245,158,11,.35)}.toast.bad{border-color:rgba(248,113,113,.35)}@keyframes toastIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}.modal-backdrop,.reconnect{position:fixed;inset:0;z-index:40;display:none;place-items:center;padding:18px;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}.modal-backdrop.show,.reconnect.show{display:grid;animation:fadeIn .2s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.modal{width:min(520px,100%);padding:18px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line-strong);box-shadow:var(--shadow-lg);animation:modalIn .25s cubic-bezier(.22,1,.36,1)}@keyframes modalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}.modal h2{margin-bottom:8px;font-size:1.1rem}.modal p{color:var(--muted);line-height:1.5;margin-bottom:14px;font-size:.88rem}.progress{height:8px;overflow:hidden;border-radius:999px;background:var(--panel-3);border:1px solid var(--line)}.progress>span{display:block;height:100%;width:0;background:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.75));transition:width .25s ease}.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:var(--radius-sm);background:rgba(255,255,255,.03);font-size:.88rem}.warning-note{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.05);color:#fde68a}.settings-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}.settings-search{flex:1 1 220px;min-width:220px;background:var(--panel-2) !important;border-color:var(--line) !important}.settings-search:focus{background:var(--bg) !important}.settings-group{margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--panel-2)}.settings-group-header{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;background:var(--panel-2);transition:background .15s ease;user-select:none}.settings-group-header:hover{background:var(--panel-hover)}.settings-group-header .sg-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-size:.72rem;font-weight:800}.settings-group-header .sg-title{font-size:.9rem;font-weight:600}.settings-group-header .sg-desc{font-size:.75rem;color:var(--muted);margin-top:2px}.settings-group-header .sg-chevron{margin-left:auto;width:20px;height:20px;display:grid;place-items:center;transition:transform .25s cubic-bezier(.22,1,.36,1);color:var(--muted)}.settings-group.open .sg-chevron{transform:rotate(180deg)}.settings-group-body{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(.22,1,.36,1),padding .25s ease;padding:0 14px}.settings-group.open .settings-group-body{max-height:2000px;padding:4px 14px 14px}.settings-group .form-grid{margin-top:4px}.settings-group.highlight{border-color:rgba(96,165,250,.35);box-shadow:0 0 0 2px rgba(96,165,250,.08)}.clickable-row{cursor:pointer}.clickable-row:hover{background:rgba(255,255,255,.04)}.batch-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px;margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);font-size:.88rem}.batch-toolbar .actions{gap:8px}.item-detail{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);padding:16px}.detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}input[type="checkbox"]{width:18px;height:18px;accent-color:var(--text);cursor:pointer}.skeleton{background:linear-gradient(90deg,var(--panel-3) 25%,var(--panel-hover) 50%,var(--panel-3) 75%);background-size:200% 100%;animation:skeleton 1.4s ease infinite;border-radius:var(--radius-sm)}@keyframes skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}.skeleton-text{height:14px;margin-bottom:8px}.skeleton-title{height:18px;width:60%;margin-bottom:12px}.skeleton-row{height:48px;margin-bottom:8px}.spinner{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--text);border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.upload-row{align-items:center}.dash-status-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}.dash-card{padding:16px}.dash-card-header{display:flex;align-items:center;gap:12px}.dash-card-icon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.75rem}.dash-card-header h3{font-size:.95rem;font-weight:600}.dash-card-sub{font-size:.78rem;color:var(--muted);margin-top:2px}.dash-card-sub.good{color:var(--good)}.dash-card-sub.bad{color:var(--bad)}.dash-card-sub.warn{color:var(--warn)}.dash-features{margin-bottom:14px}.dash-section{margin-bottom:14px}.dash-section h3{font-size:.88rem;font-weight:600;margin-bottom:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:.72rem}.dash-feature-chips{display:flex;flex-wrap:wrap;gap:8px}.dash-quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.dash-action-btn{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text);font-size:.88rem;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .1s ease}.dash-action-btn:hover{background:var(--panel-hover);border-color:var(--line-strong);transform:translateY(-1px)}.dash-action-btn:active{transform:translateY(0)}.dash-action-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.7rem;flex-shrink:0}.dash-recent-list{display:grid;gap:8px}.dash-recent-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease}.dash-recent-item:hover{background:var(--panel-hover)}.dash-recent-info{min-width:0}.dash-recent-info strong{display:block;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dash-recent-info small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);font-size:.75rem}@media (max-width:860px){.app{padding:12px}.topbar,.layout,.hero{grid-template-columns:1fr}.nav{position:static;display:flex;overflow-x:auto;gap:6px;padding:8px}.nav button{min-width:max-content;padding:8px 12px}.grid.cols-2,.grid.cols-3,.form-grid,.status-grid{grid-template-columns:1fr}.dash-status-row{grid-template-columns:1fr}.dash-quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-input{grid-template-columns:1fr}.top-actions{justify-content:flex-start}.settings-toolbar{flex-direction:column;align-items:stretch}.settings-search{width:100%}}</style>
+  <style>:root{--bg:#000;--panel:#0a0a0a;--panel-2:#111114;--panel-3:#16161a;--panel-hover:#1c1c22;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.18);--text:#fff;--muted:#b3b3b8;--dim:#76767d;--accent:#fff;--good:#34d399;--warn:#f59e0b;--bad:#f87171;--blue:#60a5fa;--pink:#f472b6;--radius:12px;--radius-sm:8px;--shadow:0 2px 12px rgba(0,0,0,.45);--shadow-lg:0 8px 32px rgba(0,0,0,.55);--shadow-hover:0 6px 20px rgba(255,255,255,.12);--ease:cubic-bezier(.4,0,.2,1);--ease-out:cubic-bezier(.22,1,.36,1);--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;--body:'Space Grotesk',Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important;scroll-behavior:auto !important}}*{box-sizing:border-box}[hidden]{display:none !important}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);font-family:var(--body);background:var(--bg);overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}button,input,select,textarea{font:inherit}button{color:inherit;background:none;border:none;cursor:pointer}code{font-family:var(--mono);font-size:.88em}.app{width:min(1200px,100%);margin:0 auto;padding:18px}.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;margin-bottom:16px}.brand{display:flex;align-items:center;gap:10px;min-width:0;line-height:1}.brand-mark{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:7px;background:var(--text);color:var(--bg);font-family:var(--mono);font-size:.78rem;font-weight:800;letter-spacing:-.02em;box-shadow:0 0 0 1px var(--line),0 1px 0 rgba(255,255,255,.04) inset}.brand-text{display:inline-flex;align-items:baseline;gap:6px;font-family:var(--mono);font-size:.9rem;letter-spacing:-.01em;white-space:nowrap;min-width:0}.brand-name{color:var(--text);font-weight:600}.brand-sep{color:var(--dim)}.brand-ver{color:var(--muted)}h1,h2,h3,p{margin:0}h1{font-size:clamp(1.25rem,2.4vw,1.75rem);line-height:1.05;letter-spacing:-.03em}.subtitle{margin-top:4px;color:var(--dim);font-size:.78rem;letter-spacing:.02em}.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.status-cluster{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line)}.status-cluster .status-dot{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:50%;cursor:default;transition:background .2s var(--ease),box-shadow .2s var(--ease)}.status-cluster .status-dot .dot{width:8px;height:8px}.status-cluster .status-dot:hover{background:var(--panel-3)}.chip,.badge{display:inline-flex;align-items:center;gap:6px;min-height:24px;border-radius:999px;padding:3px 9px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:.72rem;white-space:nowrap;font-weight:500;letter-spacing:.01em;flex:0 0 auto}.badge.warn{border-color:rgba(245,158,11,.3);color:#fde68a;background:rgba(245,158,11,.08)}.badge.bad{border-color:rgba(248,113,113,.3);color:#fecaca;background:rgba(248,113,113,.08)}.badge.good{border-color:rgba(52,211,153,.3);color:#bbf7d0;background:rgba(52,211,153,.08)}.badge.mono{font-family:var(--mono)}h3.title-row,.title-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .3s ease}.dot.good{background:var(--good);box-shadow:0 0 8px rgba(52,211,153,.35)}.dot.warn{background:var(--warn);box-shadow:0 0 8px rgba(245,158,11,.35)}.dot.bad{background:var(--bad);box-shadow:0 0 8px rgba(248,113,113,.35)}.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:start}.nav{position:sticky;top:18px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.nav button{width:100%;border:0;background:transparent;color:var(--muted);border-radius:var(--radius-sm);padding:10px 12px;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.9rem;transition:background .15s ease,color .15s ease,transform .1s ease}.nav button:hover{background:var(--panel-3);color:var(--text)}.nav button:active{transform:scale(.98)}.nav button.active{background:var(--text);color:var(--bg);font-weight:700}.nav small{font-family:var(--mono);opacity:.65;font-size:.7rem}.page{display:none;min-width:0}.page.active{display:block;animation:pageIn .2s cubic-bezier(.22,1,.36,1)}@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.panel,.card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}.panel{padding:16px}.panel-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.panel-title h2{font-size:1.05rem;letter-spacing:-.02em}.panel-title p{color:var(--muted);font-size:.84rem;margin-top:4px;line-height:1.4}.grid{display:grid;gap:14px}.grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.card{position:relative;overflow:hidden;padding:14px;cursor:pointer;min-height:100px;display:flex;flex-direction:column;justify-content:space-between;transition:border-color .2s var(--ease),background .2s var(--ease),transform .15s var(--ease),box-shadow .2s var(--ease)}.card::before{content:'';position:absolute;inset:0;background:linear-gradient(45deg,rgba(244,114,182,.05),rgba(52,211,153,.04),rgba(96,165,250,.05));transform:translateX(-100%);transition:transform .7s var(--ease);pointer-events:none;z-index:0}.card>*{position:relative;z-index:1}.card:hover{border-color:var(--line-strong);background:var(--panel-2);transform:translateY(-3px);box-shadow:0 8px 24px rgba(255,255,255,.06)}.card:hover::before{transform:translateX(100%)}.card:active{transform:translateY(-1px)}.card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.icon{width:32px;height:32px;border-radius:var(--radius-sm);display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.85rem}.card h3{margin-top:12px;font-size:.95rem}.card p{margin-top:4px;color:var(--muted);font-size:.8rem;line-height:1.4}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .15s ease}.stat:hover{background:var(--panel-hover)}.stat label{display:block;color:var(--dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;font-weight:600}.stat strong{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.btn{position:relative;overflow:hidden;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text);border-radius:var(--radius-sm);padding:8px 12px;cursor:pointer;min-height:34px;font-size:.88rem;font-weight:500;transition:background .2s var(--ease),border-color .2s var(--ease),transform .15s var(--ease),box-shadow .2s var(--ease)}.btn>*{position:relative;z-index:1}.btn::before{content:'';position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;background:rgba(255,255,255,.10);transform:translate(-50%,-50%);transition:width .5s var(--ease),height .5s var(--ease);z-index:0}.btn:hover{background:var(--panel-3);border-color:rgba(255,255,255,.32);transform:translateY(-1px);box-shadow:0 4px 12px rgba(255,255,255,.06)}.btn:hover::before{width:220px;height:220px}.btn:active{transform:scale(.97)}.btn.primary{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.btn.primary:hover{background:#fff;border-color:#fff;transform:translateY(-2px);box-shadow:0 6px 20px rgba(255,255,255,.18)}.btn.danger{border-color:rgba(248,113,113,.35);color:#fecaca;background:rgba(248,113,113,.08)}.btn.danger:hover{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.5)}.btn.ghost{background:transparent}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none !important;box-shadow:none !important}.menu-list{display:grid;gap:10px}.menu-row{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-sm);transition:background .2s var(--ease),border-color .2s var(--ease),transform .15s var(--ease),box-shadow .2s var(--ease)}.menu-row::before{content:'';position:absolute;inset:0;background:linear-gradient(45deg,rgba(244,114,182,.04),rgba(52,211,153,.03),rgba(96,165,250,.04));transform:translateX(-100%);transition:transform .7s var(--ease);pointer-events:none;z-index:0}.menu-row>*{position:relative;z-index:1}.menu-row:hover{background:var(--panel-hover);border-color:var(--line-strong);transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,255,255,.05)}.menu-row:hover::before{transform:translateX(100%)}.menu-row h3{font-size:.92rem;font-weight:600}.menu-row p{margin-top:3px;color:var(--muted);font-size:.8rem;line-height:1.35}.menu-row code{color:var(--blue);font-size:.82em}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{display:grid;gap:6px}.field label{color:var(--muted);font-size:.78rem;font-weight:500}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);padding:9px 11px;font-size:.88rem;outline:none;transition:border-color .15s ease,box-shadow .15s ease}textarea{min-height:72px;resize:vertical}input:focus,select:focus,textarea:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px rgba(255,255,255,.06)}input[type="search"]{-webkit-appearance:none}input[type="color"]{padding:4px;height:38px;cursor:pointer}input::placeholder,textarea::placeholder{color:var(--dim);opacity:.7}.terminal{min-height:320px;max-height:56vh;overflow:auto;padding:14px;border-radius:var(--radius-sm);background:#060608;border:1px solid var(--line);color:#c8f0d8;font:12px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-width:thin;scrollbar-color:var(--panel-3) transparent}.terminal::-webkit-scrollbar{width:8px}.terminal::-webkit-scrollbar-thumb{background:var(--panel-3);border-radius:4px}.terminal-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2)}table{width:100%;border-collapse:collapse;min-width:640px}th,td{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left;font-size:.82rem}th{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;background:rgba(255,255,255,.03);font-weight:600}tr:last-child td{border-bottom:0}td code{color:#c8d4f0}tr.clickable-row{transition:background .12s ease}tr.clickable-row:hover{background:rgba(255,255,255,.04)}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.tab-btn{border:1px solid var(--line);background:var(--panel-2);color:var(--muted);border-radius:var(--radius-sm);padding:7px 12px;cursor:pointer;font-size:.84rem;font-weight:500;transition:background .15s ease,color .15s ease,border-color .15s ease}.tab-btn:hover{background:var(--panel-3);color:var(--text)}.tab-btn.active{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700}.subpage{display:none}.subpage.active{display:block;animation:pageIn .18s ease}.feature-detail[hidden]{display:none}.feature-detail{display:block}.feature-detail .table-wrap{margin-top:14px}.detail-toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.detail-toolbar .actions{justify-content:flex-end}.result-list{display:grid;gap:10px}.result-row{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.result-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.result-index{min-width:30px;height:30px;display:grid;place-items:center;border-radius:var(--radius-sm);background:var(--panel-3);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-weight:700;font-size:.85rem}.result-main{min-width:0}.result-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.result-main small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}.file-list{display:grid;gap:10px}.file-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease,border-color .12s ease}.file-row:hover{background:var(--panel-hover);border-color:var(--line-strong)}.file-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}.file-row small{color:var(--muted);font-size:.78rem}.toast-stack{position:fixed;right:16px;bottom:16px;z-index:50;display:grid;gap:10px;width:min(360px,calc(100vw - 32px))}.toast{padding:12px 14px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--panel);box-shadow:var(--shadow-lg);color:var(--text);font-size:.88rem;animation:toastIn .3s cubic-bezier(.22,1,.36,1);display:flex;align-items:center;gap:10px}.toast.good{border-color:rgba(52,211,153,.35)}.toast.warn{border-color:rgba(245,158,11,.35)}.toast.bad{border-color:rgba(248,113,113,.35)}@keyframes toastIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}.modal-backdrop,.reconnect{position:fixed;inset:0;z-index:40;display:none;place-items:center;padding:18px;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}.modal-backdrop.show,.reconnect.show{display:grid;animation:fadeIn .2s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.modal{width:min(520px,100%);padding:18px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line-strong);box-shadow:var(--shadow-lg);animation:modalIn .25s cubic-bezier(.22,1,.36,1)}@keyframes modalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}.modal h2{margin-bottom:8px;font-size:1.1rem}.modal p{color:var(--muted);line-height:1.5;margin-bottom:14px;font-size:.88rem}.progress{height:8px;overflow:hidden;border-radius:999px;background:var(--panel-3);border:1px solid var(--line)}.progress>span{display:block;height:100%;width:0;background:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.75));transition:width .25s ease}.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:var(--radius-sm);background:rgba(255,255,255,.03);font-size:.88rem}.warning-note{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.05);color:#fde68a}.settings-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}.settings-search{flex:1 1 220px;min-width:220px;background:var(--panel-2) !important;border-color:var(--line) !important}.settings-search:focus{background:var(--bg) !important}.settings-tabs{display:flex;flex-wrap:nowrap;gap:6px;margin-bottom:14px;padding:6px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel-2);overflow-x:auto;scrollbar-width:thin;position:sticky;top:0;z-index:5;-webkit-overflow-scrolling:touch}.settings-tab{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:var(--radius-sm);font-size:.8rem;color:var(--muted);text-decoration:none;white-space:nowrap;transition:background .15s var(--ease),color .15s var(--ease);flex:0 0 auto}.settings-tab:hover{background:var(--panel-3);color:var(--text)}.settings-tab.active{background:var(--text);color:var(--bg);font-weight:600}.settings-tab-icon{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:5px;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-size:.65rem;font-weight:800}.settings-tab.active .settings-tab-icon{background:rgba(0,0,0,.15);border-color:transparent}.settings-group{margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--panel-2);scroll-margin-top:90px}.settings-group-header{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;background:var(--panel-2);transition:background .15s ease;user-select:none}.settings-group-header:hover{background:var(--panel-hover)}.settings-group-header .sg-icon{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-size:.72rem;font-weight:800;flex:0 0 auto}.settings-group-header .sg-meta{min-width:0;flex:0 0 auto}.settings-group-header .sg-title{font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:8px}.settings-group-header .sg-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:var(--panel-3);border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:.68rem;font-weight:600}.settings-group-header .sg-desc{font-size:.75rem;color:var(--muted);margin-top:2px}.settings-group-header .sg-summary{margin-left:auto;margin-right:12px;font-size:.76rem;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50%;text-align:right}.settings-group-header .sg-summary strong{color:var(--text);font-weight:600}.settings-group-header .sg-chevron{flex:0 0 auto;width:20px;height:20px;display:grid;place-items:center;transition:transform .25s cubic-bezier(.22,1,.36,1);color:var(--muted)}.settings-group.open .sg-chevron{transform:rotate(180deg)}.settings-group-body{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(.22,1,.36,1),padding .25s ease;padding:0 14px}.settings-group.open .settings-group-body{max-height:4000px;padding:4px 14px 16px}.settings-group .form-grid{margin-top:6px}.form-grid--mixed{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--mixed .field--wide{grid-column:1 / -1}.form-grid--mixed .field--wide textarea{min-height:64px}.settings-group.highlight{border-color:rgba(96,165,250,.35);box-shadow:0 0 0 2px rgba(96,165,250,.08)}.clickable-row{cursor:pointer}.clickable-row:hover{background:rgba(255,255,255,.04)}.batch-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px;margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);font-size:.88rem}.batch-toolbar .actions{gap:8px}.item-detail{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);padding:16px}.detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}input[type="checkbox"]{width:18px;height:18px;accent-color:var(--text);cursor:pointer}.switch{display:inline-flex;align-items:center;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}.switch input[type="checkbox"]{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}.switch-track{position:relative;display:inline-block;width:42px;height:24px;border-radius:999px;background:var(--panel-3);border:1px solid var(--line);transition:background .2s var(--ease),border-color .2s var(--ease),box-shadow .2s var(--ease);flex:0 0 auto}.switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#f4f4f5;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:transform .22s var(--ease-out),background .2s var(--ease)}.switch input[type="checkbox"]:checked + .switch-track{background:var(--good);border-color:var(--good);box-shadow:0 0 0 3px rgba(52,211,153,.12)}.switch input[type="checkbox"]:checked + .switch-track .switch-thumb{transform:translateX(18px);background:#fff}.switch input[type="checkbox"]:focus-visible + .switch-track{box-shadow:0 0 0 3px rgba(255,255,255,.18)}.switch input[type="checkbox"]:disabled + .switch-track{opacity:.4;cursor:not-allowed}.skeleton{background:linear-gradient(90deg,var(--panel-3) 25%,var(--panel-hover) 50%,var(--panel-3) 75%);background-size:200% 100%;animation:skeleton 1.4s ease infinite;border-radius:var(--radius-sm)}@keyframes skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}.skeleton-text{height:14px;margin-bottom:8px}.skeleton-title{height:18px;width:60%;margin-bottom:12px}.skeleton-row{height:48px;margin-bottom:8px}.spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--text);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex:0 0 auto}@keyframes spin{to{transform:rotate(360deg)}}.comm-pending{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:.78rem}.comm-pending[hidden]{display:none}.terminal .peer-response{color:#93c5fd}.terminal .peer-error{color:#fecaca}.upload-row{align-items:center}.dash-status-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}.dash-card{padding:16px}.dash-card-header{display:flex;align-items:center;gap:12px}.dash-card-icon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.75rem}.dash-card-header h3{font-size:.95rem;font-weight:600}.dash-card-sub{font-size:.78rem;color:var(--muted);margin-top:2px}.dash-card-sub.good{color:var(--good)}.dash-card-sub.bad{color:var(--bad)}.dash-card-sub.warn{color:var(--warn)}.dash-features{margin-bottom:14px}.dash-section{margin-bottom:14px}.dash-section h3{font-size:.88rem;font-weight:600;margin-bottom:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:.72rem}.dash-feature-chips{display:flex;flex-wrap:wrap;gap:8px}.dash-quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.dash-action-btn{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text);font-size:.88rem;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .1s ease}.dash-action-btn:hover{background:var(--panel-hover);border-color:var(--line-strong);transform:translateY(-1px)}.dash-action-btn:active{transform:translateY(0)}.dash-action-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-family:var(--mono);font-weight:800;font-size:.7rem;flex-shrink:0}.dash-recent-list{display:grid;gap:8px}.dash-recent-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);transition:background .12s ease}.dash-recent-item:hover{background:var(--panel-hover)}.dash-recent-info{min-width:0}.dash-recent-info strong{display:block;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dash-recent-info small{display:block;margin-top:2px;color:var(--muted);font-family:var(--mono);font-size:.75rem}@media (max-width:860px){.app{padding:12px}.topbar,.layout,.hero{grid-template-columns:1fr}.nav{position:static;display:flex;overflow-x:auto;gap:6px;padding:8px}.nav button{min-width:max-content;padding:8px 12px}.grid.cols-2,.grid.cols-3,.form-grid,.status-grid{grid-template-columns:1fr}.form-grid--mixed{grid-template-columns:1fr}.dash-status-row{grid-template-columns:1fr}.dash-quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-input{grid-template-columns:1fr}.top-actions{justify-content:flex-start}.settings-toolbar{flex-direction:column;align-items:stretch}.settings-search{width:100%}.settings-group-header .sg-summary{display:none}}</style>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
       <div class="brand">
-        <div>
-          <h1>GhostESP: Revival</h1>
-          <p class="subtitle">Device Control Interface</p>
+        <div class="brand-mark" aria-hidden="true">G</div>
+        <div class="brand-text">
+          <span class="brand-name">GhostESP</span>
+          <span class="brand-sep">/</span>
+          <span class="brand-ver">Revival</span>
         </div>
       </div>
       <div class="top-actions">
-        <span class="chip" id="api-chip"><span id="api-dot" class="dot"></span><span id="api-status">Checking</span></span>
-        <span class="chip" id="comm-chip"><span id="comm-dot" class="dot"></span><span id="comm-status">GhostLink unknown</span></span>
+        <div class="status-cluster" aria-label="Connection status">
+          <span class="status-dot" id="api-chip" title="API: checking">
+            <span id="api-dot" class="dot"></span>
+            <span class="sr-only" id="api-status">Checking</span>
+          </span>
+          <span class="status-dot" id="comm-chip" title="GhostLink: unknown">
+            <span id="comm-dot" class="dot"></span>
+            <span class="sr-only" id="comm-status">GhostLink unknown</span>
+          </span>
+        </div>
         <button class="btn ghost" data-refresh aria-label="Refresh all">Refresh</button>
       </div>
     </header>
@@ -135,7 +145,8 @@
               <p>BLE scans, spam detection and device tracking. GhostLink preferred for radio-disruptive ops.</p>
             </div>
           </div>
-          <div class="menu-list" id="ble-actions"></div>
+          <div class="tabs" data-tabs="ble"></div>
+          <div id="ble-subpages"></div>
           <div id="ble-detail" class="feature-detail" hidden></div>
         </div>
       </section>
@@ -173,38 +184,28 @@
       </section>
 
       <section id="page-ghostlink" class="page">
-        <div class="grid cols-2">
-          <div class="panel">
-            <div class="panel-title">
-              <div>
-                <h2>GhostLink</h2>
-                <p>Preferred execution path for WiFi / BLE / radio-disruptive commands.</p>
-              </div>
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>Remote Command</h2>
+              <p>Send to connected peer using <code>/api/esp_comm/send</code>. Responses from the peer appear in the terminal below.</p>
             </div>
-            <div class="status-grid">
-              <div class="stat"><label>State</label><strong id="comm-state">Unknown</strong></div>
-              <div class="stat"><label>Remote Command</label><strong id="comm-remote">Unknown</strong></div>
-            </div>
-            <div style="height:10px"></div>
             <div class="actions">
-              <button class="btn" data-command="commstatus">Status</button>
-              <button class="btn" data-command="commdiscovery">Discovery</button>
-              <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+              <span class="chip" id="comm-status-chip"><span id="comm-dot" class="dot"></span><span id="comm-state">Unknown</span></span>
+              <span class="badge" id="comm-remote-badge">Remote: No</span>
             </div>
           </div>
-
-          <div class="panel">
-            <div class="panel-title">
-              <div>
-                <h2>Remote Command</h2>
-                <p>Send to connected peer using <code>/api/esp_comm/send</code>.</p>
-              </div>
-            </div>
-            <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
-            <div class="terminal-input">
-              <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
-              <button class="btn primary" id="comm-send-btn">Send</button>
-            </div>
+          <div class="actions" style="margin-bottom:12px;flex-wrap:wrap">
+            <button class="btn" data-command="commstatus">Status</button>
+            <button class="btn" data-command="commdiscovery">Discovery</button>
+            <button class="btn primary" id="comm-connect-btn">Connect to Peer</button>
+            <button class="btn danger" id="comm-disconnect-btn">Disconnect</button>
+            <span class="comm-pending" id="comm-pending" hidden><span class="spinner"></span><span>waiting for peer response…</span></span>
+          </div>
+          <div class="terminal" id="comm-terminal">GhostLink terminal ready.</div>
+          <div class="terminal-input">
+            <input id="comm-input" placeholder="scanap, blescan -r, capture -probe..." autocomplete="off" spellcheck="false">
+            <button class="btn primary" id="comm-send-btn">Send</button>
           </div>
         </div>
       </section>
@@ -214,7 +215,7 @@
           <div class="panel-title">
             <div>
               <h2>Settings</h2>
-              <p>All device settings. Matches the on-device settings registry.</p>
+              <p>Device configuration. Search jumps to matching fields. Unsaved changes are highlighted in blue.</p>
             </div>
             <div class="actions">
               <button class="btn primary" id="save-settings-btn">Save Settings</button>
@@ -225,12 +226,21 @@
             <button class="btn ghost" id="settings-expand-all">Expand All</button>
             <button class="btn ghost" id="settings-collapse-all">Collapse All</button>
           </div>
+          <nav class="settings-tabs" id="settings-tabs" aria-label="Settings sections"></nav>
           <div id="settings-container"></div>
           <div style="height:12px"></div>
-          <div class="actions">
+          <div class="actions" style="flex-wrap:wrap">
             <button class="btn" id="connect-wifi-btn">Connect WiFi</button>
             <button class="btn" id="start-portal-btn">Start Portal</button>
             <button class="btn" id="send-printer-btn">Send to Printer</button>
+            <button class="btn" id="set-rgb-pins-btn">Apply RGB Pins</button>
+          </div>
+          <div style="height:10px"></div>
+          <div class="actions" style="flex-wrap:wrap">
+            <button class="btn ghost" id="settings-reset-all-btn">Reset All to Defaults</button>
+            <button class="btn ghost" id="settings-backup-export-btn">Backup to SD</button>
+            <button class="btn ghost" id="settings-backup-import-btn">Restore from SD</button>
+            <button class="btn danger" id="reboot-btn">Reboot Device</button>
           </div>
         </div>
       </section>
@@ -252,18 +262,6 @@
             <input id="terminal-input" placeholder="Enter command..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
             <button class="btn primary" id="terminal-send-btn">Send</button>
           </div>
-        </div>
-      </section>
-
-      <section id="page-help" class="page">
-        <div class="panel">
-          <div class="panel-title">
-            <div>
-              <h2>Help</h2>
-              <p>Command groups and safety guidance.</p>
-            </div>
-          </div>
-          <div class="grid cols-2" id="help-grid"></div>
         </div>
       </section>
     </main>
@@ -326,7 +324,7 @@ const CMD = {
   selectSta:       (indices) => ({ cmd: `select -s ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select station by index' }),
   connect:         (ssid, pass) => {
     if (!ssid) return { cmd: 'connect', risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to saved WiFi' };
-    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
+    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
   },
   disconnect:      () => ({ cmd: 'disconnect',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Disconnect WiFi' }),
   wifiStatus:      () => ({ cmd: 'wifistatus',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'WiFi connection status' }),
@@ -340,7 +338,7 @@ const CMD = {
     return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Beacon spam' };
   },
   stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop beacon spam' }),
-  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
+  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(s => /\s/.test(s) ? `"${s}"` : s).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
   karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop karma attack' }),
   saeFlood:        (pass) => ({ cmd: `saeflood ${pass}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
   stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop SAE flood' }),
@@ -360,7 +358,7 @@ const CMD = {
   startEapol:      (ch) => ({ cmd: ch != null ? `capture -eapol -c ${ch}` : 'capture -eapol', risky: true, stopFirst: true, cat: 'WiFi Capture', desc: 'Start EAPOL capture' }),
 
   // Environment
-  sweep:           (stop) => ({ cmd: stop ? 'sweep -s' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
+  sweep:           (stop) => ({ cmd: stop ? 'stop' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
   pineap:          () => ({ cmd: 'pineap',          risky: true, stopFirst: true, cat: 'Environment', desc: 'Detect WiFi Pineapples' }),
   congestion:      () => ({ cmd: 'congestion',      risky: false, stopFirst: false, cat: 'Environment', desc: 'Channel congestion' }),
   listenProbes:    (stop) => ({ cmd: stop ? 'listenprobes -s' : 'listenprobes', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'Listen for probe requests' }),
@@ -375,7 +373,7 @@ const CMD = {
   scanArp:         () => ({ cmd: 'scanarp',         risky: false, stopFirst: false, cat: 'Network', desc: 'ARP scan local network' }),
   scanLocal:       () => ({ cmd: 'scanlocal',       risky: false, stopFirst: false, cat: 'Network', desc: 'Local IP lookup' }),
   scanSsh:         (target) => ({ cmd: `scanssh ${target}`, risky: false, stopFirst: false, cat: 'Network', desc: 'Scan for SSH' }),
-  dhcpStarve:      (stop) => ({ cmd: stop ? 'dhcpstarve -s' : 'dhcpstarve', risky: !stop, stopFirst: !stop, cat: 'Network', desc: 'DHCP starvation' }),
+  dhcpStarve:      (stop) => ({ cmd: stop ? 'dhcpstarve stop' : 'dhcpstarve start', risky: !stop, stopFirst: !stop, cat: 'Network', desc: 'DHCP starvation' }),
 
   // Evil Portal
   startPortal:     (path, ssid, password) => {
@@ -406,8 +404,8 @@ const CMD = {
   bleWardrive:     (stop) => ({ cmd: stop ? 'blewardriving -s' : 'blewardriving', risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: 'BLE wardriving' }),
 
   // NFC
-  chameleonScan:   (timeout) => ({ cmd: `chameleon scan ${timeout || 60}`, risky: true, stopFirst: true, cat: 'NFC', desc: 'Chameleon NFC scan' }),
-  chameleonStop:   () => ({ cmd: 'chameleon scan stop', risky: false, stopFirst: false, cat: 'NFC', desc: 'Stop NFC scan' }),
+  // Chameleon Ultra exposes subcommands like connect/scanhf/scanlf/etc.
+  // No single 'scan' verb exists; a full NFC view would need its own UI.
 
   // IR
   irList:          (path) => ({ cmd: path ? `ir list ${path}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
@@ -439,7 +437,7 @@ const CMD = {
   aerialScan:      (duration, stop) => ({ cmd: stop ? 'aerialstop' : `aerialscan ${duration || 30}`, risky: !stop, stopFirst: !stop, cat: 'Aerial', desc: 'Aerial scan' }),
   aerialList:      () => ({ cmd: 'aeriallist',      risky: false, stopFirst: false, cat: 'Aerial', desc: 'List aerial devices' }),
   aerialTrack:     (id) => ({ cmd: `aerialtrack ${id}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Track aerial device' }),
-  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof ${id || 'GHOST-TEST'} ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
+  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof "${id || 'GHOST-TEST'}" ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
   aerialSpoofStop: () => ({ cmd: 'aerialspoofstop', risky: false, stopFirst: false, cat: 'Aerial', desc: 'Stop aerial spoof' }),
 
   // Ethernet
@@ -452,6 +450,9 @@ const CMD = {
   settingsList:    () => ({ cmd: 'settings list',   risky: false, stopFirst: false, cat: 'Settings', desc: 'List all settings' }),
   settingsGet:     (key) => ({ cmd: `settings get ${key}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Get setting' }),
   settingsSet:     (key, value) => ({ cmd: `settings set ${key} ${value}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Set setting' }),
+  settingsReset:   (name) => ({ cmd: name ? `settings reset ${name}` : 'settings reset', risky: false, stopFirst: false, cat: 'Settings', desc: 'Reset settings to defaults' }),
+  settingsBackupExport: () => ({ cmd: 'settings backup export', risky: false, stopFirst: false, cat: 'Settings', desc: 'Export settings to SD' }),
+  settingsBackupImport: () => ({ cmd: 'settings backup import', risky: false, stopFirst: false, cat: 'Settings', desc: 'Import settings from SD' }),
 
   // GhostLink
   commStatus:      () => ({ cmd: 'commstatus',      risky: false, stopFirst: false, cat: 'GhostLink', desc: 'GhostLink status' }),
@@ -527,19 +528,38 @@ const WIFI_GROUPS = {
   ]
 };
 
-/** BLE action definitions */
-const BLE_ACTIONS = [
-  { label: 'Detect Devices',    factory: () => CMD.bleScan('spam') },
-  { label: 'Find Flippers',     factory: () => CMD.bleScan('flipper') },
-  { label: 'AirTag Scanner',    factory: () => CMD.bleScan('airtag') },
-  { label: 'Raw BLE Scanner',   factory: () => CMD.bleScan('raw') },
-  { label: 'Stop BLE Scan',     factory: () => CMD.bleScan(null, true) },
-  { label: 'BLE Spam - Apple',  factory: () => CMD.bleSpam('apple') },
-  { label: 'BLE Spam - Microsoft',factory: () => CMD.bleSpam('microsoft') },
-  { label: 'BLE Spam - Samsung',factory: () => CMD.bleSpam('samsung') },
-  { label: 'BLE Spam - Google', factory: () => CMD.bleSpam('google') },
-  { label: 'Stop BLE Spam',     factory: () => CMD.bleSpam(null, true) },
-];
+/** BLE action definitions (grouped, mirroring WiFi layout) */
+const BLE_GROUPS = {
+  'Scan & Select': [
+    { label: 'Detect Devices',     factory: () => CMD.bleScan('spam'),    refresh: () => CMD.bleScan('spam'),    refreshLabel: 'Re-scan' },
+    { label: 'Find Flippers',      factory: () => CMD.bleScan('flipper') },
+    { label: 'AirTag Scanner',     factory: () => CMD.bleScan('airtag') },
+    { label: 'Raw BLE Scanner',    factory: () => CMD.bleScan('raw') },
+    { label: 'GATT Scanner',       factory: () => CMD.bleScan('gatt'),   refresh: () => CMD.listGatt(),         refreshLabel: 'List GATT' },
+    { label: 'Stop BLE Scan',      factory: () => CMD.bleScan(null, true) },
+  ],
+  'Attacks': [
+    { label: 'BLE Spam - Apple',     factory: () => CMD.bleSpam('apple') },
+    { label: 'BLE Spam - Microsoft', factory: () => CMD.bleSpam('microsoft') },
+    { label: 'BLE Spam - Samsung',   factory: () => CMD.bleSpam('samsung') },
+    { label: 'BLE Spam - Google',    factory: () => CMD.bleSpam('google') },
+    { label: 'Stop BLE Spam',        factory: () => CMD.bleSpam(null, true) },
+  ],
+  'Tracking': [
+    { label: 'BLE Wardriving',     factory: () => CMD.bleWardrive() },
+    { label: 'Stop Wardriving',    factory: () => CMD.bleWardrive(true) },
+    { label: 'Spoof AirTag',       factory: () => CMD.spoofAirTag(true) },
+    { label: 'Stop AirTag Spoof',  factory: () => CMD.spoofAirTag(false) },
+  ],
+  'Misc': [
+    { label: 'List Flippers',      factory: () => CMD.listFlippers() },
+    { label: 'List AirTags',       factory: () => CMD.listAirTags() },
+    { label: 'List GATT Devices',  factory: () => CMD.listGatt() },
+    { label: 'Stop All',           factory: () => CMD.stop() },
+  ]
+};
+
+const BLE_ACTIONS = Object.values(BLE_GROUPS).flat();
 
 /** Settings schema with categories, descriptions, and validation */
 const SETTINGS_SCHEMA = [
@@ -549,7 +569,7 @@ const SETTINGS_SCHEMA = [
     description: 'Access Point and Station configuration',
     fields: [
       { id: 'ap_ssid',        label: 'AP SSID',            type: 'text',   max: 33,  hint: 'Broadcast network name' },
-      { id: 'ap_password',    label: 'AP Password',        type: 'text',   max: 65,  hint: 'Leave empty for open AP' },
+      { id: 'ap_password',    label: 'AP Password',        type: 'text',   max: 65,  hint: '8-63 chars; leave empty for open AP' },
       { id: 'ap_enabled',     label: 'AP Enabled',         type: 'bool' },
       { id: 'sta_ssid',       label: 'STA SSID',           type: 'text',   max: 65,  hint: 'Network to connect to' },
       { id: 'sta_password',   label: 'STA Password',       type: 'text',   max: 65 },
@@ -665,15 +685,15 @@ function buildCommand(factoryResult) {
 /** Determine if a raw command string is risky */
 function isRiskyCommand(commandString) {
   const riskyPatterns = [
-    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i, /^stopscan\b/i,
-    /^attack\b/i, /^beaconspam\b/i, /^stopspam\b/i, /^stopdeauth\b/i,
+    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i,
+    /^attack\b/i, /^beaconspam\b/i,
     /^capture\b/i, /^listenprobes\b/i, /^pineap\b/i, /^karma\b/i,
     /^blescan\b/i, /^blespam\b/i, /^blewardriving\b/i,
     /^startwd\b/i, /^startportal\b/i, /^sweep\b/i, /^dhcpstarve\b/i,
     /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
     /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
     /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
-    /^chameleon scan\b/i, /^reboot\b/i, /^apenable\b/i,
+    /^reboot\b/i, /^apenable\b/i,
   ];
   return riskyPatterns.some(p => p.test(commandString.trim()));
 }
@@ -840,7 +860,7 @@ const Parsers = {
 
   station(text) {
     if (!text.includes('Station MAC:') && !text.includes('Station:') && !text.includes('New Station:')) return null;
-    const idx = Patterns.STATION_INDEX.exec(text)?.[1] || String(Parsers._stationCounter++);
+    const idx = Patterns.STATION_INDEX.exec(text)?.[1];
     const mac = Patterns.STATION_MAC.exec(text)?.[1];
     if (!mac) return null;
     return {
@@ -855,6 +875,15 @@ const Parsers = {
   },
   _stationCounter: 0,
   resetStationCounter() { this._stationCounter = 0; },
+
+  stationWithFallbackIndex(text) {
+    const result = this.station(text);
+    if (!result) return null;
+    if (result.index == null) {
+      result.index = String(this._stationCounter++);
+    }
+    return result;
+  },
 
   bleDevice(line) {
     if (!line.startsWith('BLE:')) return null;
@@ -1164,7 +1193,7 @@ function parseAllStations(text) {
   const rows = [];
   const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:Station MAC:|STA:))/g);
   for (const block of blocks) {
-    const sta = Parsers.station(block);
+    const sta = Parsers.stationWithFallbackIndex(block);
     if (sta) rows.push(sta);
   }
   return rows;
@@ -1276,9 +1305,18 @@ const state = {
   terminalTimer: null,
   commandHistory: [],
   historyIndex: -1,
+  commHistory: [],
+  commHistoryIndex: -1,
   isLoading: false,
   settingsOpen: new Set(),
   settingsFilter: '',
+  reconnectActive: false,
+  bleFilter: 'ALL',
+  dashboardAutoPopulated: false,
+  commLogOffset: 0,
+  commPending: 0,
+  commPendingTimer: null,
+  parseCache: { logs: null, aps: null, stations: null, ble: null, flippers: null, airtags: null, gatt: null, ports: null },
 };
 
 const pages = [
@@ -1289,7 +1327,6 @@ const pages = [
   ['ghostlink', 'GhostLink', '04'],
   ['settings', 'Settings', '05'],
   ['terminal', 'Terminal', '06'],
-  ['help', 'Help', '07']
 ];
 
 /* ======================== UTILITIES ======================== */
@@ -1335,6 +1372,14 @@ function setLoading(el, loading) {
 function isRisky(command) { return isRiskyCommand(command); }
 function canUseGhostLink() { return !!state.comm.connected; }
 
+async function runCommandSequence(commands) {
+  for (const command of commands) {
+    await new Promise(resolve => {
+      runCommand(command, { skipRisk: true, onComplete: resolve });
+    });
+  }
+}
+
 /* ======================== SHELL BUILDERS ======================== */
 function buildShell() {
   $('nav').innerHTML = pages.map(([id, label, code], idx) =>
@@ -1346,7 +1391,6 @@ function buildShell() {
   buildDashboard();
   buildWifi();
   buildBle();
-  buildHelp();
   buildSettingsForm();
 }
 
@@ -1385,7 +1429,22 @@ function buildWifi() {
 }
 
 function buildBle() {
-  $('ble-actions').innerHTML = BLE_ACTIONS.map(action => actionRow(action, 'ble')).join('');
+  const groups = Object.keys(BLE_GROUPS);
+  document.querySelector('[data-tabs="ble"]').innerHTML = groups.map((name, i) =>
+    `<button class="tab-btn ${i === 0 ? 'active' : ''}" data-ble-tab="${esc(name)}">${esc(name)}</button>`
+  ).join('');
+  $('ble-subpages').innerHTML = groups.map((name, i) =>
+    `<div class="subpage ${i === 0 ? 'active' : ''}" data-ble-page="${esc(name)}">
+      <div class="menu-list">${BLE_GROUPS[name].map(action => actionRow(action, 'ble')).join('')}</div>
+    </div>`
+  ).join('');
+  document.querySelectorAll('[data-ble-tab]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      if (state.activeAction) closeAction();
+      document.querySelectorAll('[data-ble-tab]').forEach(x => x.classList.toggle('active', x === btn));
+      document.querySelectorAll('[data-ble-page]').forEach(x => x.classList.toggle('active', x.dataset.blePage === btn.dataset.bleTab));
+    })
+  );
 }
 
 function buildDashboard() {
@@ -1514,7 +1573,7 @@ function renderDashboardFeatures() {
 }
 
 function renderDashboardRecent() {
-  const aps = parseAllAccessPoints(state.logs);
+  const { aps } = cachedParse(state.logs);
   const section = $('dash-recent-section');
   const list = $('dash-recent-list');
   if (!aps.length) {
@@ -1544,7 +1603,7 @@ function actionRow(action, section) {
   const item = registerAction({ section, label, command, desc, risky, refreshCmd: action.refresh?.(), refreshLabel: action.refreshLabel });
   return `<div class="menu-row">
     <div>
-      <h3>${esc(label)} ${risky ? '<span class="badge">May disconnect</span>' : ''}</h3>
+      <h3 class="title-row">${esc(label)}${risky ? '<span class="badge warn">May disconnect</span>' : ''}</h3>
       <p>${esc(desc)}</p>
       <p><code>${esc(command)}</code></p>
     </div>
@@ -1570,12 +1629,14 @@ function openAction(actionId) {
   state.activeAction = action;
   state.activeItem = null;
   state.selectedIndices.clear();
+  state.bleFilter = 'ALL';
   if (action.section === 'wifi') {
     $('wifi-subpages').hidden = true;
     document.querySelector('[data-tabs="wifi"]').hidden = true;
     $('wifi-detail').hidden = false;
   } else if (action.section === 'ble') {
-    $('ble-actions').hidden = true;
+    $('ble-subpages').hidden = true;
+    document.querySelector('[data-tabs="ble"]').hidden = true;
     $('ble-detail').hidden = false;
   }
   renderActionDetail();
@@ -1586,13 +1647,15 @@ function closeAction() {
   state.activeAction = null;
   state.activeItem = null;
   state.selectedIndices.clear();
+  state.bleFilter = 'ALL';
   if (section === 'wifi') {
     document.querySelector('[data-tabs="wifi"]').hidden = false;
     $('wifi-subpages').hidden = false;
     $('wifi-detail').hidden = true;
     $('wifi-detail').innerHTML = '';
   } else if (section === 'ble') {
-    $('ble-actions').hidden = false;
+    document.querySelector('[data-tabs="ble"]').hidden = false;
+    $('ble-subpages').hidden = false;
     $('ble-detail').hidden = true;
     $('ble-detail').innerHTML = '';
   }
@@ -1615,8 +1678,8 @@ function buildActionDetail(action) {
   const result = state.activeItem ? renderItemDetail(state.activeItem) : renderActionResult(action);
   const refreshCommand = action.refreshCmd ? action.refreshCmd.cmd : '';
   const backLabel = state.activeItem ? 'Back to Results' : (action.section === 'wifi' ? 'WiFi' : 'BLE');
-  const categoryBadge = `<span class="badge">${esc(commandCategory(action.command))}</span>`;
-  const safetyBadge = action.risky ? '<span class="badge">May disconnect</span>' : '<span class="badge">Local-safe</span>';
+  const categoryBadge = `<span class="badge mono">${esc(commandCategory(action.command))}</span>`;
+  const safetyBadge = action.risky ? '<span class="badge warn">May disconnect</span>' : '<span class="badge good">Local-safe</span>';
   return `<div class="detail-toolbar">
     <div>
       <button class="btn ghost" data-${state.activeItem ? 'back-results' : 'close-action'}>Back to ${esc(backLabel)}</button>
@@ -1642,8 +1705,9 @@ function buildActionDetail(action) {
 
 function renderActionResult(action) {
   const cmd = (action.command || '').trim().toLowerCase();
-  if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(parseAllAccessPoints(state.logs));
-  if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(parseAllStations(state.logs));
+  const cache = cachedParse(state.logs);
+  if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(cache.aps);
+  if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(cache.stations);
   if (/^wifistatus\b/.test(cmd)) {
     const status = Parsers.wifiStatus(state.logs);
     const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(state.logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
@@ -1659,14 +1723,11 @@ function renderActionResult(action) {
     return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(state.logs, /GPS\s*Info/i, null), 'GPS Information');
   }
   if (/^blescan\b/.test(cmd)) {
-    const ble = parseAllBleDevices(state.logs);
-    const flippers = parseAllFlippers(state.logs);
-    const airtags = parseAllAirTags(state.logs);
-    const gatt = parseAllGattDevices(state.logs);
+    const { ble, flippers, airtags, gatt } = cachedParse(state.logs);
     const all = [...ble, ...flippers, ...airtags, ...gatt];
     return renderBleTable(all);
   }
-  if (/^scanports\b/.test(cmd)) return renderPortTable(parsePortScan(state.logs));
+  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(state.logs).ports);
   if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(state.logs), cmd);
   if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(state.logs), 'Capture Status');
   if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(state.logs), cmd);
@@ -1694,6 +1755,7 @@ function renderItemDetail(item) {
 
 function renderApDetail(data) {
   const isOpen = (data.security || '').toLowerCase().includes('open');
+  const passId = `ap-connect-pass-${data.index}`;
   return `<div class="item-detail">
     <div class="status-grid" style="margin-bottom:10px">
       <div class="stat"><label>SSID</label><strong>${esc(data.ssid || '(Hidden)')}</strong></div>
@@ -1707,11 +1769,11 @@ function renderApDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-ap" data-index="${escapeAttr(data.index)}">Select AP</button>
-      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn danger" data-item-action="deauth" data-index="${escapeAttr(data.index)}">Deauth</button>
       <button class="btn" data-item-action="track-ap">Track AP</button>
       <button class="btn" data-item-action="connect-ap" data-ssid="${escapeAttr(data.ssid)}">Connect</button>
     </div>
-    ${!isOpen ? `<div style="margin-top:10px"><input id="ap-connect-pass" placeholder="Password (optional)" style="max-width:260px"></div>` : ''}
+    ${!isOpen ? `<div style="margin-top:10px"><input id="${passId}" placeholder="Password (optional)" style="max-width:260px"></div>` : ''}
   </div>`;
 }
 
@@ -1727,7 +1789,7 @@ function renderStationDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-sta" data-index="${escapeAttr(data.index)}">Select Station</button>
-      <button class="btn danger" data-item-action="deauth">Deauth</button>
+      <button class="btn danger" data-item-action="deauth-sta" data-index="${escapeAttr(data.index)}">Deauth</button>
       <button class="btn" data-item-action="track-sta">Track Station</button>
     </div>
   </div>`;
@@ -1926,8 +1988,9 @@ function renderBatchToolbar(type) {
   const count = state.selectedIndices.size;
   if (!count) return '';
   const label = type === 'ap' ? 'AP' : 'Station';
+  const action = type === 'ap' ? 'deauth' : null;
   return `<div class="batch-toolbar"><span>${count} ${label}${count > 1 ? 's' : ''} selected</span><div class="actions">
-    <button class="btn danger" data-batch-action="deauth">Deauth Selected</button>
+    ${action ? `<button class="btn danger" data-batch-action="${action}">Deauth Selected</button>` : '<span class="chip warn">Firmware only supports single-station deauth</span>'}
     <button class="btn ghost" data-batch-action="clear">Clear</button>
   </div></div>`;
 }
@@ -1948,8 +2011,19 @@ function objectToKeyValueRows(value) {
 
 function renderBleTable(rows) {
   if (!rows.length) return '<div class="empty">No BLE results yet. Run a BLE scan to populate.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
+  const filters = ['ALL', 'FLIPPER_ZERO', 'AIR_TAG', 'GATT', 'GENERIC'];
+  const activeFilter = state.bleFilter || 'ALL';
+  const filtered = activeFilter === 'ALL' ? rows : rows.filter(r => (r.type || 'GENERIC') === activeFilter);
+  const chips = filters.map(f => {
+    const count = f === 'ALL' ? rows.length : rows.filter(r => (r.type || 'GENERIC') === f).length;
+    if (f !== 'ALL' && !count) return '';
+    const active = f === activeFilter ? ' active' : '';
+    return `<button class="tab-btn${active}" data-ble-filter="${f}">${esc(f.replace('_', ' '))} (${count})</button>`;
+  }).filter(Boolean).join('');
+  const filterBar = `<div class="tabs" style="margin-bottom:10px">${chips}</div>`;
+  if (!filtered.length) return filterBar + '<div class="empty">No devices match the current filter.</div>';
+  return filterBar + `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
+    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
       <td>${esc(r.index || String(i))}</td>
       <td><code>${esc(r.mac || '-')}</code></td>
       <td>${esc(r.name || '-')}</td>
@@ -1978,50 +2052,71 @@ function renderGenericRows(rows, command) {
   ).join('')}</div>`;
 }
 
-function buildHelp() {
-  const groups = [
-    ['WiFi', 'scanap, scansta, list -a, select -a, attack, beaconspam, capture'],
-    ['BLE', 'blescan, blespam, blewardriving, listairtags'],
-    ['GhostLink', 'commstatus, commdiscovery, commconnect, commsend, commdisconnect'],
-    ['Files', 'Use Files page for SD card browse/upload/download/delete'],
-    ['Safety', 'Risky local radio commands may disconnect WebUI. GhostLink is preferred.'],
-    ['Recovery', 'After local disruption, V2 polls APIs and reloads logs when reachable.'],
-  ];
-  $('help-grid').innerHTML = groups.map(([title, body]) =>
-    `<div class="card" style="cursor:default;min-height:auto"><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`
-  ).join('');
-}
-
 /* ======================== SETTINGS (Accordion) ======================== */
 function buildSettingsForm() {
   const container = $('settings-container');
-  if (!container) return;
+  const tabs = $('settings-tabs');
+  if (!container || !tabs) return;
+  const DEFAULT_OPEN = new Set([0, 1]);
   container.innerHTML = SETTINGS_SCHEMA.map((group, gi) => {
-    const isOpen = state.settingsOpen.has(gi);
+    const isOpen = state.settingsOpen.has(gi) || (state.settingsOpen.size === 0 && DEFAULT_OPEN.has(gi));
     const fieldsHtml = group.fields.map(field => renderField(field)).join('');
-    return `<div class="settings-group ${isOpen ? 'open' : ''}" data-settings-group="${gi}">
+    return `<div class="settings-group ${isOpen ? 'open' : ''}" data-settings-group="${gi}" id="settings-group-${gi}">
       <div class="settings-group-header" role="button" tabindex="0" aria-expanded="${isOpen}" aria-controls="sg-body-${gi}">
         <div class="sg-icon">${esc(group.icon)}</div>
-        <div style="min-width:0">
-          <div class="sg-title">${esc(group.category)}</div>
+        <div class="sg-meta">
+          <div class="sg-title">${esc(group.category)} <span class="sg-count">${group.fields.length}</span></div>
           <div class="sg-desc">${esc(group.description)}</div>
         </div>
+        <div class="sg-summary" id="sg-summary-${gi}"></div>
         <div class="sg-chevron" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </div>
       </div>
       <div class="settings-group-body" id="sg-body-${gi}">
-        <div class="form-grid">${fieldsHtml}</div>
+        <div class="form-grid form-grid--mixed">${fieldsHtml}</div>
       </div>
     </div>`;
   }).join('');
+  tabs.innerHTML = SETTINGS_SCHEMA.map((group, gi) =>
+    `<a class="settings-tab" href="#settings-group-${gi}" data-tab-group="${gi}"><span class="settings-tab-icon">${esc(group.icon)}</span><span>${esc(group.category)}</span></a>`
+  ).join('');
   bindSettingsAccordion();
+  bindSettingsTabs();
+  updateSettingsSummaries();
+}
+
+function updateSettingsSummaries() {
+  SETTINGS_SCHEMA.forEach((group, gi) => {
+    const summary = $('sg-summary-' + gi);
+    if (!summary) return;
+    const bits = group.fields.slice(0, 2).map(f => {
+      const v = readSettingDisplay(f);
+      return v ? `${esc(f.label)}: <strong>${esc(v)}</strong>` : '';
+    }).filter(Boolean);
+    summary.innerHTML = bits.join(' &middot; ');
+  });
+}
+
+function readSettingDisplay(field) {
+  const el = $(field.id);
+  if (!el) return '';
+  if (field.type === 'bool') return el.checked ? 'On' : 'Off';
+  if (field.type === 'color') return el.value || '';
+  if (field.type === 'enum') {
+    const opt = field.options.find(([v]) => v === el.value);
+    return opt ? opt[1] : el.value;
+  }
+  const v = el.value;
+  if (v == null || v === '') return '';
+  return v.length > 24 ? v.slice(0, 24) + '…' : v;
 }
 
 function renderField(field) {
   let input = '';
+  const wide = field.type === 'text' || field.type === 'textarea' || field.type === 'color';
   if (field.type === 'bool') {
-    input = `<input id="${field.id}" type="checkbox">`;
+    input = `<label class="switch" for="${field.id}"><input id="${field.id}" type="checkbox"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span></label>`;
   } else if (field.type === 'textarea') {
     input = `<textarea id="${field.id}" rows="2" placeholder="${esc(field.hint || '')}"></textarea>`;
   } else if (field.type === 'enum') {
@@ -2035,7 +2130,7 @@ function renderField(field) {
     if (field.max) attrs.push(`maxlength="${field.max}"`);
     input = `<input id="${field.id}" type="${field.type === 'number' ? 'number' : 'text'}" ${attrs.join(' ')}>`;
   }
-  return `<div class="field" data-field-label="${esc(field.label.toLowerCase())}" data-field-id="${esc(field.id.toLowerCase())}">
+  return `<div class="field ${wide ? 'field--wide' : ''}" data-field-label="${esc(field.label.toLowerCase())}" data-field-id="${esc(field.id.toLowerCase())}">
     <label for="${field.id}">${esc(field.label)}</label>
     ${input}
   </div>`;
@@ -2086,6 +2181,25 @@ function expandAllSettings(open) {
   });
 }
 
+function bindSettingsTabs() {
+  document.querySelectorAll('.settings-tab').forEach(tab => {
+    tab.addEventListener('click', e => {
+      e.preventDefault();
+      const idx = parseInt(tab.dataset.tabGroup, 10);
+      const group = $('settings-group-' + idx);
+      if (!group) return;
+      document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('active', t === tab));
+      if (!group.classList.contains('open')) {
+        group.classList.add('open');
+        group.querySelector('.settings-group-header').setAttribute('aria-expanded', 'true');
+        state.settingsOpen.add(idx);
+      }
+      const offset = group.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: offset, behavior: 'smooth' });
+    });
+  });
+}
+
 /* ======================== API & DATA ======================== */
 async function refreshAll() {
   const refreshBtn = document.querySelector('[data-refresh]');
@@ -2107,6 +2221,22 @@ async function refreshAll() {
   } finally {
     setLoading(refreshBtn, false);
   }
+}
+
+const DASHBOARD_AUTO_QUERIES = [
+  { cmd: 'chipinfo',   has: (logs) => Parsers.chipInfo(logs) != null },
+  { cmd: 'wifistatus', has: (logs) => /===\s*WIFI\s*STATUS\s*===/.test(logs) },
+];
+
+function populateDashboardIfStale() {
+  if (state.dashboardAutoPopulated) return;
+  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(state.logs || ''));
+  if (!missing.length) {
+    state.dashboardAutoPopulated = true;
+    return;
+  }
+  state.dashboardAutoPopulated = true;
+  missing.forEach(({ cmd }) => runCommand(cmd));
 }
 
 async function loadSettings() {
@@ -2131,12 +2261,42 @@ async function loadSettings() {
       } else el.value = String(value);
     }
   }
-  setVal('station_ip', data.station_ip || 'Not connected');
+  updateSettingsSummaries();
+  document.querySelectorAll('#settings-container input, #settings-container select, #settings-container textarea').forEach(el => {
+    el.addEventListener('input', updateSettingsSummaries);
+    el.addEventListener('change', updateSettingsSummaries);
+  });
 }
 
-function setVal(id, value) { const el = $(id); if (el) el.value = value; }
 function getVal(id) { const el = $(id); return el ? el.value : ''; }
 function getBool(id) { const el = $(id); return el ? !!el.checked : false; }
+
+function cachedParse(logs) {
+  if (state.parseCache.logs === logs) {
+    return {
+      aps: state.parseCache.aps,
+      stations: state.parseCache.stations,
+      ble: state.parseCache.ble,
+      flippers: state.parseCache.flippers,
+      airtags: state.parseCache.airtags,
+      gatt: state.parseCache.gatt,
+      ports: state.parseCache.ports,
+    };
+  }
+  const aps = parseAllAccessPoints(logs);
+  const stations = parseAllStations(logs);
+  const ble = parseAllBleDevices(logs);
+  const flippers = parseAllFlippers(logs);
+  const airtags = parseAllAirTags(logs);
+  const gatt = parseAllGattDevices(logs);
+  const ports = parsePortScan(logs);
+  state.parseCache = { logs, aps, stations, ble, flippers, airtags, gatt, ports };
+  return { aps, stations, ble, flippers, airtags, gatt, ports };
+}
+
+function invalidateParseCache() {
+  state.parseCache = { logs: null, aps: null, stations: null, ble: null, flippers: null, airtags: null, gatt: null, ports: null };
+}
 
 async function loadCommStatus() {
   const res = await api('/api/esp_comm/status');
@@ -2145,11 +2305,19 @@ async function loadCommStatus() {
   state.comm = data;
   const label = data.state ? data.state.charAt(0).toUpperCase() + data.state.slice(1) : 'Unknown';
   $('comm-status').textContent = 'GhostLink ' + label;
-  $('comm-state').textContent = label;
-  $('comm-remote').textContent = data.is_remote_command ? 'Yes' : 'No';
+  const cs = $('comm-state');
+  if (cs) cs.textContent = label;
+  const cr = $('comm-remote-badge');
+  if (cr) {
+    cr.textContent = data.is_remote_command ? 'Remote: Yes' : 'Remote: No';
+    cr.className = 'badge ' + (data.is_remote_command ? 'warn' : '');
+  }
   $('comm-dot').className = 'dot ' + (data.connected ? 'good' : data.state === 'error' ? 'bad' : data.state === 'scanning' || data.state === 'handshake' ? 'warn' : '');
+  const chipBorder = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
   const chip = $('comm-chip');
-  if (chip) chip.style.borderColor = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
+  if (chip) chip.style.borderColor = chipBorder;
+  const sc = $('comm-status-chip');
+  if (sc) sc.style.borderColor = chipBorder;
 }
 
 async function saveSettings() {
@@ -2192,10 +2360,16 @@ async function runCommand(command, options = {}) {
     if (!res.ok) throw new Error('command failed');
     toast('Command sent', 'good');
     setTimeout(() => refreshLogs(true), 900);
-    if (isRisky(command)) startReconnectWatch();
+    if (isRisky(command)) {
+      startReconnectWatch();
+    } else {
+      localStorage.removeItem('ghost_v2_pending_command');
+    }
+    if (typeof options.onComplete === 'function') options.onComplete();
   } catch (err) {
     if (isRisky(command)) startReconnectWatch();
     else toast('Command failed: ' + err.message, 'bad');
+    if (typeof options.onComplete === 'function') options.onComplete(err);
   }
 }
 
@@ -2212,21 +2386,89 @@ function closeRiskModal() {
 }
 
 async function runRemote(command) {
+  if (isRisky(command)) {
+    const ok = confirm(`"${command}" is a radio-disruptive or risky command. Send it to the GhostLink peer anyway?`);
+    if (!ok) return;
+  }
   appendComm('> ' + command);
+  setCommPending(true);
   try {
     const res = await api('/api/esp_comm/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
     const data = await res.json();
-    appendComm(data.message || (data.success ? 'Command sent' : 'Failed'));
-    toast(data.success ? 'GhostLink command sent' : 'GhostLink command failed', data.success ? 'good' : 'bad');
-    if (data.success) setTimeout(() => refreshLogs(true), 1200);
+    if (!data.success) {
+      appendComm('Error: ' + (data.message || 'send failed'), { kind: 'error' });
+      toast('GhostLink command failed', 'bad');
+      setCommPending(false);
+    } else {
+      toast('GhostLink command sent', 'good');
+      state.commLogOffset = (state.logs || '').length;
+      setTimeout(() => refreshLogs(true).then(pollPeerResponses).catch(() => setCommPending(false)), 800);
+    }
   } catch (err) {
-    appendComm('Error: ' + err.message);
+    appendComm('Error: ' + err.message, { kind: 'error' });
     toast('GhostLink failed', 'bad');
+    setCommPending(false);
   }
+}
+
+function setCommPending(on) {
+  const el = $('comm-pending');
+  if (el) el.hidden = !on;
+  if (state.commPendingTimer) { clearTimeout(state.commPendingTimer); state.commPendingTimer = null; }
+  if (on) {
+    state.commPending = (state.commPending || 0) + 1;
+    state.commPendingTimer = setTimeout(() => {
+      if (state.commPending > 0) {
+        appendComm('(no peer response within 12s)', { kind: 'error' });
+      }
+      setCommPending(false);
+    }, 12000);
+  } else {
+    state.commPending = 0;
+  }
+}
+
+function pollPeerResponses() {
+  if (!state.logs) return;
+  if (state.commLogOffset === 0 || state.commLogOffset > state.logs.length) {
+    state.commLogOffset = state.logs.length;
+    return;
+  }
+  const slice = state.logs.slice(state.commLogOffset);
+  if (!slice) return;
+  const lines = slice.split('\n');
+  let appended = false;
+  for (const raw of lines) {
+    let body = null;
+    let kind = 'response';
+    let m = raw.match(/^RX:\s?(.*)$/);
+    if (m) {
+      body = m[1];
+    } else {
+      m = raw.match(/^ESP Comm Response:\s?(.*)$/);
+      if (m) body = m[1];
+    }
+    if (body != null) {
+      appendComm(body || '(empty response)', { kind });
+      appended = true;
+      continue;
+    }
+    if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed/i.test(raw) || /E:\s*esp_comm/i.test(raw)) {
+      appendComm(raw.replace(/^E:\s*/, ''), { kind: 'error' });
+      appended = true;
+    }
+  }
+  state.commLogOffset = state.logs.length;
+  if (appended) setCommPending(false);
 }
 
 function startReconnectWatch() {
   const overlay = $('reconnect-overlay');
+  if (state.reconnectActive) {
+    overlay.classList.add('show');
+    return;
+  }
+  state.reconnectActive = true;
   overlay.classList.add('show');
   let attempts = 0;
   const maxAttempts = 60;
@@ -2237,17 +2479,24 @@ function startReconnectWatch() {
       const res = await api('/api/logs', { cache: 'no-store' });
       if (res.ok) {
         state.logs = await res.text();
+        invalidateParseCache();
         overlay.classList.remove('show');
+        state.reconnectActive = false;
         localStorage.removeItem('ghost_v2_pending_command');
         renderLogs();
         renderActiveFeatureView();
         await Promise.allSettled([loadSettings(), loadCommStatus(), loadFiles(false)]);
+        state.dashboardAutoPopulated = false;
+        populateDashboardIfStale();
         toast('Reconnected and recovered logs', 'good');
         return;
       }
     } catch (_) {}
     if (attempts < maxAttempts) setTimeout(tick, 2000);
-    else toast('Reconnect timed out. Try refreshing after the AP returns.', 'warn');
+    else {
+      state.reconnectActive = false;
+      toast('Reconnect timed out. Try refreshing after the AP returns.', 'warn');
+    }
   };
   setTimeout(tick, 1500);
 }
@@ -2255,7 +2504,11 @@ function startReconnectWatch() {
 async function refreshLogs(parse = false) {
   const res = await api('/api/logs', { cache: 'no-store' });
   if (!res.ok) throw new Error('logs failed');
-  state.logs = await res.text();
+  const newLogs = await res.text();
+  if (newLogs !== state.logs) {
+    state.logs = newLogs;
+    invalidateParseCache();
+  }
   renderLogs();
   if (parse) {
     renderActiveFeatureView();
@@ -2273,9 +2526,14 @@ function renderLogs() {
   t.textContent = state.logs || 'No logs yet.';
   t.scrollTop = t.scrollHeight;
 }
-function appendComm(text) {
+function appendComm(text, opts) {
   const t = $('comm-terminal');
-  t.textContent += '\n' + text;
+  const line = document.createElement('div');
+  if (opts && opts.kind === 'response') line.className = 'peer-response';
+  else if (opts && opts.kind === 'error') line.className = 'peer-error';
+  line.textContent = text;
+  t.appendChild(line);
+  while (t.childElementCount > 500) t.removeChild(t.firstChild);
   t.scrollTop = t.scrollHeight;
 }
 
@@ -2300,7 +2558,7 @@ async function loadFiles(showErrors = true) {
     const files = data.files || [];
     list.innerHTML = files.length ? files.map(fileRow).join('') : '<div class="empty">This folder is empty.</div>';
   } catch (err) {
-    list.innerHTML = '<div class="empty">Unable to load files.</div>';
+    list.innerHTML = '<div class="empty">SD card not accessible.<br><small>Check that an SD card is inserted and the configured pins match your board. Run <code>sd status</code> in the Terminal to verify.</small></div>';
     if (showErrors) toast(err.message, 'bad');
   }
 }
@@ -2384,10 +2642,11 @@ function bindEvents() {
       const type = itemRow.dataset.selectItem;
       const index = itemRow.dataset.index;
       let data = null;
-      if (type === 'ap') data = parseAllAccessPoints(state.logs).find(r => r.index === index);
-      else if (type === 'station') data = parseAllStations(state.logs).find(r => r.index === index);
-      else if (type === 'ble') data = parseAllBleDevices(state.logs).concat(parseAllFlippers(state.logs), parseAllAirTags(state.logs), parseAllGattDevices(state.logs)).find(r => (r.index || '0') === index);
-      else if (type === 'port') data = parsePortScan(state.logs).find(r => r.index === index);
+      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(state.logs);
+      if (type === 'ap') data = aps.find(r => r.index === index);
+      else if (type === 'station') data = stations.find(r => r.index === index);
+      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index);
+      else if (type === 'port') data = ports.find(r => r.index === index);
       else if (type === 'generic') data = parseGenericRows(state.logs, state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
       if (data) openItem(type, data);
       return;
@@ -2406,8 +2665,9 @@ function bindEvents() {
     if (selectAll) {
       const type = selectAll.dataset.selectAll;
       let rows = [];
-      if (type === 'ap') rows = parseAllAccessPoints(state.logs);
-      else if (type === 'station') rows = parseAllStations(state.logs);
+      const cache = cachedParse(state.logs);
+      if (type === 'ap') rows = cache.aps;
+      else if (type === 'station') rows = cache.stations;
       if (selectAll.checked) rows.forEach(r => state.selectedIndices.add(r.index));
       else rows.forEach(r => state.selectedIndices.delete(r.index));
       renderActionDetail();
@@ -2419,9 +2679,10 @@ function bindEvents() {
       const action = batch.dataset.batchAction;
       if (action === 'clear') { state.selectedIndices.clear(); renderActionDetail(); }
       else if (action === 'deauth') {
-        const indices = Array.from(state.selectedIndices).join(',');
-        if (!indices) { toast('Nothing selected', 'warn'); return; }
-        runCommand(CMD.deauth().cmd);
+        const indices = Array.from(state.selectedIndices);
+        if (!indices.length) { toast('Nothing selected', 'warn'); return; }
+        const selectCmd = CMD.selectAp(indices.join(',')).cmd;
+        runCommandSequence([selectCmd, CMD.stopDeauth().cmd, 'stop', CMD.deauth().cmd]);
       }
       return;
     }
@@ -2429,6 +2690,13 @@ function bindEvents() {
     const itemAction = event.target.closest('[data-item-action]');
     if (itemAction) {
       handleItemAction(itemAction.dataset.itemAction, itemAction.dataset);
+      return;
+    }
+
+    const bleFilter = event.target.closest('[data-ble-filter]');
+    if (bleFilter) {
+      state.bleFilter = bleFilter.dataset.bleFilter;
+      renderActionDetail();
       return;
     }
   });
@@ -2439,13 +2707,44 @@ function bindEvents() {
   $('terminal-send-btn').addEventListener('click', sendTerminal);
   $('terminal-input').addEventListener('keydown', terminalKeydown);
   $('save-settings-btn').addEventListener('click', () => saveSettings().catch(e => toast(e.message, 'bad')));
+  $('settings-reset-all-btn')?.addEventListener('click', () => {
+    if (confirm('Reset ALL settings to firmware defaults? This will restart the AP if AP creds are reset.')) {
+      runCommand(CMD.settingsReset().cmd);
+    }
+  });
+  $('settings-backup-export-btn')?.addEventListener('click', () => runCommand(CMD.settingsBackupExport().cmd));
+  $('settings-backup-import-btn')?.addEventListener('click', () => {
+    if (confirm('Import settings from SD card backup? This will overwrite current settings.')) {
+      runCommand(CMD.settingsBackupImport().cmd);
+    }
+  });
+  $('reboot-btn')?.addEventListener('click', () => {
+    if (confirm('Reboot the device now? The WebUI will be unavailable until the device restarts.')) {
+      runCommand(CMD.reboot().cmd);
+    }
+  });
+  $('set-rgb-pins-btn')?.addEventListener('click', () => {
+    const data = getVal('rgb_data_pin');
+    const r = getVal('rgb_red_pin');
+    const g = getVal('rgb_green_pin');
+    const b = getVal('rgb_blue_pin');
+    runCommand(`setrgbpins ${data} ${r} ${g} ${b}`);
+  });
   $('connect-wifi-btn').addEventListener('click', () => {
     const ssid = getVal('sta_ssid');
     const pass = getVal('sta_password');
-    runCommand(ssid ? CMD.connect(ssid, pass).cmd : CMD.connect().cmd);
+    const cmd = ssid ? CMD.connect(ssid, pass).cmd : CMD.connect().cmd;
+    if (ssid) runCommand(cmd);
+    else runCommand(cmd);
   });
-  $('start-portal-btn').addEventListener('click', () => runCommand(CMD.startPortal(getVal('portal_url') || 'default', getVal('portal_ap_ssid') || 'FreeWiFi', getVal('portal_password')).cmd));
-  $('send-printer-btn').addEventListener('click', () => runCommand(CMD.powerprinter(getVal('printer_ip'), getVal('printer_text'), getVal('printer_font_size'), 'CM').cmd));
+  $('start-portal-btn').addEventListener('click', () => {
+    const cmd = CMD.startPortal(getVal('portal_url') || 'default', getVal('portal_ap_ssid') || 'FreeWiFi', getVal('portal_password')).cmd;
+    runCommand(cmd);
+  });
+  $('send-printer-btn').addEventListener('click', () => {
+    const cmd = CMD.powerprinter(getVal('printer_ip'), getVal('printer_text'), getVal('printer_font_size'), 'CM').cmd;
+    runCommand(cmd);
+  });
   $('refresh-files-btn').addEventListener('click', () => loadFiles());
   $('up-folder-btn').addEventListener('click', () => {
     if (state.currentPath !== '/mnt') {
@@ -2454,13 +2753,40 @@ function bindEvents() {
     }
   });
   $('upload-btn').addEventListener('click', () => uploadFile().catch(e => toast(e.message, 'bad')));
-  $('comm-send-btn').addEventListener('click', () => { const cmd = $('comm-input').value.trim(); if (cmd) { $('comm-input').value = ''; runRemote(cmd); } });
-  $('comm-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('comm-send-btn').click(); });
+  $('comm-send-btn').addEventListener('click', () => {
+    const cmd = $('comm-input').value.trim();
+    if (cmd) {
+      $('comm-input').value = '';
+      state.commHistory.push(cmd);
+      state.commHistoryIndex = state.commHistory.length;
+      runRemote(cmd);
+    }
+  });
+  $('comm-connect-btn')?.addEventListener('click', () => {
+    const peer = prompt('Peer name (from commdiscovery list):', '');
+    if (peer && peer.trim()) runCommand(CMD.commConnect(peer.trim()).cmd);
+  });
+  $('comm-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { $('comm-send-btn').click(); return; }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (state.commHistoryIndex > 0) state.commHistoryIndex--;
+      $('comm-input').value = state.commHistory[state.commHistoryIndex] || '';
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (state.commHistoryIndex < state.commHistory.length) state.commHistoryIndex++;
+      $('comm-input').value = state.commHistory[state.commHistoryIndex] || '';
+    }
+  });
   $('comm-disconnect-btn').addEventListener('click', disconnectComm);
   $('risk-cancel-btn').addEventListener('click', closeRiskModal);
   $('risk-local-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runCommand(cmd, { skipRisk: true }); });
   $('risk-ghostlink-btn').addEventListener('click', () => { const cmd = state.pendingRiskCommand; closeRiskModal(); if (cmd) runRemote(cmd); });
-  $('dismiss-reconnect-btn').addEventListener('click', () => $('reconnect-overlay').classList.remove('show'));
+  $('dismiss-reconnect-btn').addEventListener('click', () => {
+    $('reconnect-overlay').classList.remove('show');
+    state.reconnectActive = false;
+  });
 
   // Settings accordion controls
   const searchEl = $('settings-search');
@@ -2475,11 +2801,12 @@ function handleItemAction(action, dataset) {
   switch (action) {
     case 'select-ap': runCommand(CMD.selectAp(dataset.index).cmd); break;
     case 'select-sta': runCommand(CMD.selectSta(dataset.index).cmd); break;
-    case 'deauth': runCommand(CMD.deauth().cmd); break;
+    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd]); break;
+    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd]); break;
     case 'track-ap': runCommand(CMD.trackAp().cmd); break;
     case 'track-sta': runCommand(CMD.trackSta().cmd); break;
     case 'connect-ap': {
-      const pass = getVal('ap-connect-pass') || '';
+      const pass = getVal(`ap-connect-pass-${dataset.index}`) || '';
       const ssid = dataset.ssid;
       if (ssid) runCommand(CMD.connect(ssid, pass).cmd);
       else toast('No SSID available', 'warn');
@@ -2528,7 +2855,11 @@ function recoverPendingCommand() {
   try {
     const pending = JSON.parse(raw);
     state.lastCommand = pending.command || '';
-    toast('Recovered pending command state; parsing logs', 'warn');
+    if (pending.at && Date.now() - pending.at < 5 * 60 * 1000) {
+      toast('Recovered pending command state; parsing logs', 'warn');
+    } else {
+      localStorage.removeItem('ghost_v2_pending_command');
+    }
     refreshLogs(true).catch(() => {});
   } catch (_) {}
 }
@@ -2544,8 +2875,9 @@ function init() {
     startReconnectWatch();
   });
   state.terminalTimer = setInterval(() => {
-    refreshLogs(false).catch(() => {});
+    refreshLogs(false).then(pollPeerResponses).catch(() => {});
     if (document.querySelector('#page-dashboard.active')) renderDashboard();
+    populateDashboardIfStale();
   }, 2000);
   setInterval(() => loadCommStatus().catch(() => {}), 1500);
 }

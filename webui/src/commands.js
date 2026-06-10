@@ -31,7 +31,7 @@ const CMD = {
   selectSta:       (indices) => ({ cmd: `select -s ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select station by index' }),
   connect:         (ssid, pass) => {
     if (!ssid) return { cmd: 'connect', risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to saved WiFi' };
-    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
+    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
   },
   disconnect:      () => ({ cmd: 'disconnect',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Disconnect WiFi' }),
   wifiStatus:      () => ({ cmd: 'wifistatus',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'WiFi connection status' }),
@@ -45,7 +45,7 @@ const CMD = {
     return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Beacon spam' };
   },
   stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop beacon spam' }),
-  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
+  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(s => /\s/.test(s) ? `"${s}"` : s).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
   karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop karma attack' }),
   saeFlood:        (pass) => ({ cmd: `saeflood ${pass}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
   stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop SAE flood' }),
@@ -65,7 +65,7 @@ const CMD = {
   startEapol:      (ch) => ({ cmd: ch != null ? `capture -eapol -c ${ch}` : 'capture -eapol', risky: true, stopFirst: true, cat: 'WiFi Capture', desc: 'Start EAPOL capture' }),
 
   // Environment
-  sweep:           (stop) => ({ cmd: stop ? 'sweep -s' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
+  sweep:           (stop) => ({ cmd: stop ? 'stop' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
   pineap:          () => ({ cmd: 'pineap',          risky: true, stopFirst: true, cat: 'Environment', desc: 'Detect WiFi Pineapples' }),
   congestion:      () => ({ cmd: 'congestion',      risky: false, stopFirst: false, cat: 'Environment', desc: 'Channel congestion' }),
   listenProbes:    (stop) => ({ cmd: stop ? 'listenprobes -s' : 'listenprobes', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'Listen for probe requests' }),
@@ -80,7 +80,7 @@ const CMD = {
   scanArp:         () => ({ cmd: 'scanarp',         risky: false, stopFirst: false, cat: 'Network', desc: 'ARP scan local network' }),
   scanLocal:       () => ({ cmd: 'scanlocal',       risky: false, stopFirst: false, cat: 'Network', desc: 'Local IP lookup' }),
   scanSsh:         (target) => ({ cmd: `scanssh ${target}`, risky: false, stopFirst: false, cat: 'Network', desc: 'Scan for SSH' }),
-  dhcpStarve:      (stop) => ({ cmd: stop ? 'dhcpstarve -s' : 'dhcpstarve', risky: !stop, stopFirst: !stop, cat: 'Network', desc: 'DHCP starvation' }),
+  dhcpStarve:      (stop) => ({ cmd: stop ? 'dhcpstarve stop' : 'dhcpstarve start', risky: !stop, stopFirst: !stop, cat: 'Network', desc: 'DHCP starvation' }),
 
   // Evil Portal
   startPortal:     (path, ssid, password) => {
@@ -111,8 +111,8 @@ const CMD = {
   bleWardrive:     (stop) => ({ cmd: stop ? 'blewardriving -s' : 'blewardriving', risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: 'BLE wardriving' }),
 
   // NFC
-  chameleonScan:   (timeout) => ({ cmd: `chameleon scan ${timeout || 60}`, risky: true, stopFirst: true, cat: 'NFC', desc: 'Chameleon NFC scan' }),
-  chameleonStop:   () => ({ cmd: 'chameleon scan stop', risky: false, stopFirst: false, cat: 'NFC', desc: 'Stop NFC scan' }),
+  // Chameleon Ultra exposes subcommands like connect/scanhf/scanlf/etc.
+  // No single 'scan' verb exists; a full NFC view would need its own UI.
 
   // IR
   irList:          (path) => ({ cmd: path ? `ir list ${path}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
@@ -144,7 +144,7 @@ const CMD = {
   aerialScan:      (duration, stop) => ({ cmd: stop ? 'aerialstop' : `aerialscan ${duration || 30}`, risky: !stop, stopFirst: !stop, cat: 'Aerial', desc: 'Aerial scan' }),
   aerialList:      () => ({ cmd: 'aeriallist',      risky: false, stopFirst: false, cat: 'Aerial', desc: 'List aerial devices' }),
   aerialTrack:     (id) => ({ cmd: `aerialtrack ${id}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Track aerial device' }),
-  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof ${id || 'GHOST-TEST'} ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
+  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof "${id || 'GHOST-TEST'}" ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
   aerialSpoofStop: () => ({ cmd: 'aerialspoofstop', risky: false, stopFirst: false, cat: 'Aerial', desc: 'Stop aerial spoof' }),
 
   // Ethernet
@@ -157,6 +157,9 @@ const CMD = {
   settingsList:    () => ({ cmd: 'settings list',   risky: false, stopFirst: false, cat: 'Settings', desc: 'List all settings' }),
   settingsGet:     (key) => ({ cmd: `settings get ${key}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Get setting' }),
   settingsSet:     (key, value) => ({ cmd: `settings set ${key} ${value}`, risky: false, stopFirst: false, cat: 'Settings', desc: 'Set setting' }),
+  settingsReset:   (name) => ({ cmd: name ? `settings reset ${name}` : 'settings reset', risky: false, stopFirst: false, cat: 'Settings', desc: 'Reset settings to defaults' }),
+  settingsBackupExport: () => ({ cmd: 'settings backup export', risky: false, stopFirst: false, cat: 'Settings', desc: 'Export settings to SD' }),
+  settingsBackupImport: () => ({ cmd: 'settings backup import', risky: false, stopFirst: false, cat: 'Settings', desc: 'Import settings from SD' }),
 
   // GhostLink
   commStatus:      () => ({ cmd: 'commstatus',      risky: false, stopFirst: false, cat: 'GhostLink', desc: 'GhostLink status' }),
@@ -232,19 +235,38 @@ const WIFI_GROUPS = {
   ]
 };
 
-/** BLE action definitions */
-const BLE_ACTIONS = [
-  { label: 'Detect Devices',    factory: () => CMD.bleScan('spam') },
-  { label: 'Find Flippers',     factory: () => CMD.bleScan('flipper') },
-  { label: 'AirTag Scanner',    factory: () => CMD.bleScan('airtag') },
-  { label: 'Raw BLE Scanner',   factory: () => CMD.bleScan('raw') },
-  { label: 'Stop BLE Scan',     factory: () => CMD.bleScan(null, true) },
-  { label: 'BLE Spam - Apple',  factory: () => CMD.bleSpam('apple') },
-  { label: 'BLE Spam - Microsoft',factory: () => CMD.bleSpam('microsoft') },
-  { label: 'BLE Spam - Samsung',factory: () => CMD.bleSpam('samsung') },
-  { label: 'BLE Spam - Google', factory: () => CMD.bleSpam('google') },
-  { label: 'Stop BLE Spam',     factory: () => CMD.bleSpam(null, true) },
-];
+/** BLE action definitions (grouped, mirroring WiFi layout) */
+const BLE_GROUPS = {
+  'Scan & Select': [
+    { label: 'Detect Devices',     factory: () => CMD.bleScan('spam'),    refresh: () => CMD.bleScan('spam'),    refreshLabel: 'Re-scan' },
+    { label: 'Find Flippers',      factory: () => CMD.bleScan('flipper') },
+    { label: 'AirTag Scanner',     factory: () => CMD.bleScan('airtag') },
+    { label: 'Raw BLE Scanner',    factory: () => CMD.bleScan('raw') },
+    { label: 'GATT Scanner',       factory: () => CMD.bleScan('gatt'),   refresh: () => CMD.listGatt(),         refreshLabel: 'List GATT' },
+    { label: 'Stop BLE Scan',      factory: () => CMD.bleScan(null, true) },
+  ],
+  'Attacks': [
+    { label: 'BLE Spam - Apple',     factory: () => CMD.bleSpam('apple') },
+    { label: 'BLE Spam - Microsoft', factory: () => CMD.bleSpam('microsoft') },
+    { label: 'BLE Spam - Samsung',   factory: () => CMD.bleSpam('samsung') },
+    { label: 'BLE Spam - Google',    factory: () => CMD.bleSpam('google') },
+    { label: 'Stop BLE Spam',        factory: () => CMD.bleSpam(null, true) },
+  ],
+  'Tracking': [
+    { label: 'BLE Wardriving',     factory: () => CMD.bleWardrive() },
+    { label: 'Stop Wardriving',    factory: () => CMD.bleWardrive(true) },
+    { label: 'Spoof AirTag',       factory: () => CMD.spoofAirTag(true) },
+    { label: 'Stop AirTag Spoof',  factory: () => CMD.spoofAirTag(false) },
+  ],
+  'Misc': [
+    { label: 'List Flippers',      factory: () => CMD.listFlippers() },
+    { label: 'List AirTags',       factory: () => CMD.listAirTags() },
+    { label: 'List GATT Devices',  factory: () => CMD.listGatt() },
+    { label: 'Stop All',           factory: () => CMD.stop() },
+  ]
+};
+
+const BLE_ACTIONS = Object.values(BLE_GROUPS).flat();
 
 /** Settings schema with categories, descriptions, and validation */
 const SETTINGS_SCHEMA = [
@@ -254,7 +276,7 @@ const SETTINGS_SCHEMA = [
     description: 'Access Point and Station configuration',
     fields: [
       { id: 'ap_ssid',        label: 'AP SSID',            type: 'text',   max: 33,  hint: 'Broadcast network name' },
-      { id: 'ap_password',    label: 'AP Password',        type: 'text',   max: 65,  hint: 'Leave empty for open AP' },
+      { id: 'ap_password',    label: 'AP Password',        type: 'text',   max: 65,  hint: '8-63 chars; leave empty for open AP' },
       { id: 'ap_enabled',     label: 'AP Enabled',         type: 'bool' },
       { id: 'sta_ssid',       label: 'STA SSID',           type: 'text',   max: 65,  hint: 'Network to connect to' },
       { id: 'sta_password',   label: 'STA Password',       type: 'text',   max: 65 },
@@ -370,15 +392,15 @@ function buildCommand(factoryResult) {
 /** Determine if a raw command string is risky */
 function isRiskyCommand(commandString) {
   const riskyPatterns = [
-    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i, /^stopscan\b/i,
-    /^attack\b/i, /^beaconspam\b/i, /^stopspam\b/i, /^stopdeauth\b/i,
+    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i,
+    /^attack\b/i, /^beaconspam\b/i,
     /^capture\b/i, /^listenprobes\b/i, /^pineap\b/i, /^karma\b/i,
     /^blescan\b/i, /^blespam\b/i, /^blewardriving\b/i,
     /^startwd\b/i, /^startportal\b/i, /^sweep\b/i, /^dhcpstarve\b/i,
     /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
     /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
     /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
-    /^chameleon scan\b/i, /^reboot\b/i, /^apenable\b/i,
+    /^reboot\b/i, /^apenable\b/i,
   ];
   return riskyPatterns.some(p => p.test(commandString.trim()));
 }
