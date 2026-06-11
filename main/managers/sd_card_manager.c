@@ -852,13 +852,9 @@ esp_err_t sd_card_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
     if (bus_init_success) {
       sd_spi_bus_release_if_tracked();
     }
-#else
-    (void)bus_init_success;
-#endif
     if (display_was_suspended) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();

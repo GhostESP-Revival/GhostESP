@@ -1008,6 +1008,9 @@ int handle_serial_command(const char *input) {
         strcmp(actual_command, "badusb keyboard_stop") == 0 ||
         strcmp(actual_command, "badusb jiggle_start") == 0 ||
         strcmp(actual_command, "badusb jiggle_stop") == 0 ||
+        strncmp(actual_command, "badusb trackpad_move ", 21) == 0 ||
+        strcmp(actual_command, "badusb trackpad_start") == 0 ||
+        strcmp(actual_command, "badusb trackpad_stop") == 0 ||
         strcmp(actual_command, "badusb stop") == 0;
     if (!quiet_badusb_setting) {
       glog("Received command from peer: %s\n", actual_command);

@@ -5,6 +5,7 @@
 #include "managers/views/badusb_view.h"
 #include "managers/display_manager.h"
 #include "managers/views/main_menu_screen.h"
+#include "managers/views/trackpad_view.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "gui/options_view.h"
@@ -76,6 +77,7 @@ static const char *badusb_main_options[] = {
     "Run Script",
     "USB Keyboard",
     "Mouse Jiggler",
+    "Trackpad",
     "Settings",
     "< Back",
     NULL
@@ -303,6 +305,8 @@ static void badusb_key_immediate_cb(char c) {
     char cmd[32];
     if (c == '\b') {
         snprintf(cmd, sizeof(cmd), "keysend 0 0x2A");
+    } else if (c == '\n' || c == '\r') {
+        snprintf(cmd, sizeof(cmd), "keysend 0 0x28");  // Enter key
     } else {
         snprintf(cmd, sizeof(cmd), "type_char %u", (unsigned char)c);
     }
@@ -310,6 +314,7 @@ static void badusb_key_immediate_cb(char c) {
     esp_comm_manager_send_command("badusb", cmd);
 #elif defined(CONFIG_HAS_BADUSB)
     if (c == '\b') badusb_manager_send_keypress(0, 0x2A);
+    else if (c == '\n' || c == '\r') badusb_manager_send_keypress(0, 0x28);
     else {
         char one[2] = {c, '\0'};
         badusb_manager_send_text(one);
@@ -467,6 +472,15 @@ void badusb_view_update_status(const char *status) {
         }
     } else if (strcmp(status, "keyboard") == 0) {
         // Keyboard mode uses keyboard_view directly; do not cover it with a popup.
+        if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
+            lv_obj_del(badusb_running_popup);
+            badusb_running_popup = NULL;
+        }
+        badusb_popup_title_lbl = NULL;
+        badusb_popup_body_lbl = NULL;
+    } else if (strcmp(status, "trackpad") == 0) {
+        // Trackpad mode is driven by the remote view itself; do not pop a
+        // popup over it. This status is informational only.
         if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
             lv_obj_del(badusb_running_popup);
             badusb_running_popup = NULL;
@@ -688,6 +702,32 @@ static void handle_option(const char *option) {
                 show_running_popup_ex("Mouse Jiggler", false);
 #endif
             }
+        } else if (strcmp(option, "Trackpad") == 0) {
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_TOUCHSCREEN) && !defined(CONFIG_USE_CARDPUTER) && !defined(CONFIG_USE_CARDPUTER_ADV) && !defined(CONFIG_USE_TDECK) && !defined(CONFIG_USE_JOYSTICK)
+            error_popup_create("No trackpad input");
+            return;
+#else
+            if (remote && !esp_comm_manager_is_connected()) {
+                error_popup_create("Not connected to peer");
+                return;
+            }
+            trackpad_view_set_return_view(&badusb_view);
+            if (remote) {
+#ifdef CONFIG_HAS_BADUSB_REMOTE
+                esp_comm_manager_send_command("badusb", "trackpad_start");
+                display_manager_switch_view(&trackpad_view);
+#endif
+            } else {
+#ifdef CONFIG_HAS_BADUSB
+                esp_err_t ret = badusb_manager_trackpad_start();
+                if (ret != ESP_OK) {
+                    error_popup_create("Failed to start trackpad");
+                    return;
+                }
+                display_manager_switch_view(&trackpad_view);
+#endif
+            }
+#endif
         } else if (strcmp(option, "< Back") == 0) {
             go_back();
         }
@@ -1028,6 +1068,8 @@ void badusb_view_input_cb(InputEvent *event) {
             int thr_x = LV_HOR_RES / BADUSB_SWIPE_THRESHOLD_RATIO;
             int dx = data->point.x - badusb_touch_drag.start_x;
 
+            int saved_start_x = badusb_touch_drag.start_x;
+            int saved_start_y = badusb_touch_drag.start_y;
             bool was_dragged = touch_drag_release(&badusb_touch_drag, data);
             if (was_dragged) {
                 display_manager_flush_pending_scroll();
@@ -1037,8 +1079,8 @@ void badusb_view_input_cb(InputEvent *event) {
 
             lv_area_t cont_area;
             lv_obj_get_coords(menu_container, &cont_area);
-            bool started_in_container = (badusb_touch_drag.start_x >= cont_area.x1 && badusb_touch_drag.start_x <= cont_area.x2 &&
-                                         badusb_touch_drag.start_y >= cont_area.y1 && badusb_touch_drag.start_y <= cont_area.y2);
+            bool started_in_container = (saved_start_x >= cont_area.x1 && saved_start_x <= cont_area.x2 &&
+                                          saved_start_y >= cont_area.y1 && saved_start_y <= cont_area.y2);
             if (!started_in_container) return;
             if (abs(dx) > thr_x) return;
 

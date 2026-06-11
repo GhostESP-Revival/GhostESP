@@ -280,6 +280,51 @@ static inline uint32_t get_tdeck_repeat_rate(void) {
 
 static uint16_t original_beacon_interval = 100;
 
+// Global keyboard key repeat: re-injects the last pressed key while held.
+// Uses the same input_repeat_speed setting as joystick repeat.
+static uint8_t s_kb_repeat_key = 0;
+static esp_timer_handle_t s_kb_repeat_timer = NULL;
+
+static void kb_repeat_fire_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    InputEvent ev;
+    ev.type = INPUT_TYPE_KEYBOARD;
+    ev.data.key_value = s_kb_repeat_key;
+    ev.is_touch_move = false;
+    ev.is_repeat = true;
+    xQueueSend(input_queue, &ev, 0);
+}
+
+static void kb_repeat_start(uint8_t key) {
+    s_kb_repeat_key = key;
+    if (!s_kb_repeat_timer) return;
+    if (esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+    // First repeat uses the initial delay, then switch to interval
+    esp_timer_start_once(s_kb_repeat_timer, get_joystick_repeat_initial_delay() * 1000);
+}
+
+static void kb_repeat_stop(void) {
+    s_kb_repeat_key = 0;
+    if (s_kb_repeat_timer && esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+}
+
+// Called after initial delay fires — switch to periodic repeat
+static void kb_repeat_initial_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    // Inject the first repeat immediately
+    kb_repeat_fire_cb(NULL);
+    // Start periodic repeat at the interval rate
+    if (s_kb_repeat_timer && s_kb_repeat_key) {
+        esp_timer_start_periodic(s_kb_repeat_timer, get_joystick_repeat_interval() * 1000);
+    }
+}
+
 #define BACKLIGHT_SLEEP_POLL_MS 50   // Poll slower when dimmed
 
 static inline uint32_t dm_now_ms(void) {
@@ -1703,6 +1748,15 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   display_manager_init_success = true;
   last_touch_time = xTaskGetTickCount();
+
+  // Create global keyboard repeat timer (used by all views for held-key repeat)
+  if (!s_kb_repeat_timer) {
+      esp_timer_create_args_t args = {
+          .callback = kb_repeat_initial_cb,
+          .name = "kb_repeat",
+      };
+      esp_timer_create(&args, &s_kb_repeat_timer);
+  }
   is_backlight_dimmed = false;
 
   // Keep the panel dark until the first real view has been drawn.
@@ -1942,7 +1996,9 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Audio Player") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
-          strcmp(view_name, "SD Browser") == 0);
+          strcmp(view_name, "SD Browser") == 0 ||
+          strcmp(view_name, "BadUSB") == 0 ||
+          strcmp(view_name, "Trackpad") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {
@@ -3082,12 +3138,27 @@ void processEvent() {
         processed++;
         continue;
       }
-      // Joystick release events are only meaningful in the keyboard view.
+      // Joystick release events are only meaningful in the keyboard view and trackpad view.
       // All other views only check joystick_index and would double-fire on release.
       if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-          strcmp(view_name, "Keyboard Screen") != 0) {
+          strcmp(view_name, "Keyboard Screen") != 0 &&
+          strcmp(view_name, "Trackpad") != 0) {
         processed++;
         continue;
+      }
+      // Global keyboard repeat: start on press, stop on release.
+      // Release events are consumed here for all views except Trackpad
+      // (which needs them for tap/hold click detection).
+      if (event.type == INPUT_TYPE_KEYBOARD) {
+          if (event.is_touch_move) {
+              kb_repeat_stop();
+              if (strcmp(view_name, "Trackpad") != 0) {
+                  processed++;
+                  continue;
+              }
+          } else {
+              kb_repeat_start(event.data.key_value);
+          }
       }
       if (input_callback) input_callback(&event);
     }
@@ -3128,10 +3199,22 @@ void processEvent() {
         if (event.type == INPUT_TYPE_TOUCH && event.is_touch_move && !accepts_touch_move) {
           // drop live move samples for views that still treat pressed touches as clicks
         } else if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-            strcmp(view_name, "Keyboard Screen") != 0) {
-          // drop release event for non-keyboard views
-        } else if (input_callback) {
-          input_callback(&event);
+            strcmp(view_name, "Keyboard Screen") != 0 &&
+            strcmp(view_name, "Trackpad") != 0) {
+          // drop release event for non-keyboard/non-trackpad views
+        } else if (event.type == INPUT_TYPE_KEYBOARD && event.is_touch_move) {
+          // keyboard release: stop global repeat, forward only to Trackpad
+          kb_repeat_stop();
+          if (strcmp(view_name, "Trackpad") != 0) {
+              // drop for all other views
+          } else if (input_callback) {
+              input_callback(&event);
+          }
+        } else {
+          if (event.type == INPUT_TYPE_KEYBOARD && !event.is_touch_move) {
+              kb_repeat_start(event.data.key_value);
+          }
+          if (input_callback) input_callback(&event);
         }
       }
     }

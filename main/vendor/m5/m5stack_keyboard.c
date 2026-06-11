@@ -48,8 +48,8 @@ static bool tca_is_shift_like_active(Keyboard_t *kb){
 static SemaphoreHandle_t s_tca_sem = NULL;
 static TaskHandle_t s_tca_task = NULL;
 // keyboard event push helper (avoid extra allocations)
-static void tca_push_key_event(uint8_t key_value){
-    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value;
+static void tca_push_key_event(uint8_t key_value, bool pressed){
+    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value; ev.is_touch_move = !pressed;
     xQueueSend((QueueHandle_t)input_queue, &ev, 0);
 }
 
@@ -194,8 +194,18 @@ static void tca_keyboard_task(void* arg){
                 if (display_manager_notify_user_input()) {
                     // swallowed as wake event
                 } else {
-                    tca_push_key_event(key_value);
+                    tca_push_key_event(key_value, true);
                 }
+            }
+        }
+        // third pass: emit released non-modifier keys
+        for (size_t i = 0; i < ev_idx; ++i) {
+            if (events[i].pressed) continue;
+            uint8_t base_code = base_codes[i];
+            if (base_code == KEY_LEFT_SHIFT || base_code == KEY_LEFT_CTRL || base_code == KEY_LEFT_ALT || base_code == KEY_OPT) continue;
+            uint8_t key_value = keyboard_get_key(&gkeyboard, pts[i]);
+            if (key_value) {
+                tca_push_key_event(key_value, false);
             }
         }
         // clear INT status

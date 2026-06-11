@@ -2,23 +2,28 @@
 
 ## Revival v2.0-pre5
 
-- Added USB Keyboard Mode for forwarding on-device keystrokes over usb
+
+- Fixed asset pack background image not properly filling the screen on some devices
+- Replaced the placeholder ghost sprite on small screenswith the real GhostESP logo
+- Added a trackpad option to BadUSB
+- Added proper touch support to the BadUSB view
+- BadUSB view now uses the standard touch bar styling
+- Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
 - Added mouse jiggler to BadUSB
 - Added `badusb type_char` CLI command for typing single ASCII characters
 - Made BadUSB keyboard startup async so GhostLink doesn't block
 - Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
 - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
 - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
-- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan from the CLI or on-device menu
+- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
 - Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
 - Tightened native SD app storage scope and path checks
 - Made native SD app launch failures diagnostic-only instead of quarantining apps
 - Added a separate `nrf24` native SD app permission
 - Added small native SD app helpers for capability checks and SubGHz replay
-- Refactored BadUSB menu to use the shared touch drag state machine, themed touch bar, and `options_view` click callbacks
-- Fixed asset pack background image not properly filling the screen on devices whose display aspect doesn't match the builder's default
 
-## Revival v2.0-pre4
+
+## Revival v2.0-pre4 - 2026-06-06
 
 ### Added
  - Added 5 new Ghostchi images. "Banshee" by @pr3
@@ -68,7 +73,7 @@
  - Fixed Waveshare 7-inch (ESP32-S3-Touch-LCD-7) backlight and touch
  - Fixed Wigle "already uploaded" check stalling uploads on long histories by caching the on-disk log in RAM
 
-## Revival v2.0-pre3
+## Revival v2.0-pre3 - 2026-06-03
 
  - Added custom asset packs loaded from SD with custom icons, colors, and backgrounds.
  - Refactored main menu layout sizing and made portrait grid screens more compact
@@ -85,7 +90,7 @@
  - Moved Goertzel ring buffers and MIC sample buffer to PSRAM to free up internal RAM
  - Bumped GhostBT to v0.2.2
 
-## Revival v2.0-pre2
+## Revival v2.0-pre2 - 2026-06-01
 
  - Added WiFi Airspace Monitor with realtime packet/threat insights, fast channel hopping, and suspect device cards
  - Added native SD apps loaded from the SD card with permissions, scoped storage, and launch-failure quarantine
@@ -105,7 +110,7 @@
  - Moved Ethernet to a standalone main menu item - @Billi-Green
  - Added touch handling to ethernet view
 
-## Revival v2.0-pre1
+## Revival v2.0-pre1 - 2026-05-21
 
  - Added PIN lock screen with lock on wake and auto-lock settings
  - Added toast notification system
@@ -127,7 +132,7 @@
    - Input repeat speed (Slow/Normal/Fast)
  - Added epilepsy warning toggle (disables flashing LED effect popups)
 
-## Revival v1.9.10
+## Revival v1.9.10 - 2026-05-18
 
 - Fixed Settings submenus on Cardputer ADV showing shifted content from Network onward when Status Display is not compiled in
 - Fixed Cardputer grid card navigation not scrolling down when keyboard/encoder selection moves below the visible rows
@@ -136,7 +141,7 @@
 - Fixed potential boot hang on splash screen with no SD card inserted on shared-SPI boards
 - Removed compile-time GPS menu gate. GPS menu is now always visible since the RX pin can be set at runtime via `gpspin` command
 
-## Revival v1.9.9
+## Revival v1.9.9 - 2026-05-12
 
 ### Added
 - Added DNS sinkhole with blocklist-based NXDOMAIN blocking, parent-domain matching, CNAME inspection, iOS/DoH bypass canaries, query logging, and PSRAM/no-PSRAM lookup paths
@@ -223,7 +228,7 @@
   snapshot with 60B lightweight copy
 - Fixed inverted touch scroll direction on grid cards main menu layout
 
-## Revival v1.9.8
+## Revival v1.9.8 - 2026-04-14
 
 ### Added
 - Added New 'Ghostchi' App - assets by pr3!
@@ -277,7 +282,7 @@
 - Fixed snprintf size mismatch in WebUI file upload handler that could write past allocation
 - Reset BLE spam detector state (company_id + counter) consistently on stop
 
-## Revival v1.9.7
+## Revival v1.9.7 - 2026-03-23
 
 ### Added
 - MIC RGB visualizer adapted from SensoryBridge by Connor Nishijima (https://github.com/connornishijima/SensoryBridge)
@@ -297,7 +302,7 @@
 - Added back missing RGB pulse for flipper and airtag detection
 - Fixed boot crash loop on devices without RTC hardware by replacing ESP_ERROR_CHECK with graceful error handling in RTC driver
 
-## Revival v1.9.6
+## Revival v1.9.6 - 2026-03-10
 
 ### Added
 - Added Channel Switch attack
@@ -313,7 +318,7 @@
 - Fixed FreeRTOS xTaskCreateStatic stack size bug, saving significant memory
 - Fixed SD/SPI regression potentially causing some devices to not function properly
 
-## Revival v1.9.5
+## Revival v1.9.5 - 2026-03-09
 
 ### Added
 - Added auto saving of coredumps and cli commands for debugging - @tototo31
@@ -348,7 +353,7 @@
 - Fixed a wardriving packet parsing crash risk by validating short management frames before copying the 802.11 header
 - Removed incorrect blescan help log
 
-## Revival v1.9.4
+## Revival v1.9.4 - 2026-03-02
 
 ### Added
 - Added `wifistatus` CLI command to show connection status and saved network info
@@ -430,7 +435,7 @@
 - Fixed NFC saved tag popup having vertically aligned buttons instead of horizontal
 - Fixed Marauder v4 SD Card mounting
 
-## Revival v1.9.3
+## Revival v1.9.3 - 2026-02-11
 
 ### Added
 - Added support for the Febris Pro board
@@ -490,7 +495,7 @@
 - Fixed issues with saving most settings to NVS
 - Fixed deauth reverse-direction frames using station MAC as BSSID instead of AP BSSID
 
-## Revival v1.9.2
+## Revival v1.9.2 - 2026-01-05
 
 - Added Wireshark dongle mode for real-time PCAP streaming over USB/UART
 - Added "No portal files found" placeholder for evil portal when SD folder is empty
@@ -510,7 +515,7 @@
 - Updated NimBLE config options to mirror the TEmbedC1101 for improved BLE reliability during certain tasks like AirTag detection
 - Misc small fixes
 
-## Revival v1.9.1
+## Revival v1.9.1 - 2025-12-25
 
 - Fixed WebUI AP-only restriction to correctly allow AP clients (including IPv6-mapped IPv4 addresses)
 - 'setcountry' command is now case-insensitive
@@ -520,7 +525,7 @@
 - Improved Cardputer charging detection
 - Fixed dedicated GhostLink webui terminal not showing responses
 
-## Revival v1.9
+## Revival v1.9 - 2025-12-23
 
 ### Added
 
@@ -693,7 +698,7 @@
 - Fixed TEmbed C1101-specific hardware initialization running on all encoder configs
 - Raise sys event task size to prevent intermittent crashes
 
-## Revival v1.8.1
+## Revival v1.8.1 - 2025-11-03
 
 ### Added
 
@@ -722,7 +727,7 @@
 - Correct ADC battery percentage scaling math to prevent incorrect readings
 - Fixed BQ27220 reset/reseal flow to more accurately reflect battery state
 
-## Revival v1.8
+## Revival v1.8 - 2025-10-27
 
 ### TL;DR
 
@@ -846,7 +851,7 @@
 - Remove key highlight on touch only devices for the keyboard view
 - Fixed duplicate back button and wrong red styling in universals IR view
 
-## Revival v1.7.2
+## Revival v1.7.2 - 2025-09-06
 
 ### Added
 
@@ -866,7 +871,7 @@
 - Shift main menu down to account for status bar
 - Prevent UART conflicts on TDECK by conditionally disabling serial manager and UART driver installation in esp_comm_manager.c - @tototo31
 
-## Revival v1.7.1
+## Revival v1.7.1 - 2025-08-21
 
 - Fix for RGB not properly being handled on devices with no LEDs
 - Possible fix for captive portal not being effective on some devices
@@ -875,7 +880,7 @@
 - Update setcountry command on the C5 to use the official esp_wifi_set_country_code function
 
 
-## Revival v1.7
+## Revival v1.7 - 2025-08-17
 
 ### Major Updates
 
@@ -992,12 +997,12 @@
   - Remove legacy led strip rmt driver
   - Tweaks to evil portal captive portal handling
 
-## Revival 1.6.1
+## Revival 1.6.1 - 2025-07-02
 
 - Hotfix for 'BLE stack not ready' on CYD devices.
 
 
-## Revival v1.6
+## Revival v1.6 - 2025-06-30
 
 ### TLDR
 
@@ -1092,7 +1097,7 @@ Support for FlipperZero IR files, Better power consumption, BLE Spam, WPA3 SAE F
   - Fix file explorer not opening folders, erroring on upload.
 
 
-## Revival v1.5.1
+## Revival v1.5.1 - 2025-05-30
 
 ### Added
 
@@ -1117,7 +1122,7 @@ Support for FlipperZero IR files, Better power consumption, BLE Spam, WPA3 SAE F
 - fix cardputer settings menu crash
 - fix rabbit labs' phantom n cyd build boot issues
 
-## Revival v1.5
+## Revival v1.5 - 2025-05-25
 
 ### Added
 
@@ -1237,7 +1242,7 @@ Support for FlipperZero IR files, Better power consumption, BLE Spam, WPA3 SAE F
   - Reset GPS timeout flag on initialization
   - Assign gps RX pin based on CONFIG if not explicitly set by the user - #12 - @tototo31
 
-## Revival v1.4.9
+## Revival v1.4.9 - 2025-04-27
 
 ### ❤️ New Stuff
 
@@ -1278,7 +1283,7 @@ Rest in Peace, GhostESP - 22 April 2025
 
 ______________________
 
-## 1.4.7
+## 1.4.7 - 2025-03-09
 
 ### ❤️ New Stuff
 
@@ -1324,7 +1329,7 @@ Lighting:
   - Added Reset AP Credentials as a display option - @jaylikesbunda
 
 
-## 1.4.6
+## 1.4.6 - 2025-01-06
 
 ### ❤️ New Features
 
@@ -1350,7 +1355,7 @@ Lighting:
 - Miscellaneous fixes and improvements - @Spooks4576, @jaylikesbunda
 - Clang-Format main and include folders for better code readability - @jaylikesbunda
 
-## 1.4.5
+## 1.4.5 - 2024-12-20
 
 ### 🛠️ Core Improvements
 

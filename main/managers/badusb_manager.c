@@ -267,6 +267,8 @@ bool badusb_hid_mouse_send(int8_t dx, int8_t dy, uint8_t buttons) {
 static TaskHandle_t s_jiggler_task = NULL;
 static TaskHandle_t s_mode_start_task = NULL;
 static volatile bool s_jiggler_stop = false;
+static volatile bool s_trackpad_active = false;
+static volatile uint8_t s_trackpad_buttons = 0;
 
 static void mouse_jiggler_task(void *arg) {
     (void)arg;
@@ -295,6 +297,7 @@ static void mouse_jiggler_task(void *arg) {
 typedef enum {
     BADUSB_START_JIGGLER = 1,
     BADUSB_START_KEYBOARD = 2,
+    BADUSB_START_TRACKPAD = 3,
 } badusb_start_mode_t;
 
 static void badusb_mode_start_task(void *arg) {
@@ -322,6 +325,13 @@ static void badusb_mode_start_task(void *arg) {
         if (esp_comm_manager_is_connected()) {
             esp_comm_manager_send_command("badusb", "status keyboard");
         }
+    } else if (ret == ESP_OK && mode == BADUSB_START_TRACKPAD) {
+        s_trackpad_buttons = 0;
+        s_trackpad_active = true;
+        glog("BadUSB: Trackpad mode started\n");
+        if (esp_comm_manager_is_connected()) {
+            esp_comm_manager_send_command("badusb", "status trackpad");
+        }
     }
 
     if (ret != ESP_OK) {
@@ -332,6 +342,8 @@ static void badusb_mode_start_task(void *arg) {
         }
         s_active = false;
         s_keyboard_mode = false;
+        s_trackpad_active = false;
+        s_trackpad_buttons = 0;
         if (esp_comm_manager_is_connected()) {
             esp_comm_manager_send_command("badusb", "status done");
         }
@@ -374,6 +386,63 @@ esp_err_t badusb_manager_mouse_jiggle_stop(void) {
 
 bool badusb_manager_is_jiggling(void) {
     return s_jiggler_task != NULL;
+}
+
+// --- Trackpad Mode (remote/local mouse HID control) ---
+
+esp_err_t badusb_manager_trackpad_start(void) {
+    if (s_mode_start_task) return ESP_ERR_INVALID_STATE;
+    if (s_trackpad_active) return ESP_OK;
+
+    if (xTaskCreate(badusb_mode_start_task, "badusb_mode", 6144,
+                    (void *)(uintptr_t)BADUSB_START_TRACKPAD, 5, &s_mode_start_task) != pdPASS) {
+        s_mode_start_task = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t badusb_manager_trackpad_stop(void) {
+    s_stop_requested = true;
+    for (int i = 0; i < 100 && s_mode_start_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    s_trackpad_active = false;
+    s_trackpad_buttons = 0;
+    if (!s_keyboard_mode && !s_jiggler_task && s_driver_installed) {
+        tinyusb_driver_uninstall();
+        s_driver_installed = false;
+        s_active = false;
+    }
+    glog("BadUSB: Trackpad mode stopped\n");
+    if (esp_comm_manager_is_connected()) {
+        esp_comm_manager_send_command("badusb", "status done");
+    }
+    return ESP_OK;
+}
+
+bool badusb_manager_is_trackpad(void) {
+    return s_trackpad_active;
+}
+
+void badusb_manager_trackpad_move(int dx, int dy) {
+    if (!s_trackpad_active) return;
+    // The HID boot mouse report is 1 byte per axis, so saturate each axis to
+    // int8. Excess magnitude is dropped - the caller is expected to chunk
+    // large drags into successive reports if needed.
+    if (dx > 127) dx = 127;
+    if (dx < -128) dx = -128;
+    if (dy > 127) dy = 127;
+    if (dy < -128) dy = -128;
+    badusb_hid_mouse_send((int8_t)dx, (int8_t)dy, s_trackpad_buttons);
+}
+
+void badusb_manager_trackpad_button(uint8_t buttons) {
+    if (!s_trackpad_active) return;
+    s_trackpad_buttons = buttons & 0x07;  // Boot mouse: 3 buttons
+    // Emit a zero-delta report with the new button state so the host sees
+    // the press/release immediately, even if the cursor hasn't moved.
+    badusb_hid_mouse_send(0, 0, s_trackpad_buttons);
 }
 
 // --- Keyboard Mode (real-time key forwarding) ---
@@ -586,6 +655,8 @@ esp_err_t badusb_manager_stop(void) {
     s_stop_requested = true;
     s_keyboard_mode = false;
     s_jiggler_stop = true;
+    s_trackpad_active = false;
+    s_trackpad_buttons = 0;
     s_active = false;
     ESP_LOGI(TAG, "BadUSB stopped");
     return ESP_OK;
