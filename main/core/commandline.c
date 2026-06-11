@@ -8579,7 +8579,7 @@ void handle_badusb_cmd(int argc, char **argv) {
     bool remote_request = esp_comm_manager_is_remote_command();
 
     if (argc < 2) {
-        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop>\n");
+        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop|trackpad_start|trackpad_stop|trackpad_move|trackpad_button>\n");
         glog("  badusb run <filename>       - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
         glog("  badusb list                 - List available scripts\n");
         glog("  badusb stop                 - Stop current execution\n");
@@ -8596,6 +8596,10 @@ void handle_badusb_cmd(int argc, char **argv) {
         glog("  badusb jiggle_stop          - Stop mouse jiggler\n");
         glog("  badusb keyboard_start       - Start USB keyboard mode\n");
         glog("  badusb keyboard_stop        - Stop USB keyboard mode\n");
+        glog("  badusb trackpad_start       - Start USB trackpad (mouse) mode\n");
+        glog("  badusb trackpad_stop        - Stop USB trackpad mode\n");
+        glog("  badusb trackpad_move <dx> <dy> - Send relative mouse move (each axis clamped to int8)\n");
+        glog("  badusb trackpad_button <mask>  - Set held mouse buttons (1=L 2=R 4=M, 0=release)\n");
         return;
     }
 
@@ -8773,6 +8777,31 @@ void handle_badusb_cmd(int argc, char **argv) {
     } else if (strcmp(sub, "keyboard_stop") == 0) {
         badusb_manager_keyboard_mode_stop();
         glog("BadUSB: Keyboard mode stopped\n");
+    } else if (strcmp(sub, "trackpad_start") == 0) {
+        esp_err_t ret = badusb_manager_trackpad_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start trackpad mode: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Trackpad mode started\n");
+        }
+    } else if (strcmp(sub, "trackpad_stop") == 0) {
+        badusb_manager_trackpad_stop();
+        glog("BadUSB: Trackpad mode stopped\n");
+    } else if (strcmp(sub, "trackpad_move") == 0) {
+        if (argc < 4) {
+            glog("Usage: badusb trackpad_move <dx> <dy>\n");
+            return;
+        }
+        int dx = atoi(argv[2]);
+        int dy = atoi(argv[3]);
+        badusb_manager_trackpad_move(dx, dy);
+    } else if (strcmp(sub, "trackpad_button") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb trackpad_button <mask>\n");
+            return;
+        }
+        uint8_t buttons = (uint8_t)strtoul(argv[2], NULL, 0);
+        badusb_manager_trackpad_button(buttons);
     } else if (strcmp(sub, "status") == 0) {
         // Status update from peer - forward to view
 #ifdef CONFIG_WITH_SCREEN

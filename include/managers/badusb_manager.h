@@ -34,6 +34,17 @@ esp_err_t badusb_manager_mouse_jiggle_start(void);
 esp_err_t badusb_manager_mouse_jiggle_stop(void);
 bool badusb_manager_is_jiggling(void);
 
+// Trackpad mode: HID mouse driven by remote (or local) trackpad input.
+// Keeps the existing TinyUSB keyboard+mouse descriptor active and exposes
+// the mouse interface for dx/dy/button reports. trackpad_move saturates
+// each axis to int8 per report (extra magnitude is dropped). buttons uses
+// the standard boot-mouse bitmask (1=Left, 2=Right, 4=Middle).
+esp_err_t badusb_manager_trackpad_start(void);
+esp_err_t badusb_manager_trackpad_stop(void);
+bool badusb_manager_is_trackpad(void);
+void badusb_manager_trackpad_move(int dx, int dy);
+void badusb_manager_trackpad_button(uint8_t buttons);
+
 // Keyboard mode: real-time key forwarding via COMM_STREAM_CHANNEL_KEYBOARD
 esp_err_t badusb_manager_keyboard_mode_start(void);
 esp_err_t badusb_manager_keyboard_mode_stop(void);
