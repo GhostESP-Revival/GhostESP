@@ -16,6 +16,7 @@
 - Added a separate `nrf24` native SD app permission
 - Added small native SD app helpers for capability checks and SubGHz replay
 - Refactored BadUSB on-device menu to use the shared touch drag state machine, themed touch bar, and `options_view` click callbacks so it now honors the `touch_drag_scroll` setting and matches the look and behavior of the other views
+- Fixed asset pack background image not properly filling the screen on devices whose display aspect doesn't match the builder's 240x320 default (e.g. TEmbedC1101)
 
 ## Revival v2.0-pre4
 

@@ -1586,12 +1586,21 @@ bool asset_pack_background_should_scale(void) {
     return s_bg_scale_to_fill;
 }
 
-/* One-time bake of the small tile into a fullscreen RGB565 PSRAM buffer.
+/* One-time bake of the source into a fullscreen RGB565 PSRAM buffer.
  * Result: a single LV_IMG_CF_TRUE_COLOR desc sized to LV_HOR_RES x LV_VER_RES
- * that LVGL can blit with no per-frame tiling math. */
+ * that LVGL can blit with no per-frame scaling math.
+ *
+ * Scaling is cover-fit: aspect ratio is preserved, the source is scaled by
+ * a uniform factor so it fully covers the destination on at least one axis,
+ * and the excess on the other axis is center-cropped. This is the standard
+ * "background image fills the screen" behavior and avoids the aspect-ratio
+ * distortion that LVGL's non-uniform zoom would produce. */
 static esp_err_t bake_background_fullscreen(void) {
     if (s_bg_fullscreen_data) return ESP_OK;
     if (!s_bg_tile_data) return ESP_ERR_INVALID_STATE;
+    /* Indexed formats are rendered per-frame in screen_layout.c
+     * (indexed_scaled_bg_draw_cb) which understands the 4bpp palette. */
+    if (s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) return ESP_ERR_NOT_SUPPORTED;
 
     int sw = s_bg_tile_dsc.header.w;
     int sh = s_bg_tile_dsc.header.h;
@@ -1606,17 +1615,37 @@ static esp_err_t bake_background_fullscreen(void) {
     if (!buf) return ESP_ERR_NO_MEM;
 
     const uint8_t *src = s_bg_tile_data;
-    for (int y = 0; y < dh; y++) {
-        int src_y = y % sh;
-        uint8_t *dst_row = buf + (size_t)y * dw * 2;
-        const uint8_t *src_row = src + (size_t)src_y * sw * 2;
-        int x = 0;
-        while (x + sw <= dw) {
-            memcpy(dst_row + x * 2, src_row, (size_t)sw * 2);
-            x += sw;
+
+    /* Pick the larger of dw/sw and dh/sh so the scaled source fully covers
+     * the destination on at least one axis. Center-crop the other axis. */
+    int scaled_w, scaled_h, offset_x, offset_y;
+    if ((uint32_t)dw * sh >= (uint32_t)dh * sw) {
+        scaled_w = dw;
+        scaled_h = (int)((uint32_t)sh * (uint32_t)dw / (uint32_t)sw);
+        offset_x = 0;
+        offset_y = (scaled_h - dh) / 2;
+    } else {
+        scaled_h = dh;
+        scaled_w = (int)((uint32_t)sw * (uint32_t)dh / (uint32_t)sh);
+        offset_x = (scaled_w - dw) / 2;
+        offset_y = 0;
+    }
+    if (scaled_w < dw) scaled_w = dw;
+    if (scaled_h < dh) scaled_h = dh;
+
+    for (int dy = 0; dy < dh; dy++) {
+        int sy = ((dy + offset_y) * sh + scaled_h / 2) / scaled_h;
+        if (sy < 0) sy = 0;
+        if (sy >= sh) sy = sh - 1;
+        const uint8_t *src_row = src + (size_t)sy * sw * 2;
+        uint8_t *dst_row = buf + (size_t)dy * dw * 2;
+        for (int dx = 0; dx < dw; dx++) {
+            int sx = ((dx + offset_x) * sw + scaled_w / 2) / scaled_w;
+            if (sx < 0) sx = 0;
+            if (sx >= sw) sx = sw - 1;
+            dst_row[dx * 2]     = src_row[sx * 2];
+            dst_row[dx * 2 + 1] = src_row[sx * 2 + 1];
         }
-        int rem = dw - x;
-        if (rem > 0) memcpy(dst_row + x * 2, src_row, (size_t)rem * 2);
     }
 
     s_bg_fullscreen_dsc = s_bg_tile_dsc;
@@ -1625,7 +1654,7 @@ static esp_err_t bake_background_fullscreen(void) {
     s_bg_fullscreen_dsc.data_size = (uint32_t)size;
     s_bg_fullscreen_dsc.data = buf;
     s_bg_fullscreen_data = buf;
-    ESP_LOGI(TAG, "baked fullscreen bg: %dx%d (%u bytes) from %dx%d tile",
+    ESP_LOGI(TAG, "baked fullscreen bg: %dx%d (%u bytes) cover-scaled from %dx%d",
              dw, dh, (unsigned)size, sw, sh);
     return ESP_OK;
 }
@@ -1637,7 +1666,10 @@ const lv_img_dsc_t *asset_pack_get_background_fullscreen(void) {
     if (s_bg_tile_dsc.header.w == (uint16_t)LV_HOR_RES && s_bg_tile_dsc.header.h == (uint16_t)LV_VER_RES) {
         return &s_bg_tile_dsc;
     }
-    if (s_bg_scale_to_fill || s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) {
+    /* Indexed sources bypass the bake: LVGL can't blit a pre-baked
+     * INDEXED_4BIT desc, so they're rendered per-frame with nearest-
+     * neighbor scaling in screen_layout.c. */
+    if (s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) {
         return &s_bg_tile_dsc;
     }
     if (bake_background_fullscreen() != ESP_OK) {
