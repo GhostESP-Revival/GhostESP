@@ -11,165 +11,6 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
 
 ## Compatibility Matrix
 
-<style>
-  .compat-table {
-    --compat-bg: #ffffff;
-    --compat-header-bg: #f5f5f5;
-    --compat-text: #000000;
-    --compat-border: #e0e0e0;
-    --compat-hover: #f9f9f9;
-    border-radius: 0.5rem;
-    max-height: 70vh;
-    overflow: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    background: var(--compat-bg);
-    position: relative;
-    isolation: isolate;
-  }
-  .compat-table table {
-    margin: 0;
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    min-width: 720px;
-    color: var(--compat-text);
-  }
-  .compat-table th,
-  .compat-table td {
-    padding: 0.75rem;
-    text-align: center;
-    vertical-align: middle;
-    border-bottom: 1px solid var(--compat-border);
-  }
-  .compat-table th:first-child,
-  .compat-table td:first-child {
-    text-align: left;
-    position: sticky;
-    left: 0;
-    background: var(--compat-bg);
-    box-shadow: 1px 0 0 var(--compat-border);
-    z-index: 2;
-  }
-  .compat-table tbody tr:hover { background: var(--compat-hover); }
-  .compat-table thead th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--compat-header-bg);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-  }
-  .compat-table thead th:first-child {
-    left: 0;
-    z-index: 3;
-    background: var(--compat-header-bg);
-  }
-
-  :where([data-theme="dark"], html[data-bs-theme="dark"], body[data-bs-theme="dark"], [data-bs-theme="dark"], html.dark, body.dark, .dark-mode, .theme-dark) .compat-table {
-    --compat-bg: #1a1a1a;
-    --compat-header-bg: #2d2d2d;
-    --compat-text: #ffffff;
-    --compat-border: #3d3d3d;
-    --compat-hover: #252525;
-  }
-  :where([data-theme="light"], html[data-bs-theme="light"], body[data-bs-theme="light"], [data-bs-theme="light"], html.light, body.light, .light-mode, .theme-light) .compat-table {
-    --compat-bg: #ffffff;
-    --compat-header-bg: #f5f5f5;
-    --compat-text: #000000;
-    --compat-border: #e0e0e0;
-    --compat-hover: #f9f9f9;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme]) .compat-table {
-      --compat-bg: #1a1a1a;
-      --compat-header-bg: #2d2d2d;
-      --compat-text: #ffffff;
-      --compat-border: #3d3d3d;
-      --compat-hover: #252525;
-    }
-  }
-
-  .vendor-table {
-    --vendor-bg: #ffffff;
-    --vendor-header-bg: #f5f5f5;
-    --vendor-text: #000000;
-    --vendor-border: #e0e0e0;
-    --vendor-hover: #f9f9f9;
-    border-radius: 0.5rem;
-    overflow: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    background: var(--vendor-bg);
-    position: relative;
-    isolation: isolate;
-  }
-  .vendor-table table {
-    margin: 0;
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    min-width: 600px;
-    color: var(--vendor-text);
-  }
-  .vendor-table th,
-  .vendor-table td {
-    padding: 0.75rem;
-    text-align: left;
-    vertical-align: middle;
-    border-bottom: 1px solid var(--vendor-border);
-  }
-  .vendor-table th:first-child,
-  .vendor-table td:first-child {
-    position: sticky;
-    left: 0;
-    background: var(--vendor-bg);
-    box-shadow: 1px 0 0 var(--vendor-border);
-    z-index: 2;
-  }
-  .vendor-table tbody tr:hover { background: var(--vendor-hover); }
-  .vendor-table thead th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--vendor-header-bg);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-  }
-  .vendor-table thead th:first-child {
-    left: 0;
-    z-index: 3;
-    background: var(--vendor-header-bg);
-  }
-  .vendor-table img {
-    max-width: 150px;
-    max-height: 100px;
-    object-fit: contain;
-  }
-
-  :where([data-theme="dark"], html[data-bs-theme="dark"], body[data-bs-theme="dark"], [data-bs-theme="dark"], html.dark, body.dark, .dark-mode, .theme-dark) .vendor-table {
-    --vendor-bg: #1a1a1a;
-    --vendor-header-bg: #2d2d2d;
-    --vendor-text: #ffffff;
-    --vendor-border: #3d3d3d;
-    --vendor-hover: #252525;
-  }
-  :where([data-theme="light"], html[data-bs-theme="light"], body[data-bs-theme="light"], [data-bs-theme="light"], html.light, body.light, .light-mode, .theme-light) .vendor-table {
-    --vendor-bg: #ffffff;
-    --vendor-header-bg: #f5f5f5;
-    --vendor-text: #000000;
-    --vendor-border: #e0e0e0;
-    --vendor-hover: #f9f9f9;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme]) .vendor-table {
-      --vendor-bg: #1a1a1a;
-      --vendor-header-bg: #2d2d2d;
-      --vendor-text: #ffffff;
-      --vendor-border: #3d3d3d;
-      --vendor-hover: #252525;
-    }
-  }
-</style>
-
 <div class="compat-table">
   <table>
     <thead>
@@ -233,47 +74,35 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
 
 The following table lists the vendor-specific boards supported by GhostESP with their corresponding build names:
 
-<div class="vendor-table">
-  <table>
-    <thead>
-      <tr>
-        <th>Board Name</th>
-        <th>Build Name</th>
-        <th>Image</th>
-      </tr>
-    </thead>
-    <tbody>
-      
-      <tr><td>CYDMicroUSB</td><td><code>CYDMicroUSB.zip</code></td><td></td></tr>
-      <tr><td>CYDDualUSB</td><td><code>CYDDualUSB.zip</code></td><td></td></tr>
-      <tr><td>CYD2432S028R</td><td><code>CYD2432S028R.zip</code></td><td><img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"></td></tr>
-      <tr><td>Waveshare 7″</td><td><code>Waveshare_LCD.zip</code></td><td></td></tr>
-      <tr><td>Crowtech 7″</td><td><code>Crowtech_LCD.zip</code></td><td></td></tr>
-      <tr><td>Sunton 7″</td><td><code>Sunton_LCD.zip</code></td><td></td></tr>
-      <tr><td>Cardputer</td><td><code>ESP32-S3-Cardputer.zip</code></td><td><img src="../images/m5_cardputer.jpg" alt="M5 Stack Cardputer"></td></tr>
-      <tr><td>Cardputer ADV</td><td><code>CardputerADV.zip</code></td><td></td></tr>
-      <tr><td>MarauderV4</td><td><code>MarauderV4_FlipperHub.zip</code></td><td></td></tr>
-      <tr><td>MarauderV6 & AwokDual</td><td><code>MarauderV6_AwokDual.zip</code></td><td></td></tr>
-      <tr><td>AwokMini</td><td><code>AwokMini.zip</code></td><td></td></tr>
-      <tr><td>Awok V5</td><td><code>esp32v5_awok.zip</code></td><td></td></tr>
-      <tr><td>T-Display S3 Touch</td><td><code>LilyGo-TDisplayS3-Touch.zip</code></td><td></td></tr>
-      <tr><td>S3TWatch</td><td><code>LilyGo-S3TWatch-2020.zip</code></td><td></td></tr>
-      <tr><td>TEmbed CC1101</td><td><code>LilyGo-TEmbedC1101.zip</code></td><td><img src="../images/lilygo_tembed_cc1101.jpg" alt="Lily Go Tembed cc1101"></td></tr>
-      <tr><td>GhostBoard</td><td><code>ghostboard.zip</code></td><td><img src="../images/rabbit_labs_ghost_board_black.jpg" alt="Black Rabbit Labs Ghost Board"></td></tr>
-      <tr><td>T-Deck</td><td><code>LilyGo-T-Deck.zip</code></td><td><img src="../images/lilygo_tdeck_plus.jpg" alt="LilyGo T-Deck Plus"></td></tr>
-      <tr><td>JCMK DevBoardPro</td><td><code>JCMK_DevBoardPro.zip</code></td><td></td></tr>
-      <tr><td>RabbitLabs Minion</td><td><code>RabbitLabs_Minion.zip</code></td><td><img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"></td></tr>
-      <tr><td>RabbitLabs Phantom</td><td><code>CYD2USB2.4Inch.zip</code></td><td><img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"></td></tr>
-      <tr><td>Lolin S3 Pro</td><td><code>Lolin_S3_Pro.zip</code></td><td><img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"></td></tr>
-      <tr><td>Seeed Studio XIAO ESP32-S3 Sense</td><td><code>xiao_esp32s3_sense.zip</code></td><td></td></tr>
-      <tr><td>Seeed Studio XIAO ESP32-C5</td><td><code>xiao_esp32c5.zip</code></td><td></td></tr>
-      <tr><td>Flipper JCMK GPS</td><td><code>Flipper_JCMK_GPS.zip</code></td><td><img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"></td></tr>
-      <tr><td>JC3248W535EN</td><td><code>JC3248W535EN_LCD.zip</code></td><td></td></tr>
-      <tr><td>Wired Hatters ESPRocket</td><td><code>esp32-generic.zip</code></td><td><img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"></td></tr>
-      <tr><td>Wired Hatters Ultimate Marauder</td><td>Red Port: <code>esp32-generic.zip</code> and Blue Port: <code>MarauderV4_FlipperHub.zip</code></td><td><img src="../images/wired_hatters_ultimate_marauder.jpg" alt="Wired Hatters Ultimate Marauder"></td></tr>
-      <tr><td>Heltec V3</td><td><code>heltecv3.zip</code></td><td></td></tr>
-    </tbody>
-  </table>
-</div>
+| Board Name | Build Name | Image |
+|---|---|---|
+| CYDMicroUSB | `CYDMicroUSB.zip` | |
+| CYDDualUSB | `CYDDualUSB.zip` | |
+| CYD2432S028R | `CYD2432S028R.zip` | <img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"> |
+| Waveshare 7″ | `Waveshare_LCD.zip` | |
+| Crowtech 7″ | `Crowtech_LCD.zip` | |
+| Sunton 7″ | `Sunton_LCD.zip` | |
+| Cardputer | `ESP32-S3-Cardputer.zip` | <img src="../images/m5_cardputer.jpg" alt="M5 Stack Cardputer"> |
+| Cardputer ADV | `CardputerADV.zip` | |
+| MarauderV4 | `MarauderV4_FlipperHub.zip` | |
+| MarauderV6 & AwokDual | `MarauderV6_AwokDual.zip` | |
+| AwokMini | `AwokMini.zip` | |
+| Awok V5 | `esp32v5_awok.zip` | |
+| T-Display S3 Touch | `LilyGo-TDisplayS3-Touch.zip` | |
+| S3TWatch | `LilyGo-S3TWatch-2020.zip` | |
+| TEmbed CC1101 | `LilyGo-TEmbedC1101.zip` | <img src="../images/lilygo_tembed_cc1101.jpg" alt="Lily Go Tembed cc1101"> |
+| GhostBoard | `ghostboard.zip` | <img src="../images/rabbit_labs_ghost_board_black.jpg" alt="Black Rabbit Labs Ghost Board"> |
+| T-Deck | `LilyGo-T-Deck.zip` | <img src="../images/lilygo_tdeck_plus.jpg" alt="LilyGo T-Deck Plus"> |
+| JCMK DevBoardPro | `JCMK_DevBoardPro.zip` | |
+| RabbitLabs Minion | `RabbitLabs_Minion.zip` | <img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"> |
+| RabbitLabs Phantom | `CYD2USB2.4Inch.zip` | <img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"> |
+| Lolin S3 Pro | `Lolin_S3_Pro.zip` | <img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"> |
+| Seeed Studio XIAO ESP32-S3 Sense | `xiao_esp32s3_sense.zip` | |
+| Seeed Studio XIAO ESP32-C5 | `xiao_esp32c5.zip` | |
+| Flipper JCMK GPS | `Flipper_JCMK_GPS.zip` | <img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"> |
+| JC3248W535EN | `JC3248W535EN_LCD.zip` | |
+| Wired Hatters ESPRocket | `esp32-generic.zip` | <img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"> |
+| Wired Hatters Ultimate Marauder | Red Port: `esp32-generic.zip` and Blue Port: `MarauderV4_FlipperHub.zip` | <img src="../images/wired_hatters_ultimate_marauder.jpg" alt="Wired Hatters Ultimate Marauder"> |
+| Heltec V3 | `heltecv3.zip` | |
 
 > **Note:** Images are being added as they become available.

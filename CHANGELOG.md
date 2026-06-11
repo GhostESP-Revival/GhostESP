@@ -21,6 +21,21 @@
 - Made native SD app launch failures diagnostic-only instead of quarantining apps
 - Added a separate `nrf24` native SD app permission
 - Added small native SD app helpers for capability checks and SubGHz replay
+- Hardened `serial_task` against OOM by checking the UART buffer allocation
+- Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
+- Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
+- Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL
+- Fixed leaks of `g_app_url` when the DIAL `Application-Url` header arrived more than once
+- Made `generate_uuid` take a caller-owned buffer so concurrent DIAL binds can no longer race on its static storage
+- Fixed realloc-to-same-pointer in M5Stack keyboard, MIFARE Classic universal command loading, and Chameleon/MIFARE cache init paths so an OOM no longer leaks the previous allocation and then dereferences NULL
+- Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin` so a partial allocation no longer leaves half-initialized state for downstream code to trip over
+- Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
+- Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
+- Made `glog` copy the formatted line to a heap buffer before unlocking and fixed the deferred-queue leak when defer mode is turned off
+- Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state that were being mutated from WiFi/BLE/timer callbacks and read from other tasks
+- Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
+- Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
+- Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
 
 
 ## Revival v2.0-pre4 - 2026-06-06

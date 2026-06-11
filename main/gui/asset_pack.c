@@ -1685,6 +1685,8 @@ typedef struct {
 
 static QueueHandle_t s_switch_queue = NULL;
 static TaskHandle_t s_switch_worker = NULL;
+static StaticTask_t s_switch_tcb;
+static StackType_t *s_switch_stack = NULL;
 
 static void switch_pack_ui_refresh(void *arg) {
     (void)arg;
@@ -1736,8 +1738,17 @@ void asset_pack_switch_task(int index) {
     }
 
     if (!s_switch_worker) {
-        BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096, NULL, 6, &s_switch_worker);
-        if (ok != pdPASS) {
+        const int stack_size = 5120;
+        if (!s_switch_stack) {
+            s_switch_stack = heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!s_switch_stack) {
+                s_switch_stack = heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            }
+        }
+        if (s_switch_stack) {
+            s_switch_worker = xTaskCreateStatic(switch_pack_worker, "pack_switch", stack_size, NULL, 6, s_switch_stack, &s_switch_tcb);
+        }
+        if (!s_switch_worker) {
             ESP_LOGW(TAG, "asset_pack_switch_task: failed to create worker task; switching inline");
             esp_err_t err = switch_pack_run(index);
             if (err == ESP_OK) switch_pack_ui_refresh(NULL);

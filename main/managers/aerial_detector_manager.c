@@ -826,10 +826,10 @@ static AerialDevice* find_or_create_device(const uint8_t *mac) {
     
     AerialDevice *device = &devices[device_count++];
     memset(device, 0, sizeof(AerialDevice));
-    strcpy(device->mac, mac_str);
-    strcpy(device->device_id, "Unknown");
-    strcpy(device->operator_id, "N/A");
-    strcpy(device->description, "N/A");
+    strlcpy(device->mac, mac_str, sizeof(device->mac));
+    strlcpy(device->device_id, "Unknown", sizeof(device->device_id));
+    strlcpy(device->operator_id, "N/A", sizeof(device->operator_id));
+    strlcpy(device->description, "N/A", sizeof(device->description));
     device->type = AERIAL_TYPE_UNKNOWN;
     device->status = AERIAL_STATUS_UNKNOWN;
     device->altitude = -1000.0f;

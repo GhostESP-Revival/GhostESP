@@ -625,6 +625,11 @@ static void process_html_line(const char* line) {
 
 void serial_task(void *pvParameter) {
   uint8_t *data = (uint8_t *)malloc(BUF_SIZE);
+  if (!data) {
+    ESP_LOGE("SerialTask", "Failed to allocate serial buffer");
+    vTaskDelete(NULL);
+    return;
+  }
   int index = 0;
   static uint32_t hwm_log_counter = 0;
 

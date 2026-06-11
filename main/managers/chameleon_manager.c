@@ -437,6 +437,11 @@ static void cu_mfc_cache_begin(MFC_TYPE t, const uint8_t *uid, uint8_t uid_len, 
     int sec_bits = (sectors + 7) >> 3;
     g_cu_mfc_cache.key_a_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
     g_cu_mfc_cache.key_b_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
+    if (!g_cu_mfc_cache.blocks || !g_cu_mfc_cache.known_bits ||
+        !g_cu_mfc_cache.key_a || !g_cu_mfc_cache.key_b ||
+        !g_cu_mfc_cache.key_a_valid || !g_cu_mfc_cache.key_b_valid) {
+        cu_mfc_cache_reset();
+    }
 }
 
 static inline void cu_bitset_set(uint8_t *arr, int idx) { arr[(unsigned)idx >> 3] |= (uint8_t)(1u << (idx & 7)); }

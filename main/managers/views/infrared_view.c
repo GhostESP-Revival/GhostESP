@@ -2271,8 +2271,12 @@ static void file_event_open(int idx) {
                             if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
                         }
                         if (!dup) {
-                            uni_command_names = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
-                            uni_command_names[uni_command_count] = strdup(v);
+                            char **tmp = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
+                            if (!tmp) break;
+                            uni_command_names = tmp;
+                            char *name = strdup(v);
+                            if (!name) break;
+                            uni_command_names[uni_command_count] = name;
                             uni_command_count++;
                         }
                         strcpy(last, v);

@@ -5791,6 +5791,11 @@ static bool sd_cli_ensure_mounted(void) {
 }
 
 static void sd_cli_cleanup(void) {
+    for (size_t i = 0; i < g_sd_cli_count; i++) {
+        free(g_sd_cli_paths[i]);
+        g_sd_cli_paths[i] = NULL;
+    }
+    g_sd_cli_count = 0;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (sd_cli_jit_mounted) {
         sd_card_unmount_after_flush(sd_cli_display_suspended);
@@ -6549,12 +6554,12 @@ static const char* sweep_get_cipher_str(wifi_cipher_type_t cipher) {
 
 static void sweep_get_phy_modes(wifi_ap_record_t *ap, char *buf, size_t len) {
     buf[0] = '\0';
-    if (ap->phy_11ax) strcat(buf, "ax/");
-    if (ap->phy_11ac) strcat(buf, "ac/");
-    if (ap->phy_11n) strcat(buf, "n/");
-    if (ap->phy_11a) strcat(buf, "a/");
-    if (ap->phy_11g) strcat(buf, "g/");
-    if (ap->phy_11b) strcat(buf, "b/");
+    if (ap->phy_11ax) strlcat(buf, "ax/", len);
+    if (ap->phy_11ac) strlcat(buf, "ac/", len);
+    if (ap->phy_11n) strlcat(buf, "n/", len);
+    if (ap->phy_11a) strlcat(buf, "a/", len);
+    if (ap->phy_11g) strlcat(buf, "g/", len);
+    if (ap->phy_11b) strlcat(buf, "b/", len);
     size_t l = strlen(buf);
     if (l > 0) buf[l - 1] = '\0';
 }
@@ -10128,6 +10133,7 @@ static void sinkhole_download_task(void *pvParam) {
     if (!sd_card_manager.is_initialized) {
         glog("SD card required to download blocklist\n");
         free(url);
+        free(filepath);
         free(params);
         vTaskDelete(NULL);
         return;
@@ -10151,6 +10157,7 @@ static void sinkhole_download_task(void *pvParam) {
         if (!f) {
             glog("Failed to create blocklist file\n");
             free(url);
+            free(filepath);
             free(params);
             vTaskDelete(NULL);
             return;
@@ -10179,6 +10186,7 @@ static void sinkhole_download_task(void *pvParam) {
     }
 
     free(url);
+    free(filepath);
     free(params);
     vTaskDelete(NULL);
 }

@@ -88,8 +88,15 @@ void glog(const char *fmt, ...) {
         }
         char *queued = malloc((size_t)written + 1);
         if (!queued) {
-            glog_unlock();
-            glog_emit(buf);
+            char *fallback = malloc((size_t)written + 1);
+            if (fallback) {
+                memcpy(fallback, buf, (size_t)written + 1);
+                glog_unlock();
+                glog_emit(fallback);
+                free(fallback);
+            } else {
+                glog_unlock();
+            }
             return;
         }
         memcpy(queued, buf, (size_t)written + 1);
@@ -99,15 +106,28 @@ void glog(const char *fmt, ...) {
         glog_unlock();
         return;
     }
+
+    char *local_buf = malloc((size_t)written + 1);
+    if (!local_buf) {
+        glog_unlock();
+        return;
+    }
+    memcpy(local_buf, buf, (size_t)written + 1);
     glog_unlock();
 
-    glog_emit(buf);
+    glog_emit(local_buf);
+    free(local_buf);
 }
 
 void glog_set_defer(int on) {
+    int was_defer;
     glog_lock();
+    was_defer = s_glog_defer;
     s_glog_defer = (on != 0);
     glog_unlock();
+    if (was_defer && !on) {
+        glog_flush_deferred();
+    }
 }
 
 void glog_flush_deferred(void) {
