@@ -5,6 +5,7 @@
 #include "driver/usb_serial_jtag.h"
 #include "esp_task_wdt.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -39,15 +40,18 @@
 #define SERIAL_BUFFER_SIZE 512
 #define SERIAL_TASK_STACK_SIZE_INTERNAL 5120
 #define SERIAL_TASK_STACK_SIZE_PSRAM 8192
+#define SERIAL_TASK_USE_PSRAM_STACK 0
 
-#if defined(CONFIG_SPIRAM)
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 #define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
 #else
 #define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_INTERNAL
 #endif
 
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 static StackType_t *s_serial_task_stack = NULL;
 static StaticTask_t *s_serial_task_buffer = NULL;
+#endif
 
 #ifndef CONFIG_CONSOLE_UART_BAUDRATE
 #ifdef CONFIG_MONITOR_BAUD
@@ -57,7 +61,7 @@ static StaticTask_t *s_serial_task_buffer = NULL;
 #endif
 #endif
 
-char serial_buffer[SERIAL_BUFFER_SIZE];
+EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
@@ -88,7 +92,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
 static int cursor_position = 0;
 
 // Command history instance
-static CommandHistory command_history;
+EXT_RAM_BSS_ATTR static CommandHistory command_history;
 
 // Prompt display tracking
 static bool prompt_displayed = false;
@@ -931,7 +935,7 @@ void serial_manager_init() {
   ESP_LOGI("SerialManager", "Command queue created: depth=6, item_size=%u bytes", sizeof(SerialCommand));
 
   BaseType_t task_rc = pdFAIL;
-#if defined(CONFIG_SPIRAM)
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
   if (!s_serial_task_stack) {
     s_serial_task_stack = heap_caps_malloc(SERIAL_TASK_STACK_SIZE * sizeof(StackType_t),
                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -958,7 +962,7 @@ void serial_manager_init() {
     s_serial_task_buffer = NULL;
 #endif
   task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE_INTERNAL, NULL, 2, &s_serial_task_handle);
-#if defined(CONFIG_SPIRAM)
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
   }
 #endif
   if (task_rc != pdPASS) {

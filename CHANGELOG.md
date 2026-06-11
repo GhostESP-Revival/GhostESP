@@ -2,40 +2,50 @@
 
 ## Revival v2.0-pre5
 
+### Added
+ - Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
+ - Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
+ - Added a trackpad option to BadUSB
+ - Added proper touch support to the BadUSB view
+ - Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
+ - Added mouse jiggler to BadUSB
+ - Added `badusb type_char` CLI command for typing single ASCII characters
+ - Added a separate `nrf24` native SD app permission
+ - Added small native SD app helpers for capability checks and SubGHz replay
+ - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
+ - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
 
-- Fixed asset pack background image not properly filling the screen on some devices
-- Replaced the placeholder ghost sprite on small screenswith the real GhostESP logo
-- Added a trackpad option to BadUSB
-- Added proper touch support to the BadUSB view
-- BadUSB view now uses the standard touch bar styling
-- Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
-- Added mouse jiggler to BadUSB
-- Added `badusb type_char` CLI command for typing single ASCII characters
-- Made BadUSB keyboard startup async so GhostLink doesn't block
-- Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
-- Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
-- Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
-- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
-- Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
-- Tightened native SD app storage scope and path checks
-- Made native SD app launch failures diagnostic-only instead of quarantining apps
-- Added a separate `nrf24` native SD app permission
-- Added small native SD app helpers for capability checks and SubGHz replay
-- Hardened `serial_task` against OOM by checking the UART buffer allocation
-- Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
-- Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
-- Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL
-- Fixed leaks of `g_app_url` when the DIAL `Application-Url` header arrived more than once
-- Made `generate_uuid` take a caller-owned buffer so concurrent DIAL binds can no longer race on its static storage
-- Fixed realloc-to-same-pointer in M5Stack keyboard, MIFARE Classic universal command loading, and Chameleon/MIFARE cache init paths so an OOM no longer leaks the previous allocation and then dereferences NULL
-- Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin` so a partial allocation no longer leaves half-initialized state for downstream code to trip over
-- Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
-- Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
-- Made `glog` copy the formatted line to a heap buffer before unlocking and fixed the deferred-queue leak when defer mode is turned off
-- Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state that were being mutated from WiFi/BLE/timer callbacks and read from other tasks
-- Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
-- Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
-- Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
+### Changed
+ - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
+ - Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)
+ - BadUSB view now uses the standard touch bar styling
+ - Made BadUSB keyboard startup async so GhostLink doesn't block
+ - Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+ - Made native SD app launch failures diagnostic-only instead of quarantining apps
+ - Tightened native SD app storage scope and path checks
+ - Made `generate_uuid` take a caller-owned buffer so concurrent DIAL binds can no longer race on its static storage
+ - Hardened `serial_task` against OOM by checking the UART buffer allocation
+ - Made `glog` copy the formatted line to a heap buffer before unlocking and fixed the deferred-queue leak when defer mode is turned off
+ - Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
+ - Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
+ - Replaced the placeholder ghost sprite on small screens with the real GhostESP logo
+
+### Fixed
+ - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
+ - Fixed "Scan SSH" menu item previously failing due to missing required argument
+ - Fixed asset pack background image not properly filling the screen on some devices
+ - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+ - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+ - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
+ - Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
+ - Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
+ - Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
+ - Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL
+ - Fixed leaks of `g_app_url` when the DIAL `Application-Url` header arrived more than once
+ - Fixed realloc-to-same-pointer in M5Stack keyboard, MIFARE Classic universal command loading, and Chameleon/MIFARE cache init paths so an OOM no longer leaks the previous allocation and then dereferences NULL
+ - Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
+ - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
+ - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
 
 
 ## Revival v2.0-pre4 - 2026-06-06

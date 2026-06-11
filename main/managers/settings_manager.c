@@ -1344,6 +1344,21 @@ void settings_save(const FSettings *settings) {
     ghostchi_manager_add_xp(1);
 }
 
+void settings_save_sta_credentials(const FSettings *settings) {
+    if (!settings) return;
+
+    esp_err_t err = nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvsHandle);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save STA credentials: %s", esp_err_to_name(err));
+    }
+}
+
 void settings_set_ap_ssid(FSettings *settings, const char *ssid) {
   strncpy(settings->ap_ssid, ssid, sizeof(settings->ap_ssid) - 1);
   settings->ap_ssid[sizeof(settings->ap_ssid) - 1] = '\0';

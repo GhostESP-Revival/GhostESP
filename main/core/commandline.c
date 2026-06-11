@@ -22,6 +22,9 @@
 #include "managers/wifi_manager.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/ssh_scan.h"
+#include "scans/wifi/netbios_scan.h"
+#include "scans/wifi/http_banner_scan.h"
+#include "scans/wifi/snmp_scan.h"
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
@@ -1108,6 +1111,16 @@ void handle_stop_flipper(int argc, char **argv) {
     }
 
     wifi_manager_stop_monitor_mode();  // Stop any active monitoring
+
+    // Stop network discovery scans
+    ssh_scan_cancel();
+    netbios_scan_cancel();
+    http_banner_scan_cancel();
+    snmp_scan_cancel();
+    port_scan_cancel();
+    glog("Stopped network scans.\n");
+    stopped_any = true;
+
     if (wifi_manager_stop_deauth_station()) {
         glog("Stopped station deauth.\n");
         stopped_any = true;
@@ -1419,7 +1432,7 @@ void handle_wifi_connection(int argc, char **argv) {
         // Save provided credentials to NVS
         settings_set_sta_ssid(&G_Settings, ssid);
         settings_set_sta_password(&G_Settings, password);
-        settings_save(&G_Settings);
+        settings_save_sta_credentials(&G_Settings);
     }
     wifi_manager_set_manual_disconnect(false);
     wifi_manager_connect_wifi(ssid, password);
@@ -4267,18 +4280,55 @@ void handle_scan_arp(int argc, char **argv) {
 
 void handle_scan_ssh(int argc, char **argv) {
     if (argc < 2) {
-        glog("Usage: scanssh <IP>\n");
-        status_display_show_status("SSH Usage");
+        glog("Starting SSH scan on local subnet...\n");
+        ssh_scan_subnet();
+        status_display_show_status("SSH Scan Done");
         return;
     }
 
     const char *target_ip = argv[1];
-    
     glog("Starting SSH scan on %s...\n", target_ip);
-    
     ssh_scan_host(target_ip);
-    
     status_display_show_status("SSH Scan Done");
+}
+
+void handle_netbios_scan(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting NetBIOS scan on local subnet...\n");
+        netbios_scan_subnet();
+        status_display_show_status("NetBIOS Done");
+        return;
+    }
+
+    glog("Starting NetBIOS scan on %s...\n", argv[1]);
+    netbios_scan_host(argv[1]);
+    status_display_show_status("NetBIOS Done");
+}
+
+void handle_http_banner_scan(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting HTTP banner scan on local subnet...\n");
+        http_banner_scan_subnet();
+        status_display_show_status("HTTP Banner Done");
+        return;
+    }
+
+    glog("Starting HTTP banner scan on %s...\n", argv[1]);
+    http_banner_scan_host(argv[1]);
+    status_display_show_status("HTTP Banner Done");
+}
+
+void handle_snmp_probe(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting SNMP probe on local subnet...\n");
+        snmp_scan_subnet();
+        status_display_show_status("SNMP Done");
+        return;
+    }
+
+    glog("Starting SNMP probe on %s...\n", argv[1]);
+    snmp_scan_host(argv[1]);
+    status_display_show_status("SNMP Done");
 }
 
 void handle_crash(int argc, char **argv) {
@@ -4723,6 +4773,22 @@ void handle_help(int argc, char **argv) {
         glog("scanarp\n");
         glog("    Description: Perform ARP scan on local network to discover active hosts\n");
         glog("    Usage: scanarp\n\n");
+        glog("scanssh\n");
+        glog("    Description: Scan a host or local subnet for SSH services and grab banners\n");
+        glog("    Usage: scanssh\n");
+        glog("           scanssh <IP>\n\n");
+        glog("netbiosscan\n");
+        glog("    Description: Scan for NetBIOS Name Service hosts on local subnet or specific IP\n");
+        glog("    Usage: netbiosscan\n");
+        glog("           netbiosscan <IP>\n\n");
+        glog("httpbannerscan\n");
+        glog("    Description: Scan for HTTP/HTTPS services and grab Server banners\n");
+        glog("    Usage: httpbannerscan\n");
+        glog("           httpbannerscan <IP>\n\n");
+        glog("snmpprobe\n");
+        glog("    Description: Probe SNMP v1/v2c services with common communities\n");
+        glog("    Usage: snmpprobe\n");
+        glog("           snmpprobe <IP>\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -7318,7 +7384,7 @@ void handle_ap_enable_cmd(int argc, char **argv) {
     }
     
     settings_set_ap_enabled(&G_Settings, enable);
-    settings_save(&G_Settings);
+    settings_persist_setting(SETTING_AP_ENABLED);
     
     glog("Access Point %s. Restart required to take effect.\n", enable ? "enabled" : "disabled");
     status_display_show_status(enable ? "AP Enabled" : "AP Disabled");
@@ -10543,6 +10609,9 @@ void register_commands() {
     register_command("scanports", handle_scan_ports);
     register_command("scanarp", handle_scan_arp);
     register_command("scanssh", handle_scan_ssh);
+    register_command("netbiosscan", handle_netbios_scan);
+    register_command("httpbannerscan", handle_http_banner_scan);
+    register_command("snmpprobe", handle_snmp_probe);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("settings", handle_settings_cmd);

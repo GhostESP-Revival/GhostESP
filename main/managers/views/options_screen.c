@@ -760,7 +760,10 @@ static const char * const wifi_environment_options[] = {
 };
 
 static const char * const wifi_network_options[] = {
-    "Scan LAN Devices", "ARP Scan Network", "Scan Open Ports", "Select LAN", NULL
+    "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
+    "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
+    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...",
+    NULL
 };
 
 static void switch_to_settings_category(int cat_idx);
@@ -855,9 +858,17 @@ static const char * const dual_comm_scan_options[] = {
     "Scan Stations",
     "Scan AP + STA",
     "Sweep",
-    "Scan LAN Devices",
+    "mDNS Discovery",
     "ARP Scan Network",
     "Scan Open Ports",
+    "Scan SSH",
+    "NetBIOS Scan",
+    "HTTP Banner Scan",
+    "SNMP Probe",
+    "Scan SSH Host...",
+    "NetBIOS Scan Host...",
+    "HTTP Banner Host...",
+    "SNMP Probe Host...",
     "PineAP Detection",
     "Flock Detection",
     "Channel Congestion",
@@ -865,7 +876,6 @@ static const char * const dual_comm_scan_options[] = {
     "List Stations",
     "Select AP",
     "Select Station",
-    "Select LAN",
     "Track AP",
     "Track Station",
     NULL
@@ -1628,6 +1638,9 @@ static void wigle_manual_upload_result_cb(bool success, const char *message);
 static void wigle_stats_result_cb(bool success, const char *message);
 static void wifi_connect_kb_cb(const char *text);
 static void ssh_scan_kb_cb(const char *text);
+static void netbios_scan_kb_cb(const char *text);
+static void http_banner_kb_cb(const char *text);
+static void snmp_probe_kb_cb(const char *text);
 static void dual_comm_connect_kb_cb(const char *text);
 static void dual_comm_send_kb_cb(const char *text);
 static void dual_comm_wifi_connect_kb_cb(const char *text);
@@ -4387,7 +4400,7 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend sweep");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Scan LAN Devices") == 0) {
+        } else if (strcmp(Selected_Option, "mDNS Discovery") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -4404,6 +4417,58 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend scanports local -C");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Scan SSH") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend scanssh");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Scan") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend netbiosscan");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Scan") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend httpbannerscan");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend snmpprobe");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(ssh_scan_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Scan Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(netbios_scan_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(http_banner_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(snmp_probe_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
             view_switched = true;
         } else if (strcmp(Selected_Option, "PineAP Detection") == 0) {
             terminal_set_return_view(&options_menu_view);
@@ -4454,10 +4519,6 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend tracksta");
-            view_switched = true;
-        } else if (strcmp(Selected_Option, "Select LAN") == 0) {
-            set_number_pad_mode(NP_MODE_LAN_REMOTE);
-            display_manager_switch_view(&number_pad_view);
             view_switched = true;
         } else if (strcmp(Selected_Option, "Connect to WiFi") == 0) {
             keyboard_view_set_submit_callback(dual_comm_wifi_connect_kb_cb);
@@ -5440,7 +5501,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Scan LAN Devices") == 0) {
+    else if (strcmp(Selected_Option, "mDNS Discovery") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("scanlocal");
@@ -6079,22 +6140,73 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Scan SSH") == 0) {
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
-    simulateCommand("scanssh");
-    view_switched = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("scanssh");
+        view_switched = true;
     }
-    
+
+    else if (strcmp(Selected_Option, "NetBIOS Scan") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("netbiosscan");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Scan") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("httpbannerscan");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("snmpprobe");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(ssh_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "NetBIOS Scan Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(netbios_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(http_banner_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_probe_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Reset AP Credentials") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("apcred -r");
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "Select LAN") == 0) {
-        set_number_pad_mode(NP_MODE_LAN);
-        display_manager_switch_view(&number_pad_view);
         view_switched = true;
     }
 
@@ -8937,6 +9049,51 @@ static void ssh_scan_kb_cb(const char *text) {
     
     char cmd[64];
     snprintf(cmd, sizeof(cmd), "scanssh %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void netbios_scan_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "netbiosscan %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void http_banner_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "httpbannerscan %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_probe_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "snmpprobe %s", text);
     
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);

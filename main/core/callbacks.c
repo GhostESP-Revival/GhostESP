@@ -837,6 +837,11 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
                                          uint64_t replay,
                                          bool from_ap,
                                          uint8_t msg_type) {
+    bool log_handshake = false;
+    char log_ap_str[18];
+    uint8_t log_ap_msg = 0;
+    uint8_t log_sta_msg = 0;
+
     portENTER_CRITICAL(&hs_mux);
     for (uint8_t i = 0; i < hs_count_local; i++) {
         hs_entry_t *e = &hs_table[i];
@@ -844,16 +849,20 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
             if (from_ap) e->ap_msg = msg_type; else e->sta_msg = msg_type;
             if (e->ap_msg && e->sta_msg) {
                 hs_found_count++;
-                char ap_str[18];
-                snprintf(ap_str, sizeof(ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                snprintf(log_ap_str, sizeof(log_ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
                          e->ap[0], e->ap[1], e->ap[2], e->ap[3], e->ap[4], e->ap[5]);
-                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
-                     ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
+                log_ap_msg = e->ap_msg;
+                log_sta_msg = e->sta_msg;
+                log_handshake = true;
                 // reset to avoid duplicate notifications for same replay
                 e->ap_msg = 0;
                 e->sta_msg = 0;
             }
             portEXIT_CRITICAL(&hs_mux);
+            if (log_handshake) {
+                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
+                     log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
+            }
             return;
         }
     }
