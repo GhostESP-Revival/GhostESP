@@ -38,6 +38,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`sweep [-w wifi_sec] [-b ble_sec]`** — Full environment sweep: scans WiFi APs, stations, and BLE devices, then saves a CSV report to SD (`/mnt/ghostesp/sweeps/sweep_N.csv`).
 - **`list [-a|-s|-airtags]`** — Show AP scan results, associated stations, or AirTags.
 - **`listenprobes [channel|stop]`** — Monitor probe requests and log to PCAP if SD is present.
+- **`wpa3check`** — Run a WPA3 compliance check on the selected AP (`select -a <idx>` first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from WiFi > Scan & Select on-device.
 
 ### Targeting
 

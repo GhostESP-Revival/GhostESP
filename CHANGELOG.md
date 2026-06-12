@@ -3,6 +3,7 @@
 ## Revival v2.0-pre5
 
 ### Added
+ - Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
  - Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
  - Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
  - Added a trackpad option to BadUSB

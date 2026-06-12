@@ -33,6 +33,7 @@
 #include "gui/detail_view.h"
 #include "gui/nav_history.h"
 #include "scans/wifi/ap_scan.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/wifi/station_scan.h"
@@ -752,7 +753,7 @@ static const char * const wifi_capture_options[] = {
 static const char * const wifi_scan_select_options[] = {
     "Scan Access Points", "Scan APs Live", "Scan Stations", "Scan AP + STA",
     "List Access Points", "List Stations", "List AP + STA",
-    "Multi-Select APs", "Multi-Select Stations", NULL
+    "Multi-Select APs", "Multi-Select Stations", "WPA3 Compliance", NULL
 };
 
 static const char * const wifi_environment_options[] = {
@@ -5477,6 +5478,14 @@ void option_event_cb(lv_event_t *e) {
         error_popup_create("No APs scanned");
         option_invoked = false;
         return;
+    }
+
+    else if (strcmp(Selected_Option, "WPA3 Compliance") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        wpa3_compliance_check_selected();
+        view_switched = true;
     }
 
     else if (strcmp(Selected_Option, "Multi-Select Stations") == 0) {

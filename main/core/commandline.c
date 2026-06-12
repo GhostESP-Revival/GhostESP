@@ -25,6 +25,7 @@
 #include "scans/wifi/netbios_scan.h"
 #include "scans/wifi/http_banner_scan.h"
 #include "scans/wifi/snmp_scan.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
@@ -4516,6 +4517,12 @@ void handle_help(int argc, char **argv) {
         glog("        -a  : Show access points from Wi-Fi scan\n");
         glog("        -s  : List connected stations\n");
         glog("        -airtags: List discovered AirTags\n\n");
+        glog("wpa3check\n");
+        glog("    Description: Run a WPA3 compliance check on the currently selected AP.\n");
+        glog("                 If no AP is selected, scans all APs and prints a\n");
+        glog("                 summary table with WPA3 presence, transition mode,\n");
+        glog("                 PMF posture, and a short security finding per AP.\n");
+        glog("    Usage: wpa3check (after 'scanap' and optionally 'select -a <index>')\n\n");
         glog("beaconspam\n");
         glog("    Description: Start beacon spam with different modes.\n");
         glog("    Usage: beaconspam [OPTION]\n");
@@ -5377,6 +5384,13 @@ void handle_ble_wardriving(int argc, char **argv) {
     }
 }
 #endif
+
+void handle_wpa3_compliance(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    wpa3_compliance_check_selected();
+    status_display_show_status("WPA3 Check");
+}
 
 void handle_pineap_detection(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
@@ -10640,6 +10654,7 @@ void register_commands() {
     register_command("coredump", handle_coredump_cmd);
 #endif
     register_command("pineap", handle_pineap_detection);
+    register_command("wpa3check", handle_wpa3_compliance);
     register_command("apcred", handle_apcred);
     register_command("apenable", handle_ap_enable_cmd);
     register_command("chipinfo", handle_chip_info_cmd);
