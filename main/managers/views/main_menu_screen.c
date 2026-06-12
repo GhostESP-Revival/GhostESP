@@ -100,6 +100,39 @@ static lv_color_t menu_bg_color;
 static lv_color_t menu_surface_color;
 static lv_color_t menu_text_color;
 
+static inline bool card_bg_enabled(void) {
+    return settings_get_menu_card_bg(&G_Settings);
+}
+
+static inline void apply_card_style(lv_obj_t *obj, lv_color_t surface, lv_color_t border, int border_w, int shadow_w) {
+    if (card_bg_enabled()) {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(obj, surface, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, border_w, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, shadow_w, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_50, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
+static inline void apply_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
+    if (card_bg_enabled()) {
+        lv_obj_set_style_border_width(obj, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_30, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
 static int grid_rows = 0;
 static int grid_cols = 0;
 
@@ -470,13 +503,10 @@ static void update_menu_item(bool slide_left) {
     bool connected = esp_comm_manager_is_connected();
     int menu_index = visible_index_to_menu_index(selected_item_index, connected);
 
-    lv_obj_set_style_bg_color(current_item_obj, menu_surface_color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(current_item_obj, 12, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(current_item_obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(current_item_obj, LV_OPA_40, LV_PART_MAIN);
     bool show_borders = settings_get_menu_item_borders(&G_Settings);
-    lv_obj_set_style_border_width(current_item_obj, show_borders ? 2 : 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(current_item_obj, menu_items[menu_index].border_color, LV_PART_MAIN);
+    int card_border_w = show_borders ? 2 : 0;
+    apply_card_style(current_item_obj, menu_surface_color, menu_items[menu_index].border_color, card_border_w, 12);
+    lv_obj_set_style_shadow_opa(current_item_obj, LV_OPA_40, LV_PART_MAIN);
     lv_obj_set_style_radius(current_item_obj, GUI_RADIUS_LG, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_item_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_item_obj, false, 0);
@@ -526,7 +556,8 @@ static void update_menu_item(bool slide_left) {
         }
     }
     carousel_cache.icon_recolor_enabled = recolor_enabled;
-    lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
+    int carousel_y_shift = (btn_size <= 80) ? -6 : -10;
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, carousel_y_shift);
 
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_item_obj);
@@ -854,11 +885,9 @@ void select_menu_item(int index, bool slide_left) {
                 // Reset to original styling
                 bool connected = esp_comm_manager_is_connected();
                 int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], menu_items[menu_index_prev].border_color, LV_PART_MAIN);
-                lv_obj_set_style_border_width(grid_cards[selected_item_index], show_borders_sel ? 2 : 0, LV_PART_MAIN);
-                lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 8, LV_PART_MAIN);
-                lv_obj_set_style_shadow_color(grid_cards[selected_item_index], lv_color_hex(0x000000), LV_PART_MAIN);
-                lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_50, LV_PART_MAIN);
+                apply_card_style(grid_cards[selected_item_index], menu_surface_color,
+                                 menu_items[menu_index_prev].border_color,
+                                 show_borders_sel ? 2 : 0, 8);
             }
 
             // Highlight new selection with theme accent
@@ -866,12 +895,8 @@ void select_menu_item(int index, bool slide_left) {
             if (grid_cards[selected_item_index]) {
                 uint8_t theme = settings_get_menu_theme(&G_Settings);
                 lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-                lv_obj_set_style_border_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
-                lv_obj_set_style_border_width(grid_cards[selected_item_index], 3, LV_PART_MAIN);
-                lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 12, LV_PART_MAIN);
-                lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
-                lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
-                
+                apply_card_selection_style(grid_cards[selected_item_index], accent);
+
                 scroll_grid_card_to_view(selected_item_index);
             }
         }
@@ -882,14 +907,19 @@ void select_menu_item(int index, bool slide_left) {
                 lv_obj_t *old_btn = list_buttons[selected_item_index];
                 bool connected = esp_comm_manager_is_connected();
                 int menu_index_prev = visible_index_to_menu_index(selected_item_index, connected);
-                lv_obj_set_style_border_color(old_btn, menu_items[menu_index_prev].border_color, LV_PART_MAIN);
-                lv_obj_set_style_border_width(old_btn, show_borders_list ? 2 : 0, LV_PART_MAIN);
+                apply_card_style(old_btn, menu_surface_color,
+                                 menu_items[menu_index_prev].border_color,
+                                 show_borders_list ? 2 : 0, 6);
             }
             selected_item_index = index;
             if (list_buttons[selected_item_index]) {
                 lv_obj_t *btn = list_buttons[selected_item_index];
-                lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-                lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
+                if (card_bg_enabled()) {
+                    lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+                    lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
+                } else {
+                    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+                }
                 lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
             }
         }
@@ -1069,13 +1099,10 @@ static void create_grid_menu(void) {
         lv_obj_set_height(grid_cards[i], LV_PCT(100));
 
         // Style card
-        lv_obj_set_style_bg_color(grid_cards[i], menu_surface_color, LV_PART_MAIN);
         int shadow_w = (grid_card_height <= 50 ? 4 : 8);
-        lv_obj_set_style_shadow_width(grid_cards[i], shadow_w, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(grid_cards[i], lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(grid_cards[i], LV_OPA_50, LV_PART_MAIN);
-        lv_obj_set_style_border_width(grid_cards[i], show_borders ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(grid_cards[i], menu_items[menu_index].border_color, LV_PART_MAIN);
+        apply_card_style(grid_cards[i], menu_surface_color,
+                         menu_items[menu_index].border_color,
+                         show_borders ? 2 : 0, shadow_w);
         lv_obj_set_style_radius(grid_cards[i], GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(grid_cards[i], 0, LV_PART_MAIN);
 
@@ -1106,10 +1133,7 @@ static void create_grid_menu(void) {
         if (zoom < 64)  zoom = 64;
         lv_img_set_zoom(icon, zoom);
 
-        int icon_draw_h = (img_h * zoom) / 256;
-        int icon_area_h = grid_card_height - reserved_for_label;
-        int top_offset = (icon_area_h - icon_draw_h) / 2 - (grid_card_height <= 50 ? 15 : 18);
-        if (top_offset < 0) top_offset = 0;
+        int top_offset = (grid_card_height <= 50) ? 6 : 10;
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
 
         // Add label
@@ -1131,11 +1155,7 @@ static void create_grid_menu(void) {
     if (grid_cards[selected_item_index]) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-        lv_obj_set_style_border_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_border_width(grid_cards[selected_item_index], 3, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(grid_cards[selected_item_index], 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(grid_cards[selected_item_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(grid_cards[selected_item_index], LV_OPA_30, LV_PART_MAIN);
+        apply_card_selection_style(grid_cards[selected_item_index], accent);
 
         scroll_grid_card_to_view(selected_item_index);
     }
@@ -1176,15 +1196,11 @@ static void create_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, menu_surface_color, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn, show_borders ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, menu_items[menu_index].border_color, LV_PART_MAIN);
+        apply_card_style(btn, menu_surface_color, menu_items[menu_index].border_color,
+                         show_borders ? 2 : 0, 6);
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, layout.list_column_gap, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn, 6, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(btn, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(btn, LV_OPA_40, LV_PART_MAIN);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
         lv_obj_t *icon = lv_img_create(btn);

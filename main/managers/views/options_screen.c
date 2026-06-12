@@ -1074,6 +1074,7 @@ static SettingsItem settings_items[] = {
     {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Item Borders", SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Card Background", SETTING_MENU_CARD_BG, bool_options, 2, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Touch Drag Scroll", SETTING_TOUCH_DRAG_SCROLL, bool_options, 2, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -2169,6 +2170,9 @@ static void load_current_settings_values(void) {
             case SETTING_MENU_ITEM_BORDERS:
                 settings_items[i].current_value = settings_get_menu_item_borders(&G_Settings) ? 1 : 0;
                 break;
+            case SETTING_MENU_CARD_BG:
+                settings_items[i].current_value = settings_get_menu_card_bg(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_TOUCH_DRAG_SCROLL:
                 settings_items[i].current_value = settings_get_touch_drag_scroll(&G_Settings) ? 1 : 0;
                 break;
@@ -2417,6 +2421,14 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_ITEM_BORDERS:
             settings_set_menu_item_borders(&G_Settings, new_value == 1);
             break;
+        case SETTING_MENU_CARD_BG: {
+            settings_set_menu_card_bg(&G_Settings, new_value == 1);
+            if (g_options_view) {
+                options_view_refresh_styles(g_options_view);
+                update_settings_arrows_visibility();
+            }
+            break;
+        }
         case SETTING_TOUCH_DRAG_SCROLL:
             settings_set_touch_drag_scroll(&G_Settings, new_value == 1);
             break;

@@ -173,6 +173,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddNumberToObject(o, "menu_bg_shade", (double)s->menu_bg_shade);
   cJSON_AddBoolToObject(o, "menu_rounded", s->menu_rounded);
   cJSON_AddBoolToObject(o, "menu_item_borders", s->menu_item_borders);
+  cJSON_AddBoolToObject(o, "menu_card_bg", s->menu_card_bg);
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   cJSON_AddNumberToObject(o, "status_idle_animation", (double)s->status_idle_animation);
@@ -325,6 +326,9 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "menu_item_borders")) {
     s->menu_item_borders = jget_bool(root, "menu_item_borders", s->menu_item_borders);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "menu_card_bg")) {
+    s->menu_card_bg = jget_bool(root, "menu_card_bg", s->menu_card_bg);
   }
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY

@@ -10,10 +10,11 @@
  - Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
  - Added mouse jiggler to BadUSB
  - Added `badusb type_char` CLI command for typing single ASCII characters
- - Added a separate `nrf24` native SD app permission
- - Added small native SD app helpers for capability checks and SubGHz replay
- - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
- - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
+  - Added a separate `nrf24` native SD app permission
+  - Added small native SD app helpers for capability checks and SubGHz replay
+  - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
+  - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
+  - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
 
 ### Changed
  - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
@@ -31,13 +32,14 @@
  - Replaced the placeholder ghost sprite on small screens with the real GhostESP logo
 
 ### Fixed
- - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
- - Fixed "Scan SSH" menu item previously failing due to missing required argument
- - Fixed asset pack background image not properly filling the screen on some devices
- - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
- - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
- - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
- - Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
+  - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
+  - Fixed "Scan SSH" menu item previously failing due to missing required argument
+  - Fixed asset pack background image not properly filling the screen on some devices
+  - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+  - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+  - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
+  - Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
+  - Fixed inconsistent vertical alignment of asset pack icons in the main menu and apps gallery grid cards by anchoring icons to a fixed top padding instead of centering their bounding boxes
  - Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
  - Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
  - Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL

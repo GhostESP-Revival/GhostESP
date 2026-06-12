@@ -138,6 +138,7 @@ typedef enum {
     SETTING_INPUT_REPEAT_SPEED,
     SETTING_HIGH_CONTRAST,
     SETTING_MENU_ITEM_BORDERS,
+    SETTING_MENU_CARD_BG,
     SETTING_TOUCH_DRAG_SCROLL,
     SETTING_RELOAD_ASSET_PACK,
     SETTING_EXPORT_SETTINGS_SD,
@@ -290,6 +291,7 @@ typedef struct {
     uint8_t input_repeat_speed;     // 0=Slow, 1=Normal, 2=Fast
     bool high_contrast;             // High contrast color overrides
     bool menu_item_borders;          // Borders around main menu items
+    bool menu_card_bg;               // Card background fill/shadow on main menu items
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
 
     // Lockscreen settings
@@ -549,6 +551,8 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
+void settings_set_menu_card_bg(FSettings *settings, bool enabled);
+bool settings_get_menu_card_bg(const FSettings *settings);
 void settings_set_touch_drag_scroll(FSettings *settings, bool enabled);
 bool settings_get_touch_drag_scroll(const FSettings *settings);
 

@@ -102,6 +102,7 @@ static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
 static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
+static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
 
 // Lockscreen NVS keys
@@ -238,6 +239,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
   settings->menu_item_borders = false;
+  settings->menu_card_bg = true;
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
@@ -770,6 +772,10 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
   }
+  err = nvs_get_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->menu_card_bg = (bool)value_u8;
+  }
   err = nvs_get_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->touch_drag_scroll = (bool)value_u8;
@@ -1110,6 +1116,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
             break;
+        case SETTING_MENU_CARD_BG:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, G_Settings.menu_card_bg ? 1 : 0);
+            key = NVS_MENU_CARD_BG_KEY;
+            break;
         case SETTING_TOUCH_DRAG_SCROLL:
             err = nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, G_Settings.touch_drag_scroll ? 1 : 0);
             key = NVS_TOUCH_DRAG_SCROLL_KEY;
@@ -1323,6 +1333,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed);
     nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0);
 
     // Save lockscreen settings
@@ -2061,6 +2072,16 @@ void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
 
 bool settings_get_menu_item_borders(const FSettings *settings) {
   return settings ? settings->menu_item_borders : true;
+}
+
+void settings_set_menu_card_bg(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->menu_card_bg = enabled;
+  }
+}
+
+bool settings_get_menu_card_bg(const FSettings *settings) {
+  return settings ? settings->menu_card_bg : true;
 }
 
 void settings_set_touch_drag_scroll(FSettings *settings, bool enabled) {
