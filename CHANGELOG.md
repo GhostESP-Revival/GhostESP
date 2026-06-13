@@ -19,6 +19,7 @@
  - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
  - Added an "Invert Carousel" setting in Appearance that flips the slide direction for keyboard left/right, joystick side-to-side, and the rotary encoder on the main menu carousel
  - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
+ - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
 
 ### Changed
 

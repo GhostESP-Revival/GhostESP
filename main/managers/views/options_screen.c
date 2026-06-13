@@ -1072,6 +1072,7 @@ static SettingsItem settings_items[] = {
     {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -2155,6 +2156,9 @@ static void load_current_settings_values(void) {
                 }
                 break;
             }
+            case SETTING_TERMINAL_FONT_SIZE:
+                settings_items[i].current_value = settings_get_terminal_font_size(&G_Settings);
+                break;
             case SETTING_INVERT_COLORS:
                 settings_items[i].current_value = settings_get_invert_colors(&G_Settings) ? 1 : 0;
                 break;
@@ -2376,6 +2380,9 @@ static void apply_setting_change(int setting_index, int new_value) {
             break;
         case SETTING_TERMINAL_COLOR:
             settings_set_terminal_text_color(&G_Settings, textcolor_values[new_value]);
+            break;
+        case SETTING_TERMINAL_FONT_SIZE:
+            settings_set_terminal_font_size(&G_Settings, (uint8_t)new_value);
             break;
         case SETTING_INVERT_COLORS:
             settings_set_invert_colors(&G_Settings, new_value == 1);

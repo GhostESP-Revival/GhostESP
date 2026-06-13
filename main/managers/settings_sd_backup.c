@@ -137,6 +137,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "third_control_enabled", s->third_control_enabled);
   cJSON_AddNumberToObject(o, "menu_theme", (double)s->menu_theme);
   cJSON_AddNumberToObject(o, "terminal_text_color", (double)s->terminal_text_color);
+  cJSON_AddNumberToObject(o, "terminal_font_size", (double)s->terminal_font_size);
   cJSON_AddBoolToObject(o, "invert_colors", s->invert_colors);
   cJSON_AddBoolToObject(o, "web_auth_enabled", s->web_auth_enabled);
   cJSON_AddBoolToObject(o, "webui_restrict_to_ap", s->webui_restrict_to_ap);
@@ -250,6 +251,8 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   s->menu_theme = (uint8_t)jget_int_clamp(root, "menu_theme", s->menu_theme, 0, 64);
   s->terminal_text_color =
       jget_u32_clamp(root, "terminal_text_color", s->terminal_text_color, 0, 0xFFFFFFu);
+  s->terminal_font_size =
+      (uint8_t)jget_int_clamp(root, "terminal_font_size", s->terminal_font_size, 0, 2);
   if (cJSON_GetObjectItemCaseSensitive(root, "invert_colors")) {
     s->invert_colors = jget_bool(root, "invert_colors", s->invert_colors);
   }

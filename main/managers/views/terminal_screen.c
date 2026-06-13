@@ -36,6 +36,15 @@ static void add_char_to_buffer(char c);
 static void update_input_label();
 static void keyboard_input_callback(const char *text);
 
+static const lv_font_t *terminal_font(void) {
+    uint8_t size = settings_get_terminal_font_size(&G_Settings);
+    switch (size) {
+        case 0: return &lv_font_montserrat_10;
+        case 2: return &lv_font_montserrat_14;
+        default: return &lv_font_montserrat_12;
+    }
+}
+
 static const char *TAG = "Terminal";
 static lv_obj_t *terminal_scroller = NULL;
 static lv_obj_t *terminal_label = NULL;
@@ -715,7 +724,7 @@ void terminal_view_create(void) {
     lv_obj_set_style_border_width(terminal_canvas, 0, 0);
     // Match previous label style
     lv_obj_set_style_text_color(terminal_canvas, lv_color_hex(settings_get_terminal_text_color(&G_Settings)), 0);
-    lv_obj_set_style_text_font(terminal_canvas, accessibility_get_font_small(), 0);
+    lv_obj_set_style_text_font(terminal_canvas, terminal_font(), 0);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_draw_event, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
     lv_obj_add_event_cb(terminal_scroller, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);

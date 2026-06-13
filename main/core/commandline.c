@@ -552,6 +552,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"max_bright", ST_U8, OFF(max_screen_brightness), "Display", 0, 0, 100},
     {"invert_colors", ST_BOOL, OFF(invert_colors), "Display", 0, 0, 0},
     {"terminal_color", ST_COLOR_HEX, OFF(terminal_text_color), "Display", 0, 0, 0},
+    {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
     {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, 255},
     {"font_size", ST_U8, OFF(font_size), "Display", 0, 0, 2},
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
@@ -7579,6 +7580,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    max_bright        - Max screen brightness (0-100)\n");
         glog("    invert_colors     - Invert screen colors (true/false)\n");
         glog("    terminal_color    - Terminal text color (hex)\n");
+        glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
         glog("    menu_theme        - Menu theme (0=Default)\n");
         glog("  System Settings:\n");
         glog("    channel_delay     - Channel delay in ms\n");

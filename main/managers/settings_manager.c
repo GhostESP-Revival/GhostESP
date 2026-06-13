@@ -48,6 +48,7 @@ static const char *NVS_RGB_BLUE_PIN_KEY = "rgb_blue_pin";
 static const char *NVS_THIRD_CTRL_KEY = "third_ctrl";
 static const char *NVS_MENU_THEME_KEY = "menu_theme";
 static const char *NVS_TERMINAL_TEXT_COLOR_KEY = "term_color";
+static const char *NVS_TERMINAL_FONT_SIZE_KEY = "term_font";
 static const char *NVS_INVERT_COLORS_KEY = "invert_colors";
 static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
 static const char *NVS_WEB_AUTH_KEY = "web_auth";
@@ -195,6 +196,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_blue_pin = -1;
   settings->third_control_enabled = false;
   settings->terminal_text_color = 0x00FF00;
+  settings->terminal_font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
   settings->invert_colors = false;
   settings->web_auth_enabled = false;
   settings->webui_restrict_to_ap = true;
@@ -529,6 +531,10 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, &value_u32);
   if (err == ESP_OK) {
     settings->terminal_text_color = value_u32;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->terminal_font_size = value_u8;
   }
   err = nvs_get_u8(nvsHandle, NVS_INVERT_COLORS_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -945,6 +951,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, G_Settings.terminal_text_color);
             key = NVS_TERMINAL_TEXT_COLOR_KEY;
             break;
+        case SETTING_TERMINAL_FONT_SIZE:
+            err = nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, G_Settings.terminal_font_size);
+            key = NVS_TERMINAL_FONT_SIZE_KEY;
+            break;
         case SETTING_INVERT_COLORS:
             err = nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, G_Settings.invert_colors);
             key = NVS_INVERT_COLORS_KEY;
@@ -1292,6 +1302,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_THIRD_CTRL_KEY, settings->third_control_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_THEME_KEY, settings->menu_theme);
     nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, settings->terminal_text_color);
+    nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, settings->terminal_font_size);
     nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0);
@@ -1594,6 +1605,15 @@ void settings_set_terminal_text_color(FSettings *settings, uint32_t color) {
 
 uint32_t settings_get_terminal_text_color(const FSettings *settings) {
   return settings->terminal_text_color;
+}
+
+void settings_set_terminal_font_size(FSettings *settings, uint8_t size) {
+  if (size > 2) size = 1;
+  settings->terminal_font_size = size;
+}
+
+uint8_t settings_get_terminal_font_size(const FSettings *settings) {
+  return settings ? settings->terminal_font_size : 1;
 }
 
 void settings_set_invert_colors(FSettings *settings, bool enabled) {

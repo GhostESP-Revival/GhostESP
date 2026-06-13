@@ -140,6 +140,7 @@ typedef enum {
     SETTING_MENU_ITEM_BORDERS,
     SETTING_MENU_CARD_BG,
     SETTING_TOUCH_DRAG_SCROLL,
+    SETTING_TERMINAL_FONT_SIZE,
     SETTING_RELOAD_ASSET_PACK,
     SETTING_CAROUSEL_INVERT_DIRECTION,
     SETTING_EXPORT_SETTINGS_SD,
@@ -229,6 +230,7 @@ typedef struct {
   int32_t rgb_blue_pin;  // Separate-pin RGB: blue pin, -1 if not used
   bool third_control_enabled;  // Enable third-screen tap control
   uint32_t terminal_text_color; // Terminal text color in 0xRRGGBB
+  uint8_t terminal_font_size;   // 0=Small, 1=Normal, 2=Large
   uint8_t menu_theme;  // Theme for main menu colors (0=Default)
   bool invert_colors; // Invert screen colors
   bool web_auth_enabled;
@@ -416,6 +418,8 @@ uint8_t settings_get_menu_theme(const FSettings *settings);
 
 void settings_set_terminal_text_color(FSettings *settings, uint32_t color);
 uint32_t settings_get_terminal_text_color(const FSettings *settings);
+void settings_set_terminal_font_size(FSettings *settings, uint8_t size);
+uint8_t settings_get_terminal_font_size(const FSettings *settings);
 void settings_set_invert_colors(FSettings *settings, bool enabled);
 bool settings_get_invert_colors(const FSettings *settings);
 
