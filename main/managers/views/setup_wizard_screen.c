@@ -667,9 +667,9 @@ static void skip_setup(void) {
 static void setup_wizard_create(void) {
     ESP_LOGI(TAG, "Creating setup wizard, step=%d", current_step);
     
-    display_manager_fill_screen(lv_color_hex(0x121212));
-    
-    root = gui_screen_create_root(NULL, "Setup", lv_color_hex(0x121212), LV_OPA_TRANSP);
+    display_manager_fill_screen(lv_color_hex(GUI_DEFAULT_BG_COLOR));
+
+    root = gui_screen_create_root_no_bg(NULL, "Setup", lv_color_hex(GUI_DEFAULT_BG_COLOR), LV_OPA_TRANSP);
     setup_wizard_view.root = root;
 
     switch (current_step) {

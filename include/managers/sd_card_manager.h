@@ -58,6 +58,33 @@ bool sd_card_is_virtual_storage();
 esp_err_t sd_card_mount_for_flush(bool *display_was_suspended);
 void sd_card_unmount_after_flush(bool display_was_suspended);
 
+/*
+ * Returns true when the active build keeps the SD card unmounted after
+ * init and individual callers need to mount on demand (currently the
+ * `somethingsomething` template). Returns false when the SD is mounted
+ * once at boot and stays accessible.
+ */
+bool sd_card_needs_jit_mount(void);
+
+/*
+ * sd_card_jit_begin / sd_card_jit_end wrap the JIT mount/unmount pattern
+ * used by views and managers that may run on builds without a permanent SD
+ * mount. On builds where the SD card stays mounted after init, these are
+ * no-ops and return true.
+ *
+ * Use:
+ *   bool display_was_suspended = false;
+ *   if (!sd_card_jit_begin(&display_was_suspended, false)) { handle_error(); }
+ *   ...file I/O...
+ *   sd_card_jit_end(display_was_suspended);
+ *
+ * Pass ensure_dirs=true to also call sd_card_setup_directory_structure()
+ * after a successful mount (needed by audio / IR / GhostChi flows that
+ * expect the directory tree to exist).
+ */
+bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs);
+void sd_card_jit_end(bool display_was_suspended);
+
 // cached SD stats for HUD (updated during mount operations)
 typedef struct {
     bool valid;

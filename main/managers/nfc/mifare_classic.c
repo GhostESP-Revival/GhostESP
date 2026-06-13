@@ -124,6 +124,11 @@ static void mfc_cache_begin(MFC_TYPE t, const uint8_t* uid, uint8_t uid_len, uin
     int sec_bits = (sectors + 7) >> 3;
     g_sector_key_a_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
     g_sector_key_b_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
+    if (!g_mfc_cache || !g_mfc_known ||
+        !g_sector_key_a || !g_sector_key_b ||
+        !g_sector_key_a_valid || !g_sector_key_b_valid) {
+        mfc_cache_reset();
+    }
 }
 static void mfc_cache_store_block(int abs_block, const uint8_t data[16]){
     if (!g_mfc_cache || !g_mfc_known) return;

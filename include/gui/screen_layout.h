@@ -11,12 +11,33 @@ extern "C" {
 #define GUI_STATUS_BAR_HEIGHT GUI_STATUS_BAR_H
 #endif
 
+/*
+ * GUI_DEFAULT_BG_COLOR is the fallback background colour used by root views
+ * that need a solid (non-asset-pack) base. It is intentionally NOT derived
+ * from the active theme palette: those callers explicitly want a flat black
+ * background (e.g. trackpad, setup wizard) instead of the surface ramp.
+ */
+#ifndef GUI_DEFAULT_BG_COLOR
+#define GUI_DEFAULT_BG_COLOR 0x121212u
+#endif
+
 void gui_screen_apply_background(lv_obj_t *root);
 lv_obj_t *gui_screen_create_root(lv_obj_t *parent, const char *title, lv_color_t bg_color, lv_opa_t bg_opa);
 
-/* Same as gui_screen_create_root but without applying the asset pack
- * background image. Use for views that should always render against
- * a solid color (e.g. splash, lockscreen). */
+/*
+ * Same as gui_screen_create_root but uses GUI_DEFAULT_BG_COLOR as the
+ * fill colour at LV_OPA_COVER (with the asset-pack background image
+ * drawn on top, matching what the legacy callers did with
+ * `lv_color_hex(0x121212)` + LV_OPA_COVER). Use for full-screen input
+ * views (trackpad, keyboards) that need a flat black canvas regardless
+ * of the menu background image.
+ */
+lv_obj_t *gui_screen_create_root_default(lv_obj_t *parent, const char *title);
+
+/*
+ * Same as gui_screen_create_root but skips the asset-pack background
+ * image (solid colour only). Useful for transparent overlays or popups.
+ */
 lv_obj_t *gui_screen_create_root_no_bg(lv_obj_t *parent, const char *title, lv_color_t bg_color, lv_opa_t bg_opa);
 
 lv_obj_t *gui_screen_create_content(lv_obj_t *root, lv_coord_t status_bar_h);

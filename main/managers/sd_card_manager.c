@@ -1041,6 +1041,45 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   }
 }
 
+bool sd_card_needs_jit_mount(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
+#else
+    return false;
+#endif
+}
+
+bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {
+    if (display_was_suspended) *display_was_suspended = false;
+
+    if (!sd_card_needs_jit_mount()) {
+        return true;
+    }
+
+    esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
+    if (mount_err != ESP_OK) {
+        ESP_LOGE(TAG, "sd_card_jit_begin: mount failed: %s", esp_err_to_name(mount_err));
+        return false;
+    }
+
+    if (ensure_dirs) {
+        esp_err_t dir_err = sd_card_setup_directory_structure();
+        if (dir_err != ESP_OK) {
+            ESP_LOGW(TAG, "sd_card_jit_begin: setup_directory_structure failed: %s",
+                     esp_err_to_name(dir_err));
+        }
+    }
+
+    return true;
+}
+
+void sd_card_jit_end(bool display_was_suspended) {
+    if (!sd_card_needs_jit_mount()) {
+        return;
+    }
+    sd_card_unmount_after_flush(display_was_suspended);
+}
+
 void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #ifdef CONFIG_IS_S3TWATCH
   if (s_virtual_storage_mounted) {

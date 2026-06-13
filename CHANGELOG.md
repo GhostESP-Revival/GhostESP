@@ -2,25 +2,68 @@
 
 ## Revival v2.0-pre5
 
+### Added
 
-- Fixed asset pack background image not properly filling the screen on some devices
-- Replaced the placeholder ghost sprite on small screenswith the real GhostESP logo
-- Added a trackpad option to BadUSB
-- Added proper touch support to the BadUSB view
-- BadUSB view now uses the standard touch bar styling
-- Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
-- Added mouse jiggler to BadUSB
-- Added `badusb type_char` CLI command for typing single ASCII characters
-- Made BadUSB keyboard startup async so GhostLink doesn't block
-- Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
-- Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
-- Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
-- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
-- Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
-- Tightened native SD app storage scope and path checks
-- Made native SD app launch failures diagnostic-only instead of quarantining apps
-- Added a separate `nrf24` native SD app permission
-- Added small native SD app helpers for capability checks and SubGHz replay
+ - Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
+ - Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
+ - Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
+ - Added a trackpad option to BadUSB
+ - Added proper touch support to the BadUSB view
+ - Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
+ - Added mouse jiggler to BadUSB
+ - Added `badusb type_char` CLI command for typing single ASCII characters
+ - Added a separate `nrf24` native SD app permission
+ - Added small native SD app helpers for capability checks and SubGHz replay
+ - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
+ - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
+ - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
+ - Added an "Invert Carousel" setting in Appearance that flips the slide direction for keyboard left/right, joystick side-to-side, and the rotary encoder on the main menu carousel
+ - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
+ - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
+ - Added a reusable select overlay for option picker rows
+ - Added subcategories to the Settings view and re-organised the options
+
+### Changed
+
+ - Improved rotary encoder: raised debounce to 3 ms, added quadrature transition validation, capped pending step accumulation, and moved direct-GPIO encoder sampling to a dedicated 1 kHz task
+ - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
+ - Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)
+ - BadUSB view now uses the standard touch bar styling
+ - Made BadUSB keyboard startup async so GhostLink doesn't block
+ - Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+ - Made native SD app launch failures diagnostic-only instead of quarantining apps
+ - Tightened native SD app storage scope and path checks
+ - Made `generate_uuid` take a caller-owned buffer so concurrent DIAL binds can no longer race on its static storage
+ - Hardened `serial_task` against OOM by checking the UART buffer allocation
+ - Made `glog` copy the formatted line to a heap buffer before unlocking and fixed the deferred-queue leak when defer mode is turned off
+ - Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
+ - Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
+ - Replaced the placeholder ghost sprite on small screens with the real GhostESP logo
+ - Extracted the repeated tiered popup sizing math into `popup_calc_size` helpers
+ - Moved the per-view "mount SD on demand" boilerplate into shared `sd_card_jit_begin` / `sd_card_jit_end` helpers used by BadUSB, Infrared, NFC, and SD app views
+ - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
+ - Easy Learn in the Infrared menu now uses an iOS-style toggle row like the settings ones
+ - Removed "IR sent" toast notification
+
+### Fixed
+
+ - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
+ - Fixed "Scan SSH" menu item previously failing due to missing required argument
+ - Fixed asset pack background image not properly filling the screen on some devices
+ - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+ - Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+ - Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
+ - Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
+ - Fixed inconsistent vertical alignment of asset pack icons in the main menu and apps gallery grid cards by anchoring icons to a fixed top padding instead of centering their bounding boxes
+ - Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
+ - Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
+ - Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL
+ - Fixed leaks of `g_app_url` when the DIAL `Application-Url` header arrived more than once
+ - Fixed realloc-to-same-pointer in M5Stack keyboard, MIFARE Classic universal command loading, and Chameleon/MIFARE cache init paths so an OOM no longer leaks the previous allocation and then dereferences NULL
+ - Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
+ - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
+ - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
+ - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
 
 
 ## Revival v2.0-pre4 - 2026-06-06

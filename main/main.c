@@ -552,8 +552,15 @@ void app_main(void) {
         gpio_set_direction(15, GPIO_MODE_OUTPUT);
         
         // Check if we woke up from deep sleep
-        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-        
+        uint32_t wakeup_causes = esp_sleep_get_wakeup_causes();
+        esp_sleep_wakeup_cause_t wakeup_reason = ESP_SLEEP_WAKEUP_UNDEFINED;
+        for (unsigned i = 0; i < 32; i++) {
+            if (wakeup_causes & (1U << i)) {
+                wakeup_reason = (esp_sleep_wakeup_cause_t)i;
+                break;
+            }
+        }
+
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_UNDEFINED:
                 ESP_LOGI("Main", "Normal startup (not from deep sleep), IO15 set high");

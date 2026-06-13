@@ -505,8 +505,9 @@ esp_err_t get_query_param(httpd_req_t *req, const char *key, char *value, size_t
         }
 
         if (httpd_req_get_url_query_str(req, query, query_len) == ESP_OK) {
-            char encoded_value[max_len];
-            if (httpd_query_key_value(query, key, encoded_value, sizeof(encoded_value)) == ESP_OK) {
+            char encoded_value[512];
+            size_t ev_size = max_len < sizeof(encoded_value) ? max_len : sizeof(encoded_value);
+            if (httpd_query_key_value(query, key, encoded_value, ev_size) == ESP_OK) {
                 url_decode(value, encoded_value);
                 free(query);
                 return ESP_OK;

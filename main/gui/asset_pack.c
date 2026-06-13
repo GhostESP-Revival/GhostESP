@@ -4,7 +4,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "gui/screen_layout.h"
 #include "managers/display_manager.h"
@@ -696,6 +695,26 @@ static lv_img_cf_t gimg_cf(uint8_t fmt) {
     return LV_IMG_CF_TRUE_COLOR;
 }
 
+/* lgfx_tinfl_decompressor is ~11 KB. Keep it off task stacks and make it
+ * per-call so boot, deferred preload, and pack switching cannot share state. */
+static size_t tinfl_decompress_heap(void *out, size_t out_len,
+                                    const void *src, size_t src_len, int flags) {
+    lgfx_tinfl_decompressor *decomp = heap_caps_malloc(sizeof(*decomp),
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!decomp) decomp = malloc(sizeof(*decomp));
+    if (!decomp) return TINFL_DECOMPRESS_MEM_TO_MEM_FAILED;
+
+    lgfx_tinfl_init(decomp);
+    size_t in_len = src_len;
+    size_t dst_len = out_len;
+    lgfx_tinfl_status st = lgfx_tinfl_decompress(decomp,
+        (const lgfx_mz_uint8 *)src, &in_len,
+        (lgfx_mz_uint8 *)out, (lgfx_mz_uint8 *)out, &dst_len,
+        (flags & ~TINFL_FLAG_HAS_MORE_INPUT) | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    free(decomp);
+    return (st != TINFL_STATUS_DONE) ? TINFL_DECOMPRESS_MEM_TO_MEM_FAILED : dst_len;
+}
+
 static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, lv_img_dsc_t *out_dsc, uint8_t **out_data) {
     *out_data = NULL;
     memset(out_dsc, 0, sizeof(*out_dsc));
@@ -793,7 +812,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
             return ESP_ERR_NO_MEM;
         }
 
-        size_t out_len = lgfx_tinfl_decompress_mem_to_mem(raw, raw_size, payload, payload_size, 0);
+        size_t out_len = tinfl_decompress_heap(raw, raw_size, payload, payload_size, 0);
         free(payload);
         if (out_len == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || out_len != raw_size) {
             free(raw);
@@ -971,7 +990,7 @@ static esp_err_t extract_gtheme_to_dir(const char *archive_path, const char *out
             if (!raw) raw = malloc(raw_size ? raw_size : 1);
             if (!raw) err = ESP_ERR_NO_MEM;
             else {
-                size_t out_len = lgfx_tinfl_decompress_mem_to_mem(raw, raw_size, payload, payload_size, 0);
+                size_t out_len = tinfl_decompress_heap(raw, raw_size, payload, payload_size, 0);
                 if (out_len == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || out_len != raw_size) err = ESP_FAIL;
             }
         } else {
@@ -1679,12 +1698,7 @@ const lv_img_dsc_t *asset_pack_get_background_fullscreen(void) {
     return &s_bg_fullscreen_dsc;
 }
 
-typedef struct {
-    int index;
-} switch_msg_t;
-
-static QueueHandle_t s_switch_queue = NULL;
-static TaskHandle_t s_switch_worker = NULL;
+static volatile bool s_switch_running = false;
 
 static void switch_pack_ui_refresh(void *arg) {
     (void)arg;
@@ -1711,43 +1725,29 @@ static esp_err_t switch_pack_run(int index) {
 }
 
 static void switch_pack_worker(void *arg) {
-    (void)arg;
-    switch_msg_t msg;
-    while (true) {
-        if (xQueueReceive(s_switch_queue, &msg, portMAX_DELAY) != pdTRUE) continue;
-        esp_err_t err = switch_pack_run(msg.index);
-        if (err == ESP_OK) {
-            display_manager_run_on_lvgl(switch_pack_ui_refresh, NULL);
-            ESP_LOGI(TAG, "switch_pack_worker: UI refresh scheduled via version counter");
-        }
+    int index = (int)(intptr_t)arg;
+    esp_err_t err = switch_pack_run(index);
+    if (err == ESP_OK) {
+        display_manager_run_on_lvgl(switch_pack_ui_refresh, NULL);
+        ESP_LOGI(TAG, "switch_pack_worker: UI refresh scheduled via version counter");
     }
+    s_switch_running = false;
+    vTaskDelete(NULL);
 }
 
 void asset_pack_switch_task(int index) {
-    ESP_LOGI(TAG, "asset_pack_switch_task: queue pack index %d", index);
-    if (!s_switch_queue) {
-        s_switch_queue = xQueueCreate(1, sizeof(switch_msg_t));
-        if (!s_switch_queue) {
-            ESP_LOGW(TAG, "asset_pack_switch_task: no memory for switch queue; switching inline");
-            esp_err_t err = switch_pack_run(index);
-            if (err == ESP_OK) switch_pack_ui_refresh(NULL);
-            return;
-        }
+    ESP_LOGI(TAG, "asset_pack_switch_task: start pack index %d", index);
+    if (s_switch_running) {
+        ESP_LOGW(TAG, "asset_pack_switch_task: switch already running; ignoring pack index %d", index);
+        return;
     }
 
-    if (!s_switch_worker) {
-        BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096, NULL, 6, &s_switch_worker);
-        if (ok != pdPASS) {
-            ESP_LOGW(TAG, "asset_pack_switch_task: failed to create worker task; switching inline");
-            esp_err_t err = switch_pack_run(index);
-            if (err == ESP_OK) switch_pack_ui_refresh(NULL);
-            return;
-        }
-    }
-
-    switch_msg_t msg = {.index = index};
-    if (xQueueOverwrite(s_switch_queue, &msg) != pdTRUE) {
-        ESP_LOGW(TAG, "asset_pack_switch_task: switch queue send failed; switching inline");
+    s_switch_running = true;
+    BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096,
+                                (void *)(intptr_t)index, 6, NULL);
+    if (ok != pdPASS) {
+        s_switch_running = false;
+        ESP_LOGW(TAG, "asset_pack_switch_task: failed to create worker task; switching inline");
         esp_err_t err = switch_pack_run(index);
         if (err == ESP_OK) switch_pack_ui_refresh(NULL);
     }

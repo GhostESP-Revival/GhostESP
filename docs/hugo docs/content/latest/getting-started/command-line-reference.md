@@ -13,7 +13,7 @@ toc: true
 
 ## Core
 
-- **`help [category|all]`** — List commands by category (`wifi`, `ble`, `portal`, `comm`, `sd`, `led`, `gps`, `misc`, `printer`, `cast`, `capture`, `beacon`, `attack`, `ethernet`).
+- **`help [category|all]`** — List commands by category (`wifi`, `ble`, `chameleon`, `comm`, `sd`, `led`, `gps`, `misc`, `portal`, `printer`, `cast`, `capture`, `beacon`, `attack`, `wigle`, `ir`, `ethernet`, `camera`). Use `help all` to list every command.
 - **`chipinfo`** — Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
 - (for developers) **`mem [dump|trace <start|stop|dump>]`** — Print heap stats, dump allocation state, or control heap tracing.
 - **`reboot`** — Soft restart the device.
@@ -38,6 +38,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`sweep [-w wifi_sec] [-b ble_sec]`** — Full environment sweep: scans WiFi APs, stations, and BLE devices, then saves a CSV report to SD (`/mnt/ghostesp/sweeps/sweep_N.csv`).
 - **`list [-a|-s|-airtags]`** — Show AP scan results, associated stations, or AirTags.
 - **`listenprobes [channel|stop]`** — Monitor probe requests and log to PCAP if SD is present.
+- **`wpa3check`** — Run a WPA3 compliance check on the selected AP (`select -a <idx>` first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from WiFi > Scan & Select on-device.
 
 ### Targeting
 
@@ -48,6 +49,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`apenable on|off`** — Toggle AP persistence across reboots.
 - **`trackap`** — Track selected AP signal strength (RSSI) in real-time.
 - **`tracksta`** — Track selected station signal strength (RSSI) in real-time.
+- **`wifistatus`** — Show current WiFi connection status, including SSID, signal strength, IP address, and saved network info.
 
 ### Offense
 
@@ -66,8 +68,11 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 ### Network
 
 - **`scanports <local|ip> [all|start-end]`**, **`scanarp`**, **`scanlocal`**, **`scanssh <ip>`** — Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
+- **`netbiosscan [subnet [a.b.c.]]|<ip>`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Scan the current subnet, a specific `/24` prefix, or a specific host.
+- **`httpbannerscan [subnet [a.b.c.]]|<ip>`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
+- **`snmpprobe [subnet [a.b.c.]]|<ip>`** — Probe SNMP v1/v2c on UDP port 161 with common communities (`public`, `private`) and retrieve `sysDescr` to identify network devices (routers, switches, printers).
 - **`dhcpstarve <start [threads]|stop|display>`** — Flood a DHCP server or show collected leases.
-- **`capture <-probe|-deauth|-beacon>`** — Start packet captures for the specified frame type to SD.
+- **`capture <-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop>`** — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports `-802154` for 802.15.4 capture.
 
 ### Output
 
@@ -119,6 +124,18 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`evilportal -c <sethtmlstr|clear>`** — Manage the Evil Portal HTML buffer (`-c sethtmlstr` to capture inbound HTML, `-c clear` to revert to defaults).
 - **`webauth on|off`** — Require or disable web UI login.
 
+### DNS Sinkhole
+
+- **`sinkhole start [upstream_dns] [log]`** — Start the DNS sinkhole server. Default upstream DNS: `1.1.1.1`. Use `log` to enable query logging.
+- **`sinkhole stop`** — Stop the DNS sinkhole server.
+- **`sinkhole status`** — Show sinkhole status and statistics.
+- **`sinkhole download [n]`** — Download blocklist. `n` selects the source: `1`=Peter Lowe, `2`=OISD Basic, `3`=StevenBlack. Defaults to OISD Basic.
+- **`sinkhole load <filename>`** — Load a custom blocklist from SD.
+- **`sinkhole add <domain>`** — Add a domain to the blocklist.
+- **`sinkhole remove <domain>`** — Remove a domain from the blocklist.
+- **`sinkhole reload`** — Reload the blocklist from storage.
+- **`sinkhole log <on|off>`** — Toggle query logging.
+
 ## GhostLink (Dual Communication)
 
 - **`commdiscovery`** — Start discovery mode to find other GhostESP devices.
@@ -152,16 +169,99 @@ All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `S
 - **`sd_pins_mmc <clk> <cmd> <d0> <d1> <d2> <d3>`** — Configure SDIO wiring.
 - **`sd_save_config`** — Persist SD settings to storage.
 
+## NRF24 Analyzer
+
+Available on boards with `CONFIG_HAS_NRF24` or `CONFIG_HAS_NRF24_REMOTE`.
+
+- **`nrf24 start`** — Start NRF24 frequency analysis and jamming detection.
+- **`nrf24 pause`** — Pause analysis without stopping.
+- **`nrf24 resume`** — Resume paused analysis.
+- **`nrf24 status`** — Show current frequency, channel, detected signals, and jamming status.
+- **`nrf24 stop`** — Stop NRF24 analysis.
+
+## SubGHz
+
+Available on boards with `CONFIG_HAS_SUBGHZ` (CC1101 hardware).
+
+- **`subghz scan`** — Scan the current frequency band and display detected signals.
+- **`subghz scan <frequency>`** — Scan a specific frequency (e.g., `433.92`).
+- **`subghz list`** — List saved SubGHz signal files on SD.
+- **`subghz load <filename>`** — Load a `.sub` signal file for transmission.
+- **`subghz transmit`** — Transmit the loaded signal.
+- **`subghz transmit raw <freq> <data>`** — Transmit raw data on a frequency.
+- **`subghz stop`** — Stop scanning or transmission.
+- **`subghz save <filename>`** — Save the last scan results to a `.sub` file.
+
+For protocol documentation, see the [SubGHz Protocols]({{< relref "../subghz/protocols.md" >}}) guide.
+
+## Audio
+
+Available on boards with `CONFIG_HAS_AUDIO_PLAYER` or `CONFIG_HAS_MIC`.
+
+- **`audio play <filename>`** — Play an MP3 file from SD.
+- **`audio stop`** — Stop audio playback.
+- **`audio pause`** — Pause playback.
+- **`audio resume`** — Resume playback.
+- **`audio vol <0-100>`** — Set volume (0-100).
+- **`mic_cal`** — Calibrate the microphone (available on boards with `CONFIG_HAS_MIC`). Runs a calibration routine to set the MIC RGB visualizer baseline.
+
+## Rave Mode
+
+- **`rave on`** — Enable Rave Mode (display-based LED visualizer synced to music via microphone or line-in).
+- **`rave off`** — Disable Rave Mode.
+- **`raveport <port>`** — Set the Rave UDP receiver port (default: 6677).
+
+Rave Mode streams visualization data over UDP. Use the `rave_helper.bat` or `rave_tray.exe` app on your PC to receive and display the visualizer.
+
+## Screen Mirroring
+
+- **`mirror start`** — Start screen mirroring server (wired USB).
+- **`mirror stop`** — Stop screen mirroring.
+- **`mirror status`** — Show mirror server status.
+
+For wired mirroring, use `python ghost_mirror.py` on your PC with `--baud 460800` for CYD devices or `--list` to see available ports. For web-based mirroring, visit [ghostesp.net/serial](https://ghostesp.net/serial) and use the Screen Mirror tab.
+
+## Input & Identity
+
+- **`input`** — Show current button/encoder input state.
+- **`identify`** — Display board identification info (model, MAC address, build config).
+- **`time`** — Show current system time.
+- **`settime <YYYY-MM-DD> <HH:MM:SS>`** — Set system time manually.
+
+## Flock Detection
+
+- **`flockscan`** — Start scanning for Flock Safety camera wireless signals.
+- **`flocklist`** — List detected Flock cameras with MAC prefix, signal strength, and confidence level.
+- **`flockstop`** — Stop Flock camera detection.
+
+Flock Safety cameras use known MAC prefixes (e.g., `FC:A1:3E`, `F0:A1:C0`). Detection is confidence-based: HIGH if wildcard probe is sent or SSID keyword matches, LOW if only OUI match.
+
 ## Camera
 
-Available on builds with **`CONFIG_HAS_CAMERA`**.
+Available on boards with **`CONFIG_HAS_CAMERA`** (XIAO ESP32-S3 Sense and compatible boards).
 
-- **`motion ...`** — Motion detector controls for onboard camera builds. See the full [Motion Detector]({{< relref "../camera/motion-detector.md" >}}) guide for setup, tuning, SD snapshots, and Discord webhooks.
+- **`camerastream start`** — Start the MJPEG camera stream server.
+- **`camerastream stop`** — Stop the camera stream.
+- **`camerastream status`** — Show stream status and settings.
+- **`camerastream quality <1-100>`** — Set JPEG quality.
+- **`camerastream resolution <name>`** — Set resolution: QQVGA, QVGA, VGA, SVGA, XGA, SXGA, UXGA.
+- **`camerastream fps <1-30>`** — Set target frames per second.
+- **`motion start|stop|status`** — Start or stop motion detection.
+- **`motion threshold <1-255>`** — Set pixel difference threshold (higher = less sensitive).
+- **`motion interval <100-10000>`** — Set minimum time between frames in ms.
+- **`motion percent <1-100>`** — Set motion trigger percentage (higher = more motion required).
+- **`motion sample <1-32>`** — Set pixel sampling rate.
+- **`motion snap <on|off>`** — Enable or disable SD card snapshots on motion.
+- **`motion image <on|off>`** — Attach snapshot image to Discord webhook alerts.
+- **`motion discord <url>`** — Set Discord webhook URL for motion alerts.
+- **`motion cooldown <seconds>`** — Set minimum time between webhook alerts.
+
+For full setup, tuning, SD snapshots, and Discord webhook configuration, see the [Motion Detector]({{< relref "../camera/motion-detector.md" >}}) guide.
 
 ## RGB
 
-- **`rgbmode <rainbow|police|strobe|off|color>`** — Run an LED effect immediately.
-- **`setrgbmode <normal|rainbow|stealth>`** — Persist the LED mode across reboots.
+- **`rgbmode <0-13>`** — Run an LED effect immediately. Available modes: `0`=Normal, `1`=Rainbow, `2`=Stealth, `3`=Knight Rider, `4`=Red, `5`=Green, `6`=Blue, `7`=Yellow, `8`=Purple, `9`=Cyan, `10`=Orange, `11`=White, `12`=Pink, `13`=Mic Visualizer. Can also use mode names: `normal`, `rainbow`, `stealth`, `police`, `strobe`, `knight`, `off`, `red`, `green`, `blue`, `yellow`, `purple`, `cyan`, `orange`, `white`, `pink`.
+- **`setrgbmode <normal|rainbow|stealth>`** — Persist the LED mode across reboots (only accepts `normal`, `rainbow`, or `stealth`). Use `rgbmode` to set any mode temporarily.
 - **`setrgbpins <r> <g> <b>`** — Override discrete RGB GPIOs; pass the same pin for all three values to switch into single-wire NeoPixel mode on that data pin.
 - **`setrgbcount <1-512>`** — Persist the number of RGB LEDs connected so effects span the correct length. Reinitializes immediately if pins are already configured.
 - **`setneopixelbrightness <0-100>`** / **`getneopixelbrightness`** — Control NeoPixel intensity.
@@ -227,7 +327,7 @@ On press, the device switches to the terminal view and runs the command. To use 
 
 - **`gpspin [pin]`** — View or set the GPS RX pin for external GPS modules. Without arguments, shows current pin. Setting persists to NVS; restart GPS commands to apply.
 - **`gpsinfo [-s]`** — Stream current fix, satellites, and speed; pass `-s` to stop the display task.
-- **`startwd [-s]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop.
+- **`startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop. Use `--helper` to enable the GhostLink split-channel helper. Use `--channels` to specify a CSV of channels to hop (e.g., `1,6,11`). Use `--hop` to set the channel hop interval in ms (default: 100). Use `--weighted` to enable 5GHz weighted scanning.
 
 ## Ethernet
 *(Requires `CONFIG_WITH_ETHERNET`)*
@@ -278,12 +378,36 @@ On press, the device switches to the terminal view and runs the command. To use 
 
 - **`ethstats`** — Display Ethernet network statistics (link status, IP info, MAC address, packet statistics, ARP statistics).
 
+## WiGLE
+
+- **`wigle API <APIName>:<APIToken>`** — Set WiGLE credentials. Get your token from [wigle.net/account](https://wigle.net/account).
+- **`wigle auto <on|off>`** — Enable or disable automatic upload when WiFi STA connects.
+- **`wigle donate <on|off>`** — Enable or disable the donate flag (recommended: `on`).
+- **`wigle show`** — Display current WiGLE settings and API key status.
+- **`wigle list`** — List stored uploaded CSV memory.
+- **`wigle files`** — List pending CSV files in `/mnt/ghostesp/gps/`.
+- **`wigle upload <filename>`** — Upload a CSV file to WiGLE.
+- **`wigle upload all`** — Upload all pending CSV files.
+- **`wigle stats`** — Show WiGLE account statistics.
+
 ## Settings
 
 - **`settings list`** — Dump available configuration keys.
 - **`settings help`** — Show supported subcommands.
 - **`settings get <key>`** / **`settings set <key> <value>`** — Inspect or change individual options.
 - **`settings reset [key]`** — Restore all settings or a specific key to defaults.
+- **`loadconfig`** — Load settings from `config.cfg` on the SD card (SSID, PASSKEY, WiGLE token, auto-upload, donate).
+
+## Native SD Apps
+
+Available on builds with `CONFIG_ENABLE_NATIVE_SD_APPS`.
+
+- **`apps list`** — List all discovered SD apps.
+- **`apps reload`** — Rescan the apps and packages directories for new or removed apps.
+- **`apps info <id>`** — Show manifest details and failure diagnostic state for an app.
+- **`apps run <id>`** — Launch an app by ID.
+- **`apps stop`** — Stop the currently running app.
+- **`apps reset <id>`** — Clear failure diagnostic state for an app.
 
 ## BadUSB
 
