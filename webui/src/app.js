@@ -37,10 +37,11 @@ const pages = [
   ['dashboard', 'Dashboard', '00'],
   ['wifi', 'WiFi', '01'],
   ['ble', 'BLE', '02'],
-  ['files', 'Files', '03'],
-  ['ghostlink', 'GhostLink', '04'],
-  ['settings', 'Settings', '05'],
-  ['terminal', 'Terminal', '06'],
+  ['badusb', 'BadUSB', '03'],
+  ['files', 'Files', '04'],
+  ['ghostlink', 'GhostLink', '05'],
+  ['settings', 'Settings', '06'],
+  ['terminal', 'Terminal', '07'],
 ];
 
 /* ======================== UTILITIES ======================== */
@@ -105,7 +106,367 @@ function buildShell() {
   buildDashboard();
   buildWifi();
   buildBle();
+  buildBadUsb();
   buildSettingsForm();
+}
+
+/* ======================== BADUSB ======================== */
+const BADUSB_BUILTIN_LABEL = 'Ghost Art (Built-in)';
+const HID_KEYCODES = {
+  BACKSPACE: 0x2A, ENTER: 0x28, ESC: 0x29, TAB: 0x2B, SPACE: 0x2C,
+  RIGHT: 0x4F, LEFT: 0x50, DOWN: 0x51, UP: 0x52,
+  HOME: 0x4A, PAGE_UP: 0x4B, PAGE_DOWN: 0x4E, END: 0x4D, INSERT: 0x49, DELETE: 0x4C,
+  F1: 0x3A, F2: 0x3B, F3: 0x3C, F4: 0x3D, F5: 0x3E, F6: 0x3F,
+  F7: 0x40, F8: 0x41, F9: 0x42, F10: 0x43, F11: 0x44, F12: 0x45,
+  A: 0x04, B: 0x05, C: 0x06, D: 0x07, E: 0x08, F: 0x09, G: 0x0A, H: 0x0B,
+  I: 0x0C, J: 0x0D, K: 0x0E, L: 0x0F, M: 0x10, N: 0x11, O: 0x12, P: 0x13,
+  Q: 0x14, R: 0x15, S: 0x16, T: 0x17, U: 0x18, V: 0x19, W: 0x1A, X: 0x1B,
+  Y: 0x1C, Z: 0x1D,
+  '1': 0x1E, '2': 0x1F, '3': 0x20, '4': 0x21, '5': 0x22, '6': 0x23, '7': 0x24, '8': 0x25, '9': 0x26, '0': 0x27,
+};
+const HID_MOD_LEFT_CTRL = 0x01;
+const HID_MOD_LEFT_SHIFT = 0x02;
+
+const badusbState = {
+  trackpad: { active: false, lastX: 0, lastY: 0, holding: 0, holdTimer: null, moveTimer: null },
+  jiggling: false,
+  keyboard: false,
+  scriptsCache: [],
+};
+
+function buildBadUsb() {
+  const select = $('badusb-script-select');
+  if (!select) return;
+
+  document.querySelectorAll('[data-badusb-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (state.activeAction) closeAction();
+      document.querySelectorAll('[data-badusb-tab]').forEach(x => x.classList.toggle('active', x === btn));
+      document.querySelectorAll('[data-badusb-page]').forEach(x => x.classList.toggle('active', x.dataset.badusbPage === btn.dataset.badusbTab));
+      if (btn.dataset.badusbTab === 'settings') badusbLoadSettings();
+    });
+  });
+
+  $('badusb-refresh-btn')?.addEventListener('click', () => badusbRefreshScripts(true));
+  $('badusb-stop-btn')?.addEventListener('click', () => runCommand(CMD.badusbStop().cmd));
+  $('badusb-cancel-btn')?.addEventListener('click', () => {
+    runCommandSequence([
+      CMD.badusbTrackpadStop().cmd,
+      CMD.badusbJiggleStop().cmd,
+      CMD.badusbKeyboardStop().cmd,
+      CMD.badusbStop().cmd,
+    ]);
+  });
+
+  $('badusb-run-script-btn')?.addEventListener('click', () => {
+    const sel = $('badusb-script-select');
+    const value = sel && sel.value;
+    if (!value) { toast('Pick a script first', 'warn'); return; }
+    if (value === BADUSB_BUILTIN_LABEL) {
+      runCommand(CMD.badusbRunBuiltin().cmd);
+    } else {
+      runCommand(CMD.badusbRun(value).cmd);
+    }
+  });
+
+  $('badusb-jiggle-start-btn')?.addEventListener('click', () => {
+    badusbState.jiggling = true;
+    updateBadUsbStatus('Jiggling', 'warn');
+    runCommand(CMD.badusbJiggleStart().cmd, { silent: true });
+  });
+  $('badusb-jiggle-stop-btn')?.addEventListener('click', () => {
+    badusbState.jiggling = false;
+    updateBadUsbStatus('Idle', '');
+    runCommand(CMD.badusbJiggleStop().cmd, { silent: true });
+  });
+
+  // Trackpad controls
+  $('badusb-trackpad-start-btn')?.addEventListener('click', () => {
+    badusbState.trackpad.active = true;
+    $('badusb-trackpad').classList.add('active');
+    $('badusb-trackpad-status').textContent = 'Active. Drag on the pad, click the buttons, or scroll the wheel area.';
+    runCommand(CMD.badusbTrackpadStart().cmd);
+  });
+  $('badusb-trackpad-stop-btn')?.addEventListener('click', () => {
+    badusbStopTrackpad();
+  });
+
+  // Trackpad mouse buttons
+  document.querySelectorAll('[data-badusb-mouse]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mask = parseInt(btn.dataset.badusbMouse, 10) || 0;
+      runCommand(CMD.badusbTrackpadButton(mask).cmd, { silent: true });
+      $('badusb-trackpad-status').textContent = `Buttons mask=${mask}`;
+    });
+  });
+
+  bindTrackpad($('badusb-trackpad'));
+
+  // Keyboard
+  $('badusb-kb-start-btn')?.addEventListener('click', () => {
+    badusbState.keyboard = true;
+    updateBadUsbStatus('Keyboard mode', 'good');
+    runCommand(CMD.badusbKeyboardStart().cmd);
+  });
+  $('badusb-kb-stop-btn')?.addEventListener('click', () => {
+    badusbState.keyboard = false;
+    updateBadUsbStatus('Idle', '');
+    runCommand(CMD.badusbKeyboardStop().cmd);
+  });
+  $('badusb-kb-send-btn')?.addEventListener('click', () => {
+    const text = ($('badusb-kb-input').value || '').trim();
+    if (!text) { toast('Type some text first', 'warn'); return; }
+    runCommand(CMD.badusbType(text).cmd);
+  });
+  $('badusb-kb-clear-btn')?.addEventListener('click', () => { $('badusb-kb-input').value = ''; });
+  $('badusb-kb-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const text = (e.target.value || '');
+      const lines = text.split('\n');
+      const head = lines.slice(0, -1).join('\n');
+      const last = lines[lines.length - 1];
+      e.target.value = head;
+      if (last) runCommand(CMD.badusbType(last).cmd, { silent: true });
+      runCommand(CMD.badusbKeysend(0, HID_KEYCODES.ENTER).cmd, { silent: true });
+    }
+  });
+  document.querySelectorAll('[data-badusb-key]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const [modifier, keycode] = (btn.dataset.badusbKey || '').split(' ').map(s => s.trim());
+      runCommand(CMD.badusbKeysend(modifier || 0, keycode || 0x00).cmd, { silent: true });
+    });
+  });
+
+  // Settings
+  $('badusb-settings-apply-btn')?.addEventListener('click', badusbApplySettings);
+  $('badusb-settings-reload-btn')?.addEventListener('click', badusbLoadSettings);
+  $('badusb-settings-reset-btn')?.addEventListener('click', () => {
+    if (!confirm('Reset BadUSB settings to firmware defaults?')) return;
+    runCommand(CMD.settingsReset('badusb').cmd, { onComplete: () => setTimeout(badusbLoadSettings, 700) });
+  });
+
+  // First paint
+  badusbRefreshScripts(false);
+}
+
+function updateBadUsbStatus(text, dotClass) {
+  const label = $('badusb-status-label');
+  const dot = $('badusb-status-dot');
+  const chip = $('badusb-status-chip');
+  if (label) label.textContent = text;
+  if (dot) dot.className = 'dot ' + (dotClass || '');
+  if (chip) chip.style.borderColor = dotClass === 'good' ? 'rgba(52,211,153,.35)'
+    : dotClass === 'bad' ? 'rgba(248,113,113,.35)'
+    : dotClass === 'warn' ? 'rgba(245,158,11,.35)' : '';
+}
+
+async function badusbRefreshScripts(showToastOnError) {
+  const sel = $('badusb-script-select');
+  if (!sel) return;
+  try {
+    const res = await api('/api/sdcard?path=' + encodeURIComponent('/mnt/ghostesp/badusb'));
+    if (!res.ok) throw new Error('SD unavailable');
+    const data = await res.json();
+    const files = (data.files || []).filter(f => f.type !== 'folder' && f.name.toLowerCase().endsWith('.txt'));
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = BADUSB_BUILTIN_LABEL;
+    opt0.textContent = BADUSB_BUILTIN_LABEL;
+    sel.appendChild(opt0);
+    files.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.name;
+      opt.textContent = `${f.name}${f.size != null ? ' (' + formatBytes(f.size) + ')' : ''}`;
+      sel.appendChild(opt);
+    });
+    badusbState.scriptsCache = files.map(f => f.name);
+    if (!files.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(no scripts on SD)';
+      opt.disabled = true;
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    sel.innerHTML = '<option disabled>SD card unavailable</option>';
+    if (showToastOnError) toast('Could not list scripts: ' + e.message, 'bad');
+  }
+}
+
+function badusbStopTrackpad() {
+  badusbState.trackpad.active = false;
+  $('badusb-trackpad').classList.remove('active');
+  $('badusb-trackpad-status').textContent = 'Inactive. Tap Start to enable relative mouse reporting.';
+  if (badusbState.trackpad.holdTimer) { clearTimeout(badusbState.trackpad.holdTimer); badusbState.trackpad.holdTimer = null; }
+  if (badusbState.trackpad.moveTimer) { clearTimeout(badusbState.trackpad.moveTimer); badusbState.trackpad.moveTimer = null; }
+  badusbState.trackpad.holding = 0;
+  runCommand(CMD.badusbTrackpadStop().cmd);
+}
+
+function bindTrackpad(el) {
+  if (!el) return;
+  let pointerId = null;
+  let startX = 0, startY = 0, startTime = 0;
+  let dragMoved = false;
+  let scrollBucket = 0;
+  let activePointerStillDown = false;
+
+  const dxThreshold = 8;
+  const msHoldThreshold = 300;
+  const moveThrottleMs = 12;
+  const lastMove = { x: 0, y: 0, t: 0, dx: 0, dy: 0 };
+  let moveInFlight = false;
+
+  function flushMove() {
+    if (lastMove.dx === 0 && lastMove.dy === 0 && scrollBucket === 0) return;
+    if (lastMove.dx !== 0 || lastMove.dy !== 0) {
+      if (moveInFlight) return;
+      const dx = lastMove.dx, dy = lastMove.dy;
+      lastMove.dx = 0;
+      lastMove.dy = 0;
+      moveInFlight = true;
+      runCommand(CMD.badusbTrackpadMove(dx, dy).cmd, { silent: true, onComplete: () => { moveInFlight = false; } });
+    }
+    if (scrollBucket !== 0) {
+      // Wheel via dy overflow — most firmware trackpads do not have a separate wheel command, so encode wheel as dy in panel.
+      // To keep changes minimal we skip firmware-side wheel here; UI just animates a counter.
+      scrollBucket = 0;
+    }
+  }
+
+  el.addEventListener('pointerdown', e => {
+    if (!badusbState.trackpad.active) {
+      toast('Tap Start first', 'warn');
+      return;
+    }
+    if (e.button !== 0) return; // LMB only initiates tap/hold/drag
+    pointerId = e.pointerId;
+    el.setPointerCapture(pointerId);
+    startX = e.clientX; startY = e.clientY;
+    startTime = performance.now();
+    dragMoved = false;
+    activePointerStillDown = true;
+
+    if (badusbState.trackpad.holdTimer) clearTimeout(badusbState.trackpad.holdTimer);
+    badusbState.trackpad.holdTimer = setTimeout(() => {
+      if (!activePointerStillDown || dragMoved) return;
+      // Right-click on long-press
+      badusbState.trackpad.holding = 2;
+      runCommand(CMD.badusbTrackpadButton(2).cmd, { silent: true });
+      $('badusb-trackpad-status').textContent = 'Right-click held';
+    }, msHoldThreshold);
+  });
+
+  el.addEventListener('pointermove', e => {
+    if (!activePointerStillDown || pointerId !== e.pointerId) return;
+    const dx = e.clientX - lastMove.x;
+    const dy = e.clientY - lastMove.y;
+    const totalDx = e.clientX - startX;
+    const totalDy = e.clientY - startY;
+    lastMove.x = e.clientX;
+    lastMove.y = e.clientY;
+
+    // Detect drag intent
+    if (!dragMoved && (Math.abs(totalDx) > dxThreshold || Math.abs(totalDy) > dxThreshold)) {
+      dragMoved = true;
+      if (badusbState.trackpad.holdTimer) { clearTimeout(badusbState.trackpad.holdTimer); badusbState.trackpad.holdTimer = null; }
+    }
+
+    // Wheel area
+    if (e.target && e.target.id === 'badusb-trackpad-hit') {
+      scrollBucket += dy;
+      const now = performance.now();
+      if (now - lastMove.t > moveThrottleMs) {
+        lastMove.t = now;
+        const steps = Math.max(-3, Math.min(3, Math.round(scrollBucket / 24)));
+        if (steps) {
+          // wheel steps encoded as separate top-level HID not available; use trackpad_move with dy -> host scroll
+          runCommand(CMD.badusbTrackpadMove(0, steps).cmd, { silent: true });
+          scrollBucket = 0;
+        }
+      }
+      return;
+    }
+
+    if (!dragMoved) return;
+
+    // Trackpad acceleration mirrors the on-device curve (4 -> 32 step) — but PC trackpads are usually unscaled; use 1:1 with cap
+    lastMove.dx = Math.max(-127, Math.min(127, lastMove.dx + Math.round(dx)));
+    lastMove.dy = Math.max(-127, Math.min(127, lastMove.dy + Math.round(dy)));
+
+    const now = performance.now();
+    if (now - lastMove.t >= moveThrottleMs) {
+      lastMove.t = now;
+      flushMove();
+    }
+  });
+
+  const endHandler = e => {
+    if (pointerId !== e.pointerId) return;
+    activePointerStillDown = false;
+    if (badusbState.trackpad.holdTimer) { clearTimeout(badusbState.trackpad.holdTimer); badusbState.trackpad.holdTimer = null; }
+
+    if (dragMoved) {
+      flushMove();
+    } else if (performance.now() - startTime < msHoldThreshold) {
+      // Tap → L-click
+      runCommand(CMD.badusbTrackpadButton(1).cmd, { silent: true });
+      setTimeout(() => runCommand(CMD.badusbTrackpadButton(0).cmd, { silent: true }), 30);
+      $('badusb-trackpad-status').textContent = 'Left-click';
+    }
+    if (badusbState.trackpad.holding) {
+      badusbState.trackpad.holding = 0;
+      runCommand(CMD.badusbTrackpadButton(0).cmd, { silent: true });
+    }
+
+    try { el.releasePointerCapture(pointerId); } catch (_) { /* ignore */ }
+    pointerId = null;
+  };
+  el.addEventListener('pointerup', endHandler);
+  el.addEventListener('pointercancel', endHandler);
+  el.addEventListener('pointerleave', endHandler);
+}
+
+async function badusbLoadSettings() {
+  try {
+    const res = await api('/api/settings');
+    if (!res.ok) return;
+    const data = await res.json();
+    const get = key => data && data[key] != null ? data[key] : null;
+    $('badusb-vid').value = get('badusb_vid') != null ? '0x' + Number(get('badusb_vid')).toString(16).toUpperCase().padStart(4, '0') : '';
+    $('badusb-pid').value = get('badusb_pid') != null ? '0x' + Number(get('badusb_pid')).toString(16).toUpperCase().padStart(4, '0') : '';
+    $('badusb-mfr').value = get('badusb_manufacturer') || '';
+    $('badusb-prod').value = get('badusb_product') || '';
+    $('badusb-layout').value = String(get('badusb_kb_layout') != null ? get('badusb_kb_layout') : 0);
+    $('badusb-rand').checked = !!get('badusb_randomize');
+  } catch (e) {
+    toast('Could not load settings: ' + e.message, 'bad');
+  }
+}
+
+async function badusbApplySettings() {
+  const vid = parseInt(($('badusb-vid').value || '').toLowerCase().replace(/^0x/, ''), 16);
+  const pid = parseInt(($('badusb-pid').value || '').toLowerCase().replace(/^0x/, ''), 16);
+  const mfr = $('badusb-mfr').value.trim();
+  const prod = $('badusb-prod').value.trim();
+  const layout = parseInt($('badusb-layout').value, 10);
+  const rand = $('badusb-rand').checked ? 1 : 0;
+
+  if (!Number.isFinite(vid) || vid < 0 || vid > 0xFFFF) { toast('VID must be 0x0000-0xFFFF', 'bad'); return; }
+  if (!Number.isFinite(pid) || pid < 0 || pid > 0xFFFF) { toast('PID must be 0x0000-0xFFFF', 'bad'); return; }
+  if (!Number.isFinite(layout) || layout < 0 || layout > 4) { toast('Layout must be 0-4', 'bad'); return; }
+
+  const seq = [];
+  seq.push(`badusb set_vid 0x${vid.toString(16)}`);
+  seq.push(`badusb set_pid 0x${pid.toString(16)}`);
+  seq.push(`badusb set_mfr ${JSON.stringify(mfr)}`);
+  seq.push(`badusb set_prod ${JSON.stringify(prod)}`);
+  seq.push(`badusb set_layout ${layout}`);
+  seq.push(`badusb set_rand ${rand}`);
+  seq.push('settings save');
+  await runCommandSequence(seq);
+  toast('BadUSB settings applied', 'good');
 }
 
 function showPage(page) {
@@ -119,6 +480,11 @@ function showPage(page) {
   if (isSame && state.activeAction) closeAction();
   if (page === 'files') loadFiles();
   if (page === 'dashboard') renderDashboard();
+  if (page === 'badusb') {
+    badusbRefreshScripts(false);
+    badusbState.trackpad.active = false;
+    if ($('badusb-trackpad')) $('badusb-trackpad').classList.remove('active');
+  }
 }
 
 /* ======================== WiFi PAGE ======================== */
@@ -926,12 +1292,10 @@ async function refreshAll() {
     }
     $('api-dot').className = 'dot good';
     $('api-status').textContent = 'Connected';
-    $('api-chip').style.borderColor = 'rgba(52,211,153,.25)';
     renderDashboard();
   } catch (e) {
     $('api-dot').className = 'dot bad';
     $('api-status').textContent = 'Disconnected';
-    $('api-chip').style.borderColor = 'rgba(248,113,113,.25)';
   } finally {
     setLoading(refreshBtn, false);
   }
@@ -1027,11 +1391,6 @@ async function loadCommStatus() {
     cr.className = 'badge ' + (data.is_remote_command ? 'warn' : '');
   }
   $('comm-dot').className = 'dot ' + (data.connected ? 'good' : data.state === 'error' ? 'bad' : data.state === 'scanning' || data.state === 'handshake' ? 'warn' : '');
-  const chipBorder = data.connected ? 'rgba(52,211,153,.25)' : data.state === 'error' ? 'rgba(248,113,113,.25)' : '';
-  const chip = $('comm-chip');
-  if (chip) chip.style.borderColor = chipBorder;
-  const sc = $('comm-status-chip');
-  if (sc) sc.style.borderColor = chipBorder;
 }
 
 async function saveSettings() {
@@ -1064,25 +1423,29 @@ async function runCommand(command, options = {}) {
     showRiskModal(command);
     return;
   }
-  state.commandHistory.push(command);
-  state.lastCommand = command;
-  state.historyIndex = state.commandHistory.length;
-  localStorage.setItem('ghost_v2_pending_command', JSON.stringify({ command, at: Date.now() }));
-  appendTerminal('> ' + command + '\n');
+  if (!options.silent) {
+    state.commandHistory.push(command);
+    state.lastCommand = command;
+    state.historyIndex = state.commandHistory.length;
+    localStorage.setItem('ghost_v2_pending_command', JSON.stringify({ command, at: Date.now() }));
+    appendTerminal('> ' + command + '\n');
+  }
   try {
     const res = await api('/api/command', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
     if (!res.ok) throw new Error('command failed');
-    toast('Command sent', 'good');
-    setTimeout(() => refreshLogs(true), 900);
-    if (isRisky(command)) {
+    if (!options.silent) {
+      toast('Command sent', 'good');
+      setTimeout(() => refreshLogs(true), 900);
+    }
+    if (isRisky(command) && !options.silent) {
       startReconnectWatch();
-    } else {
+    } else if (!options.silent) {
       localStorage.removeItem('ghost_v2_pending_command');
     }
     if (typeof options.onComplete === 'function') options.onComplete();
   } catch (err) {
-    if (isRisky(command)) startReconnectWatch();
-    else toast('Command failed: ' + err.message, 'bad');
+    if (isRisky(command) && !options.silent) startReconnectWatch();
+    else if (!options.silent) toast('Command failed: ' + err.message, 'bad');
     if (typeof options.onComplete === 'function') options.onComplete(err);
   }
 }

@@ -4,29 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0a0a0b">
-  <title>GhostESP V2</title>
+  <title>GhostNet</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">G</div>
-        <div class="brand-text">
-          <span class="brand-name">GhostESP</span>
-          <span class="brand-sep">/</span>
-          <span class="brand-ver">Revival</span>
-        </div>
-      </div>
+      <a class="brand" href="#" aria-label="GhostESP">
+        <img class="brand-logo" src="../../GhostESP_Brand_Assets/01_logo/png/ghostesp_logo_white_transparent.png" alt="GhostESP">
+      </a>
       <div class="top-actions">
         <div class="status-cluster" aria-label="Connection status">
-          <span class="status-dot" id="api-chip" title="API: checking">
+          <span class="status-pill" id="api-pill" title="API: checking">
             <span id="api-dot" class="dot"></span>
-            <span class="sr-only" id="api-status">Checking</span>
+            <span class="status-pill-label" id="api-status">API</span>
           </span>
-          <span class="status-dot" id="comm-chip" title="GhostLink: unknown">
+          <span class="status-pill" id="comm-pill" title="GhostLink: unknown">
             <span id="comm-dot" class="dot"></span>
-            <span class="sr-only" id="comm-status">GhostLink unknown</span>
+            <span class="status-pill-label" id="comm-status">GhostLink</span>
           </span>
         </div>
         <button class="btn ghost" data-refresh aria-label="Refresh all">Refresh</button>
@@ -261,6 +256,186 @@
           <div class="terminal-input">
             <input id="terminal-input" placeholder="Enter command..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
             <button class="btn primary" id="terminal-send-btn">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-badusb" class="page">
+        <div class="panel">
+          <div class="panel-title">
+            <div>
+              <h2>BadUSB</h2>
+              <p>Run DuckyScript files, type text, control a remote mouse, or jiggle the cursor. Mirrors the on-device menu.</p>
+            </div>
+            <div class="actions">
+              <span class="chip" id="badusb-status-chip"><span id="badusb-status-dot" class="dot"></span><span id="badusb-status-label">Idle</span></span>
+              <button class="btn ghost" id="badusb-refresh-btn">Refresh</button>
+              <button class="btn danger" id="badusb-stop-btn">Stop</button>
+            </div>
+          </div>
+
+          <div class="tabs" data-tabs="badusb">
+            <button class="tab-btn active" data-badusb-tab="scripts">Scripts</button>
+            <button class="tab-btn" data-badusb-tab="trackpad">Trackpad</button>
+            <button class="tab-btn" data-badusb-tab="keyboard">Keyboard</button>
+            <button class="tab-btn" data-badusb-tab="settings">Settings</button>
+          </div>
+
+          <div class="subpage active" data-badusb-page="scripts">
+            <div class="menu-row">
+              <div>
+                <h3>Run Script</h3>
+                <p>Runs a DuckyScript stored in <code>/mnt/ghostesp/badusb/</code>. Built-in script is always first.</p>
+              </div>
+              <div class="actions" style="flex-wrap:wrap;justify-content:flex-end;gap:8px">
+                <select id="badusb-script-select" class="settings-search" style="max-width:280px"></select>
+                <button class="btn primary" id="badusb-run-script-btn">Run</button>
+              </div>
+            </div>
+            <div class="menu-row">
+              <div>
+                <h3>Mouse Jiggler</h3>
+                <p>Toggles a tiny alternating mouse motion on the host. Useful to keep screens awake.</p>
+              </div>
+              <div class="actions">
+                <button class="btn" id="badusb-jiggle-start-btn">Start</button>
+                <button class="btn danger" id="badusb-jiggle-stop-btn">Stop</button>
+              </div>
+            </div>
+            <div class="menu-row">
+              <div>
+                <h3>Status & Cancel</h3>
+                <p>Trackpad mode and active script share the same HID endpoint. Tap stop to halt everything.</p>
+              </div>
+              <div class="actions">
+                <button class="btn danger" id="badusb-cancel-btn">Halt all HID</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="subpage" data-badusb-page="trackpad">
+            <div class="menu-row">
+              <div>
+                <h3>Trackpad Mode</h3>
+                <p>Drag on the surface to move the remote cursor. Tap once to left-click, long-press for right-click.</p>
+              </div>
+              <div class="actions">
+                <button class="btn primary" id="badusb-trackpad-start-btn">Start</button>
+                <button class="btn danger" id="badusb-trackpad-stop-btn">Stop</button>
+              </div>
+            </div>
+            <div class="trackpad-wrap">
+              <div class="trackpad-hint">Drag = move &nbsp; Tap = L-click &nbsp; Hold = R-click &nbsp; Wheel area = scroll</div>
+              <div class="trackpad" id="badusb-trackpad">
+                <div class="trackpad-hit" id="badusb-trackpad-hit"></div>
+              </div>
+              <div class="trackpad-buttons" role="group" aria-label="Mouse buttons">
+                <button class="btn" data-badusb-mouse="1" title="Left click (press)">L</button>
+                <button class="btn" data-badusb-mouse="2" title="Right click (press)">R</button>
+                <button class="btn" data-badusb-mouse="4" title="Middle click (press)">M</button>
+                <button class="btn danger" data-badusb-mouse="0" title="Release all buttons">Release</button>
+              </div>
+              <div class="trackpad-status" id="badusb-trackpad-status">Inactive. Tap Start to enable relative mouse reporting.</div>
+            </div>
+          </div>
+
+          <div class="subpage" data-badusb-page="keyboard">
+            <div class="menu-row">
+              <div>
+                <h3>USB Keyboard</h3>
+                <p>Every keystroke is forwarded live to the host. Backspace / Enter / Ctrl / Alt / Win / arrows are buttons.</p>
+              </div>
+              <div class="actions">
+                <button class="btn primary" id="badusb-kb-start-btn">Start Keyboard</button>
+                <button class="btn danger" id="badusb-kb-stop-btn">Stop Keyboard</button>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:12px">
+              <label for="badusb-kb-input">Type to send</label>
+              <textarea id="badusb-kb-input" rows="3" placeholder="Type text. Each character is forwarded over HID on Enter or Send." spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+            </div>
+            <div class="actions" style="flex-wrap:wrap">
+              <button class="btn primary" id="badusb-kb-send-btn">Send Text</button>
+              <button class="btn ghost" id="badusb-kb-clear-btn">Clear</button>
+            </div>
+            <div style="height:10px"></div>
+            <div class="actions badusb-keys" aria-label="Modifier and special keys">
+              <button class="btn" data-badusb-key="0 0x2A">Backspace</button>
+              <button class="btn" data-badusb-key="0 0x28">Enter</button>
+              <button class="btn" data-badusb-key="0 0x29">Esc</button>
+              <button class="btn" data-badusb-key="0 0x2B">Tab</button>
+              <button class="btn" data-badusb-key="0 0x2C">Space</button>
+              <button class="btn" data-badusb-key="2 0x06">Ctrl+C</button>
+              <button class="btn" data-badusb-key="2 0x05">Ctrl+V</button>
+              <button class="btn" data-badusb-key="2 0x04">Ctrl+A</button>
+              <button class="btn" data-badusb-key="2 0x1A">Ctrl+Z</button>
+              <button class="btn" data-badusb-key="0 0x4F">Right</button>
+              <button class="btn" data-badusb-key="0 0x50">Left</button>
+              <button class="btn" data-badusb-key="0 0x51">Down</button>
+              <button class="btn" data-badusb-key="0 0x52">Up</button>
+              <button class="btn" data-badusb-key="0 0x4A">Home</button>
+              <button class="btn" data-badusb-key="0 0x4B">Page Up</button>
+              <button class="btn" data-badusb-key="0 0x4E">Page Down</button>
+              <button class="btn" data-badusb-key="0 0x4D">End</button>
+              <button class="btn" data-badusb-key="0 0x49">Insert</button>
+              <button class="btn" data-badusb-key="0 0x4C">Delete</button>
+              <button class="btn" data-badusb-key="0 0x3A">F1</button>
+              <button class="btn" data-badusb-key="0 0x3B">F2</button>
+              <button class="btn" data-badusb-key="0 0x3C">F3</button>
+              <button class="btn" data-badusb-key="0 0x3D">F4</button>
+              <button class="btn" data-badusb-key="0 0x3E">F5</button>
+              <button class="btn" data-badusb-key="0 0x3F">F6</button>
+              <button class="btn" data-badusb-key="0 0x40">F7</button>
+              <button class="btn" data-badusb-key="0 0x41">F8</button>
+              <button class="btn" data-badusb-key="0 0x42">F9</button>
+              <button class="btn" data-badusb-key="0 0x43">F10</button>
+              <button class="btn" data-badusb-key="0 0x44">F11</button>
+              <button class="btn" data-badusb-key="0 0x45">F12</button>
+            </div>
+          </div>
+
+          <div class="subpage" data-badusb-page="settings">
+            <div class="form-grid">
+              <div class="field">
+                <label for="badusb-vid">Vendor ID (hex)</label>
+                <input id="badusb-vid" type="text" maxlength="6" placeholder="0x1209" spellcheck="false" autocapitalize="off">
+              </div>
+              <div class="field">
+                <label for="badusb-pid">Product ID (hex)</label>
+                <input id="badusb-pid" type="text" maxlength="6" placeholder="0x0001" spellcheck="false" autocapitalize="off">
+              </div>
+              <div class="field">
+                <label for="badusb-mfr">Manufacturer (max 32)</label>
+                <input id="badusb-mfr" type="text" maxlength="32" placeholder="USB Device" spellcheck="false" autocapitalize="off">
+              </div>
+              <div class="field">
+                <label for="badusb-prod">Product (max 32)</label>
+                <input id="badusb-prod" type="text" maxlength="32" placeholder="HID Keyboard" spellcheck="false" autocapitalize="off">
+              </div>
+              <div class="field">
+                <label for="badusb-layout">Keyboard Layout</label>
+                <select id="badusb-layout">
+                  <option value="0">US</option>
+                  <option value="1">DE</option>
+                  <option value="2">FR</option>
+                  <option value="3">UK</option>
+                  <option value="4">ES</option>
+                </select>
+              </div>
+              <div class="field" style="flex-direction:row;align-items:center;gap:10px">
+                <label class="switch">
+                  <input type="checkbox" id="badusb-rand">
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </label>
+                <span>Randomize VID/PID/strings per run</span>
+              </div>
+            </div>
+            <div style="height:12px"></div>
+            <div class="actions" style="flex-wrap:wrap">
+              <button class="btn primary" id="badusb-settings-apply-btn">Apply</button>
+              <button class="btn ghost" id="badusb-settings-reload-btn">Reload from Device</button>
+              <button class="btn danger" id="badusb-settings-reset-btn">Reset to Defaults</button>
+            </div>
           </div>
         </div>
       </section>

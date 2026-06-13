@@ -8283,6 +8283,7 @@ void handle_nrf24_cmd(int argc, char **argv) {
     }
 
     const char *sub = argv[1];
+    (void)sub;
     bool remote_request = esp_comm_manager_is_remote_command();
 
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
@@ -10286,7 +10287,7 @@ typedef struct {
 static void sinkhole_download_task(void *pvParam) {
     sinkhole_dl_params_t *params = (sinkhole_dl_params_t *)pvParam;
     char *url = params->url;
-    const char *filepath = params->filepath;
+    char *filepath = params->filepath;
 
     if (!sd_card_manager.is_initialized) {
         glog("SD card required to download blocklist\n");

@@ -123,8 +123,26 @@ const CMD = {
 
   // BadUSB
   badusbList:      () => ({ cmd: 'badusb list',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'List BadUSB scripts' }),
-  badusbRun:       (file) => ({ cmd: `badusb run ${file}`, risky: true, stopFirst: true, cat: 'BadUSB', desc: 'Run BadUSB script' }),
+  badusbRun:       (file) => ({ cmd: `badusb run ${file}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run BadUSB script' }),
   badusbStop:      () => ({ cmd: 'badusb stop',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Stop BadUSB' }),
+  badusbRunBuiltin:() => ({ cmd: 'badusb run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run built-in Ghost Art script' }),
+  badusbKeyboardStart: () => ({ cmd: 'badusb keyboard_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Enable USB keyboard mode' }),
+  badusbKeyboardStop:  () => ({ cmd: 'badusb keyboard_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Disable USB keyboard mode' }),
+  badusbType:      (text) => ({ cmd: `badusb type ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Type via USB keyboard' }),
+  badusbTypeChar:  (ch) => ({ cmd: `badusb type_char ${(ch || '').charCodeAt(0)}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send a single ASCII char' }),
+  badusbKeysend:   (modifier, keycode) => ({ cmd: `badusb keysend ${modifier} ${keycode}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send single HID key (modifier, keycode)' }),
+  badusbJiggleStart: () => ({ cmd: 'badusb jiggle_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Start mouse jiggler' }),
+  badusbJiggleStop:  () => ({ cmd: 'badusb jiggle_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Stop mouse jiggler' }),
+  badusbTrackpadStart: () => ({ cmd: 'badusb trackpad_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Enable relative mouse (trackpad) mode' }),
+  badusbTrackpadStop:  () => ({ cmd: 'badusb trackpad_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Disable trackpad mode' }),
+  badusbTrackpadMove:  (dx, dy) => ({ cmd: `badusb trackpad_move ${dx} ${dy}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Relative mouse move (int8 dx dy)' }),
+  badusbTrackpadButton:(mask) => ({ cmd: `badusb trackpad_button ${mask}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Mouse button mask: 1=L 2=R 4=M 0=release' }),
+  badusbSetVid:    (hex) => ({ cmd: `badusb set_vid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB VID (next run)' }),
+  badusbSetPid:    (hex) => ({ cmd: `badusb set_pid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB PID (next run)' }),
+  badusbSetMfr:    (text) => ({ cmd: `badusb set_mfr ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set manufacturer string' }),
+  badusbSetProd:   (text) => ({ cmd: `badusb set_prod ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set product string' }),
+  badusbSetRand:   (on) => ({ cmd: `badusb set_rand ${on ? '1' : '0'}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Toggle VID/PID randomize' }),
+  badusbSetLayout: (n) => ({ cmd: `badusb set_layout ${n}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Keyboard layout (0=US 1=DE 2=FR 3=UK 4=ES)' }),
 
   // GPS
   gpsInfo:         (stop) => ({ cmd: stop ? 'gpsinfo -s' : 'gpsinfo', risky: false, stopFirst: false, cat: 'GPS', desc: 'GPS information' }),
@@ -414,6 +432,7 @@ function commandCategory(commandString) {
   if (c.startsWith('ble')) return 'BLE';
   if (c.startsWith('startportal') || c.startsWith('stopportal') || c.startsWith('listportals')) return 'Portal';
   if (c.startsWith('sd ')) return 'Files';
+  if (c.startsWith('badusb')) return 'BadUSB';
   if (c.startsWith('comm')) return 'GhostLink';
   if (c.startsWith('settings')) return 'Settings';
   return 'System';
