@@ -3,6 +3,7 @@
 ## Revival v2.0-pre5
 
 ### Added
+
  - Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
  - Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
  - Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
@@ -18,6 +19,7 @@
  - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
 
 ### Changed
+
  - Improved rotary encoder: raised debounce to 3 ms, added quadrature transition validation, capped pending step accumulation, and moved direct-GPIO encoder sampling to a dedicated 1 kHz task
  - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
  - Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)
@@ -37,6 +39,7 @@
  - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
 
 ### Fixed
+
  - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
  - Fixed "Scan SSH" menu item previously failing due to missing required argument
  - Fixed asset pack background image not properly filling the screen on some devices
@@ -54,6 +57,9 @@
  - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
 
+### Removed
+
+- Removed "IR sent" toast notification
 
 ## Revival v2.0-pre4 - 2026-06-06
 

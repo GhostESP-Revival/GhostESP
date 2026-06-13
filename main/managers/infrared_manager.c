@@ -22,6 +22,7 @@
 #include <strings.h>
 #include "managers/infrared_timings.h"
 #include "managers/infrared_protocols.h"
+#include "gui/toast.h"
 #include "soc/soc_caps.h"
 #include "freertos/queue.h"
 #include "esp_timer.h"
