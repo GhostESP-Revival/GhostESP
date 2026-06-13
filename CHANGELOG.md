@@ -58,6 +58,7 @@
  - Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
  - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
+ - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
 
 ### Removed
 

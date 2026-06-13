@@ -1001,6 +1001,26 @@ void serial_manager_deinit() {
   s_serial_initialized = false;
 }
 
+void serial_manager_restore_console(void) {
+#if JTAG_SUPPORTED
+  if (!s_serial_initialized) {
+    return;
+  }
+  usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
+      .rx_buffer_size = BUF_SIZE,
+      .tx_buffer_size = BUF_SIZE,
+  };
+  esp_err_t ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+  if (ret != ESP_OK) {
+    ESP_LOGW("SerialManager",
+             "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
+             esp_err_to_name(ret));
+  } else {
+    ESP_LOGI("SerialManager", "USB-JTAG restored after BadUSB teardown");
+  }
+#endif
+}
+
 int serial_manager_get_uart_num() {
     return (int)UART_NUM;
 }

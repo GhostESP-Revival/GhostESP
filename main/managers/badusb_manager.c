@@ -10,6 +10,7 @@
 #include "managers/settings_manager.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
+#include "core/serial_manager.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
@@ -336,10 +337,7 @@ static void badusb_mode_start_task(void *arg) {
 
     if (ret != ESP_OK) {
         glog("BadUSB: Failed to start mode: %s\n", esp_err_to_name(ret));
-        if (s_driver_installed) {
-            tinyusb_driver_uninstall();
-            s_driver_installed = false;
-        }
+        badusb_uninstall_driver();
         s_active = false;
         s_keyboard_mode = false;
         s_trackpad_active = false;
@@ -377,8 +375,7 @@ esp_err_t badusb_manager_mouse_jiggle_stop(void) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     if (s_driver_installed) {
-        tinyusb_driver_uninstall();
-        s_driver_installed = false;
+        badusb_uninstall_driver();
     }
     s_active = false;
     return ESP_OK;
@@ -410,8 +407,7 @@ esp_err_t badusb_manager_trackpad_stop(void) {
     s_trackpad_active = false;
     s_trackpad_buttons = 0;
     if (!s_keyboard_mode && !s_jiggler_task && s_driver_installed) {
-        tinyusb_driver_uninstall();
-        s_driver_installed = false;
+        badusb_uninstall_driver();
         s_active = false;
     }
     glog("BadUSB: Trackpad mode stopped\n");
@@ -485,8 +481,7 @@ esp_err_t badusb_manager_keyboard_mode_stop(void) {
     }
     s_keyboard_mode = false;
     if (s_driver_installed) {
-        tinyusb_driver_uninstall();
-        s_driver_installed = false;
+        badusb_uninstall_driver();
     }
     s_active = false;
     glog("BadUSB: Keyboard mode stopped\n");
@@ -621,6 +616,21 @@ static esp_err_t badusb_install_driver(void) {
     return ESP_OK;
 }
 
+// Stop TinyUSB and hand the USB peripheral back to the native
+// USB-Serial-JTAG console driver (S3/C3/C5/C6). The restore is a no-op on
+// targets without the native peripheral or when it is already installed.
+static void badusb_uninstall_driver(void) {
+    if (!s_driver_installed) {
+        return;
+    }
+    tinyusb_driver_uninstall();
+    s_driver_installed = false;
+    // Give the USB host time to finish its disconnect handshake before the
+    // native console driver takes over the bus.
+    vTaskDelay(pdMS_TO_TICKS(50));
+    serial_manager_restore_console();
+}
+
 // Wait for USB host to mount the device
 static esp_err_t badusb_wait_for_mount(void) {
     int timeout = 500;  // 5 seconds
@@ -750,10 +760,7 @@ static void badusb_exec_task(void *arg) {
         esp_comm_manager_send_command("badusb", "status done");
     }
 
-    if (s_driver_installed) {
-        tinyusb_driver_uninstall();
-        s_driver_installed = false;
-    }
+    badusb_uninstall_driver();
 
     s_active = false;
     free(params);
