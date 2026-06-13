@@ -231,8 +231,10 @@ static bool is_backlight_off = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
-static joystick_t enc_button; // we'll treat the push-switch like any other button
-static joystick_t exit_button; // IO6 exit button
+static joystick_t enc_button;
+static joystick_t exit_button;
+static TaskHandle_t encoder_poll_task_handle = NULL;
+static void encoder_poll_task(void *pvParameters);
 #endif
 
 #define FADE_DURATION_MS GUI_ANIM_TRANSITION
@@ -1705,6 +1707,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
 
+    // Run encoder sampling at 1 kHz for cleaner quadrature decoding
+    if (xTaskCreate(encoder_poll_task, "EncPoll", 2048, NULL,
+                    HARDWARE_INPUT_TASK_PRIORITY, &encoder_poll_task_handle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create encoder poll task");
+    }
+
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     // GPIO 6 exit button is TEmbed C1101 only
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
@@ -2254,6 +2262,19 @@ static char tdeck_raw_to_char(int col, int row, bool shift, bool symbol) {
 
 
 
+#ifdef CONFIG_USE_ENCODER
+static void encoder_poll_task(void *pvParameters)
+{
+    (void)pvParameters;
+    const TickType_t sample_interval = pdMS_TO_TICKS(1);
+    while (1) {
+        encoder_tick(&g_encoder);
+        vTaskDelay(sample_interval);
+    }
+    vTaskDelete(NULL);
+}
+#endif
+
 void hardware_input_task(void *pvParameters) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
   const int touch_move_min_delta = 1;
@@ -2418,8 +2439,12 @@ void hardware_input_task(void *pvParameters) {
 #endif
 
 #ifdef CONFIG_USE_ENCODER
-    /* 1 kHz poll; cheap */
+#ifdef CONFIG_USE_IO_EXPANDER
+    /* IO expander encoder: poll at hardware_input_task rate (100 Hz) */
     encoder_tick(&g_encoder);
+#else
+    /* Direct GPIO encoder: sampled at 1 kHz in encoder_poll_task; just drain events here */
+#endif
 
     /* direction events */
     if (encoder_peek_direction(&g_encoder) != ENCODER_DIR_NONE) {
