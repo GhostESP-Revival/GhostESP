@@ -8743,7 +8743,7 @@ void handle_badusb_cmd(int argc, char **argv) {
     bool remote_request = esp_comm_manager_is_remote_command();
 
     if (argc < 2) {
-        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop|trackpad_start|trackpad_stop|trackpad_move|trackpad_button>\n");
+        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop|trackpad_start|trackpad_stop|trackpad_move|trackpad_button|trackpad_wheel>\n");
         glog("  badusb run <filename>       - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
         glog("  badusb list                 - List available scripts\n");
         glog("  badusb stop                 - Stop current execution\n");
@@ -8764,6 +8764,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         glog("  badusb trackpad_stop        - Stop USB trackpad mode\n");
         glog("  badusb trackpad_move <dx> <dy> - Send relative mouse move (each axis clamped to int8)\n");
         glog("  badusb trackpad_button <mask>  - Set held mouse buttons (1=L 2=R 4=M, 0=release)\n");
+        glog("  badusb trackpad_wheel <delta> - Send vertical mouse wheel delta (int8)\n");
         return;
     }
 
@@ -8966,6 +8967,13 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint8_t buttons = (uint8_t)strtoul(argv[2], NULL, 0);
         badusb_manager_trackpad_button(buttons);
+    } else if (strcmp(sub, "trackpad_wheel") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb trackpad_wheel <delta>\n");
+            return;
+        }
+        int delta = atoi(argv[2]);
+        badusb_manager_trackpad_wheel(delta);
     } else if (strcmp(sub, "status") == 0) {
         // Status update from peer - forward to view
 #ifdef CONFIG_WITH_SCREEN

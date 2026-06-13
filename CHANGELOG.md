@@ -25,6 +25,7 @@
 
 ### Changed
 
+ - Completely redesigned the WebUI and added a dedicated BadUSB page
  - Improved rotary encoder: raised debounce to 3 ms, added quadrature transition validation, capped pending step accumulation, and moved direct-GPIO encoder sampling to a dedicated 1 kHz task
  - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
  - Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)

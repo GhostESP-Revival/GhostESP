@@ -136,6 +136,7 @@ const CMD = {
   badusbTrackpadStart: () => ({ cmd: 'badusb trackpad_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Enable relative mouse (trackpad) mode' }),
   badusbTrackpadStop:  () => ({ cmd: 'badusb trackpad_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Disable trackpad mode' }),
   badusbTrackpadMove:  (dx, dy) => ({ cmd: `badusb trackpad_move ${dx} ${dy}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Relative mouse move (int8 dx dy)' }),
+  badusbTrackpadWheel: (delta) => ({ cmd: `badusb trackpad_wheel ${delta}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Vertical mouse wheel delta (int8)' }),
   badusbTrackpadButton:(mask) => ({ cmd: `badusb trackpad_button ${mask}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Mouse button mask: 1=L 2=R 4=M 0=release' }),
   badusbSetVid:    (hex) => ({ cmd: `badusb set_vid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB VID (next run)' }),
   badusbSetPid:    (hex) => ({ cmd: `badusb set_pid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB PID (next run)' }),

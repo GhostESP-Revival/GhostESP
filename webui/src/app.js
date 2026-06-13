@@ -379,10 +379,10 @@ function bindTrackpad(el) {
       const now = performance.now();
       if (now - lastMove.t > moveThrottleMs) {
         lastMove.t = now;
-        const steps = Math.max(-3, Math.min(3, Math.round(scrollBucket / 24)));
+        // 12px of drag = one wheel notch
+        const steps = Math.max(-3, Math.min(3, Math.round(scrollBucket / 12)));
         if (steps) {
-          // wheel steps encoded as separate top-level HID not available; use trackpad_move with dy -> host scroll
-          runCommand(CMD.badusbTrackpadMove(0, steps).cmd, { silent: true });
+          runCommand(CMD.badusbTrackpadWheel(steps * -1).cmd, { silent: true });
           scrollBucket = 0;
         }
       }
