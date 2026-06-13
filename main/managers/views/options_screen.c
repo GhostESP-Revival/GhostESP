@@ -32,6 +32,7 @@
 #include "gui/scan_status.h"
 #include "gui/detail_view.h"
 #include "gui/nav_history.h"
+#include "gui/select_overlay.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
@@ -1304,6 +1305,8 @@ static const int OPT_SWIPE_THRESHOLD_RATIO = 10;
 static bool option_fired = false;
 static bool option_invoked = false;
 static options_view_t *g_options_view = NULL;
+static gui_select_overlay_t *settings_select_overlay = NULL;
+static int settings_select_setting_index = -1;
 
 // Add button declarations and constants
 static lv_obj_t *scroll_up_btn = NULL;
@@ -1409,6 +1412,11 @@ static int opt_resolve_drag_axis(int total_dx, int total_dy) {
 // forward declaration for incremental builder callback
 static void menu_builder_cb(lv_timer_t *t);
 static void change_setting_value(int setting_index, bool increment); // Forward Declaration
+static void apply_setting_change(int setting_index, int new_value);
+static bool settings_select_overlay_is_open(void);
+static void settings_select_open(int setting_index);
+static void settings_select_close(void);
+static bool settings_select_handle_input(InputEvent *event);
 
 static lv_timer_t *menu_build_timer = NULL;
 static const char * const *current_options_list = NULL;
@@ -1844,6 +1852,7 @@ void options_menu_create() {
      * destroy/create to avoid expensive LVGL operations and watchdog starvation.
      */
     ESP_LOGI(TAG, "options_menu_create: SelectedMenuType=%d (%s)", SelectedMenuType, options_menu_type_to_string(SelectedMenuType));
+    settings_select_close();
     s_info_detail_active = false;
     
     // Reset WiFi menu state when entering from main menu to ensure clean entry
@@ -2815,6 +2824,183 @@ static void apply_setting_change(int setting_index, int new_value) {
     settings_persist_setting((SettingsType)item->setting_type);
 }
 
+static bool settings_select_overlay_is_open(void) {
+    return gui_select_overlay_is_open(settings_select_overlay);
+}
+
+static void settings_refresh_row_label(int setting_index) {
+    if (!menu_container || !lv_obj_is_valid(menu_container)) return;
+    if (setting_index < 0 || setting_index >= settings_items_count) return;
+
+    SettingsItem *item = &settings_items[setting_index];
+    uint32_t child_cnt = lv_obj_get_child_cnt(menu_container);
+    for (uint32_t row_idx = 0; row_idx < child_cnt; row_idx++) {
+        lv_obj_t *row = lv_obj_get_child(menu_container, (int32_t)row_idx);
+        if (!row || !lv_obj_is_valid(row)) continue;
+        if ((int)(intptr_t)lv_obj_get_user_data(row) != setting_index) continue;
+
+        lv_obj_t *label = NULL;
+        uint32_t row_child_cnt = lv_obj_get_child_cnt(row);
+        for (uint32_t i = 0; i < row_child_cnt; ++i) {
+            lv_obj_t *child = lv_obj_get_child(row, (int32_t)i);
+            if (!child) continue;
+            if (lv_obj_get_user_data(child) == (void *)1) {
+                label = child;
+                break;
+            }
+        }
+        if (!label && row_child_cnt > 0) {
+            label = lv_obj_get_child(row, 0);
+        }
+        if (label) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%s: %s", item->label, settings_item_value_text(item));
+            lv_label_set_text(label, buf);
+        }
+        return;
+    }
+}
+
+static void settings_select_apply_value(int option_index, void *user_data) {
+    (void)user_data;
+    if (settings_select_setting_index < 0 || settings_select_setting_index >= settings_items_count) {
+        settings_select_close();
+        return;
+    }
+
+    SettingsItem *item = &settings_items[settings_select_setting_index];
+    if (option_index < 0 || option_index >= item->value_count) {
+        settings_select_close();
+        return;
+    }
+
+    int setting_index = settings_select_setting_index;
+    settings_select_close();
+    apply_setting_change(setting_index, option_index);
+    settings_refresh_row_label(setting_index);
+    update_settings_arrows_visibility();
+}
+
+static void settings_select_dismiss(void *user_data) {
+    (void)user_data;
+    settings_select_close();
+}
+
+static void settings_select_close(void) {
+    gui_select_overlay_destroy(&settings_select_overlay);
+    settings_select_setting_index = -1;
+}
+
+static void settings_select_open(int setting_index) {
+    if (setting_index < 0 || setting_index >= settings_items_count) return;
+    SettingsItem *item = &settings_items[setting_index];
+    if (item->widget != SETTING_WIDGET_VALUE_CYCLE || item->value_count <= 1 || !item->value_options) return;
+
+    settings_select_close();
+
+    settings_select_setting_index = setting_index;
+
+    int row_h = (button_height_global > 0) ? button_height_global - 8 : 40;
+    if (row_h < 30) row_h = 30;
+
+    lv_obj_t *row = NULL;
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        uint32_t child_cnt = lv_obj_get_child_cnt(menu_container);
+        for (uint32_t i = 0; i < child_cnt; i++) {
+            lv_obj_t *candidate = lv_obj_get_child(menu_container, (int32_t)i);
+            if (candidate && (int)(intptr_t)lv_obj_get_user_data(candidate) == setting_index) {
+                row = candidate;
+                break;
+            }
+        }
+    }
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+
+    int bottom_reserved = 8;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    bottom_reserved += SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#endif
+    gui_select_overlay_config_t cfg = {
+        .parent = lv_layer_top(),
+        .anchor = row,
+        .options = item->value_options,
+        .option_count = item->value_count,
+        .selected_index = settings_item_clamped_value(item),
+        .row_height = row_h,
+        .max_visible_rows = (LV_VER_RES <= 200) ? 4 : 5,
+        .top_reserved = GUI_STATUS_BAR_H + 4,
+        .bottom_reserved = bottom_reserved,
+        .min_width = 90,
+        .max_width = 230,
+        .surface_color = lv_color_hex(theme_palette_get_surface_alt(theme)),
+        .text_color = lv_color_hex(theme_palette_get_text(theme)),
+        .muted_text_color = lv_color_hex(theme_palette_get_text_muted(theme)),
+        .accent_color = lv_color_hex(theme_palette_get_accent(theme)),
+        .font = (row_h <= 34) ? accessibility_get_font_small() : accessibility_get_font_body(),
+        .on_select = settings_select_apply_value,
+        .on_dismiss = settings_select_dismiss,
+        .user_data = NULL,
+    };
+    settings_select_overlay = gui_select_overlay_create(&cfg);
+    if (!settings_select_overlay) {
+        settings_select_setting_index = -1;
+    }
+}
+
+static bool settings_select_handle_input(InputEvent *event) {
+    if (!settings_select_overlay_is_open()) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) {
+        return gui_select_overlay_handle_touch(settings_select_overlay, &event->data.touch_data);
+    }
+
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        settings_select_close();
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 2 || button == 0) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (button == 4 || button == 3) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        } else if (button == 1) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        }
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == LV_KEY_UP || key == 'k' || key == ';' || key == ',' || key == 'h' || key == 44 || key == 59) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (key == LV_KEY_DOWN || key == 'j' || key == '.' || key == '/' || key == 'l' || key == 46 || key == 47) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        } else if (key == LV_KEY_ENTER || key == 13) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        } else if (key == LV_KEY_ESC || key == 29 || key == '`') {
+            settings_select_close();
+        }
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        } else if (event->data.encoder.direction < 0) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (event->data.encoder.direction > 0) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        }
+        return true;
+    }
+
+    return true;
+}
+
 static void change_current_row(bool increment)
 {
     if (!menu_container) return;
@@ -2852,11 +3038,16 @@ static void change_setting_value(int setting_index, bool increment) {
     }
 #endif
     SettingsItem *item = &settings_items[setting_index];
+    if (item->value_count <= 0) return;
+
     int new_value = item->current_value;
 
     if (item->widget == SETTING_WIDGET_TOGGLE) {
         // Flip 0 <-> 1 regardless of the `increment` argument.
         new_value = (item->current_value == 0) ? 1 : 0;
+    } else if (item->value_count > 1) {
+        settings_select_open(setting_index);
+        return;
     } else if (increment) {
         new_value = (new_value + 1) % item->value_count;
     } else {
@@ -2879,24 +3070,7 @@ static void change_setting_value(int setting_index, bool increment) {
         return;
     }
 
-    lv_obj_t *label = NULL;
-    uint32_t child_cnt = lv_obj_get_child_cnt(current_item);
-    for (uint32_t i = 0; i < child_cnt; ++i) {
-        lv_obj_t *child = lv_obj_get_child(current_item, (int32_t)i);
-        if (!child) continue;
-        if (lv_obj_get_user_data(child) == (void *)1) {
-            label = child;
-            break;
-        }
-    }
-    if (!label && child_cnt > 0) {
-        label = lv_obj_get_child(current_item, 0);
-    }
-    if (label) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%s: %s", item->label, settings_item_value_text(item));
-        lv_label_set_text(label, buf);
-    }
+    settings_refresh_row_label(setting_index);
 }
 
 static void select_option_item(int index) {
@@ -2932,6 +3106,10 @@ void handle_hardware_button_press_options(InputEvent *event) {
             wigle_stats_popup_close_cb(NULL);
             return;
         }
+    }
+
+    if (settings_select_handle_input(event)) {
+        return;
     }
 
     bool station_scan_overlay_active = station_scan_is_active() ||
@@ -4202,7 +4380,6 @@ void option_event_cb(lv_event_t *e) {
     
     if (is_settings_mode) {
         void *raw_udata = lv_event_get_user_data(e);
-        const char *udata = (const char *)raw_udata;
 
         /* ---------- settings ROOT ("Display", "Config") ---------- */
         if (current_settings_category < 0) {
@@ -4214,7 +4391,7 @@ void option_event_cb(lv_event_t *e) {
 
         /* ---------- settings SUBMENU ---------- */
 
-        if (udata && strcmp(udata, "__BACK_OPTION__") == 0) {
+        if (raw_udata == (void *)"__BACK_OPTION__") {
             back_event_cb(NULL);
             option_invoked = false;
             return;
@@ -6433,6 +6610,7 @@ void handle_option_directly(const char *Selected_Option) {
 
 void options_menu_destroy() {
     opt_touch_started = false;
+    settings_select_close();
     gui_nav_history_clear();
     scan_all_flow_active = false;
     scan_all_started_station_phase = false;
@@ -8838,6 +9016,7 @@ static const char **blocklist_load_page(void) {
 }
 
 static void rebuild_current_menu(void) {
+    settings_select_close();
     lvgl_timer_del_safe(&menu_build_timer);
     
     if (g_options_view) {
@@ -9585,7 +9764,8 @@ static void menu_builder_cb(lv_timer_t *t)
                                 if (!btn) break;
                                 lv_obj_set_user_data(btn, (void *)(intptr_t)i);
                                 lv_obj_set_height(btn, button_height_global);
-                                decorate_settings_row_with_arrows(btn);
+                                // Select rows now open a compact overlay; keep the old arrow decoration available for rollback.
+                                // decorate_settings_row_with_arrows(btn);
                             }
                             num_items++;
                             built_this_tick++;

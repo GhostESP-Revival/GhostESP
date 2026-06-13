@@ -20,6 +20,7 @@
  - Added an "Invert Carousel" setting in Appearance that flips the slide direction for keyboard left/right, joystick side-to-side, and the rotary encoder on the main menu carousel
  - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
  - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
+ - Added a reusable select overlay for option picker rows
 
 ### Changed
 
@@ -41,6 +42,7 @@
  - Moved the per-view "mount SD on demand" boilerplate into shared `sd_card_jit_begin` / `sd_card_jit_end` helpers used by BadUSB, Infrared, NFC, and SD app views
  - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
  - Easy Learn in the Infrared menu now uses an iOS-style toggle row like the settings ones
+ - Removed "IR sent" toast notification
 
 ### Fixed
 
@@ -62,9 +64,6 @@
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
  - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
 
-### Removed
-
-- Removed "IR sent" toast notification
 
 ## Revival v2.0-pre4 - 2026-06-06
 
