@@ -21,6 +21,7 @@
  - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
  - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
  - Added a reusable select overlay for option picker rows
+ - Added subcategories to the Settings view and re-organised the options
 
 ### Changed
 
