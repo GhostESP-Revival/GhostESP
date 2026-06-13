@@ -12,6 +12,7 @@
 #include "core/scan_saver.h"
 #include "core/glog.h"
 #include "core/utils.h"
+#include "esp_random.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -80,8 +81,8 @@ static void encode_netbios_name(const char *name, uint8_t *out) {
  * @param packet_size Size of output buffer
  * @return Length of built packet
  */
-static size_t build_nbns_query(uint16_t tx_id, const char *name,
-                                uint8_t *packet, size_t packet_size) {
+static size_t build_nbns_query(uint16_t tx_id, const char *name, uint16_t qtype,
+                               uint8_t *packet, size_t packet_size) {
     if (packet_size < NETBIOS_QUERY_PACKET_SIZE) return 0;
 
     memset(packet, 0, packet_size);
@@ -132,9 +133,8 @@ static size_t build_nbns_query(uint16_t tx_id, const char *name,
     }
     packet[offset++] = 0x00; // Name terminator
 
-    // Type: NB (0x0020)
-    packet[offset++] = 0x00;
-    packet[offset++] = 0x20;
+    packet[offset++] = (uint8_t)(qtype >> 8);
+    packet[offset++] = (uint8_t)(qtype & 0xFF);
 
     // Class: IN (0x0001)
     packet[offset++] = 0x00;
@@ -159,7 +159,7 @@ static void parse_nbns_response(const uint8_t *buf, size_t len,
 
     // Find name in response (skip header + name)
     size_t pos = 12;
-    if (buf[pos] == 0x20) pos += 33; // 32 bytes + length + terminator
+    if (buf[pos] == 0x20) pos += 34; // length byte + 32-byte name + terminator
     else {
         while (pos < len && buf[pos] != 0x00) pos += buf[pos] + 1;
         pos++;
@@ -185,7 +185,39 @@ static void parse_nbns_response(const uint8_t *buf, size_t len,
         uint16_t rdlength = ((uint16_t)buf[pos] << 8) | buf[pos + 1];
         pos += 2;
 
-        if (type == 0x20 && rdlength >= 6 && pos + 6 <= len) {
+        if (type == 0x21 && rdlength >= 1 && pos + rdlength <= len) {
+            size_t rdata_end = pos + rdlength;
+            uint8_t name_count = buf[pos++];
+            glog("[NetBIOS] Host: %s  Names: ", src_ip);
+            if (sf != NULL) {
+                scan_file_printf(sf, "Host: %s  Names: ", src_ip);
+            }
+
+            bool printed = false;
+            for (uint8_t i = 0; i < name_count && pos + 18 <= rdata_end; i++) {
+                char nb_name[16];
+                memcpy(nb_name, &buf[pos], 15);
+                nb_name[15] = '\0';
+                for (int j = 14; j >= 0 && nb_name[j] == ' '; j--) {
+                    nb_name[j] = '\0';
+                }
+                uint8_t suffix = buf[pos + 15];
+                uint16_t nb_flags = ((uint16_t)buf[pos + 16] << 8) | buf[pos + 17];
+                pos += 18;
+
+                if (nb_name[0] == '\0') continue;
+                glog("%s%s<%02X>/0x%04X", printed ? ", " : "", nb_name, suffix, nb_flags);
+                if (sf != NULL) {
+                    scan_file_printf(sf, "%s%s<%02X>/0x%04X", printed ? ", " : "", nb_name, suffix, nb_flags);
+                }
+                printed = true;
+            }
+            glog("%s\n", printed ? "" : "none");
+            if (sf != NULL) {
+                scan_file_printf(sf, "%s\n", printed ? "" : "none");
+            }
+            pos = rdata_end;
+        } else if (type == 0x20 && rdlength >= 6 && pos + 6 <= len) {
             uint16_t nb_flags = ((uint16_t)buf[pos] << 8) | buf[pos + 1];
             pos += 2;
 
@@ -245,7 +277,7 @@ static void send_nbns_query(const char *target_ip, bool broadcast,
 
     uint8_t packet[512];
     uint16_t tx_id = (uint16_t)(esp_random() & 0xFFFF);
-    size_t pkt_len = build_nbns_query(tx_id, NULL, packet, sizeof(packet));
+    size_t pkt_len = build_nbns_query(tx_id, NULL, 0x0021, packet, sizeof(packet));
 
     if (pkt_len == 0) {
         close(sock);
@@ -295,6 +327,7 @@ void netbios_scan_host(const char *target_ip) {
     ESP_LOGI(TAG, "Starting NetBIOS scan on host: %s", target_ip);
     glog("NetBIOS scanning host: %s\n", target_ip);
 
+    g_network_scan_cancel = false;
     send_nbns_query(target_ip, false, NULL);
 
     glog("NetBIOS scan completed on %s\n", target_ip);
@@ -308,6 +341,15 @@ void netbios_scan_subnet(void) {
 
     if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
         glog("NetBIOS Scan: Failed to get subnet prefix - not connected to WiFi?\n");
+        return;
+    }
+
+    netbios_scan_subnet_prefix(subnet_prefix);
+}
+
+void netbios_scan_subnet_prefix(const char *subnet_prefix) {
+    if (subnet_prefix == NULL || strlen(subnet_prefix) == 0) {
+        glog("NetBIOS Scan: Invalid subnet prefix\n");
         return;
     }
 

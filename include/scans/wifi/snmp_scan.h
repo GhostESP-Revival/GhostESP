@@ -23,6 +23,13 @@
 void snmp_scan_subnet(void);
 
 /**
+ * @brief Scan a specific /24 subnet prefix for SNMP services.
+ *
+ * @param subnet_prefix Prefix including trailing dot, e.g. "192.168.4."
+ */
+void snmp_scan_subnet_prefix(const char *subnet_prefix);
+
+/**
  * @brief Scan a specific host for SNMP services
  *
  * @param target_ip IP address to scan

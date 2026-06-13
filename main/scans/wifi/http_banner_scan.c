@@ -59,9 +59,9 @@ void http_banner_scan_reset_cancel(void) {
  * @brief Send a simple HTTP probe and read the response banner
  */
 static bool grab_http_banner(const char *target_ip, uint16_t port,
-                              const char *scheme,
-                              char *banner_out, size_t banner_size,
-                               scan_file_t *sf) {
+                             const char *scheme,
+                             char *banner_out, size_t banner_size,
+                             scan_file_t *sf) {
     if (g_network_scan_cancel) return false;
 
     int sock = tcp_connect_with_timeout_cancel(target_ip, port, HTTP_SCAN_TIMEOUT_MS,
@@ -152,6 +152,26 @@ static bool grab_http_banner(const char *target_ip, uint16_t port,
     }
 }
 
+static bool probe_tls_service(const char *target_ip, uint16_t port,
+                              const char *scheme, scan_file_t *sf) {
+    if (g_network_scan_cancel) return false;
+
+    int sock = tcp_connect_with_timeout_cancel(target_ip, port, HTTP_SCAN_TIMEOUT_MS,
+                                               &g_network_scan_cancel);
+    if (sock < 0) {
+        return false;
+    }
+    tcp_close_socket(&sock);
+
+    glog("[%s:%d] (%s) Status: OPEN, TLS banner requires handshake\n",
+         target_ip, port, scheme);
+    if (sf != NULL) {
+        scan_file_printf(sf, "[%s:%d] (%s) Status: OPEN, TLS banner requires handshake\n",
+                         target_ip, port, scheme);
+    }
+    return true;
+}
+
 // ============================================================================
 // Public API Implementation
 // ============================================================================
@@ -170,10 +190,14 @@ void http_banner_scan_host(const char *target_ip) {
 
     int open_ports = 0;
     char banner[HTTP_BANNER_BUFFER_SIZE];
+    g_network_scan_cancel = false;
 
     for (int i = 0; i < HTTP_MAX_PORTS && !g_network_scan_cancel; i++) {
-        if (grab_http_banner(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i],
-                              banner, sizeof(banner), NULL)) {
+        bool found = (strncmp(HTTP_PORT_NAMES[i], "https", 5) == 0)
+            ? probe_tls_service(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i], NULL)
+            : grab_http_banner(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i],
+                               banner, sizeof(banner), NULL);
+        if (found) {
             open_ports++;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -194,6 +218,15 @@ void http_banner_scan_subnet(void) {
         return;
     }
 
+    http_banner_scan_subnet_prefix(subnet_prefix);
+}
+
+void http_banner_scan_subnet_prefix(const char *subnet_prefix) {
+    if (subnet_prefix == NULL || strlen(subnet_prefix) == 0) {
+        glog("HTTP Banner Scan: Invalid subnet prefix\n");
+        return;
+    }
+
     glog("HTTP Banner Scan: Scanning subnet %s*\n", subnet_prefix);
 
     scan_file_t sf = SCAN_FILE_INIT;
@@ -208,22 +241,24 @@ void http_banner_scan_subnet(void) {
     char banner[HTTP_BANNER_BUFFER_SIZE];
     g_network_scan_cancel = false;
 
-    glog("HTTP Banner Scan: Scanning 254 hosts...\n");
+    glog("HTTP Banner Scan: Scanning 254 hosts (5 ports each, may take several minutes)...\n");
 
     // Scan all hosts in the subnet (1-254)
     for (int host = 1; host <= 254 && !g_network_scan_cancel; host++) {
-        // Progress update every 25 hosts
-        if (host % 25 == 0) {
-            glog("HTTP Banner Scan: Progress %d/254 hosts\n", host);
-        }
-
         char target_ip[16];
         build_ip_string(target_ip, sizeof(target_ip), subnet_prefix, host);
 
+        if (host == 1 || host % 5 == 0) {
+            glog("HTTP Banner Scan: Progress %d/254 hosts, checking %s\n", host, target_ip);
+        }
+
         int host_services = 0;
         for (int i = 0; i < HTTP_MAX_PORTS && !g_network_scan_cancel; i++) {
-            if (grab_http_banner(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i],
-                                  banner, sizeof(banner), &sf)) {
+            bool found = (strncmp(HTTP_PORT_NAMES[i], "https", 5) == 0)
+                ? probe_tls_service(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i], &sf)
+                : grab_http_banner(target_ip, HTTP_PORTS[i], HTTP_PORT_NAMES[i],
+                                   banner, sizeof(banner), &sf);
+            if (found) {
                 host_services++;
                 total_services++;
             }

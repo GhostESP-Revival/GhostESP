@@ -68,9 +68,9 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 ### Network
 
 - **`scanports <local|ip> [all|start-end]`**, **`scanarp`**, **`scanlocal`**, **`scanssh <ip>`** — Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
-- **`netbiosscan [subnet|<ip>]`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Scan the subnet or probe a specific host.
-- **`httpbannerscan [subnet|<ip>]`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
-- **`snmpprobe [subnet|<ip>]`** — Probe SNMP v1/v2c on UDP port 161 with common communities (`public`, `private`) and retrieve `sysDescr` to identify network devices (routers, switches, printers).
+- **`netbiosscan [subnet [a.b.c.]]|<ip>`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Scan the current subnet, a specific `/24` prefix, or a specific host.
+- **`httpbannerscan [subnet [a.b.c.]]|<ip>`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
+- **`snmpprobe [subnet [a.b.c.]]|<ip>`** — Probe SNMP v1/v2c on UDP port 161 with common communities (`public`, `private`) and retrieve `sysDescr` to identify network devices (routers, switches, printers).
 - **`dhcpstarve <start [threads]|stop|display>`** — Flood a DHCP server or show collected leases.
 - **`capture <-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop>`** — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports `-802154` for 802.15.4 capture.
 

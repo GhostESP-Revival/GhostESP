@@ -4293,7 +4293,56 @@ void handle_scan_ssh(int argc, char **argv) {
     status_display_show_status("SSH Scan Done");
 }
 
+static bool normalize_subnet_prefix_arg(const char *arg, char *out, size_t out_len) {
+    if (arg == NULL || out == NULL || out_len < 16) {
+        return false;
+    }
+
+    char tmp[32];
+    strlcpy(tmp, arg, sizeof(tmp));
+    char *slash = strchr(tmp, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+    }
+
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    int consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u.%u%n", &a, &b, &c, &d, &consumed) == 4 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u.%n", &a, &b, &c, &consumed) == 3 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u%n", &a, &b, &c, &consumed) == 3 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    return false;
+}
+
 void handle_netbios_scan(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: netbiosscan subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting NetBIOS scan on subnet %s*...\n", subnet_prefix);
+        netbios_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("NetBIOS Done");
+        return;
+    }
+
     if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
         glog("Starting NetBIOS scan on local subnet...\n");
         netbios_scan_subnet();
@@ -4307,6 +4356,18 @@ void handle_netbios_scan(int argc, char **argv) {
 }
 
 void handle_http_banner_scan(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: httpbannerscan subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting HTTP banner scan on subnet %s*...\n", subnet_prefix);
+        http_banner_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("HTTP Banner Done");
+        return;
+    }
+
     if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
         glog("Starting HTTP banner scan on local subnet...\n");
         http_banner_scan_subnet();
@@ -4320,6 +4381,18 @@ void handle_http_banner_scan(int argc, char **argv) {
 }
 
 void handle_snmp_probe(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: snmpprobe subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting SNMP probe on subnet %s*...\n", subnet_prefix);
+        snmp_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("SNMP Done");
+        return;
+    }
+
     if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
         glog("Starting SNMP probe on local subnet...\n");
         snmp_scan_subnet();
@@ -4787,15 +4860,18 @@ void handle_help(int argc, char **argv) {
         glog("netbiosscan\n");
         glog("    Description: Scan for NetBIOS Name Service hosts on local subnet or specific IP\n");
         glog("    Usage: netbiosscan\n");
-        glog("           netbiosscan <IP>\n\n");
+        glog("           netbiosscan <IP>\n");
+        glog("           netbiosscan subnet <a.b.c[.0|.]>\n\n");
         glog("httpbannerscan\n");
         glog("    Description: Scan for HTTP/HTTPS services and grab Server banners\n");
         glog("    Usage: httpbannerscan\n");
-        glog("           httpbannerscan <IP>\n\n");
+        glog("           httpbannerscan <IP>\n");
+        glog("           httpbannerscan subnet <a.b.c[.0|.]>\n\n");
         glog("snmpprobe\n");
         glog("    Description: Probe SNMP v1/v2c services with common communities\n");
         glog("    Usage: snmpprobe\n");
-        glog("           snmpprobe <IP>\n\n");
+        glog("           snmpprobe <IP>\n");
+        glog("           snmpprobe subnet <a.b.c[.0|.]>\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");

@@ -23,6 +23,13 @@
 void netbios_scan_subnet(void);
 
 /**
+ * @brief Scan a specific /24 subnet prefix for NetBIOS hosts.
+ *
+ * @param subnet_prefix Prefix including trailing dot, e.g. "192.168.4."
+ */
+void netbios_scan_subnet_prefix(const char *subnet_prefix);
+
+/**
  * @brief Scan a specific host for NetBIOS name information
  *
  * Sends an NBNS name query to the target IP address.

@@ -764,6 +764,7 @@ static const char * const wifi_network_options[] = {
     "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
     "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...",
+    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...",
     NULL
 };
 
@@ -870,6 +871,9 @@ static const char * const dual_comm_scan_options[] = {
     "NetBIOS Scan Host...",
     "HTTP Banner Host...",
     "SNMP Probe Host...",
+    "NetBIOS Subnet...",
+    "HTTP Banner Subnet...",
+    "SNMP Probe Subnet...",
     "PineAP Detection",
     "Flock Detection",
     "Channel Congestion",
@@ -1643,6 +1647,12 @@ static void ssh_scan_kb_cb(const char *text);
 static void netbios_scan_kb_cb(const char *text);
 static void http_banner_kb_cb(const char *text);
 static void snmp_probe_kb_cb(const char *text);
+static void netbios_subnet_kb_cb(const char *text);
+static void http_banner_subnet_kb_cb(const char *text);
+static void snmp_probe_subnet_kb_cb(const char *text);
+static void dual_comm_netbios_subnet_kb_cb(const char *text);
+static void dual_comm_http_banner_subnet_kb_cb(const char *text);
+static void dual_comm_snmp_probe_subnet_kb_cb(const char *text);
 static void dual_comm_connect_kb_cb(const char *text);
 static void dual_comm_send_kb_cb(const char *text);
 static void dual_comm_wifi_connect_kb_cb(const char *text);
@@ -4483,6 +4493,27 @@ void option_event_cb(lv_event_t *e) {
             keyboard_view_set_initial_text("");
             display_manager_switch_view(&keyboard_view);
             view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_netbios_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_http_banner_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_snmp_probe_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
         } else if (strcmp(Selected_Option, "PineAP Detection") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
@@ -6219,6 +6250,33 @@ display_manager_switch_view(&terminal_view);
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(snmp_probe_kb_cb);
         keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(netbios_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(http_banner_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_probe_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
         keyboard_view_set_initial_text("");
         display_manager_switch_view(&keyboard_view);
         view_switched = true;
@@ -9117,6 +9175,99 @@ static void snmp_probe_kb_cb(const char *text) {
     snprintf(cmd, sizeof(cmd), "snmpprobe %s", text);
     
     terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void netbios_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "netbiosscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void http_banner_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "httpbannerscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_probe_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_netbios_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend netbiosscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_http_banner_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend httpbannerscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_snmp_probe_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
     display_manager_switch_view(&terminal_view);
     simulateCommand(cmd);
     keyboard_view_set_submit_callback(NULL);

@@ -12,6 +12,7 @@
 #include "core/scan_saver.h"
 #include "core/glog.h"
 #include "core/utils.h"
+#include "esp_random.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -99,6 +100,34 @@ static size_t encode_octet_string(uint8_t *buf, size_t offset, const char *str) 
     return offset;
 }
 
+static bool asn1_read_len(const uint8_t *buf, size_t len, size_t *pos, size_t *out_len) {
+    if (*pos >= len) return false;
+
+    uint8_t first = buf[(*pos)++];
+    if ((first & 0x80) == 0) {
+        *out_len = first;
+        return *pos + *out_len <= len;
+    }
+
+    uint8_t bytes = first & 0x7F;
+    if (bytes == 0 || bytes > sizeof(size_t) || *pos + bytes > len) return false;
+
+    size_t value = 0;
+    for (uint8_t i = 0; i < bytes; i++) {
+        value = (value << 8) | buf[(*pos)++];
+    }
+    *out_len = value;
+    return *pos + *out_len <= len;
+}
+
+static bool asn1_skip_tlv(const uint8_t *buf, size_t len, size_t *pos, uint8_t expected_tag) {
+    if (*pos >= len || buf[(*pos)++] != expected_tag) return false;
+    size_t value_len = 0;
+    if (!asn1_read_len(buf, len, pos, &value_len)) return false;
+    *pos += value_len;
+    return *pos <= len;
+}
+
 /**
  * @brief Build SNMPv1 GetRequest packet for sysDescr
  */
@@ -127,8 +156,6 @@ static size_t build_snmp_get_request(uint8_t *buf, size_t buf_size,
     // VarBind sequence
     size_t vb_start = inner;
     inner = encode_oid(buf, inner); // OID
-    inner = encode_int(buf, inner, 0); // value = NULL (but encode as integer 0 for simplicity)
-    // Actually for GetRequest the value should be NULL
     buf[inner++] = 0x05; // NULL
     buf[inner++] = 0x00;
 
@@ -171,50 +198,52 @@ static size_t build_snmp_get_request(uint8_t *buf, size_t buf_size,
 static bool parse_snmp_response(const uint8_t *buf, size_t len, char *out, size_t out_size) {
     if (len < 20 || buf[0] != 0x30) return false;
 
-    size_t pos = 2;
-    if (buf[1] & 0x80) {
-        int extra = buf[1] & 0x7F;
-        pos += extra;
-    }
+    size_t pos = 1;
+    size_t seq_len = 0;
+    if (!asn1_read_len(buf, len, &pos, &seq_len)) return false;
+    size_t seq_end = pos + seq_len;
+    if (seq_end > len) return false;
 
     // Skip version
-    if (buf[pos] != 0x02) return false;
-    pos += 2 + buf[pos + 1];
+    if (!asn1_skip_tlv(buf, seq_end, &pos, 0x02)) return false;
 
     // Skip community
-    if (buf[pos] != 0x04) return false;
-    pos += 2 + buf[pos + 1];
+    if (!asn1_skip_tlv(buf, seq_end, &pos, 0x04)) return false;
 
     // PDU type (should be 0xA2 = GetResponse)
-    if (buf[pos] != 0xA2) return false;
-    pos += 2;
-    if (buf[pos - 1] & 0x80) {
-        int extra = buf[pos - 1] & 0x7F;
-        pos += extra;
-    }
+    if (pos >= seq_end || buf[pos++] != 0xA2) return false;
+    size_t pdu_len = 0;
+    if (!asn1_read_len(buf, seq_end, &pos, &pdu_len)) return false;
+    size_t pdu_end = pos + pdu_len;
+    if (pdu_end > seq_end) return false;
 
     // Skip request-id, error-status, error-index
     for (int i = 0; i < 3; i++) {
-        if (buf[pos] != 0x02) return false;
-        pos += 2 + buf[pos + 1];
+        if (!asn1_skip_tlv(buf, pdu_end, &pos, 0x02)) return false;
     }
 
     // VarBindList
-    if (buf[pos] != 0x30) return false;
-    pos += 2;
+    if (pos >= pdu_end || buf[pos++] != 0x30) return false;
+    size_t vblist_len = 0;
+    if (!asn1_read_len(buf, pdu_end, &pos, &vblist_len)) return false;
+    size_t vblist_end = pos + vblist_len;
+    if (vblist_end > pdu_end) return false;
 
     // VarBind
-    if (buf[pos] != 0x30) return false;
-    pos += 2;
+    if (pos >= vblist_end || buf[pos++] != 0x30) return false;
+    size_t vb_len = 0;
+    if (!asn1_read_len(buf, vblist_end, &pos, &vb_len)) return false;
+    size_t vb_end = pos + vb_len;
+    if (vb_end > vblist_end) return false;
 
     // Skip OID
-    if (buf[pos] != 0x06) return false;
-    pos += 2 + buf[pos + 1];
+    if (!asn1_skip_tlv(buf, vb_end, &pos, 0x06)) return false;
 
     // Value (should be OCTET STRING for sysDescr)
-    if (buf[pos] != 0x04) return false;
-    size_t val_len = buf[pos + 1];
-    pos += 2;
+    if (pos >= vb_end || buf[pos++] != 0x04) return false;
+    size_t val_len = 0;
+    if (!asn1_read_len(buf, vb_end, &pos, &val_len)) return false;
+    if (pos + val_len > vb_end) return false;
 
     if (val_len >= out_size) val_len = out_size - 1;
     memcpy(out, &buf[pos], val_len);
@@ -250,7 +279,7 @@ static bool probe_snmp(const char *target_ip, const char *community,
     inet_pton(AF_INET, target_ip, &dest_addr.sin_addr);
 
     uint8_t packet[256];
-    uint32_t req_id = esp_random() & 0x7FFFFFFF;
+    uint32_t req_id = esp_random() & 0x7FFF;
     size_t pkt_len = build_snmp_get_request(packet, sizeof(packet), community, req_id);
 
     if (pkt_len == 0) {
@@ -304,6 +333,7 @@ void snmp_scan_host(const char *target_ip) {
 
     char sysdescr[256];
     bool found = false;
+    g_network_scan_cancel = false;
 
     for (int i = 0; i < SNMP_MAX_COMMUNITIES; i++) {
         if (probe_snmp(target_ip, SNMP_COMMUNITIES[i], sysdescr, sizeof(sysdescr), NULL)) {
@@ -328,6 +358,15 @@ void snmp_scan_subnet(void) {
 
     if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
         glog("SNMP Scan: Failed to get subnet prefix - not connected to WiFi?\n");
+        return;
+    }
+
+    snmp_scan_subnet_prefix(subnet_prefix);
+}
+
+void snmp_scan_subnet_prefix(const char *subnet_prefix) {
+    if (subnet_prefix == NULL || strlen(subnet_prefix) == 0) {
+        glog("SNMP Scan: Invalid subnet prefix\n");
         return;
     }
 
