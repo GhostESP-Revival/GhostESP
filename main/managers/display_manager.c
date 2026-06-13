@@ -2518,8 +2518,8 @@ void hardware_input_task(void *pvParameters) {
         // Check for 7-second hold to enter deep sleep
         if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
         uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
-        if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
-            ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
+        if (elapsed >= 4000 && !exit_button.deep_sleep_triggered) { // 4 seconds
+            ESP_LOGI("DeepSleep", "IO6 held for 4 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
 
             // Pull IO15 low before sleep (TEmbed C1101 power control)
