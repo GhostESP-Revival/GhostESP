@@ -1557,8 +1557,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   buf1_pixels = CONFIG_TFT_WIDTH * 10;
 #else
-  buf1_pixels = CONFIG_TFT_WIDTH * 20;
-  buf2_pixels = CONFIG_TFT_WIDTH * 20;
+  buf1_pixels = CONFIG_TFT_WIDTH * 10;
+  buf2_pixels = CONFIG_TFT_WIDTH * 10;
 #endif
   size_t buf1_bytes = buf1_pixels * sizeof(*buf1);
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
@@ -1627,7 +1627,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
 #else
   /* default: double buffer for smoother drawing */
-  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
+  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, buf1_pixels);
 #endif
 
   /* Initialize the display */
