@@ -1075,6 +1075,7 @@ static SettingsItem settings_items[] = {
 
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Invert Carousel", SETTING_CAROUSEL_INVERT_DIRECTION, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -2199,6 +2200,9 @@ static void load_current_settings_values(void) {
             case SETTING_MENU_LAYOUT:
                 settings_items[i].current_value = settings_get_menu_layout(&G_Settings);
                 break;
+            case SETTING_CAROUSEL_INVERT_DIRECTION:
+                settings_items[i].current_value = settings_get_carousel_invert_direction(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_MAX_BRIGHTNESS:
                 { int bv = (settings_get_max_screen_brightness(&G_Settings) / 10) - 1;
                   settings_items[i].current_value = (bv < 0) ? 0 : bv; }
@@ -2458,6 +2462,9 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_LAYOUT:
             settings_set_menu_layout(&G_Settings, (uint8_t)new_value);
             // The layout change will take effect on next menu creation
+            break;
+        case SETTING_CAROUSEL_INVERT_DIRECTION:
+            settings_set_carousel_invert_direction(&G_Settings, new_value == 1);
             break;
         #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
         // This setting is only available if LV_DISP_BACKLIGHT_PWM is enabled

@@ -60,6 +60,7 @@ static const char *NVS_ZEBRA_MENUS_KEY = "zebra_menus";
 static const char *NVS_MAX_SCREEN_BRIGHTNESS_KEY = "max_bright";
 static const char *NVS_NAV_BUTTONS_KEY = "nav_buttons";
 static const char *NVS_MENU_LAYOUT_KEY = "menu_layout";
+static const char *NVS_CAROUSEL_INVERT_KEY = "carr_inv";
 static const char *NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY = "neopixel_bright";
 static const char *NVS_RGB_LED_COUNT_KEY = "rgb_led_cnt";
 static const char *NVS_ENCODER_INVERT_KEY = "enc_inv";
@@ -211,6 +212,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->infrared_easy_mode = false; // Default to disabled
   settings->nav_buttons_enabled = true; // Default to enabled
   settings->menu_layout = 0; // Default to carousel layout
+  settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
   settings->rgb_led_count = CONFIG_NUM_LEDS;
@@ -625,6 +627,14 @@ void settings_load(FSettings *settings) {
     settings->menu_layout = 0; // Default to carousel layout if not found
   }
 
+  // Load carousel slide direction inversion
+  err = nvs_get_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->carousel_invert_direction = (bool)value_u8;
+  } else {
+    settings->carousel_invert_direction = false;
+  }
+
   // Load Neopixel Max Brightness
   err = nvs_get_u8(nvsHandle, NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -979,6 +989,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, G_Settings.menu_layout);
             key = NVS_MENU_LAYOUT_KEY;
             break;
+        case SETTING_CAROUSEL_INVERT_DIRECTION:
+            err = nvs_set_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, G_Settings.carousel_invert_direction);
+            key = NVS_CAROUSEL_INVERT_KEY;
+            break;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         case SETTING_IDLE_ANIMATION:
             err = nvs_set_u8(nvsHandle, NVS_STATUS_IDLE_ANIM_KEY, (uint8_t)G_Settings.status_idle_animation);
@@ -1291,6 +1305,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, settings->auto_save_scans ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, (uint8_t)settings->menu_layout);
+    nvs_set_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, settings->carousel_invert_direction ? 1 : 0);
     nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, settings->selected_timezone);
     nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, settings->wifi_country);
     nvs_set_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key);
@@ -1760,6 +1775,14 @@ void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
     return settings->menu_layout <= 2 ? settings->menu_layout : 0;
+}
+
+void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
+    settings->carousel_invert_direction = enabled;
+}
+
+bool settings_get_carousel_invert_direction(const FSettings *settings) {
+    return settings->carousel_invert_direction;
 }
 
 // Neopixel brightness settings

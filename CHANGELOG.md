@@ -17,6 +17,7 @@
  - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
  - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
  - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
+ - Added an "Invert Carousel" setting in Appearance that flips the slide direction for keyboard left/right, joystick side-to-side, and the rotary encoder on the main menu carousel
  - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
 
 ### Changed

@@ -606,13 +606,14 @@ static void navigate_vertical(int direction) {
  */
 
 void handle_keyboard_interactions(int keyValue){
+    const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     // arrows and vim keys: h/j/k/l, plus , /
     if (keyValue == 44 || keyValue == ',' || keyValue == 'h') { // left
         ESP_LOGI(TAG, "Left button or 'h' pressed\n");
-        select_menu_item(selected_item_index - 1, true);
+        select_menu_item(selected_item_index - 1, inverted ? false : true);
     } else if (keyValue == 47 || keyValue == '/' || keyValue == 'l') { // right
         ESP_LOGI(TAG, "Right button or 'l' pressed\n");
-        select_menu_item(selected_item_index + 1, false);
+        select_menu_item(selected_item_index + 1, inverted ? true : false);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed\n");
         navigate_vertical(-1);
@@ -823,10 +824,11 @@ static void menu_item_event_handler(InputEvent *event) {
         if (event->data.encoder.button) {
             handle_menu_item_selection(selected_item_index);
         } else {
+            const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
             if (event->data.encoder.direction > 0)
-                select_menu_item(selected_item_index + 1, false); // CW == right
+                select_menu_item(selected_item_index + 1, inverted ? true : false); // CW == right
             else
-                select_menu_item(selected_item_index - 1, true);  // CCW == left
+                select_menu_item(selected_item_index - 1, inverted ? false : true);  // CCW == left
         }
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         ESP_LOGI(TAG, "keyboard event");
@@ -848,10 +850,11 @@ static void menu_item_event_handler(InputEvent *event) {
  * @brief Handles hardware button presses for menu navigation.
  */
 void handle_hardware_button_press(int ButtonPressed) {
+    const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     if (ButtonPressed == 0) {
-        select_menu_item(selected_item_index - 1, true);
+        select_menu_item(selected_item_index - 1, inverted ? false : true);
     } else if (ButtonPressed == 3) {
-        select_menu_item(selected_item_index + 1, false);
+        select_menu_item(selected_item_index + 1, inverted ? true : false);
     } else if (ButtonPressed == 2) { // up
         navigate_vertical(-1);
     } else if (ButtonPressed == 4) { // down

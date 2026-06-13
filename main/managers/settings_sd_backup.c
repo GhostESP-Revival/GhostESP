@@ -149,6 +149,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "infrared_easy_mode", s->infrared_easy_mode);
   cJSON_AddBoolToObject(o, "nav_buttons_enabled", s->nav_buttons_enabled);
   cJSON_AddNumberToObject(o, "menu_layout", (double)s->menu_layout);
+  cJSON_AddBoolToObject(o, "carousel_invert_direction", s->carousel_invert_direction);
   cJSON_AddNumberToObject(o, "neopixel_max_brightness", (double)s->neopixel_max_brightness);
   cJSON_AddBoolToObject(o, "encoder_invert_direction", s->encoder_invert_direction);
   cJSON_AddBoolToObject(o, "auto_save_scans", s->auto_save_scans);
@@ -280,6 +281,10 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
     s->nav_buttons_enabled = jget_bool(root, "nav_buttons_enabled", s->nav_buttons_enabled);
   }
   s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 2);
+  if (cJSON_GetObjectItemCaseSensitive(root, "carousel_invert_direction")) {
+    s->carousel_invert_direction =
+        jget_bool(root, "carousel_invert_direction", s->carousel_invert_direction);
+  }
   s->neopixel_max_brightness =
       (uint8_t)jget_int_clamp(root, "neopixel_max_brightness", s->neopixel_max_brightness, 0, 100);
   if (cJSON_GetObjectItemCaseSensitive(root, "encoder_invert_direction")) {

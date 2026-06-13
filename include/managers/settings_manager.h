@@ -141,6 +141,7 @@ typedef enum {
     SETTING_MENU_CARD_BG,
     SETTING_TOUCH_DRAG_SCROLL,
     SETTING_RELOAD_ASSET_PACK,
+    SETTING_CAROUSEL_INVERT_DIRECTION,
     SETTING_EXPORT_SETTINGS_SD,
     SETTING_IMPORT_SETTINGS_SD,
     // Lockscreen settings
@@ -246,6 +247,7 @@ typedef struct {
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
   uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List)
+  bool carousel_invert_direction; // Invert main menu carousel slide direction
   
   // Neopixel settings
   uint8_t neopixel_max_brightness; // Max neopixel brightness (0-100)
@@ -459,6 +461,10 @@ bool settings_get_nav_buttons_enabled(const FSettings *settings);
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout);
 uint8_t settings_get_menu_layout(const FSettings *settings);
+
+// Carousel slide direction inversion settings
+void settings_set_carousel_invert_direction(FSettings *settings, bool enabled);
+bool settings_get_carousel_invert_direction(const FSettings *settings);
 
 // Neopixel brightness settings
 void settings_set_neopixel_max_brightness(FSettings *settings, uint8_t brightness);

@@ -224,6 +224,7 @@ static const hid_transport_t usb_transport = {
 
 // --- Forward declarations ---
 static esp_err_t badusb_install_driver(void);
+static void badusb_uninstall_driver(void);
 static esp_err_t badusb_wait_for_mount(void);
 static void keyboard_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
 static volatile bool s_keyboard_mode = false;
