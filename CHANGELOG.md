@@ -38,6 +38,7 @@
  - Extracted the repeated tiered popup sizing math into `popup_calc_size` helpers
  - Moved the per-view "mount SD on demand" boilerplate into shared `sd_card_jit_begin` / `sd_card_jit_end` helpers used by BadUSB, Infrared, NFC, and SD app views
  - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
+ - Easy Learn in the Infrared menu now uses an iOS-style toggle row like the settings ones
 
 ### Fixed
 
