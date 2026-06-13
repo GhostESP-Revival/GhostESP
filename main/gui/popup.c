@@ -360,6 +360,28 @@ static bool popup_is_small_screen(lv_obj_t *popup) {
     return lv_disp_get_hor_res(disp) <= 240;
 }
 
+void popup_calc_size(popup_calc_size_t *out) {
+    popup_calc_size_ex(out, 110);
+}
+
+void popup_calc_size_ex(popup_calc_size_t *out, lv_coord_t min_h) {
+    if (!out) return;
+
+    out->width = (LV_HOR_RES <= 240) ? (LV_HOR_RES - 20) : (LV_HOR_RES - 30);
+
+    if (LV_VER_RES <= 135) {
+        out->height = 130;
+        out->y_offset = 0;
+    } else if (LV_VER_RES <= 200) {
+        out->height = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
+        if (out->height < min_h) out->height = min_h;
+        out->y_offset = 10;
+    } else {
+        out->height = (LV_VER_RES <= 240) ? 140 : 160;
+        out->y_offset = 10;
+    }
+}
+
 static void popup_apply_button_label_center(lv_obj_t *btn) {
     if (!btn || !lv_obj_is_valid(btn)) return;
     lv_obj_t *lbl = lv_obj_get_child(btn, 0);

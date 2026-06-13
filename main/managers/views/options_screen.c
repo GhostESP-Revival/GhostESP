@@ -8432,25 +8432,11 @@ static void wigle_manual_popup_update_selection(void) {
 }
 
 static void wigle_get_popup_geometry(int *popup_w, int *popup_h, int *y_offset) {
-    int w = (LV_HOR_RES <= 240) ? (LV_HOR_RES - 20) : (LV_HOR_RES - 30);
-    int h;
-    int y = 0;
-
-    if (LV_VER_RES <= 135) {
-        h = 130;
-        y = 0;
-    } else if (LV_VER_RES <= 200) {
-        h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
-        if (h < 120) h = 120;
-        y = 10;
-    } else {
-        h = (LV_VER_RES <= 240) ? 140 : 160;
-        y = 10;
-    }
-
-    if (popup_w) *popup_w = w;
-    if (popup_h) *popup_h = h;
-    if (y_offset) *y_offset = y;
+    popup_calc_size_t geom;
+    popup_calc_size_ex(&geom, 120);
+    if (popup_w) *popup_w = geom.width;
+    if (popup_h) *popup_h = geom.height;
+    if (y_offset) *y_offset = geom.y_offset;
 }
 
 static void wigle_stats_popup_close_cb(lv_event_t *e) {

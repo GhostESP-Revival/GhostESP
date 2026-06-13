@@ -32,6 +32,9 @@
  - Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
  - Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
  - Replaced the placeholder ghost sprite on small screens with the real GhostESP logo
+ - Extracted the repeated tiered popup sizing math into `popup_calc_size` helpers
+ - Moved the per-view "mount SD on demand" boilerplate into shared `sd_card_jit_begin` / `sd_card_jit_end` helpers used by BadUSB, Infrared, NFC, and SD app views
+ - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
 
 ### Fixed
  - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given

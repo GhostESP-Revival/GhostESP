@@ -38,31 +38,12 @@ static const char *TAG = "badusb_view";
 // JIT SD helpers for configs that unmount SD after init (e.g. somethingsomething)
 static bool badusb_sd_begin(bool *display_was_suspended)
 {
-    if (display_was_suspended) *display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
-        esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
-        if (mount_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(mount_err));
-            return false;
-        }
-        return true;
-    }
-#endif
-    return true;
+    return sd_card_jit_begin(display_was_suspended, false);
 }
 
 static void badusb_sd_end(bool display_was_suspended)
 {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
-        sd_card_unmount_after_flush(display_was_suspended);
-    }
-#else
-    (void)display_was_suspended;
-#endif
+    sd_card_jit_end(display_was_suspended);
 }
 
 typedef enum {
@@ -869,10 +850,10 @@ static void rebuild_menu(void) {
 }
 
 void badusb_view_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    display_manager_fill_screen(lv_color_hex(GUI_DEFAULT_BG_COLOR));
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
 
-    root = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root_default(NULL, NULL);
     badusb_view.root = root;
 
     g_ov = options_view_create(root, "BadUSB");

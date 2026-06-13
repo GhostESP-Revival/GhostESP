@@ -237,10 +237,10 @@ static void trackpad_stop_btn_cb(lv_event_t *e) {
 void trackpad_view_create(void) {
     if (s_root) return;
 
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    display_manager_fill_screen(lv_color_hex(GUI_DEFAULT_BG_COLOR));
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
 
-    s_root = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_COVER);
+    s_root = gui_screen_create_root_default(NULL, NULL);
     trackpad_view.root = s_root;
 
     uint8_t theme = settings_get_menu_theme(&G_Settings);

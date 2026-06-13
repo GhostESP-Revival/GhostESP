@@ -705,34 +705,12 @@ static void refresh_ir_file_list(const char *dir) {
 // jit sd helpers for somethingsomething template
 static bool ir_sd_begin(bool *display_was_suspended)
 {
-    if (display_was_suspended) *display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
-        if (mount_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to mount SD card for IR operation: %s", esp_err_to_name(mount_err));
-            return false;
-        }
-
-        esp_err_t dir_err = sd_card_setup_directory_structure();
-        if (dir_err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to ensure SD directory structure: %s", esp_err_to_name(dir_err));
-        }
-        return true;
-    }
-#endif
-    return true;
+    return sd_card_jit_begin(display_was_suspended, true);
 }
 
 static void ir_sd_end(bool display_was_suspended)
 {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        sd_card_unmount_after_flush(display_was_suspended);
-    }
-#else
-    (void)display_was_suspended;
-#endif
+    sd_card_jit_end(display_was_suspended);
 }
 
 static void cleanup_transmit_popup(void *obj) {
@@ -1347,7 +1325,7 @@ void infrared_view_create(void) {
     is_easy_mode = settings_get_infrared_easy_mode(&G_Settings);
 #endif
     
-    root = gui_screen_create_root(NULL, "Infrared", lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root_default(NULL, "Infrared");
     lv_obj_set_style_pad_all(root, 0, 0);
     infrared_view.root = root;
     if (!ir_sd_queue) {
