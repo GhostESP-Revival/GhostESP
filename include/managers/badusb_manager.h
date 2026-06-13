@@ -26,8 +26,10 @@ bool badusb_vsense_connected(void);
 esp_err_t badusb_manager_prepare_receive(size_t size);
 void badusb_manager_register_stream_handler(void);
 
-// Send a mouse HID report (dx, dy are relative movement, buttons is bitmask)
+// Send a mouse HID report (dx, dy are relative movement, buttons is bitmask,
+// wheel is the vertical wheel delta in 8-bit signed units; 0 leaves wheel alone)
 bool badusb_hid_mouse_send(int8_t dx, int8_t dy, uint8_t buttons);
+bool badusb_hid_mouse_wheel_send(int8_t wheel, uint8_t buttons);
 
 // Mouse jiggler: moves mouse periodically to keep PC awake
 esp_err_t badusb_manager_mouse_jiggle_start(void);
@@ -44,6 +46,7 @@ esp_err_t badusb_manager_trackpad_stop(void);
 bool badusb_manager_is_trackpad(void);
 void badusb_manager_trackpad_move(int dx, int dy);
 void badusb_manager_trackpad_button(uint8_t buttons);
+void badusb_manager_trackpad_wheel(int delta);
 
 // Keyboard mode: real-time key forwarding via COMM_STREAM_CHANNEL_KEYBOARD
 esp_err_t badusb_manager_keyboard_mode_start(void);

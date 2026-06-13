@@ -1,0 +1,11 @@
+{
+  "name": "ghostesp-webui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:header": "node build.mjs && python html_to_header.py",
+    "host": "node host.mjs"
+  }
+}

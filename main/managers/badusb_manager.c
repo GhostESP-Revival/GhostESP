@@ -264,6 +264,19 @@ bool badusb_hid_mouse_send(int8_t dx, int8_t dy, uint8_t buttons) {
     return tud_hid_n_report(HID_INSTANCE_MOUSE, 0, report, sizeof(report));
 }
 
+bool badusb_hid_mouse_wheel_send(int8_t wheel, uint8_t buttons) {
+    if (!s_active) return false;
+    int timeout = 100;
+    while (!tud_hid_n_ready(HID_INSTANCE_MOUSE) && timeout-- > 0) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!tud_hid_n_ready(HID_INSTANCE_MOUSE)) return false;
+
+    // Wheel-only report keeps dx/dy at zero so the cursor doesn't drift.
+    uint8_t report[4] = {buttons, 0, 0, (uint8_t)wheel};
+    return tud_hid_n_report(HID_INSTANCE_MOUSE, 0, report, sizeof(report));
+}
+
 // --- Mouse Jiggler ---
 
 static TaskHandle_t s_jiggler_task = NULL;
@@ -440,6 +453,14 @@ void badusb_manager_trackpad_button(uint8_t buttons) {
     // Emit a zero-delta report with the new button state so the host sees
     // the press/release immediately, even if the cursor hasn't moved.
     badusb_hid_mouse_send(0, 0, s_trackpad_buttons);
+}
+
+void badusb_manager_trackpad_wheel(int delta) {
+    if (!s_trackpad_active) return;
+    // Boot-mouse wheel byte is 8-bit signed (range -128..+127).
+    if (delta > 127) delta = 127;
+    if (delta < -128) delta = -128;
+    badusb_hid_mouse_wheel_send((int8_t)delta, s_trackpad_buttons);
 }
 
 // --- Keyboard Mode (real-time key forwarding) ---
