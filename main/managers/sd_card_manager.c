@@ -586,6 +586,9 @@ esp_err_t sd_card_init(void) {
   display_rebind_required = display_spi_requires_rebind_for_sd();
   ESP_LOGI(TAG, "display_rebind_required=%d", display_rebind_required);
   if (is_shared_display_sd_spi() && !display_rebind_required) {
+    /* Pins match the display, so the display's SPI device is still attached
+     * to the shared host. Pause LVGL and defer panel detach to the
+     * gating/rebind block below before SD claims the bus. */
     shared_spi_guard_active = true;
     ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
     display_manager_suspend_lvgl_task();
@@ -600,11 +603,20 @@ esp_err_t sd_card_init(void) {
 
   bool gating_template = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+                     strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
 #endif
   bool display_was_suspended = false;
+  /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
+   * the panel. Same-pin shared SPI boards like TEmbedC1101 keep the old path. */
   if (gating_template || display_rebind_required) {
     display_was_suspended = display_spi_suspend_for_sd();
+    if (display_was_suspended) {
+      /* Full suspend removed the panel device. Do not resume the LVGL task via
+       * the lightweight guard; display_spi_resume_after_sd() must re-add the
+       * panel first and then resume LVGL. */
+      shared_spi_guard_active = false;
+    }
   }
 
 
@@ -729,7 +741,10 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       s_spi_bus_initialized = true;
       s_spi_host_id = SPI2_HOST;
-    } else if (bus_ret != ESP_ERR_INVALID_STATE) {
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
+      s_spi_host_id = SPI2_HOST;
+    } else {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
@@ -852,13 +867,9 @@ esp_err_t sd_card_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
     if (bus_init_success) {
       sd_spi_bus_release_if_tracked();
     }
-#else
-    (void)bus_init_success;
-#endif
     if (display_was_suspended) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
@@ -1043,6 +1054,49 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   if (resume_display) {
     display_spi_resume_after_sd();
   }
+}
+
+bool sd_card_needs_jit_mount(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    /* Boards where the SD card shares SPI pins/host with the LVGL display
+     * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).
+     * Force JIT mount/unmount so the display is restored between SD use. */
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+#else
+    return false;
+#endif
+}
+
+bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {
+    if (display_was_suspended) *display_was_suspended = false;
+
+    if (!sd_card_needs_jit_mount()) {
+        return true;
+    }
+
+    esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
+    if (mount_err != ESP_OK) {
+        ESP_LOGE(TAG, "sd_card_jit_begin: mount failed: %s", esp_err_to_name(mount_err));
+        return false;
+    }
+
+    if (ensure_dirs) {
+        esp_err_t dir_err = sd_card_setup_directory_structure();
+        if (dir_err != ESP_OK) {
+            ESP_LOGW(TAG, "sd_card_jit_begin: setup_directory_structure failed: %s",
+                     esp_err_to_name(dir_err));
+        }
+    }
+
+    return true;
+}
+
+void sd_card_jit_end(bool display_was_suspended) {
+    if (!sd_card_needs_jit_mount()) {
+        return;
+    }
+    sd_card_unmount_after_flush(display_was_suspended);
 }
 
 void sd_card_unmount_with_context(sd_unmount_context_t context) {

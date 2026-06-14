@@ -1195,3 +1195,109 @@ html[data-theme="light"] .content__body .chroma .ni,
 html[data-theme="light"] .content__body .chroma .err {
   color: #e36209;
 }
+
+/* Compatibility and vendor tables */
+.compat-table,
+.vendor-table {
+  --compat-bg: #ffffff;
+  --compat-header-bg: #f5f5f5;
+  --compat-text: #000000;
+  --compat-border: #e0e0e0;
+  --compat-hover: #f9f9f9;
+  border-radius: 0.5rem;
+  max-height: 70vh;
+  overflow: auto;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  background: var(--compat-bg);
+  position: relative;
+  isolation: isolate;
+  margin: 1.5rem 0;
+}
+
+.compat-table table,
+.vendor-table table {
+  margin: 0;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 720px;
+  color: var(--compat-text);
+}
+
+.compat-table th,
+.compat-table td,
+.vendor-table th,
+.vendor-table td {
+  padding: 0.75rem;
+  text-align: center;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--compat-border);
+}
+
+.compat-table th:first-child,
+.compat-table td:first-child,
+.vendor-table th:first-child,
+.vendor-table td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: var(--compat-bg);
+  box-shadow: 1px 0 0 var(--compat-border);
+  z-index: 2;
+}
+
+.compat-table tbody tr:hover,
+.vendor-table tbody tr:hover {
+  background-color: var(--compat-hover);
+}
+
+.compat-table thead th,
+.vendor-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--compat-header-bg);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+
+.compat-table thead th:first-child,
+.vendor-table thead th:first-child {
+  left: 0;
+  z-index: 3;
+  background: var(--compat-header-bg);
+}
+
+.vendor-table img {
+  max-width: 150px;
+  max-height: 100px;
+  object-fit: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .compat-table,
+  :root:not([data-theme]) .vendor-table {
+    --compat-bg: #1a1a1a;
+    --compat-header-bg: #2d2d2d;
+    --compat-text: #ffffff;
+    --compat-border: #3d3d3d;
+    --compat-hover: #252525;
+  }
+}
+
+html[data-theme="dark"] .compat-table,
+html[data-theme="dark"] .vendor-table {
+  --compat-bg: #1a1a1a;
+  --compat-header-bg: #2d2d2d;
+  --compat-text: #ffffff;
+  --compat-border: #3d3d3d;
+  --compat-hover: #252525;
+}
+
+html[data-theme="light"] .compat-table,
+html[data-theme="light"] .vendor-table {
+  --compat-bg: #ffffff;
+  --compat-header-bg: #f5f5f5;
+  --compat-text: #000000;
+  --compat-border: #e0e0e0;
+  --compat-hover: #f9f9f9;
+}

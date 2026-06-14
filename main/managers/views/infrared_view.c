@@ -8,6 +8,7 @@
 #include "managers/views/error_popup.h"
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
+#include "gui/ios_toggle.h"
 #include "managers/status_display_manager.h"
 
 void update_learning_popup_selection(void);
@@ -705,34 +706,12 @@ static void refresh_ir_file_list(const char *dir) {
 // jit sd helpers for somethingsomething template
 static bool ir_sd_begin(bool *display_was_suspended)
 {
-    if (display_was_suspended) *display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
-        if (mount_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to mount SD card for IR operation: %s", esp_err_to_name(mount_err));
-            return false;
-        }
-
-        esp_err_t dir_err = sd_card_setup_directory_structure();
-        if (dir_err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to ensure SD directory structure: %s", esp_err_to_name(dir_err));
-        }
-        return true;
-    }
-#endif
-    return true;
+    return sd_card_jit_begin(display_was_suspended, true);
 }
 
 static void ir_sd_end(bool display_was_suspended)
 {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        sd_card_unmount_after_flush(display_was_suspended);
-    }
-#else
-    (void)display_was_suspended;
-#endif
+    sd_card_jit_end(display_was_suspended);
 }
 
 static void cleanup_transmit_popup(void *obj) {
@@ -1326,7 +1305,21 @@ static void back_event_cb(lv_event_t *e) {
 #ifdef CONFIG_HAS_INFRARED_RX
         is_easy_mode = settings_get_infrared_easy_mode(&G_Settings);
         options_view_add_item(g_ir_ov, "Learn Remote", learn_remote_event_cb, NULL);
-        options_view_add_item(g_ir_ov, is_easy_mode ? "Easy Learn [X]" : "Easy Learn [ ]", easy_learn_toggle_cb, NULL);
+        {
+            lv_obj_t *easy_learn_btn = options_view_add_item(g_ir_ov, "Easy Learn", easy_learn_toggle_cb, NULL);
+            if (easy_learn_btn) {
+                lv_obj_set_flex_flow(easy_learn_btn, LV_FLEX_FLOW_ROW);
+                lv_obj_set_flex_align(easy_learn_btn, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+                lv_obj_t *easy_learn_label = lv_obj_get_child(easy_learn_btn, 0);
+                if (easy_learn_label) {
+                    lv_obj_set_flex_grow(easy_learn_label, 1);
+                    lv_obj_set_width(easy_learn_label, LV_SIZE_CONTENT);
+                }
+                lv_obj_t *easy_learn_toggle = ios_toggle_create(easy_learn_btn);
+                lv_obj_update_layout(easy_learn_btn);
+                ios_toggle_set_value(easy_learn_toggle, is_easy_mode, false);
+            }
+        }
 #endif
         options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -1347,7 +1340,7 @@ void infrared_view_create(void) {
     is_easy_mode = settings_get_infrared_easy_mode(&G_Settings);
 #endif
     
-    root = gui_screen_create_root(NULL, "Infrared", lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root_default(NULL, "Infrared");
     lv_obj_set_style_pad_all(root, 0, 0);
     infrared_view.root = root;
     if (!ir_sd_queue) {
@@ -1389,7 +1382,21 @@ void infrared_view_create(void) {
         ESP_LOGE(TAG, "Failed to initialize RMT RX channel via manager");
     }
     options_view_add_item(g_ir_ov, "Learn Remote", learn_remote_event_cb, NULL);
-    options_view_add_item(g_ir_ov, is_easy_mode ? "Easy Learn [X]" : "Easy Learn [ ]", easy_learn_toggle_cb, NULL);
+    {
+        lv_obj_t *easy_learn_btn = options_view_add_item(g_ir_ov, "Easy Learn", easy_learn_toggle_cb, NULL);
+        if (easy_learn_btn) {
+            lv_obj_set_flex_flow(easy_learn_btn, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(easy_learn_btn, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_t *easy_learn_label = lv_obj_get_child(easy_learn_btn, 0);
+            if (easy_learn_label) {
+                lv_obj_set_flex_grow(easy_learn_label, 1);
+                lv_obj_set_width(easy_learn_label, LV_SIZE_CONTENT);
+            }
+            lv_obj_t *easy_learn_toggle = ios_toggle_create(easy_learn_btn);
+            lv_obj_update_layout(easy_learn_btn);
+            ios_toggle_set_value(easy_learn_toggle, is_easy_mode, false);
+        }
+    }
 #endif
 
     options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
@@ -2271,8 +2278,12 @@ static void file_event_open(int idx) {
                             if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
                         }
                         if (!dup) {
-                            uni_command_names = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
-                            uni_command_names[uni_command_count] = strdup(v);
+                            char **tmp = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
+                            if (!tmp) break;
+                            uni_command_names = tmp;
+                            char *name = strdup(v);
+                            if (!name) break;
+                            uni_command_names[uni_command_count] = name;
                             uni_command_count++;
                         }
                         strcpy(last, v);
@@ -3528,22 +3539,27 @@ void easy_learn_toggle_cb(lv_event_t *e) {
     settings_set_infrared_easy_mode(&G_Settings, is_easy_mode);
     settings_save(&G_Settings);
     
-    // Update the button text to reflect the new state
+    // Keep the iOS toggle widget in sync with `is_easy_mode`. Touch-driven
+    // LVGL events deliver `e` so we can grab the track directly; encoder/
+    // keyboard callbacks arrive with `e == NULL`, so we locate the toggle
+    // child the same way the settings rows do.
     lv_obj_t *btn = NULL;
     if (e != NULL) {
-        // Called from LVGL event (touch)
         btn = lv_event_get_target(e);
     } else {
-        // Called from encoder/keyboard input - find the Easy Learn button
         // Easy Learn button is at index: (has_remotes_option ? 1 : 0) + (has_universals_option ? 1 : 0) + 1
         int easy_learn_index = (has_remotes_option ? 1 : 0) + (has_universals_option ? 1 : 0) + 1;
         btn = lv_obj_get_child(list, easy_learn_index);
     }
     
-    if (btn) {
-        lv_obj_t *label = lv_obj_get_child(btn, 0);
-        if (label) {
-            lv_label_set_text(label, is_easy_mode ? "Easy Learn [X]" : "Easy Learn [ ]");
+    if (btn && lv_obj_is_valid(btn)) {
+        uint32_t child_cnt = lv_obj_get_child_cnt(btn);
+        for (uint32_t i = 0; i < child_cnt; i++) {
+            lv_obj_t *child = lv_obj_get_child(btn, i);
+            if (child && lv_obj_get_user_data(child) == IOS_TOGGLE_USER_DATA) {
+                ios_toggle_set_value(child, is_easy_mode, e != NULL);
+                break;
+            }
         }
     }
     

@@ -206,6 +206,12 @@ lv_obj_t *gui_screen_create_root(lv_obj_t *parent, const char *title, lv_color_t
     return create_root_internal(parent, title, bg_color, bg_opa, true);
 }
 
+lv_obj_t *gui_screen_create_root_default(lv_obj_t *parent, const char *title) {
+    return create_root_internal(parent, title,
+                                lv_color_hex(GUI_DEFAULT_BG_COLOR),
+                                LV_OPA_COVER, true);
+}
+
 lv_obj_t *gui_screen_create_root_no_bg(lv_obj_t *parent, const char *title, lv_color_t bg_color, lv_opa_t bg_opa) {
     return create_root_internal(parent, title, bg_color, bg_opa, false);
 }

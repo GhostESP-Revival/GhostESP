@@ -183,6 +183,8 @@ bool get_wifi_subnet_prefix(char *prefix, size_t prefix_size);
  * @return Socket descriptor on success, -1 on failure
  */
 int tcp_connect_with_timeout(const char *target_ip, uint16_t port, int timeout_sec);
+int tcp_connect_with_timeout_cancel(const char *target_ip, uint16_t port, int timeout_ms,
+                                    volatile bool *cancel_flag);
 
 /**
  * @brief Receive data from a socket with timeout
@@ -194,6 +196,8 @@ int tcp_connect_with_timeout(const char *target_ip, uint16_t port, int timeout_s
  * @return Number of bytes received, -1 on error, 0 on timeout
  */
 int tcp_recv_with_timeout(int sock, char *buffer, size_t buffer_size, int timeout_sec);
+int tcp_recv_with_timeout_cancel(int sock, char *buffer, size_t buffer_size, int timeout_ms,
+                                 volatile bool *cancel_flag);
 
 /**
  * @brief Close socket safely (handles invalid socket)

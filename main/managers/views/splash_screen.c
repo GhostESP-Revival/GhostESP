@@ -74,22 +74,55 @@ void splash_create(void) {
 
   img = lv_img_create(splash_screen);
 
-  if (LV_VER_RES < 140 || LV_HOR_RES > 300) { // small screen gets small ghostie
-    lv_img_set_src(img, &ghost); // using ghost sprite as placeholder till logo gets scaled
+  /* The 191x50 ghostesplogo is the real boot logo. On the smaller
+   * landscape boards the native size crowds the version + build
+   * labels and the progress bar, so scale it down with a per-display
+   * zoom. At zoom Z the rendered size is (191*Z/256) x (50*Z/256).
+   *
+   * TEmbedC1101 / TDisplayS3-Touch 320x170
+   *     zoom 192 (0.75x) -> 143x37, offset -30
+   *     logo y=37-74, version y=84-100, build y=102-118,
+   *     status y=126-142, bar y=146-154 (labels follow logo)
+   *
+   * Cardputer / cardputeradv 240x135
+ *     zoom 128 (0.5x) -> 95x25, offset -30
+ *     logo y=25-50, version pinned at y=52, build pinned at y=70,
+ *     status y=93-107, bar y=111-119
+ *
+ * The Cardputer labels are placed with absolute y (LV_ALIGN_TOP_MID)
+ * instead of relative to the logo so the cramped 135 px-tall screen
+ * can pin the build name to a known good y regardless of where the
+ * logo lands. Logo and labels sit in the upper half with ~21 px of
+ * clear space between the build label and the status text. */
+  bool cardputer_layout = false;
+  if (LV_HOR_RES <= 240 && LV_VER_RES <= 135 && LV_VER_RES >= 100) {
+    lv_img_set_src(img, &ghostesplogo);
     lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
-    lv_img_set_zoom(img, 384); //256 is 1x zoom - 384 is 1.5x
+    lv_img_set_zoom(img, 128);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, -30);
+    cardputer_layout = true;
+  }
+  else if (LV_HOR_RES <= 320 && LV_VER_RES <= 170 && LV_VER_RES >= 130) {
+    lv_img_set_src(img, &ghostesplogo);
+    lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_zoom(img, 192);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, -30);
+  }
+  else if (LV_VER_RES < 140 || LV_HOR_RES > 300) {
+    lv_img_set_src(img, &ghost);
+    lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_zoom(img, 384);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
   }
   else {
     lv_img_set_src(img, &ghostesplogo);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
   }
-
-  lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
 
 
   lv_obj_t *label1 = lv_label_create(splash_screen);
   lv_label_set_text(label1, GHOSTESP_VERSION);
   lv_obj_set_style_text_color(label1, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align_to(label1, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
 
   lv_obj_t *label2 = lv_label_create(splash_screen);
   const char *build_name = CONFIG_BUILD_CONFIG_TEMPLATE;
@@ -98,7 +131,15 @@ void splash_create(void) {
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align_to(label2, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+
+  if (cardputer_layout) {
+    lv_obj_align(label1, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_align(label2, LV_ALIGN_TOP_MID, 0, 70);
+  }
+  else {
+    lv_obj_align_to(label1, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+    lv_obj_align_to(label2, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+  }
 
   s_status_label = lv_label_create(splash_screen);
   lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xCCCCCC), 0);

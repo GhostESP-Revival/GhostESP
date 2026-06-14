@@ -1149,8 +1149,8 @@ static void format_coordinates(double lat, double lon, char *lat_str, char *lon_
     int lon_deg = (int)fabs(lon);
     double lon_min = (fabs(lon) - lon_deg) * 60;
 
-    sprintf(lat_str, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
-    sprintf(lon_str, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
+    snprintf(lat_str, 20, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
+    snprintf(lon_str, 20, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
 }
 
 float get_accuracy_percentage(float hdop) {

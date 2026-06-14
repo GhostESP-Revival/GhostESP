@@ -50,3 +50,30 @@ lv_obj_t *popup_create_scroll_area(lv_obj_t *parent, lv_coord_t w, lv_coord_t h,
 // layout buttons in an evenly-spaced row
 void popup_layout_buttons_row(lv_obj_t *container, lv_obj_t **btns, int count, lv_coord_t btn_w, lv_coord_t btn_h, lv_coord_t y, lv_coord_t gap);
 void popup_layout_buttons_responsive(lv_obj_t *popup, lv_obj_t **btns, int count, lv_coord_t yoff, const PopupButtonLayoutConfig *config);
+
+/*
+ * popup_calc_size_t - compute the width/height/y_offset of a popup that
+ * matches the dominant tiered sizing used by scan/status popups across the
+ * app (NFC, BadUSB, WiGLE stats, etc.).
+ *
+ * Tiers (matching the previous inlined math in nfc_view.c / options_screen.c):
+ *   - LV_VER_RES <= 135 : height = 130, y_offset = 0
+ *   - LV_VER_RES <= 200 : height = LV_VER_RES - 30 (clamped to >=110),
+ *                          y_offset = 10
+ *   - LV_VER_RES <= 240 : height = 140, y_offset = 10
+ *   - else              : height = 160, y_offset = 10
+ * Width: LV_HOR_RES - 30 (or LV_HOR_RES - 20 on displays <= 240 px wide).
+ *
+ * min_h is the lower clamp applied to the mid-tier (LV_VER_RES <= 200)
+ * height. Pass 0 to keep the default of 110.
+ *
+ * All output parameters are optional; pass NULL to discard.
+ */
+typedef struct {
+    lv_coord_t width;
+    lv_coord_t height;
+    lv_coord_t y_offset;
+} popup_calc_size_t;
+
+void popup_calc_size(popup_calc_size_t *out);
+void popup_calc_size_ex(popup_calc_size_t *out, lv_coord_t min_h);

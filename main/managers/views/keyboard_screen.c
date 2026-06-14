@@ -1296,8 +1296,14 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         if (c == '`') {
             display_manager_switch_view(&options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
-            submit_text();
+            if (immediate_callback) {
+                // Real-time typing mode (e.g. BadUSB): send Enter, don't close
+                immediate_callback('\n');
+            } else {
+                submit_text();
+            }
         } else if (c == '\b') {
+            if (input_len == 0 && immediate_callback) immediate_callback('\b');
             remove_char_from_buffer();
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);

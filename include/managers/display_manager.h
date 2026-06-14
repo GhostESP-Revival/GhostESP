@@ -25,6 +25,7 @@ typedef enum {
 typedef struct {
   InputType type;
   bool is_touch_move;
+  bool is_repeat;                 // true for auto-repeated keyboard events
   union {
     struct {
       int joystick_index;

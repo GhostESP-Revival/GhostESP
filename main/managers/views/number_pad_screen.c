@@ -137,7 +137,7 @@ static void numpad_activate(int idx) {
         if (input_pos > 0) {
             terminal_set_return_view(&options_menu_view);
             if (current_mode == NP_MODE_AP_REMOTE || current_mode == NP_MODE_STA_REMOTE ||
-                current_mode == NP_MODE_AIRTAG_REMOTE || current_mode == NP_MODE_LAN_REMOTE ||
+                current_mode == NP_MODE_AIRTAG_REMOTE ||
                 current_mode == NP_MODE_FLIPPER_REMOTE) {
                 terminal_set_dualcomm_filter(true);
             }
@@ -148,13 +148,11 @@ static void numpad_activate(int idx) {
                 case NP_MODE_AP:        snprintf(command, sizeof(command), "select -a %s", input_buffer); break;
                 case NP_MODE_STA:       snprintf(command, sizeof(command), "select -s %s", input_buffer); break;
                 case NP_MODE_AIRTAG:    snprintf(command, sizeof(command), "selectairtag %s", input_buffer); break;
-                case NP_MODE_LAN:       snprintf(command, sizeof(command), "select -a %s", input_buffer); break;
                 case NP_MODE_FLIPPER:   snprintf(command, sizeof(command), "selectflipper %s", input_buffer); break;
                 case NP_MODE_GATT:      snprintf(command, sizeof(command), "selectgatt %s", input_buffer); break;
                 case NP_MODE_AP_REMOTE:      snprintf(command, sizeof(command), "commsend select -a %s", input_buffer); break;
                 case NP_MODE_STA_REMOTE:     snprintf(command, sizeof(command), "commsend select -s %s", input_buffer); break;
                 case NP_MODE_AIRTAG_REMOTE:  snprintf(command, sizeof(command), "commsend selectairtag %s", input_buffer); break;
-                case NP_MODE_LAN_REMOTE:     snprintf(command, sizeof(command), "commsend select -a %s", input_buffer); break;
                 case NP_MODE_FLIPPER_REMOTE: snprintf(command, sizeof(command), "commsend selectflipper %s", input_buffer); break;
                 default: snprintf(command, sizeof(command), "select -a %s", input_buffer); break;
             }
@@ -288,7 +286,7 @@ static void number_pad_create(void) {
     else if (current_mode == NP_MODE_AIRTAG || current_mode == NP_MODE_AIRTAG_REMOTE) title = "Select AirTag";
     else if (current_mode == NP_MODE_FLIPPER || current_mode == NP_MODE_FLIPPER_REMOTE) title = "Select Flipper";
     else if (current_mode == NP_MODE_GATT) title = "Select GATT";
-    else title = "Select LAN";
+    else title = "Select";
     display_manager_add_status_bar(title);
 }
 

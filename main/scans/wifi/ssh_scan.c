@@ -19,12 +19,27 @@
 #include <string.h>
 
 // Constants
-#define SSH_SCAN_TIMEOUT_SEC 3
-#define SSH_BANNER_TIMEOUT_SEC 2
+#define SSH_SCAN_TIMEOUT_MS 1000
+#define SSH_BANNER_TIMEOUT_MS 1000
 #define SSH_BANNER_BUFFER_SIZE 256
 
 // Module tag for logging
 static const char *TAG = "SSHScan";
+
+// Shared cancellation flag for all network scans
+static volatile bool g_network_scan_cancel = false;
+
+// ============================================================================
+// Cancellation Control
+// ============================================================================
+
+void ssh_scan_cancel(void) {
+    g_network_scan_cancel = true;
+}
+
+void ssh_scan_reset_cancel(void) {
+    g_network_scan_cancel = false;
+}
 
 // ============================================================================
 // Helper Functions
@@ -54,20 +69,27 @@ static void clean_banner_string(char *banner) {
  */
 static bool scan_ssh_port(const char *target_ip, uint16_t port, scan_file_t *sf) {
     char banner[SSH_BANNER_BUFFER_SIZE];
+    if (g_network_scan_cancel) return false;
     
     ESP_LOGI(TAG, "Testing port %d on %s", port, target_ip);
     
     // Connect with timeout
-    int sock = tcp_connect_with_timeout(target_ip, port, SSH_SCAN_TIMEOUT_SEC);
+    int sock = tcp_connect_with_timeout_cancel(target_ip, port, SSH_SCAN_TIMEOUT_MS,
+                                               &g_network_scan_cancel);
     if (sock < 0) {
         ESP_LOGD(TAG, "Port %d connection failed on %s", port, target_ip);
+        return false;
+    }
+    if (g_network_scan_cancel) {
+        tcp_close_socket(&sock);
         return false;
     }
     
     // Port is open - try to grab banner
     ESP_LOGI(TAG, "Port %d is OPEN on %s", port, target_ip);
     
-    int bytes = tcp_recv_with_timeout(sock, banner, sizeof(banner), SSH_BANNER_TIMEOUT_SEC);
+    int bytes = tcp_recv_with_timeout_cancel(sock, banner, sizeof(banner), SSH_BANNER_TIMEOUT_MS,
+                                             &g_network_scan_cancel);
     tcp_close_socket(&sock);
     
     if (bytes > 0) {
@@ -121,7 +143,7 @@ void ssh_scan_host(const char *target_ip) {
     
     int open_ports_found = 0;
     
-    for (size_t i = 0; i < num_ssh_ports; i++) {
+    for (size_t i = 0; i < num_ssh_ports && !g_network_scan_cancel; i++) {
         if (scan_ssh_port(target_ip, ssh_ports[i], NULL)) {
             open_ports_found++;
         }
@@ -155,13 +177,19 @@ void ssh_scan_subnet(void) {
     
     int total_hosts_with_ssh = 0;
     int total_open_ports = 0;
+    g_network_scan_cancel = false;
+    
+    glog("SSH Scan: Scanning 254 hosts...\n");
     
     // Scan all hosts in the subnet (1-254)
-    for (int host = 1; host <= 254; host++) {
+    for (int host = 1; host <= 254 && !g_network_scan_cancel; host++) {
+        // Progress update every 25 hosts
+        if (host % 25 == 0) {
+            glog("SSH Scan: Progress %d/254 hosts\n", host);
+        }
+        
         char target_ip[16];
         build_ip_string(target_ip, sizeof(target_ip), subnet_prefix, host);
-        
-        glog("SSH Scan: Checking %s...\n", target_ip);
         
         // Common SSH ports to check
         static const uint16_t ssh_ports[] = {22, 2222, 2022};
@@ -169,7 +197,7 @@ void ssh_scan_subnet(void) {
         
         int host_open_ports = 0;
         
-        for (size_t i = 0; i < num_ssh_ports; i++) {
+        for (size_t i = 0; i < num_ssh_ports && !g_network_scan_cancel; i++) {
             if (scan_ssh_port(target_ip, ssh_ports[i], &sf)) {
                 host_open_ports++;
                 total_open_ports++;
@@ -185,13 +213,18 @@ void ssh_scan_subnet(void) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     
-    glog("SSH Scan: Subnet scan complete - found %d hosts with %d open SSH ports\n",
-         total_hosts_with_ssh, total_open_ports);
+    if (g_network_scan_cancel) {
+        glog("SSH Scan: Cancelled. Found %d hosts with %d open SSH ports\n",
+             total_hosts_with_ssh, total_open_ports);
+    } else {
+        glog("SSH Scan: Subnet scan complete - found %d hosts with %d open SSH ports\n",
+             total_hosts_with_ssh, total_open_ports);
+    }
     
     if (saving) {
         scan_file_printf(&sf, "--- SSH Scan Summary ---\n");
         scan_file_printf(&sf, "Hosts with SSH: %d, Total open ports: %d\n",
-                        total_hosts_with_ssh, total_open_ports);
+                         total_hosts_with_ssh, total_open_ports);
         scan_file_close(&sf);
     }
 }

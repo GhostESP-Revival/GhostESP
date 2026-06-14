@@ -55,6 +55,39 @@ static inline int get_app_anim_duration(void) {
 
 #define ANIM_DURATION get_app_anim_duration()
 
+static inline bool app_card_bg_enabled(void) {
+    return settings_get_menu_card_bg(&G_Settings);
+}
+
+static inline void apply_app_card_style(lv_obj_t *obj, lv_color_t surface, lv_color_t border, int border_w, int shadow_w) {
+    if (app_card_bg_enabled()) {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(obj, surface, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, border_w, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, shadow_w, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_50, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
+static inline void apply_app_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
+    if (app_card_bg_enabled()) {
+        lv_obj_set_style_border_width(obj, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_30, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
 static void select_app_item(int index, bool slide_left);
 static void apps_plugin_reload_done(void *arg);
 
@@ -610,11 +643,8 @@ static void update_app_item(bool slide_left) {
     current_app_obj = lv_btn_create(apps_container);
     apps_carousel_cache.card = current_app_obj;
 
-    lv_obj_set_style_bg_color(current_app_obj, apps_surface_color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(current_app_obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_border_width(current_app_obj, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(current_app_obj, app_items[app_idx].border_color, LV_PART_MAIN);
+    int card_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
+    apply_app_card_style(current_app_obj, apps_surface_color, app_items[app_idx].border_color, card_border_w, 3);
     lv_obj_set_style_radius(current_app_obj, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_app_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_app_obj, false, 0);
@@ -748,13 +778,8 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_width(card, card_width);
         lv_obj_set_height(card, LV_PCT(100));
 
-        lv_obj_set_style_bg_color(card, apps_surface_color, LV_PART_MAIN);
         int shadow_w = (card_height <= 50 ? 4 : 8);
-        lv_obj_set_style_shadow_width(card, shadow_w, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(card, LV_OPA_50, LV_PART_MAIN);
-        lv_obj_set_style_border_width(card, show_borders ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(card, app_items[i].border_color, LV_PART_MAIN);
+        apply_app_card_style(card, apps_surface_color, app_items[i].border_color, show_borders ? 2 : 0, shadow_w);
         lv_obj_set_style_radius(card, GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
@@ -768,7 +793,8 @@ static void create_apps_grid_menu(void) {
         if (item_symbol) {
             lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
             if (icon) {
-                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 4);
+                int symbol_top_offset = (card_height <= 50) ? 6 : 10;
+                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, symbol_top_offset);
             }
         } else if (item_icon) {
             lv_obj_t *icon = lv_img_create(card);
@@ -789,10 +815,7 @@ static void create_apps_grid_menu(void) {
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
 
-            int icon_draw_h = (img_h * zoom) / 256;
-            int icon_area_h = card_height - reserved_for_label;
-            int top_offset = (icon_area_h - icon_draw_h) / 2 - (card_height <= 50 ? 15 : 18);
-            if (top_offset < 0) top_offset = 0;
+            int top_offset = (card_height <= 50) ? 6 : 10;
             lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
         }
 
@@ -815,11 +838,7 @@ static void create_apps_grid_menu(void) {
     if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-        lv_obj_set_style_border_color(apps_grid_cards[selected_app_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_border_width(apps_grid_cards[selected_app_index], 3, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(apps_grid_cards[selected_app_index], 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(apps_grid_cards[selected_app_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(apps_grid_cards[selected_app_index], LV_OPA_30, LV_PART_MAIN);
+        apply_app_card_selection_style(apps_grid_cards[selected_app_index], accent);
         lv_obj_scroll_to_view(apps_grid_cards[selected_app_index], LV_ANIM_OFF);
     }
 }
@@ -850,15 +869,11 @@ static void create_apps_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, apps_surface_color, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, app_items[i].border_color, LV_PART_MAIN);
+        int btn_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
+        apply_app_card_style(btn, apps_surface_color, app_items[i].border_color, btn_border_w, 6);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn, 6, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(btn, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(btn, LV_OPA_40, LV_PART_MAIN);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
         const char *item_symbol = app_item_symbol_icon(i);
@@ -1168,22 +1183,15 @@ static void select_app_item(int index, bool slide_left) {
         bool show_borders_sel = settings_get_menu_item_borders(&G_Settings);
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
             lv_obj_t *old = apps_grid_cards[selected_app_index];
-            lv_obj_set_style_border_width(old, show_borders_sel ? 2 : 0, LV_PART_MAIN);
-            lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(old, 8, LV_PART_MAIN);
-            lv_obj_set_style_shadow_color(old, lv_color_hex(0x000000), LV_PART_MAIN);
-            lv_obj_set_style_shadow_opa(old, LV_OPA_50, LV_PART_MAIN);
+            apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
+                                 show_borders_sel ? 2 : 0, 8);
         }
         selected_app_index = index;
         if (apps_grid_cards[selected_app_index]) {
             lv_obj_t *card = apps_grid_cards[selected_app_index];
             uint8_t theme = settings_get_menu_theme(&G_Settings);
             lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-            lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
-            lv_obj_set_style_border_color(card, accent, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(card, 12, LV_PART_MAIN);
-            lv_obj_set_style_shadow_color(card, accent, LV_PART_MAIN);
-            lv_obj_set_style_shadow_opa(card, LV_OPA_30, LV_PART_MAIN);
+            apply_app_card_selection_style(card, accent);
             lv_obj_scroll_to_view(card, LV_ANIM_OFF);
         }
         return;
@@ -1192,14 +1200,18 @@ static void select_app_item(int index, bool slide_left) {
     if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_list_buttons[selected_app_index]) {
             lv_obj_t *old = apps_list_buttons[selected_app_index];
-            lv_obj_set_style_border_width(old, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-            lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
+            apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
+                                 settings_get_menu_item_borders(&G_Settings) ? 2 : 0, 6);
         }
         selected_app_index = index;
         if (apps_list_buttons[selected_app_index]) {
             lv_obj_t *btn = apps_list_buttons[selected_app_index];
-            lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
-            lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+            if (app_card_bg_enabled()) {
+                lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
+                lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+            } else {
+                lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+            }
             lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
         }
         return;

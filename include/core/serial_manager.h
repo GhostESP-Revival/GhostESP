@@ -11,6 +11,12 @@ void serial_manager_init();
 
 void serial_manager_deinit();
 
+// Re-installs the native USB-Serial-JTAG console driver if it was previously
+// overtaken by TinyUSB (e.g. during BadUSB/HID sessions on ESP32-S3/C3/C5/C6).
+// No-op on targets without the native USB-Serial-JTAG peripheral and when the
+// driver is already installed.
+void serial_manager_restore_console();
+
 int serial_manager_get_uart_num();
 
 int serial_manager_write_bytes(const void *data, size_t len);

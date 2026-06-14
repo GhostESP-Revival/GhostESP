@@ -154,7 +154,7 @@ list(APPEND required_components tlv320dac3100)
 # Add audio codec component for audio receiver headers/libraries.
 list(APPEND required_components esp_audio_codec)
 
-set(embed_files_list "core/ouis.json")
+set(embed_files_list "core/ouis.bin")
 
 if(CONFIG_HAS_NFC)
     idf_component_register(SRCS ${sources}
