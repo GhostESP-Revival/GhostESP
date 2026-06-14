@@ -1647,9 +1647,7 @@ static void start_wardrive_heartbeat(void) {
     memset(wardrive_helper_dedupe, 0, sizeof(wardrive_helper_dedupe));
     wardrive_helper_dedupe_idx = 0;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    memset(ble_wd_seen_hashes, 0, sizeof(ble_wd_seen_hashes));
-    ble_wd_seen_idx = 0;
-    ble_wd_unique_count = 0;
+    ble_wardriving_reset_unique_device_count();
 #endif
 
     if (!wardrive_heartbeat_timer) {
