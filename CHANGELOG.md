@@ -23,7 +23,6 @@
  - Added a reusable select overlay for option picker rows
  - Added fullscreen option to `popup_create_container` so popups can fill the screen under the status bar; opted NFC, SubGHz, Infrared, BadUSB, and WiGLE popups in
  - Added subcategories to the Settings view and re-organised the options
- - Compressed OUI list to save free up flash space
 
 ### Changed
 
@@ -48,10 +47,12 @@
  - Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
  - Easy Learn in the Infrared menu now uses an iOS-style toggle row like the settings ones
  - Removed "IR sent" toast notification
+ - Compressed OUI list to save free up flash space
 
 ### Fixed
 
- - Fixed `scanssh`, `netbiosscan`, `httpbannerscan`, and `snmpprobe` CLI commands to default to subnet scan when no IP is given
+ - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
+ - Fixed asset pack auto-selecting an installed pack on boot when the user hadn't picked one, so a pack dropped on the SD is no longer made active without manual selection
  - Fixed "Scan SSH" menu item previously failing due to missing required argument
  - Fixed asset pack background image not properly filling the screen on some devices
  - Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
@@ -67,8 +68,7 @@
  - Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
  - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
- - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
- - Fixed asset pack auto-selecting an installed pack on boot when the user hadn't picked one, so a pack dropped on the SD is no longer made active without manual selection
+
 
 
 ## Revival v2.0-pre4 - 2026-06-06
