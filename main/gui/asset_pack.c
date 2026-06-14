@@ -428,13 +428,16 @@ static esp_err_t select_pack_for_load(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    char name[32] = "active";
+    char name[32] = "None";
     char archive_path_buf[192];
     bool archive = false;
 
     char saved[32];
     if (load_saved_active_name(saved)) snprintf(name, sizeof(name), "%s", saved);
     if (strcmp(name, "None") == 0) {
+        snprintf(s_active_name, sizeof(s_active_name), "None");
+        s_active_is_archive = false;
+        snprintf(s_pack_dir, sizeof(s_pack_dir), "%s", ACTIVE_PACK_DIR);
         ESP_LOGI(TAG, "asset pack disabled (None)");
         return ESP_ERR_NOT_FOUND;
     }
@@ -1421,7 +1424,7 @@ static void scan_installed_packs(void) {
     }
     closedir(dir);
 
-    for (int i = 0; i < s_installed_count - 1; ++i) {
+    for (int i = 1; i < s_installed_count - 1; ++i) {
         for (int j = i + 1; j < s_installed_count; ++j) {
             if (strcmp(s_installed_names[i], s_installed_names[j]) > 0) {
                 char tmp[ASSET_PACK_NAME_MAX];
@@ -1440,6 +1443,9 @@ esp_err_t asset_pack_select_by_index(int index) {
 
     if (index == 0) {
         save_active_name("None");
+        snprintf(s_active_name, sizeof(s_active_name), "None");
+        s_active_is_archive = false;
+        snprintf(s_pack_dir, sizeof(s_pack_dir), "%s", ACTIVE_PACK_DIR);
         clear_runtime();
         return ESP_OK;
     }

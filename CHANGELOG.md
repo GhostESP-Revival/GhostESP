@@ -67,6 +67,7 @@
  - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
  - Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
+ - Fixed asset pack auto-selecting an installed pack on boot when the user hadn't picked one, so a pack dropped on the SD is no longer made active without manual selection
 
 
 ## Revival v2.0-pre4 - 2026-06-06
