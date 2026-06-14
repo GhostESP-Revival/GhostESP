@@ -32,8 +32,10 @@ void popup_destroy(popup_t *p);
 popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *title, const char *body, const char **buttons, int button_count, lv_event_cb_t *cbs, void **user_datas);
 
 // create a styled container suitable for popups (returns an lv_obj_t* container)
-lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height);
-lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset);
+// Pass fullscreen=true to fill the whole screen under the status bar (no
+// rounded corners / shadow, height = LV_VER_RES - GUI_STATUS_BAR_H, top-aligned).
+lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height, bool fullscreen);
+lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset, bool fullscreen);
 
 // create styled buttons and labels for popups
 lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, int btn_w, int btn_h, lv_align_t align, lv_coord_t x_ofs, lv_coord_t y_ofs, const lv_font_t *font, lv_event_cb_t cb, void *user_data);

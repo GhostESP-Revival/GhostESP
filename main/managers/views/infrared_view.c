@@ -753,7 +753,7 @@ static void dazzler_event_cb(lv_event_t *e) {
     if (scr_h < 200) popup_h = scr_h - 40;
     if (popup_h < 80) popup_h = 80;
     
-    dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
+    dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
     lv_obj_center(dazzler_popup);
     
     lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", accessibility_get_font_body(), 15);
@@ -2381,7 +2381,7 @@ static void command_event_execute(int idx) {
             error_popup_create("EPILEPSY WARNING\nRGB LED will flash\nduring IR transmission");
         }
 
-        transmitting_popup = popup_create_container(lv_scr_act(), 200, 60);
+        transmitting_popup = popup_create_container(lv_scr_act(), 200, 60, true);
         lv_obj_center(transmitting_popup);
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2525,10 +2525,10 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
     lv_obj_t *instruction_label;
 
     if (type == LEARNING_POPUP_STANDARD) {
-        learning_popup = popup_create_container(lv_scr_act(), config->width, config->height);
+        learning_popup = popup_create_container(lv_scr_act(), config->width, config->height, true);
         popup = learning_popup;
     } else {
-        easy_learn_popup = popup_create_container(lv_scr_act(), config->width, config->height);
+        easy_learn_popup = popup_create_container(lv_scr_act(), config->width, config->height, true);
         popup = easy_learn_popup;
     }
 
@@ -3263,7 +3263,7 @@ void create_signal_preview_popup(void)
         status_display_show_status("IR Decoded");
     }
     
-    signal_preview_popup = popup_create_container(lv_scr_act(), base_w, base_h);
+    signal_preview_popup = popup_create_container(lv_scr_act(), base_w, base_h, true);
     lv_obj_center(signal_preview_popup);
     
     // Remove scrollbars and ensure content fits

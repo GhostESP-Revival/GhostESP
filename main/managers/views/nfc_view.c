@@ -29,8 +29,8 @@
 #include "core/glog.h"
 
 // popup helper forward declarations
-lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height);
-lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset);
+lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height, bool fullscreen);
+lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset, bool fullscreen);
 
 lv_obj_t *popup_add_styled_button(lv_obj_t *container,
 	const char *label_text,
@@ -2247,7 +2247,7 @@ static void create_nfc_scan_popup(void) {
     // scale to screen, leave margin for edges
     popup_calc_size_t geom;
     popup_calc_size(&geom);
-    nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset, true);
     if (nfc_scan_popup) lv_obj_add_flag(nfc_scan_popup, LV_OBJ_FLAG_CLICKABLE);
 
     // Fonts
@@ -2969,7 +2969,7 @@ static void create_keys_popup(void) {
         popup_h = (LV_VER_RES <= 240) ? 140 : 170;
         y_offset = 10;
     }
-    keys_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    keys_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset, true);
     if (keys_popup) lv_obj_add_flag(keys_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
@@ -3263,7 +3263,7 @@ static void create_cu_popup(void) {
     if (cu_popup && lv_obj_is_valid(cu_popup)) cleanup_cu_popup(NULL);
     popup_calc_size_t geom;
     popup_calc_size(&geom);
-    cu_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    cu_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset, true);
     if (cu_popup) lv_obj_add_flag(cu_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
@@ -3775,7 +3775,7 @@ static void create_nfc_write_popup(const char *path) {
     if (nfc_write_popup && lv_obj_is_valid(nfc_write_popup)) cleanup_nfc_write_popup(NULL);
     popup_calc_size_t geom;
     popup_calc_size_ex(&geom, 120);
-    nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset, true);
     if (nfc_write_popup) lv_obj_add_flag(nfc_write_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
@@ -3974,7 +3974,7 @@ static void create_saved_details_popup(const char *path) {
     if (saved_popup && lv_obj_is_valid(saved_popup)) cleanup_saved_details_popup(NULL);
     popup_calc_size_t geom;
     popup_calc_size_ex(&geom, 120);
-    saved_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    saved_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset, true);
     if (saved_popup) lv_obj_add_flag(saved_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();

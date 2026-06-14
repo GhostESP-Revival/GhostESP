@@ -21,6 +21,7 @@
  - Added an "Invert Carousel" setting in Appearance that flips the slide direction
  - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
  - Added a reusable select overlay for option picker rows
+ - Added fullscreen option to `popup_create_container` so popups can fill the screen under the status bar; opted NFC, SubGHz, Infrared, BadUSB, and WiGLE popups in
  - Added subcategories to the Settings view and re-organised the options
  - Compressed OUI list to save free up flash space
 

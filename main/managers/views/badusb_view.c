@@ -349,7 +349,7 @@ static void show_running_popup_ex(const char *script_name, bool waiting_for_usb)
         popup_h = (LV_VER_RES <= 240) ? 130 : 140;
     }
 
-    badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset, true);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();

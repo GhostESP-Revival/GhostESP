@@ -140,21 +140,28 @@ static lv_coord_t popup_measure_button_text_width(lv_obj_t *btn, lv_coord_t padd
     return width;
 }
 
-lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height) {
-    return popup_create_container_with_offset(parent, width, height, 0);
+lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height, bool fullscreen) {
+    return popup_create_container_with_offset(parent, width, height, 0, fullscreen);
 }
 
-lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset) {
+lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset, bool fullscreen) {
     	if (!parent) parent = lv_scr_act();
 	lv_obj_t *container = lv_obj_create(parent);
-    	lv_obj_set_size(container, width, height);
-	lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
-    	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
+	if (fullscreen) {
+		lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES - GUI_STATUS_BAR_H);
+		lv_obj_align(container, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
+		lv_obj_set_style_radius(container, 0, 0);
+		lv_obj_set_style_shadow_width(container, 0, 0);
+	} else {
+		lv_obj_set_size(container, width, height);
+		lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
+		lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
+		lv_obj_set_style_shadow_width(container, 8, 0);
+		lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
+		lv_obj_set_style_shadow_opa(container, LV_OPA_20, 0);
+	}
+	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
     lv_obj_set_style_border_width(container, 0, 0);
-    lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
-    lv_obj_set_style_shadow_width(container, 8, 0);
-    lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(container, LV_OPA_20, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_top(container, GUI_SAFEAREA_VER, 0);
     lv_obj_set_style_pad_bottom(container, GUI_SAFEAREA_VER, 0);

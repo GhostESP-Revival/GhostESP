@@ -2713,7 +2713,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             
             int popup_w = LV_HOR_RES - 20;
             int popup_h = LV_VER_RES - 40;
-            wigle_help_popup = popup_create_container(lv_layer_top(), popup_w, popup_h);
+            wigle_help_popup = popup_create_container(lv_layer_top(), popup_w, popup_h, true);
             lv_obj_set_style_bg_color(wigle_help_popup, lv_color_hex(0x1E1E1E), 0);
             lv_obj_add_flag(wigle_help_popup, LV_OBJ_FLAG_CLICKABLE);
             
@@ -8723,7 +8723,7 @@ static void wigle_stats_popup_open(void) {
     int popup_h = 0;
     int y_offset = 0;
     wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
-    wigle_stats_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset);
+    wigle_stats_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset, true);
     lv_obj_set_style_bg_color(wigle_stats_popup, lv_color_hex(0x1E1E1E), 0);
     lv_obj_add_flag(wigle_stats_popup, LV_OBJ_FLAG_CLICKABLE);
 
@@ -8818,7 +8818,7 @@ static void wigle_show_csv_details_popup(const char *filename) {
     int popup_h = 0;
     int y_offset = 0;
     wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
-    wigle_manual_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset);
+    wigle_manual_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset, true);
     lv_obj_set_style_bg_color(wigle_manual_popup, lv_color_hex(0x1E1E1E), 0);
     lv_obj_add_flag(wigle_manual_popup, LV_OBJ_FLAG_CLICKABLE);
 

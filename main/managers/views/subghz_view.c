@@ -2175,7 +2175,7 @@ static void subghz_open_freq_analyzer_popup(void) {
     if (!tiny && popup_w < 220) popup_w = 220;
     if (!tiny && popup_h < 180) popup_h = 180;
 
-    s_fa_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
+    s_fa_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
     lv_obj_center(s_fa_popup);
 
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -2562,7 +2562,7 @@ static void subghz_open_waterfall_popup(void) {
     if (!tiny && popup_w < 220) popup_w = 220;
     if (!tiny && popup_h < 180) popup_h = 180;
 
-    s_wf_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
+    s_wf_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
     lv_obj_center(s_wf_popup);
 
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -2930,7 +2930,7 @@ static void subghz_open_capture_popup(void) {
     if (popup_w < 220) popup_w = 220;
     if (popup_h < 150) popup_h = 150;
 
-    s_capture_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
+    s_capture_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
     lv_obj_center(s_capture_popup);
     s_capture_popup_opened_us = esp_timer_get_time();
     ESP_LOGI(TAG,
@@ -3140,7 +3140,7 @@ static void subghz_open_saved_popup(void) {
     if (popup_w < 220) popup_w = 220;
     if (popup_h < 150) popup_h = 150;
 
-    s_saved_popup = popup_create_container(lv_scr_act(), popup_w, popup_h);
+    s_saved_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
     lv_obj_center(s_saved_popup);
 
     s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", accessibility_get_font_body(), 8);
