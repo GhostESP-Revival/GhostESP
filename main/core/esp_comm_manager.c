@@ -1097,6 +1097,13 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_11;
             resolved_rx = GPIO_NUM_12;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0) {
+        desired_uart = UART_NUM_1;
+        if (((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) ||
+            ((int)tx_pin == 6 && (int)rx_pin == 7)) {
+            resolved_tx = GPIO_NUM_11;
+            resolved_rx = GPIO_NUM_12;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }
@@ -1166,13 +1173,20 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     return;
 #endif
 
-    // Don't deinitialize serial manager on TDECK to avoid UART conflicts
+    bool keep_serial_manager = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    keep_serial_manager = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+#endif
+
+    // Don't deinitialize serial manager on boards whose CLI runs over USB-JTAG.
 #ifndef CONFIG_USE_TDECK
-    if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
-        serial_manager_deinit();
-    } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
-        if ((int)resolved_tx == U0TXD_GPIO_NUM || (int)resolved_rx == U0RXD_GPIO_NUM) {
+    if (!keep_serial_manager) {
+        if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
             serial_manager_deinit();
+        } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
+            if ((int)resolved_tx == U0TXD_GPIO_NUM || (int)resolved_rx == U0RXD_GPIO_NUM) {
+                serial_manager_deinit();
+            }
         }
     }
 #endif
@@ -1321,13 +1335,20 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
     s_comm_manager->tx_pin = tx_pin;
     s_comm_manager->rx_pin = rx_pin;
 
-    // Don't deinitialize serial manager on TDECK to avoid UART conflicts
+    bool keep_serial_manager = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    keep_serial_manager = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+#endif
+
+    // Don't deinitialize serial manager on boards whose CLI runs over USB-JTAG.
 #ifndef CONFIG_USE_TDECK
-    if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
-        serial_manager_deinit();
-    } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
-        if ((int)tx_pin == U0TXD_GPIO_NUM || (int)rx_pin == U0RXD_GPIO_NUM) {
+    if (!keep_serial_manager) {
+        if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
             serial_manager_deinit();
+        } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
+            if ((int)tx_pin == U0TXD_GPIO_NUM || (int)rx_pin == U0RXD_GPIO_NUM) {
+                serial_manager_deinit();
+            }
         }
     }
 #endif

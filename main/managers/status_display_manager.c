@@ -583,12 +583,46 @@ void status_display_deinit(void) {
 
 #else
 
+#include <string.h>
+#include "managers/views/tdongle_status_screen.h"
+
+static bool status_display_use_tdongle_lcd(void)
+{
+#if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-S3") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+#else
+    return false;
+#endif
+}
+
 void status_display_init(void) {}
-bool status_display_is_ready(void) { return false; }
-void status_display_set_lines(const char *a, const char *b) { (void)a; (void)b; }
-void status_display_show_attack(const char *a, const char *b) { (void)a; (void)b; }
-void status_display_show_status(const char *s) { (void)s; }
-void status_display_clear(void) {}
+
+bool status_display_is_ready(void)
+{
+    return status_display_use_tdongle_lcd() && tdongle_status_is_ready();
+}
+
+void status_display_set_lines(const char *a, const char *b)
+{
+    if (status_display_use_tdongle_lcd()) tdongle_status_set_lines(a, b);
+}
+
+void status_display_show_attack(const char *a, const char *b)
+{
+    if (status_display_use_tdongle_lcd()) tdongle_status_show_attack(a, b);
+}
+
+void status_display_show_status(const char *s)
+{
+    if (status_display_use_tdongle_lcd()) tdongle_status_show_status(s);
+}
+
+void status_display_clear(void)
+{
+    if (status_display_use_tdongle_lcd()) tdongle_status_clear();
+}
+
 void status_display_deinit(void) {}
 
 #endif

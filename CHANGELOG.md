@@ -3,7 +3,8 @@
 ## Revival v2.0-pre5
 
 ### Added
-
+ - Added support for the LilyGo T-Dongle-S3 with WebUI BadUSB support
+ - Added support for the LilyGo T-Dongle-C5
  - Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
  - Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
  - Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
@@ -16,16 +17,17 @@
  - Added small native SD app helpers for capability checks and SubGHz replay
  - Added spinlock protection to the handshake tracking table, BLE wardrive dedupe counters, and wardrive channel-hop state
  - Added NULL-check + reset paths to the six `calloc`s in `mfc_cache_begin` and `cu_mfc_cache_begin`
- - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items, leaving just the icon and text over the screen background
- - Added an "Invert Carousel" setting in Appearance that flips the slide direction for keyboard left/right, joystick side-to-side, and the rotary encoder on the main menu carousel
- - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
+ - Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items
+ - Added an "Invert Carousel" setting in Appearance that flips the slide direction
  - Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
  - Added a reusable select overlay for option picker rows
  - Added subcategories to the Settings view and re-organised the options
+ - Compressed OUI list to save free up flash space
 
 ### Changed
 
  - Completely redesigned the WebUI and added a dedicated BadUSB page
+ - Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
  - Improved rotary encoder: raised debounce to 3 ms, added quadrature transition validation, capped pending step accumulation, and moved direct-GPIO encoder sampling to a dedicated 1 kHz task
  - Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
  - Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)
