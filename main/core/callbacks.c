@@ -116,6 +116,7 @@ static StaticTask_t *peer_gps_stream_tcb = NULL;
 static uint32_t ble_wd_seen_hashes[BLE_WD_SEEN_SIZE];
 static uint16_t ble_wd_seen_idx = 0;
 static uint32_t ble_wd_unique_count = 0;
+static portMUX_TYPE ble_wd_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static uint32_t ble_wd_hash_mac(const uint8_t *addr) {
     uint32_t hash = 2166136261u;
@@ -127,13 +128,19 @@ static uint32_t ble_wd_hash_mac(const uint8_t *addr) {
 }
 
 uint32_t ble_wardriving_get_unique_device_count(void) {
-    return ble_wd_unique_count;
+    uint32_t count;
+    portENTER_CRITICAL(&ble_wd_mux);
+    count = ble_wd_unique_count;
+    portEXIT_CRITICAL(&ble_wd_mux);
+    return count;
 }
 
 void ble_wardriving_reset_unique_device_count(void) {
+    portENTER_CRITICAL(&ble_wd_mux);
     memset(ble_wd_seen_hashes, 0, sizeof(ble_wd_seen_hashes));
     ble_wd_seen_idx = 0;
     ble_wd_unique_count = 0;
+    portEXIT_CRITICAL(&ble_wd_mux);
 }
 #endif
 
@@ -144,6 +151,7 @@ static void stop_wardrive_heartbeat(void);
 static uint8_t wardrive_channels[WIFI_CHANNELS_MAX];
 static uint8_t wardrive_channel_count = 0;
 static uint8_t wardrive_channel_idx = 0;
+static portMUX_TYPE wardrive_ch_mux = portMUX_INITIALIZER_UNLOCKED;
 
 typedef enum {
     WARDRIVE_ROLE_PRIMARY = 0,
@@ -793,6 +801,7 @@ static hs_entry_t hs_table[HS_TABLE_MAX];
 static uint8_t hs_count_local = 0;
 static uint8_t hs_insert_idx_local = 0;
 static uint32_t hs_found_count = 0;
+static portMUX_TYPE hs_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_pcap_enabled = true;
 
 static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
@@ -800,14 +809,20 @@ static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
 }
 
 uint32_t wifi_callbacks_get_handshake_count(void) {
-    return hs_found_count;
+    uint32_t count;
+    portENTER_CRITICAL(&hs_mux);
+    count = hs_found_count;
+    portEXIT_CRITICAL(&hs_mux);
+    return count;
 }
 
 void wifi_callbacks_reset_handshake_tracking(void) {
+    portENTER_CRITICAL(&hs_mux);
     memset(hs_table, 0, sizeof(hs_table));
     hs_count_local = 0;
     hs_insert_idx_local = 0;
     hs_found_count = 0;
+    portEXIT_CRITICAL(&hs_mux);
 }
 
 void wifi_callbacks_set_pcap_enabled(bool enabled) {
@@ -823,24 +838,35 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
                                          uint64_t replay,
                                          bool from_ap,
                                          uint8_t msg_type) {
+    bool log_handshake = false;
+    char log_ap_str[18];
+    uint8_t log_ap_msg = 0;
+    uint8_t log_sta_msg = 0;
+
+    portENTER_CRITICAL(&hs_mux);
     for (uint8_t i = 0; i < hs_count_local; i++) {
         hs_entry_t *e = &hs_table[i];
         if (mac_equal(e->ap, ap) && mac_equal(e->sta, sta) && e->replay == replay) {
             if (from_ap) e->ap_msg = msg_type; else e->sta_msg = msg_type;
             if (e->ap_msg && e->sta_msg) {
                 hs_found_count++;
-                char ap_str[18];
-                snprintf(ap_str, sizeof(ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                snprintf(log_ap_str, sizeof(log_ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
                          e->ap[0], e->ap[1], e->ap[2], e->ap[3], e->ap[4], e->ap[5]);
-                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
-                     ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
-                char hs_payload[40];
-                snprintf(hs_payload, sizeof(hs_payload), "%s|%s/%s",
-                    ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
-                ghostscript_emit_event("handshake_captured", hs_payload);
+                log_ap_msg = e->ap_msg;
+                log_sta_msg = e->sta_msg;
+                log_handshake = true;
                 // reset to avoid duplicate notifications for same replay
                 e->ap_msg = 0;
                 e->sta_msg = 0;
+            }
+            portEXIT_CRITICAL(&hs_mux);
+            if (log_handshake) {
+                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
+                     log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
+                char hs_payload[40];
+                snprintf(hs_payload, sizeof(hs_payload), "%s|%s/%s",
+                         log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
+                ghostscript_emit_event("handshake_captured", hs_payload);
             }
             return;
         }
@@ -858,6 +884,7 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
     ne->replay = replay;
     ne->ap_msg = from_ap ? msg_type : 0;
     ne->sta_msg = from_ap ? 0 : msg_type;
+    portEXIT_CRITICAL(&hs_mux);
 }
 
 typedef struct {
@@ -1309,8 +1336,10 @@ static void channel_hop_timer_callback(void *arg) {
     if (!pineap_detection_active)
         return;
 
+    portENTER_CRITICAL(&wardrive_ch_mux);
     wardrive_channel_idx = (wardrive_channel_idx + 1) % wardrive_channel_count;
     current_channel = wardrive_channels[wardrive_channel_idx];
+    portEXIT_CRITICAL(&wardrive_ch_mux);
     esp_wifi_set_channel(current_channel, WIFI_SECOND_CHAN_NONE);
 }
 
@@ -3039,6 +3068,7 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
 
     uint32_t mac_hash = ble_wd_hash_mac(event->disc.addr.val);
     bool already_seen = false;
+    portENTER_CRITICAL(&ble_wd_mux);
     for (int i = 0; i < BLE_WD_SEEN_SIZE; i++) {
         if (ble_wd_seen_hashes[i] == mac_hash) { already_seen = true; break; }
     }
@@ -3047,6 +3077,7 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
         ble_wd_seen_idx = (ble_wd_seen_idx + 1) % BLE_WD_SEEN_SIZE;
         ble_wd_unique_count++;
     }
+    portEXIT_CRITICAL(&ble_wd_mux);
 
     wardriving_data_t wardriving_data = {0};
     wardriving_data.ble_data.is_ble_device = true;

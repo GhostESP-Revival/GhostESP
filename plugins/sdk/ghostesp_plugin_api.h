@@ -494,12 +494,16 @@ typedef struct ghostesp_api {
     void (*ui_button_set_selected)(ghostesp_ui_obj_t button, bool selected);
     int32_t (*ui_screen_get_content_width)(void);
     int32_t (*ui_screen_get_content_height)(void);
-bool (*ui_screen_is_compact)(void);
+    bool (*ui_screen_is_compact)(void);
     bool (*ui_has_touchscreen)(void);
 
     bool (*wifi_live_scan_start)(void);
     void (*wifi_live_scan_stop)(void);
     bool (*wifi_live_scan_active)(void);
+
+    bool (*has_permission)(const char *permission);
+    bool (*has_feature)(const char *feature);
+    bool (*subghz_transmit_file)(const char *app_relative_path);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

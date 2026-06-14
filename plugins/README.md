@@ -56,7 +56,7 @@ plugins/
   "icon_width": 50,
   "icon_height": 50,
   "accent_color": "#56B6F7",
-  "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "badusb", "camera", "usb", "audio", "zigbee"],
+  "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "nrf24", "badusb", "camera", "usb", "audio", "zigbee"],
   "memory_limit": 65536,
   "stack_size": 8192,
   "requires_psram": false
@@ -70,7 +70,7 @@ Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly reco
 | Permission | Unlocks |
 |------------|---------|
 | `ui` | Screen creation, widgets, popups, detail views, canvas, animations |
-| `storage` | Absolute and app-scoped file I/O |
+| `storage` | App-scoped file I/O; absolute `/mnt/ghostesp` file I/O only when `storage_scope` is `"ghostesp"` |
 | `commands` | CLI command execution |
 | `tasks` | Reserved for future task APIs |
 | `wifi` | WiFi scan, AP enumeration, monitor receive |
@@ -78,6 +78,7 @@ Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly reco
 | `nfc` | NFC read/stop |
 | `ir` | IR send file/stop |
 | `subghz` | SubGHz snapshot load, transmit, stop |
+| `nrf24` | NRF24 start/stop/pause and state queries |
 | `badusb` | BadUSB run script/stop |
 | `raw_gpio` | GPIO mode/read/write/pulls/drive/interrupts |
 | `lvgl` | Raw `lv_scr_act()`, `display_get_current_view()` |
@@ -101,7 +102,6 @@ Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly reco
 | `audio` | Reserved for microphone/audio APIs |
 | `settings` | Limited settings read/write/save APIs |
 | `zigbee` | Reserved for IEEE 802.15.4/Zigbee APIs |
-| `nrf24` | NRF24 start/stop/pause and state queries |
 
 ## Entry Point
 
@@ -139,6 +139,10 @@ The UI layer provides screens, cards, labels, buttons, popups, detail views, opt
 
 The stable UI layer is intentionally decoupled from GhostESP's internal view code — apps stay source-compatible as firmware views change.
 
+## Capability Helpers
+
+Apps can call `api->has_permission("wifi")` or `api->has_feature("touchscreen")` to gracefully hide unavailable actions. Useful feature names include `touchscreen`, `compact_screen`, `absolute_storage`, `subghz`, `nrf24`, `camera`, `usb`, `badusb`, `ir`, and `ble`.
+
 ## Storage
 
 | Scope | Path | Functions |
@@ -152,7 +156,7 @@ App-scoped storage uses `api->app_storage_read/write/list/...`. The firmware aut
 
 `api->app_malloc` / `api->app_calloc` / `api->app_free` are tracked against the `memory_limit` in the manifest. Query usage with `api->app_memory_used()` and `api->app_memory_limit()`. Raw `malloc`/`free` remain available for C compatibility but are not tracked.
 
-## App State & Quarantine
+## App State
 
 State is persisted to `/mnt/ghostesp/appdata/<app_id>/.state.json`:
 
@@ -165,7 +169,7 @@ State is persisted to `/mnt/ghostesp/appdata/<app_id>/.state.json`:
 }
 ```
 
-Apps that crash or fail to load 3+ times are quarantined and won't load until reset: `apps reset <id>`. Clean exits (normal `on_stop` → `dlclose`) reset the count to zero.
+Apps that crash or fail to load keep a failure count and last error for diagnostics. Apps are not blocked from launching automatically; `apps reset <id>` clears the diagnostic state. Clean exits (normal `on_stop` -> `dlclose`) reset the count to zero.
 
 ## Build Targets
 
@@ -239,4 +243,4 @@ Full docs: `docs/hugo docs/content/latest/development/gbt.md`
 | `apps info <id>` | Show manifest details and state |
 | `apps run <id>` | Launch an app |
 | `apps stop` | Stop the running app |
-| `apps reset <id>` | Clear failure/quarantine state |
+| `apps reset <id>` | Clear failure diagnostic state |

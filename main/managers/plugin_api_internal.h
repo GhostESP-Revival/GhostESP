@@ -42,7 +42,7 @@ typedef struct {
 } plugin_ui_obj_ctx_t;
 
 bool plugin_api_internal_has_ui_permission(void);
-bool plugin_api_internal_has_permission(uint32_t permission);
+bool plugin_api_internal_has_permission(plugin_permission_t permission);
 bool plugin_api_internal_build_app_path(const char *path, char *out, size_t out_len);
 bool plugin_api_internal_absolute_storage_allowed(const char *path);
 const char *plugin_api_internal_app_id(void);

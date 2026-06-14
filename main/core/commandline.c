@@ -22,6 +22,10 @@
 #include "managers/wifi_manager.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/ssh_scan.h"
+#include "scans/wifi/netbios_scan.h"
+#include "scans/wifi/http_banner_scan.h"
+#include "scans/wifi/snmp_scan.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/sd_card_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
@@ -479,6 +483,12 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     esp_err_t stop_err = esp_wifi_stop();
     esp_err_t start_err = esp_wifi_start();
 
+    // Live AP scan and timed scan both call ap_manager_stop_services() on
+    // entry, so this function is the only thing that brings the AP back for
+    // those flows. Always restore AP services before returning, regardless
+    // of whether the Wi-Fi driver restart succeeded.
+    ap_manager_start_services();
+
     if (stop_err != ESP_OK || start_err != ESP_OK) {
         glog("WiFi scan stop completed with recovery errors (stop=%s, start=%s).\n",
              esp_err_to_name(stop_err), esp_err_to_name(start_err));
@@ -546,6 +556,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"max_bright", ST_U8, OFF(max_screen_brightness), "Display", 0, 0, 100},
     {"invert_colors", ST_BOOL, OFF(invert_colors), "Display", 0, 0, 0},
     {"terminal_color", ST_COLOR_HEX, OFF(terminal_text_color), "Display", 0, 0, 0},
+    {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
     {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, 255},
     {"font_size", ST_U8, OFF(font_size), "Display", 0, 0, 2},
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
@@ -1106,6 +1117,16 @@ void handle_stop_flipper(int argc, char **argv) {
     }
 
     wifi_manager_stop_monitor_mode();  // Stop any active monitoring
+
+    // Stop network discovery scans
+    ssh_scan_cancel();
+    netbios_scan_cancel();
+    http_banner_scan_cancel();
+    snmp_scan_cancel();
+    port_scan_cancel();
+    glog("Stopped network scans.\n");
+    stopped_any = true;
+
     if (wifi_manager_stop_deauth_station()) {
         glog("Stopped station deauth.\n");
         stopped_any = true;
@@ -1417,7 +1438,7 @@ void handle_wifi_connection(int argc, char **argv) {
         // Save provided credentials to NVS
         settings_set_sta_ssid(&G_Settings, ssid);
         settings_set_sta_password(&G_Settings, password);
-        settings_save(&G_Settings);
+        settings_save_sta_credentials(&G_Settings);
     }
     wifi_manager_set_manual_disconnect(false);
     wifi_manager_connect_wifi(ssid, password);
@@ -4265,18 +4286,128 @@ void handle_scan_arp(int argc, char **argv) {
 
 void handle_scan_ssh(int argc, char **argv) {
     if (argc < 2) {
-        glog("Usage: scanssh <IP>\n");
-        status_display_show_status("SSH Usage");
+        glog("Starting SSH scan on local subnet...\n");
+        ssh_scan_subnet();
+        status_display_show_status("SSH Scan Done");
         return;
     }
 
     const char *target_ip = argv[1];
-    
     glog("Starting SSH scan on %s...\n", target_ip);
-    
     ssh_scan_host(target_ip);
-    
     status_display_show_status("SSH Scan Done");
+}
+
+static bool normalize_subnet_prefix_arg(const char *arg, char *out, size_t out_len) {
+    if (arg == NULL || out == NULL || out_len < 16) {
+        return false;
+    }
+
+    char tmp[32];
+    strlcpy(tmp, arg, sizeof(tmp));
+    char *slash = strchr(tmp, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+    }
+
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    int consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u.%u%n", &a, &b, &c, &d, &consumed) == 4 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u.%n", &a, &b, &c, &consumed) == 3 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    consumed = 0;
+    if (sscanf(tmp, "%u.%u.%u%n", &a, &b, &c, &consumed) == 3 && tmp[consumed] == '\0') {
+        if (a > 255 || b > 255 || c > 255) return false;
+        snprintf(out, out_len, "%u.%u.%u.", a, b, c);
+        return true;
+    }
+
+    return false;
+}
+
+void handle_netbios_scan(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: netbiosscan subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting NetBIOS scan on subnet %s*...\n", subnet_prefix);
+        netbios_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("NetBIOS Done");
+        return;
+    }
+
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting NetBIOS scan on local subnet...\n");
+        netbios_scan_subnet();
+        status_display_show_status("NetBIOS Done");
+        return;
+    }
+
+    glog("Starting NetBIOS scan on %s...\n", argv[1]);
+    netbios_scan_host(argv[1]);
+    status_display_show_status("NetBIOS Done");
+}
+
+void handle_http_banner_scan(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: httpbannerscan subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting HTTP banner scan on subnet %s*...\n", subnet_prefix);
+        http_banner_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("HTTP Banner Done");
+        return;
+    }
+
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting HTTP banner scan on local subnet...\n");
+        http_banner_scan_subnet();
+        status_display_show_status("HTTP Banner Done");
+        return;
+    }
+
+    glog("Starting HTTP banner scan on %s...\n", argv[1]);
+    http_banner_scan_host(argv[1]);
+    status_display_show_status("HTTP Banner Done");
+}
+
+void handle_snmp_probe(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: snmpprobe subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting SNMP probe on subnet %s*...\n", subnet_prefix);
+        snmp_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("SNMP Done");
+        return;
+    }
+
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting SNMP probe on local subnet...\n");
+        snmp_scan_subnet();
+        status_display_show_status("SNMP Done");
+        return;
+    }
+
+    glog("Starting SNMP probe on %s...\n", argv[1]);
+    snmp_scan_host(argv[1]);
+    status_display_show_status("SNMP Done");
 }
 
 void handle_crash(int argc, char **argv) {
@@ -4464,6 +4595,12 @@ void handle_help(int argc, char **argv) {
         glog("        -a  : Show access points from Wi-Fi scan\n");
         glog("        -s  : List connected stations\n");
         glog("        -airtags: List discovered AirTags\n\n");
+        glog("wpa3check\n");
+        glog("    Description: Run a WPA3 compliance check on the currently selected AP.\n");
+        glog("                 If no AP is selected, scans all APs and prints a\n");
+        glog("                 summary table with WPA3 presence, transition mode,\n");
+        glog("                 PMF posture, and a short security finding per AP.\n");
+        glog("    Usage: wpa3check (after 'scanap' and optionally 'select -a <index>')\n\n");
         glog("beaconspam\n");
         glog("    Description: Start beacon spam with different modes.\n");
         glog("    Usage: beaconspam [OPTION]\n");
@@ -4721,6 +4858,25 @@ void handle_help(int argc, char **argv) {
         glog("scanarp\n");
         glog("    Description: Perform ARP scan on local network to discover active hosts\n");
         glog("    Usage: scanarp\n\n");
+        glog("scanssh\n");
+        glog("    Description: Scan a host or local subnet for SSH services and grab banners\n");
+        glog("    Usage: scanssh\n");
+        glog("           scanssh <IP>\n\n");
+        glog("netbiosscan\n");
+        glog("    Description: Scan for NetBIOS Name Service hosts on local subnet or specific IP\n");
+        glog("    Usage: netbiosscan\n");
+        glog("           netbiosscan <IP>\n");
+        glog("           netbiosscan subnet <a.b.c[.0|.]>\n\n");
+        glog("httpbannerscan\n");
+        glog("    Description: Scan for HTTP/HTTPS services and grab Server banners\n");
+        glog("    Usage: httpbannerscan\n");
+        glog("           httpbannerscan <IP>\n");
+        glog("           httpbannerscan subnet <a.b.c[.0|.]>\n\n");
+        glog("snmpprobe\n");
+        glog("    Description: Probe SNMP v1/v2c services with common communities\n");
+        glog("    Usage: snmpprobe\n");
+        glog("           snmpprobe <IP>\n");
+        glog("           snmpprobe subnet <a.b.c[.0|.]>\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -5310,6 +5466,13 @@ void handle_ble_wardriving(int argc, char **argv) {
 }
 #endif
 
+void handle_wpa3_compliance(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    wpa3_compliance_check_selected();
+    status_display_show_status("WPA3 Check");
+}
+
 void handle_pineap_detection(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
         glog("Stopping PineAP detection...\n");
@@ -5789,6 +5952,11 @@ static bool sd_cli_ensure_mounted(void) {
 }
 
 static void sd_cli_cleanup(void) {
+    for (size_t i = 0; i < g_sd_cli_count; i++) {
+        free(g_sd_cli_paths[i]);
+        g_sd_cli_paths[i] = NULL;
+    }
+    g_sd_cli_count = 0;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (sd_cli_jit_mounted) {
         sd_card_unmount_after_flush(sd_cli_display_suspended);
@@ -6547,12 +6715,12 @@ static const char* sweep_get_cipher_str(wifi_cipher_type_t cipher) {
 
 static void sweep_get_phy_modes(wifi_ap_record_t *ap, char *buf, size_t len) {
     buf[0] = '\0';
-    if (ap->phy_11ax) strcat(buf, "ax/");
-    if (ap->phy_11ac) strcat(buf, "ac/");
-    if (ap->phy_11n) strcat(buf, "n/");
-    if (ap->phy_11a) strcat(buf, "a/");
-    if (ap->phy_11g) strcat(buf, "g/");
-    if (ap->phy_11b) strcat(buf, "b/");
+    if (ap->phy_11ax) strlcat(buf, "ax/", len);
+    if (ap->phy_11ac) strlcat(buf, "ac/", len);
+    if (ap->phy_11n) strlcat(buf, "n/", len);
+    if (ap->phy_11a) strlcat(buf, "a/", len);
+    if (ap->phy_11g) strlcat(buf, "g/", len);
+    if (ap->phy_11b) strlcat(buf, "b/", len);
     size_t l = strlen(buf);
     if (l > 0) buf[l - 1] = '\0';
 }
@@ -7315,7 +7483,7 @@ void handle_ap_enable_cmd(int argc, char **argv) {
     }
     
     settings_set_ap_enabled(&G_Settings, enable);
-    settings_save(&G_Settings);
+    settings_persist_setting(SETTING_AP_ENABLED);
     
     glog("Access Point %s. Restart required to take effect.\n", enable ? "enabled" : "disabled");
     status_display_show_status(enable ? "AP Enabled" : "AP Disabled");
@@ -7420,6 +7588,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    max_bright        - Max screen brightness (0-100)\n");
         glog("    invert_colors     - Invert screen colors (true/false)\n");
         glog("    terminal_color    - Terminal text color (hex)\n");
+        glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
         glog("    menu_theme        - Menu theme (0=Default)\n");
         glog("  System Settings:\n");
         glog("    channel_delay     - Channel delay in ms\n");
@@ -8131,6 +8300,7 @@ void handle_nrf24_cmd(int argc, char **argv) {
     }
 
     const char *sub = argv[1];
+    (void)sub;
     bool remote_request = esp_comm_manager_is_remote_command();
 
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
@@ -8587,18 +8757,31 @@ static void badusb_strip_quotes(char *text) {
 
 void handle_badusb_cmd(int argc, char **argv) {
 #ifdef CONFIG_HAS_BADUSB
+    bool remote_request = esp_comm_manager_is_remote_command();
+
     if (argc < 2) {
-        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout>\n");
-        glog("  badusb run <filename>  - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
-        glog("  badusb list            - List available scripts\n");
-        glog("  badusb stop            - Stop current execution\n");
-        glog("  badusb exec <size>     - Prepare to receive a script via stream\n");
-        glog("  badusb set_vid <hex>   - Set USB VID for next run\n");
-        glog("  badusb set_pid <hex>   - Set USB PID for next run\n");
-        glog("  badusb set_mfr <text>  - Set USB manufacturer for next run\n");
-        glog("  badusb set_prod <text> - Set USB product for next run\n");
-        glog("  badusb set_rand <0|1>  - Toggle USB detail randomization\n");
-        glog("  badusb set_layout <n>  - Set keyboard layout for next run\n");
+        glog("Usage: badusb <run|list|stop|exec|set_vid|set_pid|set_mfr|set_prod|set_rand|set_layout|type|keysend|jiggle_start|jiggle_stop|keyboard_start|keyboard_stop|trackpad_start|trackpad_stop|trackpad_move|trackpad_button|trackpad_wheel>\n");
+        glog("  badusb run <filename>       - Execute a DuckyScript from /mnt/ghostesp/badusb/\n");
+        glog("  badusb list                 - List available scripts\n");
+        glog("  badusb stop                 - Stop current execution\n");
+        glog("  badusb exec <size>          - Prepare to receive a script via stream\n");
+        glog("  badusb set_vid <hex>        - Set USB VID for next run\n");
+        glog("  badusb set_pid <hex>        - Set USB PID for next run\n");
+        glog("  badusb set_mfr <text>       - Set USB manufacturer for next run\n");
+        glog("  badusb set_prod <text>      - Set USB product for next run\n");
+        glog("  badusb set_rand <0|1>       - Toggle USB detail randomization\n");
+        glog("  badusb set_layout <n>       - Set keyboard layout for next run\n");
+        glog("  badusb type <text>          - Type text through active keyboard mode\n");
+        glog("  badusb keysend <mod> <key>  - Send a single keypress (HID codes)\n");
+        glog("  badusb jiggle_start         - Start mouse jiggler\n");
+        glog("  badusb jiggle_stop          - Stop mouse jiggler\n");
+        glog("  badusb keyboard_start       - Start USB keyboard mode\n");
+        glog("  badusb keyboard_stop        - Stop USB keyboard mode\n");
+        glog("  badusb trackpad_start       - Start USB trackpad (mouse) mode\n");
+        glog("  badusb trackpad_stop        - Stop USB trackpad mode\n");
+        glog("  badusb trackpad_move <dx> <dy> - Send relative mouse move (each axis clamped to int8)\n");
+        glog("  badusb trackpad_button <mask>  - Set held mouse buttons (1=L 2=R 4=M, 0=release)\n");
+        glog("  badusb trackpad_wheel <delta> - Send vertical mouse wheel delta (int8)\n");
         return;
     }
 
@@ -8645,12 +8828,12 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         size_t size = (size_t)atoi(argv[2]);
         esp_err_t ret = badusb_manager_prepare_receive(size);
-        if (ret != ESP_OK) {
+        if (ret != ESP_OK && !remote_request) {
             glog("BadUSB: Failed to prepare receive\n");
         }
     } else if (strcmp(sub, "stop") == 0) {
         badusb_manager_stop();
-        glog("BadUSB: Stopped\n");
+        if (!remote_request) glog("BadUSB: Stopped\n");
     } else if (strcmp(sub, "set_vid") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_vid <hex>\n");
@@ -8658,7 +8841,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint16_t vid = (uint16_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_vid(&G_Settings, vid);
-        glog("BadUSB: VID set\n");
+        if (!remote_request) glog("BadUSB: VID set\n");
     } else if (strcmp(sub, "set_pid") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_pid <hex>\n");
@@ -8666,7 +8849,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint16_t pid = (uint16_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_pid(&G_Settings, pid);
-        glog("BadUSB: PID set\n");
+        if (!remote_request) glog("BadUSB: PID set\n");
     } else if (strcmp(sub, "set_mfr") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_mfr <text>\n");
@@ -8676,7 +8859,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         badusb_join_args(value, sizeof(value), argc, argv, 2);
         badusb_strip_quotes(value);
         settings_set_badusb_manufacturer(&G_Settings, value);
-        glog("BadUSB: Manufacturer set\n");
+        if (!remote_request) glog("BadUSB: Manufacturer set\n");
     } else if (strcmp(sub, "set_prod") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_prod <text>\n");
@@ -8686,7 +8869,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         badusb_join_args(value, sizeof(value), argc, argv, 2);
         badusb_strip_quotes(value);
         settings_set_badusb_product(&G_Settings, value);
-        glog("BadUSB: Product set\n");
+        if (!remote_request) glog("BadUSB: Product set\n");
     } else if (strcmp(sub, "set_rand") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_rand <0|1>\n");
@@ -8694,7 +8877,7 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         bool enabled = atoi(argv[2]) != 0;
         settings_set_badusb_randomize(&G_Settings, enabled);
-        glog("BadUSB: Randomize set to %u\n", enabled ? 1 : 0);
+        if (!remote_request) glog("BadUSB: Randomize set to %u\n", enabled ? 1 : 0);
     } else if (strcmp(sub, "set_layout") == 0) {
         if (argc < 3) {
             glog("Usage: badusb set_layout <n>\n");
@@ -8702,7 +8885,112 @@ void handle_badusb_cmd(int argc, char **argv) {
         }
         uint8_t layout = (uint8_t)strtol(argv[2], NULL, 0);
         settings_set_badusb_kb_layout(&G_Settings, layout);
-        glog("BadUSB: Layout set to %u\n", layout);
+        if (!remote_request) glog("BadUSB: Layout set to %u\n", layout);
+    } else if (strcmp(sub, "keysend") == 0) {
+        if (argc < 4) {
+            glog("Usage: badusb keysend <modifier> <keycode>\n");
+            return;
+        }
+        uint8_t mod = (uint8_t)strtol(argv[2], NULL, 0);
+        uint8_t key = (uint8_t)strtol(argv[3], NULL, 0);
+        if (!badusb_manager_send_keypress(mod, key)) {
+            glog("BadUSB: Failed to send key (is HID active?)\n");
+        } else {
+            glog("BadUSB: Key sent (mod=0x%02X key=0x%02X)\n", mod, key);
+        }
+    } else if (strcmp(sub, "type") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb type <text>\n");
+            return;
+        }
+        char value[256];
+        badusb_join_args(value, sizeof(value), argc, argv, 2);
+        badusb_strip_quotes(value);
+        if (!badusb_manager_is_active()) {
+            esp_err_t ret = badusb_manager_keyboard_mode_start();
+            if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+                glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+                return;
+            }
+        }
+        if (!badusb_manager_send_text(value)) {
+            glog("BadUSB: Failed to type text\n");
+        } else {
+            glog("BadUSB: Typed %u chars\n", (unsigned)strlen(value));
+        }
+    } else if (strcmp(sub, "type_char") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb type_char <ascii>\n");
+            return;
+        }
+        int code = (int)strtol(argv[2], NULL, 0);
+        if (code < 1 || code > 126) {
+            glog("BadUSB: Invalid ASCII code\n");
+            return;
+        }
+        if (!badusb_manager_is_active()) {
+            esp_err_t ret = badusb_manager_keyboard_mode_start();
+            if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+                glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+                return;
+            }
+        }
+        char one[2] = {(char)code, '\0'};
+        if (!badusb_manager_send_text(one)) {
+            glog("BadUSB: Failed to type char\n");
+        }
+    } else if (strcmp(sub, "jiggle_start") == 0) {
+        esp_err_t ret = badusb_manager_mouse_jiggle_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start jiggler: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Mouse jiggler started\n");
+        }
+    } else if (strcmp(sub, "jiggle_stop") == 0) {
+        badusb_manager_mouse_jiggle_stop();
+        glog("BadUSB: Mouse jiggler stopped\n");
+    } else if (strcmp(sub, "keyboard_start") == 0) {
+        esp_err_t ret = badusb_manager_keyboard_mode_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start keyboard mode: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Keyboard mode started\n");
+        }
+    } else if (strcmp(sub, "keyboard_stop") == 0) {
+        badusb_manager_keyboard_mode_stop();
+        glog("BadUSB: Keyboard mode stopped\n");
+    } else if (strcmp(sub, "trackpad_start") == 0) {
+        esp_err_t ret = badusb_manager_trackpad_start();
+        if (ret != ESP_OK) {
+            glog("BadUSB: Failed to start trackpad mode: %s\n", esp_err_to_name(ret));
+        } else {
+            glog("BadUSB: Trackpad mode started\n");
+        }
+    } else if (strcmp(sub, "trackpad_stop") == 0) {
+        badusb_manager_trackpad_stop();
+        glog("BadUSB: Trackpad mode stopped\n");
+    } else if (strcmp(sub, "trackpad_move") == 0) {
+        if (argc < 4) {
+            glog("Usage: badusb trackpad_move <dx> <dy>\n");
+            return;
+        }
+        int dx = atoi(argv[2]);
+        int dy = atoi(argv[3]);
+        badusb_manager_trackpad_move(dx, dy);
+    } else if (strcmp(sub, "trackpad_button") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb trackpad_button <mask>\n");
+            return;
+        }
+        uint8_t buttons = (uint8_t)strtoul(argv[2], NULL, 0);
+        badusb_manager_trackpad_button(buttons);
+    } else if (strcmp(sub, "trackpad_wheel") == 0) {
+        if (argc < 3) {
+            glog("Usage: badusb trackpad_wheel <delta>\n");
+            return;
+        }
+        int delta = atoi(argv[2]);
+        badusb_manager_trackpad_wheel(delta);
     } else if (strcmp(sub, "status") == 0) {
         // Status update from peer - forward to view
 #ifdef CONFIG_WITH_SCREEN
@@ -9716,9 +10004,8 @@ static void handle_apps_cmd(int argc, char **argv) {
         for (int i = 0; i < count; ++i) {
             const plugin_app_manifest_t *app = plugin_manager_get(i);
             if (!app) continue;
-            glog("  %s - %s v%s [%s]%s%s\n", app->id, app->name, app->version[0] ? app->version : "?",
+            glog("  %s - %s v%s [%s]%s\n", app->id, app->name, app->version[0] ? app->version : "?",
                  app->target[0] ? app->target : "any",
-                 app->quarantined ? " [quarantined]" : "",
                  app->launch_failure_count > 0 ? " [failures]" : "");
         }
         return;
@@ -9735,11 +10022,10 @@ static void handle_apps_cmd(int argc, char **argv) {
             glog("app not found: %s\n", argv[2]);
             return;
         }
-        glog("id: %s\nname: %s\nversion: %s\nauthor: %s\ntarget: %s\nentry: %s\napi: %u\nfailures: %lu\nquarantined: %s\n",
+        glog("id: %s\nname: %s\nversion: %s\nauthor: %s\ntarget: %s\nentry: %s\napi: %u\nfailures: %lu\n",
              app->id, app->name, app->version, app->author, app->target, app->entry,
               (unsigned)app->api_version,
-              (unsigned long)app->launch_failure_count,
-              app->quarantined ? "yes" : "no");
+              (unsigned long)app->launch_failure_count);
         return;
     }
 
@@ -10026,11 +10312,12 @@ typedef struct {
 static void sinkhole_download_task(void *pvParam) {
     sinkhole_dl_params_t *params = (sinkhole_dl_params_t *)pvParam;
     char *url = params->url;
-    const char *filepath = params->filepath;
+    char *filepath = params->filepath;
 
     if (!sd_card_manager.is_initialized) {
         glog("SD card required to download blocklist\n");
         free(url);
+        free(filepath);
         free(params);
         vTaskDelete(NULL);
         return;
@@ -10054,6 +10341,7 @@ static void sinkhole_download_task(void *pvParam) {
         if (!f) {
             glog("Failed to create blocklist file\n");
             free(url);
+            free(filepath);
             free(params);
             vTaskDelete(NULL);
             return;
@@ -10082,6 +10370,7 @@ static void sinkhole_download_task(void *pvParam) {
     }
 
     free(url);
+    free(filepath);
     free(params);
     vTaskDelete(NULL);
 }
@@ -10438,6 +10727,9 @@ void register_commands() {
     register_command("scanports", handle_scan_ports);
     register_command("scanarp", handle_scan_arp);
     register_command("scanssh", handle_scan_ssh);
+    register_command("netbiosscan", handle_netbios_scan);
+    register_command("httpbannerscan", handle_http_banner_scan);
+    register_command("snmpprobe", handle_snmp_probe);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("settings", handle_settings_cmd);
@@ -10466,6 +10758,7 @@ void register_commands() {
     register_command("coredump", handle_coredump_cmd);
 #endif
     register_command("pineap", handle_pineap_detection);
+    register_command("wpa3check", handle_wpa3_compliance);
     register_command("apcred", handle_apcred);
     register_command("apenable", handle_ap_enable_cmd);
     register_command("chipinfo", handle_chip_info_cmd);

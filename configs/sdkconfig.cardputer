@@ -3179,7 +3179,7 @@ CONFIG_TINYUSB_MIDI_COUNT=0
 #
 # Human Interface Device Class (HID)
 #
-CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_HID_COUNT=2
 # end of Human Interface Device Class (HID)
 
 #

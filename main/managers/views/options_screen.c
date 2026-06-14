@@ -32,7 +32,9 @@
 #include "gui/scan_status.h"
 #include "gui/detail_view.h"
 #include "gui/nav_history.h"
+#include "gui/select_overlay.h"
 #include "scans/wifi/ap_scan.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/wifi/station_scan.h"
@@ -449,12 +451,16 @@ static const char *TAG = "optionsScreen";
 
 typedef enum {
     SETTINGS_CAT_DISPLAY = 0,
-    SETTINGS_CAT_APPEARANCE,
+    SETTINGS_CAT_THEME_ASSETS,
+    SETTINGS_CAT_MENU_STYLE,
     SETTINGS_CAT_LED_RGB,
     SETTINGS_CAT_NAVIGATION,
     SETTINGS_CAT_STATUS_DISPLAY,
     SETTINGS_CAT_NETWORK,
-    SETTINGS_CAT_POWER_SYSTEM,
+    SETTINGS_CAT_POWER,
+    SETTINGS_CAT_SYSTEM_TOOLS,
+    SETTINGS_CAT_BACKUP_RESET,
+    SETTINGS_CAT_SCAN_SAVING,
     SETTINGS_CAT_WIGLE,
 #ifdef CONFIG_USE_IO_EXPANDER
     SETTINGS_CAT_IO_BUTTONS,
@@ -466,41 +472,73 @@ typedef enum {
     SETTINGS_CAT_ACCESSIBILITY,
     SETTINGS_CAT_LOCKSCREEN,
     SETTINGS_CAT_WARDRIVING,
-    SETTINGS_CAT_INFO,
     SETTINGS_CAT_COUNT
 } SettingsCategoryId;
+
+typedef enum {
+    SETTINGS_ROOT_INFO = 0,
+    SETTINGS_ROOT_INTERFACE,
+    SETTINGS_ROOT_CONTROLS,
+    SETTINGS_ROOT_LIGHTS_AUDIO,
+    SETTINGS_ROOT_CONNECTIVITY,
+    SETTINGS_ROOT_DATA_TOOLS,
+    SETTINGS_ROOT_SECURITY,
+    SETTINGS_ROOT_SYSTEM,
+    SETTINGS_ROOT_COUNT
+} SettingsRootId;
 
 typedef struct {
     const char *name;
     uint8_t id;
+} SettingsRootCategory;
+
+typedef struct {
+    const char *name;
+    uint8_t id;
+    uint8_t root_id;
     bool conditional;
     const char *condition_config;
 } SettingsCategory;
 
-static SettingsCategory settings_categories[] = {
-    {"Info",           SETTINGS_CAT_INFO,          false, NULL},
-    {"Display",        SETTINGS_CAT_DISPLAY,       false, NULL},
-    {"Appearance",     SETTINGS_CAT_APPEARANCE,    false, NULL},
-    {"LED & RGB",      SETTINGS_CAT_LED_RGB,       false, NULL},
-    {"Navigation",     SETTINGS_CAT_NAVIGATION,    false, NULL},
-#ifdef CONFIG_WITH_STATUS_DISPLAY
-    {"Status Display", SETTINGS_CAT_STATUS_DISPLAY, true, "CONFIG_WITH_STATUS_DISPLAY"},
-#endif
-    {"Network",        SETTINGS_CAT_NETWORK,       false, NULL},
-    {"Power & System", SETTINGS_CAT_POWER_SYSTEM,  false, NULL},
-    {"WiGLE", SETTINGS_CAT_WIGLE, false, NULL},
-#ifdef CONFIG_USE_IO_EXPANDER
-    {"IO Buttons", SETTINGS_CAT_IO_BUTTONS, true, "CONFIG_USE_IO_EXPANDER"},
-#endif
-#if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
-    {"MIC Visualizer", SETTINGS_CAT_MIC_RGB, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
-#endif
-    {"GhostLink", SETTINGS_CAT_GHOSTLINK, false, NULL},
-    {"Accessibility", SETTINGS_CAT_ACCESSIBILITY, false, NULL},
-    {"Lockscreen", SETTINGS_CAT_LOCKSCREEN, false, NULL},
-    {"Wardriving", SETTINGS_CAT_WARDRIVING, false, NULL},
+static SettingsRootCategory settings_root_categories[] = {
+    {"About", SETTINGS_ROOT_INFO},
+    {"Display & Brightness", SETTINGS_ROOT_INTERFACE},
+    {"Controls", SETTINGS_ROOT_CONTROLS},
+    {"Lights & Audio", SETTINGS_ROOT_LIGHTS_AUDIO},
+    {"Connectivity", SETTINGS_ROOT_CONNECTIVITY},
+    {"Scans & Data", SETTINGS_ROOT_DATA_TOOLS},
+    {"Privacy & Security", SETTINGS_ROOT_SECURITY},
+    {"General", SETTINGS_ROOT_SYSTEM},
 };
 
+static SettingsCategory settings_categories[] = {
+    {"Display", SETTINGS_CAT_DISPLAY, SETTINGS_ROOT_INTERFACE, false, NULL},
+    {"Appearance", SETTINGS_CAT_THEME_ASSETS, SETTINGS_ROOT_INTERFACE, false, NULL},
+    {"Menus", SETTINGS_CAT_MENU_STYLE, SETTINGS_ROOT_INTERFACE, false, NULL},
+    {"Navigation", SETTINGS_CAT_NAVIGATION, SETTINGS_ROOT_CONTROLS, false, NULL},
+    {"Accessibility", SETTINGS_CAT_ACCESSIBILITY, SETTINGS_ROOT_INTERFACE, false, NULL},
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+    {"Status Display", SETTINGS_CAT_STATUS_DISPLAY, SETTINGS_ROOT_INTERFACE, true, "CONFIG_WITH_STATUS_DISPLAY"},
+#endif
+    {"RGB", SETTINGS_CAT_LED_RGB, SETTINGS_ROOT_LIGHTS_AUDIO, false, NULL},
+#if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
+    {"Microphone", SETTINGS_CAT_MIC_RGB, SETTINGS_ROOT_LIGHTS_AUDIO, true, "CONFIG_HAS_MIC or CONFIG_ENABLE_MIC_RGB_VISUALIZER"},
+#endif
+#ifdef CONFIG_USE_IO_EXPANDER
+    {"Buttons", SETTINGS_CAT_IO_BUTTONS, SETTINGS_ROOT_CONTROLS, true, "CONFIG_USE_IO_EXPANDER"},
+#endif
+    {"Wi-Fi", SETTINGS_CAT_NETWORK, SETTINGS_ROOT_CONNECTIVITY, false, NULL},
+    {"GhostLink", SETTINGS_CAT_GHOSTLINK, SETTINGS_ROOT_CONNECTIVITY, false, NULL},
+    {"WiGLE", SETTINGS_CAT_WIGLE, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
+    {"Wardriving", SETTINGS_CAT_WARDRIVING, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
+    {"Saving", SETTINGS_CAT_SCAN_SAVING, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
+    {"Lock Screen", SETTINGS_CAT_LOCKSCREEN, SETTINGS_ROOT_SECURITY, false, NULL},
+    {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
+    {"Setup", SETTINGS_CAT_SYSTEM_TOOLS, SETTINGS_ROOT_SYSTEM, false, NULL},
+    {"Transfer or Reset", SETTINGS_CAT_BACKUP_RESET, SETTINGS_ROOT_SYSTEM, false, NULL},
+};
+
+static int current_settings_root = -1;
 static int current_settings_category = -1;
 static int settings_submenu_depth = 0;
 
@@ -522,6 +560,40 @@ static int settings_category_index_for_id(SettingsCategoryId cat_id) {
         if (settings_categories[i].id == cat_id) {
             return i;
         }
+    }
+    return -1;
+}
+
+static SettingsRootId current_settings_root_id(void) {
+    int root_count = sizeof(settings_root_categories) / sizeof(settings_root_categories[0]);
+    if (current_settings_root < 0 || current_settings_root >= root_count) {
+        return SETTINGS_ROOT_COUNT;
+    }
+    return settings_root_categories[current_settings_root].id;
+}
+
+static int settings_category_count_for_root(SettingsRootId root_id) {
+    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    int visible_count = 0;
+    for (int i = 0; i < category_count; i++) {
+        if (settings_categories[i].root_id == root_id) {
+            visible_count++;
+        }
+    }
+    return visible_count;
+}
+
+static int settings_category_index_for_root_position(SettingsRootId root_id, int position) {
+    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    int visible_index = 0;
+    for (int i = 0; i < category_count; i++) {
+        if (settings_categories[i].root_id != root_id) {
+            continue;
+        }
+        if (visible_index == position) {
+            return i;
+        }
+        visible_index++;
     }
     return -1;
 }
@@ -593,6 +665,7 @@ static void options_show_info_detail(void) {
     }
 
     s_info_detail_active = true;
+    current_settings_root = -1;
     current_settings_category = -1;
     settings_submenu_depth = 0;
     selected_item_index = 0;
@@ -752,7 +825,7 @@ static const char * const wifi_capture_options[] = {
 static const char * const wifi_scan_select_options[] = {
     "Scan Access Points", "Scan APs Live", "Scan Stations", "Scan AP + STA",
     "List Access Points", "List Stations", "List AP + STA",
-    "Multi-Select APs", "Multi-Select Stations", NULL
+    "Multi-Select APs", "Multi-Select Stations", "WPA3 Compliance", NULL
 };
 
 static const char * const wifi_environment_options[] = {
@@ -760,10 +833,16 @@ static const char * const wifi_environment_options[] = {
 };
 
 static const char * const wifi_network_options[] = {
-    "Scan LAN Devices", "ARP Scan Network", "Scan Open Ports", "Select LAN", NULL
+    "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
+    "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
+    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...",
+    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...",
+    NULL
 };
 
+static void switch_to_settings_root(int root_idx);
 static void switch_to_settings_category(int cat_idx);
+static void settings_activate_row(int row_index, bool increment);
 
 static const char * const wifi_evil_portal_options[] = {
     "Start Evil Portal", "Start Custom Evil Portal", "Stop Evil Portal", NULL
@@ -855,9 +934,20 @@ static const char * const dual_comm_scan_options[] = {
     "Scan Stations",
     "Scan AP + STA",
     "Sweep",
-    "Scan LAN Devices",
+    "mDNS Discovery",
     "ARP Scan Network",
     "Scan Open Ports",
+    "Scan SSH",
+    "NetBIOS Scan",
+    "HTTP Banner Scan",
+    "SNMP Probe",
+    "Scan SSH Host...",
+    "NetBIOS Scan Host...",
+    "HTTP Banner Host...",
+    "SNMP Probe Host...",
+    "NetBIOS Subnet...",
+    "HTTP Banner Subnet...",
+    "SNMP Probe Subnet...",
     "PineAP Detection",
     "Flock Detection",
     "Channel Congestion",
@@ -865,7 +955,6 @@ static const char * const dual_comm_scan_options[] = {
     "List Stations",
     "Select AP",
     "Select Station",
-    "Select LAN",
     "Track AP",
     "Track Station",
     NULL
@@ -1057,16 +1146,19 @@ static SettingsItem settings_items[] = {
     {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
-    {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"Item Borders", SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"Touch Drag Scroll", SETTING_TOUCH_DRAG_SCROLL, bool_options, 2, 1, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_APPEARANCE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Item Borders", SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Card Background", SETTING_MENU_CARD_BG, bool_options, 2, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Invert Carousel", SETTING_CAROUSEL_INVERT_DIRECTION, bool_options, 2, 0, SETTINGS_CAT_NAVIGATION, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Touch Drag Scroll", SETTING_TOUCH_DRAG_SCROLL, bool_options, 2, 1, SETTINGS_CAT_NAVIGATION, false, NULL, SETTING_WIDGET_TOGGLE},
 
     {"RGB Mode", SETTING_RGB_MODE, rgb_mode_options, RGB_MODE_COUNT, 0, SETTINGS_CAT_LED_RGB, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Neopixel Brightness", SETTING_NEOPIXEL_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_LED_RGB, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -1086,16 +1178,16 @@ static SettingsItem settings_items[] = {
     {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
     {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
 
-    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
 #if CONFIG_IDF_TARGET_ESP32S3
-    {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER_SYSTEM, true, "CONFIG_IDF_TARGET_ESP32S3", SETTING_WIDGET_TOGGLE},
+    {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER, true, "CONFIG_IDF_TARGET_ESP32S3", SETTING_WIDGET_TOGGLE},
 #endif
-    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Export Settings SD", SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Import Settings SD", SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_POWER_SYSTEM, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_SCAN_SAVING, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_SYSTEM_TOOLS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"I2C Bus Scan", SETTING_I2C_SCAN, action_options, 1, 0, SETTINGS_CAT_SYSTEM_TOOLS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Export Settings SD", SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Import Settings SD", SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Auto Upload", SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Donate Data", SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -1286,6 +1378,8 @@ static const int OPT_SWIPE_THRESHOLD_RATIO = 10;
 static bool option_fired = false;
 static bool option_invoked = false;
 static options_view_t *g_options_view = NULL;
+static gui_select_overlay_t *settings_select_overlay = NULL;
+static int settings_select_setting_index = -1;
 
 // Add button declarations and constants
 static lv_obj_t *scroll_up_btn = NULL;
@@ -1391,6 +1485,11 @@ static int opt_resolve_drag_axis(int total_dx, int total_dy) {
 // forward declaration for incremental builder callback
 static void menu_builder_cb(lv_timer_t *t);
 static void change_setting_value(int setting_index, bool increment); // Forward Declaration
+static void apply_setting_change(int setting_index, int new_value);
+static bool settings_select_overlay_is_open(void);
+static void settings_select_open(int setting_index);
+static void settings_select_close(void);
+static bool settings_select_handle_input(InputEvent *event);
 
 static lv_timer_t *menu_build_timer = NULL;
 static const char * const *current_options_list = NULL;
@@ -1628,6 +1727,15 @@ static void wigle_manual_upload_result_cb(bool success, const char *message);
 static void wigle_stats_result_cb(bool success, const char *message);
 static void wifi_connect_kb_cb(const char *text);
 static void ssh_scan_kb_cb(const char *text);
+static void netbios_scan_kb_cb(const char *text);
+static void http_banner_kb_cb(const char *text);
+static void snmp_probe_kb_cb(const char *text);
+static void netbios_subnet_kb_cb(const char *text);
+static void http_banner_subnet_kb_cb(const char *text);
+static void snmp_probe_subnet_kb_cb(const char *text);
+static void dual_comm_netbios_subnet_kb_cb(const char *text);
+static void dual_comm_http_banner_subnet_kb_cb(const char *text);
+static void dual_comm_snmp_probe_subnet_kb_cb(const char *text);
 static void dual_comm_connect_kb_cb(const char *text);
 static void dual_comm_send_kb_cb(const char *text);
 static void dual_comm_wifi_connect_kb_cb(const char *text);
@@ -1817,6 +1925,7 @@ void options_menu_create() {
      * destroy/create to avoid expensive LVGL operations and watchdog starvation.
      */
     ESP_LOGI(TAG, "options_menu_create: SelectedMenuType=%d (%s)", SelectedMenuType, options_menu_type_to_string(SelectedMenuType));
+    settings_select_close();
     s_info_detail_active = false;
     
     // Reset WiFi menu state when entering from main menu to ensure clean entry
@@ -1975,6 +2084,7 @@ void options_menu_create() {
         break;
     case OT_Settings: 
         is_settings_mode = true;
+        current_settings_root = -1;
         current_settings_category = -1;
         settings_submenu_depth = 0;
         {
@@ -2129,6 +2239,9 @@ static void load_current_settings_values(void) {
                 }
                 break;
             }
+            case SETTING_TERMINAL_FONT_SIZE:
+                settings_items[i].current_value = settings_get_terminal_font_size(&G_Settings);
+                break;
             case SETTING_INVERT_COLORS:
                 settings_items[i].current_value = settings_get_invert_colors(&G_Settings) ? 1 : 0;
                 break;
@@ -2156,6 +2269,9 @@ static void load_current_settings_values(void) {
             case SETTING_MENU_ITEM_BORDERS:
                 settings_items[i].current_value = settings_get_menu_item_borders(&G_Settings) ? 1 : 0;
                 break;
+            case SETTING_MENU_CARD_BG:
+                settings_items[i].current_value = settings_get_menu_card_bg(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_TOUCH_DRAG_SCROLL:
                 settings_items[i].current_value = settings_get_touch_drag_scroll(&G_Settings) ? 1 : 0;
                 break;
@@ -2170,6 +2286,9 @@ static void load_current_settings_values(void) {
                 break;
             case SETTING_MENU_LAYOUT:
                 settings_items[i].current_value = settings_get_menu_layout(&G_Settings);
+                break;
+            case SETTING_CAROUSEL_INVERT_DIRECTION:
+                settings_items[i].current_value = settings_get_carousel_invert_direction(&G_Settings) ? 1 : 0;
                 break;
             case SETTING_MAX_BRIGHTNESS:
                 { int bv = (settings_get_max_screen_brightness(&G_Settings) / 10) - 1;
@@ -2345,6 +2464,9 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_TERMINAL_COLOR:
             settings_set_terminal_text_color(&G_Settings, textcolor_values[new_value]);
             break;
+        case SETTING_TERMINAL_FONT_SIZE:
+            settings_set_terminal_font_size(&G_Settings, (uint8_t)new_value);
+            break;
         case SETTING_INVERT_COLORS:
             settings_set_invert_colors(&G_Settings, new_value == 1);
             // Invert is read in the flush callback, so we need to force a
@@ -2404,6 +2526,14 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_ITEM_BORDERS:
             settings_set_menu_item_borders(&G_Settings, new_value == 1);
             break;
+        case SETTING_MENU_CARD_BG: {
+            settings_set_menu_card_bg(&G_Settings, new_value == 1);
+            if (g_options_view) {
+                options_view_refresh_styles(g_options_view);
+                update_settings_arrows_visibility();
+            }
+            break;
+        }
         case SETTING_TOUCH_DRAG_SCROLL:
             settings_set_touch_drag_scroll(&G_Settings, new_value == 1);
             break;
@@ -2422,6 +2552,9 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_LAYOUT:
             settings_set_menu_layout(&G_Settings, (uint8_t)new_value);
             // The layout change will take effect on next menu creation
+            break;
+        case SETTING_CAROUSEL_INVERT_DIRECTION:
+            settings_set_carousel_invert_direction(&G_Settings, new_value == 1);
             break;
         #ifdef CONFIG_LV_DISP_BACKLIGHT_PWM
         // This setting is only available if LV_DISP_BACKLIGHT_PWM is enabled
@@ -2765,6 +2898,183 @@ static void apply_setting_change(int setting_index, int new_value) {
     settings_persist_setting((SettingsType)item->setting_type);
 }
 
+static bool settings_select_overlay_is_open(void) {
+    return gui_select_overlay_is_open(settings_select_overlay);
+}
+
+static void settings_refresh_row_label(int setting_index) {
+    if (!menu_container || !lv_obj_is_valid(menu_container)) return;
+    if (setting_index < 0 || setting_index >= settings_items_count) return;
+
+    SettingsItem *item = &settings_items[setting_index];
+    uint32_t child_cnt = lv_obj_get_child_cnt(menu_container);
+    for (uint32_t row_idx = 0; row_idx < child_cnt; row_idx++) {
+        lv_obj_t *row = lv_obj_get_child(menu_container, (int32_t)row_idx);
+        if (!row || !lv_obj_is_valid(row)) continue;
+        if ((int)(intptr_t)lv_obj_get_user_data(row) != setting_index) continue;
+
+        lv_obj_t *label = NULL;
+        uint32_t row_child_cnt = lv_obj_get_child_cnt(row);
+        for (uint32_t i = 0; i < row_child_cnt; ++i) {
+            lv_obj_t *child = lv_obj_get_child(row, (int32_t)i);
+            if (!child) continue;
+            if (lv_obj_get_user_data(child) == (void *)1) {
+                label = child;
+                break;
+            }
+        }
+        if (!label && row_child_cnt > 0) {
+            label = lv_obj_get_child(row, 0);
+        }
+        if (label) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%s: %s", item->label, settings_item_value_text(item));
+            lv_label_set_text(label, buf);
+        }
+        return;
+    }
+}
+
+static void settings_select_apply_value(int option_index, void *user_data) {
+    (void)user_data;
+    if (settings_select_setting_index < 0 || settings_select_setting_index >= settings_items_count) {
+        settings_select_close();
+        return;
+    }
+
+    SettingsItem *item = &settings_items[settings_select_setting_index];
+    if (option_index < 0 || option_index >= item->value_count) {
+        settings_select_close();
+        return;
+    }
+
+    int setting_index = settings_select_setting_index;
+    settings_select_close();
+    apply_setting_change(setting_index, option_index);
+    settings_refresh_row_label(setting_index);
+    update_settings_arrows_visibility();
+}
+
+static void settings_select_dismiss(void *user_data) {
+    (void)user_data;
+    settings_select_close();
+}
+
+static void settings_select_close(void) {
+    gui_select_overlay_destroy(&settings_select_overlay);
+    settings_select_setting_index = -1;
+}
+
+static void settings_select_open(int setting_index) {
+    if (setting_index < 0 || setting_index >= settings_items_count) return;
+    SettingsItem *item = &settings_items[setting_index];
+    if (item->widget != SETTING_WIDGET_VALUE_CYCLE || item->value_count <= 1 || !item->value_options) return;
+
+    settings_select_close();
+
+    settings_select_setting_index = setting_index;
+
+    int row_h = (button_height_global > 0) ? button_height_global - 8 : 40;
+    if (row_h < 30) row_h = 30;
+
+    lv_obj_t *row = NULL;
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        uint32_t child_cnt = lv_obj_get_child_cnt(menu_container);
+        for (uint32_t i = 0; i < child_cnt; i++) {
+            lv_obj_t *candidate = lv_obj_get_child(menu_container, (int32_t)i);
+            if (candidate && (int)(intptr_t)lv_obj_get_user_data(candidate) == setting_index) {
+                row = candidate;
+                break;
+            }
+        }
+    }
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+
+    int bottom_reserved = 8;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    bottom_reserved += SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#endif
+    gui_select_overlay_config_t cfg = {
+        .parent = lv_layer_top(),
+        .anchor = row,
+        .options = item->value_options,
+        .option_count = item->value_count,
+        .selected_index = settings_item_clamped_value(item),
+        .row_height = row_h,
+        .max_visible_rows = (LV_VER_RES <= 200) ? 4 : 5,
+        .top_reserved = GUI_STATUS_BAR_H + 4,
+        .bottom_reserved = bottom_reserved,
+        .min_width = 90,
+        .max_width = 230,
+        .surface_color = lv_color_hex(theme_palette_get_surface_alt(theme)),
+        .text_color = lv_color_hex(theme_palette_get_text(theme)),
+        .muted_text_color = lv_color_hex(theme_palette_get_text_muted(theme)),
+        .accent_color = lv_color_hex(theme_palette_get_accent(theme)),
+        .font = (row_h <= 34) ? accessibility_get_font_small() : accessibility_get_font_body(),
+        .on_select = settings_select_apply_value,
+        .on_dismiss = settings_select_dismiss,
+        .user_data = NULL,
+    };
+    settings_select_overlay = gui_select_overlay_create(&cfg);
+    if (!settings_select_overlay) {
+        settings_select_setting_index = -1;
+    }
+}
+
+static bool settings_select_handle_input(InputEvent *event) {
+    if (!settings_select_overlay_is_open()) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) {
+        return gui_select_overlay_handle_touch(settings_select_overlay, &event->data.touch_data);
+    }
+
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        settings_select_close();
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 2 || button == 0) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (button == 4 || button == 3) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        } else if (button == 1) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        }
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == LV_KEY_UP || key == 'k' || key == ';' || key == ',' || key == 'h' || key == 44 || key == 59) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (key == LV_KEY_DOWN || key == 'j' || key == '.' || key == '/' || key == 'l' || key == 46 || key == 47) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        } else if (key == LV_KEY_ENTER || key == 13) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        } else if (key == LV_KEY_ESC || key == 29 || key == '`') {
+            settings_select_close();
+        }
+        return true;
+    }
+
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) {
+            gui_select_overlay_select_current(settings_select_overlay);
+        } else if (event->data.encoder.direction < 0) {
+            gui_select_overlay_move(settings_select_overlay, -1);
+        } else if (event->data.encoder.direction > 0) {
+            gui_select_overlay_move(settings_select_overlay, 1);
+        }
+        return true;
+    }
+
+    return true;
+}
+
 static void change_current_row(bool increment)
 {
     if (!menu_container) return;
@@ -2802,11 +3112,16 @@ static void change_setting_value(int setting_index, bool increment) {
     }
 #endif
     SettingsItem *item = &settings_items[setting_index];
+    if (item->value_count <= 0) return;
+
     int new_value = item->current_value;
 
     if (item->widget == SETTING_WIDGET_TOGGLE) {
         // Flip 0 <-> 1 regardless of the `increment` argument.
         new_value = (item->current_value == 0) ? 1 : 0;
+    } else if (item->value_count > 1) {
+        settings_select_open(setting_index);
+        return;
     } else if (increment) {
         new_value = (new_value + 1) % item->value_count;
     } else {
@@ -2829,24 +3144,33 @@ static void change_setting_value(int setting_index, bool increment) {
         return;
     }
 
-    lv_obj_t *label = NULL;
-    uint32_t child_cnt = lv_obj_get_child_cnt(current_item);
-    for (uint32_t i = 0; i < child_cnt; ++i) {
-        lv_obj_t *child = lv_obj_get_child(current_item, (int32_t)i);
-        if (!child) continue;
-        if (lv_obj_get_user_data(child) == (void *)1) {
-            label = child;
-            break;
-        }
+    settings_refresh_row_label(setting_index);
+}
+
+static void settings_activate_row(int row_index, bool increment) {
+    if (!menu_container || !lv_obj_is_valid(menu_container)) return;
+
+    if (current_settings_root < 0) {
+        switch_to_settings_root(row_index);
+        return;
     }
-    if (!label && child_cnt > 0) {
-        label = lv_obj_get_child(current_item, 0);
+
+    if (current_settings_category < 0) {
+        switch_to_settings_category(row_index);
+        return;
     }
-    if (label) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%s: %s", item->label, settings_item_value_text(item));
-        lv_label_set_text(label, buf);
+
+    lv_obj_t *sel = lv_obj_get_child(menu_container, row_index);
+    if (!sel) return;
+
+    void *udata = lv_obj_get_user_data(sel);
+    if (udata == (void *)"__BACK_OPTION__") {
+        back_event_cb(NULL);
+        return;
     }
+
+    int setting_idx = (int)(intptr_t)udata;
+    change_setting_value(setting_idx, increment);
 }
 
 static void select_option_item(int index) {
@@ -2882,6 +3206,10 @@ void handle_hardware_button_press_options(InputEvent *event) {
             wigle_stats_popup_close_cb(NULL);
             return;
         }
+    }
+
+    if (settings_select_handle_input(event)) {
+        return;
     }
 
     bool station_scan_overlay_active = station_scan_is_active() ||
@@ -3230,22 +3558,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     } else {
                         // Middle third - handle selection
                         if (is_settings_mode) {
-                            if (current_settings_category < 0) {
-                                // At category level, enter the selected category
-                                switch_to_settings_category(selected_item_index);
-                            } else {
-                                // At setting level, change the setting value
-                                lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
-                                if (sel) {
-                                    void *udata = lv_obj_get_user_data(sel);
-                                    if (udata == (void *)"__BACK_OPTION__") {
-                                        back_event_cb(NULL);
-                                    } else {
-                                        int setting_idx = (int)(intptr_t)udata;
-                                        change_setting_value(setting_idx, true);
-                                    }
-                                }
-                            }
+                            settings_activate_row(selected_item_index, true);
                         } else {
                             // Non-settings menus
                             lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
@@ -3277,24 +3590,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     select_option_item(i);
 
                     if (is_settings_mode) {
-                        // **NEW**: if we're still at category-level, open submenu
-                        if (current_settings_category < 0) {
-                            switch_to_settings_category(i);
-                        } else {
-                            // leaf setting or back row
-                            int center_x = (btn_area.x1 + btn_area.x2) / 2;
-                            bool increment = data->point.x >= center_x;
-                            lv_obj_t *sel = lv_obj_get_child(menu_container, i);
-                            if (sel) {
-                                void *udata = lv_obj_get_user_data(sel);
-                                if (udata == (void *)"__BACK_OPTION__") {
-                                    back_event_cb(NULL);
-                                } else {
-                                    int setting_idx = (int)(intptr_t)udata;
-                                    change_setting_value(setting_idx, increment);
-                                }
-                            }
-                        }
+                        int center_x = (btn_area.x1 + btn_area.x2) / 2;
+                        settings_activate_row(i, data->point.x >= center_x);
                     } else {
                         // non-settings menus
                         const char *opt = (const char*)lv_obj_get_user_data(btn);
@@ -3599,22 +3896,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
             select_option_item(selected_item_index + 1);
         } else if (button == 1) { // Normal select button
             if (is_settings_mode) {
-                if (current_settings_category < 0) {
-                    // Enter settings category
-                    switch_to_settings_category(selected_item_index);
-                } else { // current_settings_category >= 0
-                    // Change setting value or handle back
-                    lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
-                    if (sel) {
-                        void *udata = lv_obj_get_user_data(sel);
-                        if (udata == (void *)"__BACK_OPTION__") {
-                            back_event_cb(NULL);
-                        } else {
-                            int setting_idx = (int)(intptr_t)udata;
-                            change_setting_value(setting_idx, true);
-                        }
-                    }
-                }
+                settings_activate_row(selected_item_index, true);
             } else {
                 // Non-settings menu selection
                 lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
@@ -3740,21 +4022,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
         } else if (keyValue == 13) {
             ESP_LOGI(TAG, "Enter button pressed");
             if (is_settings_mode) {
-                if (current_settings_category < 0) {
-                    // We're at the top level ("Display", "Config", ...) -> open submenu
-                    switch_to_settings_category(selected_item_index);
-                } else { // current_settings_category >= 0
-                    // Inside a submenu -> back row goes back, else cycle the value
-                    lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
-                    if (sel) {
-                        void *udata = lv_obj_get_user_data(sel);
-                        if (udata == (void *)"__BACK_OPTION__") {
-                            back_event_cb(NULL);
-                        } else {
-                            change_current_row(true);
-                        }
-                    }
-                }
+                settings_activate_row(selected_item_index, true);
             } else {
                 lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
                 if (selected_obj) {
@@ -3849,31 +4117,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
         if (event->data.encoder.button) {
             // Encoder button press - treat as select/enter/cycle
             if (is_settings_mode) {
-                if (current_settings_category < 0) {
-                    // Top level settings (category selection) - button *enters* category
-                    switch_to_settings_category(selected_item_index);
-                } else { // current_settings_category >= 0
-                    /* Inside a settings submenu:
-                     *  ─ encoder press on a normal row  → cycle the value
-                     *  ─ encoder press on "← Back"     → leave submenu        */
-                    lv_obj_t *sel = lv_obj_get_child(menu_container,
-                                                     selected_item_index);
-                    if (sel) {
-                        void *udata = lv_obj_get_user_data(sel);
-                        // back button is always the string literal pointer
-                        if (udata == (void *)"__BACK_OPTION__") {
-                            back_event_cb(NULL);
-                        } else if (is_settings_mode && current_settings_category >= 0) {
-                            // In settings submenu, always cycle value
-                            int setting_idx = (int)(intptr_t)udata;
-                            change_setting_value(setting_idx, true);
-                        } else {
-                            // For non-settings, treat as select
-                            const char *opt = (const char *)udata;
-                            handle_option_directly(opt);
-                        }
-                    }
-                }
+                settings_activate_row(selected_item_index, true);
             } else {
                 // Non-settings menus: button selects the item
                 lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
@@ -4152,20 +4396,21 @@ void option_event_cb(lv_event_t *e) {
     
     if (is_settings_mode) {
         void *raw_udata = lv_event_get_user_data(e);
-        const char *udata = (const char *)raw_udata;
 
-        /* ---------- settings ROOT ("Display", "Config") ---------- */
-        if (current_settings_category < 0) {
-            int cat_idx = (int)(intptr_t)raw_udata;
-            switch_to_settings_category(cat_idx);
+        if (raw_udata == (void *)"__BACK_OPTION__") {
+            back_event_cb(NULL);
             option_invoked = false;
             return;
         }
 
-        /* ---------- settings SUBMENU ---------- */
+        if (current_settings_root < 0) {
+            switch_to_settings_root((int)(intptr_t)raw_udata);
+            option_invoked = false;
+            return;
+        }
 
-        if (udata && strcmp(udata, "__BACK_OPTION__") == 0) {
-            back_event_cb(NULL);
+        if (current_settings_category < 0) {
+            switch_to_settings_category((int)(intptr_t)raw_udata);
             option_invoked = false;
             return;
         }
@@ -4252,8 +4497,9 @@ void option_event_cb(lv_event_t *e) {
                     settings_set_io_btn_p12_cmd(&G_Settings, prefix);
                 }
                 settings_save(&G_Settings);
+                current_settings_root = SETTINGS_ROOT_CONTROLS;
                 current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
-                settings_submenu_depth = 1;
+                settings_submenu_depth = 2;
                 SelectedMenuType = OT_Settings;
                 is_settings_mode = true;
                 rebuild_current_menu();
@@ -4387,7 +4633,7 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend sweep");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Scan LAN Devices") == 0) {
+        } else if (strcmp(Selected_Option, "mDNS Discovery") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -4404,6 +4650,79 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend scanports local -C");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Scan SSH") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend scanssh");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Scan") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend netbiosscan");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Scan") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend httpbannerscan");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend snmpprobe");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(ssh_scan_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Scan Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(netbios_scan_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(http_banner_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe Host...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(snmp_probe_kb_cb);
+            keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_netbios_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "HTTP Banner Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_http_banner_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "SNMP Probe Subnet...") == 0) {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_submit_callback(dual_comm_snmp_probe_subnet_kb_cb);
+            keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+            keyboard_view_set_initial_text("");
+            display_manager_switch_view(&keyboard_view);
             view_switched = true;
         } else if (strcmp(Selected_Option, "PineAP Detection") == 0) {
             terminal_set_return_view(&options_menu_view);
@@ -4454,10 +4773,6 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend tracksta");
-            view_switched = true;
-        } else if (strcmp(Selected_Option, "Select LAN") == 0) {
-            set_number_pad_mode(NP_MODE_LAN_REMOTE);
-            display_manager_switch_view(&number_pad_view);
             view_switched = true;
         } else if (strcmp(Selected_Option, "Connect to WiFi") == 0) {
             keyboard_view_set_submit_callback(dual_comm_wifi_connect_kb_cb);
@@ -5406,6 +5721,14 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
+    else if (strcmp(Selected_Option, "WPA3 Compliance") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        wpa3_compliance_check_selected();
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Multi-Select Stations") == 0) {
         int sta_count_local = station_scan_get_count();
         if (sta_count_local > 0) {
@@ -5440,7 +5763,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Scan LAN Devices") == 0) {
+    else if (strcmp(Selected_Option, "mDNS Discovery") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("scanlocal");
@@ -6079,22 +6402,100 @@ display_manager_switch_view(&terminal_view);
     }
 
     else if (strcmp(Selected_Option, "Scan SSH") == 0) {
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
-    simulateCommand("scanssh");
-    view_switched = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("scanssh");
+        view_switched = true;
     }
-    
+
+    else if (strcmp(Selected_Option, "NetBIOS Scan") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("netbiosscan");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Scan") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("httpbannerscan");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("snmpprobe");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(ssh_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "NetBIOS Scan Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(netbios_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(http_banner_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_probe_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(netbios_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "HTTP Banner Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(http_banner_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Probe Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_probe_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Reset AP Credentials") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("apcred -r");
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "Select LAN") == 0) {
-        set_number_pad_mode(NP_MODE_LAN);
-        display_manager_switch_view(&number_pad_view);
         view_switched = true;
     }
 
@@ -6217,8 +6618,14 @@ void handle_option_directly(const char *Selected_Option) {
             back_event_cb(NULL);
             return;
         }
-        int setting_index = (int)(intptr_t)Selected_Option;
-        change_setting_value(setting_index, true);
+        int row_data = (int)(intptr_t)Selected_Option;
+        if (current_settings_root < 0) {
+            switch_to_settings_root(row_data);
+        } else if (current_settings_category < 0) {
+            switch_to_settings_category(row_data);
+        } else {
+            change_setting_value(row_data, true);
+        }
         return;
     }
     lv_event_t e;
@@ -6228,6 +6635,7 @@ void handle_option_directly(const char *Selected_Option) {
 
 void options_menu_destroy() {
     opt_touch_started = false;
+    settings_select_close();
     gui_nav_history_clear();
     scan_all_flow_active = false;
     scan_all_started_station_phase = false;
@@ -6261,7 +6669,9 @@ void options_menu_destroy() {
     // Reset state variables
     selected_item_index = 0;
     num_items = 0;
+    current_settings_root = -1;
     current_settings_category = -1;
+    settings_submenu_depth = 0;
     s_info_detail_active = false;
     // note: wifi/bluetooth/dualcomm submenu states are intentionally NOT reset here
     // so when returning from terminal view, we resume at the correct submenu
@@ -6428,6 +6838,7 @@ static void back_event_cb(lv_event_t *e) {
             menu_container = s_info_saved_menu_container;
         }
         s_info_saved_menu_container = NULL;
+        current_settings_root = -1;
         current_settings_category = -1;
         settings_submenu_depth = 0;
         rebuild_current_menu();
@@ -6454,8 +6865,9 @@ static void back_event_cb(lv_event_t *e) {
         wigle_csv_free_cache();
         SelectedMenuType = OT_Settings;
         is_settings_mode = true;
+        current_settings_root = SETTINGS_ROOT_DATA_TOOLS;
         current_settings_category = settings_category_index_for_id(SETTINGS_CAT_WIGLE);
-        settings_submenu_depth = 1;
+        settings_submenu_depth = 2;
         rebuild_current_menu();
         return;
     }
@@ -6574,6 +6986,14 @@ static void back_event_cb(lv_event_t *e) {
     }
     // If in a settings submenu, go back to category selection
     if (is_settings_mode && current_settings_category >= 0) {
+        current_settings_category = -1;
+        settings_submenu_depth = 1;
+        rebuild_current_menu();
+        return;
+    }
+    // If in a settings root section, go back to the settings root list
+    if (is_settings_mode && current_settings_root >= 0) {
+        current_settings_root = -1;
         current_settings_category = -1;
         settings_submenu_depth = 0;
         rebuild_current_menu();
@@ -8241,25 +8661,11 @@ static void wigle_manual_popup_update_selection(void) {
 }
 
 static void wigle_get_popup_geometry(int *popup_w, int *popup_h, int *y_offset) {
-    int w = (LV_HOR_RES <= 240) ? (LV_HOR_RES - 20) : (LV_HOR_RES - 30);
-    int h;
-    int y = 0;
-
-    if (LV_VER_RES <= 135) {
-        h = 130;
-        y = 0;
-    } else if (LV_VER_RES <= 200) {
-        h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
-        if (h < 120) h = 120;
-        y = 10;
-    } else {
-        h = (LV_VER_RES <= 240) ? 140 : 160;
-        y = 10;
-    }
-
-    if (popup_w) *popup_w = w;
-    if (popup_h) *popup_h = h;
-    if (y_offset) *y_offset = y;
+    popup_calc_size_t geom;
+    popup_calc_size_ex(&geom, 120);
+    if (popup_w) *popup_w = geom.width;
+    if (popup_h) *popup_h = geom.height;
+    if (y_offset) *y_offset = geom.y_offset;
 }
 
 static void wigle_stats_popup_close_cb(lv_event_t *e) {
@@ -8647,6 +9053,7 @@ static const char **blocklist_load_page(void) {
 }
 
 static void rebuild_current_menu(void) {
+    settings_select_close();
     lvgl_timer_del_safe(&menu_build_timer);
     
     if (g_options_view) {
@@ -8833,6 +9240,13 @@ static void rebuild_current_menu(void) {
             } else {
                 options_view_set_title(g_options_view, "Settings");
             }
+        } else if (current_settings_root >= 0) {
+            int root_count = sizeof(settings_root_categories) / sizeof(settings_root_categories[0]);
+            if (current_settings_root < root_count) {
+                options_view_set_title(g_options_view, settings_root_categories[current_settings_root].name);
+            } else {
+                options_view_set_title(g_options_view, "Settings");
+            }
         } else {
             options_view_set_title(g_options_view, "Settings");
         }
@@ -8860,6 +9274,27 @@ static void rebuild_current_menu(void) {
     menu_build_timer = lv_timer_create(menu_builder_cb, timer_period, NULL);
 }
 
+static void switch_to_settings_root(int root_idx) {
+    int root_count = sizeof(settings_root_categories) / sizeof(settings_root_categories[0]);
+    if (root_idx < 0 || root_idx >= root_count) {
+        ESP_LOGW(TAG,
+                 "switch_to_settings_root: index %d outside [0..%d]; interpreting as Back action",
+                 root_idx, root_count - 1);
+        back_event_cb(NULL);
+        return;
+    }
+
+    if (settings_root_categories[root_idx].id == SETTINGS_ROOT_INFO) {
+        options_show_info_detail();
+        return;
+    }
+
+    current_settings_root = root_idx;
+    current_settings_category = -1;
+    settings_submenu_depth = 1;
+    rebuild_current_menu();
+}
+
 static void switch_to_settings_category(int cat_idx) {
     /* -------------------------------------------------------------------- *
      * SAFETY GUARD                                                         *
@@ -8876,7 +9311,8 @@ static void switch_to_settings_category(int cat_idx) {
      * Instead, treat any out-of-range index exactly like a Back press and  *
      * leave current_settings_category unchanged.                           *
      * ------------------------------------------------------------------ */
-    int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+    SettingsRootId root_id = current_settings_root_id();
+    int category_count = settings_category_count_for_root(root_id);
     if (cat_idx < 0 || cat_idx >= category_count) {
         ESP_LOGW(TAG,
                  "switch_to_settings_category: index %d outside [0..%d]; "
@@ -8886,13 +9322,14 @@ static void switch_to_settings_category(int cat_idx) {
         return;
     }
 
-    if (settings_categories[cat_idx].id == SETTINGS_CAT_INFO) {
-        options_show_info_detail();
+    int actual_cat_idx = settings_category_index_for_root_position(root_id, cat_idx);
+    if (actual_cat_idx < 0) {
+        back_event_cb(NULL);
         return;
     }
 
-    current_settings_category = cat_idx;
-    settings_submenu_depth = 1;
+    current_settings_category = actual_cat_idx;
+    settings_submenu_depth = 2;
     rebuild_current_menu();
 }
 
@@ -8901,8 +9338,9 @@ static void iobtn_p10_kb_cb(const char *text) {
     settings_set_io_btn_p10_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONTROLS;
     current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
-    settings_submenu_depth = 1;
+    settings_submenu_depth = 2;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
     display_manager_switch_view(&options_menu_view);
@@ -8911,8 +9349,9 @@ static void iobtn_p11_kb_cb(const char *text) {
     settings_set_io_btn_p11_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONTROLS;
     current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
-    settings_submenu_depth = 1;
+    settings_submenu_depth = 2;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
     display_manager_switch_view(&options_menu_view);
@@ -8921,8 +9360,9 @@ static void iobtn_p12_kb_cb(const char *text) {
     settings_set_io_btn_p12_cmd(&G_Settings, text ? text : "");
     settings_save(&G_Settings);
     keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONTROLS;
     current_settings_category = settings_category_index_for_id(SETTINGS_CAT_IO_BUTTONS);
-    settings_submenu_depth = 1;
+    settings_submenu_depth = 2;
     SelectedMenuType = OT_Settings;
     is_settings_mode = true;
     display_manager_switch_view(&options_menu_view);
@@ -8939,6 +9379,144 @@ static void ssh_scan_kb_cb(const char *text) {
     snprintf(cmd, sizeof(cmd), "scanssh %s", text);
     
     terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void netbios_scan_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "netbiosscan %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void http_banner_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "httpbannerscan %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_probe_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+    
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "snmpprobe %s", text);
+    
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void netbios_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "netbiosscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void http_banner_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "httpbannerscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_probe_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_netbios_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend netbiosscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_http_banner_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend httpbannerscan subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void dual_comm_snmp_probe_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "commsend snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    terminal_set_dualcomm_filter(true);
     display_manager_switch_view(&terminal_view);
     simulateCommand(cmd);
     keyboard_view_set_submit_callback(NULL);
@@ -9163,10 +9741,32 @@ static void menu_builder_cb(lv_timer_t *t)
 
     if (!back_option_was_added_in_previous_tick) {
         if (is_settings_mode) {
-            if (current_settings_category < 0) {
-                int category_count = sizeof(settings_categories) / sizeof(settings_categories[0]);
+            if (current_settings_root < 0) {
+                int root_count = sizeof(settings_root_categories) / sizeof(settings_root_categories[0]);
+                while (build_item_index < root_count && built_this_tick < BATCH) {
+                    SettingsRootCategory *root_cat = &settings_root_categories[build_item_index];
+                    lv_obj_t *btn = options_view_add_item(g_options_view, root_cat->name, option_event_cb, (void *)(intptr_t)build_item_index);
+                    if (!btn) break;
+                    lv_obj_set_user_data(btn, (void *)(intptr_t)build_item_index);
+                    lv_obj_set_height(btn, button_height_global * 1.2);
+                    options_view_relayout_item(g_options_view, btn);
+                    num_items++;
+                    built_this_tick++;
+                    build_item_index++;
+                    if (num_items == 1) {
+                        select_option_item(0);
+                    }
+                }
+                if (build_item_index >= root_count) {
+                    all_current_options_processed = true;
+                }
+            } else if (current_settings_category < 0) {
+                SettingsRootId root_id = current_settings_root_id();
+                int category_count = settings_category_count_for_root(root_id);
                 while (build_item_index < category_count && built_this_tick < BATCH) {
-                    SettingsCategory *cat = &settings_categories[build_item_index];
+                    int cat_idx = settings_category_index_for_root_position(root_id, build_item_index);
+                    if (cat_idx < 0) break;
+                    SettingsCategory *cat = &settings_categories[cat_idx];
                     lv_obj_t *btn = options_view_add_item(g_options_view, cat->name, option_event_cb, (void *)(intptr_t)build_item_index);
                     if (!btn) break;
                     lv_obj_set_user_data(btn, (void *)(intptr_t)build_item_index);
@@ -9256,7 +9856,8 @@ static void menu_builder_cb(lv_timer_t *t)
                                 if (!btn) break;
                                 lv_obj_set_user_data(btn, (void *)(intptr_t)i);
                                 lv_obj_set_height(btn, button_height_global);
-                                decorate_settings_row_with_arrows(btn);
+                                // Select rows now open a compact overlay; keep the old arrow decoration available for rollback.
+                                // decorate_settings_row_with_arrows(btn);
                             }
                             num_items++;
                             built_this_tick++;

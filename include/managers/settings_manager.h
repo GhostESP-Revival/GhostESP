@@ -138,8 +138,11 @@ typedef enum {
     SETTING_INPUT_REPEAT_SPEED,
     SETTING_HIGH_CONTRAST,
     SETTING_MENU_ITEM_BORDERS,
+    SETTING_MENU_CARD_BG,
     SETTING_TOUCH_DRAG_SCROLL,
+    SETTING_TERMINAL_FONT_SIZE,
     SETTING_RELOAD_ASSET_PACK,
+    SETTING_CAROUSEL_INVERT_DIRECTION,
     SETTING_EXPORT_SETTINGS_SD,
     SETTING_IMPORT_SETTINGS_SD,
     // Lockscreen settings
@@ -227,6 +230,7 @@ typedef struct {
   int32_t rgb_blue_pin;  // Separate-pin RGB: blue pin, -1 if not used
   bool third_control_enabled;  // Enable third-screen tap control
   uint32_t terminal_text_color; // Terminal text color in 0xRRGGBB
+  uint8_t terminal_font_size;   // 0=Small, 1=Normal, 2=Large
   uint8_t menu_theme;  // Theme for main menu colors (0=Default)
   bool invert_colors; // Invert screen colors
   bool web_auth_enabled;
@@ -245,6 +249,7 @@ typedef struct {
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
   uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List)
+  bool carousel_invert_direction; // Invert main menu carousel slide direction
   
   // Neopixel settings
   uint8_t neopixel_max_brightness; // Max neopixel brightness (0-100)
@@ -290,6 +295,7 @@ typedef struct {
     uint8_t input_repeat_speed;     // 0=Slow, 1=Normal, 2=Fast
     bool high_contrast;             // High contrast color overrides
     bool menu_item_borders;          // Borders around main menu items
+    bool menu_card_bg;               // Card background fill/shadow on main menu items
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
 
     // Lockscreen settings
@@ -310,6 +316,7 @@ void settings_init(FSettings *settings);
 void settings_deinit(void);
 void settings_load(FSettings *settings);
 void settings_save(const FSettings *settings);
+void settings_save_sta_credentials(const FSettings *settings);
 void settings_set_defaults(FSettings *settings);
 
 // Optimized Persistence and Task Management
@@ -411,6 +418,8 @@ uint8_t settings_get_menu_theme(const FSettings *settings);
 
 void settings_set_terminal_text_color(FSettings *settings, uint32_t color);
 uint32_t settings_get_terminal_text_color(const FSettings *settings);
+void settings_set_terminal_font_size(FSettings *settings, uint8_t size);
+uint8_t settings_get_terminal_font_size(const FSettings *settings);
 void settings_set_invert_colors(FSettings *settings, bool enabled);
 bool settings_get_invert_colors(const FSettings *settings);
 
@@ -456,6 +465,10 @@ bool settings_get_nav_buttons_enabled(const FSettings *settings);
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout);
 uint8_t settings_get_menu_layout(const FSettings *settings);
+
+// Carousel slide direction inversion settings
+void settings_set_carousel_invert_direction(FSettings *settings, bool enabled);
+bool settings_get_carousel_invert_direction(const FSettings *settings);
 
 // Neopixel brightness settings
 void settings_set_neopixel_max_brightness(FSettings *settings, uint8_t brightness);
@@ -548,6 +561,8 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
+void settings_set_menu_card_bg(FSettings *settings, bool enabled);
+bool settings_get_menu_card_bg(const FSettings *settings);
 void settings_set_touch_drag_scroll(FSettings *settings, bool enabled);
 bool settings_get_touch_drag_scroll(const FSettings *settings);
 

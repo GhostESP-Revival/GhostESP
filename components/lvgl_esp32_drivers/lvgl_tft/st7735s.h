@@ -43,6 +43,9 @@ extern "C" {
 #elif CONFIG_LV_HOR_RES_MAX==128 && CONFIG_LV_VER_RES_MAX==80
 #define COLSTART            26
 #define ROWSTART            1
+#elif CONFIG_LV_HOR_RES_MAX==160 && CONFIG_LV_VER_RES_MAX==80
+#define COLSTART            26
+#define ROWSTART            1
 #else
 #define COLSTART            0
 #define ROWSTART            0

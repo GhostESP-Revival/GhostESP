@@ -48,6 +48,7 @@ static const char *NVS_RGB_BLUE_PIN_KEY = "rgb_blue_pin";
 static const char *NVS_THIRD_CTRL_KEY = "third_ctrl";
 static const char *NVS_MENU_THEME_KEY = "menu_theme";
 static const char *NVS_TERMINAL_TEXT_COLOR_KEY = "term_color";
+static const char *NVS_TERMINAL_FONT_SIZE_KEY = "term_font";
 static const char *NVS_INVERT_COLORS_KEY = "invert_colors";
 static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
 static const char *NVS_WEB_AUTH_KEY = "web_auth";
@@ -60,6 +61,7 @@ static const char *NVS_ZEBRA_MENUS_KEY = "zebra_menus";
 static const char *NVS_MAX_SCREEN_BRIGHTNESS_KEY = "max_bright";
 static const char *NVS_NAV_BUTTONS_KEY = "nav_buttons";
 static const char *NVS_MENU_LAYOUT_KEY = "menu_layout";
+static const char *NVS_CAROUSEL_INVERT_KEY = "carr_inv";
 static const char *NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY = "neopixel_bright";
 static const char *NVS_RGB_LED_COUNT_KEY = "rgb_led_cnt";
 static const char *NVS_ENCODER_INVERT_KEY = "enc_inv";
@@ -102,6 +104,7 @@ static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
 static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
+static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
 
 // Lockscreen NVS keys
@@ -193,6 +196,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_blue_pin = -1;
   settings->third_control_enabled = false;
   settings->terminal_text_color = 0x00FF00;
+  settings->terminal_font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
   settings->invert_colors = false;
   settings->web_auth_enabled = false;
   settings->webui_restrict_to_ap = true;
@@ -210,6 +214,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->infrared_easy_mode = false; // Default to disabled
   settings->nav_buttons_enabled = true; // Default to enabled
   settings->menu_layout = 0; // Default to carousel layout
+  settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
   settings->rgb_led_count = CONFIG_NUM_LEDS;
@@ -238,6 +243,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
   settings->menu_item_borders = false;
+  settings->menu_card_bg = true;
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
@@ -526,6 +532,10 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->terminal_text_color = value_u32;
   }
+  err = nvs_get_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->terminal_font_size = value_u8;
+  }
   err = nvs_get_u8(nvsHandle, NVS_INVERT_COLORS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->invert_colors = (value_u8 != 0);
@@ -621,6 +631,14 @@ void settings_load(FSettings *settings) {
     settings->menu_layout = value_u8;
   } else {
     settings->menu_layout = 0; // Default to carousel layout if not found
+  }
+
+  // Load carousel slide direction inversion
+  err = nvs_get_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->carousel_invert_direction = (bool)value_u8;
+  } else {
+    settings->carousel_invert_direction = false;
   }
 
   // Load Neopixel Max Brightness
@@ -769,6 +787,10 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->menu_card_bg = (bool)value_u8;
   }
   err = nvs_get_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -929,6 +951,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, G_Settings.terminal_text_color);
             key = NVS_TERMINAL_TEXT_COLOR_KEY;
             break;
+        case SETTING_TERMINAL_FONT_SIZE:
+            err = nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, G_Settings.terminal_font_size);
+            key = NVS_TERMINAL_FONT_SIZE_KEY;
+            break;
         case SETTING_INVERT_COLORS:
             err = nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, G_Settings.invert_colors);
             key = NVS_INVERT_COLORS_KEY;
@@ -972,6 +998,10 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_MENU_LAYOUT:
             err = nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, G_Settings.menu_layout);
             key = NVS_MENU_LAYOUT_KEY;
+            break;
+        case SETTING_CAROUSEL_INVERT_DIRECTION:
+            err = nvs_set_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, G_Settings.carousel_invert_direction);
+            key = NVS_CAROUSEL_INVERT_KEY;
             break;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         case SETTING_IDLE_ANIMATION:
@@ -1109,6 +1139,10 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
+            break;
+        case SETTING_MENU_CARD_BG:
+            err = nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, G_Settings.menu_card_bg ? 1 : 0);
+            key = NVS_MENU_CARD_BG_KEY;
             break;
         case SETTING_TOUCH_DRAG_SCROLL:
             err = nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, G_Settings.touch_drag_scroll ? 1 : 0);
@@ -1268,6 +1302,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_THIRD_CTRL_KEY, settings->third_control_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_THEME_KEY, settings->menu_theme);
     nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, settings->terminal_text_color);
+    nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, settings->terminal_font_size);
     nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0);
@@ -1281,6 +1316,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, settings->auto_save_scans ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, (uint8_t)settings->menu_layout);
+    nvs_set_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, settings->carousel_invert_direction ? 1 : 0);
     nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, settings->selected_timezone);
     nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, settings->wifi_country);
     nvs_set_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key);
@@ -1323,6 +1359,7 @@ void settings_save(const FSettings *settings) {
     nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed);
     nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0);
+    nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0);
     nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0);
 
     // Save lockscreen settings
@@ -1342,6 +1379,21 @@ void settings_save(const FSettings *settings) {
         ESP_LOGE(TAG, "Failed to commit settings_save: %s", esp_err_to_name(err));
     }
     ghostchi_manager_add_xp(1);
+}
+
+void settings_save_sta_credentials(const FSettings *settings) {
+    if (!settings) return;
+
+    esp_err_t err = nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvsHandle);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save STA credentials: %s", esp_err_to_name(err));
+    }
 }
 
 void settings_set_ap_ssid(FSettings *settings, const char *ssid) {
@@ -1555,6 +1607,15 @@ uint32_t settings_get_terminal_text_color(const FSettings *settings) {
   return settings->terminal_text_color;
 }
 
+void settings_set_terminal_font_size(FSettings *settings, uint8_t size) {
+  if (size > 2) size = 1;
+  settings->terminal_font_size = size;
+}
+
+uint8_t settings_get_terminal_font_size(const FSettings *settings) {
+  return settings ? settings->terminal_font_size : 1;
+}
+
 void settings_set_invert_colors(FSettings *settings, bool enabled) {
   settings->invert_colors = enabled;
 }
@@ -1734,6 +1795,14 @@ void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
     return settings->menu_layout <= 2 ? settings->menu_layout : 0;
+}
+
+void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
+    settings->carousel_invert_direction = enabled;
+}
+
+bool settings_get_carousel_invert_direction(const FSettings *settings) {
+    return settings->carousel_invert_direction;
 }
 
 // Neopixel brightness settings
@@ -2046,6 +2115,16 @@ void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
 
 bool settings_get_menu_item_borders(const FSettings *settings) {
   return settings ? settings->menu_item_borders : true;
+}
+
+void settings_set_menu_card_bg(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->menu_card_bg = enabled;
+  }
+}
+
+bool settings_get_menu_card_bg(const FSettings *settings) {
+  return settings ? settings->menu_card_bg : true;
 }
 
 void settings_set_touch_drag_scroll(FSettings *settings, bool enabled) {

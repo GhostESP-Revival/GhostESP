@@ -51,7 +51,7 @@ static void (*s_ui_clear)(void) = NULL;
 static void (*s_ui_toast)(const char *message) = NULL;
 static char s_app_id[PLUGIN_APP_ID_MAX];
 static char s_app_data_path[PLUGIN_APP_PATH_MAX];
-static uint32_t s_permissions = 0;
+static plugin_permission_t s_permissions = 0;
 static bool s_allow_absolute_storage = false;
 static size_t s_memory_limit = 0;
 static size_t s_memory_used = 0;
@@ -61,6 +61,7 @@ static SemaphoreHandle_t s_api_mutex = NULL;
 static uint16_t plugin_ap_count = 0;
 static wifi_ap_record_t *plugin_scanned_aps = NULL;
 static volatile bool s_plugin_live_scan_active = false;
+static char s_subghz_loaded_path[PLUGIN_APP_PATH_MAX];
 
 static void plugin_wifi_snapshot_scan_results(void) {
     extern uint16_t ap_count;
@@ -168,8 +169,84 @@ static void plugin_api_unlock(void) {
 static bool plugin_api_build_app_path(const char *path, char *out, size_t out_len);
 static bool plugin_api_absolute_storage_allowed(const char *path);
 
-static bool plugin_api_has_permission(uint32_t permission) {
+static bool plugin_api_has_permission(plugin_permission_t permission) {
     return (s_permissions & permission) != 0;
+}
+
+static plugin_permission_t plugin_api_permission_from_string(const char *value) {
+    if (!value) return 0;
+    if (strcmp(value, "ui") == 0) return PLUGIN_PERMISSION_UI;
+    if (strcmp(value, "storage") == 0) return PLUGIN_PERMISSION_STORAGE;
+    if (strcmp(value, "commands") == 0 || strcmp(value, "command") == 0) return PLUGIN_PERMISSION_COMMANDS;
+    if (strcmp(value, "tasks") == 0) return PLUGIN_PERMISSION_TASKS;
+    if (strcmp(value, "wifi") == 0) return PLUGIN_PERMISSION_WIFI;
+    if (strcmp(value, "ble") == 0) return PLUGIN_PERMISSION_BLE;
+    if (strcmp(value, "nfc") == 0) return PLUGIN_PERMISSION_NFC;
+    if (strcmp(value, "ir") == 0 || strcmp(value, "infrared") == 0) return PLUGIN_PERMISSION_IR;
+    if (strcmp(value, "subghz") == 0) return PLUGIN_PERMISSION_SUBGHZ;
+    if (strcmp(value, "badusb") == 0) return PLUGIN_PERMISSION_BADUSB;
+    if (strcmp(value, "raw_gpio") == 0) return PLUGIN_PERMISSION_RAW_GPIO;
+    if (strcmp(value, "lvgl") == 0) return PLUGIN_PERMISSION_LVGL;
+    if (strcmp(value, "rgb") == 0 || strcmp(value, "led") == 0 || strcmp(value, "leds") == 0) return PLUGIN_PERMISSION_RGB;
+    if (strcmp(value, "uart") == 0 || strcmp(value, "serial") == 0) return PLUGIN_PERMISSION_UART;
+    if (strcmp(value, "i2c") == 0) return PLUGIN_PERMISSION_I2C;
+    if (strcmp(value, "spi") == 0) return PLUGIN_PERMISSION_SPI;
+    if (strcmp(value, "adc") == 0) return PLUGIN_PERMISSION_ADC;
+    if (strcmp(value, "pwm") == 0 || strcmp(value, "ledc") == 0) return PLUGIN_PERMISSION_PWM;
+    if (strcmp(value, "network") == 0 || strcmp(value, "http") == 0) return PLUGIN_PERMISSION_NETWORK;
+    if (strcmp(value, "wifi_control") == 0) return PLUGIN_PERMISSION_WIFI_CONTROL;
+    if (strcmp(value, "power") == 0 || strcmp(value, "battery") == 0) return PLUGIN_PERMISSION_POWER;
+    if (strcmp(value, "input") == 0 || strcmp(value, "buttons") == 0) return PLUGIN_PERMISSION_INPUT;
+    if (strcmp(value, "display") == 0 || strcmp(value, "backlight") == 0) return PLUGIN_PERMISSION_DISPLAY;
+    if (strcmp(value, "time") == 0) return PLUGIN_PERMISSION_TIME;
+    if (strcmp(value, "random") == 0) return PLUGIN_PERMISSION_RANDOM;
+    if (strcmp(value, "system") == 0) return PLUGIN_PERMISSION_SYSTEM;
+    if (strcmp(value, "camera") == 0) return PLUGIN_PERMISSION_CAMERA;
+    if (strcmp(value, "usb") == 0) return PLUGIN_PERMISSION_USB;
+    if (strcmp(value, "ethernet") == 0 || strcmp(value, "eth") == 0) return PLUGIN_PERMISSION_ETHERNET;
+    if (strcmp(value, "audio") == 0 || strcmp(value, "mic") == 0 || strcmp(value, "microphone") == 0) return PLUGIN_PERMISSION_AUDIO;
+    if (strcmp(value, "settings") == 0) return PLUGIN_PERMISSION_SETTINGS;
+    if (strcmp(value, "zigbee") == 0 || strcmp(value, "ieee802154") == 0) return PLUGIN_PERMISSION_ZIGBEE;
+    if (strcmp(value, "nrf24") == 0) return PLUGIN_PERMISSION_NRF24;
+    return 0;
+}
+
+static bool plugin_api_has_permission_name(const char *permission) {
+    plugin_permission_t bit = plugin_api_permission_from_string(permission);
+    return bit != 0 && plugin_api_has_permission(bit);
+}
+
+extern bool plugin_api_ui_screen_is_compact(void);
+extern bool plugin_api_ui_has_touchscreen(void);
+
+static bool plugin_api_has_feature(const char *feature) {
+    if (!feature || feature[0] == '\0') return false;
+    if (strcmp(feature, "absolute_storage") == 0) return s_allow_absolute_storage;
+    if (strcmp(feature, "touchscreen") == 0) return plugin_api_ui_has_touchscreen();
+    if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
+    if (strcmp(feature, "wifi") == 0) return true;
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    if (strcmp(feature, "ble") == 0) return true;
+#endif
+#if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
+    if (strcmp(feature, "subghz") == 0) return subghz_remote_manager_is_ready();
+#endif
+#ifdef CONFIG_HAS_NRF24
+    if (strcmp(feature, "nrf24") == 0) return true;
+#endif
+#ifdef CONFIG_HAS_CAMERA
+    if (strcmp(feature, "camera") == 0) return true;
+#endif
+#ifdef CONFIG_HAS_BADUSB
+    if (strcmp(feature, "usb") == 0 || strcmp(feature, "badusb") == 0) return true;
+#endif
+#ifdef CONFIG_HAS_INFRARED
+    if (strcmp(feature, "ir") == 0 || strcmp(feature, "infrared") == 0) return true;
+#endif
+#ifdef CONFIG_HAS_ZIGBEE
+    if (strcmp(feature, "zigbee") == 0) return true;
+#endif
+    return false;
 }
 
 static bool plugin_api_has_ui_permission(void) {
@@ -208,7 +285,7 @@ bool plugin_api_internal_has_ui_permission(void) {
     return plugin_api_has_ui_permission();
 }
 
-bool plugin_api_internal_has_permission(uint32_t permission) {
+bool plugin_api_internal_has_permission(plugin_permission_t permission) {
     return plugin_api_has_permission(permission);
 }
 
@@ -268,7 +345,9 @@ static void plugin_ui_delete_user_obj_event_cb(lv_event_t *event) {
 }
 
 static bool plugin_api_path_is_ghostesp_absolute(const char *path) {
-    return path && (strcmp(path, "/mnt/ghostesp") == 0 || strncmp(path, "/mnt/ghostesp/", 14) == 0);
+    if (!path || path[0] == '\0') return false;
+    if (strchr(path, '\\') || strstr(path, "..")) return false;
+    return strcmp(path, "/mnt/ghostesp") == 0 || strncmp(path, "/mnt/ghostesp/", 14) == 0;
 }
 
 static bool plugin_api_absolute_storage_allowed(const char *path) {
@@ -768,24 +847,209 @@ static bool plugin_api_subghz_is_available(void) {
 #endif
 }
 
+static bool plugin_subghz_key_match(const char *line, const char *key) {
+    size_t klen = strlen(key);
+    for (size_t i = 0; i < klen; i++) {
+        char a = line[i], b = key[i];
+        if (a >= 'A' && a <= 'Z') a += 32;
+        if (b >= 'A' && b <= 'Z') b += 32;
+        if (a != b) return false;
+    }
+    return true;
+}
+
+static const char *plugin_subghz_skip_key_colon(const char *line, size_t key_len) {
+    const char *p = line + key_len;
+    while (*p == ' ' || *p == ':') p++;
+    return p;
+}
+
+static void plugin_subghz_trim_newline(char *s) {
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == '\n' || s[len - 1] == '\r' || s[len - 1] == ' ')) {
+        s[--len] = '\0';
+    }
+}
+
+static subghz_preset_t plugin_subghz_parse_preset(const char *v) {
+    if (strstr(v, "Ook650") || strstr(v, "OOK650") || strstr(v, "ook650")) return SUBGHZ_PRESET_OOK650_ASYNC;
+    if (strstr(v, "2FSK") && strstr(v, "Dev238")) return SUBGHZ_PRESET_2FSK_DEV238_ASYNC;
+    if (strstr(v, "2FSK") && strstr(v, "Dev476")) return SUBGHZ_PRESET_2FSK_DEV476_ASYNC;
+    if (strstr(v, "Custom") || strstr(v, "custom")) return SUBGHZ_PRESET_CUSTOM;
+    return SUBGHZ_PRESET_OOK270_ASYNC;
+}
+
+static size_t plugin_subghz_sanitize_pulses(int32_t *durations, size_t count) {
+    if (!durations || count == 0) return 0;
+    size_t write = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (durations[i] == 0) continue;
+        durations[write++] = durations[i];
+    }
+    return write;
+}
+
+static bool plugin_subghz_parse_raw_file(const char *path, int32_t *out, size_t max_count, size_t *out_count, uint32_t *out_frequency_hz, subghz_preset_t *out_preset) {
+    if (!path || !out || max_count == 0) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+
+    size_t count = 0;
+    uint32_t freq = 0;
+    subghz_preset_t preset = SUBGHZ_PRESET_OOK270_ASYNC;
+    bool in_raw_data = false;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        plugin_subghz_trim_newline(line);
+        if (line[0] == '#' || line[0] == '\0') {
+            in_raw_data = false;
+            continue;
+        }
+
+        if (plugin_subghz_key_match(line, "Frequency:")) {
+            in_raw_data = false;
+            freq = (uint32_t)atoi(plugin_subghz_skip_key_colon(line, 10));
+        } else if (plugin_subghz_key_match(line, "Preset:")) {
+            in_raw_data = false;
+            preset = plugin_subghz_parse_preset(plugin_subghz_skip_key_colon(line, 7));
+        } else if (plugin_subghz_key_match(line, "RAW_Data:")) {
+            in_raw_data = true;
+            char *saveptr = NULL;
+            char *tok = strtok_r((char *)plugin_subghz_skip_key_colon(line, 9), " ,", &saveptr);
+            while (tok && count < max_count) {
+                out[count++] = (int32_t)strtol(tok, NULL, 10);
+                tok = strtok_r(NULL, " ,", &saveptr);
+            }
+        } else if (in_raw_data) {
+            char *saveptr = NULL;
+            char *tok = strtok_r(line, " ,", &saveptr);
+            while (tok && count < max_count) {
+                if (*tok != '\0') out[count++] = (int32_t)strtol(tok, NULL, 10);
+                tok = strtok_r(NULL, " ,", &saveptr);
+            }
+        } else {
+            in_raw_data = false;
+        }
+    }
+    fclose(f);
+
+    if (out_count) *out_count = count;
+    if (out_frequency_hz) *out_frequency_hz = freq;
+    if (out_preset) *out_preset = preset;
+    return count > 0;
+}
+
+static bool plugin_subghz_parse_decoded_file(const char *path, int32_t *out, size_t max_count, size_t *out_count, uint32_t *out_frequency_hz, subghz_preset_t *out_preset) {
+    if (!path || !out || max_count == 0) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+
+    char protocol[SUBGHZ_DECODED_PROTO_MAX] = {0};
+    int bits = 0;
+    int frequency_hz = 0;
+    uint64_t code = 0;
+    int key_bytes = 0;
+    subghz_preset_t preset = SUBGHZ_PRESET_OOK270_ASYNC;
+    char line[384];
+    while (fgets(line, sizeof(line), f)) {
+        plugin_subghz_trim_newline(line);
+        if (line[0] == '#' || line[0] == '\0') continue;
+        if (plugin_subghz_key_match(line, "Frequency:")) {
+            frequency_hz = atoi(plugin_subghz_skip_key_colon(line, 10));
+        } else if (plugin_subghz_key_match(line, "Protocol:")) {
+            snprintf(protocol, sizeof(protocol), "%.*s", (int)sizeof(protocol) - 1, plugin_subghz_skip_key_colon(line, 9));
+        } else if (plugin_subghz_key_match(line, "Preset:")) {
+            preset = plugin_subghz_parse_preset(plugin_subghz_skip_key_colon(line, 7));
+        } else if (plugin_subghz_key_match(line, "Bit:")) {
+            bits = atoi(plugin_subghz_skip_key_colon(line, 4));
+        } else if (plugin_subghz_key_match(line, "Key:")) {
+            char *saveptr = NULL;
+            char *tok = strtok_r((char *)plugin_subghz_skip_key_colon(line, 4), " ", &saveptr);
+            while (tok) {
+                unsigned long b = strtoul(tok, NULL, 16);
+                code = (code << 8) | (uint64_t)(b & 0xFFUL);
+                key_bytes++;
+                tok = strtok_r(NULL, " ", &saveptr);
+            }
+        }
+    }
+    fclose(f);
+
+    if (protocol[0] == '\0' || strcmp(protocol, "RAW") == 0 || key_bytes <= 0) return false;
+    subghz_decoded_signal_t decoded = {0};
+    decoded.decoded = true;
+    decoded.code = code;
+    decoded.bits = subghz_normalize_decoded_bits(protocol, (bits > 0) ? bits : (key_bytes * 8));
+    decoded.frequency_hz = (frequency_hz > 0) ? frequency_hz : 433920000;
+    decoded.te = (int)subghz_protocol_te(protocol);
+    snprintf(decoded.protocol, sizeof(decoded.protocol), "%s", protocol);
+    if (!subghz_build_raw_from_decoded(decoded.protocol, decoded.code, decoded.bits, out, max_count, out_count)) return false;
+    if (out_frequency_hz) *out_frequency_hz = (uint32_t)decoded.frequency_hz;
+    if (out_preset) *out_preset = preset;
+    return out_count && *out_count > 0;
+}
+
 static bool plugin_api_subghz_load_snapshot(const char *app_relative_path) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
     char full_path[PLUGIN_APP_PATH_MAX];
     if (!plugin_api_build_app_path(app_relative_path, full_path, sizeof(full_path))) return false;
-    return subghz_remote_manager_load_snapshot(full_path);
+    s_subghz_loaded_path[0] = '\0';
+    bool loaded_snapshot = subghz_remote_manager_load_snapshot(full_path);
+    if (loaded_snapshot || sd_card_exists(full_path)) {
+        snprintf(s_subghz_loaded_path, sizeof(s_subghz_loaded_path), "%s", full_path);
+        return true;
+    }
+    return false;
 #else
     return false;
 #endif
 }
 
+static bool plugin_subghz_transmit_path(const char *full_path);
+
 static bool plugin_api_subghz_transmit_loaded(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
-    return false;
+    return plugin_subghz_transmit_path(s_subghz_loaded_path);
 #else
     return false;
 #endif
+}
+
+static bool plugin_subghz_transmit_path(const char *full_path) {
+#if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
+    if (!full_path || full_path[0] == '\0') return false;
+    int32_t *durations = malloc(SUBGHZ_RAW_MAX_DURATIONS * sizeof(*durations));
+    if (!durations) return false;
+    size_t count = 0;
+    uint32_t frequency_hz = 0;
+    subghz_preset_t preset = SUBGHZ_PRESET_OOK270_ASYNC;
+    if (!plugin_subghz_parse_raw_file(full_path, durations, SUBGHZ_RAW_MAX_DURATIONS, &count, &frequency_hz, &preset) &&
+        !plugin_subghz_parse_decoded_file(full_path, durations, SUBGHZ_RAW_MAX_DURATIONS, &count, &frequency_hz, &preset)) {
+        free(durations);
+        return false;
+    }
+    count = plugin_subghz_sanitize_pulses(durations, count);
+    if (count == 0) {
+        free(durations);
+        return false;
+    }
+    if (frequency_hz == 0) frequency_hz = 433920000;
+    bool ok = subghz_remote_manager_transmit_raw(durations, count, frequency_hz, preset);
+    free(durations);
+    return ok;
+#else
+    (void)full_path;
+    return false;
+#endif
+}
+
+static bool plugin_api_subghz_transmit_file(const char *app_relative_path) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
+    char full_path[PLUGIN_APP_PATH_MAX];
+    if (!plugin_api_build_app_path(app_relative_path, full_path, sizeof(full_path))) return false;
+    return plugin_subghz_transmit_path(full_path);
 }
 
 static bool plugin_api_subghz_stop(void) {
@@ -1664,10 +1928,13 @@ static ghostesp_api_t s_api = {
     .wifi_live_scan_start = plugin_api_wifi_live_scan_start,
     .wifi_live_scan_stop = plugin_api_wifi_live_scan_stop,
     .wifi_live_scan_active = plugin_api_wifi_live_scan_active,
+    .has_permission = plugin_api_has_permission_name,
+    .has_feature = plugin_api_has_feature,
+    .subghz_transmit_file = plugin_api_subghz_transmit_file,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
-                                     uint32_t permissions,
+                                     uint64_t permissions,
                                      size_t memory_limit,
                                      bool allow_absolute_storage) {
     plugin_api_lock();

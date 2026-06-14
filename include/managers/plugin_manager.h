@@ -31,40 +31,41 @@ extern "C" {
 #define PLUGIN_APP_STORAGE_SCOPE_GHOSTESP "ghostesp"
 #define PLUGIN_APP_QUARANTINE_THRESHOLD 3u
 
-typedef enum {
-    PLUGIN_PERMISSION_UI       = 1u << 0,
-    PLUGIN_PERMISSION_STORAGE  = 1u << 1,
-    PLUGIN_PERMISSION_COMMANDS = 1u << 2,
-    PLUGIN_PERMISSION_TASKS    = 1u << 3,
-    PLUGIN_PERMISSION_WIFI     = 1u << 4,
-    PLUGIN_PERMISSION_BLE      = 1u << 5,
-    PLUGIN_PERMISSION_NFC      = 1u << 6,
-    PLUGIN_PERMISSION_IR       = 1u << 7,
-    PLUGIN_PERMISSION_SUBGHZ   = 1u << 8,
-    PLUGIN_PERMISSION_BADUSB   = 1u << 9,
-    PLUGIN_PERMISSION_RAW_GPIO = 1u << 10,
-    PLUGIN_PERMISSION_LVGL     = 1u << 11,
-    PLUGIN_PERMISSION_RGB      = 1u << 12,
-    PLUGIN_PERMISSION_UART     = 1u << 13,
-    PLUGIN_PERMISSION_I2C      = 1u << 14,
-    PLUGIN_PERMISSION_SPI      = 1u << 15,
-    PLUGIN_PERMISSION_ADC      = 1u << 16,
-    PLUGIN_PERMISSION_PWM      = 1u << 17,
-    PLUGIN_PERMISSION_NETWORK  = 1u << 18,
-    PLUGIN_PERMISSION_WIFI_CONTROL = 1u << 19,
-    PLUGIN_PERMISSION_POWER    = 1u << 20,
-    PLUGIN_PERMISSION_INPUT    = 1u << 21,
-    PLUGIN_PERMISSION_DISPLAY  = 1u << 22,
-    PLUGIN_PERMISSION_TIME     = 1u << 23,
-    PLUGIN_PERMISSION_RANDOM   = 1u << 24,
-    PLUGIN_PERMISSION_SYSTEM   = 1u << 25,
-    PLUGIN_PERMISSION_CAMERA   = 1u << 26,
-    PLUGIN_PERMISSION_USB      = 1u << 27,
-    PLUGIN_PERMISSION_ETHERNET = 1u << 28,
-    PLUGIN_PERMISSION_AUDIO    = 1u << 29,
-    PLUGIN_PERMISSION_SETTINGS = 1u << 30,
-    PLUGIN_PERMISSION_ZIGBEE   = 1u << 31,
-} plugin_permission_t;
+typedef uint64_t plugin_permission_t;
+
+#define PLUGIN_PERMISSION_UI           (1ULL << 0)
+#define PLUGIN_PERMISSION_STORAGE      (1ULL << 1)
+#define PLUGIN_PERMISSION_COMMANDS     (1ULL << 2)
+#define PLUGIN_PERMISSION_TASKS        (1ULL << 3)
+#define PLUGIN_PERMISSION_WIFI         (1ULL << 4)
+#define PLUGIN_PERMISSION_BLE          (1ULL << 5)
+#define PLUGIN_PERMISSION_NFC          (1ULL << 6)
+#define PLUGIN_PERMISSION_IR           (1ULL << 7)
+#define PLUGIN_PERMISSION_SUBGHZ       (1ULL << 8)
+#define PLUGIN_PERMISSION_BADUSB       (1ULL << 9)
+#define PLUGIN_PERMISSION_RAW_GPIO     (1ULL << 10)
+#define PLUGIN_PERMISSION_LVGL         (1ULL << 11)
+#define PLUGIN_PERMISSION_RGB          (1ULL << 12)
+#define PLUGIN_PERMISSION_UART         (1ULL << 13)
+#define PLUGIN_PERMISSION_I2C          (1ULL << 14)
+#define PLUGIN_PERMISSION_SPI          (1ULL << 15)
+#define PLUGIN_PERMISSION_ADC          (1ULL << 16)
+#define PLUGIN_PERMISSION_PWM          (1ULL << 17)
+#define PLUGIN_PERMISSION_NETWORK      (1ULL << 18)
+#define PLUGIN_PERMISSION_WIFI_CONTROL (1ULL << 19)
+#define PLUGIN_PERMISSION_POWER        (1ULL << 20)
+#define PLUGIN_PERMISSION_INPUT        (1ULL << 21)
+#define PLUGIN_PERMISSION_DISPLAY      (1ULL << 22)
+#define PLUGIN_PERMISSION_TIME         (1ULL << 23)
+#define PLUGIN_PERMISSION_RANDOM       (1ULL << 24)
+#define PLUGIN_PERMISSION_SYSTEM       (1ULL << 25)
+#define PLUGIN_PERMISSION_CAMERA       (1ULL << 26)
+#define PLUGIN_PERMISSION_USB          (1ULL << 27)
+#define PLUGIN_PERMISSION_ETHERNET     (1ULL << 28)
+#define PLUGIN_PERMISSION_AUDIO        (1ULL << 29)
+#define PLUGIN_PERMISSION_SETTINGS     (1ULL << 30)
+#define PLUGIN_PERMISSION_ZIGBEE       (1ULL << 31)
+#define PLUGIN_PERMISSION_NRF24        (1ULL << 32)
 
 typedef struct {
     char id[PLUGIN_APP_ID_MAX];
@@ -93,7 +94,7 @@ typedef struct {
     uint16_t icon_width;
     uint16_t icon_height;
     uint32_t launch_failure_count;
-    uint32_t permissions;
+    plugin_permission_t permissions;
     bool requires_psram;
     bool allow_absolute_storage;
     bool quarantined;

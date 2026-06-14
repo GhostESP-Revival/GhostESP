@@ -59,6 +59,7 @@ static char pending_initial_text[128] = {0};
 static bool has_pending_initial_text = false;
 static bool start_with_caps = true;
 static KeyboardSubmitCallback submit_callback = NULL;
+static KeyboardImmediateCallback immediate_callback = NULL;
 
 static bool is_caps = true;
 static bool is_symbols_mode = false;
@@ -340,17 +341,23 @@ static void submit_text() {
     }
 }
 
+static void emit_immediate_char(char c) {
+    if (immediate_callback) immediate_callback(c);
+}
+
 static void add_char_to_buffer(char c) {
     if (input_len < sizeof(input_buffer) - 1) {
         // Use capslock or SHIFT if active, otherwise lowercase
         bool use_caps = is_capslock || is_caps;
         if (isalpha((unsigned char)c)) {
-            input_buffer[input_len++] = use_caps ? toupper((unsigned char)c) : tolower((unsigned char)c);
+            c = use_caps ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+            input_buffer[input_len++] = c;
         } else {
             input_buffer[input_len++] = c; // Add non-alphabetic characters unchanged
         }
         input_buffer[input_len] = '\0';
         update_input_label();
+        emit_immediate_char(c);
     }
     if (is_caps && !is_capslock) {
         is_caps = false; // Reset to lowercase after any key press unless capslock is on
@@ -375,6 +382,7 @@ static void add_char_to_buffer_raw(char c) {
         input_buffer[input_len++] = c;
         input_buffer[input_len] = '\0';
         update_input_label();
+        emit_immediate_char(c);
     }
 }
 
@@ -382,6 +390,7 @@ static void remove_char_from_buffer() {
     if (input_len > 0) {
         input_buffer[--input_len] = '\0';
         update_input_label();
+        emit_immediate_char('\b');
     }
 }
 
@@ -838,6 +847,7 @@ static void keyboard_destroy() {
         pressed_btn_id = -1;
         input_label = NULL;
         submit_callback = NULL;
+        immediate_callback = NULL;
         input_len = 0;
         input_buffer[0] = '\0';
         is_symbols_mode = false;
@@ -1286,8 +1296,14 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         if (c == '`') {
             display_manager_switch_view(&options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
-            submit_text();
+            if (immediate_callback) {
+                // Real-time typing mode (e.g. BadUSB): send Enter, don't close
+                immediate_callback('\n');
+            } else {
+                submit_text();
+            }
         } else if (c == '\b') {
+            if (input_len == 0 && immediate_callback) immediate_callback('\b');
             remove_char_from_buffer();
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);
@@ -1306,6 +1322,10 @@ static void get_keyboard_callback(void **callback) {
 
 void keyboard_view_set_submit_callback(KeyboardSubmitCallback cb){
     submit_callback = cb;
+}
+
+void keyboard_view_set_immediate_callback(KeyboardImmediateCallback cb){
+    immediate_callback = cb;
 }
 
 void keyboard_view_set_placeholder(const char *text){

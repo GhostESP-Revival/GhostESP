@@ -48,8 +48,8 @@ static bool tca_is_shift_like_active(Keyboard_t *kb){
 static SemaphoreHandle_t s_tca_sem = NULL;
 static TaskHandle_t s_tca_task = NULL;
 // keyboard event push helper (avoid extra allocations)
-static void tca_push_key_event(uint8_t key_value){
-    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value;
+static void tca_push_key_event(uint8_t key_value, bool pressed){
+    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value; ev.is_touch_move = !pressed;
     xQueueSend((QueueHandle_t)input_queue, &ev, 0);
 }
 
@@ -194,8 +194,18 @@ static void tca_keyboard_task(void* arg){
                 if (display_manager_notify_user_input()) {
                     // swallowed as wake event
                 } else {
-                    tca_push_key_event(key_value);
+                    tca_push_key_event(key_value, true);
                 }
+            }
+        }
+        // third pass: emit released non-modifier keys
+        for (size_t i = 0; i < ev_idx; ++i) {
+            if (events[i].pressed) continue;
+            uint8_t base_code = base_codes[i];
+            if (base_code == KEY_LEFT_SHIFT || base_code == KEY_LEFT_CTRL || base_code == KEY_LEFT_ALT || base_code == KEY_OPT) continue;
+            uint8_t key_value = keyboard_get_key(&gkeyboard, pts[i]);
+            if (key_value) {
+                tca_push_key_event(key_value, false);
             }
         }
         // clear INT status
@@ -344,8 +354,13 @@ void keyboard_update_key_list(Keyboard_t* keyboard) {
                     coor.y = -coor.y + 3;  // Adjust Y coordinate to match picture
 
                     keyboard->key_list_buffer_len++;
-                    keyboard->key_list_buffer = realloc(keyboard->key_list_buffer,
+                    void *tmp = realloc(keyboard->key_list_buffer,
                         keyboard->key_list_buffer_len * sizeof(Point2D_t));
+                    if (!tmp) {
+                        keyboard->key_list_buffer_len--;
+                        return;
+                    }
+                    keyboard->key_list_buffer = (Point2D_t *)tmp;
                     keyboard->key_list_buffer[keyboard->key_list_buffer_len - 1] = coor;
                 }
             }
@@ -392,25 +407,37 @@ void keyboard_update_keys_state(Keyboard_t* keyboard) {
             case KEY_LEFT_CTRL:
                 keyboard->keys_state_buffer.ctrl = true;
                 keyboard->keys_state_buffer.modifier_keys_len++;
-                keyboard->keys_state_buffer.modifier_keys = realloc(
-                    keyboard->keys_state_buffer.modifier_keys,
-                    keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                {
+                    void *tmp_mk = realloc(
+                        keyboard->keys_state_buffer.modifier_keys,
+                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
+                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                }
                 keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_CTRL;
                 break;
             case KEY_LEFT_SHIFT:
                 keyboard->keys_state_buffer.shift = true;
                 keyboard->keys_state_buffer.modifier_keys_len++;
-                keyboard->keys_state_buffer.modifier_keys = realloc(
-                    keyboard->keys_state_buffer.modifier_keys,
-                    keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                {
+                    void *tmp_mk = realloc(
+                        keyboard->keys_state_buffer.modifier_keys,
+                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
+                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                }
                 keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_SHIFT;
                 break;
             case KEY_LEFT_ALT:
                 keyboard->keys_state_buffer.alt = true;
                 keyboard->keys_state_buffer.modifier_keys_len++;
-                keyboard->keys_state_buffer.modifier_keys = realloc(
-                    keyboard->keys_state_buffer.modifier_keys,
-                    keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                {
+                    void *tmp_mk = realloc(
+                        keyboard->keys_state_buffer.modifier_keys,
+                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
+                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
+                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                }
                 keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_ALT;
                 break;
             case KEY_TAB:
@@ -427,9 +454,13 @@ void keyboard_update_keys_state(Keyboard_t* keyboard) {
                 break;
             default:
                 keyboard->keys_state_buffer.word_len++;
-                keyboard->keys_state_buffer.word = realloc(
-                    keyboard->keys_state_buffer.word,
-                    keyboard->keys_state_buffer.word_len * sizeof(char));
+                {
+                    void *tmp_w = realloc(
+                        keyboard->keys_state_buffer.word,
+                        keyboard->keys_state_buffer.word_len * sizeof(char));
+                    if (!tmp_w) { keyboard->keys_state_buffer.word_len--; break; }
+                    keyboard->keys_state_buffer.word = (char *)tmp_w;
+                }
                 
                 char character = (keyboard->keys_state_buffer.shift || keyboard->is_caps_locked)
                                      ? get_key_value(&key_pos, true, keyboard->keys_state_buffer.ctrl, keyboard->is_caps_locked)

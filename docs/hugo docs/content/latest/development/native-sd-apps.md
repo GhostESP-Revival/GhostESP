@@ -62,7 +62,7 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
   "icon_width": 50,
   "icon_height": 50,
   "accent_color": "#56B6F7",
-  "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "badusb", "camera", "usb", "audio", "zigbee"],
+  "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "nrf24", "badusb", "camera", "usb", "audio", "zigbee"],
   "memory_limit": 65536,
   "stack_size": 8192,
   "requires_psram": false
@@ -86,7 +86,7 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `package_version` | No | Integer, minimum `1`. |
 | `data_version` | No | Integer, minimum `1`. Bump to trigger data migration. |
 | `storage_scope` | No | `"app"` (default — scoped to `/mnt/ghostesp/appdata/<id>/`) or `"ghostesp"` (absolute paths under `/mnt/ghostesp/`). |
-| `permissions` | No | Array of permission strings (see below). |
+| `permissions` | No | Array of permission strings (see below). Unknown permission names make the manifest invalid. |
 | `memory_limit` | No | Advisory limit in bytes for `app_malloc`/`app_calloc` tracked allocations. |
 | `stack_size` | No | Advisory stack size hint in bytes. |
 | `requires_psram` | No | If `true`, loader additionally checks that PSRAM is available (all native SD apps already require PSRAM at a baseline). Apps with this flag are hidden from the gallery on no-PSRAM boards. |
@@ -105,7 +105,7 @@ Apps request permissions in `manifest.json`. The host API gates every subsystem 
 | Permission | Unlocks |
 |------------|---------|
 | `ui` | Screen creation, widgets, popups, detail views, options menus, scan status, canvas, animations |
-| `storage` | `storage_*` (absolute) and `app_storage_*` (scoped) functions |
+| `storage` | `app_storage_*` functions, plus `storage_*` absolute functions only when `storage_scope` is `"ghostesp"` |
 | `commands` | CLI command execution via `command_exec` |
 | `tasks` | `delay_ms`, any future task creation |
 | `wifi` | `wifi_start_scan`, `wifi_stop_scan`, AP enumeration |
@@ -227,7 +227,11 @@ const char *(*app_data_path)(void);
 uint8_t     (*settings_get_theme)(void);
 const char *(*settings_get_device_name)(void);
 void        (*app_exit)(void);
+bool        (*has_permission)(const char *permission);
+bool        (*has_feature)(const char *feature);
 ```
+
+`has_permission` checks the current app manifest permissions by name, for example `"wifi"` or `"nrf24"`. `has_feature` checks host capabilities such as `"touchscreen"`, `"compact_screen"`, `"absolute_storage"`, `"subghz"`, `"nrf24"`, `"camera"`, `"usb"`, `"badusb"`, `"ir"`, or `"ble"`.
 
 ### Memory (Tracked)
 
@@ -480,7 +484,9 @@ bool (*ui_has_touchscreen)(void);
 
 `ui_screen_is_compact` reports whether the host considers the current screen a "compact" layout (narrow, single-column — e.g. cardputer, M5StickC) versus a wide layout (gallery / grid). Use it to swap list views for grids, hide labels, or pick a denser font. `ui_has_touchscreen` reports whether the device has a touch panel; combine with `GHOSTESP_INPUT_TOUCH` events in `on_input` to add touch-only affordances.
 
-### Storage (Absolute, `storage` Permission)
+### Storage (Absolute, `storage` Permission + `storage_scope: "ghostesp"`)
+
+These calls only work when the manifest sets `storage_scope` to `"ghostesp"`. Paths must stay under `/mnt/ghostesp` and traversal such as `..` is rejected.
 
 ```c
 bool (*storage_exists)(const char *path);
@@ -822,8 +828,11 @@ bool (*ir_stop)(void);
 bool (*subghz_is_available)(void);
 bool (*subghz_load_snapshot)(const char *app_relative_path);
 bool (*subghz_transmit_loaded)(void);
+bool (*subghz_transmit_file)(const char *app_relative_path);
 bool (*subghz_stop)(void);
 ```
+
+`subghz_transmit_file` replays an app-scoped Flipper-style `.sub` file directly. `subghz_load_snapshot` plus `subghz_transmit_loaded` is still useful when an app wants to remember or inspect the loaded file before transmitting.
 
 ### BadUSB
 
@@ -931,7 +940,7 @@ The `.gapp` format is a custom streaming archive (not ZIP):
 - **Per-file entry**: 4-byte magic `FILE`, 2-byte compression method (0=store, 1=raw-deflate), 2-byte path length, 4-byte uncompressed size, 4-byte compressed size, 8-byte FNV-1a 64-bit checksum, then UTF-8 relative path, then payload.
 - Firmware extracts `.gapp` files into `/mnt/ghostesp/app_cache/<name>-<hash>/` because `elf_loader` needs a real `.so` file path.
 
-## App State & Quarantine
+## App State
 
 State is tracked per-app in `/mnt/ghostesp/appdata/<app_id>/.state.json`:
 
@@ -944,13 +953,13 @@ State is tracked per-app in `/mnt/ghostesp/appdata/<app_id>/.state.json`:
 }
 ```
 
-Apps that crash or fail to load 3+ times (configurable: `PLUGIN_APP_QUARANTINE_THRESHOLD`) are quarantined and won't load until reset:
+Apps that crash or fail to load keep a failure count and last error for diagnostics. They are not blocked from launching automatically. Reset the diagnostic state with:
 
 ```
 apps reset <id>
 ```
 
-A clean exit (normal `on_stop` → `dlclose`) resets the failure count to 0.
+A clean exit (normal `on_stop` -> `dlclose`) resets the failure count to 0.
 
 ## Memory & Load Constraints
 
@@ -994,7 +1003,7 @@ If your app fails to load with an exec-memory error, check this value. Disabling
 |---------|-------------|
 | `apps list` | List all discovered SD apps |
 | `apps reload` | Rescan `/mnt/ghostesp/apps/` and `/mnt/ghostesp/packages/` |
-| `apps info <id>` | Show manifest details, failures, quarantine status |
+| `apps info <id>` | Show manifest details and failure count |
 | `apps run <id>` | Launch app (UI mode if screen available, headless otherwise) |
 | `apps stop` | Stop the currently running app |
-| `apps reset <id>` | Clear failure/quarantine state |
+| `apps reset <id>` | Clear failure diagnostic state |

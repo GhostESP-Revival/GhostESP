@@ -231,8 +231,10 @@ static bool is_backlight_off = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
-static joystick_t enc_button; // we'll treat the push-switch like any other button
-static joystick_t exit_button; // IO6 exit button
+static joystick_t enc_button;
+static joystick_t exit_button;
+static TaskHandle_t encoder_poll_task_handle = NULL;
+static void encoder_poll_task(void *pvParameters);
 #endif
 
 #define FADE_DURATION_MS GUI_ANIM_TRANSITION
@@ -279,6 +281,51 @@ static inline uint32_t get_tdeck_repeat_rate(void) {
 }
 
 static uint16_t original_beacon_interval = 100;
+
+// Global keyboard key repeat: re-injects the last pressed key while held.
+// Uses the same input_repeat_speed setting as joystick repeat.
+static uint8_t s_kb_repeat_key = 0;
+static esp_timer_handle_t s_kb_repeat_timer = NULL;
+
+static void kb_repeat_fire_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    InputEvent ev;
+    ev.type = INPUT_TYPE_KEYBOARD;
+    ev.data.key_value = s_kb_repeat_key;
+    ev.is_touch_move = false;
+    ev.is_repeat = true;
+    xQueueSend(input_queue, &ev, 0);
+}
+
+static void kb_repeat_start(uint8_t key) {
+    s_kb_repeat_key = key;
+    if (!s_kb_repeat_timer) return;
+    if (esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+    // First repeat uses the initial delay, then switch to interval
+    esp_timer_start_once(s_kb_repeat_timer, get_joystick_repeat_initial_delay() * 1000);
+}
+
+static void kb_repeat_stop(void) {
+    s_kb_repeat_key = 0;
+    if (s_kb_repeat_timer && esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+}
+
+// Called after initial delay fires — switch to periodic repeat
+static void kb_repeat_initial_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    // Inject the first repeat immediately
+    kb_repeat_fire_cb(NULL);
+    // Start periodic repeat at the interval rate
+    if (s_kb_repeat_timer && s_kb_repeat_key) {
+        esp_timer_start_periodic(s_kb_repeat_timer, get_joystick_repeat_interval() * 1000);
+    }
+}
 
 #define BACKLIGHT_SLEEP_POLL_MS 50   // Poll slower when dimmed
 
@@ -1284,8 +1331,10 @@ void apply_power_management_config(bool power_save_enabled) {
       .freq_hz = 5000, // 5 kHz
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Auto-select best clock for current power mode
   };
-  ledc_timer_config(&ledc_timer);
-  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s", power_save_enabled ? "enabled" : "disabled");
+  esp_err_t timer_err = ledc_timer_config(&ledc_timer);
+  uint32_t current_duty = ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s, timer_err=%s, current_duty=%lu",
+           power_save_enabled ? "enabled" : "disabled", esp_err_to_name(timer_err), (unsigned long)current_duty);
 #endif
 
   // control ap based on power save mode and AP enabled setting
@@ -1508,8 +1557,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   buf1_pixels = CONFIG_TFT_WIDTH * 10;
 #else
-  buf1_pixels = CONFIG_TFT_WIDTH * 20;
-  buf2_pixels = CONFIG_TFT_WIDTH * 20;
+  buf1_pixels = CONFIG_TFT_WIDTH * 10;
+  buf2_pixels = CONFIG_TFT_WIDTH * 10;
 #endif
   size_t buf1_bytes = buf1_pixels * sizeof(*buf1);
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
@@ -1578,7 +1627,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
 #else
   /* default: double buffer for smoother drawing */
-  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
+  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, buf1_pixels);
 #endif
 
   /* Initialize the display */
@@ -1658,6 +1707,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
 
+    // Run encoder sampling at 1 kHz for cleaner quadrature decoding
+    if (xTaskCreate(encoder_poll_task, "EncPoll", 2048, NULL,
+                    HARDWARE_INPUT_TASK_PRIORITY, &encoder_poll_task_handle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create encoder poll task");
+    }
+
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     // GPIO 6 exit button is TEmbed C1101 only
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
@@ -1701,6 +1756,15 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   display_manager_init_success = true;
   last_touch_time = xTaskGetTickCount();
+
+  // Create global keyboard repeat timer (used by all views for held-key repeat)
+  if (!s_kb_repeat_timer) {
+      esp_timer_create_args_t args = {
+          .callback = kb_repeat_initial_cb,
+          .name = "kb_repeat",
+      };
+      esp_timer_create(&args, &s_kb_repeat_timer);
+  }
   is_backlight_dimmed = false;
 
   // Keep the panel dark until the first real view has been drawn.
@@ -1941,7 +2005,9 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
-          strcmp(view_name, "GhostScript Runner") == 0);
+          strcmp(view_name, "GhostScript Runner") == 0 ||
+          strcmp(view_name, "BadUSB") == 0 ||
+          strcmp(view_name, "Trackpad") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {
@@ -1995,11 +2061,15 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
+        ESP_LOGI(TAG, "BL PWM: scaled_pct=%d, raw_duty=%lu", percentage, (unsigned long)duty);
 #if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
         duty = ((1 << LEDC_TIMER_10_BIT) - 1) - duty;
+        if (duty == 0) duty = 1;
+        ESP_LOGI(TAG, "BL PWM: active-low inverted, final_duty=%lu", (unsigned long)duty);
 #endif
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        esp_err_t err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        ESP_LOGI(TAG, "BL PWM: ledc_update_duty returned %s", esp_err_to_name(err));
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping PWM backlight");
     }
@@ -2034,9 +2104,10 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 }
 
 void set_backlight_brightness(uint8_t percentage) {
+    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
+    ESP_LOGI(TAG, "set_backlight_brightness: input=%d%%, max_brightness_setting=%d%%", percentage, max_brightness);
     display_manager_set_backlight_raw(percentage);
 
-    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
     percentage = (percentage * max_brightness) / 100;
     if (percentage > 100) percentage = 100;
 
@@ -2191,6 +2262,19 @@ static char tdeck_raw_to_char(int col, int row, bool shift, bool symbol) {
 #endif
 
 
+
+#ifdef CONFIG_USE_ENCODER
+static void encoder_poll_task(void *pvParameters)
+{
+    (void)pvParameters;
+    const TickType_t sample_interval = pdMS_TO_TICKS(1);
+    while (1) {
+        encoder_tick(&g_encoder);
+        vTaskDelay(sample_interval);
+    }
+    vTaskDelete(NULL);
+}
+#endif
 
 void hardware_input_task(void *pvParameters) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
@@ -2356,8 +2440,12 @@ void hardware_input_task(void *pvParameters) {
 #endif
 
 #ifdef CONFIG_USE_ENCODER
-    /* 1 kHz poll; cheap */
+#ifdef CONFIG_USE_IO_EXPANDER
+    /* IO expander encoder: poll at hardware_input_task rate (100 Hz) */
     encoder_tick(&g_encoder);
+#else
+    /* Direct GPIO encoder: sampled at 1 kHz in encoder_poll_task; just drain events here */
+#endif
 
     /* direction events */
     if (encoder_peek_direction(&g_encoder) != ENCODER_DIR_NONE) {
@@ -2431,8 +2519,8 @@ void hardware_input_task(void *pvParameters) {
         // Check for 7-second hold to enter deep sleep
         if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
         uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
-        if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
-            ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
+        if (elapsed >= 4000 && !exit_button.deep_sleep_triggered) { // 4 seconds
+            ESP_LOGI("DeepSleep", "IO6 held for 4 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
 
             // Pull IO15 low before sleep (TEmbed C1101 power control)
@@ -3076,12 +3164,27 @@ void processEvent() {
         processed++;
         continue;
       }
-      // Joystick release events are only meaningful in the keyboard view.
+      // Joystick release events are only meaningful in the keyboard view and trackpad view.
       // All other views only check joystick_index and would double-fire on release.
       if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-          strcmp(view_name, "Keyboard Screen") != 0) {
+          strcmp(view_name, "Keyboard Screen") != 0 &&
+          strcmp(view_name, "Trackpad") != 0) {
         processed++;
         continue;
+      }
+      // Global keyboard repeat: start on press, stop on release.
+      // Release events are consumed here for all views except Trackpad
+      // (which needs them for tap/hold click detection).
+      if (event.type == INPUT_TYPE_KEYBOARD) {
+          if (event.is_touch_move) {
+              kb_repeat_stop();
+              if (strcmp(view_name, "Trackpad") != 0) {
+                  processed++;
+                  continue;
+              }
+          } else {
+              kb_repeat_start(event.data.key_value);
+          }
       }
       if (input_callback) input_callback(&event);
     }
@@ -3122,10 +3225,22 @@ void processEvent() {
         if (event.type == INPUT_TYPE_TOUCH && event.is_touch_move && !accepts_touch_move) {
           // drop live move samples for views that still treat pressed touches as clicks
         } else if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-            strcmp(view_name, "Keyboard Screen") != 0) {
-          // drop release event for non-keyboard views
-        } else if (input_callback) {
-          input_callback(&event);
+            strcmp(view_name, "Keyboard Screen") != 0 &&
+            strcmp(view_name, "Trackpad") != 0) {
+          // drop release event for non-keyboard/non-trackpad views
+        } else if (event.type == INPUT_TYPE_KEYBOARD && event.is_touch_move) {
+          // keyboard release: stop global repeat, forward only to Trackpad
+          kb_repeat_stop();
+          if (strcmp(view_name, "Trackpad") != 0) {
+              // drop for all other views
+          } else if (input_callback) {
+              input_callback(&event);
+          }
+        } else {
+          if (event.type == INPUT_TYPE_KEYBOARD && !event.is_touch_move) {
+              kb_repeat_start(event.data.key_value);
+          }
+          if (input_callback) input_callback(&event);
         }
       }
     }

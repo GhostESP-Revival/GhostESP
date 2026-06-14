@@ -460,6 +460,71 @@ int tcp_connect_with_timeout(const char *target_ip, uint16_t port, int timeout_s
   return -1;
 }
 
+int tcp_connect_with_timeout_cancel(const char *target_ip, uint16_t port, int timeout_ms,
+                                    volatile bool *cancel_flag) {
+  struct sockaddr_in server_addr;
+  fd_set fdset;
+  int flags;
+  int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (sock < 0) {
+    return -1;
+  }
+
+  flags = fcntl(sock, F_GETFL, 0);
+  fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(port);
+  if (inet_pton(AF_INET, target_ip, &server_addr.sin_addr) <= 0) {
+    close(sock);
+    return -1;
+  }
+
+  int result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  if (result == 0) {
+    fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+    return sock;
+  }
+  if (result < 0 && errno != EINPROGRESS) {
+    close(sock);
+    return -1;
+  }
+
+  TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+  while (!cancel_flag || !*cancel_flag) {
+    TickType_t now = xTaskGetTickCount();
+    if ((int32_t)(deadline - now) <= 0) {
+      break;
+    }
+
+    int wait_ms = 100;
+    TickType_t remaining_ticks = deadline - now;
+    int remaining_ms = (int)(remaining_ticks * portTICK_PERIOD_MS);
+    if (remaining_ms < wait_ms) wait_ms = remaining_ms;
+
+    struct timeval timeout = {
+      .tv_sec = wait_ms / 1000,
+      .tv_usec = (wait_ms % 1000) * 1000,
+    };
+    FD_ZERO(&fdset);
+    FD_SET(sock, &fdset);
+    result = select(sock + 1, NULL, &fdset, NULL, &timeout);
+    if (result > 0) {
+      int error = 0;
+      socklen_t len = sizeof(error);
+      if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) >= 0 && error == 0) {
+        fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+        return sock;
+      }
+      break;
+    }
+  }
+
+  close(sock);
+  return -1;
+}
+
 int tcp_recv_with_timeout(int sock, char *buffer, size_t buffer_size, int timeout_sec) {
   if (sock < 0 || buffer == NULL || buffer_size == 0) {
     return -1;
@@ -477,6 +542,46 @@ int tcp_recv_with_timeout(int sock, char *buffer, size_t buffer_size, int timeou
   }
   
   return (bytes == 0) ? 0 : -1;
+}
+
+int tcp_recv_with_timeout_cancel(int sock, char *buffer, size_t buffer_size, int timeout_ms,
+                                 volatile bool *cancel_flag) {
+  if (sock < 0 || buffer == NULL || buffer_size == 0) {
+    return -1;
+  }
+
+  TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+  while (!cancel_flag || !*cancel_flag) {
+    TickType_t now = xTaskGetTickCount();
+    if ((int32_t)(deadline - now) <= 0) {
+      break;
+    }
+
+    int wait_ms = 100;
+    TickType_t remaining_ticks = deadline - now;
+    int remaining_ms = (int)(remaining_ticks * portTICK_PERIOD_MS);
+    if (remaining_ms < wait_ms) wait_ms = remaining_ms;
+
+    struct timeval timeout = {
+      .tv_sec = wait_ms / 1000,
+      .tv_usec = (wait_ms % 1000) * 1000,
+    };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    ssize_t bytes = recv(sock, buffer, buffer_size - 1, 0);
+    if (bytes > 0) {
+      buffer[bytes] = '\0';
+      return (int)bytes;
+    }
+    if (bytes == 0) {
+      return 0;
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      return -1;
+    }
+  }
+
+  return -1;
 }
 
 void tcp_close_socket(int *sock) {

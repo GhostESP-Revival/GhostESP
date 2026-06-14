@@ -62,6 +62,8 @@ jobs:
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
           - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip" }
+          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip" }
+          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip" }
           - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip" }
           - { name: "TDisplayS3-Touch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",               zip_name: "LilyGo-TDisplayS3-Touch.zip" }
           - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }

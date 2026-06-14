@@ -98,8 +98,7 @@ static void write_app_state(const plugin_app_manifest_t *manifest, uint32_t fail
 static void record_app_failure(const plugin_app_manifest_t *manifest, const char *error) {
     if (!manifest) return;
     uint32_t count = read_state_failure_count(manifest) + 1;
-    bool quarantined = count >= PLUGIN_APP_QUARANTINE_THRESHOLD;
-    write_app_state(manifest, count, quarantined, false, error);
+    write_app_state(manifest, count, false, false, error);
 }
 
 static void record_app_running(const plugin_app_manifest_t *manifest) {
@@ -206,10 +205,18 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
         return ESP_FAIL;
     }
 
-    const ghostesp_app_t *app = init_fn(plugin_api_get(manifest->id,
-                                                        manifest->permissions,
-                                                        manifest->memory_limit,
-                                                        manifest->allow_absolute_storage));
+    const ghostesp_api_t *api = plugin_api_get(manifest->id,
+                                               manifest->permissions,
+                                               manifest->memory_limit,
+                                               manifest->allow_absolute_storage);
+    if (!api) {
+        dlclose(handle);
+        record_app_failure(manifest, "plugin API unavailable");
+        plugin_loader_sd_end(mounted_here, display_was_suspended);
+        return fail_err(ESP_ERR_INVALID_STATE, "plugin API unavailable");
+    }
+
+    const ghostesp_app_t *app = init_fn(api);
     esp_err_t validate_err = validate_app_descriptor(manifest, app);
     if (validate_err != ESP_OK) {
         dlclose(handle);

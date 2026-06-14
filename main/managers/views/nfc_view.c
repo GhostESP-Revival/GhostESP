@@ -142,24 +142,12 @@ static char g_write_image_path[256] = {0};
 // jit sd helpers for somethingsomething template (mirror infrared behavior)
 static bool nfc_sd_begin(bool *display_was_suspended)
 {
-    if (display_was_suspended) *display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        return sd_card_mount_for_flush(display_was_suspended) == ESP_OK;
-    }
-#endif
-    return true;
+    return sd_card_jit_begin(display_was_suspended, false);
 }
 
 static void nfc_sd_end(bool display_was_suspended)
 {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        sd_card_unmount_after_flush(display_was_suspended);
-    }
-#else
-    (void)display_was_suspended;
-#endif
+    sd_card_jit_end(display_was_suspended);
 }
 
 // saved details popup
@@ -2257,23 +2245,10 @@ static void create_nfc_scan_popup(void) {
     // New scan session: invalidate any stale async events from prior scan
     nfc_scan_session++;
     // scale to screen, leave margin for edges
-    int popup_w = LV_HOR_RES - 30;
-    int popup_h;
-    int y_offset = 0;
-    
-    if (LV_VER_RES <= 135) {
-        // Cardputer: maximize vertical space usage
-        popup_h = 130;
-        y_offset = 0;
-    } else if (LV_VER_RES <= 200) {
-        popup_h = (LV_VER_RES < 190) ? (LV_VER_RES - 30) : 160;
-        if (popup_h < 110) popup_h = 110;
-        y_offset = 10; // Account for status bar
-    } else {
-        popup_h = (LV_VER_RES <= 240) ? 140 : 160;
-        y_offset = 10; // Account for status bar
-    }
-    nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    popup_calc_size_t geom;
+    popup_calc_size(&geom);
+    nfc_scan_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    if (nfc_scan_popup) lv_obj_add_flag(nfc_scan_popup, LV_OBJ_FLAG_CLICKABLE);
 
     // Fonts
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
@@ -2978,10 +2953,11 @@ static void keys_scroll_down_cb(lv_event_t *e) {
 static void create_keys_popup(void) {
     if (!root) return;
     if (keys_popup && lv_obj_is_valid(keys_popup)) cleanup_keys_popup(NULL);
-    int popup_w = LV_HOR_RES - 30;
+    int popup_w;
+    if (LV_HOR_RES <= 240) popup_w = LV_HOR_RES - 20; else popup_w = LV_HOR_RES - 30;
     int popup_h;
     int y_offset = 0;
-    
+
     if (LV_VER_RES <= 135) {
         popup_h = 130;
         y_offset = 0;
@@ -2994,6 +2970,7 @@ static void create_keys_popup(void) {
         y_offset = 10;
     }
     keys_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    if (keys_popup) lv_obj_add_flag(keys_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -3284,22 +3261,10 @@ static void cu_more_cb(lv_event_t *e) { (void)e; }
 static void create_cu_popup(void) {
     if (!root) return;
     if (cu_popup && lv_obj_is_valid(cu_popup)) cleanup_cu_popup(NULL);
-    int popup_w = (LV_HOR_RES <= 240) ? (LV_HOR_RES - 20) : (LV_HOR_RES - 30);
-    int popup_h;
-    int y_offset = 0;
-    
-    if (LV_VER_RES <= 135) {
-        popup_h = 130;
-        y_offset = 0;
-    } else if (LV_VER_RES <= 200) {
-        popup_h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
-        if (popup_h < 110) popup_h = 110;
-        y_offset = 10;
-    } else {
-        popup_h = (LV_VER_RES <= 240) ? 140 : 160;
-        y_offset = 10;
-    }
-    cu_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    popup_calc_size_t geom;
+    popup_calc_size(&geom);
+    cu_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    if (cu_popup) lv_obj_add_flag(cu_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -3808,23 +3773,10 @@ static void create_nfc_write_popup(const char *path) {
     #endif
 
     if (nfc_write_popup && lv_obj_is_valid(nfc_write_popup)) cleanup_nfc_write_popup(NULL);
-    int popup_w;
-    if (LV_HOR_RES <= 240) popup_w = LV_HOR_RES - 20; else popup_w = LV_HOR_RES - 30;
-    int popup_h;
-    int y_offset = 0;
-    
-    if (LV_VER_RES <= 135) {
-        popup_h = 130;
-        y_offset = 0;
-    } else if (LV_VER_RES <= 200) {
-        popup_h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
-        if (popup_h < 120) popup_h = 120;
-        y_offset = 10;
-    } else {
-        popup_h = (LV_VER_RES <= 240) ? 140 : 160;
-        y_offset = 10;
-    }
-    nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    popup_calc_size_t geom;
+    popup_calc_size_ex(&geom, 120);
+    nfc_write_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    if (nfc_write_popup) lv_obj_add_flag(nfc_write_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -4020,30 +3972,17 @@ void cleanup_saved_details_popup(void *obj) {
 static void create_saved_details_popup(const char *path) {
     if (!root) return;
     if (saved_popup && lv_obj_is_valid(saved_popup)) cleanup_saved_details_popup(NULL);
-    int popup_w;
-    if (LV_HOR_RES <= 240) popup_w = LV_HOR_RES - 20; else popup_w = LV_HOR_RES - 30;
-    int popup_h;
-    int y_offset = 0;
-    
-    if (LV_VER_RES <= 135) {
-        popup_h = 130;
-        y_offset = 0;
-    } else if (LV_VER_RES <= 200) {
-        popup_h = (LV_VER_RES < 200) ? (LV_VER_RES - 30) : 160;
-        if (popup_h < 120) popup_h = 120;
-        y_offset = 10;
-    } else {
-        popup_h = (LV_VER_RES <= 240) ? 140 : 160;
-        y_offset = 10;
-    }
-    saved_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    popup_calc_size_t geom;
+    popup_calc_size_ex(&geom, 120);
+    saved_popup = popup_create_container_with_offset(lv_scr_act(), geom.width, geom.height, geom.y_offset);
+    if (saved_popup) lv_obj_add_flag(saved_popup, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
 
     saved_title_label = popup_create_title_label(saved_popup, "Saved Tag", title_font, 10);
 
-    saved_scroll = popup_create_scroll_area(saved_popup, LV_HOR_RES - 50, popup_h - 80, LV_ALIGN_TOP_MID, 0, 26);
+    saved_scroll = popup_create_scroll_area(saved_popup, LV_HOR_RES - 50, geom.height - 80, LV_ALIGN_TOP_MID, 0, 26);
     saved_details_label = popup_create_body_label(saved_scroll, "", LV_HOR_RES - 60, true, body_font, 0);
 
     // store current path for rename/delete
@@ -4263,7 +4202,7 @@ static void nfc_write_go_cb(lv_event_t *e) {
 
 void nfc_view_create(void) {
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
-    root = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_TRANSP);
+    root = gui_screen_create_root_no_bg(NULL, NULL, lv_color_hex(GUI_DEFAULT_BG_COLOR), LV_OPA_TRANSP);
     nfc_view.root = root;
     lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);

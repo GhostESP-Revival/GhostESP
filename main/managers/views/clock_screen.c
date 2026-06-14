@@ -54,6 +54,7 @@ static const char* get_friendly_timezone_name(const char *tz) {
             *comma = '\0';
             const char *result = strdup(tz_copy);
             free(tz_copy);
+            if (!result) return "UTC";
             return result;
         }
         free(tz_copy);

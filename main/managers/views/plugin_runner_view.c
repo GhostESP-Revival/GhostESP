@@ -409,7 +409,7 @@ void plugin_runner_view_create(void) {
     s_touch_started = false;
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
-    s_root = gui_screen_create_root(NULL, "SD App", lv_color_hex(0x121212), LV_OPA_COVER);
+    s_root = gui_screen_create_root_default(NULL, "SD App");
     plugin_runner_view.root = s_root;
     display_manager_add_status_bar("SD App");
 

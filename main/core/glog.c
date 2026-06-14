@@ -101,6 +101,7 @@ void glog(const char *fmt, ...) {
         glog_unlock();
         return;
     }
+
     glog_unlock();
 
     glog_emit(buf);
