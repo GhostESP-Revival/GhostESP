@@ -70,6 +70,7 @@
  - Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
  - Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
  - Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
+ - Fixed panic in Infrared when reopening the Remotes list. `clear_ir_file_paths` now always resets `ir_file_capacity`, and the duplicate manual frees in `back_event_cb` and `infrared_view_destroy` route through it so `load_ir_file_list_from_dir` can no longer write through a stale-but-freed pointer.
 
 
 

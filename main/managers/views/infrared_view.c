@@ -536,13 +536,12 @@ static void dazzler_stop_cb(lv_event_t *e);
 static void cleanup_dazzler_popup(void *obj);
 
 static void clear_ir_file_paths(void) {
-    if (!ir_file_paths) {
-        return;
+    if (ir_file_paths) {
+        for (size_t i = 0; i < ir_file_count; i++) {
+            free(ir_file_paths[i]);
+        }
+        free(ir_file_paths);
     }
-    for (size_t i = 0; i < ir_file_count; i++) {
-        free(ir_file_paths[i]);
-    }
-    free(ir_file_paths);
     ir_file_paths = NULL;
     ir_file_count = 0;
     ir_file_capacity = 0;
@@ -1281,12 +1280,7 @@ static void back_event_cb(lv_event_t *e) {
             signals = NULL;
             signal_count = 0;
         }
-        if (ir_file_paths) {
-            for (size_t i = 0; i < ir_file_count; i++) free(ir_file_paths[i]);
-            free(ir_file_paths);
-            ir_file_paths = NULL;
-            ir_file_count = 0;
-        }
+        clear_ir_file_paths();
         if (uni_command_names) {
             for (size_t i = 0; i < uni_command_count; i++) free(uni_command_names[i]);
             free(uni_command_names);
@@ -1533,14 +1527,7 @@ void infrared_view_destroy(void) {
             signals = NULL;
             signal_count = 0;
         }
-        if(ir_file_paths) {
-            for(size_t i = 0; i < ir_file_count; i++) {
-                free(ir_file_paths[i]);
-            }
-            free(ir_file_paths);
-            ir_file_paths = NULL;
-            ir_file_count = 0;
-        }
+        clear_ir_file_paths();
         showing_commands = false;
         if (g_ir_ov) { options_view_destroy(g_ir_ov); g_ir_ov = NULL; }
         lvgl_obj_del_safe(&root);
