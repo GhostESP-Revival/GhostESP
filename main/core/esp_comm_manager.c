@@ -44,6 +44,7 @@
 // flags for PACKET_TYPE_RESPONSE framing
 #define RESP_FLAG_LINE_START 0x01
 
+
 // sizes for fields embedded in packets
 #define CHIP_ID_LEN 6
 #define CHIP_NAME_MAX 32           // includes null terminator
@@ -125,8 +126,10 @@ typedef struct {
     
     volatile bool initialized;
     bool is_executing_remote_cmd;
+    bool remote_output_capture;
     bool uart_driver_installed;
     bool use_crc;
+
 
     uint32_t tx_dropped_packets;
     uint32_t rx_queue_dropped_packets;
@@ -162,6 +165,10 @@ typedef struct {
 static esp_comm_manager_t* s_comm_manager = NULL;
 static comm_command_callback_t s_pending_callback = NULL;
 static void* s_pending_callback_user_data = NULL;
+static comm_response_callback_t s_response_callback = NULL;
+static void* s_response_callback_user_data = NULL;
+static comm_data_callback_t s_data_callback = NULL;
+static void* s_data_callback_user_data = NULL;
 static uart_port_t s_uart_num = UART_NUM_1; /* selected UART for dualcomm */
 
 // Forward declarations for functions referenced before their definitions
@@ -383,7 +390,7 @@ static bool send_packet_internal(const comm_packet_t* packet, TickType_t wait) {
 
 static bool send_packet(const comm_packet_t* packet) {
     TickType_t wait = (packet && packet->type == PACKET_TYPE_RESPONSE)
-        ? pdMS_TO_TICKS(30)
+        ? pdMS_TO_TICKS(100)
         : pdMS_TO_TICKS(5);
     return send_packet_internal(packet, wait);
 }
@@ -661,6 +668,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->rx_expected_seq = 0;
                     comm->rx_drop_until_newline = false;
                     comm->last_rx_tick = xTaskGetTickCount();
+                    comm->remote_output_capture = false;
                     if (comm->handshake_timer) {
                         xTimerStop(comm->handshake_timer, 0);
                     }
@@ -717,6 +725,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 comm->rx_expected_seq = 0;
                 comm->rx_drop_until_newline = false;
                 comm->last_rx_tick = xTaskGetTickCount();
+                comm->remote_output_capture = false;
                 if (comm->handshake_timer) {
                     xTimerStop(comm->handshake_timer, 0);
                 }
@@ -776,6 +785,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
 
         case PACKET_TYPE_COMMAND:
             if (comm->state == COMM_STATE_CONNECTED && comm->command_callback) {
+                comm->remote_output_capture = true;
                 if (!comm->command_queue) {
                     comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
                     if (comm->command_queue && !comm->command_executor_task_handle) {
@@ -825,13 +835,14 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     break;
                 }
                 comm_stream_callback_t cb = comm->stream_handlers[channel];
-                if (!cb) {
-                    printf("STREAM packet ignored: no handler for channel %d\n", channel);
-                    break;
-                }
                 const uint8_t* payload = packet->data + 1;
                 size_t payload_len = packet->length - 1;
-                cb(channel, payload, payload_len, comm->stream_user_data[channel]);
+                if (s_data_callback && payload_len > 0) {
+                    s_data_callback(payload, payload_len, s_data_callback_user_data);
+                }
+                if (cb) {
+                    cb(channel, payload, payload_len, comm->stream_user_data[channel]);
+                }
             }
             break;
 
@@ -938,6 +949,9 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         cap = sizeof(comm->response_assembly);
                     }
                     size_t to_copy = (rem < cap) ? rem : cap;
+                    if (s_response_callback && to_copy > 0) {
+                        s_response_callback(p, to_copy, s_response_callback_user_data);
+                    }
                     memcpy(comm->response_assembly + comm->response_assembly_len, p, to_copy);
                     comm->response_assembly_len += to_copy;
                     p += to_copy;
@@ -1131,6 +1145,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->state = COMM_STATE_IDLE;
     s_comm_manager->role = COMM_ROLE_MASTER;
     s_comm_manager->is_executing_remote_cmd = false;
+    s_comm_manager->remote_output_capture = false;
     s_comm_manager->uart_driver_installed = false;
     s_comm_manager->use_crc = true;
     s_comm_manager->parse_state = PARSE_STATE_IDLE;
@@ -1576,6 +1591,16 @@ void esp_comm_manager_set_command_callback(comm_command_callback_t callback, voi
     }
 }
 
+void esp_comm_manager_set_response_callback(comm_response_callback_t callback, void* user_data) {
+    s_response_callback = callback;
+    s_response_callback_user_data = user_data;
+}
+
+void esp_comm_manager_set_data_callback(comm_data_callback_t callback, void* user_data) {
+    s_data_callback = callback;
+    s_data_callback_user_data = user_data;
+}
+
 void esp_comm_manager_set_remote_command_flag(bool is_remote) {
     if (s_comm_manager) {
         s_comm_manager->is_executing_remote_cmd = is_remote;
@@ -1586,6 +1611,32 @@ bool esp_comm_manager_is_remote_command(void) {
     return s_comm_manager && s_comm_manager->is_executing_remote_cmd;
 }
 
+bool esp_comm_manager_should_forward_output(void) {
+    return s_comm_manager && (s_comm_manager->is_executing_remote_cmd || s_comm_manager->remote_output_capture);
+}
+
+bool esp_comm_manager_get_peer_name(char* out, size_t out_len) {
+    if (!s_comm_manager || !out || out_len == 0 || s_comm_manager->peer.chip_name[0] == '\0') {
+        return false;
+    }
+    strncpy(out, s_comm_manager->peer.chip_name, out_len - 1);
+    out[out_len - 1] = '\0';
+    return true;
+}
+
+bool esp_comm_manager_get_pins(gpio_num_t* tx_pin, gpio_num_t* rx_pin) {
+    if (!s_comm_manager) {
+        return false;
+    }
+    if (tx_pin) {
+        *tx_pin = s_comm_manager->tx_pin;
+    }
+    if (rx_pin) {
+        *rx_pin = s_comm_manager->rx_pin;
+    }
+    return true;
+}
+
 void esp_comm_manager_disconnect(void) {
     if (s_comm_manager) {
         comm_state_t previous_state = s_comm_manager->state;
@@ -1594,6 +1645,7 @@ void esp_comm_manager_disconnect(void) {
         }
         lock_state(s_comm_manager);
         s_comm_manager->state = COMM_STATE_IDLE;
+        s_comm_manager->remote_output_capture = false;
         if (s_comm_manager->handshake_timer) {
             xTimerStop(s_comm_manager->handshake_timer, 0);
         }
@@ -1731,6 +1783,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
     terminal_view_add_text("W: Connection lost, restarting discovery\n");
 
     comm->state = COMM_STATE_SCANNING;
+    comm->remote_output_capture = false;
 
     // Stop ping timer; keep it allocated and restart on next connection.
     if (comm->ping_timer) {

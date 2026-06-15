@@ -36,6 +36,8 @@
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
+#include "managers/status_display_manager.h"
+#include "managers/ble_bridge_manager.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "esp_timer.h"
@@ -1009,6 +1011,7 @@ static const char * const dual_comm_tools_options[] = {
 };
 
 static const char * const dual_comm_ble_options[] = {
+    "BLE Bridge",
     "Start AirTag Scanner",
     "List AirTags",
     "Select AirTag",
@@ -4959,6 +4962,19 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend webuiap");
             view_switched = true;
+        } else if (strcmp(Selected_Option, "BLE Bridge") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+            bool enabled = ble_bridge_get_enabled() || ble_bridge_is_running();
+            if (ble_bridge_set_enabled(!enabled)) {
+                status_display_show_status(!enabled ? "BLE Bridge On" : "BLE Bridge Off");
+                rebuild_current_menu();
+                option_invoked = false;
+                return;
+            }
+            error_popup_create("Failed to start BLE bridge");
+#else
+            error_popup_create("Device Does not Support Bluetooth...");
+#endif
         } else if (strcmp(Selected_Option, "Start AirTag Scanner") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
             terminal_set_return_view(&options_menu_view);
@@ -7399,6 +7415,7 @@ static void ap_multi_select_handle_selection(const char *option, void *user_data
 
     for (int i = 0; i < (int)count; i++) {
         char test_name[PAGED_MENU_NAME_MAX];
+        (void)test_name;
         bool has_more = false;
         char names[1][PAGED_MENU_NAME_MAX];
         ap_multi_select_load_fn(page_offset + i, 1, names, &has_more, NULL);
@@ -9898,6 +9915,10 @@ static void menu_builder_cb(lv_timer_t *t)
                 }
                 lv_obj_set_height(btn, row_height);
                 options_view_relayout_item(g_options_view, btn);
+                if (SelectedMenuType == OT_DualComm && current_dualcomm_menu_state == DUALCOMM_MENU_BLE &&
+                    strcmp(opt, "BLE Bridge") == 0) {
+                    decorate_settings_row_with_toggle(btn, ble_bridge_get_enabled() || ble_bridge_is_running());
+                }
                 if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_CAPTURE_BROWSER) {
                     lv_obj_t *lbl = lv_obj_get_child(btn, 0);
                     if (lbl) lv_label_set_long_mode(lbl, LV_LABEL_LONG_SCROLL);

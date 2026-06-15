@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
+#include "managers/ble_bridge_manager.h"
 #endif
 #include <esp_log.h>
 #include "esp_random.h"
@@ -673,6 +674,9 @@ void app_main(void) {
 #endif
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
+#endif
     wardriving_register_stream_handler();
     usb_keyboard_manager_register_stream_handler();
 #ifdef CONFIG_HAS_BADUSB

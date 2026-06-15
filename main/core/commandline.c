@@ -11,6 +11,7 @@
 #include "vendor/drivers/pcf8563.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
+#include "managers/ble_bridge_manager.h"
 #include "attacks/ble/ble_spam.h"
 #include "scans/ble/flipper_scan.h"
 #endif
@@ -4764,6 +4765,9 @@ void handle_help(int argc, char **argv) {
         glog("commstatus\n    Show communication status.\n    Usage: commstatus\n\n");
         glog("commdisconnect\n    Disconnect from current peer.\n    Usage: commdisconnect\n\n");
         glog("commsetpins\n    Change communication GPIO pins at runtime.\n    Usage: commsetpins <tx_pin> <rx_pin>\n    Example: commsetpins 4 5\n\n");
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        glog("blebridge\n    Start/status/stop the BLE GhostLink bridge.\n    Usage: blebridge [start|stop|status|pair <peer_name>]\n\n");
+#endif
         return;
     }
 
@@ -4774,7 +4778,7 @@ void handle_help(int argc, char **argv) {
         glog("sd list\n    List files/dirs with indices.\n    Usage: sd list [path]\n\n");
         glog("sd info\n    Show file/dir details.\n    Usage: sd info <index|path>\n\n");
         glog("sd size\n    Get file size.\n    Usage: sd size <index|path>\n\n");
-        glog("sd read\n    Read file (chunked downloads).\n    Usage: sd read <index|path> [offset] [length]\n\n");
+        glog("sd read\n    Read file (chunked downloads).\n    Usage: sd read <index|path> [offset] [length] [--base64]\n\n");
         glog("sd write\n    Create/overwrite file with base64 data.\n    Usage: sd write <path> <base64>\n\n");
         glog("sd append\n    Append base64 data to file.\n    Usage: sd append <path> <base64>\n\n");
         glog("sd mkdir\n    Create directory.\n    Usage: sd mkdir <path>\n\n");
@@ -5969,7 +5973,7 @@ void handle_sd_cmd(int argc, char **argv) {
         glog("  sd list [path]                   - List files/dirs with indices\n");
         glog("  sd info <idx|path>               - Show file/dir info\n");
         glog("  sd size <idx|path>               - Get file size\n");
-        glog("  sd read <idx|path> [off] [len]   - Read file (offset, length)\n");
+        glog("  sd read <idx|path> [off] [len] [--base64] - Read file (offset, length)\n");
         glog("  sd write <path> <base64>         - Write base64 data to file\n");
         glog("  sd append <path> <base64>        - Append base64 data to file\n");
         glog("  sd mkdir <path>                  - Create directory\n");
@@ -6121,12 +6125,19 @@ void handle_sd_cmd(int argc, char **argv) {
         }
 
         bool raw_output = (strcmp(sub, "cat") == 0);
+        bool base64_output = false;
         long offset = 0;
         size_t max_bytes = 0;
         int numeric_arg_count = 0;
         for (int i = 3; i < argc; i++) {
             if (strcmp(argv[i], "--raw") == 0) {
                 raw_output = true;
+                base64_output = false;
+                continue;
+            }
+            if (strcmp(argv[i], "--base64") == 0) {
+                raw_output = false;
+                base64_output = true;
                 continue;
             }
 
@@ -6173,32 +6184,67 @@ void handle_sd_cmd(int argc, char **argv) {
             glog("SD:READ:SIZE:%ld\n", file_size);
             glog("SD:READ:OFFSET:%ld\n", offset);
             glog("SD:READ:LENGTH:%zu\n", max_bytes);
+            if (base64_output) {
+                glog("SD:READ:ENCODING:base64\n");
+            }
         }
 
-        char *buf = malloc(1024);
+        size_t read_buf_size = base64_output ? 768 : 1024; /* 768 keeps base64 chunks aligned. */
+        unsigned char *buf = malloc(read_buf_size);
         if (!buf) {
             fclose(f);
             glog("SD:ERR:oom\n");
             return;
         }
+        char *b64 = NULL;
+        size_t b64_size = ((read_buf_size + 2) / 3) * 4 + 1;
+        if (base64_output) {
+            b64 = malloc(b64_size);
+            if (!b64) {
+                free(buf);
+                fclose(f);
+                glog("SD:ERR:oom\n");
+                return;
+            }
+        }
 
         size_t total_read = 0;
         size_t n;
         bool read_failed = false;
-        while (total_read < max_bytes && (n = fread(buf, 1, 1024, f)) > 0) {
-            size_t to_write = n;
-            if (total_read + to_write > max_bytes) {
-                to_write = max_bytes - total_read;
-            }
-            size_t out_written = fwrite(buf, 1, to_write, stdout);
-            if (out_written != to_write) {
-                if (raw_output) {
-                    glog("SD:ERR:stdout_write_failed\n");
-                } else {
-                    glog("\nSD:ERR:stdout_write_failed\n");
-                }
-                read_failed = true;
+        while (total_read < max_bytes) {
+            size_t remaining = max_bytes - total_read;
+            size_t to_write = remaining < read_buf_size ? remaining : read_buf_size;
+            n = fread(buf, 1, to_write, f);
+            if (n == 0) {
                 break;
+            }
+            to_write = n;
+
+            if (base64_output) {
+                size_t written = 0;
+                int ret = mbedtls_base64_encode((unsigned char *)b64,
+                                                b64_size,
+                                                &written,
+                                                buf,
+                                                to_write);
+                if (ret != 0) {
+                    glog("SD:ERR:base64_encode_failed\n");
+                    read_failed = true;
+                    break;
+                }
+                b64[written] = '\0';
+                glog("SD:READ:DATA:%s\n", b64);
+            } else {
+                size_t out_written = fwrite(buf, 1, to_write, stdout);
+                if (out_written != to_write) {
+                    if (raw_output) {
+                        glog("SD:ERR:stdout_write_failed\n");
+                    } else {
+                        glog("\nSD:ERR:stdout_write_failed\n");
+                    }
+                    read_failed = true;
+                    break;
+                }
             }
             total_read += to_write;
         }
@@ -6210,11 +6256,12 @@ void handle_sd_cmd(int argc, char **argv) {
             }
             read_failed = true;
         }
+        free(b64);
         free(buf);
         fclose(f);
 
         if (!raw_output) {
-            glog("\nSD:READ:END:bytes=%zu\n", total_read);
+            glog(base64_output ? "SD:READ:END:bytes=%zu\n" : "\nSD:READ:END:bytes=%zu\n", total_read);
             if (!read_failed) {
                 glog("SD:OK\n");
             }
@@ -10727,6 +10774,7 @@ void register_commands() {
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blescan", handle_ble_scan_cmd);
+    register_command("blebridge", ble_bridge_handle_command);
     register_command("blewardriving", handle_ble_wardriving);
     register_command("listairtags", handle_list_airtags_cmd);
     register_command("selectairtag", handle_select_airtag);
