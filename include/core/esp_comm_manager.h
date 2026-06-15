@@ -37,6 +37,7 @@ typedef void (*comm_data_callback_t)(const uint8_t* data, size_t length, void* u
 
 
 #define COMM_MAX_STREAM_CHANNELS 10
+#define COMM_STREAM_CHANNEL_COMMAND 0
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
@@ -55,6 +56,7 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin);
 bool esp_comm_manager_start_discovery(void);
 bool esp_comm_manager_connect_to_peer(const char* peer_name);
 bool esp_comm_manager_send_command(const char* command, const char* data);
+bool esp_comm_manager_send_command_line(const char* command_line);
 bool esp_comm_manager_is_connected(void);
 comm_state_t esp_comm_manager_get_state(void);
 void esp_comm_manager_set_command_callback(comm_command_callback_t callback, void* user_data);

@@ -24,6 +24,7 @@
  - Added a reusable select overlay for option picker rows
  - Added fullscreen option to `popup_create_container` so popups can fill the screen under the status bar; opted NFC, SubGHz, Infrared, BadUSB, and WiGLE popups in
  - Added subcategories to the Settings view and re-organised the options
+ - Added `capture -channel <n>` to lock WiFi capture modes and 802.15.4 captures to a fixed channel
 
 ### Changed
 

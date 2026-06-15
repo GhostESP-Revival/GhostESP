@@ -41,6 +41,7 @@
 #define BRIDGE_TASK_STACK_BYTES 4096
 #define BRIDGE_FRAME_HEADER_LEN 12
 #define BRIDGE_DEFAULT_MTU 128
+#define BRIDGE_PEER_COMMAND_PAYLOAD_MAX 60
 
 #define GB_MAGIC0 0x47
 #define GB_MAGIC1 0x42
@@ -440,7 +441,13 @@ static void bridge_send_cmd_to_peer(uint32_t cmd_id, const char *command) {
     data[sizeof(data) - 1] = '\0';
 
     const char *data_arg = data[0] ? data : NULL;
-    if (!esp_comm_manager_send_command(cmd, data_arg)) {
+    bool sent = false;
+    if (strlen(command) <= BRIDGE_PEER_COMMAND_PAYLOAD_MAX) {
+        sent = esp_comm_manager_send_command(cmd, data_arg);
+    } else {
+        sent = esp_comm_manager_send_command_line(command);
+    }
+    if (!sent) {
         bridge_send_err(cmd_id, "comm send failed");
         return;
     }

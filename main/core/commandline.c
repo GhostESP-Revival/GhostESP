@@ -1854,7 +1854,7 @@ void handle_status_idle_cmd(int argc, char **argv) {
 #endif
 
 void handle_capture_scan(int argc, char **argv) {
-    if (argc < 2 || argc > 4) {
+    if (argc < 2 || argc > 5) {
         glog("Error: Incorrect number of arguments.\n");
         status_display_show_status("Capture Usage");
         return;
@@ -1868,10 +1868,70 @@ void handle_capture_scan(int argc, char **argv) {
         return;
     }
 
+    // Parse optional "-channel <n>" or "-c <n>" before mode-specific logic.
+    // The mode remains argv[1], so existing usage like `capture -wireshark -c 6`
+    // and new usage like `capture -probe -channel 6` both work.
+    uint8_t fixed_channel = 0;
+    bool fixed_channel_set = false;
+    int parsed_fixed_channel = 0;
+    for (int i = 2; i + 1 < argc; i++) {
+        if (strcmp(argv[i], "-channel") == 0 || strcmp(argv[i], "-c") == 0) {
+            parsed_fixed_channel = atoi(argv[i + 1]);
+            fixed_channel_set = true;
+            break;
+        }
+    }
+
+    bool wifi_channel_lock_mode =
+        strcmp(capturetype, "-probe") == 0 ||
+        strcmp(capturetype, "-deauth") == 0 ||
+        strcmp(capturetype, "-beacon") == 0 ||
+        strcmp(capturetype, "-raw") == 0 ||
+        strcmp(capturetype, "-eapol") == 0 ||
+        strcmp(capturetype, "-pwn") == 0 ||
+        strcmp(capturetype, "-wps") == 0 ||
+        strcmp(capturetype, "-wireshark") == 0;
+
+    bool channel_flag_applicable = wifi_channel_lock_mode
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        || strcmp(capturetype, "-802154") == 0
+#endif
+        ;
+
+    bool channel_flag_ignored_by_mode =
+        strcmp(capturetype, "-list") == 0 || strcmp(capturetype, "-export") == 0;
+
+    if (fixed_channel_set && wifi_channel_lock_mode) {
+        if (parsed_fixed_channel < 1 || parsed_fixed_channel > MAX_WIFI_CHANNEL) {
+            glog("Error: Invalid channel %d. Must be between 1 and %d\n",
+                 parsed_fixed_channel, MAX_WIFI_CHANNEL);
+            status_display_show_status("Invalid Channel");
+            return;
+        }
+        fixed_channel = (uint8_t)parsed_fixed_channel;
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    } else if (fixed_channel_set && strcmp(capturetype, "-802154") == 0) {
+        if (parsed_fixed_channel < 11 || parsed_fixed_channel > 26) {
+            glog("Error: Invalid 802.15.4 channel %d. Must be between 11 and 26\n",
+                 parsed_fixed_channel);
+            status_display_show_status("Invalid Channel");
+            return;
+        }
+        fixed_channel = (uint8_t)parsed_fixed_channel;
+#endif
+    } else if (fixed_channel_set && !channel_flag_applicable && !channel_flag_ignored_by_mode) {
+        glog("Note: -channel ignored for '%s' (not supported for this mode)\n",
+             capturetype);
+    }
+
     if (strcmp(capturetype, "-list") == 0) {
         if (argc != 2) {
-            glog("Usage: capture -list\n");
-            return;
+            if (fixed_channel_set) {
+                glog("Note: -channel ignored for '-list'\n");
+            } else {
+                glog("Usage: capture -list\n");
+                return;
+            }
         }
         handle_capture_list();
         return;
@@ -1879,27 +1939,36 @@ void handle_capture_scan(int argc, char **argv) {
 
     if (strcmp(capturetype, "-export") == 0) {
         if (argc != 3) {
-            glog("Usage: capture -export <pcap-file>\n");
-            return;
+            if (fixed_channel_set && argc == 5) {
+                glog("Note: -channel ignored for '-export'\n");
+            } else {
+                glog("Usage: capture -export <pcap-file>\n");
+                return;
+            }
         }
         handle_capture_export(argv[2]);
         return;
     }
-    
-    // Parse channel parameter if present
-    uint8_t fixed_channel = 0;
-    bool use_fixed_channel = false;
-    
-    if (argc >= 4 && strcmp(argv[2], "-c") == 0) {
-        fixed_channel = atoi(argv[3]);
-        use_fixed_channel = true;
-        
-        if (fixed_channel < 1 || fixed_channel > MAX_WIFI_CHANNEL) {
-            glog("Error: Invalid channel %d. Must be between 1 and %d\n", fixed_channel, MAX_WIFI_CHANNEL);
-            status_display_show_status("Invalid Channel");
-            return;
-        }
-    }
+
+    // Helper macro: after starting monitor mode, lock to fixed_channel if asked.
+    // Failure to lock is surfaced as an error and we tear the capture back down,
+    // matching the existing -wireshark behavior.
+#define APPLY_CAPTURE_CHANNEL_LOCK()                                          \
+    do {                                                                      \
+        if (fixed_channel_set) {                                              \
+            esp_err_t _lock_err =                                             \
+                wifi_manager_set_capture_channel_lock(fixed_channel);         \
+            if (_lock_err != ESP_OK) {                                        \
+                glog("Error: Failed to lock capture to channel %d\n",         \
+                     fixed_channel);                                          \
+                status_display_show_status("Channel Err");                    \
+                pcap_file_close();                                            \
+                wifi_manager_stop_monitor_mode();                             \
+                return;                                                       \
+            }                                                                 \
+            glog("Capture locked to channel %d\n", fixed_channel);            \
+        }                                                                     \
+    } while (0)
 
     if (strcmp(capturetype, "-probe") == 0) {
         glog("Starting probe request\npacket capture...\n");
@@ -1911,6 +1980,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_probe_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Probe");
     }
 
@@ -1923,6 +1993,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_deauth_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Deauth");
     }
 
@@ -1936,6 +2007,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_beacon_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Beacon");
     }
 
@@ -1949,6 +2021,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Raw");
     }
 
@@ -1961,7 +2034,17 @@ void handle_capture_scan(int argc, char **argv) {
             status_display_show_status("PCAP Warn");
         }
         uint8_t ch = 0; // 0 means hopping by default
-        if (argc == 3 && argv[2]) {
+        if (fixed_channel_set) {
+            // Re-validate against the 802.15.4 range 11..26.
+            if (fixed_channel < 11 || fixed_channel > 26) {
+                glog("Error: Invalid 802.15.4 channel %d. Must be between 11 and 26\n",
+                     fixed_channel);
+                status_display_show_status("Invalid Channel");
+                return;
+            }
+            ch = fixed_channel;
+        } else if (argc == 3 && argv[2]) {
+            // Backward-compatible positional "ch<n>" form.
             const char *arg = argv[2];
             if (strncmp(arg, "ch", 2) == 0) arg += 2;
             int parsed = atoi(arg);
@@ -1982,6 +2065,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_eapol_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture EAPOL");
     }
 
@@ -1995,6 +2079,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_pwn_scan_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture PWN");
     }
 
@@ -2010,6 +2095,7 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_wps_detection_callback);
+        APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture WPS");
     }
 
@@ -2021,12 +2107,14 @@ void handle_capture_scan(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
-        
-        if (use_fixed_channel) {
+
+        if (fixed_channel_set) {
             err = wifi_manager_set_wireshark_fixed_channel(fixed_channel);
             if (err != ESP_OK) {
                 glog("Error: Failed to set fixed channel %d\n", fixed_channel);
                 status_display_show_status("Channel Err");
+                pcap_wireshark_stop();
+                wifi_manager_stop_monitor_mode();
                 return;
             }
             glog("Wireshark capture locked to channel %d\n", fixed_channel);
@@ -2111,6 +2199,8 @@ void handle_capture_scan(int argc, char **argv) {
         glog("Error: Unknown capture type '%s'.\n", capturetype);
         status_display_show_status("Capture Unknown");
     }
+
+#undef APPLY_CAPTURE_CHANNEL_LOCK
 }
 
 void stop_portal(int argc, char **argv) {
@@ -4965,7 +5055,7 @@ void handle_help(int argc, char **argv) {
         glog("\nCapture Commands:\n\n");
         glog("capture\n");
         glog("    Description: Start a WiFi Capture (Requires SD Card or Flipper)\n");
-        glog("    Usage: capture [OPTION]\n");
+        glog("    Usage: capture [OPTION] [-channel <n>|-c <n>]\n");
         glog("    Arguments:\n");
         glog("        -probe     : Start Capturing Probe Packets\n");
         glog("        -beacon    : Start Capturing Beacon Packets\n");
@@ -4973,23 +5063,37 @@ void handle_help(int argc, char **argv) {
         glog("        -raw       : Start Capturing Raw Packets\n");
         glog("        -wps       : Start Capturing WPS Packets and there Auth Type\n");
         glog("        -pwn       : Start Capturing Pwnagotchi Packets\n");
+        glog("        -eapol     : Start Capturing EAPOL (handshake) Packets\n");
         glog("        -list      : Browse saved PCAPs with +/- hc22000 markers\n");
         glog("        -export    : Export PCAP to hc22000 (PMKID + M2/M3)\n");
         glog("                    Usage: capture -export <pcap-file>\n");
         glog("        -wireshark : Stream raw PCAP to USB/UART for Wireshark\n");
-        glog("                    Usage: capture -wireshark [-c <channel>]\n");
-        glog("                    -c <channel>: Lock to specific channel (1-%d)\n", MAX_WIFI_CHANNEL);
+        glog("                    Usage: capture -wireshark [-c <channel>|-channel <channel>]\n");
+        glog("                    -channel <n>: Lock to specific channel (1-%d)\n", MAX_WIFI_CHANNEL);
+        glog("        -wiresharkble : Stream BLE PCAP to USB/UART for Wireshark\n");
+        #ifndef CONFIG_IDF_TARGET_ESP32S2
+        glog("        -ble       : Start BLE packet capture\n");
+        glog("        -skimmer   : Start skimmer (BLE) detection\n");
+        #endif
         #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
         glog("        -802154    : Start Capturing IEEE 802.15.4 Packets [C5/C6]\n");
+        glog("                    Usage: capture -802154 [ch<n>|-channel <n>]\n");
+        glog("                    -channel <n>: Lock to 802.15.4 channel (11-26)\n");
         #endif
         glog("        -stop      : Stops the active capture\n\n");
         glog("capture\n");
         glog("    Start a WiFi packet capture.\n");
-        glog("    Usage: capture [OPTION]\n");
+        glog("    Usage: capture [OPTION] [-channel <n>|-c <n>]\n");
+        glog("    -channel <n>: Lock the radio to channel <n> during the capture.\n");
+        glog("                  Accepted by: -probe, -deauth, -beacon, -raw, -eapol, -pwn, -wps, -wireshark");
         #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        glog("    Options: -probe, -beacon, -deauth, -raw, -wps, -pwn, -list, -export, -802154, -stop\n\n");
+        glog(", -802154 (11-26 only)");
+        #endif
+        glog(".\n");
+        #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        glog("    Options: -probe, -beacon, -deauth, -raw, -wps, -pwn, -eapol, -list, -export, -wireshark, -wiresharkble, -802154, -stop\n\n");
         #else
-        glog("    Options: -probe, -beacon, -deauth, -raw, -wps, -pwn, -list, -export, -stop\n\n");
+        glog("    Options: -probe, -beacon, -deauth, -raw, -wps, -pwn, -eapol, -list, -export, -wireshark, -wiresharkble, -stop\n\n");
         #endif
         return;
     }
@@ -5257,9 +5361,9 @@ void handle_help(int argc, char **argv) {
 void handle_capture(int argc, char **argv) {
     if (argc < 2) {
         #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        glog("Usage: capture [-probe|-beacon|-deauth|-raw|-ble|-zigbee]\n");
+        glog("Usage: capture [-probe|-beacon|-deauth|-raw|-eapol|-pwn|-wps|-wireshark|-wiresharkble|-ble|-skimmer|-802154|-list|-export|-stop] [-channel <n>|-c <n>]\n");
         #else
-        glog("Usage: capture [-probe|-beacon|-deauth|-raw|-ble]\n");
+        glog("Usage: capture [-probe|-beacon|-deauth|-raw|-eapol|-pwn|-wps|-wireshark|-wiresharkble|-ble|-skimmer|-list|-export|-stop] [-channel <n>|-c <n>]\n");
         #endif
         status_display_show_status("Capture Usage");
         return;
@@ -7463,8 +7567,6 @@ void handle_comm_setpins(int argc, char **argv) {
 }
 
 static void comm_command_callback(const char* command, const char* data, void* user_data) {
-    static char full_command[128];
-    
 #ifdef CONFIG_WITH_ETHERNET
     if (eth_comm_handler_handle_command(command, data)) {
         return;
@@ -7492,13 +7594,28 @@ static void comm_command_callback(const char* command, const char* data, void* u
     }
 #endif
 
+    char stack_command[128];
+    char *full_command = stack_command;
+    size_t data_len = (data && strlen(data) > 0) ? strlen(data) : 0;
+    size_t needed = strlen("peer:") + strlen(command) + (data_len ? 1 + data_len : 0) + 1;
+    if (needed > sizeof(stack_command)) {
+        full_command = (char *)malloc(needed);
+        if (!full_command) {
+            glog("Failed to allocate remote command buffer\n");
+            return;
+        }
+    }
+
     if (data && strlen(data) > 0) {
-        snprintf(full_command, sizeof(full_command), "peer:%s %s", command, data);
+        snprintf(full_command, needed, "peer:%s %s", command, data);
     } else {
-        snprintf(full_command, sizeof(full_command), "peer:%s", command);
+        snprintf(full_command, needed, "peer:%s", command);
     }
     
     simulateCommand(full_command);
+    if (full_command != stack_command) {
+        free(full_command);
+    }
 }
 
 void handle_ap_enable_cmd(int argc, char **argv) {

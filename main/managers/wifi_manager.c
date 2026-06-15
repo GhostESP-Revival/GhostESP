@@ -3653,23 +3653,54 @@ void wifi_manager_stop_wireshark_channel_hop(void) {
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
     // Validate channel range based on target
     uint8_t max_channel = MAX_WIFI_CHANNEL;
-    
+
     if (channel < 1 || channel > max_channel) {
         ESP_LOGE(TAG, "Invalid channel %d. Must be between 1 and %d", channel, max_channel);
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     // Stop any existing channel hopping
     wifi_manager_stop_wireshark_channel_hop();
-    
+
     // Set the fixed channel
     esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set channel %d: %s", channel, esp_err_to_name(err));
         return err;
     }
-    
+
     ESP_LOGI(TAG, "Wireshark capture locked to channel %d", channel);
+    return ESP_OK;
+}
+
+esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel) {
+    // Validate channel range based on target
+    uint8_t max_channel = MAX_WIFI_CHANNEL;
+
+    if (channel < 1 || channel > max_channel) {
+        ESP_LOGE(TAG, "Invalid capture channel %d. Must be between 1 and %d", channel, max_channel);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Stop any active scan/capture channel hopping first so monitor mode stays locked.
+    if (station_scan_is_active()) {
+        station_scan_stop();
+    }
+    if (live_ap_hopping_active) {
+        stop_live_ap_channel_hopping();
+    }
+    wifi_manager_stop_wireshark_channel_hop();
+    if (airspace_monitor_is_active()) {
+        airspace_monitor_stop();
+    }
+
+    esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to lock capture to channel %d: %s", channel, esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Capture locked to channel %d", channel);
     return ESP_OK;
 }
 

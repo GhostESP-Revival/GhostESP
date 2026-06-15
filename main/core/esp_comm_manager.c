@@ -20,8 +20,10 @@
 #include "esp_system.h"
 #include "esp_mac.h"
 #include "esp_heap_caps.h"
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
 
@@ -41,6 +43,7 @@
 #define PACKET_CHECKSUM_SIZE 1
 #define PACKET_MAX_PAYLOAD (COMM_PACKET_SIZE - 4)
 #define RESPONSE_LOG_PREFIX "RX: "
+#define COMM_STREAM_COMMAND_MAX 250
 // flags for PACKET_TYPE_RESPONSE framing
 #define RESP_FLAG_LINE_START 0x01
 
@@ -96,6 +99,7 @@ typedef struct {
 typedef struct {
     char command[33];
     char data[COMM_PACKET_SIZE];
+    char* dynamic_data;
 } comm_command_t;
 
 typedef struct {
@@ -160,6 +164,10 @@ typedef struct {
 
     comm_stream_callback_t stream_handlers[COMM_MAX_STREAM_CHANNELS];
     void* stream_user_data[COMM_MAX_STREAM_CHANNELS];
+    char* command_stream_buf;
+    size_t command_stream_len;
+    size_t command_stream_cap;
+    bool command_stream_discarding;
 } esp_comm_manager_t;
 
 static esp_comm_manager_t* s_comm_manager = NULL;
@@ -184,6 +192,9 @@ static void send_handshake_request(const char* peer_name);
 static void send_handshake_ack(void);
 static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t* packet);
 static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason);
+static bool queue_received_command(esp_comm_manager_t* comm, const char* command, const char* data);
+static void drain_command_queue(QueueHandle_t queue);
+static void reset_command_stream(esp_comm_manager_t* comm);
 
 static inline void lock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
@@ -283,6 +294,184 @@ static void free_task_resources(psram_task_resources_t* res) {
     if (res->tcb) {
         heap_caps_free(res->tcb);
         res->tcb = NULL;
+    }
+}
+
+static bool ensure_command_executor(esp_comm_manager_t* comm) {
+    if (!comm || !comm->command_callback) {
+        return false;
+    }
+    if (!comm->command_queue) {
+        comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+    }
+    if (comm->command_queue && !comm->command_executor_task_handle) {
+        TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
+                                            "comm_cmd_exec_task", 3072, comm, 5);
+        if (!t) {
+            printf("E: failed to create command executor task\n");
+            free_task_resources(&comm->command_task_res);
+        }
+        comm->command_executor_task_handle = t;
+    }
+    return comm->command_queue != NULL;
+}
+
+static void free_command_payload(comm_command_t* cmd) {
+    if (cmd && cmd->dynamic_data) {
+        free(cmd->dynamic_data);
+        cmd->dynamic_data = NULL;
+    }
+}
+
+static void drain_command_queue(QueueHandle_t queue) {
+    if (!queue) {
+        return;
+    }
+    comm_command_t pending;
+    while (xQueueReceive(queue, &pending, 0) == pdPASS) {
+        free_command_payload(&pending);
+    }
+}
+
+static bool queue_received_command(esp_comm_manager_t* comm, const char* command, const char* data) {
+    if (!comm || !command || !ensure_command_executor(comm)) {
+        return false;
+    }
+
+    comm_command_t cmd_to_queue;
+    memset(&cmd_to_queue, 0, sizeof(comm_command_t));
+    strncpy(cmd_to_queue.command, command, MAX_CMD_LEN);
+    cmd_to_queue.command[MAX_CMD_LEN] = '\0';
+
+    if (data && data[0] != '\0') {
+        size_t data_len = strlen(data);
+        if (data_len < sizeof(cmd_to_queue.data)) {
+            memcpy(cmd_to_queue.data, data, data_len + 1);
+        } else {
+            cmd_to_queue.dynamic_data = (char*)malloc(data_len + 1);
+            if (!cmd_to_queue.dynamic_data) {
+                printf("Command data allocation failed for: %s\n", command);
+                return false;
+            }
+            memcpy(cmd_to_queue.dynamic_data, data, data_len + 1);
+        }
+    }
+
+    if (xQueueSend(comm->command_queue, &cmd_to_queue, pdMS_TO_TICKS(10)) != pdPASS) {
+        printf("Command queue full, dropped command: %s\n", cmd_to_queue.command);
+        free_command_payload(&cmd_to_queue);
+        return false;
+    }
+    return true;
+}
+
+static void reset_command_stream(esp_comm_manager_t* comm) {
+    if (!comm) {
+        return;
+    }
+    if (comm->command_stream_buf) {
+        free(comm->command_stream_buf);
+        comm->command_stream_buf = NULL;
+    }
+    comm->command_stream_len = 0;
+    comm->command_stream_cap = 0;
+    comm->command_stream_discarding = false;
+}
+
+static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t needed) {
+    if (!comm || needed > COMM_STREAM_COMMAND_MAX + 1) {
+        return false;
+    }
+    if (needed <= comm->command_stream_cap) {
+        return true;
+    }
+
+    size_t new_cap = comm->command_stream_cap ? comm->command_stream_cap : 64;
+    while (new_cap < needed && new_cap < COMM_STREAM_COMMAND_MAX + 1) {
+        new_cap *= 2;
+    }
+    if (new_cap > COMM_STREAM_COMMAND_MAX + 1) {
+        new_cap = COMM_STREAM_COMMAND_MAX + 1;
+    }
+
+    char* new_buf = (char*)realloc(comm->command_stream_buf, new_cap);
+    if (!new_buf) {
+        reset_command_stream(comm);
+        return false;
+    }
+    comm->command_stream_buf = new_buf;
+    comm->command_stream_cap = new_cap;
+    return true;
+}
+
+static bool queue_command_line(esp_comm_manager_t* comm, char* line) {
+    if (!comm || !line) {
+        return false;
+    }
+
+    while (*line && isspace((unsigned char)*line)) {
+        line++;
+    }
+    size_t len = strlen(line);
+    while (len > 0 && isspace((unsigned char)line[len - 1])) {
+        line[--len] = '\0';
+    }
+    if (len == 0) {
+        return false;
+    }
+
+    size_t cmd_len = 0;
+    while (line[cmd_len] && !isspace((unsigned char)line[cmd_len])) {
+        cmd_len++;
+    }
+    if (cmd_len == 0 || cmd_len > MAX_CMD_LEN) {
+        printf("Stream command name too long\n");
+        return false;
+    }
+
+    char command[MAX_CMD_LEN + 1];
+    memcpy(command, line, cmd_len);
+    command[cmd_len] = '\0';
+
+    char* data = line + cmd_len;
+    while (*data && isspace((unsigned char)*data)) {
+        data++;
+    }
+    return queue_received_command(comm, command, data[0] ? data : NULL);
+}
+
+static void handle_command_stream_data(esp_comm_manager_t* comm, const uint8_t* payload, size_t payload_len) {
+    if (!comm || !payload || payload_len == 0) {
+        return;
+    }
+
+    for (size_t i = 0; i < payload_len; ++i) {
+        uint8_t b = payload[i];
+        if (b == '\0' || b == '\n') {
+            if (comm->command_stream_len > 0 && comm->command_stream_buf) {
+                comm->command_stream_buf[comm->command_stream_len] = '\0';
+                comm->remote_output_capture = true;
+                if (!queue_command_line(comm, comm->command_stream_buf)) {
+                    printf("Stream command dropped\n");
+                }
+            }
+            reset_command_stream(comm);
+            continue;
+        }
+        if (b == '\r') {
+            continue;
+        }
+        if (comm->command_stream_discarding) {
+            continue;
+        }
+        if (comm->command_stream_len >= COMM_STREAM_COMMAND_MAX ||
+            !ensure_command_stream_capacity(comm, comm->command_stream_len + 2)) {
+            printf("Stream command too long\n");
+            reset_command_stream(comm);
+            comm->command_stream_discarding = true;
+            continue;
+        }
+        comm->command_stream_buf[comm->command_stream_len++] = (char)b;
     }
 }
 
@@ -786,36 +975,23 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
         case PACKET_TYPE_COMMAND:
             if (comm->state == COMM_STATE_CONNECTED && comm->command_callback) {
                 comm->remote_output_capture = true;
-                if (!comm->command_queue) {
-                    comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
-                    if (comm->command_queue && !comm->command_executor_task_handle) {
-                        TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                           "comm_cmd_exec_task", 3072, comm, 5);
-                        if (!t) {
-                            printf("E: failed to create command executor task\n");
-                            free_task_resources(&comm->command_task_res);
-                        }
-                        comm->command_executor_task_handle = t;
-                    }
-                }
-                comm_command_t cmd_to_queue;
-                memset(&cmd_to_queue, 0, sizeof(comm_command_t));
-                strncpy(cmd_to_queue.command, (char*)packet->data, MAX_CMD_LEN);
-                cmd_to_queue.command[MAX_CMD_LEN] = '\0';
-                size_t cmd_len = strlen(cmd_to_queue.command);
+                char command[MAX_CMD_LEN + 1];
+                strncpy(command, (char*)packet->data, MAX_CMD_LEN);
+                command[MAX_CMD_LEN] = '\0';
+                size_t cmd_len = strlen(command);
                 size_t data_start = cmd_len + 1;
+                char data[COMM_PACKET_SIZE];
+                data[0] = '\0';
                 if (packet->length > data_start) {
                     size_t data_len = packet->length - data_start;
-                    if (data_len > sizeof(cmd_to_queue.data) - 1) {
-                        data_len = sizeof(cmd_to_queue.data) - 1;
+                    if (data_len > sizeof(data) - 1) {
+                        data_len = sizeof(data) - 1;
                     }
-                    strncpy(cmd_to_queue.data, (char*)packet->data + data_start, data_len);
-                    cmd_to_queue.data[data_len] = '\0';
+                    memcpy(data, (char*)packet->data + data_start, data_len);
+                    data[data_len] = '\0';
                 }
 
-                if (comm->command_queue && xQueueSend(comm->command_queue, &cmd_to_queue, pdMS_TO_TICKS(10)) != pdPASS) {
-                    printf("Command queue full, dropped command: %s\n", cmd_to_queue.command);
-                }
+                (void)queue_received_command(comm, command, data[0] ? data : NULL);
             }
             break;
 
@@ -837,6 +1013,10 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 comm_stream_callback_t cb = comm->stream_handlers[channel];
                 const uint8_t* payload = packet->data + 1;
                 size_t payload_len = packet->length - 1;
+                if (channel == COMM_STREAM_CHANNEL_COMMAND) {
+                    handle_command_stream_data(comm, payload, payload_len);
+                    break;
+                }
                 if (s_data_callback && payload_len > 0) {
                     s_data_callback(payload, payload_len, s_data_callback_user_data);
                 }
@@ -1006,13 +1186,15 @@ static void command_executor_task(void* arg) {
     while (comm->initialized) {
         if (xQueueReceive(comm->command_queue, &received_cmd, pdMS_TO_TICKS(100)) == pdPASS) {
             if (comm->command_callback) {
+                const char* data = received_cmd.dynamic_data ? received_cmd.dynamic_data : received_cmd.data;
                 // Temporarily set the remote command flag to indicate this is a remote command
                 bool was_remote = esp_comm_manager_is_remote_command();
                 esp_comm_manager_set_remote_command_flag(true);
-                comm->command_callback(received_cmd.command, received_cmd.data, comm->callback_user_data);
+                comm->command_callback(received_cmd.command, data, comm->callback_user_data);
                 // Restore the previous remote command flag state
                 esp_comm_manager_set_remote_command_flag(was_remote);
             }
+            free_command_payload(&received_cmd);
         }
     }
 
@@ -1317,6 +1499,21 @@ bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t l
     return esp_comm_manager_send_stream_wait(channel, data, length, 0);
 }
 
+bool esp_comm_manager_send_command_line(const char* command_line) {
+    if (!command_line || command_line[0] == '\0') {
+        return false;
+    }
+    size_t len = strlen(command_line);
+    if (len > COMM_STREAM_COMMAND_MAX) {
+        printf("Command line too long for stream transport\n");
+        return false;
+    }
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_COMMAND,
+                                            (const uint8_t*)command_line,
+                                            len + 1,
+                                            10);
+}
+
 bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callback_t callback, void* user_data) {
     if (!s_comm_manager || channel >= COMM_MAX_STREAM_CHANNELS) {
         return false;
@@ -1415,9 +1612,11 @@ bool esp_comm_manager_start_discovery(void) {
         s_comm_manager->rx_packet_queue = NULL;
     }
     if (s_comm_manager->command_queue) {
+        drain_command_queue(s_comm_manager->command_queue);
         vQueueDelete(s_comm_manager->command_queue);
         s_comm_manager->command_queue = NULL;
     }
+    reset_command_stream(s_comm_manager);
     if (s_comm_manager->tx_task_handle) {
         vTaskDelete(s_comm_manager->tx_task_handle);
         s_comm_manager->tx_task_handle = NULL;
@@ -1736,8 +1935,10 @@ void esp_comm_manager_deinit(void) {
         vQueueDelete(s_comm_manager->tx_queue);
     }
     if (s_comm_manager->command_queue) {
+        drain_command_queue(s_comm_manager->command_queue);
         vQueueDelete(s_comm_manager->command_queue);
     }
+    reset_command_stream(s_comm_manager);
     if (s_comm_manager->state_mutex) {
         vSemaphoreDelete(s_comm_manager->state_mutex);
     }
@@ -1796,8 +1997,10 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         xQueueReset(comm->rx_packet_queue);
     }
     if (comm->command_queue) {
+        drain_command_queue(comm->command_queue);
         xQueueReset(comm->command_queue);
     }
+    reset_command_stream(comm);
     if (comm->tx_queue) {
         xQueueReset(comm->tx_queue);
     }

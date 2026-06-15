@@ -197,6 +197,11 @@ void wifi_manager_stop_wireshark_channel_hop(void);
 // Set fixed channel for Wireshark capture
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel);
 
+// Lock any monitor-mode capture (probe/deauth/beacon/raw/eapol/pwn/wps) to a
+// fixed WiFi channel. Stops any active channel hopping and sets the channel
+// via esp_wifi_set_channel. Returns ESP_ERR_INVALID_ARG for out-of-range values.
+esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel);
+
 void wifi_manager_start_deauth();
 
 void wifi_manager_stop_deauth();
