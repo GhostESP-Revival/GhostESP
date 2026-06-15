@@ -714,14 +714,11 @@ static void bridge_wait_and_send_task(void *arg) {
 }
 
 static void bridge_kick_wait_and_send(void) {
-    static StaticTask_t s_wait_tcb;
-    static StackType_t s_wait_stack[2048];
     if (!bridge_load_enabled()) {
         return;
     }
-    (void)xTaskCreateStatic(bridge_wait_and_send_task, "ble_bridge_wait",
-                            sizeof(s_wait_stack) / sizeof(s_wait_stack[0]),
-                            NULL, 3, s_wait_stack, &s_wait_tcb);
+    (void)xTaskCreate(bridge_wait_and_send_task, "ble_bridge_wait",
+                      BRIDGE_TASK_STACK_BYTES, NULL, 3, NULL);
 }
 
 bool ble_bridge_start(void) {
