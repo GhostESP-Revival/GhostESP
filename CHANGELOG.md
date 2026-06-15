@@ -3,6 +3,7 @@
 ## Revival v2.0-pre5
 
 ### Added
+ - Added support for assigning a GhostLink connected chip to act as a blebridge between a main chip and the android companion app
  - Added support for the LilyGo T-Dongle-S3 with WebUI BadUSB support
  - Added support for the LilyGo T-Dongle-C5
  - Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
