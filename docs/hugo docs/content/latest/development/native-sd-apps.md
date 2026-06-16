@@ -795,6 +795,48 @@ bool (*ble_detect_start_tracking)(int index);
 bool (*ble_detect_start_airtag_spoof)(int index);
 ```
 
+### BLE Advertiser Scan
+
+```c
+typedef struct {
+    uint8_t  mac[6];
+    uint8_t  addr_type;            // 0 = Public, 1 = Random, other = Unknown
+    int8_t   rssi;
+    uint8_t  event_type;
+    uint32_t seen_count;
+    char     name[24];
+    bool     has_flags;
+    uint8_t  flags;
+    bool     has_tx_power;
+    int8_t   tx_power;
+    bool     has_manufacturer_id;
+    uint16_t manufacturer_id;
+    bool     is_ibeacon;
+    char     ibeacon_uuid[37];
+    uint16_t ibeacon_major;
+    uint16_t ibeacon_minor;
+    int8_t   ibeacon_measured_power;
+    char     adv_type[16];
+    char     manufacturer[24];
+    char     oui_vendor[32];      // Empty if MAC has no recognized OUI
+    char     services[96];        // Comma-separated 16-bit service UUIDs
+    char     service_data[64];    // Includes Eddystone frame hints
+    bool     has_appearance;
+    uint16_t appearance;
+} ghostesp_ble_adv_info_t;
+
+void (*ble_adv_scan_start)(void);
+void (*ble_adv_scan_stop)(void);
+bool (*ble_adv_scan_active)(void);
+int  (*ble_adv_scan_count)(void);
+bool (*ble_adv_scan_get)(int index, ghostesp_ble_adv_info_t *out);
+bool (*ble_adv_scan_track)(int index);
+void (*ble_adv_scan_stop_tracking)(void);
+bool (*ble_adv_scan_save_to_sd)(int index);
+```
+
+`ble_adv_scan_start` begins a parsed BLE advertisement scan that does not require a connection. Use `ble_adv_scan_get` to enumerate results, `ble_adv_scan_track` to follow a single advertiser's RSSI on the terminal, and `ble_adv_scan_save_to_sd` to write the parsed record(s) to `/mnt/ghostesp/scans/ble_advertiser*.txt`. Pass `index < 0` to save the full list as `ble_advertisers_*.txt`. Requires the `ble` permission. Not available on ESP32-S2.
+
 ### NRF24
 
 ```c

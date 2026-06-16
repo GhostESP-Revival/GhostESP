@@ -13,6 +13,7 @@
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
 #include "attacks/ble/ble_spam.h"
+#include "scans/ble/advertiser_scan.h"
 #include "scans/ble/flipper_scan.h"
 #endif
 #include "managers/dial_manager.h"
@@ -1540,9 +1541,19 @@ void handle_ble_scan_cmd(int argc, char **argv) {
         return;
     }
 
+    if (argc > 1 && strcmp(argv[1], "-adv") == 0) {
+        glog("Starting BLE Advertiser Scan.\n");
+        advertiser_scan_start();
+        return;
+    }
+
     if (argc > 1 && strcmp(argv[1], "-s") == 0) {
         glog("Stopping BLE Scan.\n");
-        ble_stop();
+        bool advertiser_active = advertiser_scan_is_active();
+        advertiser_scan_stop();
+        if (!advertiser_active) {
+            ble_stop();
+        }
         ble_stop_gatt_scan();
         return;
     }
@@ -4790,6 +4801,8 @@ void handle_help(int argc, char **argv) {
         glog("        -f   : Start 'Find the Flippers' mode\n");
         glog("        -ds  : Start BLE spam detector\n");
         glog("        -a   : Start AirTag scanner\n");
+        glog("        -adv : Start parsed BLE advertiser scan\n");
+        glog("        -g   : Start GATT scanner for connectable devices\n");
         glog("        -r   : Scan for raw BLE packets\n");
         glog("        -s   : Stop BLE scanning\n\n");
         glog("blespam\n");
@@ -4811,6 +4824,9 @@ void handle_help(int argc, char **argv) {
         glog("    Description: List discovered AirTags\n");
         glog("    Usage: list -airtags\n\n");
         glog("select -airtag <index>\n\n");
+        glog("listadv\n");
+        glog("    Description: List parsed BLE advertisers from blescan -adv\n");
+        glog("    Usage: listadv\n\n");
         return;
     }
 
@@ -7215,6 +7231,13 @@ void handle_enum_gatt_cmd(int argc, char **argv) {
 
 void handle_track_gatt_cmd(int argc, char **argv) {
     ble_track_gatt_device();
+}
+
+void handle_list_advertisers_cmd(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    advertiser_scan_print_devices();
+    status_display_show_status("List BLE Adv");
 }
 
 #endif
@@ -10930,6 +10953,7 @@ void register_commands() {
     register_command("selectgatt", handle_select_gatt_cmd);
     register_command("enumgatt", handle_enum_gatt_cmd);
     register_command("trackgatt", handle_track_gatt_cmd);
+    register_command("listadv", handle_list_advertisers_cmd);
 #endif
     register_command("trackap", handle_track_ap_cmd);
     register_command("tracksta", handle_track_sta_cmd);

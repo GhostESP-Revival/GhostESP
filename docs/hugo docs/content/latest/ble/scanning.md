@@ -61,6 +61,15 @@ Discover nearby BLE devices and gather information about them.
 
 See the dedicated [GATT Discovery]({{< relref "gatt" >}}) page for a full walkthrough, command reference, and service UUID tables.
 
+### BLE Advertiser Scan
+- **UI**: Menu → Bluetooth → Advertiser Scan
+- **CLI**: `blescan -adv`
+- Passively scans all BLE advertisements, including non-connectable beacons.
+- Parses common advertisement fields and iBeacon UUID, major, minor, and measured power when present.
+- Use **List Advertisers** or CLI `listadv` to browse parsed results.
+
+See the dedicated [Advertiser Scan]({{< relref "advertisers" >}}) page for details.
+
 ## Listing and selecting devices
 
 After scanning, you can interact with discovered devices:
@@ -68,6 +77,7 @@ After scanning, you can interact with discovered devices:
 ### List discovered devices
 - **Flippers**: Menu → Bluetooth → Flipper → List Flippers or CLI: `listflippers`
 - **AirTags**: Menu → Bluetooth → AirTag → List AirTags or CLI: `listairtags`
+- **Advertisers**: Menu → Bluetooth → List Advertisers or CLI: `listadv`
 - **GATT Devices**: Menu → Bluetooth → GATT Scan → List GATT Devices or CLI: `listgatt`
 
 ### Select a device for further action

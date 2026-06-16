@@ -1,4 +1,5 @@
 #include "scans/ble/device_detect_scan.h"
+#include "scans/ble/advertiser_scan.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32S2
 
@@ -39,6 +40,42 @@ bool ble_device_detect_is_tracking(void) {
 const char *ble_device_detect_type_to_string(BLEDetectDeviceType type) {
     (void)type;
     return "BLE Device";
+}
+
+void advertiser_scan_start(void) {}
+
+void advertiser_scan_stop(void) {}
+
+bool advertiser_scan_is_active(void) {
+    return false;
+}
+
+int advertiser_scan_get_count(void) {
+    return 0;
+}
+
+int advertiser_scan_get_device(int index, AdvertiserDeviceInfo *out_info) {
+    (void)index;
+    (void)out_info;
+    return -1;
+}
+
+bool advertiser_scan_start_tracking(int index) {
+    (void)index;
+    return false;
+}
+
+void advertiser_scan_stop_tracking(void) {}
+
+bool advertiser_scan_is_tracking(void) {
+    return false;
+}
+
+void advertiser_scan_print_devices(void) {}
+
+bool advertiser_scan_save_to_sd(int index) {
+    (void)index;
+    return false;
 }
 
 #endif

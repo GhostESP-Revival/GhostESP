@@ -17,6 +17,7 @@
 #include "managers/views/app_gallery_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
+#include "scans/ble/advertiser_scan.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/wifi/ap_scan.h"
 #include "freertos/FreeRTOS.h"
@@ -1273,6 +1274,74 @@ static bool plugin_api_ble_detect_start_airtag_spoof(int index) {
     return ble_device_detect_start_airtag_spoof(index);
 }
 
+static void plugin_api_ble_adv_scan_start(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return;
+    advertiser_scan_start();
+}
+
+static void plugin_api_ble_adv_scan_stop(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return;
+    advertiser_scan_stop();
+}
+
+static bool plugin_api_ble_adv_scan_active(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
+    return advertiser_scan_is_active();
+}
+
+static int plugin_api_ble_adv_scan_count(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return 0;
+    return advertiser_scan_get_count();
+}
+
+static bool plugin_api_ble_adv_scan_get(int index, ghostesp_ble_adv_info_t *out) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE) || out == NULL) return false;
+
+    AdvertiserDeviceInfo info;
+    if (advertiser_scan_get_device(index, &info) != 0) return false;
+
+    memset(out, 0, sizeof(*out));
+    memcpy(out->mac, info.mac, sizeof(out->mac));
+    out->rssi = info.rssi;
+    out->event_type = info.event_type;
+    out->seen_count = info.seen_count;
+    out->has_flags = info.has_flags;
+    out->flags = info.flags;
+    out->has_tx_power = info.has_tx_power;
+    out->tx_power = info.tx_power;
+    out->has_manufacturer_id = info.has_manufacturer_id;
+    out->manufacturer_id = info.manufacturer_id;
+    out->is_ibeacon = info.is_ibeacon;
+    out->ibeacon_major = info.ibeacon_major;
+    out->ibeacon_minor = info.ibeacon_minor;
+    out->ibeacon_measured_power = info.ibeacon_measured_power;
+    strncpy(out->name, info.name, sizeof(out->name) - 1);
+    strncpy(out->ibeacon_uuid, info.ibeacon_uuid, sizeof(out->ibeacon_uuid) - 1);
+    strncpy(out->adv_type, info.adv_type, sizeof(out->adv_type) - 1);
+    strncpy(out->manufacturer, info.manufacturer, sizeof(out->manufacturer) - 1);
+    strncpy(out->oui_vendor, info.oui_vendor, sizeof(out->oui_vendor) - 1);
+    strncpy(out->services, info.services, sizeof(out->services) - 1);
+    strncpy(out->service_data, info.service_data, sizeof(out->service_data) - 1);
+    out->has_appearance = info.has_appearance;
+    out->appearance = info.appearance;
+    return true;
+}
+
+static bool plugin_api_ble_adv_scan_track(int index) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
+    return advertiser_scan_start_tracking(index);
+}
+
+static void plugin_api_ble_adv_scan_stop_tracking(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return;
+    advertiser_scan_stop_tracking();
+}
+
+static bool plugin_api_ble_adv_scan_save_to_sd(int index) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
+    return advertiser_scan_save_to_sd(index);
+}
+
 static bool plugin_api_rgb_set_all(uint8_t red, uint8_t green, uint8_t blue) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_RGB)) return false;
     return rgb_manager_set_color(&rgb_manager, -1, red, green, blue, false) == ESP_OK;
@@ -1901,6 +1970,14 @@ static ghostesp_api_t s_api = {
     .has_permission = plugin_api_has_permission_name,
     .has_feature = plugin_api_has_feature,
     .subghz_transmit_file = plugin_api_subghz_transmit_file,
+    .ble_adv_scan_start = plugin_api_ble_adv_scan_start,
+    .ble_adv_scan_stop = plugin_api_ble_adv_scan_stop,
+    .ble_adv_scan_active = plugin_api_ble_adv_scan_active,
+    .ble_adv_scan_count = plugin_api_ble_adv_scan_count,
+    .ble_adv_scan_get = plugin_api_ble_adv_scan_get,
+    .ble_adv_scan_track = plugin_api_ble_adv_scan_track,
+    .ble_adv_scan_stop_tracking = plugin_api_ble_adv_scan_stop_tracking,
+    .ble_adv_scan_save_to_sd = plugin_api_ble_adv_scan_save_to_sd,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,

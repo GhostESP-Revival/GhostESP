@@ -6,9 +6,12 @@
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
 #include "lvgl.h"
+#include "esp_log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+
+static const char *DV_TAG = "dv_nav";
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
@@ -61,6 +64,9 @@ struct detail_view_t {
     lv_coord_t item_radius;
     bool compact_layout;
     detail_nav_region_t nav_region;
+    bool wrap_pending_down;
+    bool wrap_pending_up;
+    uint32_t last_step_ms;
 };
 
 static inline bool detail_view_should_use_compact_layout(int w, int h) {
@@ -222,6 +228,40 @@ static inline lv_coord_t get_info_scroll_step(const detail_view_t *dv) {
     return step;
 }
 
+#define DETAIL_VIEW_WRAP_TIMEOUT_MS 500
+
+static inline void detail_view_clear_wrap_pending(detail_view_t *dv) {
+    dv->wrap_pending_down = false;
+    dv->wrap_pending_up = false;
+    dv->last_step_ms = 0;
+}
+
+static inline void detail_view_set_wrap_pending(detail_view_t *dv, bool down) {
+    if (down) dv->wrap_pending_down = true;
+    else dv->wrap_pending_up = true;
+    dv->last_step_ms = lv_tick_get();
+}
+
+static inline bool detail_view_check_wrap_pending(detail_view_t *dv, bool down) {
+    bool *flag = down ? &dv->wrap_pending_down : &dv->wrap_pending_up;
+    if (!*flag) return false;
+    if ((int32_t)(lv_tick_get() - dv->last_step_ms) > DETAIL_VIEW_WRAP_TIMEOUT_MS) {
+        *flag = false;
+        return false;
+    }
+    return true;
+}
+
+static inline void detail_view_clear_wrap_pending_down(detail_view_t *dv) {
+    dv->wrap_pending_down = false;
+    if (!dv->wrap_pending_up) dv->last_step_ms = 0;
+}
+
+static inline void detail_view_clear_wrap_pending_up(detail_view_t *dv) {
+    dv->wrap_pending_up = false;
+    if (!dv->wrap_pending_down) dv->last_step_ms = 0;
+}
+
 static inline bool detail_view_info_can_scroll(detail_view_t *dv) {
     if (!dv || !dv->info_panel || !lv_obj_is_valid(dv->info_panel)) return false;
     if (dv->container && lv_obj_is_valid(dv->container)) {
@@ -261,6 +301,28 @@ static inline bool detail_view_info_at_bottom(detail_view_t *dv) {
     if (!dv || !dv->info_panel || !lv_obj_is_valid(dv->info_panel)) return true;
     lv_obj_update_layout(dv->info_panel);
     return lv_obj_get_scroll_bottom(dv->info_panel) <= 0;
+}
+
+static inline bool detail_view_info_at_top(detail_view_t *dv) {
+    if (!dv || !dv->info_panel || !lv_obj_is_valid(dv->info_panel)) return true;
+    lv_obj_update_layout(dv->info_panel);
+    return lv_obj_get_scroll_top(dv->info_panel) <= 0;
+}
+
+static inline int detail_view_restore_selection(detail_view_t *dv) {
+    if (!dv) return -1;
+    if (dv->selected >= 0 && dv->selected < dv->count && dv->rows[dv->selected].selectable) {
+        return dv->selected;
+    }
+    return dv->first_selectable;
+}
+
+static inline bool detail_view_wrap_to_actions(detail_view_t *dv) {
+    if (!dv) return false;
+    int restore = detail_view_restore_selection(dv);
+    if (restore < 0) return false;
+    detail_view_set_selected(dv, restore);
+    return true;
 }
 
 static inline int detail_view_get_last_selectable(detail_view_t *dv) {
@@ -303,11 +365,9 @@ static void detail_view_sync_info_canvas(detail_view_t *dv) {
         lv_obj_set_style_border_color(dv->info_panel, accent, 0);
         lv_obj_set_style_border_opa(dv->info_panel, LV_OPA_40, 0);
         if (h > panel_h) {
-            lv_obj_add_flag(dv->info_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_scrollbar_mode(dv->info_panel, LV_SCROLLBAR_MODE_AUTO);
         } else {
             lv_obj_scroll_to_y(dv->info_panel, 0, LV_ANIM_OFF);
-            lv_obj_clear_flag(dv->info_panel, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_scrollbar_mode(dv->info_panel, LV_SCROLLBAR_MODE_OFF);
         }
     }
@@ -518,6 +578,9 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     dv->first_selectable = -1;
     dv->info_count = 0;
     dv->nav_region = DETAIL_NAV_REGION_INFO;
+    dv->wrap_pending_down = false;
+    dv->wrap_pending_up = false;
+    dv->last_step_ms = 0;
     
     lv_color_t bg, surface, surface_alt, text, accent;
     get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
@@ -556,7 +619,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_scroll_dir(dv->info_panel, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(dv->info_panel, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_flex_flow(dv->info_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_clear_flag(dv->info_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(dv->info_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     dv->info_canvas = lv_obj_create(dv->info_panel);
     lv_obj_set_width(dv->info_canvas, LV_PCT(100));
@@ -565,8 +628,8 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_style_border_width(dv->info_canvas, 0, 0);
     lv_obj_set_style_radius(dv->info_canvas, 0, 0);
     lv_obj_set_style_pad_all(dv->info_canvas, 0, 0);
+    lv_obj_add_flag(dv->info_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(dv->info_canvas, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(dv->info_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(dv->info_canvas, detail_view_info_draw_event, LV_EVENT_DRAW_MAIN, dv);
     
     lv_coord_t action_pad_h = dv->compact_layout ? 2 : GUI_SAFEAREA_HOR;
@@ -836,36 +899,74 @@ bool detail_view_step_down(detail_view_t *dv) {
     if (!dv) return false;
 
     if (dv->nav_region == DETAIL_NAV_REGION_INFO) {
+        ESP_LOGI(DV_TAG, "DOWN enter region=INFO selected=%d info_count=%d", dv->selected, dv->info_count);
         if (detail_view_scroll_info(dv, 1)) {
-            if (detail_view_info_at_bottom(dv) && dv->first_selectable >= 0) {
-                detail_view_set_selected(dv, dv->first_selectable);
+            detail_view_clear_wrap_pending(dv);
+            bool at_bot = detail_view_info_at_bottom(dv);
+            ESP_LOGI(DV_TAG, "DOWN scrolled top=%d bottom=%d at_boundary=%d",
+                     (int)lv_obj_get_scroll_top(dv->info_panel),
+                     (int)lv_obj_get_scroll_bottom(dv->info_panel),
+                     at_bot);
+            if (at_bot) {
+                detail_view_wrap_to_actions(dv);
+                ESP_LOGI(DV_TAG, "DOWN wrap->actions selected=%d", dv->selected);
             }
             return true;
         }
-        if (dv->first_selectable >= 0) {
-            detail_view_set_selected(dv, dv->first_selectable);
-            return true;
+        if (detail_view_check_wrap_pending(dv, true)) {
+            detail_view_clear_wrap_pending(dv);
+            ESP_LOGI(DV_TAG, "DOWN wrap-pending fired -> actions selected=%d", dv->selected);
+            return detail_view_wrap_to_actions(dv);
         }
-        return false;
+        detail_view_set_wrap_pending(dv, true);
+        ESP_LOGI(DV_TAG, "DOWN at boundary, wrap_pending set (no-op)");
+        return true;
     }
+
+    detail_view_clear_wrap_pending_up(dv);
 
     if (dv->selected < 0 && dv->first_selectable >= 0) {
         detail_view_set_selected(dv, dv->first_selectable);
+        ESP_LOGI(DV_TAG, "DOWN init->%d", dv->first_selectable);
         return true;
     }
 
-    int next_idx = find_next_selectable(dv, dv->selected, 1);
-    if (next_idx != dv->selected) {
-        detail_view_set_selected(dv, next_idx);
-        return true;
+    int last_idx = detail_view_get_last_selectable(dv);
+    if (last_idx < 0) return false;
+
+    if (dv->selected != last_idx) {
+        int next_idx = find_next_selectable(dv, dv->selected, 1);
+        if (next_idx != dv->selected) {
+            ESP_LOGI(DV_TAG, "DOWN action prev=%d -> next=%d", dv->selected, next_idx);
+            detail_view_set_selected(dv, next_idx);
+            return true;
+        }
     }
 
-    if (detail_view_info_can_scroll(dv)) {
+    bool can_scroll_info = detail_view_info_can_scroll(dv);
+    ESP_LOGI(DV_TAG, "DOWN at last action selected=%d info_count=%d info_can_scroll=%d",
+             dv->selected, dv->info_count, can_scroll_info);
+
+    if (dv->info_count > 0) {
         if (dv->selected >= 0 && dv->selected < dv->count) {
             apply_selected_style(dv, dv->rows[dv->selected].obj, false);
         }
         dv->nav_region = DETAIL_NAV_REGION_INFO;
-        return detail_view_scroll_info(dv, 1);
+        if (detail_view_scroll_info(dv, 1)) {
+            ESP_LOGI(DV_TAG, "DOWN -> INFO, scrolled");
+            return true;
+        }
+        ESP_LOGI(DV_TAG, "DOWN -> INFO, info doesn't need scrolling");
+        return true;
+    }
+
+    if (last_idx >= 0 && last_idx != dv->selected) {
+        if (dv->selected >= 0 && dv->selected < dv->count) {
+            apply_selected_style(dv, dv->rows[dv->selected].obj, false);
+        }
+        detail_view_set_selected(dv, dv->first_selectable);
+        ESP_LOGI(DV_TAG, "DOWN no-info wrap %d -> %d", dv->selected, dv->first_selectable);
+        return true;
     }
 
     return false;
@@ -875,26 +976,65 @@ bool detail_view_step_up(detail_view_t *dv) {
     if (!dv) return false;
 
     if (dv->nav_region == DETAIL_NAV_REGION_ACTIONS) {
+        detail_view_clear_wrap_pending_down(dv);
+
         if (dv->selected >= 0 && dv->selected != dv->first_selectable) {
             int prev_idx = find_next_selectable(dv, dv->selected, -1);
             if (prev_idx != dv->selected) {
                 detail_view_set_selected(dv, prev_idx);
+                ESP_LOGI(DV_TAG, "UP action %d -> %d", dv->selected, prev_idx);
                 return true;
             }
         }
 
-        if (detail_view_info_can_scroll(dv)) {
+        ESP_LOGI(DV_TAG, "UP at first action selected=%d info_count=%d info_can_scroll=%d",
+                 dv->selected, dv->info_count, detail_view_info_can_scroll(dv));
+
+        if (dv->info_count > 0) {
             if (dv->selected >= 0 && dv->selected < dv->count) {
                 apply_selected_style(dv, dv->rows[dv->selected].obj, false);
             }
             dv->nav_region = DETAIL_NAV_REGION_INFO;
-            return detail_view_scroll_info(dv, -1);
+            if (detail_view_scroll_info(dv, -1)) {
+                ESP_LOGI(DV_TAG, "UP -> INFO, scrolled");
+                return true;
+            }
+            ESP_LOGI(DV_TAG, "UP -> INFO, info doesn't need scrolling");
+            return true;
+        }
+
+        int last_idx = detail_view_get_last_selectable(dv);
+        if (last_idx >= 0 && last_idx != dv->selected) {
+            if (dv->selected >= 0 && dv->selected < dv->count) {
+                apply_selected_style(dv, dv->rows[dv->selected].obj, false);
+            }
+            detail_view_set_selected(dv, last_idx);
+            ESP_LOGI(DV_TAG, "UP no-info wrap %d -> %d", dv->selected, last_idx);
+            return true;
         }
 
         return false;
     }
 
-    return detail_view_scroll_info(dv, -1);
+    if (detail_view_scroll_info(dv, -1)) {
+        detail_view_clear_wrap_pending(dv);
+        bool at_top = detail_view_info_at_top(dv);
+        ESP_LOGI(DV_TAG, "UP scrolled region=INFO top=%d at_boundary=%d",
+                 (int)lv_obj_get_scroll_top(dv->info_panel), at_top);
+        if (at_top) {
+            detail_view_wrap_to_actions(dv);
+            ESP_LOGI(DV_TAG, "UP wrap->actions selected=%d", dv->selected);
+        }
+        return true;
+    }
+    if (detail_view_check_wrap_pending(dv, false)) {
+        detail_view_clear_wrap_pending(dv);
+        ESP_LOGI(DV_TAG, "UP wrap-pending fired -> actions selected=%d", dv->selected);
+        return detail_view_wrap_to_actions(dv);
+    }
+    detail_view_set_wrap_pending(dv, false);
+    ESP_LOGI(DV_TAG, "UP at boundary, wrap_pending set (no-op)");
+    return true;
 }
 
 int detail_view_get_selected(const detail_view_t *dv) {
@@ -923,6 +1063,7 @@ void detail_view_clear(detail_view_t *dv) {
     dv->selected = -1;
     dv->first_selectable = -1;
     dv->info_count = 0;
+    detail_view_clear_wrap_pending(dv);
     detail_view_sync_info_canvas(dv);
 }
 

@@ -1,5 +1,13 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre6
+
+### Added
+ - Added a BLE advertisement scan option in the Bluetooth menu
+
+### Fixed
+ - Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
+
 ## Revival v2.0-pre5
 
 ### Added
