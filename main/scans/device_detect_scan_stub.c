@@ -1,5 +1,6 @@
 #include "scans/ble/device_detect_scan.h"
 #include "scans/ble/advertiser_scan.h"
+#include "scans/ble/gatt_scan.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32S2
 
@@ -76,6 +77,39 @@ void advertiser_scan_print_devices(void) {}
 bool advertiser_scan_save_to_sd(int index) {
     (void)index;
     return false;
+}
+
+void gatt_scan_start(void) {}
+
+void gatt_scan_stop(void) {}
+
+int gatt_scan_get_device_count(void) {
+    return 0;
+}
+
+void gatt_scan_print_devices(void) {}
+
+bool gatt_scan_is_active(void) {
+    return false;
+}
+
+void gatt_scan_select_device(int index) {
+    (void)index;
+}
+
+void gatt_scan_enumerate_services(void) {}
+
+void gatt_scan_track_device(void) {}
+
+void gatt_scan_stop_tracking(void) {}
+
+int gatt_scan_get_device_data(int index, uint8_t *mac, int8_t *rssi, char *name, size_t name_len) {
+    (void)index;
+    (void)mac;
+    (void)rssi;
+    (void)name;
+    (void)name_len;
+    return -1;
 }
 
 #endif

@@ -938,17 +938,28 @@ void gatt_scan_start(void) {
  * @brief Stop scanning for BLE devices
  */
 void gatt_scan_stop(void) {
+    bool was_scanning = g_enum_state.scan_active;
+    bool had_connection = gatt_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    bool was_enumerating = g_enum_state.enum_in_progress;
+    bool was_tracking = g_tracking.active;
+
+    if (!was_scanning && !had_connection && !was_enumerating && !was_tracking) {
+        return;
+    }
+
     g_enum_state.scan_active = false;
+    g_enum_state.enum_in_progress = false;
+    g_tracking.active = false;
     ble_unregister_handler(gatt_scan_callback);
+    ble_unregister_handler(gatt_track_scan_callback);
     
-    if (gatt_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+    if (had_connection) {
         ble_gap_terminate(gatt_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         gatt_conn_handle = BLE_HS_CONN_HANDLE_NONE;
     }
-    g_enum_state.enum_in_progress = false;
     
     // Save results to file
-    if (discovered_gatt_devices && discovered_gatt_device_count > 0) {
+    if (was_scanning && discovered_gatt_devices && discovered_gatt_device_count > 0) {
         scan_file_t sf = SCAN_FILE_INIT;
         if (scan_file_open(&sf, "gatt_scan", "txt") == ESP_OK) {
             scan_file_printf(&sf, "--- GATT Devices (%u) ---\n", discovered_gatt_device_count);
@@ -967,8 +978,10 @@ void gatt_scan_stop(void) {
         }
     }
     
-    glog("GATT scan stopped. Found %u devices.\n", discovered_gatt_device_count);
-    status_display_show_status("GATT Stopped");
+    if (was_scanning) {
+        glog("GATT scan stopped. Found %u devices.\n", discovered_gatt_device_count);
+        status_display_show_status("GATT Stopped");
+    }
 }
 
 /**

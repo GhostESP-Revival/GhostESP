@@ -40,6 +40,7 @@
 #include "managers/ble_bridge_manager.h"
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/device_detect_scan.h"
+#include "scans/ble/gatt_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "esp_timer.h"
 #include <stdint.h>
@@ -89,6 +90,7 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 #define SCANALL_LIST_PAGE_SIZE 8
 #define BLE_DETECT_LIST_PAGE_SIZE 8
 #define BLE_ADV_LIST_PAGE_SIZE 8
+#define BLE_GATT_LIST_PAGE_SIZE 8
 #ifdef CONFIG_IDF_TARGET_ESP32C5
 #define AP_SCAN_ESTIMATE_SECONDS 6
 #else
@@ -115,6 +117,10 @@ static paged_menu_t *ble_adv_list_menu = NULL;
 static detail_view_t *ble_adv_detail_view = NULL;
 static lv_timer_t *ble_adv_poll_timer = NULL;
 static scan_status_t *ble_adv_status = NULL;
+static paged_menu_t *ble_gatt_list_menu = NULL;
+static detail_view_t *ble_gatt_detail_view = NULL;
+static lv_timer_t *ble_gatt_poll_timer = NULL;
+static scan_status_t *ble_gatt_status = NULL;
 static char gtk_abuse_ssid[33];
 static scan_status_t *gtk_abuse_status = NULL;
 static detail_view_t *gtk_abuse_detail_view = NULL;
@@ -122,6 +128,8 @@ static int ble_detect_last_count = -1;
 static int selected_ble_detect_index = -1;
 static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
+static int ble_gatt_last_count = -1;
+static int selected_ble_gatt_index = -1;
 static int selected_station_index = -1;
 static lv_timer_t *sta_scan_poll_timer = NULL;
 static int64_t sta_scan_start_time = 0;
@@ -142,6 +150,7 @@ typedef enum {
     RESUME_STA_DETAIL,
     RESUME_BLE_DETECT_DETAIL,
     RESUME_BLE_ADV_DETAIL,
+    RESUME_BLE_GATT_DETAIL,
 } pending_detail_resume_t;
 
 static pending_detail_resume_t s_pending_detail_resume = RESUME_NONE;
@@ -164,8 +173,10 @@ static const char **sta_list_get_options(void);
 static const char **scanall_list_get_options(void);
 static const char **ble_detect_list_get_options(void);
 static const char **ble_adv_list_get_options(void);
+static const char **ble_gatt_list_get_options(void);
 static void ble_detect_poll_timer_cb(lv_timer_t *timer);
 static void ble_adv_poll_timer_cb(lv_timer_t *timer);
+static void ble_gatt_poll_timer_cb(lv_timer_t *timer);
 static void ap_scan_complete_callback(void);
 static void ap_detail_back_cb(lv_event_t *e);
 static void ap_scan_poll_timer_cb(lv_timer_t *timer);
@@ -192,6 +203,13 @@ static void ble_adv_detail_back_cb(lv_event_t *e);
 static void ble_adv_track_cb(lv_event_t *e);
 static void ble_adv_save_cb(lv_event_t *e);
 static void show_ble_adv_detail(int device_index);
+static bool start_ble_gatt_flow(void);
+static void stop_ble_gatt_flow(void);
+static void ble_gatt_list_cleanup(void);
+static void ble_gatt_detail_back_cb(lv_event_t *e);
+static void ble_gatt_track_cb(lv_event_t *e);
+static void ble_gatt_enum_cb(lv_event_t *e);
+static void show_ble_gatt_detail(int device_index);
 static void gtk_abuse_back_cb(lv_event_t *e);
 
 static int ap_multi_select_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX], bool *has_more, void *user_data);
@@ -239,6 +257,9 @@ static bool handle_wifi_detail_keyboard(uint8_t key_value) {
     } else if (ble_adv_detail_view) {
         active_detail = ble_adv_detail_view;
         back_cb = ble_adv_detail_back_cb;
+    } else if (ble_gatt_detail_view) {
+        active_detail = ble_gatt_detail_view;
+        back_cb = ble_gatt_detail_back_cb;
     }
 
     if (!active_detail) {
@@ -1488,6 +1509,8 @@ typedef enum {
     BLUETOOTH_MENU_DETECT_DETAILS,
     BLUETOOTH_MENU_ADV_LIST,
     BLUETOOTH_MENU_ADV_DETAILS,
+    BLUETOOTH_MENU_GATT_LIST,
+    BLUETOOTH_MENU_GATT_DETAILS,
     BLUETOOTH_MENU_SPAM,
     BLUETOOTH_MENU_RAW,
     BLUETOOTH_MENU_GATT,
@@ -1740,6 +1763,9 @@ static void update_scroll_buttons_visibility(void) {
     } else if (ble_adv_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) {
         target = detail_view_get_list(ble_adv_detail_view);
         force_show = true;
+    } else if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+        target = detail_view_get_list(ble_gatt_detail_view);
+        force_show = true;
     } else {
         target = menu_container;
     }
@@ -1912,6 +1938,10 @@ static void scroll_options_up(lv_event_t *e) {
         detail_view_step_up(ble_adv_detail_view);
         return;
     }
+    if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+        detail_view_step_up(ble_gatt_detail_view);
+        return;
+    }
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, scroll_amt, LV_ANIM_OFF);
@@ -1943,6 +1973,10 @@ static void scroll_options_down(lv_event_t *e) {
         detail_view_step_down(ble_adv_detail_view);
         return;
     }
+    if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+        detail_view_step_down(ble_gatt_detail_view);
+        return;
+    }
     if (!menu_container) return;
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, -scroll_amt, LV_ANIM_OFF);
@@ -1968,6 +2002,10 @@ static void touch_back_button_cb(lv_event_t *e) {
     }
     if (ble_adv_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) {
         ble_adv_detail_back_cb(NULL);
+        return;
+    }
+    if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+        ble_gatt_detail_back_cb(NULL);
         return;
     }
     back_event_cb(NULL);
@@ -2018,6 +2056,7 @@ static void close_all_scan_status_overlays(void) {
     if (display_manager_get_current_view() == &options_menu_view) {
         close_one_scan_status(&ble_detect_status);
         close_one_scan_status(&ble_adv_status);
+        close_one_scan_status(&ble_gatt_status);
         close_one_scan_status(&gtk_abuse_status);
     }
 }
@@ -2056,6 +2095,11 @@ static void options_menu_freeze_pre_lock(void) {
             resume_index = selected_ble_adv_index;
             detail_view_destroy(ble_adv_detail_view);
             ble_adv_detail_view = NULL;
+        } else if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+            resume_id = RESUME_BLE_GATT_DETAIL;
+            resume_index = selected_ble_gatt_index;
+            detail_view_destroy(ble_gatt_detail_view);
+            ble_gatt_detail_view = NULL;
         }
     } else if (gtk_abuse_detail_view) {
         /* Gtk abuse detail is not currently routed via *_menu_state for
@@ -2105,6 +2149,11 @@ static void options_menu_apply_pending_detail_resume(void) {
     case RESUME_BLE_ADV_DETAIL:
         if (SelectedMenuType == OT_Bluetooth) {
             show_ble_adv_detail(resume_index);
+        }
+        break;
+    case RESUME_BLE_GATT_DETAIL:
+        if (SelectedMenuType == OT_Bluetooth) {
+            show_ble_gatt_detail(resume_index);
         }
         break;
     default:
@@ -2251,6 +2300,15 @@ void options_menu_create() {
                 options = ble_adv_list_get_options();
                 break;
             case BLUETOOTH_MENU_ADV_DETAILS: options = NULL; break;
+            case BLUETOOTH_MENU_GATT_LIST:
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+                if (gatt_scan_get_device_count() <= 0 && !gatt_scan_is_active()) {
+                    start_ble_gatt_flow();
+                }
+#endif
+                options = ble_gatt_list_get_options();
+                break;
+            case BLUETOOTH_MENU_GATT_DETAILS: options = NULL; break;
             case BLUETOOTH_MENU_SPAM: options = bluetooth_spam_options; break;
             case BLUETOOTH_MENU_RAW: options = bluetooth_raw_options; break;
             case BLUETOOTH_MENU_GATT: options = bluetooth_gatt_options; break;
@@ -2351,6 +2409,10 @@ void options_menu_create() {
         case RESUME_BLE_ADV_DETAIL:
             current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_LIST;
             options = ble_adv_list_get_options();
+            break;
+        case RESUME_BLE_GATT_DETAIL:
+            current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+            options = ble_gatt_list_get_options();
             break;
         default:
             display_manager_switch_view(&main_menu_view);
@@ -3471,6 +3533,14 @@ void handle_hardware_button_press_options(InputEvent *event) {
         return;
     }
 
+    bool ble_gatt_overlay_active = gatt_scan_is_active() ||
+                                   (ble_gatt_poll_timer != NULL) ||
+                                   (ble_gatt_status != NULL);
+    if (ble_gatt_overlay_active && should_stop_station_scan_on_input(event)) {
+        stop_ble_gatt_flow();
+        return;
+    }
+
     if (s_info_detail_active && event->type != INPUT_TYPE_TOUCH) {
         if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             back_event_cb(NULL);
@@ -3606,6 +3676,9 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     } else if (ble_adv_detail_view &&
                                opt_touch_bluetooth_state == BLUETOOTH_MENU_ADV_DETAILS) {
                         active_detail_view = ble_adv_detail_view;
+                    } else if (ble_gatt_detail_view &&
+                               opt_touch_bluetooth_state == BLUETOOTH_MENU_GATT_DETAILS) {
+                        active_detail_view = ble_gatt_detail_view;
                     }
 
                     if (active_detail_view) {
@@ -3668,7 +3741,9 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 (ble_detect_detail_view &&
                  current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_DETAILS) ||
                 (ble_adv_detail_view &&
-                 current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS)) {
+                 current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) ||
+                (ble_gatt_detail_view &&
+                 current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS)) {
                 if (!opt_touch_started) {
                     opt_touch_begin(data);
                 }
@@ -3772,7 +3847,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 current_wifi_menu_state == WIFI_MENU_CAPTURE_BROWSER ||
                 (SelectedMenuType == OT_Bluetooth &&
                  (current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_LIST ||
-                  current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_LIST)) ||
+                  current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_LIST ||
+                  current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_LIST)) ||
                 SelectedMenuType == OT_WigleManualUpload) {
                 thr_y = LV_VER_RES / 20; // much more sensitive for short lists
             }
@@ -3977,6 +4053,22 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 }
             } else if (button == 0 || button == 3) {
                 ble_adv_detail_back_cb(NULL);
+            }
+            return;
+        }
+
+        if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+            if (button == 2) {
+                detail_view_step_up(ble_gatt_detail_view);
+            } else if (button == 4) {
+                detail_view_step_down(ble_gatt_detail_view);
+            } else if (button == 1) {
+                lv_obj_t *obj = detail_view_get_selected_obj(ble_gatt_detail_view);
+                if (obj && lv_obj_is_valid(obj)) {
+                    lv_event_send(obj, LV_EVENT_CLICKED, NULL);
+                }
+            } else if (button == 0 || button == 3) {
+                ble_gatt_detail_back_cb(NULL);
             }
             return;
         }
@@ -4198,6 +4290,50 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 }
             } else if (button == 0 || button == 3) {
                 ble_adv_list_cleanup();
+                current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
+                rebuild_current_menu();
+            }
+            return;
+        }
+
+        if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_LIST &&
+            ble_gatt_list_menu) {
+            if (button == 2) {
+                if (num_items > 0) {
+                    selected_item_index = (selected_item_index <= 0) ? (num_items - 1) : (selected_item_index - 1);
+                }
+                select_option_item(selected_item_index);
+            } else if (button == 4) {
+                if (num_items > 0) {
+                    selected_item_index = (selected_item_index >= (num_items - 1)) ? 0 : (selected_item_index + 1);
+                }
+                select_option_item(selected_item_index);
+            } else if (button == 1) {
+                const char **opts = paged_menu_get_options(ble_gatt_list_menu);
+                int count = 0;
+                for (int i = 0; opts[i]; i++) count++;
+
+                if (selected_item_index >= count) {
+                    back_event_cb(NULL);
+                    return;
+                }
+
+                const char *selected_option = opts[selected_item_index];
+                if (selected_option) {
+                    if (strcmp(selected_option, "< Prev") == 0) {
+                        paged_menu_page_prev(ble_gatt_list_menu);
+                        rebuild_current_menu();
+                    } else if (strcmp(selected_option, "Next >") == 0) {
+                        paged_menu_page_next(ble_gatt_list_menu);
+                        rebuild_current_menu();
+                    } else if (strcmp(selected_option, "No items found") != 0) {
+                        int offset = paged_menu_get_page_offset(ble_gatt_list_menu);
+                        int skip = paged_menu_has_prev(ble_gatt_list_menu) ? 1 : 0;
+                        show_ble_gatt_detail(offset + (selected_item_index - skip));
+                    }
+                }
+            } else if (button == 0 || button == 3) {
+                ble_gatt_list_cleanup();
                 current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
                 rebuild_current_menu();
             }
@@ -4436,6 +4572,17 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 detail_view_step_up(ble_adv_detail_view);
             } else if (event->data.encoder.direction > 0) {
                 detail_view_step_down(ble_adv_detail_view);
+            }
+            return;
+        }
+        if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+            if (event->data.encoder.button) {
+                lv_obj_t *obj = detail_view_get_selected_obj(ble_gatt_detail_view);
+                if (obj && lv_obj_is_valid(obj)) lv_event_send(obj, LV_EVENT_CLICKED, NULL);
+            } else if (event->data.encoder.direction < 0) {
+                detail_view_step_up(ble_gatt_detail_view);
+            } else if (event->data.encoder.direction > 0) {
+                detail_view_step_down(ble_gatt_detail_view);
             }
             return;
         }
@@ -5743,7 +5890,19 @@ void option_event_cb(lv_event_t *e) {
                 return;
 #endif
             }
-            if (strcmp(Selected_Option, "GATT Scan") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_GATT;
+            if (strcmp(Selected_Option, "GATT Scan") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+                if (!start_ble_gatt_flow()) {
+                    error_popup_create("Scan failed to start");
+                }
+                option_invoked = false;
+                return;
+#else
+                error_popup_create("Device Does not Support Bluetooth...");
+                option_invoked = false;
+                return;
+#endif
+            }
             else if (strcmp(Selected_Option, "Aerial Detector") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_AERIAL;
             else if (strcmp(Selected_Option, "Spam") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_SPAM;
             else if (strcmp(Selected_Option, "Raw") == 0) current_bluetooth_menu_state = BLUETOOTH_MENU_RAW;
@@ -5810,6 +5969,38 @@ void option_event_cb(lv_event_t *e) {
         for (int i = 0; opts[i]; i++) {
             if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
                 show_ble_adv_detail(offset + (i - skip));
+                break;
+            }
+        }
+        option_invoked = false;
+        return;
+    }
+
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_LIST) {
+        if (strcmp(Selected_Option, "No items found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            paged_menu_page_prev(ble_gatt_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            paged_menu_page_next(ble_gatt_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        int offset = paged_menu_get_page_offset(ble_gatt_list_menu);
+        const char **opts = paged_menu_get_options(ble_gatt_list_menu);
+        int skip = paged_menu_has_prev(ble_gatt_list_menu) ? 1 : 0;
+
+        for (int i = 0; opts[i]; i++) {
+            if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
+                show_ble_gatt_detail(offset + (i - skip));
                 break;
             }
         }
@@ -7411,6 +7602,10 @@ static void back_event_cb(lv_event_t *e) {
             current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) {
             ble_adv_list_cleanup();
         }
+        if (current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_LIST ||
+            current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+            ble_gatt_list_cleanup();
+        }
         current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
         rebuild_current_menu();
         return;
@@ -8561,6 +8756,256 @@ static void show_ble_adv_detail(int device_index) {
     detail_view_add_back(ble_adv_detail_view, ble_adv_detail_back_cb, NULL);
 
     current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+static void ble_gatt_set_subtext(int count) {
+    if (!ble_gatt_status) {
+        return;
+    }
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d device%s found", count, count == 1 ? "" : "s");
+    scan_status_set_subtext(ble_gatt_status, buf);
+}
+
+static void ble_gatt_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+
+    int count = gatt_scan_get_device_count();
+    if (count == ble_gatt_last_count) {
+        if (!gatt_scan_is_active()) {
+            stop_ble_gatt_flow();
+        }
+        return;
+    }
+
+    ble_gatt_last_count = count;
+    ble_gatt_set_subtext(count);
+    if (ble_gatt_list_menu) {
+        paged_menu_reset(ble_gatt_list_menu);
+    }
+
+    if (!gatt_scan_is_active()) {
+        stop_ble_gatt_flow();
+        return;
+    }
+
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_LIST) {
+        rebuild_current_menu();
+    }
+}
+
+static int ble_gatt_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX],
+                                 bool *has_more, void *user_data) {
+    (void)user_data;
+
+    int count = gatt_scan_get_device_count();
+    if (count <= 0) {
+        *has_more = false;
+        return 0;
+    }
+
+    int loaded = 0;
+    for (int i = offset; i < count && loaded < page_size; i++) {
+        uint8_t mac[6];
+        int8_t rssi;
+        char name[32];
+        if (gatt_scan_get_device_data(i, mac, &rssi, name, sizeof(name)) != 0) {
+            continue;
+        }
+
+        char label[32];
+        if (name[0] != '\0') {
+            snprintf(label, sizeof(label), "%s", name);
+        } else {
+            snprintf(label, sizeof(label), "%02X:%02X:%02X", mac[3], mac[4], mac[5]);
+        }
+
+        snprintf(names[loaded], PAGED_MENU_NAME_MAX, "GATT | %.*s | %d dBm", 20, label, rssi);
+        loaded++;
+    }
+
+    *has_more = (offset + loaded) < count;
+    return loaded;
+}
+
+static void ble_gatt_list_cleanup(void) {
+    if (ble_gatt_poll_timer) {
+        lv_timer_del(ble_gatt_poll_timer);
+        ble_gatt_poll_timer = NULL;
+    }
+    if (ble_gatt_status) {
+        scan_status_close(ble_gatt_status);
+        ble_gatt_status = NULL;
+    }
+    if (ble_gatt_list_menu) {
+        paged_menu_destroy(ble_gatt_list_menu);
+        ble_gatt_list_menu = NULL;
+    }
+    if (ble_gatt_detail_view) {
+        detail_view_destroy(ble_gatt_detail_view);
+        ble_gatt_detail_view = NULL;
+    }
+
+    selected_ble_gatt_index = -1;
+    ble_gatt_last_count = -1;
+    if (gatt_scan_is_active()) {
+        gatt_scan_stop();
+    }
+    if (ble_is_initialized()) {
+        ble_stop();
+    }
+}
+
+static const char **ble_gatt_list_get_options(void) {
+    if (!ble_gatt_list_menu) {
+        ble_gatt_list_menu = paged_menu_create(BLE_GATT_LIST_PAGE_SIZE, ble_gatt_list_load_fn, NULL);
+    }
+    return paged_menu_get_options(ble_gatt_list_menu);
+}
+
+static bool start_ble_gatt_flow(void) {
+    ble_gatt_list_cleanup();
+    gatt_scan_start();
+    if (!gatt_scan_is_active()) {
+        return false;
+    }
+
+    ble_gatt_status = scan_status_create("Scanning GATT Devices");
+    ble_gatt_set_subtext(0);
+    ble_gatt_last_count = gatt_scan_get_device_count();
+    ble_gatt_poll_timer = lv_timer_create(ble_gatt_poll_timer_cb, 750, NULL);
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+    return true;
+}
+
+static void stop_ble_gatt_flow(void) {
+    if (gatt_scan_is_active()) {
+        gatt_scan_stop();
+    }
+    if (ble_is_initialized()) {
+        ble_stop();
+    }
+    if (ble_gatt_poll_timer) {
+        lv_timer_del(ble_gatt_poll_timer);
+        ble_gatt_poll_timer = NULL;
+    }
+    if (ble_gatt_status) {
+        scan_status_close(ble_gatt_status);
+        ble_gatt_status = NULL;
+    }
+
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+    if (ble_gatt_list_menu) {
+        paged_menu_reset(ble_gatt_list_menu);
+    }
+
+    if (gatt_scan_get_device_count() <= 0) {
+        error_popup_create("No GATT devices found");
+        current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
+    }
+
+    rebuild_current_menu();
+}
+
+static void ble_gatt_detail_back_cb(lv_event_t *e) {
+    (void)e;
+
+    if (ble_gatt_detail_view) {
+        detail_view_destroy(ble_gatt_detail_view);
+        ble_gatt_detail_view = NULL;
+    }
+
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+    suppress_wifi_state_reset_once = true;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+static void ble_gatt_track_cb(lv_event_t *e) {
+    (void)e;
+
+    if (selected_ble_gatt_index < 0) {
+        error_popup_create("Track failed");
+        return;
+    }
+
+    gatt_scan_select_device(selected_ble_gatt_index);
+    gatt_scan_track_device();
+
+    if (ble_gatt_detail_view) {
+        detail_view_destroy(ble_gatt_detail_view);
+        ble_gatt_detail_view = NULL;
+    }
+
+    selected_ble_gatt_index = -1;
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+}
+
+static void ble_gatt_enum_cb(lv_event_t *e) {
+    (void)e;
+
+    if (selected_ble_gatt_index < 0) {
+        error_popup_create("Enumerate failed");
+        return;
+    }
+
+    gatt_scan_select_device(selected_ble_gatt_index);
+    if (ble_gatt_detail_view) {
+        detail_view_destroy(ble_gatt_detail_view);
+        ble_gatt_detail_view = NULL;
+    }
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand("enumgatt");
+}
+
+static void show_ble_gatt_detail(int device_index) {
+    uint8_t mac_bytes[6];
+    int8_t rssi;
+    char name[32];
+    if (gatt_scan_get_device_data(device_index, mac_bytes, &rssi, name, sizeof(name)) != 0) {
+        error_popup_create("GATT device not found");
+        return;
+    }
+
+    selected_ble_gatt_index = device_index;
+
+    if (menu_build_timer) {
+        lv_timer_del(menu_build_timer);
+        menu_build_timer = NULL;
+    }
+
+    if (ble_gatt_detail_view) {
+        detail_view_destroy(ble_gatt_detail_view);
+    }
+    ble_gatt_detail_view = detail_view_create(lv_scr_act(), NULL);
+    reserve_detail_touch_bar_space(ble_gatt_detail_view);
+
+    char mac[18];
+    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", mac_bytes[0], mac_bytes[1],
+             mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
+
+    detail_view_add_info(ble_gatt_detail_view, "Type", "GATT Device");
+    if (name[0] != '\0') {
+        detail_view_add_info(ble_gatt_detail_view, "Name", name);
+    }
+    detail_view_add_info(ble_gatt_detail_view, "MAC", mac);
+    detail_view_add_infof(ble_gatt_detail_view, "RSSI", "%d dBm", rssi);
+    detail_view_add_info(ble_gatt_detail_view, "Actions:", "");
+    detail_view_add_action(ble_gatt_detail_view, "Enumerate Services", ble_gatt_enum_cb, NULL);
+    detail_view_add_action(ble_gatt_detail_view, "Track", ble_gatt_track_cb, NULL);
+    detail_view_add_back(ble_gatt_detail_view, ble_gatt_detail_back_cb, NULL);
+
+    current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_DETAILS;
 #ifdef CONFIG_USE_TOUCHSCREEN
     update_scroll_buttons_visibility();
 #endif
@@ -9897,6 +10342,16 @@ static void rebuild_current_menu(void) {
                     timer_period = 25;
                     break;
                 case BLUETOOTH_MENU_ADV_DETAILS: options = NULL; break;
+                case BLUETOOTH_MENU_GATT_LIST:
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+                    if (gatt_scan_get_device_count() <= 0 && !gatt_scan_is_active()) {
+                        start_ble_gatt_flow();
+                    }
+#endif
+                    options = ble_gatt_list_get_options();
+                    timer_period = 25;
+                    break;
+                case BLUETOOTH_MENU_GATT_DETAILS: options = NULL; break;
                 case BLUETOOTH_MENU_SPAM: options = bluetooth_spam_options; break;
                 case BLUETOOTH_MENU_RAW: options = bluetooth_raw_options; break;
                 case BLUETOOTH_MENU_GATT: options = bluetooth_gatt_options; break;

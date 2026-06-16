@@ -4,6 +4,7 @@
 
 ### Added
  - Added a BLE advertisement scan option in the Bluetooth menu
+ - Added scanning spinner and details view for `GATT Scan` in the Bluetooth menu (matches the Detect Devices and Advertiser Scan flows)
 
 ### Fixed
  - Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
