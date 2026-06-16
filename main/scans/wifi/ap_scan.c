@@ -405,9 +405,12 @@ esp_err_t ap_scan_start_async(void) {
 
     async_scan_start_time = esp_timer_get_time();
     log_heap_status(TAG, "async_scan_started");
+    return ESP_OK;
 
 cleanup:
-    ap_manager_start_services();
+    if (!async_scan_in_progress) {
+        ap_manager_start_services();
+    }
     return err;
 }
 
