@@ -4,7 +4,7 @@
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
-#include "esp_wifi.h"
+#include "esp_mac.h"
 #include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
@@ -59,6 +59,7 @@ static bool s_touch_started;
 static int s_touch_pressed_idx;
 static int s_suppress_click_idx;
 static int64_t s_suppress_click_until_ms;
+static int64_t s_ignore_input_until_ms;
 static char s_input[MAX_INPUT_LEN + 1];
 static uint8_t s_input_len;
 static bool s_setup_mode;
@@ -89,7 +90,7 @@ static void lockscreen_move_focus(int dx, int dy);
 
 static void derive_key(uint8_t *out, size_t len) {
     uint8_t mac[6] = {0};
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
         for (size_t i = 0; i < len; i++) {
             out[i] = mac[i % 6] ^ (uint8_t)(0xA5 + i);
         }
@@ -100,19 +101,34 @@ static void derive_key(uint8_t *out, size_t len) {
     }
 }
 
-static bool verify_input(const char *input) {
-    uint8_t key[32];
-    derive_key(key, sizeof(key));
+static void derive_legacy_fallback_key(uint8_t *out, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        out[i] = (uint8_t)(0x42 + i);
+    }
+}
+
+static bool verify_with_key(const char *input, const uint8_t *key, size_t key_len) {
     const uint8_t *stored = (const uint8_t *)G_Settings.lockscreen_obfuscated;
     if ((stored[0] & STORED_PIN_MARKER) == 0) return false;
     size_t stored_len = stored[0] & STORED_PIN_LEN_MASK;
     size_t in_len = strlen(input);
     if (in_len != stored_len) return false;
     for (size_t i = 0; i < in_len; i++) {
-        char decrypted = (char)(stored[i + 1] ^ key[i % 32]);
+        char decrypted = (char)(stored[i + 1] ^ key[i % key_len]);
         if (decrypted != input[i]) return false;
     }
     return true;
+}
+
+static bool verify_input(const char *input) {
+    uint8_t key[32];
+    derive_key(key, sizeof(key));
+    if (verify_with_key(input, key, sizeof(key))) {
+        return true;
+    }
+
+    derive_legacy_fallback_key(key, sizeof(key));
+    return verify_with_key(input, key, sizeof(key));
 }
 
 static void save_obfuscated(const char *input) {
@@ -156,6 +172,7 @@ void lockscreen_reset_input(void) {
     s_touch_pressed_idx = -1;
     s_suppress_click_idx = -1;
     s_suppress_click_until_ms = 0;
+    s_ignore_input_until_ms = (esp_timer_get_time() / 1000) + 350;
 }
 
 void lockscreen_enter_setup(void) {
@@ -512,6 +529,10 @@ static void lockscreen_normalize_input(InputEvent *event, bool *up, bool *down, 
 }
 
 static void lockscreen_input_handler(InputEvent *event) {
+    if ((esp_timer_get_time() / 1000) < s_ignore_input_until_ms) {
+        return;
+    }
+
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
         if (data->state == LV_INDEV_STATE_PR) {

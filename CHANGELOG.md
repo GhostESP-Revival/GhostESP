@@ -7,6 +7,10 @@
 
 ### Fixed
  - Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
+ - Fixed lockscreen rejecting correct PIN when Wi-Fi is off (BLE scan stops STA); key now uses stable STA MAC with legacy fallback
+ - Fixed wrong PIN after lock-on-wake; wake input is consumed and queued input is briefly ignored after lock
+ - Fixed detail view being orphaned over the rebuilt main menu after dim+lock; rebuilt after unlock
+ - Fixed `scan_status` spinner lingering on `lv_layer_top()` across lockscreen entry
 
 ## Revival v2.0-pre5
 

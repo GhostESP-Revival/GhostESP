@@ -134,6 +134,24 @@ static bool *g_ap_multi_selected = NULL;
 static int g_ap_multi_count = 0;
 static paged_menu_t *ap_multi_menu = NULL;
 
+/* Detail/spinner UI can outlive options_menu_view.root, so lockscreen entry
+ * snapshots logical state and tears down the transient LVGL objects. */
+typedef enum {
+    RESUME_NONE = 0,
+    RESUME_AP_DETAIL,
+    RESUME_STA_DETAIL,
+    RESUME_BLE_DETECT_DETAIL,
+    RESUME_BLE_ADV_DETAIL,
+} pending_detail_resume_t;
+
+static pending_detail_resume_t s_pending_detail_resume = RESUME_NONE;
+static int s_pending_detail_index = -1;
+static int g_freeze_hook_id = -1;
+
+static void options_menu_apply_pending_detail_resume(void);
+static void options_menu_freeze_pre_lock(void);
+static void close_all_scan_status_overlays(void);
+
 static bool *g_sta_multi_selected = NULL;
 static int g_sta_multi_count = 0;
 static paged_menu_t *sta_multi_menu = NULL;
@@ -1987,6 +2005,113 @@ select_option_item(selected_item_index + direction);
 
 /* Theme palette now centralized in display_manager; selection colors applied by options_view */
 
+static void close_one_scan_status(scan_status_t **slot) {
+    if (slot && *slot) {
+        scan_status_close(*slot);
+        *slot = NULL;
+    }
+}
+
+static void close_all_scan_status_overlays(void) {
+    close_one_scan_status(&ap_scan_status);
+    close_one_scan_status(&sta_scan_status);
+    if (display_manager_get_current_view() == &options_menu_view) {
+        close_one_scan_status(&ble_detect_status);
+        close_one_scan_status(&ble_adv_status);
+        close_one_scan_status(&gtk_abuse_status);
+    }
+}
+
+static void options_menu_freeze_pre_lock(void) {
+    /* Detail views live outside options_menu_view.root; remove and rebuild. */
+    s_pending_detail_resume = RESUME_NONE;
+    s_pending_detail_index = -1;
+
+    pending_detail_resume_t resume_id = RESUME_NONE;
+    int resume_index = -1;
+
+    if (SelectedMenuType == OT_Wifi) {
+        if (ap_detail_view && current_wifi_menu_state == WIFI_MENU_AP_DETAILS) {
+            resume_id = RESUME_AP_DETAIL;
+            resume_index = selected_ap_index;
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        } else if (sta_detail_view && current_wifi_menu_state == WIFI_MENU_STA_DETAILS) {
+            resume_id = RESUME_STA_DETAIL;
+            resume_index = selected_station_index;
+            detail_view_destroy(sta_detail_view);
+            sta_detail_view = NULL;
+        } else if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
+            detail_view_destroy(sinkhole_detail_view);
+            sinkhole_detail_view = NULL;
+        }
+    } else if (SelectedMenuType == OT_Bluetooth) {
+        if (ble_detect_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_DETAILS) {
+            resume_id = RESUME_BLE_DETECT_DETAIL;
+            resume_index = selected_ble_detect_index;
+            detail_view_destroy(ble_detect_detail_view);
+            ble_detect_detail_view = NULL;
+        } else if (ble_adv_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) {
+            resume_id = RESUME_BLE_ADV_DETAIL;
+            resume_index = selected_ble_adv_index;
+            detail_view_destroy(ble_adv_detail_view);
+            ble_adv_detail_view = NULL;
+        }
+    } else if (gtk_abuse_detail_view) {
+        /* Gtk abuse detail is not currently routed via *_menu_state for
+         * resume; just destroy the orphan widget. */
+        detail_view_destroy(gtk_abuse_detail_view);
+        gtk_abuse_detail_view = NULL;
+    }
+
+    s_pending_detail_resume = resume_id;
+    s_pending_detail_index = resume_index;
+
+    close_all_scan_status_overlays();
+
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
+        suppress_wifi_state_reset_once = true;
+    } else if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state != BLUETOOTH_MENU_MAIN) {
+        suppress_wifi_state_reset_once = true;
+    }
+}
+
+static void options_menu_apply_pending_detail_resume(void) {
+    if (s_pending_detail_resume == RESUME_NONE || s_pending_detail_index < 0) {
+        return;
+    }
+    pending_detail_resume_t to_resume = s_pending_detail_resume;
+    int resume_index = s_pending_detail_index;
+    s_pending_detail_resume = RESUME_NONE;
+    s_pending_detail_index = -1;
+
+    /* Run after the menu has been built so the back/scroll chrome is ready. */
+    switch (to_resume) {
+    case RESUME_AP_DETAIL:
+        if (SelectedMenuType == OT_Wifi) {
+            show_ap_detail(resume_index);
+        }
+        break;
+    case RESUME_STA_DETAIL:
+        if (SelectedMenuType == OT_Wifi) {
+            show_station_detail(resume_index);
+        }
+        break;
+    case RESUME_BLE_DETECT_DETAIL:
+        if (SelectedMenuType == OT_Bluetooth) {
+            show_ble_detect_detail(resume_index);
+        }
+        break;
+    case RESUME_BLE_ADV_DETAIL:
+        if (SelectedMenuType == OT_Bluetooth) {
+            show_ble_adv_detail(resume_index);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 void options_menu_create() {
     /* 
      * Performance Note: Submenu states are preserved across destroy/create cycles
@@ -2202,8 +2327,35 @@ void options_menu_create() {
     }
 
     if (!is_settings_mode && options == NULL) {
-        display_manager_switch_view(&main_menu_view);
-        return;
+        if (s_pending_detail_resume == RESUME_NONE) {
+            display_manager_switch_view(&main_menu_view);
+            return;
+        }
+        switch (s_pending_detail_resume) {
+        case RESUME_AP_DETAIL:
+            current_wifi_menu_state = ap_detail_return_state;
+            options = (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST)
+                          ? scanall_list_get_options()
+                          : ap_list_get_options();
+            break;
+        case RESUME_STA_DETAIL:
+            current_wifi_menu_state = sta_detail_return_state;
+            options = (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST)
+                          ? scanall_list_get_options()
+                          : sta_list_get_options();
+            break;
+        case RESUME_BLE_DETECT_DETAIL:
+            current_bluetooth_menu_state = BLUETOOTH_MENU_DETECT_LIST;
+            options = ble_detect_list_get_options();
+            break;
+        case RESUME_BLE_ADV_DETAIL:
+            current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_LIST;
+            options = ble_adv_list_get_options();
+            break;
+        default:
+            display_manager_switch_view(&main_menu_view);
+            return;
+        }
     }
 
     num_items = 0;
@@ -2281,6 +2433,9 @@ void options_menu_create() {
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 #endif
+    if (g_freeze_hook_id < 0) {
+        g_freeze_hook_id = display_manager_register_freeze_pre_lock(options_menu_freeze_pre_lock);
+    }
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
 }
 
@@ -6889,6 +7044,34 @@ void options_menu_destroy() {
     station_list_cleanup();
     ble_detect_list_cleanup();
 
+    /* Detail views are parented to lv_scr_act(), not options_menu_view.root. */
+    if (ap_detail_view) {
+        detail_view_destroy(ap_detail_view);
+        ap_detail_view = NULL;
+    }
+    if (sta_detail_view) {
+        detail_view_destroy(sta_detail_view);
+        sta_detail_view = NULL;
+    }
+    if (ble_detect_detail_view) {
+        detail_view_destroy(ble_detect_detail_view);
+        ble_detect_detail_view = NULL;
+    }
+    if (ble_adv_detail_view) {
+        detail_view_destroy(ble_adv_detail_view);
+        ble_adv_detail_view = NULL;
+    }
+    if (sinkhole_detail_view) {
+        detail_view_destroy(sinkhole_detail_view);
+        sinkhole_detail_view = NULL;
+    }
+    if (gtk_abuse_detail_view) {
+        detail_view_destroy(gtk_abuse_detail_view);
+        gtk_abuse_detail_view = NULL;
+    }
+
+    close_all_scan_status_overlays();
+
     lvgl_obj_del_safe(&back_btn);
     lvgl_obj_del_safe(&scroll_up_btn);
     lvgl_obj_del_safe(&scroll_down_btn);
@@ -6936,6 +7119,11 @@ void options_menu_destroy() {
     wigle_csv_free_cache();
     wigle_manual_popup_close_cb(NULL);
     wigle_stats_popup_close_cb(NULL);
+
+    if (g_freeze_hook_id > 0) {
+        display_manager_unregister_freeze_pre_lock(g_freeze_hook_id);
+        g_freeze_hook_id = -1;
+    }
 }
 
 static void refresh_touch_control_theme(lv_obj_t *btn, lv_color_t bg, lv_color_t text) {
@@ -7475,6 +7663,8 @@ static int ap_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NA
 }
 
 static void ap_list_cleanup(void) {
+    bool had_ap_scan_ui = (ap_scan_poll_timer != NULL) || (ap_scan_status != NULL);
+
     if (ap_scan_poll_timer) {
         lv_timer_del(ap_scan_poll_timer);
         ap_scan_poll_timer = NULL;
@@ -7490,6 +7680,9 @@ static void ap_list_cleanup(void) {
     if (ap_detail_view) {
         detail_view_destroy(ap_detail_view);
         ap_detail_view = NULL;
+    }
+    if (had_ap_scan_ui && ap_scan_is_running()) {
+        ap_scan_stop();
     }
 }
 
@@ -10478,6 +10671,7 @@ static void menu_builder_cb(lv_timer_t *t)
                 update_settings_arrows_visibility();
             }
             menu_build_timer = NULL;
+            options_menu_apply_pending_detail_resume();
         }
     }
 }

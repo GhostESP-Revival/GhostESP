@@ -217,6 +217,46 @@ lv_obj_t *mainlabel = NULL;
 View *display_manager_previous_view = NULL;
 static View *s_lockscreen_return_view = NULL;
 
+/* Lets views clean transient UI before the lockscreen destroys/rebuilds them. */
+typedef struct {
+    void (*fn)(void);
+    int id; /* monotonically increasing; <0 disables; 0 reserved */
+} freeze_pre_lock_cb_t;
+
+static freeze_pre_lock_cb_t s_freeze_cbs[4];
+static int s_freeze_cb_next_id = 1;
+
+int display_manager_register_freeze_pre_lock(void (*fn)(void)) {
+    if (!fn) return -1;
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].fn == NULL) {
+            int id = s_freeze_cb_next_id++;
+            if (s_freeze_cb_next_id < 0) s_freeze_cb_next_id = 1;
+            s_freeze_cbs[i].fn = fn;
+            s_freeze_cbs[i].id = id;
+            return id;
+        }
+    }
+    return -1;
+}
+
+void display_manager_unregister_freeze_pre_lock(int id) {
+    if (id <= 0) return;
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].id == id) {
+            s_freeze_cbs[i].fn = NULL;
+            s_freeze_cbs[i].id = 0;
+            return;
+        }
+    }
+}
+
+static void display_manager_run_freeze_pre_lock(void) {
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].fn) s_freeze_cbs[i].fn();
+    }
+}
+
 bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
@@ -1822,6 +1862,9 @@ static void display_manager_switch_view_internal(View *view) {
 #endif
   if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
     ESP_LOGI(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
+    if (view == &lockscreen_view) {
+      display_manager_run_freeze_pre_lock();
+    }
     if (dm.current_view && dm.current_view->root) {
       display_manager_previous_view = dm.current_view;
       if (dm.current_view->destroy) {
@@ -3142,6 +3185,8 @@ void processEvent() {
       set_backlight_brightness(100);
       is_backlight_dimmed = false;
       is_backlight_off = false;
+      processed++;
+      continue;
     }
     if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
       View *current = dm.current_view;
@@ -3204,6 +3249,7 @@ void processEvent() {
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;
+        return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
         View *current = dm.current_view;
