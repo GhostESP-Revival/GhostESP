@@ -1201,9 +1201,9 @@ CONFIG_HAS_FUEL_GAUGE=y
 # NFC Options
 #
 # CONFIG_NFC_PN532 is not set
-CONFIG_NFC_CHAMELEON=y
+# CONFIG_NFC_CHAMELEON is not set
 # default:
-CONFIG_HAS_NFC=y
+# CONFIG_HAS_NFC is not set
 # end of NFC Options
 # end of Misc Options
 
@@ -4020,7 +4020,7 @@ CONFIG_LV_TFT_DISPLAY_SPI_HALF_DUPLEX=y
 # CONFIG_LV_TFT_USE_CUSTOM_SPI_CLK_DIVIDER is not set
 # default:
 CONFIG_LV_TFT_CUSTOM_SPI_CLK_DIVIDER=2
-CONFIG_LV_INVERT_COLORS=y
+# CONFIG_LV_INVERT_COLORS is not set
 
 #
 # Display ST7789 Configuration
