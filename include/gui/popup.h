@@ -12,6 +12,8 @@
 // popup_destroy(p);
 
 typedef struct popup_t popup_t;
+typedef struct popup_confirm_t popup_confirm_t;
+typedef void (*popup_confirm_cb_t)(void *user_data);
 
 typedef struct {
     lv_coord_t min_w;
@@ -31,9 +33,20 @@ void popup_destroy(popup_t *p);
 // convenience: create, set text, add buttons, and show
 popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *title, const char *body, const char **buttons, int button_count, lv_event_cb_t *cbs, void **user_datas);
 
+// reusable confirmation popup for dangerous actions. The handle slot is set to
+// NULL when the popup is closed by touch or by popup_confirm_cancel/select().
+popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, const char *title, const char *body, const char *confirm_label, const char *cancel_label, popup_confirm_cb_t on_confirm, void *user_data);
+bool popup_confirm_is_open(popup_confirm_t *p);
+bool popup_confirm_handle_touch(popup_confirm_t **handle, const lv_indev_data_t *data);
+void popup_confirm_close(popup_confirm_t **handle);
+void popup_confirm_cancel(popup_confirm_t **handle);
+void popup_confirm_select(popup_confirm_t **handle);
+void popup_confirm_set_selected(popup_confirm_t *p, int selected);
+void popup_confirm_move(popup_confirm_t *p, int delta);
+
 // create a styled container suitable for popups (returns an lv_obj_t* container)
-// Pass fullscreen=true to fill the whole screen under the status bar (no
-// rounded corners / shadow, height = LV_VER_RES - GUI_STATUS_BAR_H, top-aligned).
+// Pass fullscreen=true to fill the whole runtime display under the status bar
+// (no rounded corners / shadow, height = display_h - GUI_STATUS_BAR_H, top-aligned).
 lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height, bool fullscreen);
 lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset, bool fullscreen);
 

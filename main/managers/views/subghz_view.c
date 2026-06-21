@@ -173,6 +173,7 @@ static int s_saved_page = 0;
 static int s_saved_index = 0;
 static bool s_in_saved_list = false;
 static subghz_saved_popup_control_t s_saved_popup_selected = SUBGHZ_SAVED_POPUP_REPLAY;
+static popup_confirm_t *s_saved_delete_confirm = NULL;
 
 static lv_obj_t *s_fa_popup = NULL;
 static lv_obj_t *s_fa_freq_label = NULL;
@@ -2176,7 +2177,6 @@ static void subghz_open_freq_analyzer_popup(void) {
     if (!tiny && popup_h < 180) popup_h = 180;
 
     s_fa_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
-    lv_obj_center(s_fa_popup);
 
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
@@ -2563,7 +2563,6 @@ static void subghz_open_waterfall_popup(void) {
     if (!tiny && popup_h < 180) popup_h = 180;
 
     s_wf_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
-    lv_obj_center(s_wf_popup);
 
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
@@ -2931,7 +2930,6 @@ static void subghz_open_capture_popup(void) {
     if (popup_h < 150) popup_h = 150;
 
     s_capture_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
-    lv_obj_center(s_capture_popup);
     s_capture_popup_opened_us = esp_timer_get_time();
     ESP_LOGI(TAG,
              "capture popup opened mode=%s popup=%p freq=%s",
@@ -3032,11 +3030,9 @@ static void subghz_saved_replay_btn_cb(lv_event_t *e) {
     subghz_load_snapshot_action();
 }
 
-static void subghz_saved_delete_btn_cb(lv_event_t *e) {
-    (void)e;
+static void subghz_saved_delete_confirm_cb(void *user_data) {
+    (void)user_data;
     if (s_saved_file_count <= 0 || !s_saved_file_paths || !s_saved_file_paths[s_saved_index]) return;
-    s_saved_popup_selected = SUBGHZ_SAVED_POPUP_DELETE;
-    subghz_saved_popup_update_buttons();
     if (remove(s_saved_file_paths[s_saved_index]) == 0) {
         subghz_show_feedback_popup("SubGHz", "Capture deleted");
         subghz_close_saved_popup();
@@ -3044,6 +3040,16 @@ static void subghz_saved_delete_btn_cb(lv_event_t *e) {
     } else {
         subghz_show_feedback_popup("SubGHz error", "Failed to delete capture");
     }
+}
+
+static void subghz_saved_delete_btn_cb(lv_event_t *e) {
+    (void)e;
+    if (s_saved_file_count <= 0 || !s_saved_file_paths || !s_saved_file_paths[s_saved_index]) return;
+    s_saved_popup_selected = SUBGHZ_SAVED_POPUP_DELETE;
+    subghz_saved_popup_update_buttons();
+    popup_confirm_show(&s_saved_delete_confirm, lv_layer_top(), "Delete Capture?",
+                       "This saved SubGHz capture will be permanently deleted.",
+                       "Delete", "Cancel", subghz_saved_delete_confirm_cb, NULL);
 }
 
 static void subghz_capture_mark_ready(void) {
@@ -3141,7 +3147,6 @@ static void subghz_open_saved_popup(void) {
     if (popup_h < 150) popup_h = 150;
 
     s_saved_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
-    lv_obj_center(s_saved_popup);
 
     s_saved_title_label = popup_create_title_label(s_saved_popup, "Saved Capture", accessibility_get_font_body(), 8);
     s_saved_status_label = popup_create_body_label(
@@ -3988,8 +3993,46 @@ void subghz_view_update_remote_state(const char *state) {
     }
 }
 
+static bool subghz_saved_delete_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(s_saved_delete_confirm)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&s_saved_delete_confirm, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&s_saved_delete_confirm);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int ji = event->data.joystick_index;
+        if (ji == 1) popup_confirm_select(&s_saved_delete_confirm);
+        else if (ji == 0) popup_confirm_set_selected(s_saved_delete_confirm, 0);
+        else if (ji == 3) popup_confirm_set_selected(s_saved_delete_confirm, 1);
+        else if (ji == 2 || ji == 4) popup_confirm_move(s_saved_delete_confirm, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&s_saved_delete_confirm);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(s_saved_delete_confirm, event->data.encoder.direction);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        int kv = event->data.key_value;
+        if (kv == 13 || kv == 10 || kv == LV_KEY_ENTER) popup_confirm_select(&s_saved_delete_confirm);
+        else if (kv == 27 || kv == LV_KEY_ESC || kv == 29 || kv == '`' || kv == 'c' || kv == 'C') popup_confirm_cancel(&s_saved_delete_confirm);
+        else if (kv == ',' || kv == '.' || kv == ';' || kv == '/' || kv == 'h' || kv == 'l' || kv == 'k' || kv == 'j' ||
+                 kv == LV_KEY_LEFT || kv == LV_KEY_RIGHT || kv == LV_KEY_UP || kv == LV_KEY_DOWN) popup_confirm_move(s_saved_delete_confirm, 1);
+        return true;
+    }
+
+    return true;
+}
+
 static void subghz_input_handler(InputEvent *event) {
     if (!event) {
+        return;
+    }
+
+    if (subghz_saved_delete_confirm_handle_input(event)) {
         return;
     }
 
@@ -4634,6 +4677,7 @@ void subghz_view_destroy(void) {
     subghz_close_popup(true);
     subghz_close_freq_analyzer_popup();
     subghz_close_waterfall_popup();
+    popup_confirm_close(&s_saved_delete_confirm);
     subghz_close_saved_popup();
     subghz_saved_list_clear();
     s_in_saved_list = false;

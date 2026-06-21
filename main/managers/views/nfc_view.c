@@ -163,6 +163,7 @@ static bool saved_details_parsed_view = false;
 static bool saved_has_extra_details = false;
 static char *saved_details_text = NULL;
 static char g_saved_current_path[256] = {0};
+static popup_confirm_t *saved_delete_confirm_popup = NULL;
 
 // user mfc keys popup
 static lv_obj_t *keys_popup = NULL;
@@ -1180,8 +1181,58 @@ static void back_event_cb(lv_event_t *e);
 // forward declare option dispatcher used by multiple input paths
 void nfc_option_event_cb(lv_event_t *e);
 
+static void saved_delete_confirm_cb(void *user_data) {
+    (void)user_data;
+    if (g_saved_current_path[0] == '\0') return;
+    bool susp = false; nfc_sd_begin(&susp);
+    if (remove(g_saved_current_path) == 0) {
+        ESP_LOGI(TAG, "deleted file: %s", g_saved_current_path);
+    } else {
+        ESP_LOGE(TAG, "failed delete: %s", g_saved_current_path);
+    }
+    nfc_sd_end(susp);
+    cleanup_saved_details_popup(NULL);
+    if (!in_saved_list) saved_enter_list(); else saved_enter_list();
+}
+
+static bool saved_delete_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(saved_delete_confirm_popup)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&saved_delete_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&saved_delete_confirm_popup);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int ji = event->data.joystick_index;
+        if (ji == 1) popup_confirm_select(&saved_delete_confirm_popup);
+        else if (ji == 0) popup_confirm_set_selected(saved_delete_confirm_popup, 0);
+        else if (ji == 3) popup_confirm_set_selected(saved_delete_confirm_popup, 1);
+        else if (ji == 2 || ji == 4) popup_confirm_move(saved_delete_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&saved_delete_confirm_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(saved_delete_confirm_popup, event->data.encoder.direction);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        int kv = event->data.key_value;
+        if (kv == 13 || kv == 10 || kv == LV_KEY_ENTER) popup_confirm_select(&saved_delete_confirm_popup);
+        else if (kv == 27 || kv == 29 || kv == LV_KEY_ESC || kv == '`' || kv == 'c' || kv == 'C') popup_confirm_cancel(&saved_delete_confirm_popup);
+        else if (kv == 9 || kv == ',' || kv == '.' || kv == ';' || kv == '/' || kv == 'h' || kv == 'l' || kv == 'k' || kv == 'j' ||
+                 kv == LV_KEY_LEFT || kv == LV_KEY_RIGHT || kv == LV_KEY_UP || kv == LV_KEY_DOWN) popup_confirm_move(saved_delete_confirm_popup, 1);
+        return true;
+    }
+
+    return true;
+}
+
 void nfc_view_input_cb(InputEvent *event) {
     if (!root) return;
+    if (saved_delete_confirm_handle_input(event)) return;
+
     // Handle NFC scan popup input first
     if (nfc_scan_popup && lv_obj_is_valid(nfc_scan_popup)) {
         if (event->type == INPUT_TYPE_TOUCH) {
@@ -3873,16 +3924,9 @@ static void saved_delete_cb(lv_event_t *e) {
         return;
     }
     if (g_saved_current_path[0] == '\0') return;
-    bool susp = false; nfc_sd_begin(&susp);
-    if (remove(g_saved_current_path) == 0) {
-        ESP_LOGI(TAG, "deleted file: %s", g_saved_current_path);
-    } else {
-        ESP_LOGE(TAG, "failed delete: %s", g_saved_current_path);
-    }
-    nfc_sd_end(susp);
-    cleanup_saved_details_popup(NULL);
-    // refresh list
-    if (!in_saved_list) saved_enter_list(); else saved_enter_list();
+    popup_confirm_show(&saved_delete_confirm_popup, lv_layer_top(), "Delete NFC File?",
+                       "This saved NFC file will be permanently deleted.",
+                       "Delete", "Cancel", saved_delete_confirm_cb, NULL);
 }
 static void saved_rename_keyboard_callback(const char *name) {
     if (!name || !*name) { display_manager_switch_view(&nfc_view); return; }
@@ -4310,6 +4354,7 @@ void nfc_view_destroy(void) {
     // cleanup chameleon popup
     cleanup_cu_popup(NULL);
     // Cleanup saved popup and list
+    popup_confirm_close(&saved_delete_confirm_popup);
     cleanup_saved_details_popup(NULL);
     saved_clear_list();
     in_saved_list = false;

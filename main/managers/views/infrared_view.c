@@ -111,6 +111,7 @@ static void ir_add_back_row(void);
 #endif
 static lv_obj_t *root = NULL;
 static lv_obj_t *list = NULL;
+static popup_confirm_t *ir_confirm_popup = NULL;
 static int selected_ir_index = 0;
 static int num_ir_items = 0;
 static char **ir_file_paths = NULL;
@@ -753,7 +754,6 @@ static void dazzler_event_cb(lv_event_t *e) {
     if (popup_h < 80) popup_h = 80;
     
     dazzler_popup = popup_create_container(lv_scr_act(), popup_w, popup_h, true);
-    lv_obj_center(dazzler_popup);
     
     lv_obj_t *title = popup_create_title_label(dazzler_popup, "IR Dazzler Active", accessibility_get_font_body(), 15);
     (void)title;
@@ -1470,6 +1470,8 @@ void infrared_view_create(void) {
 }
 
 void infrared_view_destroy(void) {
+    popup_confirm_close(&ir_confirm_popup);
+
     if (universal_task_handle) {
         universal_transmit_cancel = true;
         vTaskDelete(universal_task_handle);
@@ -1563,7 +1565,60 @@ static void ir_select_item(int index) {
     }
 }
 
+static void ir_delete_remote_confirm_cb(void *user_data) {
+    (void)user_data;
+    ESP_LOGI(TAG, "Deleting remote: %s", current_remote_path);
+
+    bool susp = false; bool did = ir_sd_begin(&susp);
+    int rm = remove(current_remote_path);
+    if (did) ir_sd_end(susp);
+    if (rm == 0) {
+        ESP_LOGI(TAG, "Successfully deleted remote: %s", current_remote_path);
+        display_manager_switch_view(&infrared_view);
+    } else {
+        ESP_LOGE(TAG, "Failed to delete remote: %s", current_remote_path);
+    }
+}
+
+static bool ir_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(ir_confirm_popup)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&ir_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&ir_confirm_popup);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 1) popup_confirm_select(&ir_confirm_popup);
+        else if (button == 0) popup_confirm_set_selected(ir_confirm_popup, 0);
+        else if (button == 3) popup_confirm_set_selected(ir_confirm_popup, 1);
+        else if (button == 2 || button == 4) popup_confirm_move(ir_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == 13 || key == 10 || key == LV_KEY_ENTER) popup_confirm_select(&ir_confirm_popup);
+        else if (key == 27 || key == 29 || key == LV_KEY_ESC || key == '`') popup_confirm_cancel(&ir_confirm_popup);
+        else if (key == 'h' || key == 'l' || key == 'k' || key == 'j' || key == ',' || key == '.' || key == ';' || key == '/' ||
+                 key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_UP || key == LV_KEY_DOWN) popup_confirm_move(ir_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&ir_confirm_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(ir_confirm_popup, event->data.encoder.direction);
+        return true;
+    }
+
+    return true;
+}
+
 void infrared_view_input_cb(InputEvent *event) {
+    if (ir_confirm_handle_input(event)) {
+        return;
+    }
+
     // allow enter/esc to cancel universals transmit popup immediately
     if (transmitting_popup && lv_obj_is_valid(transmitting_popup)) {
         if (event->type == INPUT_TYPE_KEYBOARD) {
@@ -2369,7 +2424,6 @@ static void command_event_execute(int idx) {
         }
 
         transmitting_popup = popup_create_container(lv_scr_act(), 200, 60, true);
-        lv_obj_center(transmitting_popup);
         lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *label = lv_label_create(transmitting_popup);
@@ -2519,8 +2573,6 @@ static void create_unified_learning_popup(learning_popup_type_t type, learning_p
         popup = easy_learn_popup;
     }
 
-    lv_obj_center(popup);
-
     // compute responsive button sizes/positions to avoid overlap on small screens
     lv_coord_t pw = lv_obj_get_width(popup);
     lv_coord_t edge = 8;
@@ -2654,20 +2706,10 @@ void add_signal_cb(lv_event_t *e) {
 #endif
 
 void delete_remote_cb(lv_event_t *e) {
-    // Confirm deletion
-    ESP_LOGI(TAG, "Deleting remote: %s", current_remote_path);
-    
-    // Delete the file
-    bool susp = false; bool did = ir_sd_begin(&susp);
-    int rm = remove(current_remote_path);
-    if (did) ir_sd_end(susp);
-    if (rm == 0) {
-        ESP_LOGI(TAG, "Successfully deleted remote: %s", current_remote_path);
-        // Go back to the remotes list
-        display_manager_switch_view(&infrared_view);
-    } else {
-        ESP_LOGE(TAG, "Failed to delete remote: %s", current_remote_path);
-    }
+    (void)e;
+    popup_confirm_show(&ir_confirm_popup, lv_layer_top(), "Delete Remote?",
+                       "This remote will be permanently deleted.",
+                       "Delete", "Cancel", ir_delete_remote_confirm_cb, NULL);
 }
 
 // implement universals option callback
@@ -3251,7 +3293,6 @@ void create_signal_preview_popup(void)
     }
     
     signal_preview_popup = popup_create_container(lv_scr_act(), base_w, base_h, true);
-    lv_obj_center(signal_preview_popup);
     
     // Remove scrollbars and ensure content fits
     lv_obj_set_scrollbar_mode(signal_preview_popup, LV_SCROLLBAR_MODE_OFF);

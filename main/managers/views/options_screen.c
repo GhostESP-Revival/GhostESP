@@ -56,6 +56,7 @@
 
 static detail_view_t *sinkhole_detail_view = NULL;
 static void sinkhole_detail_back_cb(lv_event_t *e);
+static popup_confirm_t *settings_confirm_popup = NULL;
 
 static char selected_portal[MAX_PORTAL_NAME] = {0};
 static char selected_karma_portal[MAX_PORTAL_NAME] = {0};
@@ -1606,6 +1607,9 @@ static bool settings_select_overlay_is_open(void);
 static void settings_select_open(int setting_index);
 static void settings_select_close(void);
 static bool settings_select_handle_input(InputEvent *event);
+static bool settings_confirm_handle_input(InputEvent *event);
+static void settings_confirm_import_cb(void *user_data);
+static void settings_confirm_factory_reset_cb(void *user_data);
 
 static lv_timer_t *menu_build_timer = NULL;
 static const char * const *current_options_list = NULL;
@@ -2943,24 +2947,15 @@ static void apply_setting_change(int setting_index, int new_value) {
             return;
         }
         case SETTING_IMPORT_SETTINGS_SD: {
-            esp_err_t err = settings_backup_import_from_sd();
-            if (err == ESP_OK) {
-                settings_backup_apply_runtime_after_import();
-                error_popup_create("Settings imported\n\nSaved to NVS.\nReboot for full effect.");
-            } else if (err == ESP_ERR_NOT_FOUND) {
-                error_popup_create("Backup not found\n\nghostesp/settings_backup.json");
-            } else if (err == ESP_ERR_INVALID_VERSION) {
-                error_popup_create("Invalid backup file\n\nWrong format or version");
-            } else if (err == ESP_ERR_INVALID_SIZE) {
-                error_popup_create("Backup file invalid\n\nSize out of range");
-            } else {
-                error_popup_create("Import failed");
-            }
+            popup_confirm_show(&settings_confirm_popup, lv_layer_top(), "Import Settings?",
+                               "This will overwrite current settings from the SD backup.",
+                               "Import", "Cancel", settings_confirm_import_cb, NULL);
             return;
         }
         case SETTING_FACTORY_RESET:
-            nvs_flash_erase();
-            esp_restart();
+            popup_confirm_show(&settings_confirm_popup, lv_layer_top(), "Factory Reset?",
+                               "This erases saved settings and restarts the device.",
+                               "Reset", "Cancel", settings_confirm_factory_reset_cb, NULL);
             return;
         case SETTING_WIGLE_AUTO_UPLOAD:
             settings_set_wigle_auto_upload(&G_Settings, new_value == 1);
@@ -3389,6 +3384,65 @@ static bool settings_select_handle_input(InputEvent *event) {
     return true;
 }
 
+static bool settings_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(settings_confirm_popup)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&settings_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&settings_confirm_popup);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 1) popup_confirm_select(&settings_confirm_popup);
+        else if (button == 0) popup_confirm_set_selected(settings_confirm_popup, 0);
+        else if (button == 3) popup_confirm_set_selected(settings_confirm_popup, 1);
+        else if (button == 2 || button == 4) popup_confirm_move(settings_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == LV_KEY_ENTER || key == 13) popup_confirm_select(&settings_confirm_popup);
+        else if (key == LV_KEY_ESC || key == 29 || key == '`') popup_confirm_cancel(&settings_confirm_popup);
+        else if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_UP || key == LV_KEY_DOWN ||
+                 key == 'h' || key == 'l' || key == 'k' || key == 'j' || key == ',' || key == '.' || key == ';' || key == '/') {
+            popup_confirm_move(settings_confirm_popup, 1);
+        }
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&settings_confirm_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(settings_confirm_popup, event->data.encoder.direction);
+        return true;
+    }
+
+    return true;
+}
+
+static void settings_confirm_import_cb(void *user_data) {
+    (void)user_data;
+    esp_err_t err = settings_backup_import_from_sd();
+    if (err == ESP_OK) {
+        settings_backup_apply_runtime_after_import();
+        error_popup_create("Settings imported\n\nSaved to NVS.\nReboot for full effect.");
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        error_popup_create("Backup not found\n\nghostesp/settings_backup.json");
+    } else if (err == ESP_ERR_INVALID_VERSION) {
+        error_popup_create("Invalid backup file\n\nWrong format or version");
+    } else if (err == ESP_ERR_INVALID_SIZE) {
+        error_popup_create("Backup file invalid\n\nSize out of range");
+    } else {
+        error_popup_create("Import failed");
+    }
+}
+
+static void settings_confirm_factory_reset_cb(void *user_data) {
+    (void)user_data;
+    nvs_flash_erase();
+    esp_restart();
+}
+
 static void change_current_row(bool increment)
 {
     if (!menu_container) return;
@@ -3501,6 +3555,10 @@ static void select_option_item(int index) {
 }
 
 void handle_hardware_button_press_options(InputEvent *event) {
+    if (settings_confirm_handle_input(event)) {
+        return;
+    }
+
     // Close wigle help popup on exit button or joystick back
     if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
         if (event->type == INPUT_TYPE_EXIT_BUTTON || 
@@ -7295,6 +7353,7 @@ void handle_option_directly(const char *Selected_Option) {
 
 void options_menu_destroy() {
     opt_touch_started = false;
+    popup_confirm_close(&settings_confirm_popup);
     settings_select_close();
     gui_nav_history_clear();
     scan_all_flow_active = false;

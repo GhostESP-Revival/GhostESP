@@ -116,6 +116,7 @@ static lv_obj_t *back_btn = NULL;
 static lv_obj_t *badusb_running_popup = NULL;
 static lv_obj_t *badusb_popup_title_lbl = NULL;
 static lv_obj_t *badusb_popup_body_lbl = NULL;
+static popup_confirm_t *badusb_confirm_popup = NULL;
 static lv_timer_t *vsense_poll_timer = NULL;
 static char vsense_pending_script[MAX_SCRIPT_NAME];
 
@@ -137,6 +138,8 @@ static void select_item(int index) {
 }
 
 static void handle_option(const char *option);
+static bool badusb_confirm_handle_input(InputEvent *event);
+static void badusb_reset_defaults_confirm_cb(void *user_data);
 
 static void on_option_click(lv_event_t *e) {
     const char *opt = (const char *)lv_event_get_user_data(e);
@@ -224,6 +227,53 @@ static void update_scroll_buttons_visibility(void) {
 
 static void rebuild_menu(void);
 static void go_back(void);
+
+static bool badusb_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(badusb_confirm_popup)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&badusb_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&badusb_confirm_popup);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 1) popup_confirm_select(&badusb_confirm_popup);
+        else if (button == 0) popup_confirm_set_selected(badusb_confirm_popup, 0);
+        else if (button == 3) popup_confirm_set_selected(badusb_confirm_popup, 1);
+        else if (button == 2 || button == 4) popup_confirm_move(badusb_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == 13 || key == LV_KEY_ENTER) popup_confirm_select(&badusb_confirm_popup);
+        else if (key == 27 || key == 29 || key == LV_KEY_ESC || key == '`') popup_confirm_cancel(&badusb_confirm_popup);
+        else if (key == 'h' || key == 'l' || key == 'k' || key == 'j' || key == ',' || key == '.' || key == ';' || key == '/' ||
+                 key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_UP || key == LV_KEY_DOWN) popup_confirm_move(badusb_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&badusb_confirm_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(badusb_confirm_popup, event->data.encoder.direction);
+        return true;
+    }
+
+    return true;
+}
+
+static void badusb_reset_defaults_confirm_cb(void *user_data) {
+    (void)user_data;
+    settings_reset_badusb_defaults(&G_Settings);
+    settings_persist_setting(SETTING_BADUSB_VID);
+    settings_persist_setting(SETTING_BADUSB_PID);
+    settings_persist_setting(SETTING_BADUSB_MANUFACTURER);
+    settings_persist_setting(SETTING_BADUSB_PRODUCT);
+    settings_persist_setting(SETTING_BADUSB_RANDOMIZE);
+    settings_persist_setting(SETTING_BADUSB_KB_LAYOUT);
+    populate_settings_labels();
+    rebuild_menu();
+}
 
 static void back_btn_cb(lv_event_t *e) {
     (void)e;
@@ -743,15 +793,9 @@ static void handle_option(const char *option) {
             snprintf(settings_labels[5], 80, "Randomize: %s", enabled ? "On" : "Off");
             options_view_update_item_text(g_ov, 5, settings_labels[5]);
         } else if (strcmp(option, "Reset To Defaults") == 0) {
-            settings_reset_badusb_defaults(&G_Settings);
-            settings_persist_setting(SETTING_BADUSB_VID);
-            settings_persist_setting(SETTING_BADUSB_PID);
-            settings_persist_setting(SETTING_BADUSB_MANUFACTURER);
-            settings_persist_setting(SETTING_BADUSB_PRODUCT);
-            settings_persist_setting(SETTING_BADUSB_RANDOMIZE);
-            settings_persist_setting(SETTING_BADUSB_KB_LAYOUT);
-            populate_settings_labels();
-            rebuild_menu();
+            popup_confirm_show(&badusb_confirm_popup, lv_layer_top(), "Reset Defaults?",
+                               "Reset BadUSB settings to firmware defaults?",
+                               "Reset", "Cancel", badusb_reset_defaults_confirm_cb, NULL);
         } else if (strcmp(option, "< Back") == 0) {
             go_back();
         }
@@ -948,6 +992,7 @@ void badusb_view_destroy(void) {
     }
     badusb_popup_title_lbl = NULL;
     badusb_popup_body_lbl = NULL;
+    popup_confirm_close(&badusb_confirm_popup);
 
     if (g_ov) {
         options_view_destroy(g_ov);
@@ -970,6 +1015,10 @@ static void get_badusb_callback(void **callback) {
 }
 
 void badusb_view_input_cb(InputEvent *event) {
+    if (badusb_confirm_handle_input(event)) {
+        return;
+    }
+
     if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
         if (event->type == INPUT_TYPE_KEYBOARD) {
             uint8_t key = event->data.key_value;

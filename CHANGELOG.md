@@ -9,6 +9,7 @@
  - Added Ghostchi companion lockscreen mode with no-PIN support and a global mood system
  - Added SD browser support for viewing text file previews and staging file copy/move operations
  - Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
+ - Added reusable LVGL confirmation popups for dangerous UI actions
 
 ### Fixed
  - Fixed BLE scans over-awarding Ghostchi XP
@@ -19,6 +20,7 @@
  - Fixed detail view being orphaned over the rebuilt main menu after dim+lock; rebuilt after unlock
  - Fixed `scan_status` spinner lingering on `lv_layer_top()` across lockscreen entry
  - Fixed main menu touch scrolling feeling less responsive than settings
+ - Fixed fullscreen LVGL popups not filling the runtime display area below the status bar on some configs
 
 ## Revival v2.0-pre5
 
