@@ -78,6 +78,8 @@ jobs:
           - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip" }
           - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip" }
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
+          - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
+          - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
 
     steps:
       - uses: actions/checkout@v4
