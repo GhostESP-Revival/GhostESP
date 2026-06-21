@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "gui/toast.h"
+#include "managers/ghostchi_mood.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
@@ -293,12 +294,38 @@ static void snapshot_write_locked(ghostchi_state_t state, const char *status_lin
     }
 }
 
+static void record_mood_for_state(ghostchi_state_t state) {
+    switch (state) {
+        case GHOSTCHI_STATE_BLOCKED:
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BLOCKED, 5);
+            break;
+        case GHOSTCHI_STATE_IDLE:
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_STORAGE_READY, 2);
+            break;
+        case GHOSTCHI_STATE_SWEEP:
+        case GHOSTCHI_STATE_RANK:
+        case GHOSTCHI_STATE_LOCK:
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_HUNTING, 4);
+            break;
+        case GHOSTCHI_STATE_STIM:
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_ATTACK, 5);
+            break;
+        case GHOSTCHI_STATE_STOPPING:
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_SESSION_STOP, 4);
+            break;
+        case GHOSTCHI_STATE_COOLDOWN:
+        default:
+            break;
+    }
+}
+
 static void snapshot_set_state(ghostchi_state_t state, const char *status_line, const char *reason) {
     if (!s_lock) return;
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
         snapshot_write_locked(state, status_line, reason);
         xSemaphoreGive(s_lock);
     }
+    record_mood_for_state(state);
 }
 
 static void snapshot_set_target(const wifi_ap_record_t *ap, uint16_t score, uint8_t confidence, const char *reason) {
@@ -847,6 +874,9 @@ static void ghostchi_enter_cooldown(const char *status, const char *reason, uint
         ++s_snapshot.failures;
         xSemaphoreGive(s_lock);
     }
+    if (count_failure) {
+        ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_MISS, 4);
+    }
     snapshot_set_state(GHOSTCHI_STATE_COOLDOWN, status, reason);
     s_phase_deadline_ms = now_ms() + delay_ms;
 }
@@ -914,6 +944,7 @@ void ghostchi_manager_tick(void) {
         target_result_update(&s_current_target, true);
         session_log("result=success total=%lu\n", (unsigned long)handshakes_now);
         ghostchi_manager_add_xp(24);
+        ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_SUCCESS, 8);
         ghostchi_enter_cooldown("capture confirmed", s_current_target.reason, GHOSTCHI_COOLDOWN_SUCCESS_MS, false);
         return;
     }
@@ -1069,6 +1100,11 @@ void ghostchi_manager_add_xp(uint32_t amount) {
                         : 0u;
     if (scaled > room) scaled = room;
 
+    if (scaled > 0) {
+        uint8_t intensity = (scaled >= 10u) ? 10u : (uint8_t)scaled;
+        ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_XP_GAIN, intensity);
+    }
+
     s_total_xp += scaled;
     s_session_xp_earned += scaled;
 
@@ -1078,6 +1114,7 @@ void ghostchi_manager_add_xp(uint32_t amount) {
         snprintf(buf, sizeof(buf), "Level %u!", new_level);
         toast_show(buf, TOAST_SUCCESS);
         s_level_up_at_ms = now_ms();
+        ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_LEVEL_UP, 10);
         if (s_storage_ready) {
             s_xp_save_deadline_ms = 0;
             save_state();
@@ -1148,6 +1185,7 @@ bool ghostchi_manager_start(void) {
     s_pcap_capture_enabled = true;
     wifi_callbacks_set_pcap_enabled(s_pcap_capture_enabled);
     status_display_show_status("Ghostchi On");
+    ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_SESSION_START, 6);
     if (pcap_file_open_in_dir("ghostchi", GHOSTCHI_PCAP_DIR, PCAP_CAPTURE_WIFI) != ESP_OK) {
         snapshot_set_state(GHOSTCHI_STATE_BLOCKED, "pcap open failed", "check sd write access");
         s_session_log_path[0] = '\0';

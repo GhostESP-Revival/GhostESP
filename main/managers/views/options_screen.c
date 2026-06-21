@@ -3148,12 +3148,6 @@ static void apply_setting_change(int setting_index, int new_value) {
             if (new_value == 1) {
                 settings_set_lockscreen_type(&G_Settings, 1);
                 settings_persist_setting(SETTING_LOCKSCREEN_TYPE);
-                if (!lockscreen_is_configured()) {
-                    settings_persist_setting(SETTING_LOCKSCREEN_ENABLED);
-                    lockscreen_enter_setup();
-                    display_manager_switch_view(&lockscreen_view);
-                    return;
-                }
             }
             break;
         case SETTING_LOCKSCREEN_WAKE:

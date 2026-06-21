@@ -6,6 +6,7 @@
 #include "managers/display_manager.h"
 #include "managers/ghostchi_activity.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostchi_mood.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "managers/views/app_gallery_screen.h"
@@ -129,13 +130,41 @@ LV_IMG_DECLARE(surpised_50x50);
 #define GHOST_H 50
 
 static const lv_img_dsc_t *ghostchi_valid_sprite(const lv_img_dsc_t *sprite,
-                                                 const lv_img_dsc_t *fallback) {
+                                                  const lv_img_dsc_t *fallback) {
     lv_img_header_t header;
     if (sprite && lv_img_decoder_get_info(sprite, &header) == LV_RES_OK &&
         header.w == GHOST_W && header.h == GHOST_H) {
         return sprite;
     }
     return fallback ? fallback : &happy_50x50;
+}
+
+static const lv_img_dsc_t *sprite_for_global_mood(ghostchi_mood_t mood) {
+    switch (mood) {
+        case GHOSTCHI_MOOD_CELEBRATE:
+            return ghostchi_valid_sprite(&cake_50x50, &love_50x50);
+        case GHOSTCHI_MOOD_LOVE:
+            return &love_50x50;
+        case GHOSTCHI_MOOD_HAPPY:
+        case GHOSTCHI_MOOD_EXCITED:
+            return &happy_50x50;
+        case GHOSTCHI_MOOD_FOCUSED:
+        case GHOSTCHI_MOOD_SURPRISED:
+            return ghostchi_valid_sprite(&surpised_50x50, &what2_50x50);
+        case GHOSTCHI_MOOD_AGGRESSIVE:
+            return &evil_50x50;
+        case GHOSTCHI_MOOD_ANGRY:
+            return &angry_50x50;
+        case GHOSTCHI_MOOD_TIRED:
+            return &tired_50x50;
+        case GHOSTCHI_MOOD_SLEEPY:
+            return ghostchi_valid_sprite(&sleep_50x50, &tired_50x50);
+        case GHOSTCHI_MOOD_CONFUSED:
+            return &what2_50x50;
+        case GHOSTCHI_MOOD_NEUTRAL:
+        default:
+            return &happy_50x50;
+    }
 }
 
 static lv_obj_t *s_root;
@@ -587,6 +616,11 @@ static const lv_img_dsc_t *pick_ghost_sprite(const ghostchi_snapshot_t *snap) {
     /* Resolve the base mood for current run state / idle age. */
     const lv_img_dsc_t *base = &happy_50x50;
     if (!snap->running) {
+        ghostchi_mood_snapshot_t mood = {0};
+        ghostchi_mood_get_snapshot(&mood);
+        if (mood.mood != GHOSTCHI_MOOD_NEUTRAL) {
+            return sprite_for_global_mood(mood.mood);
+        }
         uint32_t hours = idle_hours(snap);
         if (!snap->sd_ready)               base = &what2_50x50;
         else if (hours >= 24)              base = ghostchi_valid_sprite(&sleep_50x50, &tired_50x50);
@@ -817,6 +851,7 @@ static void handle_footer_action(int zone) {
 static void update_ui(lv_timer_t *timer) {
     ghostchi_snapshot_t snap;
     ghostchi_activity_snapshot_t act;
+    ghostchi_mood_snapshot_t mood;
     char buf[64];
     int art_w;
     int art_h;
@@ -845,6 +880,7 @@ static void update_ui(lv_timer_t *timer) {
     ghostchi_manager_tick();
     ghostchi_manager_get_snapshot(&snap);
     ghostchi_activity_get_snapshot(&act);
+    ghostchi_mood_get_snapshot(&mood);
     layout = active_layout();
     show_bubble = should_show_bubble(&snap);
     content_h = LV_VER_RES - GUI_STATUS_BAR_HEIGHT;
@@ -943,7 +979,7 @@ static void update_ui(lv_timer_t *timer) {
         lv_obj_set_style_text_align(s_state_label, LV_TEXT_ALIGN_LEFT, 0);
     }
 
-    snprintf(buf, sizeof(buf), "%s", state_mood(snap.state));
+    snprintf(buf, sizeof(buf), "%s mood: %s", state_mood(snap.state), mood.label);
     lv_label_set_text(s_reason_label, buf);
     if (is_portrait_layout()) {
         lv_obj_set_width(s_reason_label, LV_HOR_RES - 36);

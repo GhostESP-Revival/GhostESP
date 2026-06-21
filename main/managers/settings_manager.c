@@ -813,11 +813,9 @@ void settings_load(FSettings *settings) {
   }
   settings->lockscreen_type = 1;
   uint8_t lockscreen_stored_len = (uint8_t)settings->lockscreen_obfuscated[0];
-  bool lockscreen_configured = (lockscreen_stored_len & 0x80) != 0 &&
-                               (lockscreen_stored_len & 0x7F) > 0 &&
-                               (lockscreen_stored_len & 0x7F) < sizeof(settings->lockscreen_obfuscated);
-  if (settings->lockscreen_enabled && !lockscreen_configured) {
-    settings->lockscreen_enabled = false;
+  if ((lockscreen_stored_len & 0x80) != 0 &&
+      (lockscreen_stored_len & 0x7F) >= sizeof(settings->lockscreen_obfuscated)) {
+    memset(settings->lockscreen_obfuscated, 0, sizeof(settings->lockscreen_obfuscated));
   }
   value_u16 = 0;
   err = nvs_get_u16(nvsHandle, NVS_LOCKSCREEN_TIMEOUT_KEY, &value_u16);

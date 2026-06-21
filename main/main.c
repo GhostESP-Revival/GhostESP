@@ -8,6 +8,7 @@
 #include "managers/ap_manager.h"
 #include "managers/display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostchi_mood.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
@@ -505,6 +506,8 @@ static void deferred_sd_init_task(void *arg) {
 
 void app_main(void) {
     memory_debug_start_boot_trace();
+    ghostchi_mood_init();
+    ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
