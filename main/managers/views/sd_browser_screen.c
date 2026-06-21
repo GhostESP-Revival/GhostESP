@@ -17,16 +17,23 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #define SD_BROWSER_ROOT "/mnt"
 #define SD_BROWSER_PAGE_SIZE 8
+#define SD_BROWSER_EXTRA_ROWS 8
 #define SD_BROWSER_PATH_MAX 256
 #define SD_BROWSER_NAME_MAX 128
+#define SD_BROWSER_COPY_BUFFER_SIZE 1024
+#define SD_BROWSER_VIEW_MAX_BYTES 4096
+#define SD_BROWSER_VIEW_MAX_LINES 64
+#define SD_BROWSER_VIEW_LINE_MAX 96
 
-typedef enum { SD_BROWSER_MODE_LIST, SD_BROWSER_MODE_DETAIL } sd_browser_mode_t;
-typedef enum { SD_ROW_ENTRY, SD_ROW_UP, SD_ROW_PREV, SD_ROW_NEXT, SD_ROW_REFRESH, SD_ROW_BACK } sd_browser_row_type_t;
+typedef enum { SD_BROWSER_MODE_LIST, SD_BROWSER_MODE_DETAIL, SD_BROWSER_MODE_CONTENT } sd_browser_mode_t;
+typedef enum { SD_ROW_ENTRY, SD_ROW_UP, SD_ROW_PREV, SD_ROW_NEXT, SD_ROW_REFRESH, SD_ROW_PASTE, SD_ROW_CANCEL_OP, SD_ROW_BACK } sd_browser_row_type_t;
+typedef enum { SD_BROWSER_OP_NONE, SD_BROWSER_OP_COPY, SD_BROWSER_OP_MOVE } sd_browser_op_t;
 
 typedef struct {
     char name[SD_BROWSER_NAME_MAX];
@@ -57,6 +64,9 @@ static sd_browser_row_t *rows = NULL;
 static int row_count = 0;
 static sd_browser_entry_t *selected_entry = NULL;
 static char *selected_path = NULL;
+static sd_browser_op_t pending_op = SD_BROWSER_OP_NONE;
+static char *pending_path = NULL;
+static char *pending_name = NULL;
 static int sd_touch_start_x, sd_touch_start_y;
 static int sd_touch_last_x, sd_touch_last_y;
 static bool sd_touch_started;
@@ -101,6 +111,9 @@ static void sd_touch_reset(void) {
 static lv_obj_t *sd_browser_scroll_target(void) {
     if (browser_mode == SD_BROWSER_MODE_LIST && browser_options) {
         return options_view_get_list(browser_options);
+    }
+    if (browser_mode == SD_BROWSER_MODE_CONTENT && browser_detail) {
+        return detail_view_get_info_panel(browser_detail);
     }
     if (browser_mode == SD_BROWSER_MODE_DETAIL && browser_detail) {
         return detail_view_get_list(browser_detail);
@@ -289,12 +302,115 @@ static int sd_browser_load_page(void) {
 }
 
 static void sd_browser_show_list(void);
+static void sd_browser_show_selected_file_detail(void);
 static void sd_browser_detail_back_cb(lv_event_t *e);
 
 static bool sd_browser_valid_new_name(const char *name) {
     if (!name || name[0] == '\0') return false;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
     return strchr(name, '/') == NULL && strchr(name, '\\') == NULL;
+}
+
+static bool sd_browser_has_pending_op(void) {
+    return pending_op != SD_BROWSER_OP_NONE && pending_path && pending_path[0] && pending_name && pending_name[0];
+}
+
+static void sd_browser_clear_pending_op(void) {
+    pending_op = SD_BROWSER_OP_NONE;
+    if (pending_path) pending_path[0] = '\0';
+    if (pending_name) pending_name[0] = '\0';
+}
+
+static void sd_browser_set_pending_op(sd_browser_op_t op) {
+    if (!selected_path || !selected_entry || !pending_path || !pending_name) return;
+    pending_op = op;
+    sd_browser_copy(pending_path, SD_BROWSER_PATH_MAX, selected_path);
+    sd_browser_copy(pending_name, SD_BROWSER_NAME_MAX, selected_entry->name);
+    toast_show_duration(op == SD_BROWSER_OP_MOVE ? "Move ready: Paste Here" : "Copy ready: Paste Here", TOAST_SUCCESS, 1400);
+    sd_browser_show_list();
+}
+
+static bool sd_browser_copy_file_data(const char *src, const char *dst) {
+    FILE *in = fopen(src, "rb");
+    if (!in) return false;
+
+    FILE *out = fopen(dst, "wb");
+    if (!out) {
+        fclose(in);
+        return false;
+    }
+
+    uint8_t *buf = malloc(SD_BROWSER_COPY_BUFFER_SIZE);
+    if (!buf) {
+        fclose(out);
+        fclose(in);
+        remove(dst);
+        return false;
+    }
+
+    bool ok = true;
+    size_t n;
+    while ((n = fread(buf, 1, SD_BROWSER_COPY_BUFFER_SIZE, in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            ok = false;
+            break;
+        }
+    }
+    if (ferror(in)) ok = false;
+    if (fclose(out) != 0) ok = false;
+    fclose(in);
+    free(buf);
+
+    if (!ok) remove(dst);
+    return ok;
+}
+
+static bool sd_browser_paste_pending(void) {
+    if (!sd_browser_has_pending_op()) {
+        toast_show_duration("Nothing to paste", TOAST_WARN, 1200);
+        return false;
+    }
+
+    char dst_path[SD_BROWSER_PATH_MAX];
+    if (!sd_browser_join_path(dst_path, sizeof(dst_path), current_dir, pending_name)) {
+        toast_show_duration("Path too long", TOAST_WARN, 1600);
+        return false;
+    }
+    if (strcmp(pending_path, dst_path) == 0) {
+        toast_show_duration("Choose another folder", TOAST_WARN, 1600);
+        return false;
+    }
+
+    bool mounted_here = false;
+    bool display_was_suspended = false;
+    if (sd_browser_sd_begin(&mounted_here, &display_was_suspended) != ESP_OK) {
+        toast_show_duration("SD mount failed", TOAST_WARN, 1600);
+        return false;
+    }
+
+    struct stat st;
+    if (stat(dst_path, &st) == 0) {
+        sd_browser_sd_end(mounted_here, display_was_suspended);
+        toast_show_duration("File already exists", TOAST_WARN, 1600);
+        return false;
+    }
+
+    bool ok = false;
+    if (pending_op == SD_BROWSER_OP_MOVE) {
+        ok = rename(pending_path, dst_path) == 0;
+    } else {
+        ok = sd_browser_copy_file_data(pending_path, dst_path);
+    }
+    sd_browser_sd_end(mounted_here, display_was_suspended);
+
+    if (!ok) {
+        toast_show_duration(pending_op == SD_BROWSER_OP_MOVE ? "Move failed" : "Copy failed", TOAST_WARN, 1600);
+        return false;
+    }
+
+    toast_show_duration(pending_op == SD_BROWSER_OP_MOVE ? "File moved" : "File copied", TOAST_SUCCESS, 1200);
+    sd_browser_clear_pending_op();
+    return true;
 }
 
 static bool sd_browser_rename_selected(const char *new_name) {
@@ -393,16 +509,149 @@ static void sd_browser_delete_cb(lv_event_t *e) {
     detail_view_set_selected(browser_detail, 0);
 }
 
+static void sd_browser_content_back_cb(lv_event_t *e) {
+    (void)e;
+    sd_browser_show_selected_file_detail();
+}
+
+static void sd_browser_flush_preview_line(detail_view_t *dv, int *line_no, int *line_count,
+                                          char *line, size_t *line_len, bool *line_truncated) {
+    if (!dv || !line_no || !line_count || !line || !line_len || !line_truncated) return;
+    if (*line_count >= SD_BROWSER_VIEW_MAX_LINES) return;
+
+    if (*line_truncated) {
+        int dots = 3;
+        while (dots-- > 0 && *line_len < SD_BROWSER_VIEW_LINE_MAX - 1) {
+            line[(*line_len)++] = '.';
+        }
+    }
+    line[*line_len] = '\0';
+
+    char label[12];
+    snprintf(label, sizeof(label), "%d", *line_no);
+    detail_view_add_info(dv, label, line);
+    (*line_no)++;
+    (*line_count)++;
+    *line_len = 0;
+    *line_truncated = false;
+}
+
+static void sd_browser_add_file_preview(detail_view_t *dv) {
+    bool mounted_here = false;
+    bool display_was_suspended = false;
+    if (sd_browser_sd_begin(&mounted_here, &display_was_suspended) != ESP_OK) {
+        detail_view_add_info(dv, "Preview", "SD mount failed");
+        return;
+    }
+
+    FILE *f = fopen(selected_path, "rb");
+    if (!f) {
+        sd_browser_sd_end(mounted_here, display_was_suspended);
+        detail_view_add_info(dv, "Preview", "Open failed");
+        return;
+    }
+
+    char line[SD_BROWSER_VIEW_LINE_MAX];
+    size_t line_len = 0;
+    int line_no = 1;
+    int line_count = 0;
+    size_t bytes = 0;
+    bool binary = false;
+    bool truncated = false;
+    bool line_truncated = false;
+    int c;
+
+    while ((c = fgetc(f)) != EOF) {
+        if (bytes >= SD_BROWSER_VIEW_MAX_BYTES || line_count >= SD_BROWSER_VIEW_MAX_LINES) {
+            truncated = true;
+            break;
+        }
+        bytes++;
+
+        unsigned char ch = (unsigned char)c;
+        if (ch == 0 || (ch < 32 && ch != '\n' && ch != '\r' && ch != '\t')) {
+            binary = true;
+            break;
+        }
+        if (ch == '\r') continue;
+        if (ch == '\n') {
+            sd_browser_flush_preview_line(dv, &line_no, &line_count, line, &line_len, &line_truncated);
+            continue;
+        }
+        if (line_len < SD_BROWSER_VIEW_LINE_MAX - 4) {
+            line[line_len++] = (char)ch;
+        } else {
+            line_truncated = true;
+        }
+    }
+
+    if (!binary && line_count < SD_BROWSER_VIEW_MAX_LINES && line_len > 0) {
+        sd_browser_flush_preview_line(dv, &line_no, &line_count, line, &line_len, &line_truncated);
+    }
+
+    fclose(f);
+    sd_browser_sd_end(mounted_here, display_was_suspended);
+
+    if (bytes == 0 && !binary) {
+        detail_view_add_info(dv, "Preview", "Empty file");
+    } else if (binary) {
+        detail_view_add_info(dv, "Preview", "Binary or unsupported text");
+    }
+    if (truncated) {
+        detail_view_add_info(dv, "Notice", "Preview truncated");
+    }
+}
+
+static void sd_browser_view_contents_cb(lv_event_t *e) {
+    (void)e;
+    if (!selected_entry || !selected_path) return;
+
+    if (browser_options) {
+        options_view_destroy(browser_options);
+        browser_options = NULL;
+    }
+    if (browser_detail) {
+        detail_view_destroy(browser_detail);
+        browser_detail = NULL;
+    }
+
+    browser_mode = SD_BROWSER_MODE_CONTENT;
+    char title[96];
+    snprintf(title, sizeof(title), "View: %.80s", selected_entry->name);
+    browser_detail = detail_view_create(browser_root, title);
+    if (!browser_detail) return;
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
+    detail_view_set_bottom_reserved(browser_detail, TOUCH_BAR_HEIGHT);
+#endif
+
+    sd_browser_add_file_preview(browser_detail);
+    detail_view_add_back(browser_detail, sd_browser_content_back_cb, NULL);
+    detail_view_set_selected(browser_detail, 0);
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    sd_update_scroll_buttons_visibility();
+#endif
+}
+
+static void sd_browser_copy_cb(lv_event_t *e) {
+    (void)e;
+    sd_browser_set_pending_op(SD_BROWSER_OP_COPY);
+}
+
+static void sd_browser_move_cb(lv_event_t *e) {
+    (void)e;
+    sd_browser_set_pending_op(SD_BROWSER_OP_MOVE);
+}
+
 static void sd_browser_detail_back_cb(lv_event_t *e) {
     (void)e;
     sd_browser_show_list();
 }
 
-static void sd_browser_show_file_detail(int index) {
-    if (index < 0 || index >= page_entry_count) return;
-    if (selected_entry) *selected_entry = page_entries[index];
-    if (!sd_browser_join_path(selected_path, SD_BROWSER_PATH_MAX, current_dir, selected_entry->name)) return;
-
+static void sd_browser_show_selected_file_detail(void) {
+    if (!selected_entry || !selected_path) return;
     if (browser_options) {
         options_view_destroy(browser_options);
         browser_options = NULL;
@@ -428,6 +677,9 @@ static void sd_browser_show_file_detail(int index) {
     detail_view_add_info(browser_detail, "Name", selected_entry->name);
     detail_view_add_info(browser_detail, "Folder", folder);
     detail_view_add_infof(browser_detail, "Size", "%ld bytes", selected_entry->size);
+    detail_view_add_action(browser_detail, LV_SYMBOL_EYE_OPEN " View Contents", sd_browser_view_contents_cb, NULL);
+    detail_view_add_action(browser_detail, LV_SYMBOL_COPY " Copy", sd_browser_copy_cb, NULL);
+    detail_view_add_action(browser_detail, LV_SYMBOL_CUT " Move", sd_browser_move_cb, NULL);
     detail_view_add_action(browser_detail, LV_SYMBOL_EDIT " Rename", sd_browser_rename_cb, NULL);
     detail_view_add_action(browser_detail, LV_SYMBOL_TRASH " Delete", sd_browser_delete_cb, NULL);
     detail_view_add_back(browser_detail, sd_browser_detail_back_cb, NULL);
@@ -436,6 +688,13 @@ static void sd_browser_show_file_detail(int index) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     sd_update_scroll_buttons_visibility();
 #endif
+}
+
+static void sd_browser_show_file_detail(int index) {
+    if (index < 0 || index >= page_entry_count) return;
+    if (selected_entry) *selected_entry = page_entries[index];
+    if (!sd_browser_join_path(selected_path, SD_BROWSER_PATH_MAX, current_dir, selected_entry->name)) return;
+    sd_browser_show_selected_file_detail();
 }
 
 static void sd_browser_open_entry(int index) {
@@ -475,6 +734,14 @@ static void sd_browser_handle_row(int row_index) {
         case SD_ROW_REFRESH:
             sd_browser_show_list();
             break;
+        case SD_ROW_PASTE:
+            if (sd_browser_paste_pending()) sd_browser_show_list();
+            break;
+        case SD_ROW_CANCEL_OP:
+            sd_browser_clear_pending_op();
+            toast_show_duration("File operation cancelled", TOAST_SUCCESS, 1200);
+            sd_browser_show_list();
+            break;
         case SD_ROW_BACK:
             display_manager_switch_view(&apps_menu_view);
             break;
@@ -488,7 +755,7 @@ static void sd_browser_row_click_cb(lv_event_t *e) {
 }
 
 static void sd_browser_add_row(const char *label, sd_browser_row_type_t type, int entry_index) {
-    if (!browser_options || row_count >= SD_BROWSER_PAGE_SIZE + 5) return;
+    if (!browser_options || row_count >= SD_BROWSER_PAGE_SIZE + SD_BROWSER_EXTRA_ROWS) return;
     int row_index = row_count;
     rows[row_index].type = type;
     rows[row_index].entry_index = entry_index;
@@ -543,6 +810,13 @@ static void sd_browser_show_list(void) {
 
     if (!sd_browser_is_root()) sd_browser_add_row(LV_SYMBOL_UP " Up", SD_ROW_UP, -1);
     if (page_offset > 0) sd_browser_add_row(LV_SYMBOL_LEFT " Prev", SD_ROW_PREV, -1);
+    if (sd_browser_has_pending_op()) {
+        char paste_label[SD_BROWSER_NAME_MAX + 28];
+        snprintf(paste_label, sizeof(paste_label), LV_SYMBOL_PASTE " Paste %s: %.127s",
+                 pending_op == SD_BROWSER_OP_MOVE ? "Move" : "Copy", pending_name);
+        sd_browser_add_row(paste_label, SD_ROW_PASTE, -1);
+        sd_browser_add_row(LV_SYMBOL_CLOSE " Cancel File Op", SD_ROW_CANCEL_OP, -1);
+    }
 
     for (int i = 0; i < page_entry_count; i++) {
         char label[SD_BROWSER_NAME_MAX + 12];
@@ -577,13 +851,21 @@ void sd_browser_create(void) {
         page_entries = calloc(SD_BROWSER_PAGE_SIZE, sizeof(*page_entries));
     }
     if (!rows) {
-        rows = calloc(SD_BROWSER_PAGE_SIZE + 5, sizeof(*rows));
+        rows = calloc(SD_BROWSER_PAGE_SIZE + SD_BROWSER_EXTRA_ROWS, sizeof(*rows));
     }
     if (!selected_entry) {
         selected_entry = calloc(1, sizeof(*selected_entry));
     }
     if (!selected_path) {
         selected_path = malloc(SD_BROWSER_PATH_MAX);
+    }
+    if (!pending_path) {
+        pending_path = malloc(SD_BROWSER_PATH_MAX);
+        if (pending_path) pending_path[0] = '\0';
+    }
+    if (!pending_name) {
+        pending_name = malloc(SD_BROWSER_NAME_MAX);
+        if (pending_name) pending_name[0] = '\0';
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
@@ -680,11 +962,16 @@ void sd_browser_destroy(void) {
     selected_entry = NULL;
     free(selected_path);
     selected_path = NULL;
+    free(pending_path);
+    pending_path = NULL;
+    free(pending_name);
+    pending_name = NULL;
+    pending_op = SD_BROWSER_OP_NONE;
     sd_touch_reset();
 }
 
 static void sd_browser_select_current(void) {
-    if (browser_mode == SD_BROWSER_MODE_DETAIL) {
+    if (browser_mode == SD_BROWSER_MODE_DETAIL || browser_mode == SD_BROWSER_MODE_CONTENT) {
         lv_obj_t *obj = detail_view_get_selected_obj(browser_detail);
         if (obj && lv_obj_is_valid(obj)) lv_event_send(obj, LV_EVENT_CLICKED, NULL);
         return;
@@ -695,7 +982,9 @@ static void sd_browser_select_current(void) {
 }
 
 static void sd_browser_back(void) {
-    if (browser_mode == SD_BROWSER_MODE_DETAIL) {
+    if (browser_mode == SD_BROWSER_MODE_CONTENT) {
+        sd_browser_show_selected_file_detail();
+    } else if (browser_mode == SD_BROWSER_MODE_DETAIL) {
         sd_browser_show_list();
     } else if (!sd_browser_is_root()) {
         sd_browser_parent_dir();
@@ -707,7 +996,7 @@ static void sd_browser_back(void) {
 }
 
 static void sd_browser_move(int delta) {
-    if (browser_mode == SD_BROWSER_MODE_DETAIL) {
+    if (browser_mode == SD_BROWSER_MODE_DETAIL || browser_mode == SD_BROWSER_MODE_CONTENT) {
         if (delta < 0) detail_view_step_up(browser_detail);
         else detail_view_step_down(browser_detail);
     } else {

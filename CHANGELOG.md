@@ -6,6 +6,8 @@
  - Added a BLE advertisement scan option in the Bluetooth menu
  - Added scanning spinner and details view for `GATT Scan` in the Bluetooth menu (matches the Detect Devices and Advertiser Scan flows)
  - Added Ghostchi companion lockscreen mode with no-PIN support and a global mood system
+ - Added SD browser support for viewing text file previews and staging file copy/move operations
+ - Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
 
 ### Fixed
  - Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
