@@ -6,8 +6,8 @@ weight: 30
 
 ## Directory layout
 
-- `/ghostesp/infrared/remotes` — Individual remotes captured on-device
-- `/ghostesp/infrared/universals` — Library files with many commands
+- `/mnt/ghostesp/infrared/remotes` — Individual remotes captured on-device
+- `/mnt/ghostesp/infrared/universals` — Library files with many commands
 - The Infrared UI reads from `/mnt/ghostesp/infrared/...` when the SD card is mounted.
 
 ### Flipper IR libraries
@@ -29,7 +29,7 @@ In addition to SD card files, GhostESP includes a built-in Universal IR file wit
 ## Web UI management
 
 - Connect to the GhostNet AP and open the web UI.
-- Browse to the file manager tab and navigate to `/ghostesp/infrared/`.
+- Browse to the file manager tab and navigate to `/mnt/ghostesp/infrared/`.
 - Upload `.ir` files to the appropriate folder or download existing ones for backups.
 
 ### Tips

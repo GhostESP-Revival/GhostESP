@@ -28,13 +28,11 @@ Replay captured signals to control garage doors, gates, alarms, and other SubGHz
 # List all saved signals
 subghz list
 
-# Load and replay a specific signal
+# Load and replay a specific signal (load and replay are aliases — only call one)
 subghz load <name>
-subghz replay <name>
 
 # Load the last captured signal
 subghz load last
-subghz replay last
 ```
 
 ## Frequency matching

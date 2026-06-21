@@ -18,7 +18,7 @@ The parsed advertiser list includes:
 - Advertisement type, such as connectable, scannable, non-connectable, or scan response
 - Device name when present
 - Manufacturer ID and known vendor name when recognized
-- 16-bit service UUID summaries
+- 16-bit service UUID summaries (up to 4 per advertisement)
 - 16-bit service-data UUID summaries, including Eddystone frame hints
 - BLE Appearance value when present
 - iBeacon UUID, major, minor, and measured power when an iBeacon frame is detected

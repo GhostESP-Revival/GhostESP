@@ -136,6 +136,7 @@ The internal access point (GhostNet) is automatically stopped while the sinkhole
 - `sinkhole start [upstream_dns] [log]` starts the sinkhole. Add `log` to enable query logging immediately.
 - `sinkhole stop` stops the sinkhole and restores AP services.
 - `sinkhole status` shows current query and block counts.
+- `sinkhole stats` shows saved statistics from the last periodic write (every 50 queries) plus current session stats.
 - `sinkhole download [n]` lists or downloads built-in blocklists. PSRAM only.
 - `sinkhole load <filename>` copies a downloaded list to `blocklist.txt` and restarts.
 - `sinkhole add <domain>` inserts a domain into the sorted active blocklist.

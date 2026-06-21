@@ -128,7 +128,7 @@
 </code></pre><p>Shows current MAC address.</p><pre tabindex=0><code>ethmac set &lt;xx:xx:xx:xx:xx:xx&gt;
 </code></pre><p>Set a custom MAC address. Use with caution—changing MAC addresses may affect network access.</p><h2 id=system-time>System Time
 <a class=heading-anchor href=#system-time aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><h3 id=get-current-time>Get Current Time</h3><pre tabindex=0><code>time
-</code></pre><p>Displays the current system time in Unix timestamp format.</p><h3 id=set-system-time>Set System Time</h3><pre tabindex=0><code>settime &lt;unix_timestamp&gt;
+</code></pre><p>Displays the current system time including local time, UTC time, and Unix timestamp.</p><h3 id=set-system-time>Set System Time</h3><pre tabindex=0><code>settime &lt;unix_timestamp&gt;
 </code></pre><p><strong>Example</strong>:</p><pre tabindex=0><code>settime 1703001600
 </code></pre><h3 id=sync-time-via-ntp>Sync Time via NTP</h3><p>Synchronize system time with an NTP server:</p><pre tabindex=0><code>ethntp &lt;time_server&gt;
 </code></pre><p>If no server is specified, uses <code>pool.ntp.org</code> by default:</p><pre tabindex=0><code>ethntp

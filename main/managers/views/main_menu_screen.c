@@ -94,7 +94,7 @@ static bool is_animating = false;
 #define DRAG_AXIS_THRESHOLD 14
 #define DRAG_AXIS_BIAS 4
 #define DRAG_DELTA_DEADZONE 1
-#define DRAG_MAX_STEP 36
+#define DRAG_MAX_STEP 64
 static main_menu_layout_kind_t current_layout = MAIN_MENU_LAYOUT_CAROUSEL;
 static lv_color_t menu_bg_color;
 static lv_color_t menu_surface_color;
@@ -1065,7 +1065,6 @@ static void create_grid_menu(void) {
     lv_obj_set_scrollbar_mode(grid_cards_container, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_add_flag(grid_cards_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(grid_cards_container, LV_DIR_VER);
-    lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_MOMENTUM);
     lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_ELASTIC);
 
     // Allocate cards array

@@ -150,14 +150,14 @@ For backgrounds, a source named `background` with `"variants": true` generates t
 ## `gbt setup` — Install ESP-IDF
 
 ```
-gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.0.1] [--install-dir ~/esp-idf]
+gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.0] [--install-dir ~/esp-idf]
 ```
 
 If `idf.py` or `$IDF_PATH` is already available, GBT saves the path and exits. Otherwise, clones ESP-IDF from GitHub and runs the installer:
 
 ```powershell
 gbt setup
-# Detects existing ESP-IDF, or clones v6.0.1 to ~/.ghostbt/esp-idf
+# Detects existing ESP-IDF, or clones v6.0 to ~/.ghostbt/esp-idf
 # Runs install.bat/install.sh with requested targets
 ```
 

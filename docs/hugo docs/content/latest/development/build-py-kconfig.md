@@ -9,7 +9,7 @@ weight: 10
 ## Prerequisites
 
 - Python 3 installed with access to the command line.
-- ESP-IDF v5.4.1, v5.5 or v5.5.1 on disk. `build.py` can auto-detect common locations or also download it for you.
+- ESP-IDF v6.0 on disk. `build.py` can auto-detect common locations or also download it for you.
 - GhostESP repository cloned locally. Clone from GitHub and navigate into the project directory before running the script.
 
 ## 1. Launch the helper
@@ -44,7 +44,7 @@ After applying the base config, `build.py` launches:
 idf.py menuconfig
 ```
 
-Use the menu to browse `GhostESP Options → GhostESP Features`. Save and exit when finished.
+Use the menu to browse `Ghost ESP Options` and its submenus (Display Options, Misc Options, NFC Options, etc.). Save and exit when finished.
 
 ### Enabling core dumps to flash
 
@@ -54,7 +54,7 @@ In `idf.py menuconfig`, use the search function to find `ESP_COREDUMP_ENABLE_TO_
 
 ### Enabling NFC features
 
-Open **Ghost ESP Options → NFC Options** to toggle the backends:
+Open **Ghost ESP Options → Misc Options → NFC Options** to toggle the backends:
 
 - **Enable PN532 NFC** turns on the PN532 reader and exposes pin settings for SCL/SDA/IRQ/RST.
 - **Enable Chameleon Ultra NFC** lets GhostESP use a Chameleon Ultra over BLE as the NFC front-end. This option defaults to enabled when BLE is compiled in.

@@ -192,4 +192,4 @@ Your board only supports 2.4 GHz. Use an ESP32-C5 based device to access 5 GHz n
 ## Related attacks
 
 - **EAPOL Logoff** (`attack -e`): Sends logoff frames instead of deauth frames. Works similarly but uses a different frame type.
-- **SAE Flood** (`attack -s`): Floods WPA3 networks with authentication requests. Only available on ESP32-C5/C6.
+- **SAE Flood** (`attack -s <password>`): Floods WPA3 networks with authentication requests. Only available on ESP32-C5/C6. Requires the target network's password.

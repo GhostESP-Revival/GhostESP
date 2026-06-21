@@ -128,13 +128,18 @@ badusb set_mfr &lt;text&gt;
 badusb set_prod &lt;text&gt;
 badusb set_rand &lt;0|1&gt;
 badusb set_layout &lt;n&gt;
-</code></pre><p>Mouse and keyboard commands:</p><pre tabindex=0><code>badusb jiggle_start
+</code></pre><p>Mouse, keyboard, and trackpad commands:</p><pre tabindex=0><code>badusb jiggle_start
 badusb jiggle_stop
 badusb keyboard_start
 badusb keyboard_stop
 badusb type &lt;text&gt;
 badusb type_char &lt;ascii&gt;
 badusb keysend &lt;modifier&gt; &lt;keycode&gt;
+badusb trackpad_start
+badusb trackpad_stop
+badusb trackpad_move &lt;dx&gt; &lt;dy&gt;
+badusb trackpad_button &lt;mask&gt;
+badusb trackpad_wheel &lt;delta&gt;
 </code></pre><p>See <a href=/latest/usb/mouse-jiggler/>Mouse Jiggler</a> and <a href=/latest/usb/usb-keyboard-mode/>USB Keyboard Mode</a> for details.</p><p>Keyboard layout values:</p><ul><li><code>0</code> = US</li><li><code>1</code> = DE</li><li><code>2</code> = FR</li><li><code>3</code> = UK</li><li><code>4</code> = ES</li></ul><h2 id=on-display-standalone>On-Display (Standalone)
 <a class=heading-anchor href=#on-display-standalone aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>From the BadUSB view:</p><ol><li>Open <strong>Settings</strong></li><li>Edit <strong>VID</strong>, <strong>PID</strong>, <strong>Manufacturer</strong>, <strong>Product</strong></li><li>Toggle <strong>Randomize</strong> for per-run USB details</li><li>Select <strong>Layout</strong> to cycle the keyboard layout</li></ol><p>These values are saved on the local device and used on the next run.</p><h2 id=remote>Remote
 <a class=heading-anchor href=#remote aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" transform="rotate(45 12 12)"><path d="M14 12c0 2.761-2.239 5-5 5H7A5 5 0 117 7h.5"/><path d="M10 12c0-2.761 2.239-5 5-5h2a5 5 0 010 10h-.5"/></g></svg></a></h2><p>When BadUSB is used over Dual Comm, the controller sends the current settings to the peer right before streaming the script. The peer uses those settings for that run. These remote settings apply only for that run and do not persist to NVS on the peer. For setup details, see <a href=/latest/getting-started/dual-communication/>GhostLink</a>.</p><nav class=doc__nav aria-label="Document navigation"><a class="doc__nav-link doc__nav-link--prev" href=/latest/usb/keyboard/><span>← Previous</span>

@@ -64,7 +64,7 @@ badusb set_rand <0|1>
 badusb set_layout <n>
 ```
 
-Mouse and keyboard commands:
+Mouse, keyboard, and trackpad commands:
 
 ```
 badusb jiggle_start
@@ -74,6 +74,11 @@ badusb keyboard_stop
 badusb type <text>
 badusb type_char <ascii>
 badusb keysend <modifier> <keycode>
+badusb trackpad_start
+badusb trackpad_stop
+badusb trackpad_move <dx> <dy>
+badusb trackpad_button <mask>
+badusb trackpad_wheel <delta>
 ```
 
 See [Mouse Jiggler](/latest/usb/mouse-jiggler/) and [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/) for details.

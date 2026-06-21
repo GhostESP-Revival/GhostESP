@@ -81,7 +81,7 @@ Set a custom MAC address. Use with caution—changing MAC addresses may affect n
 time
 ```
 
-Displays the current system time in Unix timestamp format.
+Displays the current system time including local time, UTC time, and Unix timestamp.
 
 ### Set System Time
 

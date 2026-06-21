@@ -39,6 +39,10 @@ Discover nearby BLE devices and gather information about them.
 - Scans for nearby Flipper Zero devices and displays their names and signal strength.
 - After scanning, use **Select Flipper** to track a specific device's RSSI (signal strength) in real time as you move around.
 
+### BLE Spam Detector
+- **CLI**: `blescan -ds`
+- Detects active BLE spam attacks from nearby devices. Useful for testing whether your own spam is visible or detecting hostile spam.
+
 ### AirTag Scanner
 - **UI**: Menu → Bluetooth → Start AirTag Scanner
 - **CLI**: `blescan -a`
@@ -69,6 +73,10 @@ See the dedicated [GATT Discovery]({{< relref "gatt" >}}) page for a full walkth
 - Use **List Advertisers** or CLI `listadv` to browse parsed results.
 
 See the dedicated [Advertiser Scan]({{< relref "advertisers" >}}) page for details.
+
+### Raw BLE Packet Capture
+- **CLI**: `blescan -r`
+- Captures raw BLE packets for offline analysis. Useful for debugging BLE protocol issues.
 
 ## Listing and selecting devices
 

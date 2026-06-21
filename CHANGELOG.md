@@ -12,6 +12,7 @@
  - Fixed wrong PIN after lock-on-wake; wake input is consumed and queued input is briefly ignored after lock
  - Fixed detail view being orphaned over the rebuilt main menu after dim+lock; rebuilt after unlock
  - Fixed `scan_status` spinner lingering on `lv_layer_top()` across lockscreen entry
+ - Fixed main menu touch scrolling feeling less responsive than settings
 
 ## Revival v2.0-pre5
 

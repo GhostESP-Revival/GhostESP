@@ -19,6 +19,8 @@ toc: true
 - **`reboot`** — Soft restart the device.
 - **`timezone <TZ>`** — Set timezone, e.g., `timezone EST5EDT,M3.2.0,M11.1.0`.
 - **`stop`** — Stops all active attacks, scans, and background tasks. Also restarts Wi-Fi if it was suspended by BLE.
+- **`stopscan`** — Alias for `scanap -stop`; stops an active AP scan.
+- **`congestion`** — Display Wi-Fi channel congestion chart showing activity across all channels.
 
 ### Core dumps (flash builds only)
 
@@ -53,14 +55,20 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 ### Offense
 
-- **`attack -d|-c|-e|-s <password>`** — Trigger deauth, channel switch (CSA), EAPOL logoff, or SAE flood (`-s` needs ESP32-C5/C6 and the target PSK).
+- **`attack -d|-c|-e|-s|-g <args>`** — Trigger deauth, channel switch (CSA), EAPOL logoff, SAE flood, or GTK abuse.
   - `-d` — Deauthentication attack on selected AP(s).
   - `-c` — Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP's real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
   - `-e` — EAPOL logoff attack.
-  - `-s` — SAE flood attack (ESP32-C5/C6 only, requires target PSK).
+  - `-s <password>` — SAE flood attack (ESP32-C5/C6 only, requires target PSK).
+  - `-g <ssid> <password>` — GTK abuse attack on the selected AP.
 - **`stop`** — Stops all active attacks, scans, and background tasks.
 - **`stopdeauth`** / **`stopspam`** — Halt active attacks or beacon floods.
 - **`beaconspam [mode]`** — Broadcast spoof SSIDs (`-r`, `-rr`, `-l`, or custom text).
+- **`beaconadd <ssid>`** — Add an SSID to the beacon spam list.
+- **`beaconremove <ssid>`** — Remove an SSID from the beacon spam list.
+- **`beaconclear`** — Clear all SSIDs from the beacon spam list.
+- **`beaconshow`** — Show current beacon spam list.
+- **`beaconspamlist`** — Show the beacon spam list with details.
 - **`karma start [ssid...]`** / **`karma stop`** — Respond to client probes with saved or provided SSIDs.
 - **`pineap [-s]`** — Monitor Pineapple-style beacons; `-s` stops detection.
 - **`saeflood <password>`** / **`stopsaeflood`** / **`saefloodhelp`** — Start, stop, or show help for SAE flood attacks.
@@ -84,7 +92,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 ### Discovery
 
-- **`blescan [-f|-ds|-a|-r|-s]`** — Scan for BLE devices, Flippers, spam detectors, or raw advertising; `-s` stops.
+- **`blescan [-f|-ds|-a|-r|-adv|-g|-s]`** — Scan for BLE devices, Flippers, spam detectors, raw advertising, or GATT services; `-s` stops.
 - **`blewardriving [-s]`** — Log BLE beacons with GPS metadata.
 
 ### Spoofing
@@ -209,14 +217,15 @@ Available on boards with `CONFIG_HAS_AUDIO_PLAYER` or `CONFIG_HAS_MIC`.
 
 - **`rave on`** — Enable Rave Mode (display-based LED visualizer synced to music via microphone or line-in).
 - **`rave off`** — Disable Rave Mode.
-- **`raveport <port>`** — Set the Rave UDP receiver port (default: 6677).
+- **`raveport`** — Show the Rave UDP receiver port (default: 6677). Note: port-setting is currently a stub.
 
 Rave Mode streams visualization data over UDP. Use the `rave_helper.bat` or `rave_tray.exe` app on your PC to receive and display the visualizer.
 
 ## Screen Mirroring
 
-- **`mirror start`** — Start screen mirroring server (wired USB).
-- **`mirror stop`** — Stop screen mirroring.
+- **`mirror on`** — Start screen mirroring server (wired USB).
+- **`mirror off`** — Stop screen mirroring.
+- **`mirror refresh`** — Refresh the mirror connection.
 - **`mirror status`** — Show mirror server status.
 
 For wired mirroring, use `python ghost_mirror.py` on your PC with `--baud 460800` for CYD devices or `--list` to see available ports. For web-based mirroring, visit [ghostesp.net/serial](https://ghostesp.net/serial) and use the Screen Mirror tab.
@@ -270,10 +279,10 @@ For full setup, tuning, SD snapshots, and Discord webhook configuration, see the
 
 Available on boards with an onboard OLED status display or when an external status display is configured.
 
-- **`statusidle [list|set <life|ghost|0|1>]`** — View or change the status OLED idle animation when `CONFIG_WITH_STATUS_DISPLAY` and a status display are enabled.
+- **`statusidle [list|set <mode>]`** — View or change the status OLED idle animation when `CONFIG_WITH_STATUS_DISPLAY` and a status display are enabled.
   - `statusidle` — Show the current idle animation and timeout.
   - `statusidle list` — List available idle animations.
-  - `statusidle set <life|ghost|0|1>` — Select the idle animation mode.
+  - `statusidle set <mode>` — Select the idle animation mode. Available modes: `life`, `ghost`, `starfield`, `hud`, `matrix`, `ghosts`, `spiral`, `leaves`, `bouncing`, or numeric `0`-`8`.
 
 ## IO expander buttons (if present)
 
@@ -421,3 +430,7 @@ Available on builds with `CONFIG_ENABLE_NATIVE_SD_APPS`.
 - **`badusb set_prod <text>`** — Set USB product for the next run.
 - **`badusb set_rand <0|1>`** — Toggle per-run USB detail randomization.
 - **`badusb set_layout <n>`** — Set keyboard layout for the next run (`0` US, `1` DE, `2` FR, `3` UK, `4` ES).
+
+## USB Keyboard
+
+- **`usbkbd [on|off|status]`** — Enable, disable, or check USB HID keyboard host mode (ESP32-S3 only).
