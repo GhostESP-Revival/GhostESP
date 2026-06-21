@@ -42,6 +42,8 @@
 #define MAX_HANDLERS 10
 #define MAX_PACKET_SIZE 31
 #define NIMBLE_HOST_TASK_STACK_SIZE 6144
+#define BLE_DISC_LOG_INTERVAL 500
+#define BLE_DISC_XP_INTERVAL 250
 
 // AirTag tracking definitions
 #ifdef CONFIG_SPIRAM
@@ -170,15 +172,15 @@ int ble_gap_event_general(struct ble_gap_event *event, void *arg) {
 
         static uint32_t disc_log_counter = 0;
         disc_log_counter++;
-        if ((disc_log_counter % 50) == 1) {
-            ESP_LOGI(TAG_BLE,
+        if ((disc_log_counter % BLE_DISC_LOG_INTERVAL) == 1) {
+            ESP_LOGD(TAG_BLE,
                      "ble_gap_event_general: %lu discovery events seen; last RSSI=%d len=%u",
                      (unsigned long)disc_log_counter,
                      event->disc.rssi,
                      (unsigned int)event->disc.length_data);
         }
-        if ((disc_log_counter % 10) == 0) {
-            ghostchi_manager_add_xp(2);
+        if ((disc_log_counter % BLE_DISC_XP_INTERVAL) == 0) {
+            ghostchi_manager_add_xp(1);
         }
         notify_handlers(event, event->disc.length_data);
         ble_cb_busy = false;

@@ -91,6 +91,7 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 #define BLE_DETECT_LIST_PAGE_SIZE 8
 #define BLE_ADV_LIST_PAGE_SIZE 8
 #define BLE_GATT_LIST_PAGE_SIZE 8
+#define BLE_OUI_VENDOR_MAX_RESULTS 24
 #ifdef CONFIG_IDF_TARGET_ESP32C5
 #define AP_SCAN_ESTIMATE_SECONDS 6
 #else
@@ -130,6 +131,9 @@ static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
 static int ble_gatt_last_count = -1;
 static int selected_ble_gatt_index = -1;
+static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
+static const char *ble_oui_vendor_options[BLE_OUI_VENDOR_MAX_RESULTS + 2];
+static int ble_oui_vendor_count = 0;
 static int selected_station_index = -1;
 static lv_timer_t *sta_scan_poll_timer = NULL;
 static int64_t sta_scan_start_time = 0;
@@ -174,6 +178,7 @@ static const char **scanall_list_get_options(void);
 static const char **ble_detect_list_get_options(void);
 static const char **ble_adv_list_get_options(void);
 static const char **ble_gatt_list_get_options(void);
+static const char **ble_oui_vendor_list_get_options(void);
 static void ble_detect_poll_timer_cb(lv_timer_t *timer);
 static void ble_adv_poll_timer_cb(lv_timer_t *timer);
 static void ble_gatt_poll_timer_cb(lv_timer_t *timer);
@@ -197,8 +202,11 @@ static void ble_detect_list_cleanup(void);
 static void ble_detect_detail_back_cb(lv_event_t *e);
 static void show_ble_detect_detail(int device_index);
 static bool start_ble_adv_flow(void);
+static bool start_ble_oui_prefix_flow(const uint8_t oui[3]);
+static bool start_ble_oui_vendor_flow(const char *vendor);
 static void stop_ble_adv_flow(void);
 static void ble_adv_list_cleanup(void);
+static void ble_oui_vendor_clear(void);
 static void ble_adv_detail_back_cb(lv_event_t *e);
 static void ble_adv_track_cb(lv_event_t *e);
 static void ble_adv_save_cb(lv_event_t *e);
@@ -468,8 +476,14 @@ static void ble_adv_set_subtext(int found_count) {
         return;
     }
 
-    char msg[96];
-    snprintf(msg, sizeof(msg), "Use any input to finish scan\n%d advertisers", found_count);
+    char msg[128];
+    const char *filter = advertiser_scan_get_filter_label();
+    if (filter != NULL) {
+        snprintf(msg, sizeof(msg), "Use any input to finish scan\n%d matches\n%s",
+                 found_count, filter);
+    } else {
+        snprintf(msg, sizeof(msg), "Use any input to finish scan\n%d advertisers", found_count);
+    }
     scan_status_set_subtext(ble_adv_status, msg);
 }
 
@@ -1485,8 +1499,11 @@ static int wigle_stats_popup_selected = 1;
 
 // --- Add Bluetooth submenu arrays and state ---
 static const char * const bluetooth_main_options[] = {
-    "Detect Devices", "List Detected Devices", "Advertiser Scan", "List Advertisers",
+    "Detect Devices", "List Detected Devices", "Advertiser Scan", "OUI Device Scan", "List Advertisers",
     "GATT Scan", "Aerial Detector", "Spam", "Raw", NULL
+};
+static const char * const bluetooth_oui_options[] = {
+    "Enter OUI Prefix", "Search Vendors", NULL
 };
 static const char * const bluetooth_spam_options[] = {
     "BLE Spam - Apple", "BLE Spam - Microsoft", "BLE Spam - Samsung",
@@ -1511,6 +1528,8 @@ typedef enum {
     BLUETOOTH_MENU_ADV_DETAILS,
     BLUETOOTH_MENU_GATT_LIST,
     BLUETOOTH_MENU_GATT_DETAILS,
+    BLUETOOTH_MENU_OUI,
+    BLUETOOTH_MENU_OUI_VENDOR_LIST,
     BLUETOOTH_MENU_SPAM,
     BLUETOOTH_MENU_RAW,
     BLUETOOTH_MENU_GATT,
@@ -1848,6 +1867,8 @@ static void karma_portal_ssids_cb(const char *input);
 static void dual_comm_dns_lookup_kb_cb(const char *text);
 static void dual_comm_traceroute_kb_cb(const char *text);
 static void dual_comm_http_request_kb_cb(const char *text);
+static void ble_oui_prefix_kb_cb(const char *text);
+static void ble_oui_vendor_search_kb_cb(const char *text);
 static void wigle_csv_free_cache(void);
 static const char **wigle_csv_load_page(void);
 static void pcap_capture_free_cache(void);
@@ -2309,6 +2330,8 @@ void options_menu_create() {
                 options = ble_gatt_list_get_options();
                 break;
             case BLUETOOTH_MENU_GATT_DETAILS: options = NULL; break;
+            case BLUETOOTH_MENU_OUI: options = bluetooth_oui_options; break;
+            case BLUETOOTH_MENU_OUI_VENDOR_LIST: options = ble_oui_vendor_list_get_options(); break;
             case BLUETOOTH_MENU_SPAM: options = bluetooth_spam_options; break;
             case BLUETOOTH_MENU_RAW: options = bluetooth_raw_options; break;
             case BLUETOOTH_MENU_GATT: options = bluetooth_gatt_options; break;
@@ -5868,6 +5891,18 @@ void option_event_cb(lv_event_t *e) {
                 return;
 #endif
             }
+            if (strcmp(Selected_Option, "OUI Device Scan") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+                current_bluetooth_menu_state = BLUETOOTH_MENU_OUI;
+                rebuild_current_menu();
+                option_invoked = false;
+                return;
+#else
+                error_popup_create("Device Does not Support Bluetooth...");
+                option_invoked = false;
+                return;
+#endif
+            }
             if (strcmp(Selected_Option, "List Advertisers") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
                 if (advertiser_scan_get_count() <= 0) {
@@ -5904,6 +5939,46 @@ void option_event_cb(lv_event_t *e) {
             option_invoked = false;
             return;
         }
+    }
+
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_OUI) {
+        if (strcmp(Selected_Option, "Enter OUI Prefix") == 0) {
+            keyboard_view_set_submit_callback(ble_oui_prefix_kb_cb);
+            keyboard_view_set_placeholder("OUI prefix (e.g. 00:1A:2B)");
+            display_manager_switch_view(&keyboard_view);
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Search Vendors") == 0) {
+            keyboard_view_set_submit_callback(ble_oui_vendor_search_kb_cb);
+            keyboard_view_set_placeholder("Vendor search (e.g. Apple)");
+            display_manager_switch_view(&keyboard_view);
+            option_invoked = false;
+            return;
+        }
+    }
+
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_OUI_VENDOR_LIST) {
+        if (strcmp(Selected_Option, "Search Again") == 0) {
+            keyboard_view_set_submit_callback(ble_oui_vendor_search_kb_cb);
+            keyboard_view_set_placeholder("Vendor search (e.g. Apple)");
+            display_manager_switch_view(&keyboard_view);
+            option_invoked = false;
+            return;
+        }
+
+        for (int i = 0; i < ble_oui_vendor_count; i++) {
+            if (strcmp(Selected_Option, ble_oui_vendor_names[i]) == 0) {
+                if (!start_ble_oui_vendor_flow(ble_oui_vendor_names[i])) {
+                    error_popup_create("Scan failed to start");
+                }
+                option_invoked = false;
+                return;
+            }
+        }
+
+        option_invoked = false;
+        return;
     }
 
     if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_LIST) {
@@ -7600,6 +7675,9 @@ static void back_event_cb(lv_event_t *e) {
             current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
             ble_gatt_list_cleanup();
         }
+        if (current_bluetooth_menu_state == BLUETOOTH_MENU_OUI_VENDOR_LIST) {
+            ble_oui_vendor_clear();
+        }
         current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
         rebuild_current_menu();
         return;
@@ -8588,19 +8666,39 @@ static const char **ble_adv_list_get_options(void) {
     return paged_menu_get_options(ble_adv_list_menu);
 }
 
-static bool start_ble_adv_flow(void) {
+static bool start_ble_adv_flow_with_filter(const uint8_t *oui, const char *vendor) {
     ble_adv_list_cleanup();
-    advertiser_scan_start();
+    if (oui != NULL) {
+        advertiser_scan_start_oui_prefix(oui);
+    } else if (vendor != NULL && vendor[0] != '\0') {
+        advertiser_scan_start_vendor(vendor);
+    } else {
+        advertiser_scan_start();
+    }
     if (!advertiser_scan_is_active()) {
         return false;
     }
 
-    ble_adv_status = scan_status_create("Scanning BLE Advertisers");
+    ble_adv_status = scan_status_create(advertiser_scan_is_filtered()
+                                            ? "Scanning OUI Devices"
+                                            : "Scanning BLE Advertisers");
     ble_adv_set_subtext(0);
     ble_adv_last_count = advertiser_scan_get_count();
     ble_adv_poll_timer = lv_timer_create(ble_adv_poll_timer_cb, 750, NULL);
     current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_LIST;
     return true;
+}
+
+static bool start_ble_adv_flow(void) {
+    return start_ble_adv_flow_with_filter(NULL, NULL);
+}
+
+static bool start_ble_oui_prefix_flow(const uint8_t oui[3]) {
+    return start_ble_adv_flow_with_filter(oui, NULL);
+}
+
+static bool start_ble_oui_vendor_flow(const char *vendor) {
+    return start_ble_adv_flow_with_filter(NULL, vendor);
 }
 
 static void stop_ble_adv_flow(void) {
@@ -8622,11 +8720,79 @@ static void stop_ble_adv_flow(void) {
     }
 
     if (advertiser_scan_get_count() <= 0) {
-        error_popup_create("No advertisers found");
+        error_popup_create(advertiser_scan_is_filtered() ? "No matching devices found" : "No advertisers found");
         current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
     }
 
     rebuild_current_menu();
+}
+
+static void ble_oui_vendor_clear(void) {
+    memset(ble_oui_vendor_names, 0, sizeof(ble_oui_vendor_names));
+    memset(ble_oui_vendor_options, 0, sizeof(ble_oui_vendor_options));
+    ble_oui_vendor_count = 0;
+}
+
+static bool ble_oui_vendor_collect_cb(const char *vendor, void *user_data) {
+    (void)user_data;
+    if (vendor == NULL || ble_oui_vendor_count >= BLE_OUI_VENDOR_MAX_RESULTS) {
+        return false;
+    }
+
+    strncpy(ble_oui_vendor_names[ble_oui_vendor_count], vendor,
+            sizeof(ble_oui_vendor_names[ble_oui_vendor_count]) - 1);
+    ble_oui_vendor_names[ble_oui_vendor_count][sizeof(ble_oui_vendor_names[ble_oui_vendor_count]) - 1] = '\0';
+    ble_oui_vendor_options[ble_oui_vendor_count] = ble_oui_vendor_names[ble_oui_vendor_count];
+    ble_oui_vendor_count++;
+    return ble_oui_vendor_count < BLE_OUI_VENDOR_MAX_RESULTS;
+}
+
+static const char **ble_oui_vendor_list_get_options(void) {
+    if (ble_oui_vendor_count <= 0) {
+        static const char *fallback[] = {"Search Again", NULL};
+        return fallback;
+    }
+
+    ble_oui_vendor_options[ble_oui_vendor_count] = "Search Again";
+    ble_oui_vendor_options[ble_oui_vendor_count + 1] = NULL;
+    return ble_oui_vendor_options;
+}
+
+static void ble_oui_prefix_kb_cb(const char *text) {
+    uint8_t oui[3];
+    keyboard_view_set_submit_callback(NULL);
+
+    if (!ouis_parse_prefix(text, oui)) {
+        error_popup_create("Invalid OUI prefix");
+        return;
+    }
+
+    SelectedMenuType = OT_Bluetooth;
+    current_bluetooth_menu_state = BLUETOOTH_MENU_OUI;
+    display_manager_switch_view(&options_menu_view);
+    if (!start_ble_oui_prefix_flow(oui)) {
+        error_popup_create("Scan failed to start");
+    }
+}
+
+static void ble_oui_vendor_search_kb_cb(const char *text) {
+    keyboard_view_set_submit_callback(NULL);
+
+    if (text == NULL || text[0] == '\0') {
+        error_popup_create("Enter vendor search text");
+        return;
+    }
+
+    ble_oui_vendor_clear();
+    ouis_foreach_unique_vendor(text, ble_oui_vendor_collect_cb, NULL, BLE_OUI_VENDOR_MAX_RESULTS);
+    if (ble_oui_vendor_count <= 0) {
+        error_popup_create("No vendors found");
+        return;
+    }
+
+    SelectedMenuType = OT_Bluetooth;
+    current_bluetooth_menu_state = BLUETOOTH_MENU_OUI_VENDOR_LIST;
+    display_manager_switch_view(&options_menu_view);
 }
 
 static void ble_adv_detail_back_cb(lv_event_t *e) {
@@ -10346,6 +10512,11 @@ static void rebuild_current_menu(void) {
                     timer_period = 25;
                     break;
                 case BLUETOOTH_MENU_GATT_DETAILS: options = NULL; break;
+                case BLUETOOTH_MENU_OUI: options = bluetooth_oui_options; break;
+                case BLUETOOTH_MENU_OUI_VENDOR_LIST:
+                    options = ble_oui_vendor_list_get_options();
+                    timer_period = 25;
+                    break;
                 case BLUETOOTH_MENU_SPAM: options = bluetooth_spam_options; break;
                 case BLUETOOTH_MENU_RAW: options = bluetooth_raw_options; break;
                 case BLUETOOTH_MENU_GATT: options = bluetooth_gatt_options; break;
@@ -10429,6 +10600,10 @@ static void rebuild_current_menu(void) {
             options_view_set_title(g_options_view, "Select APs");
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_MULTI_SELECT) {
             options_view_set_title(g_options_view, "Select Stations");
+        } else if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_OUI) {
+            options_view_set_title(g_options_view, "OUI Device Scan");
+        } else if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_OUI_VENDOR_LIST) {
+            options_view_set_title(g_options_view, "Select Vendor");
         } else {
             options_view_set_title(g_options_view, options_menu_type_to_string(SelectedMenuType));
         }

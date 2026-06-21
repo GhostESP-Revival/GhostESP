@@ -4,12 +4,15 @@
 
 ### Added
  - Added a BLE advertisement scan option in the Bluetooth menu
+ - Added OUI prefix/vendor filtered BLE device scanning with RGB match pulses
  - Added scanning spinner and details view for `GATT Scan` in the Bluetooth menu (matches the Detect Devices and Advertiser Scan flows)
  - Added Ghostchi companion lockscreen mode with no-PIN support and a global mood system
  - Added SD browser support for viewing text file previews and staging file copy/move operations
  - Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
 
 ### Fixed
+ - Fixed BLE scans over-awarding Ghostchi XP
+ - Fixed BLE scan RGB getting stuck instead of pulsing
  - Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
  - Fixed lockscreen rejecting correct PIN when Wi-Fi is off (BLE scan stops STA); key now uses stable STA MAC with legacy fallback
  - Fixed wrong PIN after lock-on-wake; wake input is consumed and queued input is briefly ignored after lock

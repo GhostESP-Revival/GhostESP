@@ -3,6 +3,7 @@
 #include "core/commandline.h"
 #include "core/callbacks.h"
 #include "core/serial_manager.h"
+#include "core/ouis.h"
 #include "core/utils.h"
 #include "esp_sntp.h"
 #include "esp_mac.h"
@@ -1544,6 +1545,23 @@ void handle_ble_scan_cmd(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "-adv") == 0) {
         glog("Starting BLE Advertiser Scan.\n");
         advertiser_scan_start();
+        return;
+    }
+
+    if (argc > 2 && strcmp(argv[1], "-oui") == 0) {
+        uint8_t oui[3];
+        if (!ouis_parse_prefix(argv[2], oui)) {
+            glog("Invalid OUI prefix. Use 6 hex digits, e.g. 00:1A:2B.\n");
+            return;
+        }
+        glog("Starting BLE OUI scan for %02X:%02X:%02X.\n", oui[0], oui[1], oui[2]);
+        advertiser_scan_start_oui_prefix(oui);
+        return;
+    }
+
+    if (argc > 2 && strcmp(argv[1], "-vendor") == 0) {
+        glog("Starting BLE OUI vendor scan for %s.\n", argv[2]);
+        advertiser_scan_start_vendor(argv[2]);
         return;
     }
 
@@ -4802,6 +4820,8 @@ void handle_help(int argc, char **argv) {
         glog("        -ds  : Start BLE spam detector\n");
         glog("        -a   : Start AirTag scanner\n");
         glog("        -adv : Start parsed BLE advertiser scan\n");
+        glog("        -oui <prefix>    : Scan BLE advertisers matching an OUI prefix\n");
+        glog("        -vendor <vendor> : Scan BLE advertisers matching an OUI vendor\n");
         glog("        -g   : Start GATT scanner for connectable devices\n");
         glog("        -r   : Scan for raw BLE packets\n");
         glog("        -s   : Stop BLE scanning\n\n");

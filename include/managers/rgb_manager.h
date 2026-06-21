@@ -103,6 +103,9 @@ void knightrider_task(void *pvParameter);
 void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
                 uint8_t blue);
 
+void rgb_manager_pulse_async(RGBManager_t *rgb_manager, uint8_t red,
+                             uint8_t green, uint8_t blue);
+
 void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager, int delay_ms);
 
 void update_led_visualizer(uint8_t *amplitudes, size_t num_bars,

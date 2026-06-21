@@ -15,6 +15,7 @@
 #include "host/ble_hs.h"
 #include "managers/ble_manager.h"
 #include "managers/gps_manager.h"
+#include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "nimble/ble.h"
 
@@ -95,12 +96,28 @@ typedef struct {
     TickType_t last_log_tick;
 } AdvertiserTrackingState;
 
+typedef enum {
+    ADV_FILTER_NONE = 0,
+    ADV_FILTER_OUI_PREFIX,
+    ADV_FILTER_VENDOR,
+} AdvertiserFilterType;
+
+typedef struct {
+    AdvertiserFilterType type;
+    uint8_t oui[3];
+    char vendor[64];
+    char label[80];
+} AdvertiserFilter;
+
 static const char *TAG = "AdvScan";
 static AdvertiserDevice *s_advertisers = NULL;
 static uint8_t s_advertiser_count = 0;
 static uint8_t s_advertiser_capacity = 0;
 static bool s_scan_active = false;
 static AdvertiserTrackingState s_tracking = {0};
+static AdvertiserFilter s_filter = {0};
+
+extern RGBManager_t rgb_manager;
 
 static const char *adv_event_type_to_string(uint8_t event_type) {
     switch (event_type) {
@@ -322,6 +339,44 @@ static int find_advertiser_index(const ble_addr_t *addr) {
     return -1;
 }
 
+static void clear_filter(void) {
+    memset(&s_filter, 0, sizeof(s_filter));
+    s_filter.type = ADV_FILTER_NONE;
+}
+
+static bool vendor_matches_filter(const char *vendor) {
+    if (vendor == NULL || vendor[0] == '\0' || s_filter.vendor[0] == '\0') {
+        return false;
+    }
+    return strcasecmp(vendor, s_filter.vendor) == 0;
+}
+
+static bool advertiser_matches_filter(const ble_addr_t *addr, char *out_vendor, size_t vendor_size) {
+    if (s_filter.type == ADV_FILTER_NONE) {
+        return true;
+    }
+    if (addr == NULL) {
+        return false;
+    }
+
+    if (s_filter.type == ADV_FILTER_OUI_PREFIX) {
+        return memcmp(addr->val, s_filter.oui, sizeof(s_filter.oui)) == 0;
+    }
+
+    char vendor[64] = {0};
+    if (!ouis_lookup_vendor_bytes(addr->val, vendor, sizeof(vendor))) {
+        return false;
+    }
+    if (!vendor_matches_filter(vendor)) {
+        return false;
+    }
+    if (out_vendor != NULL && vendor_size > 0) {
+        strncpy(out_vendor, vendor, vendor_size - 1);
+        out_vendor[vendor_size - 1] = '\0';
+    }
+    return true;
+}
+
 static bool is_tracking_addr(const ble_addr_t *addr) {
     return s_tracking.active && addr != NULL && s_tracking.addr.type == addr->type &&
            memcmp(s_tracking.addr.val, addr->val, sizeof(s_tracking.addr.val)) == 0;
@@ -527,6 +582,10 @@ static void advertiser_scan_callback(struct ble_gap_event *event, size_t len) {
         return;
     }
 
+    if (!advertiser_matches_filter(&event->disc.addr, NULL, 0)) {
+        return;
+    }
+
     // While tracking a single advertiser, ignore all other advertisements so
     // the terminal output only shows RSSI updates for the tracked device and
     // no new devices are added to the result list.
@@ -575,10 +634,13 @@ static void advertiser_scan_callback(struct ble_gap_event *event, size_t len) {
         if (advertiser_scan_get_device(index, &info) == 0) {
             print_advertiser_line(index, &info);
         }
+        if (s_filter.type != ADV_FILTER_NONE) {
+            rgb_manager_pulse_async(&rgb_manager, 0, 255, 255);
+        }
     }
 }
 
-void advertiser_scan_start(void) {
+static void advertiser_scan_start_common(void) {
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
     free_results();
@@ -603,8 +665,45 @@ void advertiser_scan_start(void) {
         return;
     }
 
-    glog("BLE advertiser scan started. Run 'listadv' for parsed results.\n");
-    status_display_show_status("BLE Adv Scan");
+    if (s_filter.type == ADV_FILTER_NONE) {
+        glog("BLE advertiser scan started. Run 'listadv' for parsed results.\n");
+        status_display_show_status("BLE Adv Scan");
+    } else {
+        glog("BLE OUI scan started: %s. Run 'listadv' for matching advertisers.\n",
+             s_filter.label);
+        status_display_show_status("BLE OUI Scan");
+    }
+}
+
+void advertiser_scan_start(void) {
+    clear_filter();
+    advertiser_scan_start_common();
+}
+
+bool advertiser_scan_start_oui_prefix(const uint8_t oui[3]) {
+    if (oui == NULL) {
+        return false;
+    }
+    clear_filter();
+    s_filter.type = ADV_FILTER_OUI_PREFIX;
+    memcpy(s_filter.oui, oui, sizeof(s_filter.oui));
+    snprintf(s_filter.label, sizeof(s_filter.label), "OUI %02X:%02X:%02X",
+             oui[0], oui[1], oui[2]);
+    advertiser_scan_start_common();
+    return advertiser_scan_is_active();
+}
+
+bool advertiser_scan_start_vendor(const char *vendor) {
+    if (vendor == NULL || vendor[0] == '\0') {
+        return false;
+    }
+    clear_filter();
+    s_filter.type = ADV_FILTER_VENDOR;
+    strncpy(s_filter.vendor, vendor, sizeof(s_filter.vendor) - 1);
+    s_filter.vendor[sizeof(s_filter.vendor) - 1] = '\0';
+    snprintf(s_filter.label, sizeof(s_filter.label), "Vendor %s", s_filter.vendor);
+    advertiser_scan_start_common();
+    return advertiser_scan_is_active();
 }
 
 void advertiser_scan_stop(void) {
@@ -625,6 +724,14 @@ void advertiser_scan_stop(void) {
 
 bool advertiser_scan_is_active(void) {
     return s_scan_active;
+}
+
+bool advertiser_scan_is_filtered(void) {
+    return s_filter.type != ADV_FILTER_NONE;
+}
+
+const char *advertiser_scan_get_filter_label(void) {
+    return (s_filter.type == ADV_FILTER_NONE || s_filter.label[0] == '\0') ? NULL : s_filter.label;
 }
 
 int advertiser_scan_get_count(void) {

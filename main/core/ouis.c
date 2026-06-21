@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 extern const uint8_t ouis_bin_start[] asm("_binary_ouis_bin_start");
 extern const uint8_t ouis_bin_end[]   asm("_binary_ouis_bin_end");
@@ -63,6 +64,34 @@ static void to_proper_caps(char *s) {
     }
 }
 
+static bool contains_ci(const char *haystack, const char *needle) {
+    if (needle == NULL || needle[0] == '\0') return true;
+    if (haystack == NULL) return false;
+
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0) return true;
+
+    for (const char *h = haystack; *h; h++) {
+        size_t i = 0;
+        while (i < needle_len && h[i] &&
+               tolower((unsigned char)h[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == needle_len) return true;
+    }
+
+    return false;
+}
+
+static bool vendor_in_list(char vendors[][64], int count, const char *vendor) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(vendors[i], vendor) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool lookup_vendor(const uint8_t oui3[3], char *out_vendor, size_t out_sz) {
     const oui_header_t *h = oui_header();
     const oui_entry_t *es = oui_entries();
@@ -95,4 +124,66 @@ bool ouis_lookup_vendor(const char *mac, char *out_vendor, size_t out_sz) {
     if (nibbles < 6) return false;
     if (is_locally_administered(p3)) return false;
     return lookup_vendor(p3, out_vendor, out_sz);
+}
+
+bool ouis_parse_prefix(const char *prefix, uint8_t out_oui[3]) {
+    if (prefix == NULL || out_oui == NULL) return false;
+
+    uint8_t parsed[3] = {0};
+    int nibbles = 0;
+    parse_prefix(prefix, parsed, &nibbles);
+    if (nibbles < 6) return false;
+
+    memcpy(out_oui, parsed, sizeof(parsed));
+    return true;
+}
+
+bool ouis_lookup_vendor_bytes(const uint8_t oui[3], char *out_vendor, size_t out_sz) {
+    if (oui == NULL || out_vendor == NULL || out_sz == 0) return false;
+    if (is_locally_administered(oui)) return false;
+    return lookup_vendor(oui, out_vendor, out_sz);
+}
+
+int ouis_foreach_unique_vendor(const char *filter, ouis_vendor_iter_cb_t callback,
+                               void *user_data, int max_results) {
+    if (callback == NULL || max_results <= 0) return 0;
+
+    const oui_header_t *h = oui_header();
+    const oui_entry_t *es = oui_entries();
+    const uint8_t *strs = oui_string_table();
+    char (*seen)[64] = NULL;
+    int seen_count = 0;
+    int seen_cap = max_results;
+
+    seen = calloc((size_t)seen_cap, sizeof(*seen));
+    if (seen == NULL) return 0;
+
+    for (uint16_t i = 0; i < h->count; i++) {
+        const char *raw = (const char *)&strs[es[i].idx];
+        char vendor[64];
+        size_t vlen = 0;
+        while (vlen < sizeof(vendor) - 1 && raw[vlen] != '\0') vlen++;
+        memcpy(vendor, raw, vlen);
+        vendor[vlen] = '\0';
+        to_proper_caps(vendor);
+
+        if (!contains_ci(vendor, filter) || vendor_in_list(seen, seen_count, vendor)) {
+            continue;
+        }
+
+        strncpy(seen[seen_count], vendor, sizeof(seen[seen_count]) - 1);
+        seen[seen_count][sizeof(seen[seen_count]) - 1] = '\0';
+        seen_count++;
+
+        if (!callback(vendor, user_data)) {
+            break;
+        }
+
+        if (max_results > 0 && seen_count >= max_results) {
+            break;
+        }
+    }
+
+    free(seen);
+    return seen_count;
 }

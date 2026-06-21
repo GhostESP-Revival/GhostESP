@@ -38,8 +38,12 @@ typedef struct {
 } AdvertiserDeviceInfo;
 
 void advertiser_scan_start(void);
+bool advertiser_scan_start_oui_prefix(const uint8_t oui[3]);
+bool advertiser_scan_start_vendor(const char *vendor);
 void advertiser_scan_stop(void);
 bool advertiser_scan_is_active(void);
+bool advertiser_scan_is_filtered(void);
+const char *advertiser_scan_get_filter_label(void);
 int advertiser_scan_get_count(void);
 int advertiser_scan_get_device(int index, AdvertiserDeviceInfo *out_info);
 bool advertiser_scan_start_tracking(int index);
