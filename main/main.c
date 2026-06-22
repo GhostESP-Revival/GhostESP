@@ -796,7 +796,13 @@ void app_main(void) {
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
         if (rgb_led_count <= 0) {
-            rgb_led_count = CONFIG_NUM_LEDS;
+            if (rgb_manager.num_leds > 0) {
+                rgb_led_count = rgb_manager.num_leds;
+            } else if (CONFIG_NUM_LEDS > 0) {
+                rgb_led_count = CONFIG_NUM_LEDS;
+            } else {
+                rgb_led_count = 1;
+            }
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);

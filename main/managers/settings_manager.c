@@ -37,6 +37,7 @@ static const char *NVS_FLAPPY_GHOST_NAME = "flap_name";
 static const char *NVS_TIMEZONE_NAME = "sel_tz";
 static const char *NVS_ACCENT_COLOR = "sel_ac";
 static const char *NVS_GPS_RX_PIN = "gps_rx_pin";
+static const char *NVS_GPS_BAUD_KEY = "gps_baud";
 static const char *NVS_DISPLAY_TIMEOUT_KEY = "disp_timeout";
 static const char *NVS_ENABLE_RTS_KEY = "rts_enable";
 static const char *NVS_STA_SSID_KEY = "sta_ssid";
@@ -186,6 +187,7 @@ void settings_set_defaults(FSettings *settings) {
   strcpy(settings->selected_hex_accent_color, "#ffffff");
   strcpy(settings->selected_timezone, "MST7MDT,M3.2.0,M11.1.0");
   settings->gps_rx_pin = 0;
+  settings->gps_baud_rate = 0; // 0 = use CONFIG_GPS_UART_BAUD_RATE
   settings->display_timeout_ms = 30000; // Default to 30 seconds
   settings->rts_enabled = false;
   strcpy(settings->sta_ssid, ""); // Default empty station SSID
@@ -420,6 +422,11 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u8(nvsHandle, NVS_GPS_RX_PIN, &value_u8);
   if (err == ESP_OK) {
     settings->gps_rx_pin = value_u8;
+  }
+
+  err = nvs_get_u32(nvsHandle, NVS_GPS_BAUD_KEY, &value_u32);
+  if (err == ESP_OK) {
+    settings->gps_baud_rate = value_u32;
   }
 
   uint32_t timeout_value;
@@ -1178,6 +1185,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WD_WEIGHTED_5G_KEY, G_Settings.wd_weighted_5g ? 1 : 0);
             key = NVS_WD_WEIGHTED_5G_KEY;
             break;
+        case SETTING_GPS_BAUD_RATE:
+            err = nvs_set_u32(nvsHandle, NVS_GPS_BAUD_KEY, G_Settings.gps_baud_rate);
+            key = NVS_GPS_BAUD_KEY;
+            break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
             return;
@@ -1372,6 +1383,8 @@ void settings_save(const FSettings *settings) {
     nvs_set_u16(nvsHandle, NVS_WD_HOP_HELPER_KEY, settings->wd_hop_helper_ms);
     nvs_set_u8(nvsHandle, NVS_WD_WEIGHTED_5G_KEY, settings->wd_weighted_5g ? 1 : 0);
 
+    nvs_set_u32(nvsHandle, NVS_GPS_BAUD_KEY, settings->gps_baud_rate);
+
     esp_err_t err = nvs_commit(nvsHandle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to commit settings_save: %s", esp_err_to_name(err));
@@ -1418,6 +1431,14 @@ void settings_set_gps_rx_pin(FSettings *settings, uint8_t RxPin) {
 
 uint8_t settings_get_gps_rx_pin(const FSettings *settings) {
   return settings->gps_rx_pin;
+}
+
+void settings_set_gps_baud_rate(FSettings *settings, uint32_t baud) {
+  settings->gps_baud_rate = baud;
+}
+
+uint32_t settings_get_gps_baud_rate(const FSettings *settings) {
+  return settings->gps_baud_rate;
 }
 
 void settings_set_rgb_speed(FSettings *settings, uint8_t speed) {

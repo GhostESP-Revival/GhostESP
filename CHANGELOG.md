@@ -9,7 +9,8 @@
  - Added Ghostchi companion lockscreen mode with no-PIN support and a global mood system
  - Added SD browser support for viewing text file previews and staging file copy/move operations
  - Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
- - Added reusable LVGL confirmation popups for dangerous UI actions
+- Added reusable LVGL confirmation popups for dangerous UI actions
+ - Added a runtime-configurable GPS baud rate (settings, `gpsbaud` CLI, WebUI, and a new GPS menu under Scans & Data)
 
 ### Fixed
  - Fixed BLE scans over-awarding Ghostchi XP
@@ -21,6 +22,7 @@
  - Fixed `scan_status` spinner lingering on `lv_layer_top()` across lockscreen entry
  - Fixed main menu touch scrolling feeling less responsive than settings
  - Fixed fullscreen LVGL popups not filling the runtime display area below the status bar on some configs
+ - Fixed saved RGB pins being ignored at boot on boards with `CONFIG_NUM_LEDS=0` when the LED count was never set, causing `setrgbpins` to appear to not persist across reboots
 
 ## Revival v2.0-pre5
 

@@ -1617,6 +1617,11 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
         settings_set_gps_rx_pin(settings, gps_rx_pin->valueint);
     }
 
+    cJSON *gps_baud_rate = cJSON_GetObjectItem(root, "gps_baud_rate");
+    if (gps_baud_rate) {
+        settings_set_gps_baud_rate(settings, (uint32_t)gps_baud_rate->valueint);
+    }
+
     // Handle display timeout
     cJSON *display_timeout = cJSON_GetObjectItem(root, "display_timeout");
     if (display_timeout) {
@@ -1666,6 +1671,7 @@ static esp_err_t api_settings_get_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(root, "hex_accent_color", settings_get_accent_color_str(settings));
     cJSON_AddStringToObject(root, "timezone_str", settings_get_timezone_str(settings));
     cJSON_AddNumberToObject(root, "gps_rx_pin", settings_get_gps_rx_pin(settings));
+    cJSON_AddNumberToObject(root, "gps_baud_rate", settings_get_gps_baud_rate(settings));
     cJSON_AddNumberToObject(root, "display_timeout", settings_get_display_timeout(settings));
     cJSON_AddNumberToObject(root, "rts_enabled_bool", settings_get_rts_enabled(settings));
     cJSON_AddBoolToObject(root, "web_auth_enabled", settings_get_web_auth_enabled(settings));

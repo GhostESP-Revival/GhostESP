@@ -123,6 +123,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddStringToObject(o, "selected_timezone", s->selected_timezone);
   cJSON_AddStringToObject(o, "selected_hex_accent_color", s->selected_hex_accent_color);
   cJSON_AddNumberToObject(o, "gps_rx_pin", (double)s->gps_rx_pin);
+  cJSON_AddNumberToObject(o, "gps_baud_rate", (double)s->gps_baud_rate);
   cJSON_AddNumberToObject(o, "display_timeout_ms", (double)s->display_timeout_ms);
   cJSON_AddBoolToObject(o, "rts_enabled", s->rts_enabled);
 
@@ -227,6 +228,7 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   jstrcpy_field(s->selected_hex_accent_color, sizeof(s->selected_hex_accent_color), root,
                 "selected_hex_accent_color");
   s->gps_rx_pin = jget_int_clamp(root, "gps_rx_pin", s->gps_rx_pin, -1, 255);
+  s->gps_baud_rate = (uint32_t)jget_u32_clamp(root, "gps_baud_rate", s->gps_baud_rate, 0u, 4000000u);
   s->display_timeout_ms =
       jget_u32_clamp(root, "display_timeout_ms", s->display_timeout_ms, 0, 86400000u);
   if (cJSON_GetObjectItemCaseSensitive(root, "rts_enabled")) {

@@ -155,6 +155,7 @@ typedef enum {
     SETTING_WD_HOP_PRIMARY,
     SETTING_WD_HOP_HELPER,
     SETTING_WD_WEIGHTED_5G,
+    SETTING_GPS_BAUD_RATE,
 } SettingsType;
 
 
@@ -218,6 +219,7 @@ typedef struct {
   char selected_timezone[25];
   char selected_hex_accent_color[25];
   int gps_rx_pin;
+  uint32_t gps_baud_rate;      // 0 = use Kconfig default (CONFIG_GPS_UART_BAUD_RATE)
   uint32_t display_timeout_ms; // Display timeout in milliseconds
   bool rts_enabled;
   char sta_ssid[65];     // New field for Station SSID (Max 64 + null)
@@ -366,6 +368,9 @@ const char *settings_get_portal_ssid(const FSettings *settings);
 
 void settings_set_gps_rx_pin(FSettings *settings, uint8_t RxPin);
 uint8_t settings_get_gps_rx_pin(const FSettings *settings);
+
+void settings_set_gps_baud_rate(FSettings *settings, uint32_t baud);
+uint32_t settings_get_gps_baud_rate(const FSettings *settings);
 
 void settings_set_portal_password(FSettings *settings, const char *password);
 const char *settings_get_portal_password(const FSettings *settings);

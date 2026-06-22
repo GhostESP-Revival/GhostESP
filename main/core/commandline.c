@@ -564,6 +564,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
+    {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
@@ -5437,6 +5438,39 @@ void handle_gps_pin(int argc, char **argv) {
     TERMINAL_VIEW_ADD_TEXT("GPS pin set to IO%d\n", pin);
 }
 
+void handle_gps_baud(int argc, char **argv) {
+    if (argc < 2) {
+        uint32_t current_baud = settings_get_gps_baud_rate(&G_Settings);
+        if (current_baud > 0) {
+            glog("GPS baud rate: %lu\n", (unsigned long)current_baud);
+        } else {
+#ifdef CONFIG_GPS_UART_BAUD_RATE
+            glog("GPS baud rate: not set (using default %d)\n", CONFIG_GPS_UART_BAUD_RATE);
+#else
+            glog("GPS baud rate: not set\n");
+#endif
+        }
+        glog("Usage: gpsbaud <rate>\n");
+        glog("Common rates: 9600, 19200, 38400, 57600, 115200 (0 = reset to default)\n");
+        return;
+    }
+
+    long baud = atol(argv[1]);
+    if (baud < 0) {
+        glog("Invalid baud rate.\n");
+        return;
+    }
+
+    settings_set_gps_baud_rate(&G_Settings, (uint32_t)baud);
+    settings_save(&G_Settings);
+    if (baud == 0) {
+        glog("GPS baud rate reset to default. Restart GPS to apply.\n");
+    } else {
+        glog("GPS baud rate set to %ld. Restart GPS to apply.\n", baud);
+    }
+    TERMINAL_VIEW_ADD_TEXT("GPS baud: %ld\n", baud);
+}
+
 void handle_gps_info(int argc, char **argv) {
     bool stop_flag = false;
 
@@ -7793,6 +7827,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    channel_delay     - Channel delay in ms\n");
         glog("    broadcast_speed   - Broadcast speed\n");
         glog("    gps_rx_pin        - GPS RX pin\n");
+        glog("    gps_baud_rate     - GPS UART baud rate (0 = Kconfig default)\n");
         glog("    power_save        - Power save mode (true/false)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
@@ -10914,6 +10949,7 @@ void register_commands() {
     register_command("startwd", handle_startwd);
     register_command("gpsinfo", handle_gps_info);
     register_command("gpspin", handle_gps_pin);
+    register_command("gpsbaud", handle_gps_baud);
     register_command("scanports", handle_scan_ports);
     register_command("scanarp", handle_scan_arp);
     register_command("scanssh", handle_scan_ssh);

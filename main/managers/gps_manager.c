@@ -599,9 +599,14 @@ void gps_manager_init(GPSManager *manager) {
 
     gps_soft_mode_active = false;
 
+    uint32_t runtime_baud = settings_get_gps_baud_rate(&G_Settings);
+    if (runtime_baud > 0) {
+        config.uart.baud_rate = runtime_baud;
+    } else {
 #ifdef CONFIG_GPS_UART_BAUD_RATE
-    config.uart.baud_rate = CONFIG_GPS_UART_BAUD_RATE;
+        config.uart.baud_rate = CONFIG_GPS_UART_BAUD_RATE;
 #endif
+    }
 
     if (gps_should_use_software_rx()) {
         glog("GPS soft RX: IO%d @ %lu\n",
