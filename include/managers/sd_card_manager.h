@@ -6,6 +6,9 @@
 #include "esp_err.h"
 #include <stdbool.h>
 
+/** VFS mount point for the SD card (also used in paths for fopen, stat, etc.). */
+#define GHOSTESP_SD_ROOT "/mnt/ghostesp"
+
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
 

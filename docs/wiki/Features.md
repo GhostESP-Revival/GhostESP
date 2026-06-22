@@ -197,6 +197,7 @@ GhostESP comes packed with various features for wireless network exploration and
 
 - Wardriving with GPS logging (WiFi and BLE)
 - Live GPS info display
+- Offline raster map viewer (**Apps** → **Maps**): Slippy tiles on SD under `maps/<style>/tiles/...` (each `maps/` subfolder with a `tiles/` dir is a style; cycle via HUD / **M** / encoder); PNG or JPEG (including JPEG data in files named `.png`); optional `metadata.json` for bounds; zoom range follows on-disk `z/` levels when the card is readable
 
 ### Port Scanning
 

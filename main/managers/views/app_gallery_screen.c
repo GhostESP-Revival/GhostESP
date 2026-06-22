@@ -2,6 +2,7 @@
 #include "managers/views/ghostchi_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/music_visualizer.h"
+#include "managers/views/offline_map_screen.h"
 #include "managers/views/plugin_runner_view.h"
 #include "managers/views/sd_browser_screen.h"
 #include "managers/views/terminal_screen.h"
@@ -145,6 +146,13 @@ static const app_item_t builtin_app_items[] = {
         .icon = &ghost,
         .palette_index = 2,
         .view = &ghostchi_view,
+    },
+    {
+        .name = "Maps",
+        .asset_key = "Map",
+        .icon = &Map,
+        .palette_index = 2,
+        .view = &offline_map_view,
     },
     {
         .name = "Clock",

@@ -71,11 +71,29 @@ lodepng source code. Don't forget to remove "static" if you copypaste them
 from here.*/
 
 #ifdef LODEPNG_COMPILE_ALLOCATORS
+
+/* ESP-IDF: LVGL's lv_mem pool is too small for full-tile PNG decode; prefer PSRAM when enabled. */
+#if defined(ESP_PLATFORM) && defined(CONFIG_SPIRAM)
+#include "esp_heap_caps.h"
+#define LODEPNG_ALLOC_ESP_PSRAM 1
+#else
+#define LODEPNG_ALLOC_ESP_PSRAM 0
+#endif
+
 static void* lodepng_malloc(size_t size) {
 #ifdef LODEPNG_MAX_ALLOC
   if(size > LODEPNG_MAX_ALLOC) return 0;
 #endif
+#if LODEPNG_ALLOC_ESP_PSRAM
+  {
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(p) return p;
+    p = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return p;
+  }
+#else
   return lv_mem_alloc(size);
+#endif
 }
 
 /* NOTE: when realloc returns NULL, it leaves the original memory untouched */
@@ -83,11 +101,26 @@ static void* lodepng_realloc(void* ptr, size_t new_size) {
 #ifdef LODEPNG_MAX_ALLOC
   if(new_size > LODEPNG_MAX_ALLOC) return 0;
 #endif
+#if LODEPNG_ALLOC_ESP_PSRAM
+  if(ptr == NULL) {
+    return lodepng_malloc(new_size);
+  }
+  if(new_size == 0) {
+    free(ptr);
+    return NULL;
+  }
+  return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#else
   return lv_mem_realloc(ptr, new_size);
+#endif
 }
 
 static void lodepng_free(void* ptr) {
+#if LODEPNG_ALLOC_ESP_PSRAM
+  free(ptr);
+#else
   lv_mem_free(ptr);
+#endif
 }
 #else /*LODEPNG_COMPILE_ALLOCATORS*/
 /* TODO: support giving additional void* payload to the custom allocators */

@@ -20,6 +20,10 @@ keywords: ["gps", "wardriving", "location", "tracking", "coordinates"]
 - **BLE Wardriving**: Log BLE devices with GPS coordinates (CSV export)
 - **Combined Mapping**: Map both networks and devices on a single view
 
+## Offline map tiles (device SD)
+
+Display firmware can show **cached map imagery** from the SD card (not live map downloads on the device). Open **Apps** → **Maps** after copying Slippy tiles under `/mnt/ghostesp/maps/<style>/tiles/{z}/{x}/{y}.png` (or `.jpg` / `.jpeg`), where each **`<style>`** folder under `maps/` contains its own `tiles/` tree (multiple styles are supported; cycle with the on-map control, **`M`**, or the encoder button). PNGs are decoded by LVGL; JPEGs are decoded to RGB565 with stb when using 16-bit color, with an SJPG fallback for baseline JPEG. Optional `metadata.json` can supply bounds; **zoom limits follow the tile folders on disk** when the card can be scanned (so template min/max in JSON does not cap the viewer). Details: [Offline maps (SD tiles)](../maps/<Style>).
+
 ## Common Workflow: GPS Wardriving
 
 1. Ensure GPS module is connected and receiving signal

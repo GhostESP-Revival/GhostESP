@@ -69,7 +69,8 @@ uint32_t theme_palette_get_text_muted(uint8_t theme);
 #define LVGL_TICK_TASK_STACK_SIZE 5120
 #endif
 #else
-#define LVGL_TICK_TASK_STACK_SIZE 8192
+/* Maps / lodepng / img decode need headroom; 8K was marginal with 9x tile work on same task. */
+#define LVGL_TICK_TASK_STACK_SIZE 14336
 #endif
 
 #ifndef CONFIG_JC3248W535EN_LCD
