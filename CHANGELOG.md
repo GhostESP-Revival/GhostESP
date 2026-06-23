@@ -3,6 +3,8 @@
 ## Revival v2.0-pre6
 
 ### Added
+ - Add Marauder V8 hardware build - @H4W9
+ - Add Pancake C5 hardware build - @H4W9
  - Added a BLE advertisement scan option in the Bluetooth menu
  - Added OUI prefix/vendor filtered BLE device scanning with RGB match pulses
  - Added scanning spinner and details view for `GATT Scan` in the Bluetooth menu (matches the Detect Devices and Advertiser Scan flows)
