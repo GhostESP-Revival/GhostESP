@@ -100,10 +100,12 @@ typedef struct {
     void *user;
 } plugin_event_slot_t;
 
-static plugin_spi_slot_t s_spi_slots[PLUGIN_SPI_MAX_DEVICES];
-static plugin_pwm_slot_t s_pwm_slots[PLUGIN_PWM_MAX_CHANNELS];
+static plugin_spi_slot_t *s_spi_slots = NULL;
+static plugin_pwm_slot_t *s_pwm_slots = NULL;
 static plugin_gpio_intr_slot_t *s_gpio_intr = NULL;
 static plugin_event_slot_t *s_events = NULL;
+static TaskHandle_t *s_tasks = NULL;
+static int *s_sockets = NULL;
 
 static bool ensure_gpio_intr_slots(void) {
     if (!s_gpio_intr) s_gpio_intr = calloc(GPIO_NUM_MAX, sizeof(*s_gpio_intr));
@@ -114,8 +116,21 @@ static bool ensure_event_slots(void) {
     if (!s_events) s_events = calloc(PLUGIN_EVENT_MAX, sizeof(*s_events));
     return s_events != NULL;
 }
-static TaskHandle_t s_tasks[PLUGIN_TASK_MAX];
-static int s_sockets[PLUGIN_SOCKET_MAX];
+
+static bool ensure_spi_slots(void) {
+    if (!s_spi_slots) s_spi_slots = calloc(PLUGIN_SPI_MAX_DEVICES, sizeof(*s_spi_slots));
+    return s_spi_slots != NULL;
+}
+
+static bool ensure_pwm_slots(void) {
+    if (!s_pwm_slots) s_pwm_slots = calloc(PLUGIN_PWM_MAX_CHANNELS, sizeof(*s_pwm_slots));
+    return s_pwm_slots != NULL;
+}
+
+static bool ensure_task_slots(void) {
+    if (!s_tasks) s_tasks = calloc(PLUGIN_TASK_MAX, sizeof(*s_tasks));
+    return s_tasks != NULL;
+}
 static bool s_uart_open[UART_NUM_MAX];
 static bool s_gpio_isr_installed = false;
 static ghostesp_wifi_packet_cb_t s_wifi_packet_cb = NULL;
@@ -144,13 +159,17 @@ extern FSettings G_Settings;
 static void socket_slots_init(void) {
     static bool initialized = false;
     if (initialized) return;
+    if (!s_sockets) {
+        s_sockets = calloc(PLUGIN_SOCKET_MAX, sizeof(*s_sockets));
+        if (!s_sockets) return;
+    }
     for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) s_sockets[i] = -1;
     initialized = true;
 }
 
 static void track_socket(int sock) {
     socket_slots_init();
-    if (sock < 0) return;
+    if (sock < 0 || !s_sockets) return;
     for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) {
         if (s_sockets[i] == sock) return;
         if (s_sockets[i] < 0) {
@@ -162,6 +181,7 @@ static void track_socket(int sock) {
 
 static void untrack_socket(int sock) {
     socket_slots_init();
+    if (!s_sockets) return;
     for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) if (s_sockets[i] == sock) s_sockets[i] = -1;
 }
 
@@ -406,6 +426,7 @@ bool plugin_api_i2c_write_read(uint8_t addr, const void *tx, size_t tx_len, void
 
 int plugin_api_spi_open(int host, int sclk, int miso, int mosi, int cs, uint32_t hz, int mode) {
     if (!has_permission(PLUGIN_PERMISSION_SPI) || hz == 0 || reserved_pin(sclk) || reserved_pin(miso) || reserved_pin(mosi) || reserved_pin(cs)) return -1;
+    if (!ensure_spi_slots()) return -1;
     int slot = -1;
     for (int i = 0; i < PLUGIN_SPI_MAX_DEVICES; i++) if (!s_spi_slots[i].active) { slot = i; break; }
     if (slot < 0) return -1;
@@ -438,7 +459,7 @@ int plugin_api_spi_open(int host, int sclk, int miso, int mosi, int cs, uint32_t
 }
 
 int plugin_api_spi_transfer(int handle, const void *tx, void *rx, size_t len) {
-    if (!has_permission(PLUGIN_PERMISSION_SPI) || handle <= 0 || handle > PLUGIN_SPI_MAX_DEVICES || len == 0) return -1;
+    if (!has_permission(PLUGIN_PERMISSION_SPI) || handle <= 0 || handle > PLUGIN_SPI_MAX_DEVICES || len == 0 || !s_spi_slots) return -1;
     plugin_spi_slot_t *slot = &s_spi_slots[handle - 1];
     if (!slot->active || !slot->dev) return -1;
     spi_transaction_t t = {0};
@@ -449,7 +470,7 @@ int plugin_api_spi_transfer(int handle, const void *tx, void *rx, size_t len) {
 }
 
 bool plugin_api_spi_close(int handle) {
-    if (!has_permission(PLUGIN_PERMISSION_SPI) || handle <= 0 || handle > PLUGIN_SPI_MAX_DEVICES) return false;
+    if (!has_permission(PLUGIN_PERMISSION_SPI) || handle <= 0 || handle > PLUGIN_SPI_MAX_DEVICES || !s_spi_slots) return false;
     plugin_spi_slot_t *slot = &s_spi_slots[handle - 1];
     if (!slot->active) return false;
     if (slot->dev) spi_bus_remove_device(slot->dev);
@@ -484,6 +505,7 @@ int plugin_api_adc_read_mv(int channel) {
 
 bool plugin_api_pwm_attach(int pin, uint32_t freq_hz, uint8_t resolution_bits) {
     if (!has_permission(PLUGIN_PERMISSION_PWM) || reserved_pin(pin) || freq_hz == 0 || resolution_bits == 0 || resolution_bits > 14) return false;
+    if (!ensure_pwm_slots()) return false;
     int slot = -1;
     for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) if (!s_pwm_slots[i].active || s_pwm_slots[i].pin == pin) { slot = i; break; }
     if (slot < 0) return false;
@@ -512,7 +534,7 @@ bool plugin_api_pwm_attach(int pin, uint32_t freq_hz, uint8_t resolution_bits) {
 }
 
 bool plugin_api_pwm_write(int pin, uint32_t duty) {
-    if (!has_permission(PLUGIN_PERMISSION_PWM)) return false;
+    if (!has_permission(PLUGIN_PERMISSION_PWM) || !s_pwm_slots) return false;
     for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) {
         if (!s_pwm_slots[i].active || s_pwm_slots[i].pin != pin) continue;
         if (ledc_set_duty(LEDC_LOW_SPEED_MODE, s_pwm_slots[i].channel, duty) != ESP_OK) return false;
@@ -522,7 +544,7 @@ bool plugin_api_pwm_write(int pin, uint32_t duty) {
 }
 
 bool plugin_api_pwm_detach(int pin) {
-    if (!has_permission(PLUGIN_PERMISSION_PWM)) return false;
+    if (!has_permission(PLUGIN_PERMISSION_PWM) || !s_pwm_slots) return false;
     for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) {
         if (!s_pwm_slots[i].active || s_pwm_slots[i].pin != pin) continue;
         ledc_stop(LEDC_LOW_SPEED_MODE, s_pwm_slots[i].channel, 0);
@@ -721,12 +743,13 @@ static void plugin_task_bridge(void *arg) {
     free(ctx);
     if (fn) fn(user);
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
-    for (int i = 0; i < PLUGIN_TASK_MAX; i++) if (s_tasks[i] == self) s_tasks[i] = NULL;
+    if (s_tasks) for (int i = 0; i < PLUGIN_TASK_MAX; i++) if (s_tasks[i] == self) s_tasks[i] = NULL;
     vTaskDelete(NULL);
 }
 
 ghostesp_task_t plugin_api_task_create(const char *name, ghostesp_task_fn_t fn, void *user, uint32_t stack_size, int priority) {
     if (!has_permission(PLUGIN_PERMISSION_TASKS) || !fn) return NULL;
+    if (!ensure_task_slots()) return NULL;
     int slot = -1;
     for (int i = 0; i < PLUGIN_TASK_MAX; i++) if (!s_tasks[i]) { slot = i; break; }
     if (slot < 0) return NULL;
@@ -745,7 +768,7 @@ ghostesp_task_t plugin_api_task_create(const char *name, ghostesp_task_fn_t fn, 
 }
 
 bool plugin_api_task_delete(ghostesp_task_t task) {
-    if (!has_permission(PLUGIN_PERMISSION_TASKS) || !task) return false;
+    if (!has_permission(PLUGIN_PERMISSION_TASKS) || !task || !s_tasks) return false;
     TaskHandle_t handle = (TaskHandle_t)task;
     for (int i = 0; i < PLUGIN_TASK_MAX; i++) {
         if (s_tasks[i] != handle) continue;
@@ -1679,13 +1702,13 @@ void plugin_api_lowlevel_release(void) {
 #ifdef CONFIG_HAS_NRF24
     nrf24_remote_manager_stop();
 #endif
-    for (int i = 0; i < PLUGIN_TASK_MAX; i++) {
+    if (s_tasks) for (int i = 0; i < PLUGIN_TASK_MAX; i++) {
         if (!s_tasks[i]) continue;
         vTaskDelete(s_tasks[i]);
         s_tasks[i] = NULL;
     }
     socket_slots_init();
-    for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) {
+    if (s_sockets) for (int i = 0; i < PLUGIN_SOCKET_MAX; i++) {
         if (s_sockets[i] < 0) continue;
         close(s_sockets[i]);
         s_sockets[i] = -1;
@@ -1699,16 +1722,16 @@ void plugin_api_lowlevel_release(void) {
             memset(&s_gpio_intr[pin], 0, sizeof(*s_gpio_intr));
         }
     }
-    for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) {
+    if (s_pwm_slots) for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) {
         if (!s_pwm_slots[i].active) continue;
         ledc_stop(LEDC_LOW_SPEED_MODE, s_pwm_slots[i].channel, 0);
-        memset(&s_pwm_slots[i], 0, sizeof(s_pwm_slots[i]));
+        memset(&s_pwm_slots[i], 0, sizeof(*s_pwm_slots));
     }
-    for (int i = 0; i < PLUGIN_SPI_MAX_DEVICES; i++) {
+    if (s_spi_slots) for (int i = 0; i < PLUGIN_SPI_MAX_DEVICES; i++) {
         if (!s_spi_slots[i].active) continue;
         if (s_spi_slots[i].dev) spi_bus_remove_device(s_spi_slots[i].dev);
         if (s_spi_slots[i].bus_owned) spi_bus_free(s_spi_slots[i].host);
-        memset(&s_spi_slots[i], 0, sizeof(s_spi_slots[i]));
+        memset(&s_spi_slots[i], 0, sizeof(*s_spi_slots));
     }
     for (int i = 0; i < UART_NUM_MAX; i++) {
         if (!s_uart_open[i]) continue;
