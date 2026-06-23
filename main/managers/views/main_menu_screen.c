@@ -1112,7 +1112,7 @@ static void create_grid_menu(void) {
         lv_obj_t *icon = lv_img_create(grid_cards[i]);
         const lv_img_dsc_t *item_icon = menu_item_icon(menu_index);
         lv_img_set_src(icon, item_icon);
-        int reserved_for_label = (grid_card_height <= 50 ? 14 : 20);
+        int reserved_for_label = (grid_card_height <= 70 ? 12 : 20);
         int avail_w = (int)(grid_card_width * 0.78f);
         int avail_h = (int)((grid_card_height - reserved_for_label) * 0.78f);
         if (avail_h < 10) avail_h = grid_card_height - reserved_for_label;
@@ -1135,7 +1135,7 @@ static void create_grid_menu(void) {
         if (zoom < 64)  zoom = 64;
         lv_img_set_zoom(icon, zoom);
 
-        int top_offset = (grid_card_height <= 50) ? 6 : 10;
+        int top_offset = (grid_card_height <= 70) ? 3 : 10;
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
 
         // Add label

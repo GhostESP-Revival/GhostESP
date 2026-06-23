@@ -303,6 +303,11 @@ void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
 
+// Reports the latest tracking RSSI for the live RSSI meter view. Returns false
+// when neither AP nor STA tracking is active. When active, *out_rssi receives the
+// most recent matched RSSI and *out_fresh whether a packet arrived recently.
+bool wifi_manager_get_track_status(int8_t *out_rssi, bool *out_fresh);
+
 dns_server_handle_t dns_handle_take(void);
 
 #endif // WIFI_MANAGER_H

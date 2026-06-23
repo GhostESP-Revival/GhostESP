@@ -31,6 +31,7 @@
 #include "gui/paged_menu.h"
 #include "gui/scan_status.h"
 #include "gui/detail_view.h"
+#include "gui/rssi_meter.h"
 #include "gui/nav_history.h"
 #include "gui/select_overlay.h"
 #include "scans/wifi/ap_scan.h"
@@ -103,6 +104,7 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 static paged_menu_t *ap_list_menu = NULL;
 static scan_status_t *ap_scan_status = NULL;
 static detail_view_t *ap_detail_view = NULL;
+static rssi_meter_t *track_meter = NULL; /* live RSSI ring overlay for Track AP/STA */
 static int selected_ap_index = -1;
 static char ap_connect_ssid[64] = {0};
 static lv_timer_t *ap_scan_poll_timer = NULL;
@@ -195,6 +197,8 @@ static void station_scan_complete_callback(void);
 static void stop_station_scan_flow(void);
 static bool should_stop_station_scan_on_input(const InputEvent *event);
 static void station_detail_back_cb(lv_event_t *e);
+static void stop_track_flow(void);
+static bool track_exit_requested(const InputEvent *event);
 static void show_station_detail(int station_index);
 static void station_list_cleanup(void);
 static bool start_ble_detect_flow(void);
@@ -2026,6 +2030,10 @@ static void scroll_options_down(lv_event_t *e) {
 
 static void touch_back_button_cb(lv_event_t *e) {
     (void)e;
+    if (track_meter && rssi_meter_is_active(track_meter)) {
+        stop_track_flow();
+        return;
+    }
     if (ap_detail_view && current_wifi_menu_state == WIFI_MENU_AP_DETAILS) {
         ap_detail_back_cb(NULL);
         return;
@@ -2107,6 +2115,14 @@ static void options_menu_freeze_pre_lock(void) {
     /* Detail views live outside options_menu_view.root; remove and rebuild. */
     s_pending_detail_resume = RESUME_NONE;
     s_pending_detail_index = -1;
+
+    /* Live RSSI tracker lives outside options_menu_view.root; stop tracking and
+     * drop the overlay so it doesn't survive the lockscreen swap. */
+    if (track_meter) {
+        wifi_manager_stop_tracking();
+        rssi_meter_destroy(track_meter);
+        track_meter = NULL;
+    }
 
     pending_detail_resume_t resume_id = RESUME_NONE;
     int resume_index = -1;
@@ -3619,6 +3635,20 @@ void handle_hardware_button_press_options(InputEvent *event) {
         return;
     }
 
+    /* Live RSSI tracking overlay. Back-like physical inputs leave; other
+     * non-touch inputs are swallowed so they never leak to the menu underneath.
+     * Touch is left to fall through to the shared options touch pipeline (same
+     * as the detail-view overlay) so move/scroll samples still reach LVGL like
+     * other views; ring taps are swallowed and the Back button handled there. */
+    if (track_meter && rssi_meter_is_active(track_meter)) {
+        if (event->type != INPUT_TYPE_TOUCH) {
+            if (track_exit_requested(event)) {
+                stop_track_flow();
+            }
+            return;
+        }
+    }
+
     bool station_scan_overlay_active = station_scan_is_active() ||
                                        (sta_scan_poll_timer != NULL) ||
                                        (sta_scan_status != NULL);
@@ -3812,6 +3842,21 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         }
                     }
                 }
+                return;
+            }
+
+            /* While the RSSI tracker overlay is up, only its Back button is
+             * actionable. Swallow every other press/move sample so it neither
+             * scrolls nor taps the menu hidden underneath. */
+            if (track_meter && rssi_meter_is_active(track_meter)) {
+                if (back_btn && lv_obj_is_valid(back_btn)) {
+                    lv_area_t area; lv_obj_get_coords(back_btn, &area);
+                    if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
+                        data->point.y >= area.y1 && data->point.y <= area.y2) {
+                        touch_back_button_cb(NULL);
+                    }
+                }
+                opt_touch_started = false;
                 return;
             }
 
@@ -7399,6 +7444,11 @@ void options_menu_destroy() {
     ble_detect_list_cleanup();
 
     /* Detail views are parented to lv_scr_act(), not options_menu_view.root. */
+    if (track_meter) {
+        wifi_manager_stop_tracking();
+        rssi_meter_destroy(track_meter);
+        track_meter = NULL;
+    }
     if (ap_detail_view) {
         detail_view_destroy(ap_detail_view);
         ap_detail_view = NULL;
@@ -9673,6 +9723,90 @@ static void ap_deauth_cb(lv_event_t *e) {
     }
 }
 
+/* Sampler for the live RSSI ring: pulls the latest tracking RSSI from the wifi
+ * manager. Returns true when the reading is fresh (a recent matching packet). */
+static bool track_meter_sample(void *user, int8_t *out_rssi) {
+    (void)user;
+    bool fresh = false;
+    if (!wifi_manager_get_track_status(out_rssi, &fresh)) {
+        return false;
+    }
+    return fresh;
+}
+
+/* Which inputs leave the tracking view (mirrors the detail view's back keys). */
+static bool track_exit_requested(const InputEvent *event) {
+    if (!event) return false;
+    switch (event->type) {
+        case INPUT_TYPE_EXIT_BUTTON:
+            return true;
+        case INPUT_TYPE_JOYSTICK:
+            return event->data.joystick_index == 0 || event->data.joystick_index == 1;
+        case INPUT_TYPE_ENCODER:
+            return event->data.encoder.button;
+        case INPUT_TYPE_KEYBOARD: {
+            uint8_t k = event->data.key_value;
+            return k == LV_KEY_LEFT || k == LV_KEY_ESC || k == LV_KEY_ENTER ||
+                   k == 13 || k == 'h' || k == '`' || k == 29 || k == ',' || k == 44;
+        }
+        default:
+            return false;
+    }
+}
+
+/* Launch the pulsating RSSI ring overlay and start hardware tracking. The
+ * options menu stays the current view (like the scan spinner / detail view),
+ * so the shared touch bar remains available underneath. */
+static void start_track_meter(bool is_ap, const char *target_label) {
+    if (track_meter) {
+        rssi_meter_destroy(track_meter);
+        track_meter = NULL;
+    }
+
+    if (is_ap) {
+        wifi_manager_track_ap();
+    } else {
+        wifi_manager_track_sta();
+    }
+
+    track_meter = rssi_meter_create(lv_scr_act(),
+                                    is_ap ? "Track AP" : "Track STA",
+                                    target_label,
+                                    track_meter_sample, NULL);
+    if (!track_meter) {
+        /* Allocation failed: don't leave hardware tracking running headless. */
+        wifi_manager_stop_tracking();
+        error_popup_create("Track failed");
+        return;
+    }
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (touch_bar && lv_obj_is_valid(touch_bar)) {
+        rssi_meter_set_bottom_reserved(track_meter, lv_obj_get_height(touch_bar));
+    }
+    /* Only the Back button is meaningful while tracking. */
+    if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+    if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+    if (back_btn && lv_obj_is_valid(back_btn)) lv_obj_move_foreground(back_btn);
+#endif
+}
+
+/* Stop tracking, tear down the ring overlay, and return to the AP/STA list we
+ * came from (the detail view was already destroyed at launch; its back handler
+ * pops the nav entry and restores the list + touch bar). */
+static void stop_track_flow(void) {
+    wifi_manager_stop_tracking();
+    if (track_meter) {
+        rssi_meter_destroy(track_meter);
+        track_meter = NULL;
+    }
+    if (current_wifi_menu_state == WIFI_MENU_STA_DETAILS) {
+        station_detail_back_cb(NULL);
+    } else {
+        ap_detail_back_cb(NULL);
+    }
+}
+
 static void ap_track_cb(lv_event_t *e) {
     (void)e;
     if (selected_ap_index >= 0) {
@@ -9685,9 +9819,14 @@ static void ap_track_cb(lv_event_t *e) {
             detail_view_destroy(ap_detail_view);
             ap_detail_view = NULL;
         }
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("trackap");
+
+        char ssid[33] = {0};
+        if (selected_ap.ssid[0] == 0) {
+            strcpy(ssid, "<Hidden>");
+        } else {
+            strncpy(ssid, (const char *)selected_ap.ssid, sizeof(ssid) - 1);
+        }
+        start_track_meter(true, ssid);
     }
 }
 
@@ -9929,9 +10068,12 @@ static void station_track_cb(lv_event_t *e) {
         detail_view_destroy(sta_detail_view);
         sta_detail_view = NULL;
     }
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
-    simulateCommand("tracksta");
+
+    char sta_mac[18] = "Station";
+    if (selected_station_index >= 0 && selected_station_index < station_scan_get_count()) {
+        station_format_mac(station_ap_list[selected_station_index].station_mac, sta_mac, sizeof(sta_mac));
+    }
+    start_track_meter(false, sta_mac);
 }
 
 static void station_select_cb(lv_event_t *e) {

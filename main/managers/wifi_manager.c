@@ -4275,6 +4275,7 @@ static volatile bool sta_tracking_active = false;
 static int8_t tracking_last_rssi = 0;
 static int8_t tracking_min_rssi = 0;
 static int8_t tracking_max_rssi = -127;
+static int64_t tracking_last_rx_us = 0; // timestamp of last matched packet (signal freshness)
 
 static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) return;
@@ -4327,6 +4328,22 @@ static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     
     glog("%s %d dBm (min:%d max:%d)%s\n", bar_str, rssi, tracking_min_rssi, tracking_max_rssi, direction);
     tracking_last_rssi = rssi;
+    tracking_last_rx_us = esp_timer_get_time();
+}
+
+bool wifi_manager_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!ap_tracking_active && !sta_tracking_active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = tracking_last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // Consider the reading "live" if a matching packet arrived recently.
+        *out_fresh = (tracking_last_rx_us != 0) && ((now - tracking_last_rx_us) < 1500000);
+    }
+    return true;
 }
 
 void wifi_manager_track_ap(void) {
@@ -4348,6 +4365,7 @@ void wifi_manager_track_ap(void) {
     tracking_last_rssi = selected_ap.rssi;
     tracking_min_rssi = selected_ap.rssi;
     tracking_max_rssi = selected_ap.rssi;
+    tracking_last_rx_us = esp_timer_get_time();
     ap_tracking_active = true;
     sta_tracking_active = false;
     
@@ -4385,6 +4403,7 @@ void wifi_manager_track_sta(void) {
     tracking_last_rssi = -100;
     tracking_min_rssi = -100;
     tracking_max_rssi = -127;
+    tracking_last_rx_us = 0; // no station packet seen yet
     ap_tracking_active = false;
     sta_tracking_active = true;
     

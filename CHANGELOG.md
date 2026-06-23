@@ -12,6 +12,7 @@
 - Added reusable LVGL confirmation popups for dangerous UI actions
  - Added a runtime-configurable GPS baud rate (settings, `gpsbaud` CLI, WebUI, and a new GPS menu under Scans & Data)
  - Added `wdstream` CLI streaming for companion-app wardriving without device GPS, SD, CSV, or PCAP capture requirements
+ - Added RSSI meter view for real-time signal strength tracking with a pulsing ring indicator
 
 ### Changed
  - Renamed "Default" named theme to OG since it wasn't actually the default theme
