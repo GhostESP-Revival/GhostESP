@@ -8409,7 +8409,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    invert_colors     - Invert screen colors (true/false)\n");
         glog("    terminal_color    - Terminal text color (hex)\n");
         glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
-        glog("    menu_theme        - Menu theme (0=Default)\n");
+        glog("    menu_theme        - Menu theme (0=OG)\n");
         glog("  System Settings:\n");
         glog("    channel_delay     - Channel delay in ms\n");
         glog("    broadcast_speed   - Broadcast speed\n");

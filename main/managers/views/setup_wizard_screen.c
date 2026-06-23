@@ -101,7 +101,7 @@ static const char *display_timeout_options[] = {"5s", "10s", "30s", "60s", "Neve
 static const uint32_t display_timeout_values[] = {5000, 10000, 30000, 60000, UINT32_MAX};
 #define DISPLAY_TIMEOUT_COUNT 5
 
-static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
+static const char *theme_options[] = {"OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 #define THEME_COUNT 17
 
 static const char *menu_layout_options[] = {"Carousel", "Grid", "List"};

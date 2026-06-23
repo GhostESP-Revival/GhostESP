@@ -3,7 +3,7 @@
 #include "managers/settings_manager.h"
 
 static const uint32_t s_theme_accents[THEME_PALETTE_THEME_COUNT] = {
-    0x1976D2, // Default
+    0x1976D2, // OG
     0xFFCDD2, // Pastel
     0x263238, // Dark
     0xFFFFFF, // Bright
