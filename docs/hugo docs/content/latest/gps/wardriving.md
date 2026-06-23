@@ -184,3 +184,5 @@ In helper mode, status lines include helper transmit counters (`tx(...)`) and st
 ## Next Step
 
 After capture, see [WiGLE Upload](/latest/gps/wigle/) to upload CSV files.
+
+For wardriving without a GPS module on your GhostESP device, see [Companion Phone GPS Wardriving](/latest/gps/companion-phone-wardriving/).

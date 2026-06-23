@@ -11,6 +11,7 @@
  - Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
 - Added reusable LVGL confirmation popups for dangerous UI actions
  - Added a runtime-configurable GPS baud rate (settings, `gpsbaud` CLI, WebUI, and a new GPS menu under Scans & Data)
+ - Added `wdstream` CLI streaming for companion-app wardriving without device GPS, SD, CSV, or PCAP capture requirements
 
 ### Fixed
  - Fixed BLE scans over-awarding Ghostchi XP
