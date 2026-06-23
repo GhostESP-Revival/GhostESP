@@ -102,8 +102,18 @@ typedef struct {
 
 static plugin_spi_slot_t s_spi_slots[PLUGIN_SPI_MAX_DEVICES];
 static plugin_pwm_slot_t s_pwm_slots[PLUGIN_PWM_MAX_CHANNELS];
-static plugin_gpio_intr_slot_t s_gpio_intr[GPIO_NUM_MAX];
-static plugin_event_slot_t s_events[PLUGIN_EVENT_MAX];
+static plugin_gpio_intr_slot_t *s_gpio_intr = NULL;
+static plugin_event_slot_t *s_events = NULL;
+
+static bool ensure_gpio_intr_slots(void) {
+    if (!s_gpio_intr) s_gpio_intr = calloc(GPIO_NUM_MAX, sizeof(*s_gpio_intr));
+    return s_gpio_intr != NULL;
+}
+
+static bool ensure_event_slots(void) {
+    if (!s_events) s_events = calloc(PLUGIN_EVENT_MAX, sizeof(*s_events));
+    return s_events != NULL;
+}
 static TaskHandle_t s_tasks[PLUGIN_TASK_MAX];
 static int s_sockets[PLUGIN_SOCKET_MAX];
 static bool s_uart_open[UART_NUM_MAX];
@@ -269,7 +279,7 @@ bool plugin_api_gpio_set_drive_strength(int pin, int strength) {
 
 static void IRAM_ATTR gpio_intr_bridge(void *arg) {
     int pin = (int)(intptr_t)arg;
-    if (pin < 0 || pin >= GPIO_NUM_MAX) return;
+    if (pin < 0 || pin >= GPIO_NUM_MAX || !s_gpio_intr) return;
     plugin_gpio_intr_slot_t *slot = &s_gpio_intr[pin];
     if (slot->active && slot->cb) slot->cb(pin, gpio_get_level((gpio_num_t)pin), slot->user);
 }
@@ -281,6 +291,7 @@ bool plugin_api_gpio_set_intr(int pin, int edge, ghostesp_gpio_intr_cb_t cb, voi
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
         s_gpio_isr_installed = true;
     }
+    if (!ensure_gpio_intr_slots()) return false;
     if (gpio_set_intr_type((gpio_num_t)pin, (gpio_int_type_t)edge) != ESP_OK) return false;
     gpio_isr_handler_remove((gpio_num_t)pin);
     if (gpio_isr_handler_add((gpio_num_t)pin, gpio_intr_bridge, (void *)(intptr_t)pin) != ESP_OK) return false;
@@ -294,7 +305,7 @@ bool plugin_api_gpio_clear_intr(int pin) {
     if (!has_permission(PLUGIN_PERMISSION_RAW_GPIO) || !valid_pin(pin)) return false;
     gpio_isr_handler_remove((gpio_num_t)pin);
     gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_DISABLE);
-    memset(&s_gpio_intr[pin], 0, sizeof(s_gpio_intr[pin]));
+    if (s_gpio_intr) memset(&s_gpio_intr[pin], 0, sizeof(*s_gpio_intr));
     return true;
 }
 
@@ -1592,6 +1603,7 @@ bool plugin_api_nvs_delete(const char *key) {
 
 ghostesp_event_sub_t plugin_api_event_subscribe(const char *topic, ghostesp_event_cb_t cb, void *user) {
     if (!has_permission(PLUGIN_PERMISSION_TASKS) || !topic || !cb) return NULL;
+    if (!ensure_event_slots()) return NULL;
     for (int i = 0; i < PLUGIN_EVENT_MAX; i++) {
         if (s_events[i].active) continue;
         s_events[i].active = true;
@@ -1604,7 +1616,7 @@ ghostesp_event_sub_t plugin_api_event_subscribe(const char *topic, ghostesp_even
 }
 
 bool plugin_api_event_unsubscribe(ghostesp_event_sub_t sub) {
-    if (!has_permission(PLUGIN_PERMISSION_TASKS) || !sub) return false;
+    if (!has_permission(PLUGIN_PERMISSION_TASKS) || !sub || !s_events) return false;
     plugin_event_slot_t *slot = (plugin_event_slot_t *)sub;
     for (int i = 0; i < PLUGIN_EVENT_MAX; i++) {
         if (&s_events[i] != slot) continue;
@@ -1616,6 +1628,7 @@ bool plugin_api_event_unsubscribe(ghostesp_event_sub_t sub) {
 
 bool plugin_api_event_publish(const char *topic, const void *data, size_t len) {
     if (!has_permission(PLUGIN_PERMISSION_TASKS) || !topic || (!data && len > 0)) return false;
+    if (!s_events) return true;
     for (int i = 0; i < PLUGIN_EVENT_MAX; i++) {
         if (!s_events[i].active || strcmp(s_events[i].topic, topic) != 0) continue;
         if (s_events[i].cb) s_events[i].cb(topic, data, len, s_events[i].user);
@@ -1677,12 +1690,14 @@ void plugin_api_lowlevel_release(void) {
         close(s_sockets[i]);
         s_sockets[i] = -1;
     }
-    memset(s_events, 0, sizeof(s_events));
-    for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
-        if (!s_gpio_intr[pin].active) continue;
-        gpio_isr_handler_remove((gpio_num_t)pin);
-        gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_DISABLE);
-        memset(&s_gpio_intr[pin], 0, sizeof(s_gpio_intr[pin]));
+    if (s_events) memset(s_events, 0, PLUGIN_EVENT_MAX * sizeof(*s_events));
+    if (s_gpio_intr) {
+        for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
+            if (!s_gpio_intr[pin].active) continue;
+            gpio_isr_handler_remove((gpio_num_t)pin);
+            gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_DISABLE);
+            memset(&s_gpio_intr[pin], 0, sizeof(*s_gpio_intr));
+        }
     }
     for (int i = 0; i < PLUGIN_PWM_MAX_CHANNELS; i++) {
         if (!s_pwm_slots[i].active) continue;

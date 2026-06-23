@@ -19,8 +19,13 @@
 #endif
 
 static const char *TAG = "PluginLoader";
-static plugin_loaded_app_t s_loaded;
+static plugin_loaded_app_t *s_loaded = NULL;
 static char s_last_error[160];
+
+static bool ensure_loaded_slot(void) {
+    if (!s_loaded) s_loaded = calloc(1, sizeof(*s_loaded));
+    return s_loaded != NULL;
+}
 
 static bool plugin_loader_sd_jit_allowed(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -139,16 +144,17 @@ static esp_err_t validate_app_descriptor(const plugin_app_manifest_t *manifest, 
 }
 
 plugin_loaded_app_t *plugin_loader_current(void) {
-    return s_loaded.manifest ? &s_loaded : NULL;
+    return (s_loaded && s_loaded->manifest) ? s_loaded : NULL;
 }
 
 esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     int64_t load_start_us = esp_timer_get_time();
     if (out_app) *out_app = NULL;
     if (!id) return fail_err(ESP_ERR_INVALID_ARG, "missing app id");
+    if (!ensure_loaded_slot()) return fail_err(ESP_ERR_NO_MEM, "failed to allocate plugin loader slot");
 
-    if (s_loaded.manifest) {
-        plugin_loader_unload(&s_loaded);
+    if (s_loaded->manifest) {
+        plugin_loader_unload(s_loaded);
     }
 
     const plugin_app_manifest_t *manifest = plugin_manager_find(id);
@@ -225,14 +231,14 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
         return validate_err;
     }
 
-    memset(&s_loaded, 0, sizeof(s_loaded));
-    s_loaded.manifest = manifest;
-    s_loaded.app = app;
-    s_loaded.handle = handle;
-    s_loaded.state = PLUGIN_APP_STATE_LOADED;
-    s_loaded.permissions = manifest->permissions;
-    snprintf(s_loaded.app_data_path, sizeof(s_loaded.app_data_path), "/mnt/ghostesp/appdata/%s", manifest->id);
-    if (out_app) *out_app = &s_loaded;
+    memset(s_loaded, 0, sizeof(*s_loaded));
+    s_loaded->manifest = manifest;
+    s_loaded->app = app;
+    s_loaded->handle = handle;
+    s_loaded->state = PLUGIN_APP_STATE_LOADED;
+    s_loaded->permissions = manifest->permissions;
+    snprintf(s_loaded->app_data_path, sizeof(s_loaded->app_data_path), "/mnt/ghostesp/appdata/%s", manifest->id);
+    if (out_app) *out_app = s_loaded;
     s_last_error[0] = '\0';
     ESP_LOGI(TAG, "Loaded SD app %s in %lld ms free8=%u largest8=%u freepsram=%u largestpsram=%u",
              manifest->id,

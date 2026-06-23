@@ -515,7 +515,9 @@ static void ble_adv_set_subtext(int found_count) {
 #include "managers/views/keyboard_screen.h"
 #include "managers/usb_keyboard_manager.h"
 #include "managers/views/badusb_view.h"
+#if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
+#endif
 #include "managers/views/nfc_view.h"
 #include "managers/views/compass_screen.h"
 #include "managers/views/enviii_screen.h"

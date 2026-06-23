@@ -23,7 +23,9 @@
 #include "managers/views/compass_screen.h"
 #include "managers/views/enviii_screen.h"
 #include "managers/views/accelerometer_screen.h"
+#if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
+#endif
 #include "managers/views/nfc_view.h"
 #include "managers/views/badusb_view.h"
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
@@ -2878,7 +2880,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
@@ -2930,7 +2934,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
@@ -2982,7 +2988,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
