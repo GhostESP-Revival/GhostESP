@@ -1021,11 +1021,10 @@ static void handle_wdstream_cmd(int argc, char **argv) {
     cfg.channel_auto = true;
     snprintf(cfg.channel_desc, sizeof(cfg.channel_desc), "auto");
 
-    bool saw_wifi_flag = false;
     bool saw_ble_flag = false;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-wifi") == 0) {
-            saw_wifi_flag = true;
+            /* default mode; accepted for compatibility */
         } else if (strcmp(argv[i], "-ble") == 0) {
             saw_ble_flag = true;
         } else if (strcmp(argv[i], "-i") == 0) {
@@ -1051,8 +1050,10 @@ static void handle_wdstream_cmd(int argc, char **argv) {
         }
     }
 
-    cfg.wifi = saw_wifi_flag || !saw_ble_flag;
+    /* Modes are mutually exclusive: -ble runs BLE only, otherwise Wi-Fi only.
+     * The two radio stacks cannot be resident at once on memory-tight targets. */
     cfg.ble = saw_ble_flag;
+    cfg.wifi = !saw_ble_flag;
 #ifdef CONFIG_IDF_TARGET_ESP32S2
     if (cfg.ble) {
         wdstream_emit("WD:ERROR error=ble_unsupported\n");
