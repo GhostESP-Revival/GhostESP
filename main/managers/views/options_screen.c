@@ -9109,9 +9109,11 @@ static void ble_gatt_list_cleanup(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
+#ifndef CONFIG_IDF_TARGET_ESP32S2
     if (ble_is_initialized()) {
         ble_stop();
     }
+#endif
 }
 
 static const char **ble_gatt_list_get_options(void) {
@@ -9140,9 +9142,11 @@ static void stop_ble_gatt_flow(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
+#ifndef CONFIG_IDF_TARGET_ESP32S2
     if (ble_is_initialized()) {
         ble_stop();
     }
+#endif
     if (ble_gatt_poll_timer) {
         lv_timer_del(ble_gatt_poll_timer);
         ble_gatt_poll_timer = NULL;
