@@ -5,6 +5,8 @@
 #include "driver/usb_serial_jtag.h"
 #include "esp_task_wdt.h"
 #include "esp_log.h"
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -36,6 +38,20 @@
 #endif
 #define BUF_SIZE (512)
 #define SERIAL_BUFFER_SIZE 512
+#define SERIAL_TASK_STACK_SIZE_INTERNAL 5120
+#define SERIAL_TASK_STACK_SIZE_PSRAM 8192
+#define SERIAL_TASK_USE_PSRAM_STACK 0
+
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
+#else
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_INTERNAL
+#endif
+
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+static StackType_t *s_serial_task_stack = NULL;
+static StaticTask_t *s_serial_task_buffer = NULL;
+#endif
 
 #ifndef CONFIG_CONSOLE_UART_BAUDRATE
 #ifdef CONFIG_MONITOR_BAUD
@@ -45,7 +61,7 @@
 #endif
 #endif
 
-char serial_buffer[SERIAL_BUFFER_SIZE];
+EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
@@ -76,7 +92,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
 static int cursor_position = 0;
 
 // Command history instance
-static CommandHistory command_history;
+EXT_RAM_BSS_ATTR static CommandHistory command_history;
 
 // Prompt display tracking
 static bool prompt_displayed = false;
@@ -613,6 +629,11 @@ static void process_html_line(const char* line) {
 
 void serial_task(void *pvParameter) {
   uint8_t *data = (uint8_t *)malloc(BUF_SIZE);
+  if (!data) {
+    ESP_LOGE("SerialTask", "Failed to allocate serial buffer");
+    vTaskDelete(NULL);
+    return;
+  }
   int index = 0;
   static uint32_t hwm_log_counter = 0;
 
@@ -913,7 +934,37 @@ void serial_manager_init() {
   }
   ESP_LOGI("SerialManager", "Command queue created: depth=6, item_size=%u bytes", sizeof(SerialCommand));
 
-  BaseType_t task_rc = xTaskCreate(serial_task, "SerialTask",  5120, NULL, 2, &s_serial_task_handle);
+  BaseType_t task_rc = pdFAIL;
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+  if (!s_serial_task_stack) {
+    s_serial_task_stack = heap_caps_malloc(SERIAL_TASK_STACK_SIZE * sizeof(StackType_t),
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+  if (!s_serial_task_buffer) {
+    s_serial_task_buffer = heap_caps_malloc(sizeof(StaticTask_t),
+                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
+  if (s_serial_task_stack && s_serial_task_buffer) {
+    s_serial_task_handle = xTaskCreateStatic(serial_task, "SerialTask",
+                                            SERIAL_TASK_STACK_SIZE, NULL, 2,
+                                            s_serial_task_stack,
+                                            s_serial_task_buffer);
+    task_rc = s_serial_task_handle ? pdPASS : pdFAIL;
+    if (task_rc == pdPASS) {
+      ESP_LOGI("SerialManager", "Serial task stack allocated from PSRAM: %d bytes",
+               (int)(SERIAL_TASK_STACK_SIZE * sizeof(StackType_t)));
+    }
+  }
+  if (task_rc != pdPASS) {
+    free(s_serial_task_stack);
+    free(s_serial_task_buffer);
+    s_serial_task_stack = NULL;
+    s_serial_task_buffer = NULL;
+#endif
+  task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE_INTERNAL, NULL, 2, &s_serial_task_handle);
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+  }
+#endif
   if (task_rc != pdPASS) {
     ESP_LOGE("SerialManager", "Failed to create serial task (%ld)", (long)task_rc);
     vQueueDelete(commandQueue);
@@ -950,6 +1001,26 @@ void serial_manager_deinit() {
   s_serial_initialized = false;
 }
 
+void serial_manager_restore_console(void) {
+#if JTAG_SUPPORTED
+  if (!s_serial_initialized) {
+    return;
+  }
+  usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
+      .rx_buffer_size = BUF_SIZE,
+      .tx_buffer_size = BUF_SIZE,
+  };
+  esp_err_t ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+  if (ret != ESP_OK) {
+    ESP_LOGW("SerialManager",
+             "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
+             esp_err_to_name(ret));
+  } else {
+    ESP_LOGI("SerialManager", "USB-JTAG restored after BadUSB teardown");
+  }
+#endif
+}
+
 int serial_manager_get_uart_num() {
     return (int)UART_NUM;
 }
@@ -959,8 +1030,21 @@ int handle_serial_command(const char *input) {
   if (strncmp(input, "peer:", 5) == 0) {
     const char* actual_command = input + 5;
     esp_comm_manager_set_remote_command_flag(true);
-    glog("Received command from peer: %s\n", actual_command);
-    glog("Executing received command: %s\n", actual_command);
+    bool quiet_badusb_setting =
+        strncmp(actual_command, "badusb set_", 11) == 0 ||
+        strncmp(actual_command, "badusb exec ", 12) == 0 ||
+        strcmp(actual_command, "badusb keyboard_start") == 0 ||
+        strcmp(actual_command, "badusb keyboard_stop") == 0 ||
+        strcmp(actual_command, "badusb jiggle_start") == 0 ||
+        strcmp(actual_command, "badusb jiggle_stop") == 0 ||
+        strncmp(actual_command, "badusb trackpad_move ", 21) == 0 ||
+        strcmp(actual_command, "badusb trackpad_start") == 0 ||
+        strcmp(actual_command, "badusb trackpad_stop") == 0 ||
+        strcmp(actual_command, "badusb stop") == 0;
+    if (!quiet_badusb_setting) {
+      glog("Received command from peer: %s\n", actual_command);
+      glog("Executing received command: %s\n", actual_command);
+    }
     int result = handle_serial_command(actual_command);
     esp_comm_manager_set_remote_command_flag(false);
     return result;
@@ -1029,8 +1113,7 @@ int handle_serial_command(const char *input) {
     cmd_func(argc, argv);
     return ESP_OK;
   } else {
-    // Add command to history even if unknown
-    command_history_add(input);
+    // Don't pollute history with typos and unknown commands
     handle_unknown_command(argv[0]);
     return ESP_ERR_INVALID_ARG;
   }

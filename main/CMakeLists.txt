@@ -42,15 +42,21 @@ list(APPEND app_sources
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona.c"
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona_online.c"
 )
-# Explicitly include infrared view implementation
-list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+# Exclude infrared view from glob; conditionally included below when IR is enabled
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/settings_sd_backup.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 # Exclude camera managers until camera support is enabled.
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
+# Add infrared view back when IR support is enabled
+if(CONFIG_HAS_INFRARED)
+    list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+endif()
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
+list(APPEND image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/lock.c")
+list(REMOVE_DUPLICATES image_sources)
 file(GLOB_RECURSE axs15231b_sources "${CMAKE_SOURCE_DIR}/components/axs15231b/*.c")
 file(GLOB m5gfx_sources
     "${CMAKE_SOURCE_DIR}/components/M5GFX/src/*.cpp"
@@ -62,13 +68,16 @@ file(GLOB m5gfx_sources
     "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/platforms/esp32/*.cpp"
     "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/v1/touch/*.cpp"
 )
-list(APPEND app_sources ${axs15231b_sources} ${image_sources})
+set(lgfx_miniz_source "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/utility/lgfx_miniz.c")
+list(REMOVE_ITEM m5gfx_sources "${lgfx_miniz_source}")
+list(APPEND app_sources ${axs15231b_sources} ${image_sources} "${lgfx_miniz_source}")
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer io_manager esp_eth espcoredump esp-tls)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls)
 
 # Optionally add extra include directories
 set(extra_includes "")
+list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/M5GFX/src")
 if(CONFIG_USE_IO_EXPANDER)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/io_manager")
 endif()
@@ -108,6 +117,10 @@ if(CONFIG_USE_IO_EXPANDER)
     list(APPEND required_components io_manager)
 endif()
 
+if(CONFIG_ENABLE_NATIVE_SD_APPS)
+    list(APPEND required_components elf_loader)
+endif()
+
 # Add IEEE 802.15.4 component for Zigbee capture on ESP32-C5/C6
 if(idf_target STREQUAL "esp32c5" OR idf_target STREQUAL "esp32c6")
     list(APPEND required_components ieee802154)
@@ -137,19 +150,26 @@ if(CONFIG_HAS_CAMERA)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/conversions/include")
 endif()
 
+# Add TLV320DAC3100 driver component (code guarded by CONFIG_HAS_TLV320DAC_I2C)
+list(APPEND required_components tlv320dac3100)
+
+# Add audio codec component for audio receiver headers/libraries.
+list(APPEND required_components esp_audio_codec)
+
+set(embed_files_list "core/ouis.bin")
+
 if(CONFIG_HAS_NFC)
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
                            REQUIRES ${required_components}
                            EMBED_TXTFILES "mf_classic_dict.nfc"
-                           EMBED_FILES "core/ouis.json")
-    # Signal to C code that the dictionary is embedded so it can reference linker symbols safely
+                           EMBED_FILES ${embed_files_list})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_MFC_DICT_EMBEDDED=1)
 else()
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
                            REQUIRES ${required_components}
-                           EMBED_FILES "core/ouis.json")
+                           EMBED_FILES ${embed_files_list})
 endif()
 
 # add compile definition for esp32s2 target to maintain legacy guards (needs COMPONENT_LIB)
@@ -164,4 +184,3 @@ target_include_directories(${COMPONENT_LIB} PRIVATE
     "${idf_path}/components/wpa_supplicant/src"
     "${idf_path}/components/wpa_supplicant/esp_supplicant/src"
 )
-

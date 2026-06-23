@@ -1,0 +1,40 @@
+name: Publish ghostbt to PyPI
+
+on:
+  push:
+    tags:
+      - "ghostbt-v*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/tools/ghostbt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Clean dist
+        run: rm -rf dist/
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: plugins/tools/ghostbt/dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true

@@ -6,6 +6,8 @@ weight: 20
 
 BadUSB runs scripts from the SD card as a USB HID keyboard. Scripts live in `/mnt/ghostesp/badusb/`.
 
+For other USB features, see [Mouse Jiggler](/latest/usb/mouse-jiggler/) and [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/).
+
 ## Supported Devices
 
 **Note:** Configs with VSENSE support will wait for a USB connection before starting the script.
@@ -17,6 +19,7 @@ Without VSENSE support:
 - Cardputer
 - Cardputer ADV
 - LilyGo T-Deck/T-Deck Plus
+- somethingsomething2 (S3 worker paired with C5 display)
 
 ## Supported DuckyScript Commands
 
@@ -41,7 +44,7 @@ To add your own files, create the `badusb` folder on the SD card and copy your `
 
 ## CLI
 
-Commands:
+Script commands:
 
 ```
 badusb list
@@ -60,6 +63,25 @@ badusb set_prod <text>
 badusb set_rand <0|1>
 badusb set_layout <n>
 ```
+
+Mouse, keyboard, and trackpad commands:
+
+```
+badusb jiggle_start
+badusb jiggle_stop
+badusb keyboard_start
+badusb keyboard_stop
+badusb type <text>
+badusb type_char <ascii>
+badusb keysend <modifier> <keycode>
+badusb trackpad_start
+badusb trackpad_stop
+badusb trackpad_move <dx> <dy>
+badusb trackpad_button <mask>
+badusb trackpad_wheel <delta>
+```
+
+See [Mouse Jiggler](/latest/usb/mouse-jiggler/) and [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/) for details.
 
 Keyboard layout values:
 
@@ -83,4 +105,3 @@ These values are saved on the local device and used on the next run.
 ## Remote
 
 When BadUSB is used over Dual Comm, the controller sends the current settings to the peer right before streaming the script. The peer uses those settings for that run. These remote settings apply only for that run and do not persist to NVS on the peer. For setup details, see [GhostLink](/latest/getting-started/dual-communication/).
-

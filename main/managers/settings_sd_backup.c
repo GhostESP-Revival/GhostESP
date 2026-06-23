@@ -123,6 +123,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddStringToObject(o, "selected_timezone", s->selected_timezone);
   cJSON_AddStringToObject(o, "selected_hex_accent_color", s->selected_hex_accent_color);
   cJSON_AddNumberToObject(o, "gps_rx_pin", (double)s->gps_rx_pin);
+  cJSON_AddNumberToObject(o, "gps_baud_rate", (double)s->gps_baud_rate);
   cJSON_AddNumberToObject(o, "display_timeout_ms", (double)s->display_timeout_ms);
   cJSON_AddBoolToObject(o, "rts_enabled", s->rts_enabled);
 
@@ -137,6 +138,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "third_control_enabled", s->third_control_enabled);
   cJSON_AddNumberToObject(o, "menu_theme", (double)s->menu_theme);
   cJSON_AddNumberToObject(o, "terminal_text_color", (double)s->terminal_text_color);
+  cJSON_AddNumberToObject(o, "terminal_font_size", (double)s->terminal_font_size);
   cJSON_AddBoolToObject(o, "invert_colors", s->invert_colors);
   cJSON_AddBoolToObject(o, "web_auth_enabled", s->web_auth_enabled);
   cJSON_AddBoolToObject(o, "webui_restrict_to_ap", s->webui_restrict_to_ap);
@@ -149,6 +151,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "infrared_easy_mode", s->infrared_easy_mode);
   cJSON_AddBoolToObject(o, "nav_buttons_enabled", s->nav_buttons_enabled);
   cJSON_AddNumberToObject(o, "menu_layout", (double)s->menu_layout);
+  cJSON_AddBoolToObject(o, "carousel_invert_direction", s->carousel_invert_direction);
   cJSON_AddNumberToObject(o, "neopixel_max_brightness", (double)s->neopixel_max_brightness);
   cJSON_AddBoolToObject(o, "encoder_invert_direction", s->encoder_invert_direction);
   cJSON_AddBoolToObject(o, "auto_save_scans", s->auto_save_scans);
@@ -173,6 +176,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddNumberToObject(o, "menu_bg_shade", (double)s->menu_bg_shade);
   cJSON_AddBoolToObject(o, "menu_rounded", s->menu_rounded);
   cJSON_AddBoolToObject(o, "menu_item_borders", s->menu_item_borders);
+  cJSON_AddBoolToObject(o, "menu_card_bg", s->menu_card_bg);
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   cJSON_AddNumberToObject(o, "status_idle_animation", (double)s->status_idle_animation);
@@ -224,6 +228,7 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   jstrcpy_field(s->selected_hex_accent_color, sizeof(s->selected_hex_accent_color), root,
                 "selected_hex_accent_color");
   s->gps_rx_pin = jget_int_clamp(root, "gps_rx_pin", s->gps_rx_pin, -1, 255);
+  s->gps_baud_rate = (uint32_t)jget_u32_clamp(root, "gps_baud_rate", s->gps_baud_rate, 0u, 4000000u);
   s->display_timeout_ms =
       jget_u32_clamp(root, "display_timeout_ms", s->display_timeout_ms, 0, 86400000u);
   if (cJSON_GetObjectItemCaseSensitive(root, "rts_enabled")) {
@@ -248,6 +253,8 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   s->menu_theme = (uint8_t)jget_int_clamp(root, "menu_theme", s->menu_theme, 0, 64);
   s->terminal_text_color =
       jget_u32_clamp(root, "terminal_text_color", s->terminal_text_color, 0, 0xFFFFFFu);
+  s->terminal_font_size =
+      (uint8_t)jget_int_clamp(root, "terminal_font_size", s->terminal_font_size, 0, 2);
   if (cJSON_GetObjectItemCaseSensitive(root, "invert_colors")) {
     s->invert_colors = jget_bool(root, "invert_colors", s->invert_colors);
   }
@@ -279,6 +286,10 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
     s->nav_buttons_enabled = jget_bool(root, "nav_buttons_enabled", s->nav_buttons_enabled);
   }
   s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 2);
+  if (cJSON_GetObjectItemCaseSensitive(root, "carousel_invert_direction")) {
+    s->carousel_invert_direction =
+        jget_bool(root, "carousel_invert_direction", s->carousel_invert_direction);
+  }
   s->neopixel_max_brightness =
       (uint8_t)jget_int_clamp(root, "neopixel_max_brightness", s->neopixel_max_brightness, 0, 100);
   if (cJSON_GetObjectItemCaseSensitive(root, "encoder_invert_direction")) {
@@ -325,6 +336,9 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "menu_item_borders")) {
     s->menu_item_borders = jget_bool(root, "menu_item_borders", s->menu_item_borders);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "menu_card_bg")) {
+    s->menu_card_bg = jget_bool(root, "menu_card_bg", s->menu_card_bg);
   }
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY

@@ -175,6 +175,8 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password);
 
 void wifi_manager_cancel_connect(void);
 
+void wifi_manager_stop_reconnect(void);
+
 void wifi_manager_start_visualizer(bool for_screen);
 
 void wifi_manager_stop_visualizer(void);
@@ -194,6 +196,11 @@ void wifi_manager_stop_wireshark_channel_hop(void);
 
 // Set fixed channel for Wireshark capture
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel);
+
+// Lock any monitor-mode capture (probe/deauth/beacon/raw/eapol/pwn/wps) to a
+// fixed WiFi channel. Stops any active channel hopping and sets the channel
+// via esp_wifi_set_channel. Returns ESP_ERR_INVALID_ARG for out-of-range values.
+esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel);
 
 void wifi_manager_start_deauth();
 
@@ -295,6 +302,11 @@ void wifi_manager_set_karma_portal_file(const char *path);
 void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
+
+// Reports the latest tracking RSSI for the live RSSI meter view. Returns false
+// when neither AP nor STA tracking is active. When active, *out_rssi receives the
+// most recent matched RSSI and *out_fresh whether a packet arrived recently.
+bool wifi_manager_get_track_status(int8_t *out_rssi, bool *out_fresh);
 
 dns_server_handle_t dns_handle_take(void);
 

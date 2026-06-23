@@ -15,7 +15,7 @@ static const int8_t KNOBDIR[16] = {
      0,  1, -1,  0};
 
 #define LATCH0 0
-#define ENCODER_DEBOUNCE_US 1000         /* ignore latches quicker than this */
+#define ENCODER_DEBOUNCE_US 3000         /* ignore latches quicker than this */
 #define ENCODER_ACCEL_THRESH_US_1 15000  /* <15 ms => 2x */
 #define ENCODER_ACCEL_THRESH_US_2 5000   /* <5 ms  => 4x */
 #define LATCH3 3
@@ -104,8 +104,14 @@ void encoder_tick(encoder_t *enc)
     int8_t this_state = (int8_t)(sig1 | (sig2 << 1));
 
     if (enc->old_state != this_state) {
+        int8_t delta = KNOBDIR[this_state | (enc->old_state << 2)];
+        if (delta == 0) {
+            /* Invalid quadrature transition (e.g. noise/bounce) - keep old state */
+            ESP_LOGD("Encoder", "Invalid transition: %d -> %d (pins: %d, %d)", enc->old_state, this_state, sig1, sig2);
+            return;
+        }
         ESP_LOGD("Encoder", "State change: %d -> %d (pins: %d, %d)", enc->old_state, this_state, sig1, sig2);
-        enc->position += KNOBDIR[this_state | (enc->old_state << 2)];
+        enc->position += delta;
         enc->old_state = this_state;
 
         bool latched = false;
@@ -151,7 +157,13 @@ void encoder_tick(encoder_t *enc)
             int32_t detent_delta = base_ext - enc->position_base_ext;
             if (detent_delta != 0) {
                 enc->position_base_ext = base_ext;
-                enc->pending_steps += detent_delta * accel_mult;
+                int32_t new_pending = enc->pending_steps + detent_delta * accel_mult;
+                if (new_pending > ENCODER_MAX_PENDING_STEPS) {
+                    new_pending = ENCODER_MAX_PENDING_STEPS;
+                } else if (new_pending < -ENCODER_MAX_PENDING_STEPS) {
+                    new_pending = -ENCODER_MAX_PENDING_STEPS;
+                }
+                enc->pending_steps = new_pending;
             }
 
             enc->pos_time_prev_us = enc->pos_time_us;

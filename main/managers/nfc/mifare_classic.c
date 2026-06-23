@@ -4,6 +4,7 @@
 #include "managers/nfc/mifare_classic.h"
 #include "managers/nfc/mifare_attack.h"
 #include "managers/sd_card_manager.h"
+#include "gui/toast.h"
 #include "esp_log.h"
 #ifdef CONFIG_NFC_PN532
 #include "pn532.h"
@@ -123,6 +124,11 @@ static void mfc_cache_begin(MFC_TYPE t, const uint8_t* uid, uint8_t uid_len, uin
     int sec_bits = (sectors + 7) >> 3;
     g_sector_key_a_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
     g_sector_key_b_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
+    if (!g_mfc_cache || !g_mfc_known ||
+        !g_sector_key_a || !g_sector_key_b ||
+        !g_sector_key_a_valid || !g_sector_key_b_valid) {
+        mfc_cache_reset();
+    }
 }
 static void mfc_cache_store_block(int abs_block, const uint8_t data[16]){
     if (!g_mfc_cache || !g_mfc_known) return;
@@ -974,6 +980,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
     pos += snprintf(buf + pos, sizeof(buf) - pos, "Data format version: 2\n");
     if (sd_card_write_file(path, buf, (size_t)pos) != ESP_OK) {
         ESP_LOGE("MFC", "Header write failed: %s", path);
+        toast_show("NFC dump save failed", TOAST_ERROR);
         return false;
     }
 
@@ -982,6 +989,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
     if (io == NULL) {
         if (!mfc_cache_matches(uid, uid_len)) {
             ESP_LOGE("MFC", "No cache for this UID; cannot save without card");
+            toast_show("NFC dump save failed", TOAST_ERROR);
             return false;
         }
         MFC_TYPE t = mfc_type_from_sak(sak);
@@ -1051,6 +1059,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
             }
             free(sector_buf);
         }
+        toast_show("NFC dump saved", TOAST_SUCCESS);
         return true;
     }
 
@@ -1339,6 +1348,7 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
             free(sector_buf);
         }
     }
+    toast_show("NFC dump saved", TOAST_SUCCESS);
     return true;
 }
 #endif // CONFIG_NFC_PN532

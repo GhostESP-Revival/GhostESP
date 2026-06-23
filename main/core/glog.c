@@ -3,6 +3,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -15,7 +16,7 @@
 
 static SemaphoreHandle_t s_glog_mutex;
 static volatile int s_glog_defer = 0;
-static char s_glog_q[GLOG_DEFER_MAX][GLOG_BUF_SIZE];
+static char *s_glog_q[GLOG_DEFER_MAX];
 static uint8_t s_q_head = 0, s_q_tail = 0, s_q_count = 0;
 
 static inline void glog_lock(void) {
@@ -39,7 +40,7 @@ static inline void glog_unlock(void) {
 
 static inline void glog_emit(const char *buf) {
     printf("%s", buf);
-    if (esp_comm_manager_is_remote_command()) {
+    if (esp_comm_manager_should_forward_output()) {
         esp_comm_manager_send_response((const uint8_t *)buf, strlen(buf));
     }
     terminal_view_add_text(buf);
@@ -80,15 +81,25 @@ void glog(const char *fmt, ...) {
 
     if (s_glog_defer) {
         if (s_q_count == GLOG_DEFER_MAX) {
+            free(s_glog_q[s_q_head]);
+            s_glog_q[s_q_head] = NULL;
             s_q_head = (s_q_head + 1) % GLOG_DEFER_MAX;
             s_q_count--;
         }
-        memcpy(s_glog_q[s_q_tail], buf, (size_t)written + 1);
+        char *queued = malloc((size_t)written + 1);
+        if (!queued) {
+            glog_unlock();
+            glog_emit(buf);
+            return;
+        }
+        memcpy(queued, buf, (size_t)written + 1);
+        s_glog_q[s_q_tail] = queued;
         s_q_tail = (s_q_tail + 1) % GLOG_DEFER_MAX;
         s_q_count++;
         glog_unlock();
         return;
     }
+
     glog_unlock();
 
     glog_emit(buf);
@@ -107,12 +118,13 @@ void glog_flush_deferred(void) {
             glog_unlock();
             break;
         }
-        static char out[GLOG_BUF_SIZE];
-        memcpy(out, s_glog_q[s_q_head], GLOG_BUF_SIZE);
+        char *out = s_glog_q[s_q_head];
+        s_glog_q[s_q_head] = NULL;
         s_q_head = (s_q_head + 1) % GLOG_DEFER_MAX;
         s_q_count--;
         glog_unlock();
         glog_emit(out);
+        free(out);
     }
 }
 

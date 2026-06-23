@@ -18,7 +18,7 @@ The scan collects device names, IP addresses, detected device types (Chromecast,
 
 ## Prerequisites
 
-- A Banshee device with Ethernet connected
+- A device with Ethernet support (`CONFIG_WITH_ETHERNET` enabled)
 - Access to the device via GhostLink display menu or terminal
 - A network with active devices
 

@@ -47,4 +47,9 @@ void ssh_scan_host(const char *target_ip);
  */
 void ssh_scan_subnet(void);
 
+/**
+ * @brief Cancel an ongoing SSH scan
+ */
+void ssh_scan_cancel(void);
+
 #endif // SSH_SCAN_H

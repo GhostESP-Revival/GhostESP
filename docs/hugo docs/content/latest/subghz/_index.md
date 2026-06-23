@@ -2,7 +2,7 @@
 title: "SubGHz"
 description: "Overview of GhostESP's SubGHz radio capabilities"
 keywords: ["subghz", "radio", "433MHz", "garage door", "remote control", "CC1101"]
-weight: 35
+weight: 120
 aliases:
   - "/subghz/"
 ---

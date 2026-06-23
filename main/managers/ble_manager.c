@@ -5,6 +5,8 @@
 #include <string.h>
 #include <esp_wifi.h>
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "core/callbacks.h"
 #include "esp_random.h"
@@ -26,6 +28,7 @@
 #include <managers/rgb_manager.h>
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "esp_bt.h"
 #include "managers/ap_manager.h"
 #include "managers/wifi_manager.h"
@@ -39,6 +42,8 @@
 #define MAX_HANDLERS 10
 #define MAX_PACKET_SIZE 31
 #define NIMBLE_HOST_TASK_STACK_SIZE 6144
+#define BLE_DISC_LOG_INTERVAL 500
+#define BLE_DISC_XP_INTERVAL 250
 
 // AirTag tracking definitions
 #ifdef CONFIG_SPIRAM
@@ -55,6 +60,8 @@ static volatile bool airtag_scanner_active = false;
 
 static esp_timer_handle_t flush_timer = NULL;
 static TaskHandle_t nimble_host_task_handle = NULL;
+static StackType_t *nimble_host_task_stack = NULL;
+static StaticTask_t *nimble_host_task_buffer = NULL;
 static SemaphoreHandle_t nimble_host_exit_sem = NULL;
 static SemaphoreHandle_t ble_disc_complete_sem = NULL;
 static volatile bool ble_pending_clear = false;
@@ -165,12 +172,15 @@ int ble_gap_event_general(struct ble_gap_event *event, void *arg) {
 
         static uint32_t disc_log_counter = 0;
         disc_log_counter++;
-        if ((disc_log_counter % 50) == 1) {
-            ESP_LOGI(TAG_BLE,
+        if ((disc_log_counter % BLE_DISC_LOG_INTERVAL) == 1) {
+            ESP_LOGD(TAG_BLE,
                      "ble_gap_event_general: %lu discovery events seen; last RSSI=%d len=%u",
                      (unsigned long)disc_log_counter,
                      event->disc.rssi,
                      (unsigned int)event->disc.length_data);
+        }
+        if ((disc_log_counter % BLE_DISC_XP_INTERVAL) == 0) {
+            ghostchi_manager_add_xp(1);
         }
         notify_handlers(event, event->disc.length_data);
         ble_cb_busy = false;
@@ -190,6 +200,36 @@ void nimble_host_task(void *param) {
         xSemaphoreGive(nimble_host_exit_sem);
     }
     vTaskDelete(NULL);
+}
+
+static BaseType_t ble_create_host_task(void) {
+#if defined(CONFIG_SPIRAM)
+    if (!nimble_host_task_stack) {
+        nimble_host_task_stack = heap_caps_malloc(NIMBLE_HOST_TASK_STACK_SIZE * sizeof(StackType_t),
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!nimble_host_task_buffer) {
+        nimble_host_task_buffer = heap_caps_malloc(sizeof(StaticTask_t),
+                                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (nimble_host_task_stack && nimble_host_task_buffer) {
+        nimble_host_task_handle = xTaskCreateStatic(nimble_host_task, "nimble_host",
+                                                   NIMBLE_HOST_TASK_STACK_SIZE, NULL, 5,
+                                                   nimble_host_task_stack,
+                                                   nimble_host_task_buffer);
+        if (nimble_host_task_handle) {
+            ESP_LOGI(TAG_BLE, "nimble_host stack allocated from PSRAM: %d bytes",
+                     (int)(NIMBLE_HOST_TASK_STACK_SIZE * sizeof(StackType_t)));
+            return pdPASS;
+        }
+    }
+    free(nimble_host_task_stack);
+    free(nimble_host_task_buffer);
+    nimble_host_task_stack = NULL;
+    nimble_host_task_buffer = NULL;
+#endif
+    return xTaskCreate(nimble_host_task, "nimble_host", NIMBLE_HOST_TASK_STACK_SIZE,
+                       NULL, 5, &nimble_host_task_handle);
 }
 
 // Function to prepare BLE host config
@@ -264,6 +304,7 @@ static void ble_resume_networking(void) {
 
         esp_err_t err = ap_manager_init();
         if (err == ESP_OK) {
+            wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
         } else {
             ESP_LOGE(TAG_BLE, "Failed to reinit AP manager: 0x%X", (unsigned int)err);
@@ -342,13 +383,13 @@ static void restart_ble_stack(void) {
         }
         nimble_host_task_handle = NULL;
     }
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // Now deinitialize the port
     nimble_port_deinit();
-    
+
     // Small delay before reinitializing
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // log DMA-capable internal heap info right before NimBLE re-init
     size_t free_internal_dma_re = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
@@ -374,13 +415,24 @@ static void restart_ble_stack(void) {
     }
 
     // Restart the NimBLE host task (larger stack)
-    xTaskCreate(nimble_host_task, "nimble_host", NIMBLE_HOST_TASK_STACK_SIZE, NULL, 5, &nimble_host_task_handle);
+    if (ble_create_host_task() != pdPASS) {
+        ESP_LOGE(TAG_BLE, "Failed to restart nimble_host task");
+        ble_pending_clear = false;
+        return;
+    }
 
     ble_pending_clear = false;
-    
-    // Wait for NimBLE stack to be ready
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
+
+    // Wait for NimBLE stack to be ready (matches BT_NIMBLE_HS_STOP_TIMEOUT_MS=2000)
+    TickType_t sync_start = xTaskGetTickCount();
+    while (!ble_hs_synced() &&
+           (xTaskGetTickCount() - sync_start) < pdMS_TO_TICKS(2000)) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (!ble_hs_synced()) {
+        ESP_LOGW(TAG_BLE, "NimBLE did not sync within 2 s after restart");
+    }
+
     ESP_LOGI(TAG_BLE, "BLE stack restarted successfully");
 }
 
@@ -634,6 +686,26 @@ void ble_stop_spoofing(void) {
     airtag_scan_stop_spoofing();
 }
 
+bool ble_start_custom_adv(const uint8_t *data, size_t len) {
+    if (!data || len == 0 || len > 31) return false;
+    if (!ble_initialized) ble_init();
+    if (!wait_for_ble_ready()) return false;
+    if (ble_gap_adv_active()) ble_gap_adv_stop();
+    if (ble_gap_adv_set_data(data, len) != 0) return false;
+    uint8_t own_addr_type;
+    if (ble_hs_id_infer_auto(0, &own_addr_type) != 0) return false;
+    struct ble_gap_adv_params params = {0};
+    params.conn_mode = BLE_GAP_CONN_MODE_NON;
+    params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    return ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &params, ble_gap_event_general, NULL) == 0;
+}
+
+bool ble_stop_custom_adv(void) {
+    if (!ble_initialized || !ble_hs_synced()) return false;
+    if (!ble_gap_adv_active()) return true;
+    return ble_gap_adv_stop() == 0;
+}
+
 static bool wait_for_ble_ready(void) {
     int rc;
     int retry_count = 0;
@@ -715,6 +787,7 @@ bool ble_start_scanning(void) {
         ESP_LOGI(TAG_BLE, "Scanning started...");
         TERMINAL_VIEW_ADD_TEXT("Scanning started...\n");
         status_display_show_status("BLE Scanning");
+        ghostchi_manager_add_xp(5);
         return true;
     }
 }
@@ -816,7 +889,11 @@ void ble_init(void) {
         }
 
         // Configure and start the NimBLE host task (larger stack to avoid overflow on S3)
-        xTaskCreate(nimble_host_task, "nimble_host", NIMBLE_HOST_TASK_STACK_SIZE, NULL, 5, &nimble_host_task_handle);
+        if (ble_create_host_task() != pdPASS) {
+            ESP_LOGE(TAG_BLE, "Failed to create nimble_host task");
+            ble_resume_networking();
+            return;
+        }
         
         // Wait for NimBLE stack to be ready
         vTaskDelay(pdMS_TO_TICKS(100));

@@ -4,25 +4,33 @@
 #include "core/serial_manager.h"
 #include "core/system_manager.h"
 #include "core/ghostesp_version.h"
+#include "core/memory_debug.h"
 #include "managers/ap_manager.h"
 #include "managers/display_manager.h"
+#include "managers/ghostchi_manager.h"
+#include "managers/ghostchi_mood.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/wifi_manager.h"
+#include "gui/asset_pack.h"
+#include "managers/plugin_manager.h"
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
 #include "vendor/drivers/pcf8563.h"
 #include <sys/time.h>
 #include <time.h>
+#include <stdlib.h>
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
+#include "managers/ble_bridge_manager.h"
 #endif
 #include <esp_log.h>
 #include "esp_random.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
@@ -49,9 +57,15 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
+#ifdef CONFIG_HAS_TLV320DAC_I2S
+#include "managers/audio_receiver_manager.h"
+#endif
 
 #ifdef CONFIG_WITH_SCREEN
 #include "managers/views/splash_screen.h"
+#include "managers/views/main_menu_screen.h"
+#include "managers/views/tdongle_status_screen.h"
+#include "gui/screen_layout.h"
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 #include "managers/views/nrf24_analyzer_view.h"
 #endif
@@ -64,6 +78,55 @@
 #endif
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 #include "managers/status_display_manager.h"
+#endif
+
+#ifdef CONFIG_WITH_SCREEN
+static bool use_tdongle_status_startup(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-S3") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+#else
+    return false;
+#endif
+}
+
+static void boot_status_set_progress(float pct, const char *label) {
+    if (use_tdongle_status_startup()) {
+        (void)pct;
+        tdongle_status_show_status(label ? label : "Booting");
+        return;
+    }
+    splash_set_progress(pct, label);
+}
+
+static void boot_status_signal_completion(void) {
+    if (use_tdongle_status_startup()) {
+        tdongle_status_show_status("Ready");
+        return;
+    }
+    splash_signal_completion();
+}
+
+static void apply_main_menu_background_cb(void *arg) {
+    (void)arg;
+    gui_screen_apply_background(main_menu_view.root);
+}
+
+static void splash_asset_pack_progress_cb(float pct, const char *stage, void *user) {
+    (void)user;
+    boot_status_set_progress(pct, stage);
+}
+
+static void splash_plugin_progress_cb(float pct, int files_scanned, int files_total, void *user) {
+    (void)files_scanned;
+    (void)files_total;
+    (void)user;
+    if (pct < 0.0f) {
+        boot_status_set_progress(-1.0f, "Checking apps");
+    } else {
+        boot_status_set_progress(pct, "Checking apps");
+    }
+}
 #endif
 
 #ifdef CONFIG_HAS_MIC
@@ -83,6 +146,8 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
+
+
 
 static void print_boot_banner(void) {
     static const char *const banners[] = {
@@ -333,17 +398,117 @@ cleanup:
 }
 #endif
 
+#ifdef CONFIG_WITH_SCREEN
+// Boot-time completion coordination. The SD/asset-pack step and the
+// (fat-stack) plugin-discovery step run on separate tasks; the splash only
+// fades out once both have finished. The mask is updated under a spinlock
+// so the two tasks can race to be the last finisher.
+static portMUX_TYPE s_boot_done_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint32_t s_boot_done_mask = 0;
+#define BOOT_DONE_SD_ASSET  (1u << 0)
+#define BOOT_DONE_PLUGIN    (1u << 1)
+#define BOOT_DONE_ALL       (BOOT_DONE_SD_ASSET | BOOT_DONE_PLUGIN)
+
+static void splash_boot_step_done(uint32_t step) {
+    uint32_t now;
+    portENTER_CRITICAL(&s_boot_done_mux);
+    s_boot_done_mask |= step;
+    now = s_boot_done_mask;
+    portEXIT_CRITICAL(&s_boot_done_mux);
+    if (now == BOOT_DONE_ALL) {
+        boot_status_set_progress(100.0f, "Ready");
+        boot_status_signal_completion();
+    }
+}
+#endif
+
+#define BOOT_APP_SCAN_STACK_BYTES 32768
+
+static void boot_app_discovery_task(void *arg) {
+    (void)arg;
+#ifdef CONFIG_WITH_SCREEN
+    plugin_manager_set_progress_cb(splash_plugin_progress_cb, NULL);
+    boot_status_set_progress(-1.0f, "Checking apps...");
+#endif
+    if (plugin_manager_reload() < 0) {
+        ESP_LOGW(TAG, "Boot plugin reload failed: %s", plugin_manager_last_error());
+    }
+#ifdef CONFIG_WITH_SCREEN
+    plugin_manager_set_progress_cb(NULL, NULL);
+    splash_boot_step_done(BOOT_DONE_PLUGIN);
+#endif
+    vTaskDeleteWithCaps(NULL);
+}
+
+static bool start_boot_app_discovery_task(void) {
+    BaseType_t ok = xTaskCreateWithCaps(boot_app_discovery_task, "BootApps",
+                                        BOOT_APP_SCAN_STACK_BYTES, NULL, 5,
+                                        NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ok != pdPASS) {
+        ESP_LOGW(TAG, "Boot app discovery task create failed; skipping");
+        return false;
+    }
+    return true;
+}
+
 static void deferred_sd_init_task(void *arg) {
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    // Short initial delay: the splash holds the screen during boot work, so we
+    // only need enough time for splash_create to render the progress bar.
+    vTaskDelay(pdMS_TO_TICKS(200));
     ESP_LOGI(TAG, "Deferred SD Card init starting");
-    sd_card_init();
+
+#ifdef CONFIG_WITH_SCREEN
+    boot_status_set_progress(-1.0f, "Mounting SD card...");
+#endif
+    if (sd_card_init() != ESP_OK) {
+        ESP_LOGW(TAG, "Deferred SD Card init failed, skipping coredump autosave");
+#ifdef CONFIG_WITH_SCREEN
+        boot_status_set_progress(100.0f, "SD unavailable");
+        boot_status_signal_completion();
+#endif
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Load persisted Ghostchi XP before the first status bar is shown after
+    // splash, otherwise the badge briefly starts from Lv1 until Ghostchi opens.
+    (void)ghostchi_manager_probe_storage();
+
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#ifdef CONFIG_WITH_SCREEN
+    boot_status_set_progress(-1.0f, "Saving core dump...");
+#endif
     coredump_autosave_on_boot();
+#endif
+
+#ifdef CONFIG_WITH_SCREEN
+    asset_pack_set_progress_cb(splash_asset_pack_progress_cb, NULL);
+    boot_status_set_progress(0.0f, "Loading asset pack...");
+    esp_err_t asset_err = asset_pack_load_active();
+    asset_pack_set_progress_cb(NULL, NULL);
+    if (asset_err != ESP_OK && asset_err != ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "Active asset pack load failed: %s", esp_err_to_name(asset_err));
+    }
+    if (asset_err == ESP_OK) {
+        display_manager_run_on_lvgl(apply_main_menu_background_cb, NULL);
+    }
+
+    // Hand off app discovery to its own PSRAM-backed static task so the GAPP
+    // inflate can use the same fat stack the Apps menu allocates. The SD Init
+    // task stays at 6K; the splash holds until both boot steps are signalled.
+    if (!start_boot_app_discovery_task()) {
+        splash_boot_step_done(BOOT_DONE_PLUGIN);
+    }
+    splash_boot_step_done(BOOT_DONE_SD_ASSET);
 #endif
     vTaskDelete(NULL);
 }
 
 void app_main(void) {
+    memory_debug_start_boot_trace();
+    ghostchi_mood_init();
+    ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
+
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
 
@@ -418,8 +583,15 @@ void app_main(void) {
         gpio_set_direction(15, GPIO_MODE_OUTPUT);
         
         // Check if we woke up from deep sleep
-        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-        
+        uint32_t wakeup_causes = esp_sleep_get_wakeup_causes();
+        esp_sleep_wakeup_cause_t wakeup_reason = ESP_SLEEP_WAKEUP_UNDEFINED;
+        for (unsigned i = 0; i < 32; i++) {
+            if (wakeup_causes & (1U << i)) {
+                wakeup_reason = (esp_sleep_wakeup_cause_t)i;
+                break;
+            }
+        }
+
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_UNDEFINED:
                 ESP_LOGI("Main", "Normal startup (not from deep sleep), IO15 set high");
@@ -505,6 +677,9 @@ void app_main(void) {
 #endif
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
+#endif
     wardriving_register_stream_handler();
     usb_keyboard_manager_register_stream_handler();
 #ifdef CONFIG_HAS_BADUSB
@@ -517,6 +692,10 @@ void app_main(void) {
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     mic_visualizer_init();
     mic_visualizer_start();
+#endif
+#ifdef CONFIG_HAS_TLV320DAC_I2S
+    ESP_LOGI(TAG, "Initializing audio receiver for TLV320DAC3100 I2S");
+    MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
 #ifdef CONFIG_HAS_CAMERA
     motion_detector_init();
@@ -570,8 +749,22 @@ void app_main(void) {
 #endif
     ESP_LOGI(TAG, "Initializing display manager");
     MEASURE_INIT_RAM("Display Manager", display_manager_init() );
-    ESP_LOGI(TAG, "Presenting splash screen");
-    MEASURE_INIT_RAM("Switch to splash view", display_manager_switch_view(&splash_view));
+    ESP_LOGI(TAG, "Presenting startup screen");
+    bool startup_ready = false;
+    View *startup_view = &splash_view;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-S3") == 0 ||
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0) {
+        startup_view = &tdongle_status_view;
+    }
+#endif
+    MEASURE_INIT_RAM("Switch to startup view", startup_ready = display_manager_switch_view_and_wait_for_refresh(startup_view));
+    if (startup_ready) {
+        set_backlight_brightness(100);
+    } else {
+        ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
+    }
+    MEASURE_INIT_RAM("Deferred display peripherals", display_manager_init_deferred_peripherals());
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
         display_manager_set_rainbow_mode(true);
     }
@@ -584,10 +777,18 @@ void app_main(void) {
 #endif
 
     // Deferred SD card init: run in a background task so the shared-SPI
-    // suspend/resume does not freeze the splash-screen animation.  The task
-    // sleeps long enough for the splash transition (900 ms hold + margin).
-    xTaskCreate(deferred_sd_init_task, "SD Init", 6144, NULL,
-                tskIDLE_PRIORITY + 1, NULL);
+    // suspend/resume does not freeze the splash. The splash persists with a
+    // progress bar until splash_signal_completion() fires (or a hard timeout
+    // in splash_screen.c kicks in). The fat stack needed by GAPP inflate is
+    // handled by the separate boot_app_discovery_task spawned from inside
+    // deferred_sd_init_task.
+    {
+        BaseType_t sd_task_rc = xTaskCreate(deferred_sd_init_task, "SD Init", 6144, NULL,
+                                            tskIDLE_PRIORITY + 1, NULL);
+        if (sd_task_rc != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create SD Init task");
+        }
+    }
 
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {
@@ -595,7 +796,13 @@ void app_main(void) {
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
         if (rgb_led_count <= 0) {
-            rgb_led_count = CONFIG_NUM_LEDS;
+            if (rgb_manager.num_leds > 0) {
+                rgb_led_count = rgb_manager.num_leds;
+            } else if (CONFIG_NUM_LEDS > 0) {
+                rgb_led_count = CONFIG_NUM_LEDS;
+            } else {
+                rgb_led_count = 1;
+            }
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);

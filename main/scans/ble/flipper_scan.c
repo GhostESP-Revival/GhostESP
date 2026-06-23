@@ -320,7 +320,7 @@ static void ble_findtheflippers_callback(struct ble_gap_event *event, size_t len
              discovered_flipper_count, type_str,
 advertisementMac, advertisementName, advertisementRssi);
         // Avoid blocking the NimBLE host task inside the discovery callback.
-        rgb_manager_set_color(&rgb_manager, -1, 255, 165, 0, false);
+        rgb_manager_pulse_async(&rgb_manager, 255, 165, 0);
         discovered_flipper_count++;
     }
 }

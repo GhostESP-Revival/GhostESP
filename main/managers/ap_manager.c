@@ -58,6 +58,8 @@ static const char *TAG = "ap_manager";
 
 static esp_err_t respond_with_site(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
 #if GHOST_SITE_IS_GZ
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 #endif
@@ -503,8 +505,9 @@ esp_err_t get_query_param(httpd_req_t *req, const char *key, char *value, size_t
         }
 
         if (httpd_req_get_url_query_str(req, query, query_len) == ESP_OK) {
-            char encoded_value[max_len];
-            if (httpd_query_key_value(query, key, encoded_value, sizeof(encoded_value)) == ESP_OK) {
+            char encoded_value[512];
+            size_t ev_size = max_len < sizeof(encoded_value) ? max_len : sizeof(encoded_value);
+            if (httpd_query_key_value(query, key, encoded_value, ev_size) == ESP_OK) {
                 url_decode(value, encoded_value);
                 free(query);
                 return ESP_OK;
@@ -1321,25 +1324,41 @@ digest_fail:
 
 static esp_err_t api_command_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
-    char content[500];
-    int ret, command_len;
+    int ret;
 
-    command_len = MIN_(req->content_len, sizeof(content) - 1);
-
-    ret = httpd_req_recv(req, content, command_len);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
+    size_t content_len = req->content_len;
+    if (content_len == 0 || content_len > 4096) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "Empty or oversized payload", strlen("Empty or oversized payload"));
         return ESP_FAIL;
     }
 
-    content[command_len] = '\0';
+    char *content = malloc(content_len + 1);
+    if (!content) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, "Out of memory", strlen("Out of memory"));
+        return ESP_FAIL;
+    }
+
+    size_t received_total = 0;
+    while (received_total < content_len) {
+        ret = httpd_req_recv(req, content + received_total, content_len - received_total);
+        if (ret <= 0) {
+            free(content);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
+            }
+            return ESP_FAIL;
+        }
+        received_total += ret;
+    }
+    content[received_total] = '\0';
 
     cJSON *json = cJSON_Parse(content);
     if (json == NULL) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, "Invalid JSON", strlen("Invalid JSON"));
+        free(content);
         return ESP_FAIL;
     }
 
@@ -1348,14 +1367,15 @@ static esp_err_t api_command_handler(httpd_req_t *req) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, "Missing or invalid 'command' field",
                         strlen("Missing or invalid 'command' field"));
-        cJSON_Delete(json); // Cleanup JSON object
+        cJSON_Delete(json);
+        free(content);
         return ESP_FAIL;
     }
 
     const char *command = command_json->valuestring;
 
     // Add command to log buffer
-    char cmd_log[512];
+    char cmd_log[1024];
     snprintf(cmd_log, sizeof(cmd_log), "> %s\n", command);
     ap_manager_add_log(cmd_log);
 
@@ -1364,6 +1384,7 @@ static esp_err_t api_command_handler(httpd_req_t *req) {
     httpd_resp_send(req, "Command executed", strlen("Command executed"));
 
     cJSON_Delete(json);
+    free(content);
     return ESP_OK;
 }
 
@@ -1596,6 +1617,11 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
         settings_set_gps_rx_pin(settings, gps_rx_pin->valueint);
     }
 
+    cJSON *gps_baud_rate = cJSON_GetObjectItem(root, "gps_baud_rate");
+    if (gps_baud_rate) {
+        settings_set_gps_baud_rate(settings, (uint32_t)gps_baud_rate->valueint);
+    }
+
     // Handle display timeout
     cJSON *display_timeout = cJSON_GetObjectItem(root, "display_timeout");
     if (display_timeout) {
@@ -1645,6 +1671,7 @@ static esp_err_t api_settings_get_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(root, "hex_accent_color", settings_get_accent_color_str(settings));
     cJSON_AddStringToObject(root, "timezone_str", settings_get_timezone_str(settings));
     cJSON_AddNumberToObject(root, "gps_rx_pin", settings_get_gps_rx_pin(settings));
+    cJSON_AddNumberToObject(root, "gps_baud_rate", settings_get_gps_baud_rate(settings));
     cJSON_AddNumberToObject(root, "display_timeout", settings_get_display_timeout(settings));
     cJSON_AddNumberToObject(root, "rts_enabled_bool", settings_get_rts_enabled(settings));
     cJSON_AddBoolToObject(root, "web_auth_enabled", settings_get_web_auth_enabled(settings));

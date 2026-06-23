@@ -8,6 +8,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -388,10 +389,34 @@ bool nrf24_remote_manager_start(bool stream_to_peer) {
         return false;
     }
 
-    BaseType_t ok = xTaskCreate(nrf24_scan_task, "nrf24_scan", 4096, NULL, 5, &s_nrf24_task);
-    if (ok != pdPASS) {
-        nrf24_set_last_error("task create failed");
-        return false;
+    // Allocate task stack from PSRAM to save internal RAM
+    const uint32_t stack_size = 4096;
+    StackType_t *stack_buf = (StackType_t *)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!stack_buf) {
+        ESP_LOGW(TAG, "PSRAM stack alloc failed, falling back to internal");
+        BaseType_t ok = xTaskCreate(nrf24_scan_task, "nrf24_scan", stack_size, NULL, 5, &s_nrf24_task);
+        if (ok != pdPASS) {
+            nrf24_set_last_error("task create failed");
+            return false;
+        }
+    } else {
+        StaticTask_t *task_buf = (StaticTask_t *)malloc(sizeof(StaticTask_t));
+        if (!task_buf) {
+            free(stack_buf);
+            BaseType_t ok = xTaskCreate(nrf24_scan_task, "nrf24_scan", stack_size, NULL, 5, &s_nrf24_task);
+            if (ok != pdPASS) {
+                nrf24_set_last_error("task create failed");
+                return false;
+            }
+        } else {
+            s_nrf24_task = xTaskCreateStatic(nrf24_scan_task, "nrf24_scan", stack_size, NULL, 5, stack_buf, task_buf);
+            if (!s_nrf24_task) {
+                free(stack_buf);
+                free(task_buf);
+                nrf24_set_last_error("task create failed");
+                return false;
+            }
+        }
     }
 
     nrf24_set_last_error("none");

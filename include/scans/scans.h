@@ -15,6 +15,9 @@
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/arp_scan.h"
 #include "scans/wifi/ssh_scan.h"
+#include "scans/wifi/netbios_scan.h"
+#include "scans/wifi/http_banner_scan.h"
+#include "scans/wifi/snmp_scan.h"
 
 // BLE Scans
 #include "scans/ble/flipper_scan.h"

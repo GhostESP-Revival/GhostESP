@@ -9,10 +9,10 @@
 #define STAR_COUNT 96
 
 typedef struct {
-    int x;
-    int y;
-    int dx;
-    int dy;
+    int16_t x;
+    int16_t y;
+    int8_t dx;
+    int8_t dy;
     uint8_t trail;
 } Star;
 

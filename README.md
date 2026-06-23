@@ -22,40 +22,52 @@ An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 <details>
 <summary><strong>WiFi Features</strong></summary>
 
-- Evil Portal
+- Evil Portal (with custom HTML from buffer via serial)
 - Deauth / disassoc attacks
-- Karma
-- Beacon spam (single/list/random)
+- Channel switch attack
+- GTK abuse / client isolation testing
+- EAPOL logoff attack
+- Karma (with custom SSID lists and custom portal chaining)
+- Beacon spam (single/list/random/Rickroll)
 - AP scan / STA scan / scanall
-- Probe request listening
+- Multi-select APs and stations
+- Probe request listening (with auto-spawned Evil Twin)
 - Handshake + PMKID capture
-- WiFi capture to SD (PCAP)
+- WiFi capture to SD (PCAP) with on-device PCAP browser + hc22000 export
 - USB dongle mode for Wireshark (extcap stream)
 - DHCP starvation
 - ARP / port / SSH / local IP scanners
+- mDNS discovery / NetBIOS scan / HTTP banner scan / SNMP probe (with per-host and per-subnet variants)
 - WiFi OUI vendor lookup
-- WPA3/SAE attacks
-- EAPOL logoff attack
+- WPA3/SAE attacks (flood + compliance checker)
 - Wardriving exports (WiFi/BLE/GPS) + sweep CSV (WiFi/BLE/GPS/802.15.4)
 - Split-channel wardriving helper via GhostLink
 - RSSI tracking (AP/station)
 - Drone detection / spoofing
+- PineAP detection
+- Flock / surveillance detector
+- WPS detection
+- Pwnagotchi-style automated capture mode (Capture PWN)
+- Channel congestion analysis
+- WiFi Airspace Monitor (real-time packet/threat insights, fast channel hopping, suspect device cards)
+- DNS Sinkhole (blocklist-based NXDOMAIN blocking with built-in blocklist downloads)
 - Web UI + filesystem + remote command relay
-
 </details>
 
 <details>
 <summary><strong>BLE Features</strong></summary>
 
-- BLE scan modes (general, AirTag, Flipper)
-- BLE spam modes
-- AirTag scan / spoof
+- BLE scan modes (general, AirTag, Flipper, raw)
+- BLE spam modes (Apple, Microsoft, Samsung, Google, Random)
+- AirTag scan / spoof / select
 - BLE packet capture
 - BLE stream to Wireshark
 - Flipper finder + RSSI
-- GATT/service scan + per-device RSSI
+- GATT/service scan + per-device enumeration + device tracking
 - BLE wardriving
 - BLE skimmer detection
+- Drone / OpenDroneID scan / list / track / spoof
+- Aerial (drone) detector with threat classification
 
 </details>
 
@@ -66,6 +78,10 @@ An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 - Remote keyboard control over GhostLink
 - BadUSB script runner
 - BadUSB identity options (VID/PID/manufacturer/product/layout/randomize)
+- BadUSB trackpad (touchpad-style cursor control)
+- BadUSB mouse jiggler
+- BadUSB `type_char` CLI for typing individual ASCII characters
+- iButton (1-Wire) support
 
 </details>
 
@@ -79,7 +95,6 @@ An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 - Universal library transmit
 - IR CLI tools
 - IR dazzler (38 kHz high duty)
-
 </details>
 
 <details>
@@ -87,10 +102,12 @@ An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 
 - PN532 NTAG/MIFARE Classic support
 - Flipper `.nfc` import/export
-- MIFARE Classic dictionary attack
-- Flipper NFC parser set (transit/parking/access)
+- MIFARE Classic dictionary attack (default + user dictionary + session key reuse / sector sweep)
+- Full embedded MIFARE Classic dictionary
+- Flipper NFC parser set (transit, parking, access, amusement, loyalty) — BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, Ventra, WashCity, Social Moscow, Sonicare, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, TRT, and more
 - MIFARE Desfire detection
-- Chameleon Ultra support (CLI + UI)
+- Chameleon Ultra support (CLI + UI + BLE control)
+- Chameleon Ultra HF/LF RFID scan + reader controls
 
 </details>
 
@@ -107,23 +124,85 @@ An open-source wireless platform for ESP32 devices. Built on ESP-IDF.
 - CC1101 hardware support
 - Frequency bands: 315, 390, 433.92, 868.35, 915 MHz
 - Full CLI support
+- SubGHz remote radio support via GhostLink
+
+</details>
+
+<details>
+<summary><strong>Audio Features</strong></summary>
+
+- I2S DAC audio player (MP3 playback with headphone detection and volume control)
+- Audio receiver (TLV320DAC I2S)
+- Music visualizer (RGB LED audio visualization)
+- Microphone spectrum / MIC visualizer (microphone-driven RGB LED effects with multiple modes, color modes, sensitivity, smoothing, and contrast)
+</details>
+
+<details>
+<summary><strong>Display & Sensor Features</strong></summary>
+
+- Full LVGL graphical UI with carousel, grid, and list layouts
+- Custom asset packs loaded from SD (icons, colors, backgrounds, themes)
+- 17+ color themes
+- On-screen splash/boot animation with progress bar
+- Toast notification system
+- Persistent status bar with level badge
+- Touch drag scroll + tap-to-wake
+- Configurable screen timeout, brightness, and orientation
+- Idle animations (Game of Life, Ghost, Starfield, HUD, Matrix, Flying Ghosts, Spiral, Falling Leaves, Bouncing Text)
+- On-screen Clock
+- Compass screen (magnetometer)
+- Accelerometer screen (G-force, tilt, orientation, shake, speed)
+- ENV-III sensor screen (temperature, humidity, pressure, dew point, altitude)
+- PIN Lock screen with auto-lock
+- Trackpad / cursor control
+- Setup wizard with Home WiFi configuration
+- Accessibility settings (font size, high contrast, reduced motion, input repeat speed, epilepsy-safe mode)
+- Terminal font size control
+- Rave mode (display builds)
+
+</details>
+
+<details>
+<summary><strong>Apps & Extensibility</strong></summary>
+
+- Apps Gallery (central launcher for native SD apps)
+- Native SD app system (load, list, inspect, launch, stop, reset apps with permissions and scoped storage)
+- Ghost Build Tool (`gbt`) for scaffolding, building, and packaging apps and firmware
+- Plugin/app SDK and example apps (Device Inspector, ESP32 Finder)
+- Flappy Ghost game
+- Ghostchi virtual pet companion (50-level XP system, 27 XP sources, passive/aggressive modes, level-up toasts, status-bar badge)
+- SD Browser (file/folder browsing, rename, delete)
+- on-device PCAP browser with hc22000 export
+- On-device Info screen (device, runtime, build, credits)
 
 </details>
 
 <details>
 <summary><strong>Additional Features</strong></summary>
 
-- GhostLink (dual-device command and display interface)
+- GhostLink (dual-device command and display interface) with remote radio support and keyboard relay
 - Setup wizard (display builds)
 - Wired + web screen mirroring
-- Ethernet mode + fingerprint scan
+- Ethernet mode (W5500) + full toolset: fingerprint scan, port scan, ping sweep, ARP scan, ARP poisoning, MITM, HTTP, DNS, NTP, trace route, MAC tools, statistics
+- TLS SNI / HTTP / FTP credential capture over Ethernet
 - DIAL / Chromecast V2 support
-- GPS integration (`gpsinfo`)
-- Network printer output (`powerprinter`)
-- RGB LED modes
-- Timezone configuration (`timezone`)
+- GPS integration (`gpsinfo`) with WiGLE manual upload
+- Network printer output (`powerprinter`, PJL)
+- RGB LED modes (Normal, Rainbow, Stealth, Knight Rider, MIC Visualizer, custom colors) with neopixel brightness control
+- Timezone configuration (`timezone`) + NTP time set
 - Camera motion detection with SD card snapshot capture and Discord webhook alerts (XIAO S3 Sense)
-- Rave mode (display builds)
+- Live MJPEG camera stream (`/camera`)
+- NRF24 spectrum analyzer with passive 2.4 GHz jamming detection
+- Zigbee / 802.15.4 packet capture + sweep CSV (ESP32-C5/C6)
+- 802.15.4 / Zigbee channel capture
+- Battery monitoring / fuel gauge support
+- Sensor / RTC hardware support (PCF8563)
+- M5 Cardputer / Cardputer ADV keyboard support
+- Android companion app
+- On-device CH422G / ST7262 / AXS15231B / APX2102 display driver support
+- Light-sleep idle + frequency scaling + Wi-Fi power saving
+- Reduced-motion animations
+- SD config backup / restore
 
 </details>
 
@@ -247,16 +326,24 @@ This comparison is based on GhostESP's feature set and publicly available source
 | PMKID capture / export | [x] |  | [x] |  |
 | Live Wireshark USB streaming | [x] |  |  |  |
 | WPA3 / SAE-specific testing | [x] |  |  |  |
+| WPA3 compliance checker | [x] |  |  |  |
 | EAPOL logoff attack | [x] |  |  |  |
 | Channel switch attack | [x] |  |  |  |
 | GTK abuse / client isolation testing | [x] |  |  |  |
 | DHCP starvation | [x] | [x] |  |  |
 | ARP / port / SSH scanners | [x] | [x] |  |  |
+| mDNS discovery | [x] |  |  |  |
+| NetBIOS scanner | [x] |  |  |  |
+| HTTP banner scanner | [x] |  |  |  |
+| SNMP probe | [x] |  |  |  |
 | WiFi OUI vendor lookup | [x] | [x] | [x] |  |
-| PineAP detection | [x] |  |  | [x] |
+| PineAP / Evil Twin detection | [x] |  |  | [x] |
 | WPS detection / reporting | [x] | [x] |  |  |
 | Pwnagotchi-style automated capture mode | [x] | [x] |  |  |
 | Pwnagotchi detector / spam |  | [x] |  | [x] |
+| Channel congestion analysis | [x] |  |  |  |
+| WiFi Airspace Monitor | [x] |  |  |  |
+| DNS sinkhole / blocklist NXDOMAIN | [x] |  |  |  |
 | GPS WiFi wardriving | [x] | [x] | [x] |  |
 | BLE wardriving | [x] | [x] | [x] |  |
 | WiGLE upload integration | [x] | [x] |  |  |
@@ -267,14 +354,18 @@ This comparison is based on GhostESP's feature set and publicly available source
 | Drone / OpenDroneID detect | [x] |  |  | [x] |
 | Drone / OpenDroneID spoof | [x] |  |  |  |
 | BLE scanning | [x] | [x] | [x] | [x] |
+| Raw BLE scanner | [x] |  |  |  |
 | BLE spam modes | [x] | [x] | [x] | [x] |
 | AirTag scan / spoof | [x] | [x] | [x] | [x] |
+| BLE tracker detection suite | [x] |  | [x] | [x] |
 | Flipper Zero finder | [x] |  |  | [x] |
 | GATT / service enumeration | [x] |  | [x] |  |
+| BLE device tracking by RSSI | [x] |  |  |  |
 | BLE stream to Wireshark | [x] |  |  |  |
 | BLE skimmer detection | [x] |  |  | [x] |
 | FastPair / pairing exploit research |  | [x] | [x] | [x] |
 | BLE HID injection / DuckyScript over BLE |  | [x] |  |  |
+| BLE keyboard mode |  | [x] |  |  |
 | BLE GATT honeypot / cloned peripheral |  |  | [x] | [x] |
 | BLE vulnerability profiling |  | [x] |  |  |
 | Flock / surveillance detector | [x] |  | [x] | [x] |
@@ -290,7 +381,10 @@ This comparison is based on GhostESP's feature set and publicly available source
 | EMV / payment card reader |  | [x] |  |  |
 | BadUSB / DuckyScript | [x] | [x] |  |  |
 | USB keyboard host mode | [x] |  |  |  |
+| USB HID keyboard output mode | [x] | [x] |  |  |
+| Remote keyboard over dual-device link | [x] |  |  |  |
 | BadUSB VID/PID identity options | [x] | [x] |  |  |
+| BadUSB mouse jiggler / trackpad | [x] |  |  |  |
 | IR learn / capture / replay | [x] | [x] |  |  |
 | Flipper `.ir` file support | [x] | [x] |  |  |
 | Universal IR library transmit | [x] | [x] |  |  |
@@ -305,6 +399,8 @@ This comparison is based on GhostESP's feature set and publicly available source
 | Zigbee / 802.15.4 packet capture | [x] |  |  |  |
 | Ethernet W5500 support | [x] | [x] |  |  |
 | Ethernet ARP poisoning / MITM tools | [x] | [x] |  |  |
+| Ethernet fingerprint / port / ping tools | [x] |  |  |  |
+| Ethernet DNS / NTP / HTTP / trace tools | [x] |  |  |  |
 | TLS SNI / HTTP / FTP credential capture over Ethernet | [x] |  |  |  |
 | Camera streaming / motion detection | [x] |  |  |  |
 | Motion alerts with webhook support | [x] |  |  |  |
@@ -314,11 +410,25 @@ This comparison is based on GhostESP's feature set and publicly available source
 | Wired screen mirroring | [x] |  |  | [x] |
 | Web screen mirroring |  | [x] |  |  |
 | SD config backup / restore | [x] |  |  |  |
+| SD file manager / browser | [x] | [x] | [x] |  |
+| Native SD app/plugin system | [x] |  |  |  |
+| Native app SDK / build tooling | [x] |  |  |  |
+| Apps gallery / launcher | [x] |  |  |  |
+| Ghostchi / virtual pet | [x] | [x] |  |  |
+| Audio player | [x] | [x] |  |  |
+| Microphone spectrum / visualizer | [x] | [x] |  |  |
+| RGB LED visualizer modes | [x] | [x] |  |  |
+| Clock / RTC screen | [x] | [x] |  |  |
+| Compass screen | [x] |  |  |  |
+| Accelerometer screen | [x] |  |  |  |
+| ENV-III temperature / humidity / pressure | [x] |  |  |  |
 | Battery monitoring / fuel gauge support | [x] | [x] | [x] |  |
 | Sensor / RTC hardware support | [x] | [x] |  |  |
 | M5 Cardputer keyboard support | [x] | [x] |  |  |
 | Android companion app | [x] |  |  |  |
-| JavaScript app engine |  | [x] |  |  |
+| Accessibility modes / reduced motion | [x] |  | [x] |  |
+| Custom theme / UI palette system | [x] | [x] | [x] |  |
+| Custom SD asset packs | [x] |  |  |  |
 | LoRa support |  | [x] |  |  |
 | FM radio support |  | [x] |  |  |
 
