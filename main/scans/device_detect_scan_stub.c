@@ -72,6 +72,24 @@ bool advertiser_scan_is_tracking(void) {
     return false;
 }
 
+bool advertiser_scan_start_oui_prefix(const uint8_t oui[3]) {
+    (void)oui;
+    return false;
+}
+
+bool advertiser_scan_start_vendor(const char *vendor) {
+    (void)vendor;
+    return false;
+}
+
+bool advertiser_scan_is_filtered(void) {
+    return false;
+}
+
+const char *advertiser_scan_get_filter_label(void) {
+    return NULL;
+}
+
 void advertiser_scan_print_devices(void) {}
 
 bool advertiser_scan_save_to_sd(int index) {
