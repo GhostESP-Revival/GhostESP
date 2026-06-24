@@ -1,5 +1,11 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre7
+
+### Fixed
+ - Adjusted lockscreen layout for cardputer screens
+ - Moved grid main menu icons up on cardputer screens
+
 ## Revival v2.0-pre6
 
 ### Added

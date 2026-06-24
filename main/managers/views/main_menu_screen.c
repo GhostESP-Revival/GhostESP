@@ -122,7 +122,7 @@ static inline void apply_card_style(lv_obj_t *obj, lv_color_t surface, lv_color_
 
 static inline void apply_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
     if (card_bg_enabled()) {
-        lv_obj_set_style_border_width(obj, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
@@ -1135,7 +1135,7 @@ static void create_grid_menu(void) {
         if (zoom < 64)  zoom = 64;
         lv_img_set_zoom(icon, zoom);
 
-        int top_offset = (grid_card_height <= 70) ? 3 : 10;
+        int top_offset = (grid_card_height <= 70) ? 1 : 6;
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
 
         // Add label

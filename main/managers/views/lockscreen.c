@@ -732,6 +732,7 @@ void lockscreen_create(void) {
         int group_h = ghost_sz + 8 + 13 + 4 + 17;
         int group_y = (content_h - group_h) / 2;
         if (group_y < 0) group_y = 0;
+        group_y += 8;
         s_ghost_base_y = group_y;
 
         s_ghost = lv_img_create(s_content);

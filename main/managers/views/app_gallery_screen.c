@@ -76,7 +76,7 @@ static inline void apply_app_card_style(lv_obj_t *obj, lv_color_t surface, lv_co
 
 static inline void apply_app_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
     if (app_card_bg_enabled()) {
-        lv_obj_set_style_border_width(obj, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
         lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
         lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
@@ -775,7 +775,7 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_style_radius(card, GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
-        int reserved_for_label = (card_height <= 50 ? 14 : 20);
+        int reserved_for_label = (card_height <= 70 ? 12 : 20);
         int avail_w = (int)(card_width * 0.78f);
         int avail_h = (int)((card_height - reserved_for_label) * 0.78f);
         if (avail_h < 10) avail_h = card_height - reserved_for_label;
@@ -785,7 +785,7 @@ static void create_apps_grid_menu(void) {
         if (item_symbol) {
             lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
             if (icon) {
-                int symbol_top_offset = (card_height <= 50) ? 6 : 10;
+                int symbol_top_offset = (card_height <= 70) ? 1 : 6;
                 lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, symbol_top_offset);
             }
         } else if (item_icon) {
@@ -807,7 +807,7 @@ static void create_apps_grid_menu(void) {
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
 
-            int top_offset = (card_height <= 50) ? 6 : 10;
+            int top_offset = (card_height <= 70) ? 1 : 6;
             lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
         }
 
