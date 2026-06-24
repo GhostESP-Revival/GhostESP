@@ -1024,7 +1024,9 @@ static void sd_browser_input_callback(InputEvent *event) {
         if (event->data.encoder.button) sd_browser_select_current();
         else sd_browser_move(event->data.encoder.direction > 0 ? 1 : -1);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
-        sd_browser_handle_key(event->data.key_value);
+        if (!event->is_repeat) {
+            sd_browser_handle_key(event->data.key_value);
+        }
     } else if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
         if (data->state == LV_INDEV_STATE_PR) {

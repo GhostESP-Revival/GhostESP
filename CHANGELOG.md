@@ -8,6 +8,7 @@
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens
  - Moved grid main menu icons up on cardputer screens
+ - Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
 
 ## Revival v2.0-pre6
 
