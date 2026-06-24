@@ -776,22 +776,23 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
         int reserved_for_label = (card_height <= 70 ? 12 : 20);
-        int avail_w = (int)(card_width * 0.78f);
-        int avail_h = (int)((card_height - reserved_for_label) * 0.78f);
-        if (avail_h < 10) avail_h = card_height - reserved_for_label;
+        int icon_area_h = card_height - reserved_for_label;
+        if (icon_area_h < 10) icon_area_h = card_height - reserved_for_label;
+        int icon_target = LV_MIN((int)(card_width * 0.78f), (int)(icon_area_h * 0.78f));
+        if (icon_target < 16) icon_target = LV_MIN(card_width - 4, icon_area_h);
 
         const char *item_symbol = app_item_symbol_icon(i);
         const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
         if (item_symbol) {
             lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
             if (icon) {
-                int symbol_top_offset = (card_height <= 70) ? 1 : 6;
-                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, symbol_top_offset);
+                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
             }
         } else if (item_icon) {
             lv_obj_t *icon = lv_img_create(card);
             lv_img_set_src(icon, item_icon);
             lv_img_set_antialias(icon, false);
+            lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
             if (strcmp(app_items[i].name, "Flap") && app_item_icon_should_recolor(i, item_icon)) {
                 lv_obj_set_style_img_recolor(icon, app_items[i].border_color, 0);
                 lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -800,14 +801,17 @@ static void create_apps_grid_menu(void) {
             }
             lv_coord_t img_w = item_icon->header.w;
             lv_coord_t img_h = item_icon->header.h;
-            int zoom_w = img_w > 0 ? (avail_w * 256) / img_w : 256;
-            int zoom_h = img_h > 0 ? (avail_h * 256) / img_h : 256;
+            int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
+            int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
             int zoom = LV_MIN(zoom_w, zoom_h);
             if (zoom > 256) zoom = 256;
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
+            lv_obj_refresh_self_size(icon);
 
-            int top_offset = (card_height <= 70) ? 1 : 6;
+            int displayed_h = (img_h * zoom) / 256;
+            int top_offset = (icon_area_h - displayed_h) / 2;
+            if (top_offset < 0) top_offset = 0;
             lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
         }
 

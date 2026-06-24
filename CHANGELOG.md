@@ -9,6 +9,7 @@
  - Adjusted lockscreen layout for cardputer screens
  - Moved grid main menu icons up on cardputer screens
  - Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
+ - Fixed inconsistent icon sizing and alignment in app gallery and main menu grid layouts across different displays
 
 ## Revival v2.0-pre6
 

@@ -1113,10 +1113,12 @@ static void create_grid_menu(void) {
         const lv_img_dsc_t *item_icon = menu_item_icon(menu_index);
         lv_img_set_src(icon, item_icon);
         int reserved_for_label = (grid_card_height <= 70 ? 12 : 20);
-        int avail_w = (int)(grid_card_width * 0.78f);
-        int avail_h = (int)((grid_card_height - reserved_for_label) * 0.78f);
-        if (avail_h < 10) avail_h = grid_card_height - reserved_for_label;
+        int icon_area_h = grid_card_height - reserved_for_label;
+        if (icon_area_h < 10) icon_area_h = grid_card_height - reserved_for_label;
+        int icon_target = LV_MIN((int)(grid_card_width * 0.78f), (int)(icon_area_h * 0.78f));
+        if (icon_target < 16) icon_target = LV_MIN(grid_card_width - 4, icon_area_h);
         lv_img_set_antialias(icon, false);
+        lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
 
         if (menu_item_icon_should_recolor(menu_index, item_icon)) {
             lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
@@ -1128,14 +1130,17 @@ static void create_grid_menu(void) {
 
         lv_coord_t img_w = item_icon ? item_icon->header.w : 0;
         lv_coord_t img_h = item_icon ? item_icon->header.h : 0;
-        int zoom_w = (img_w > 0) ? (avail_w * 256) / img_w : 256;
-        int zoom_h = (img_h > 0) ? (avail_h * 256) / img_h : 256;
+        int zoom_w = (img_w > 0) ? (icon_target * 256) / img_w : 256;
+        int zoom_h = (img_h > 0) ? (icon_target * 256) / img_h : 256;
         int zoom = LV_MIN(zoom_w, zoom_h);
         if (zoom > 256) zoom = 256;
         if (zoom < 64)  zoom = 64;
         lv_img_set_zoom(icon, zoom);
+        lv_obj_refresh_self_size(icon);
 
-        int top_offset = (grid_card_height <= 70) ? 1 : 6;
+        int displayed_h = (img_h * zoom) / 256;
+        int top_offset = (icon_area_h - displayed_h) / 2;
+        if (top_offset < 0) top_offset = 0;
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
 
         // Add label
