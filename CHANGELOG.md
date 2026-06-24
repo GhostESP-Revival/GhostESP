@@ -2,6 +2,9 @@
 
 ## Revival v2.0-pre7
 
+### Changed
+ - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
+
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens
  - Moved grid main menu icons up on cardputer screens
