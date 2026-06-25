@@ -219,6 +219,12 @@ lv_obj_t *mainlabel = NULL;
 View *display_manager_previous_view = NULL;
 static View *s_lockscreen_return_view = NULL;
 
+/* True while the lockscreen is shown as a floating overlay (wake / auto-lock)
+ * on top of a still-live view. In this mode dm.current_view keeps pointing at
+ * the underlying view so its capture/timers keep running; input is routed to
+ * the lockscreen instead, and the auto-lock/wake paths must not re-trigger. */
+static volatile bool s_lockscreen_overlay_active = false;
+
 /* Lets views clean transient UI before the lockscreen destroys/rebuilds them. */
 typedef struct {
     void (*fn)(void);
@@ -2016,14 +2022,75 @@ void display_manager_init_deferred_peripherals(void) {
 #endif
 }
 
+/* While an overlay lock is up, the shared status bar (normally on lv_scr_act)
+ * would be hidden under the opaque top-layer overlay. Lift it onto the top
+ * layer above the overlay so battery/clock/icons stay live and the lock looks
+ * like a real screen; restore it verbatim on unlock. */
+static char s_pre_lock_status_title[48];
+
+static void dm_raise_status_bar_for_overlay(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  if (mainlabel && lv_obj_is_valid(mainlabel)) {
+    const char *t = lv_label_get_text(mainlabel);
+    strncpy(s_pre_lock_status_title, t ? t : "", sizeof(s_pre_lock_status_title) - 1);
+    s_pre_lock_status_title[sizeof(s_pre_lock_status_title) - 1] = '\0';
+    lv_label_set_text(mainlabel, "Locked");
+  }
+  lv_obj_set_parent(status_bar, lv_layer_top());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+}
+
+static void dm_restore_status_bar_after_overlay(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  lv_obj_set_parent(status_bar, lv_scr_act());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+  if (mainlabel && lv_obj_is_valid(mainlabel)) {
+    lv_label_set_text(mainlabel, s_pre_lock_status_title);
+  }
+}
+
+static void dm_lockscreen_overlay_create_cb(void *arg) {
+  (void)arg;
+  /* Runs on the LVGL task: build the lockscreen on the top layer without
+   * touching dm.current_view, so the view underneath keeps running. */
+  lockscreen_create();
+  dm_raise_status_bar_for_overlay();
+}
+
 void display_manager_show_lockscreen(void) {
+  /* Already locked (overlay up) — don't stack a second one. */
+  if (s_lockscreen_overlay_active) return;
+
+  /* The wake / auto-lock flow locks on top of whatever is running. Keep the
+   * current view alive and float the lockscreen over it as an overlay so an
+   * active capture (wardriving, sniffing, ...) is never torn down by locking. */
   if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
     s_lockscreen_return_view = dm.current_view;
-  } else {
-    s_lockscreen_return_view = NULL;
+    lockscreen_reset_input();
+    lockscreen_set_overlay_mode(true);
+    s_lockscreen_overlay_active = true;
+    display_manager_run_on_lvgl(dm_lockscreen_overlay_create_cb, NULL);
+    return;
   }
+
+  /* No live view to preserve (e.g. boot) — fall back to a plain view switch. */
+  s_lockscreen_return_view = NULL;
   lockscreen_reset_input();
   display_manager_switch_view(&lockscreen_view);
+}
+
+bool display_manager_is_lockscreen_active(void) {
+  return s_lockscreen_overlay_active;
+}
+
+void display_manager_clear_lockscreen_overlay(void) {
+  /* Called on the LVGL task from the lockscreen once it has torn its overlay
+   * down. Put the status bar back where the live view expects it. */
+  dm_restore_status_bar_after_overlay();
+  s_lockscreen_overlay_active = false;
+  s_lockscreen_return_view = NULL;
 }
 
 View *display_manager_get_lockscreen_return_view(void) {
@@ -2237,6 +2304,7 @@ void set_backlight_brightness(uint8_t percentage) {
         // Lockscreen on wake
         if (was_off && settings_get_lockscreen_enabled(&G_Settings) &&
             settings_get_lockscreen_wake_lock(&G_Settings) &&
+            !s_lockscreen_overlay_active &&
             dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
             display_manager_show_lockscreen();
         }
@@ -3172,6 +3240,15 @@ void hardware_input_task(void *pvParameters) {
       else if (is_backlight_dimmed && !is_backlight_off &&
                (now - last_dim_time > pdMS_TO_TICKS(INTERMEDIATE_DIM_DURATION_MS))) {
         ESP_LOGI(TAG, "Intermediate dim duration elapsed, turning backlight off");
+        /* Build the wake-lock overlay now, while the screen is still dark, so
+         * it is already the top frame when the backlight comes back — avoids a
+         * visible flash of the underlying view on wake. */
+        if (settings_get_lockscreen_enabled(&G_Settings) &&
+            settings_get_lockscreen_wake_lock(&G_Settings) &&
+            !s_lockscreen_overlay_active &&
+            dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+          display_manager_show_lockscreen();
+        }
         set_backlight_brightness(0);
         is_backlight_off = true;
       }
@@ -3236,6 +3313,14 @@ void processEvent() {
         ESP_LOGW(TAG, "Current view is NULL in input_processing_task\n");
       }
 
+      /* While the lockscreen overlay is up, the underlying view is still the
+       * "current" view (so its capture keeps running) but all input belongs to
+       * the lockscreen. */
+      if (s_lockscreen_overlay_active) {
+        input_callback = lockscreen_view.input_callback;
+        view_name = lockscreen_view.name;
+      }
+
       xSemaphoreGive(dm.mutex);
 
       ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
@@ -3297,6 +3382,12 @@ void processEvent() {
           input_callback = current->input_callback;
         } else {
           ESP_LOGW(TAG, "Current view is NULL in input_processing_task\n");
+        }
+
+        /* See note above: lockscreen overlay owns input while it's up. */
+        if (s_lockscreen_overlay_active) {
+          input_callback = lockscreen_view.input_callback;
+          view_name = lockscreen_view.name;
         }
 
         xSemaphoreGive(dm.mutex);
@@ -3493,7 +3584,8 @@ void lvgl_tick_task(void *arg) {
           uint16_t auto_lock_sec = settings_get_lockscreen_timeout_sec(&G_Settings);
           if (auto_lock_sec > 0) {
               if (now - last_touch_time > pdMS_TO_TICKS(auto_lock_sec * 1000u)) {
-                  if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+                  if (!s_lockscreen_overlay_active &&
+                      dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
                       display_manager_show_lockscreen();
                   }
               }

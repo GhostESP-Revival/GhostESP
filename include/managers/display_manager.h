@@ -126,6 +126,20 @@ int display_manager_register_freeze_pre_lock(void (*fn)(void));
 void display_manager_unregister_freeze_pre_lock(int id);
 
 /**
+ * @brief True while the lockscreen is shown as a floating overlay (wake /
+ * auto-lock) on top of a still-live view. Used to keep the underlying view's
+ * capture running and to gate input to the lockscreen.
+ */
+bool display_manager_is_lockscreen_active(void);
+
+/**
+ * @brief Clear the lockscreen-overlay state after an overlay unlock. Called by
+ * the lockscreen once it has torn its overlay down; does not touch the view
+ * underneath, which was never destroyed.
+ */
+void display_manager_clear_lockscreen_overlay(void);
+
+/**
  * @brief Return view captured when entering the lockscreen, or NULL.
  */
 View *display_manager_get_lockscreen_return_view(void);

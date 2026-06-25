@@ -9,6 +9,7 @@
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
  - Split commandline god file into separate organised files
  - Added a 250ms guard to prevent closing the wardriving view when opening it
+ - Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens

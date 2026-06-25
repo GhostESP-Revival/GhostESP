@@ -69,6 +69,7 @@ static uint8_t s_input_len;
 static bool s_setup_mode;
 static bool s_setup_confirm;
 static bool s_no_pin_mode;
+static bool s_overlay_mode;
 static char s_setup_first[MAX_INPUT_LEN + 1];
 static GhostState s_ghost_state;
 static int s_ghost_base_y;
@@ -173,6 +174,7 @@ void lockscreen_reset_input(void) {
     s_setup_mode = false;
     s_setup_confirm = false;
     s_no_pin_mode = false;
+    s_overlay_mode = false;
     s_setup_first[0] = '\0';
     s_ghost_state = GHOST_SLEEPING;
     s_focus_idx = 0;
@@ -186,6 +188,10 @@ void lockscreen_reset_input(void) {
 void lockscreen_enter_setup(void) {
     lockscreen_reset_input();
     s_setup_mode = true;
+}
+
+void lockscreen_set_overlay_mode(bool on) {
+    s_overlay_mode = on;
 }
 
 static void lockscreen_clear_input(void) {
@@ -277,6 +283,16 @@ static void lockscreen_bob_cb(lv_timer_t *timer) {
 static void lockscreen_unlock_cb(lv_timer_t *timer) {
     s_unlock_timer = NULL;
     lv_timer_del(timer);
+
+    /* Overlay mode: the view underneath was never destroyed and is still
+     * running (e.g. wardriving). Just tear down the floating lockscreen and
+     * hand input back to it — no view switch, no capture restart. */
+    if (s_overlay_mode) {
+        lockscreen_destroy();
+        display_manager_clear_lockscreen_overlay();
+        return;
+    }
+
     View *return_view = display_manager_get_lockscreen_return_view();
     if (return_view == NULL || return_view == &lockscreen_view) {
         return_view = &main_menu_view;
@@ -711,11 +727,24 @@ static void lockscreen_input_handler(InputEvent *event) {
 void lockscreen_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
-    display_manager_fill_screen(bg_color);
 
     s_no_pin_mode = !s_setup_mode && !lockscreen_is_configured();
-    s_root = gui_screen_create_root(NULL, s_no_pin_mode ? "Ghostchi" : "Locked", bg_color, LV_OPA_COVER);
-    lockscreen_view.root = s_root;
+
+    /* Overlay mode floats above the still-live view on the top layer; we must
+     * not paint the active screen (that belongs to the view underneath) and we
+     * leave the shared status bar alone by passing a NULL title. The opaque
+     * full-screen root hides everything below it on its own. */
+    if (!s_overlay_mode) {
+        display_manager_fill_screen(bg_color);
+    }
+    lv_obj_t *root_parent = s_overlay_mode ? lv_layer_top() : NULL;
+    const char *root_title = s_overlay_mode ? NULL : (s_no_pin_mode ? "Ghostchi" : "Locked");
+    s_root = gui_screen_create_root(root_parent, root_title, bg_color, LV_OPA_COVER);
+    /* Only register as the live view when we ARE the view; an overlay must not
+     * masquerade as the current view in the view system. */
+    if (!s_overlay_mode) {
+        lockscreen_view.root = s_root;
+    }
     s_content = gui_screen_create_content(s_root, GUI_STATUS_BAR_H);
 
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
@@ -861,6 +890,7 @@ void lockscreen_destroy(void) {
     s_suppress_click_idx = -1;
     s_suppress_click_until_ms = 0;
     s_no_pin_mode = false;
+    s_overlay_mode = false;
     lvgl_obj_del_safe(&s_root);
     lockscreen_view.root = NULL;
     s_content = NULL;

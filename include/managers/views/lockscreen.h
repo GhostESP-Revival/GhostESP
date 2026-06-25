@@ -25,6 +25,15 @@ void lockscreen_reset_input(void);
 void lockscreen_enter_setup(void);
 
 /**
+ * @brief Select whether the next lockscreen_create() builds as a floating
+ * overlay (on lv_layer_top(), leaving the current view alive underneath) or as
+ * a normal full-screen view. Overlay mode is used by the wake / auto-lock flow
+ * so that an active capture (wardriving, sniffing, ...) keeps running while the
+ * screen is locked. Cleared automatically on unlock.
+ */
+void lockscreen_set_overlay_mode(bool on);
+
+/**
  * @brief Check if a PIN has been configured.
  */
 bool lockscreen_is_configured(void);
