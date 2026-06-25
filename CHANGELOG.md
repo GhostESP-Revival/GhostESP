@@ -2,6 +2,9 @@
 
 ## Revival v2.0-pre7
 
+### Added
+ - Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field.
+
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
  - Split commandline god file into separate organised files
