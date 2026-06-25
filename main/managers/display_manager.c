@@ -263,6 +263,14 @@ bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
 static TaskHandle_t input_task_handle = NULL;
+/* Cooperative quiesce gate for the LVGL render task. On shared-SPI boards the
+ * SD path must free the SPI bus, but it can only do that safely while the render
+ * task is OUTSIDE lv_timer_handler() (i.e. not mid-flush). The suspender raises
+ * s_lvgl_gate_closed and waits for the render task to acknowledge via
+ * s_lvgl_gate_parked before tearing the bus down. Plain bool (not a counter) to
+ * match the existing idempotent suspend/resume semantics. */
+static volatile bool s_lvgl_gate_closed = false;
+static volatile bool s_lvgl_gate_parked = false;
 static lv_timer_t *status_update_timer = NULL;
 static lv_timer_t *rainbow_timer = NULL;
 static uint16_t rainbow_hue = 0;
@@ -2079,11 +2087,31 @@ void display_manager_fill_screen(lv_color_t color) {
 void display_manager_suspend_lvgl_task(void) {
   if (!lvgl_task_handle) return;
   if (xTaskGetCurrentTaskHandle() == lvgl_task_handle) return;
+  /* Ask the render task to park itself outside lv_timer_handler(), then wait
+   * for the acknowledgment before fully suspending. If it is currently mid-flush
+   * the ack is delayed until that flush completes — exactly the guarantee the
+   * shared-SPI teardown needs. A timeout falls back to the old hard-suspend
+   * behavior so a wedged render task can never deadlock the caller. */
+  s_lvgl_gate_closed = true;
+  TickType_t start = xTaskGetTickCount();
+  while (!s_lvgl_gate_parked) {
+    if (xTaskGetTickCount() - start > pdMS_TO_TICKS(500)) {
+      ESP_LOGW(TAG, "lvgl quiesce timed out; forcing suspend");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
   vTaskSuspend(lvgl_task_handle);
 }
 
 void display_manager_resume_lvgl_task(void) {
-  if (lvgl_task_handle) vTaskResume(lvgl_task_handle);
+  if (!lvgl_task_handle) return;
+  /* Clear the gate first so the task leaves its park loop on resume, then undo
+   * the suspend. vTaskResume on a non-suspended task is a harmless no-op, so
+   * unbalanced resume calls (e.g. the lightweight shared-SPI guard path) are
+   * safe. */
+  s_lvgl_gate_closed = false;
+  vTaskResume(lvgl_task_handle);
 }
 
 static void display_manager_set_backlight_raw(uint8_t percentage) {
@@ -3436,6 +3464,17 @@ void lvgl_tick_task(void *arg) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
   TickType_t last_mon = 0;
   while (1) {
+      /* Cooperative quiesce point: if a shared-SPI consumer (SD) has asked us
+       * to park, acknowledge here — outside any flush — and spin without
+       * touching the panel until the bus is handed back. This guarantees the
+       * suspender never frees the SPI bus mid-transaction. */
+      if (s_lvgl_gate_closed) {
+          s_lvgl_gate_parked = true;
+          while (s_lvgl_gate_closed) {
+              vTaskDelay(pdMS_TO_TICKS(5));
+          }
+          s_lvgl_gate_parked = false;
+      }
       processEvent();
       lv_timer_handler();
       lv_tick_inc(10);
