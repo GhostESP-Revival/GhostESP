@@ -520,8 +520,6 @@ static void calc_layout(void) {
     scr_h = api->ui_screen_get_content_height ? api->ui_screen_get_content_height() : 320;
     compact = api->ui_screen_is_compact ? api->ui_screen_is_compact() : (scr_w < 200 || scr_h < 200);
     if (has_touchscreen()) scr_h -= CALC_TOUCH_BAR_HEIGHT;
-    scr_w -= 16;
-    scr_h -= 16;
 }
 
 static int get_btn_index(int row, int col) {
@@ -566,6 +564,7 @@ static void create_ui(void) {
     if (api->ui_obj_set_flex_flow) api->ui_obj_set_flex_flow(screen, GHOSTESP_FLEX_FLOW_COLUMN);
     if (api->ui_obj_set_flex_align) api->ui_obj_set_flex_align(screen, GHOSTESP_FLEX_ALIGN_SPACE_BETWEEN, GHOSTESP_FLEX_ALIGN_CENTER, GHOSTESP_FLEX_ALIGN_CENTER);
     if (api->ui_obj_set_scrollable) api->ui_obj_set_scrollable(screen, false);
+    if (api->ui_obj_set_height) api->ui_obj_set_height(screen, scr_h);
 
     int display_h = compact ? (scr_h / 6) : (scr_h / 5);
     if (display_h < 30) display_h = 30;
@@ -592,8 +591,7 @@ static void create_ui(void) {
     if (api->ui_obj_set_scrollable) api->ui_obj_set_scrollable(button_grid, false);
     if (api->ui_obj_set_flex_grow) api->ui_obj_set_flex_grow(button_grid, 1);
 
-    int pad_total = compact ? 4 : 8;
-    int avail_h = scr_h - display_h - pad_total - (compact ? 6 : 12);
+    int avail_h = scr_h - display_h - (compact ? 4 : 8);
     int row_gap = compact ? 3 : 6;
     int btn_h = (avail_h - row_gap * (CALC_ROWS - 1)) / CALC_ROWS;
     if (btn_h < 24) btn_h = 24;
