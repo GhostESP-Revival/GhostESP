@@ -1,0 +1,2 @@
+dependencies:
+  espressif/elf_loader: "*"
