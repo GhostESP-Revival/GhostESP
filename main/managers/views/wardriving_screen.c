@@ -51,6 +51,15 @@ static bool wardriving_ble_mode = false;
 static bool wardriving_peer_helper_active = false;
 static bool touch_press_active = false;
 
+/*
+ * Input-settle guard: the same tap/click that selects this view from the menu
+ * can still be in flight when the view switches in. Without this guard the
+ * fresh view sees that entry event and the "any input returns to menu" handler
+ * bounces straight back out. Swallow inputs for a short window after create.
+ */
+#define WARDRIVING_INPUT_SETTLE_US (250 * 1000)
+static int64_t wardriving_view_ready_us = 0;
+
 static bool should_force_gps_deinit_on_exit(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
@@ -496,6 +505,18 @@ static void update_display_cb(lv_timer_t *timer) {
 }
 
 static void wardriving_input_callback(InputEvent *event) {
+    /* Ignore the entry event (and any input still settling) right after the
+     * view opens, so the tap/click that selected this view can't close it. */
+    if (wardriving_view_ready_us != 0 &&
+        (esp_timer_get_time() - wardriving_view_ready_us) < WARDRIVING_INPUT_SETTLE_US) {
+        if (event->type == INPUT_TYPE_TOUCH &&
+            event->data.touch_data.state == LV_INDEV_STATE_PR) {
+            /* Don't let a swallowed press arm a later release. */
+            touch_press_active = false;
+        }
+        return;
+    }
+
     if (event->type == INPUT_TYPE_TOUCH) {
         if (event->data.touch_data.state == LV_INDEV_STATE_PR) {
             touch_press_active = true;
@@ -770,6 +791,9 @@ void wardriving_view_create(void) {
     }
 
     update_timer = lv_timer_create(update_display_cb, 500, NULL);
+
+    /* Arm the input-settle guard once the view is fully built. */
+    wardriving_view_ready_us = esp_timer_get_time();
 }
 
 void wardriving_view_destroy(void) {
@@ -836,6 +860,7 @@ void wardriving_view_destroy(void) {
     compass_arc = NULL;
     compass_needle = NULL;
     wardriving_peer_helper_active = false;
+    wardriving_view_ready_us = 0;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
 }
