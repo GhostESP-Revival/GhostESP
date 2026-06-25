@@ -4,6 +4,7 @@
 
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
+ - Split commandline god file into separate organised files
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens
