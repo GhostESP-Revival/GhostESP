@@ -13,6 +13,7 @@
  - Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
  - Fixed inconsistent icon sizing and alignment in app gallery and main menu grid layouts across different displays
  - Fixed inability to exit SD app runner when app fails to load
+ - Fixed gbt generating planar RGB565A8 icons instead of interleaved format expected by LVGL
 
 ## Revival v2.0-pre6
 
