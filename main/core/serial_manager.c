@@ -12,6 +12,9 @@
 #include "freertos/task.h"
 #include "managers/gps_manager.h"
 #include "managers/wifi_manager.h"
+#if defined(CONFIG_HAS_BADUSB)
+#include "managers/badusb_manager.h"
+#endif
 #if CONFIG_HAS_INFRARED
 #include "managers/infrared_manager.h"
 #endif
@@ -38,7 +41,7 @@
 #endif
 #define BUF_SIZE (512)
 #define SERIAL_BUFFER_SIZE 512
-#define SERIAL_TASK_STACK_SIZE_INTERNAL 5120
+#define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
 #define SERIAL_TASK_STACK_SIZE_PSRAM 8192
 #define SERIAL_TASK_USE_PSRAM_STACK 0
 
@@ -248,6 +251,43 @@ static bool process_rave_serial_byte(uint8_t byte) {
 
 // Forward declaration of command handler
 int handle_serial_command(const char *command);
+
+static bool handle_peer_badusb_trackpad_fast(const char *command) {
+#if defined(CONFIG_HAS_BADUSB)
+    char *end = NULL;
+
+    if (strncmp(command, "badusb trackpad_move ", 21) == 0) {
+        const char *p = command + 21;
+        long dx = strtol(p, &end, 10);
+        if (end == p) return true;
+        p = end;
+        while (isspace((unsigned char)*p)) p++;
+        long dy = strtol(p, &end, 10);
+        if (end == p) return true;
+        badusb_manager_trackpad_move((int)dx, (int)dy);
+        return true;
+    }
+
+    if (strncmp(command, "badusb trackpad_button ", 23) == 0) {
+        const char *p = command + 23;
+        unsigned long buttons = strtoul(p, &end, 0);
+        if (end == p) return true;
+        badusb_manager_trackpad_button((uint8_t)buttons);
+        return true;
+    }
+
+    if (strncmp(command, "badusb trackpad_wheel ", 22) == 0) {
+        const char *p = command + 22;
+        long delta = strtol(p, &end, 10);
+        if (end == p) return true;
+        badusb_manager_trackpad_wheel((int)delta);
+        return true;
+    }
+#else
+    (void)command;
+#endif
+    return false;
+}
 
 // Command history management functions
 void command_history_init(void) {
@@ -654,7 +694,7 @@ void serial_task(void *pvParameter) {
     first_iteration = false;
     if (++hwm_log_counter >= 6000) {
       UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-      ESP_LOGI("SerialTask", "Stack HWM: %u words (%u bytes free)", hwm, hwm * 4);
+      ESP_LOGI("SerialTask", "Stack HWM: %u bytes free", hwm);
       UBaseType_t queue_avail = uxQueueSpacesAvailable(commandQueue);
       ESP_LOGI("SerialTask", "Command queue available: %u/%u", queue_avail, 6);
       hwm_log_counter = 0;
@@ -1038,12 +1078,18 @@ int handle_serial_command(const char *input) {
         strcmp(actual_command, "badusb jiggle_start") == 0 ||
         strcmp(actual_command, "badusb jiggle_stop") == 0 ||
         strncmp(actual_command, "badusb trackpad_move ", 21) == 0 ||
+        strncmp(actual_command, "badusb trackpad_button ", 23) == 0 ||
+        strncmp(actual_command, "badusb trackpad_wheel ", 22) == 0 ||
         strcmp(actual_command, "badusb trackpad_start") == 0 ||
         strcmp(actual_command, "badusb trackpad_stop") == 0 ||
         strcmp(actual_command, "badusb stop") == 0;
     if (!quiet_badusb_setting) {
       glog("Received command from peer: %s\n", actual_command);
       glog("Executing received command: %s\n", actual_command);
+    }
+    if (handle_peer_badusb_trackpad_fast(actual_command)) {
+      esp_comm_manager_set_remote_command_flag(false);
+      return ESP_OK;
     }
     int result = handle_serial_command(actual_command);
     esp_comm_manager_set_remote_command_flag(false);
