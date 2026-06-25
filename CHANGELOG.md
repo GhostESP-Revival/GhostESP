@@ -11,6 +11,7 @@
  - Moved grid main menu icons up on cardputer screens
  - Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
  - Fixed inconsistent icon sizing and alignment in app gallery and main menu grid layouts across different displays
+ - Fixed inability to exit SD app runner when app fails to load
 
 ## Revival v2.0-pre6
 
