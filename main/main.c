@@ -538,7 +538,18 @@ void app_main(void) {
 #ifdef CONFIG_WITH_SCREEN
 
 #ifdef CONFIG_USE_JOYSTICK
-#ifdef CONFIG_USE_IO_EXPANDER
+#ifdef CONFIG_USE_ANALOG_JOYSTICK
+    // Analog joystick mode maps two ADC axes to the existing directional inputs.
+    bool invert_x = CONFIG_ANALOG_JOYSTICK_INVERT_X;
+    bool invert_y = CONFIG_ANALOG_JOYSTICK_INVERT_Y;
+
+    joystick_init_analog(&joysticks[0], CONFIG_ANALOG_JOYSTICK_X_PIN, !invert_x, HOLD_LIMIT);  // Left
+    joystick_init_analog(&joysticks[3], CONFIG_ANALOG_JOYSTICK_X_PIN, invert_x, HOLD_LIMIT);   // Right
+    joystick_init_analog(&joysticks[2], CONFIG_ANALOG_JOYSTICK_Y_PIN, !invert_y, HOLD_LIMIT);  // Up
+    joystick_init_analog(&joysticks[4], CONFIG_ANALOG_JOYSTICK_Y_PIN, invert_y, HOLD_LIMIT);   // Down
+    joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
+    printf("Analog joystick setup successfully...\n");
+#elif defined(CONFIG_USE_IO_EXPANDER)
     esp_err_t io_ret;
     MEASURE_INIT_RAM("Joystick IO Expander init", io_ret = joystick_io_expander_init());
     if (io_ret == ESP_OK) {
@@ -705,3 +716,4 @@ void app_main(void) {
     printf("\n");
     printf("ghostcli> Type 'help' for available commands\n");
 }
+

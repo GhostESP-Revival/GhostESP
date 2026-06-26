@@ -194,6 +194,57 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable joystick input.
+
+        config USE_ANALOG_JOYSTICK
+            bool "Enable Analog Joystick"
+            default n
+            depends on USE_JOYSTICK
+            help
+                Enable joystick navigation from two ADC axes plus a push switch.
+
+        config ANALOG_JOYSTICK_X_PIN
+            int "Analog Joystick X Pin"
+            default -1
+            depends on USE_ANALOG_JOYSTICK
+            help
+                GPIO pin connected to the horizontal joystick axis (VRx).
+
+        config ANALOG_JOYSTICK_Y_PIN
+            int "Analog Joystick Y Pin"
+            default -1
+            depends on USE_ANALOG_JOYSTICK
+            help
+                GPIO pin connected to the vertical joystick axis (VRy).
+
+        config ANALOG_JOYSTICK_CENTER
+            int "Analog Joystick Center"
+            range 0 4095
+            default 2048
+            depends on USE_ANALOG_JOYSTICK
+            help
+                ADC midpoint used as the neutral resting value for both axes.
+
+        config ANALOG_JOYSTICK_DEADZONE
+            int "Analog Joystick Deadzone"
+            range 0 2047
+            default 350
+            depends on USE_ANALOG_JOYSTICK
+            help
+                ADC distance from center required to trigger a direction.
+
+        config ANALOG_JOYSTICK_INVERT_X
+            bool "Invert Analog Joystick X Axis"
+            default n
+            depends on USE_ANALOG_JOYSTICK
+            help
+                Swap left/right detection for the X axis.
+
+        config ANALOG_JOYSTICK_INVERT_Y
+            bool "Invert Analog Joystick Y Axis"
+            default n
+            depends on USE_ANALOG_JOYSTICK
+            help
+                Swap up/down detection for the Y axis.
                 
         config USE_IO_EXPANDER
             bool "Enable IO Expander (TCA9535)"
@@ -1319,4 +1370,6 @@ menu "Ghost ESP Options"
     endmenu
     
 endmenu
+
+
 
