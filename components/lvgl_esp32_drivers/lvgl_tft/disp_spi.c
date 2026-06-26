@@ -173,7 +173,7 @@ static int disp_spi_get_mode(void)
 {
 #if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Orca Zero") == 0) {
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "OrcaZero") == 0) {
         return 0;
     }
 #endif

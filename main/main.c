@@ -501,7 +501,12 @@ void app_main(void) {
         if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 && comm_tx == 6 && comm_rx == 7) {
             comm_tx = 11;
             comm_rx = 12;
+        }else if 
+         (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "OrcaZero") == 0 && comm_tx == 6 && comm_rx == 7) {
+            comm_tx = 19;
+            comm_rx = 3;
         }
+
 #endif
         MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
     }
