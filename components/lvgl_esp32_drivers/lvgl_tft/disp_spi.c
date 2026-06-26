@@ -172,7 +172,8 @@ esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed
 static int disp_spi_get_mode(void)
 {
 #if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0) {
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 ||
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Orca Zero") == 0) {
         return 0;
     }
 #endif
@@ -365,3 +366,5 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
         chained_post_cb(trans);
     }
 }
+
+

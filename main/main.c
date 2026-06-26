@@ -540,8 +540,16 @@ void app_main(void) {
 #ifdef CONFIG_USE_JOYSTICK
 #ifdef CONFIG_USE_ANALOG_JOYSTICK
     // Analog joystick mode maps two ADC axes to the existing directional inputs.
-    bool invert_x = CONFIG_ANALOG_JOYSTICK_INVERT_X;
-    bool invert_y = CONFIG_ANALOG_JOYSTICK_INVERT_Y;
+#ifdef CONFIG_ANALOG_JOYSTICK_INVERT_X
+    bool invert_x = true;
+#else
+    bool invert_x = false;
+#endif
+#ifdef CONFIG_ANALOG_JOYSTICK_INVERT_Y
+    bool invert_y = true;
+#else
+    bool invert_y = false;
+#endif
 
     joystick_init_analog(&joysticks[0], CONFIG_ANALOG_JOYSTICK_X_PIN, !invert_x, HOLD_LIMIT);  // Left
     joystick_init_analog(&joysticks[3], CONFIG_ANALOG_JOYSTICK_X_PIN, invert_x, HOLD_LIMIT);   // Right

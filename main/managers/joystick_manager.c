@@ -4,13 +4,13 @@
 #include "freertos/task.h"
 #include <string.h>
 #include "sdkconfig.h"
+#include "esp_log.h"
 
 #ifdef CONFIG_USE_ANALOG_JOYSTICK
 #include "esp_adc/adc_oneshot.h"
 #endif
 
 #ifdef CONFIG_USE_IO_EXPANDER
-#include "esp_log.h"
 static const char *TAG = "JOYSTICK_IO";
 static bool io_expander_initialized = false;
 #endif
@@ -288,3 +288,4 @@ bool joystick_just_released(joystick_t *joystick) {
     return false;
   }
 }
+
