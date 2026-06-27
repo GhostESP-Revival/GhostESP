@@ -49,6 +49,14 @@ int advertiser_scan_get_device(int index, AdvertiserDeviceInfo *out_info);
 bool advertiser_scan_start_tracking(int index);
 void advertiser_scan_stop_tracking(void);
 bool advertiser_scan_is_tracking(void);
+
+/*
+ * Live RSSI status for the tracked advertiser, mirroring
+ * wifi_manager_get_track_status(): returns false when no advertiser is being
+ * tracked. *out_rssi receives the last seen RSSI and *out_fresh is true when a
+ * matching advertisement arrived recently (so the meter can dim when stale).
+ */
+bool advertiser_scan_get_track_status(int8_t *out_rssi, bool *out_fresh);
 void advertiser_scan_print_devices(void);
 
 // Save a single advertiser (or all advertisers when index < 0) to the SD card.

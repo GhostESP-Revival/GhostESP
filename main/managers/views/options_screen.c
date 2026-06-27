@@ -105,7 +105,18 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 static paged_menu_t *ap_list_menu = NULL;
 static scan_status_t *ap_scan_status = NULL;
 static detail_view_t *ap_detail_view = NULL;
-static rssi_meter_t *track_meter = NULL; /* live RSSI ring overlay for Track AP/STA */
+static rssi_meter_t *track_meter = NULL; /* live RSSI ring overlay for Track AP/STA/BLE */
+
+/* Which hardware source feeds the live RSSI ring overlay, so teardown stops the
+ * right tracker and returns to the list it was launched from. */
+typedef enum {
+    TRACK_SRC_NONE = 0,
+    TRACK_SRC_WIFI_AP,
+    TRACK_SRC_WIFI_STA,
+    TRACK_SRC_BLE_ADV,
+    TRACK_SRC_BLE_GATT,
+} track_source_t;
+static track_source_t track_source = TRACK_SRC_NONE;
 static int selected_ap_index = -1;
 static char ap_connect_ssid[64] = {0};
 static lv_timer_t *ap_scan_poll_timer = NULL;
@@ -199,6 +210,12 @@ static void stop_station_scan_flow(void);
 static bool should_stop_station_scan_on_input(const InputEvent *event);
 static void station_detail_back_cb(lv_event_t *e);
 static void stop_track_flow(void);
+static void track_stop_current_source(void);
+static void start_track_overlay(track_source_t src, const char *status_title,
+                                const char *target_label,
+                                rssi_meter_sample_cb sampler);
+static bool track_meter_sample_ble_adv(void *user, int8_t *out_rssi);
+static bool track_meter_sample_ble_gatt(void *user, int8_t *out_rssi);
 static bool track_exit_requested(const InputEvent *event);
 static void show_station_detail(int station_index);
 static void station_list_cleanup(void);
@@ -2159,7 +2176,8 @@ static void options_menu_freeze_pre_lock(void) {
     /* Live RSSI tracker lives outside options_menu_view.root; stop tracking and
      * drop the overlay so it doesn't survive the lockscreen swap. */
     if (track_meter) {
-        wifi_manager_stop_tracking();
+        track_stop_current_source();
+        track_source = TRACK_SRC_NONE;
         rssi_meter_destroy(track_meter);
         track_meter = NULL;
     }
@@ -7545,7 +7563,8 @@ void options_menu_destroy() {
 
     /* Detail views are parented to lv_scr_act(), not options_menu_view.root. */
     if (track_meter) {
-        wifi_manager_stop_tracking();
+        track_stop_current_source();
+        track_source = TRACK_SRC_NONE;
         rssi_meter_destroy(track_meter);
         track_meter = NULL;
     }
@@ -9063,6 +9082,18 @@ static void ble_adv_track_cb(lv_event_t *e) {
         return;
     }
 
+    /* Build the subtext label (name, else MAC) before tearing down the detail. */
+    char target_label[24] = {0};
+    AdvertiserDeviceInfo info;
+    if (advertiser_scan_get_device(selected_ble_adv_index, &info) == 0) {
+        if (info.name[0] != '\0') {
+            strncpy(target_label, info.name, sizeof(target_label) - 1);
+        } else {
+            snprintf(target_label, sizeof(target_label), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5]);
+        }
+    }
+
     if (!advertiser_scan_start_tracking(selected_ble_adv_index)) {
         error_popup_create("Track failed");
         return;
@@ -9075,8 +9106,8 @@ static void ble_adv_track_cb(lv_event_t *e) {
 
     selected_ble_adv_index = -1;
     current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_LIST;
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
+    start_track_overlay(TRACK_SRC_BLE_ADV, "Track Adv", target_label,
+                        track_meter_sample_ble_adv);
 }
 
 static void ble_adv_save_cb(lv_event_t *e) {
@@ -9343,6 +9374,22 @@ static void ble_gatt_track_cb(lv_event_t *e) {
         return;
     }
 
+    /* Build the subtext label (name, else MAC) before tearing down the detail. */
+    char target_label[24] = {0};
+    uint8_t mac_bytes[6];
+    int8_t rssi;
+    char name[32];
+    if (gatt_scan_get_device_data(selected_ble_gatt_index, mac_bytes, &rssi, name,
+                                  sizeof(name)) == 0) {
+        if (name[0] != '\0') {
+            strncpy(target_label, name, sizeof(target_label) - 1);
+        } else {
+            snprintf(target_label, sizeof(target_label), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     mac_bytes[0], mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4],
+                     mac_bytes[5]);
+        }
+    }
+
     gatt_scan_select_device(selected_ble_gatt_index);
     gatt_scan_track_device();
 
@@ -9353,8 +9400,8 @@ static void ble_gatt_track_cb(lv_event_t *e) {
 
     selected_ble_gatt_index = -1;
     current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
+    start_track_overlay(TRACK_SRC_BLE_GATT, "Track GATT", target_label,
+                        track_meter_sample_ble_gatt);
 }
 
 static void ble_gatt_enum_cb(lv_event_t *e) {
@@ -9834,6 +9881,45 @@ static bool track_meter_sample(void *user, int8_t *out_rssi) {
     return fresh;
 }
 
+/* Sampler for the BLE advertiser tracker: pulls the latest RSSI from the
+ * advertiser scan. Returns true when a matching advertisement arrived recently. */
+static bool track_meter_sample_ble_adv(void *user, int8_t *out_rssi) {
+    (void)user;
+    bool fresh = false;
+    if (!advertiser_scan_get_track_status(out_rssi, &fresh)) {
+        return false;
+    }
+    return fresh;
+}
+
+/* Sampler for the BLE GATT tracker: pulls the latest RSSI from the GATT scan. */
+static bool track_meter_sample_ble_gatt(void *user, int8_t *out_rssi) {
+    (void)user;
+    bool fresh = false;
+    if (!gatt_scan_get_track_status(out_rssi, &fresh)) {
+        return false;
+    }
+    return fresh;
+}
+
+/* Stop whichever hardware tracker currently feeds the RSSI ring overlay. */
+static void track_stop_current_source(void) {
+    switch (track_source) {
+        case TRACK_SRC_WIFI_AP:
+        case TRACK_SRC_WIFI_STA:
+            wifi_manager_stop_tracking();
+            break;
+        case TRACK_SRC_BLE_ADV:
+            advertiser_scan_stop_tracking();
+            break;
+        case TRACK_SRC_BLE_GATT:
+            gatt_scan_stop_tracking();
+            break;
+        default:
+            break;
+    }
+}
+
 /* Which inputs leave the tracking view (mirrors the detail view's back keys). */
 static bool track_exit_requested(const InputEvent *event) {
     if (!event) return false;
@@ -9854,28 +9940,26 @@ static bool track_exit_requested(const InputEvent *event) {
     }
 }
 
-/* Launch the pulsating RSSI ring overlay and start hardware tracking. The
- * options menu stays the current view (like the scan spinner / detail view),
- * so the shared touch bar remains available underneath. */
-static void start_track_meter(bool is_ap, const char *target_label) {
+/* Launch the pulsating RSSI ring overlay for an already-started hardware
+ * tracker. The options menu stays the current view (like the scan spinner /
+ * detail view), so the shared touch bar remains available underneath. The
+ * caller must have started the tracker named by `src` before calling. */
+static void start_track_overlay(track_source_t src, const char *status_title,
+                                const char *target_label,
+                                rssi_meter_sample_cb sampler) {
     if (track_meter) {
         rssi_meter_destroy(track_meter);
         track_meter = NULL;
     }
 
-    if (is_ap) {
-        wifi_manager_track_ap();
-    } else {
-        wifi_manager_track_sta();
-    }
+    track_source = src;
 
-    track_meter = rssi_meter_create(lv_scr_act(),
-                                    is_ap ? "Track AP" : "Track STA",
-                                    target_label,
-                                    track_meter_sample, NULL);
+    track_meter = rssi_meter_create(lv_scr_act(), status_title, target_label,
+                                    sampler, NULL);
     if (!track_meter) {
         /* Allocation failed: don't leave hardware tracking running headless. */
-        wifi_manager_stop_tracking();
+        track_stop_current_source();
+        track_source = TRACK_SRC_NONE;
         error_popup_create("Track failed");
         return;
     }
@@ -9891,19 +9975,43 @@ static void start_track_meter(bool is_ap, const char *target_label) {
 #endif
 }
 
-/* Stop tracking, tear down the ring overlay, and return to the AP/STA list we
- * came from (the detail view was already destroyed at launch; its back handler
- * pops the nav entry and restores the list + touch bar). */
+/* Start the wifi AP/STA tracker and bring up the shared RSSI ring overlay. */
+static void start_track_meter(bool is_ap, const char *target_label) {
+    if (is_ap) {
+        wifi_manager_track_ap();
+    } else {
+        wifi_manager_track_sta();
+    }
+    start_track_overlay(is_ap ? TRACK_SRC_WIFI_AP : TRACK_SRC_WIFI_STA,
+                        is_ap ? "Track AP" : "Track STA",
+                        target_label, track_meter_sample);
+}
+
+/* Stop tracking, tear down the ring overlay, and return to the list we came
+ * from (the detail view was already destroyed at launch; its back handler
+ * restores the list + touch bar). */
 static void stop_track_flow(void) {
-    wifi_manager_stop_tracking();
+    track_source_t src = track_source;
+    track_stop_current_source();
+    track_source = TRACK_SRC_NONE;
     if (track_meter) {
         rssi_meter_destroy(track_meter);
         track_meter = NULL;
     }
-    if (current_wifi_menu_state == WIFI_MENU_STA_DETAILS) {
-        station_detail_back_cb(NULL);
-    } else {
-        ap_detail_back_cb(NULL);
+    switch (src) {
+        case TRACK_SRC_WIFI_STA:
+            station_detail_back_cb(NULL);
+            break;
+        case TRACK_SRC_BLE_ADV:
+            ble_adv_detail_back_cb(NULL);
+            break;
+        case TRACK_SRC_BLE_GATT:
+            ble_gatt_detail_back_cb(NULL);
+            break;
+        case TRACK_SRC_WIFI_AP:
+        default:
+            ap_detail_back_cb(NULL);
+            break;
     }
 }
 

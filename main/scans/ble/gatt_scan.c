@@ -26,6 +26,7 @@
 #include "managers/status_display_manager.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
@@ -129,6 +130,7 @@ typedef struct {
     int8_t last_rssi;
     int8_t min_rssi;
     int8_t max_rssi;
+    int64_t last_rx_us;   // esp_timer timestamp of the last matching advertisement
     bool active;
 } TrackingState;
 
@@ -894,6 +896,7 @@ static void gatt_track_scan_callback(struct ble_gap_event *event, size_t len) {
         glog("[%s] RSSI: %d dBm, Min: %d, Max: %d, %s\n",
              bars[bar_idx], rssi, g_tracking.min_rssi, g_tracking.max_rssi, direction);
         g_tracking.last_rssi = rssi;
+        g_tracking.last_rx_us = esp_timer_get_time();
     }
 }
 
@@ -1182,6 +1185,7 @@ void gatt_scan_track_device(void) {
     g_tracking.last_rssi = dev->rssi;
     g_tracking.min_rssi = dev->rssi;
     g_tracking.max_rssi = dev->rssi;
+    g_tracking.last_rx_us = esp_timer_get_time();
     g_tracking.active = true;
     
     status_display_show_status("Tracking...");
@@ -1200,6 +1204,24 @@ void gatt_scan_stop_tracking(void) {
         glog("Tracking stopped.\n");
         status_display_show_status("Track Stopped");
     }
+}
+
+/**
+ * @brief Get live RSSI status for the tracked device
+ */
+bool gatt_scan_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!g_tracking.active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = g_tracking.last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // Consider the reading "live" if a matching advertisement arrived recently.
+        *out_fresh = (g_tracking.last_rx_us != 0) && ((now - g_tracking.last_rx_us) < 1500000);
+    }
+    return true;
 }
 
 /**

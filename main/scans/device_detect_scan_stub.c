@@ -72,6 +72,12 @@ bool advertiser_scan_is_tracking(void) {
     return false;
 }
 
+bool advertiser_scan_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    (void)out_rssi;
+    (void)out_fresh;
+    return false;
+}
+
 bool advertiser_scan_start_oui_prefix(const uint8_t oui[3]) {
     (void)oui;
     return false;
@@ -120,6 +126,12 @@ void gatt_scan_enumerate_services(void) {}
 void gatt_scan_track_device(void) {}
 
 void gatt_scan_stop_tracking(void) {}
+
+bool gatt_scan_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    (void)out_rssi;
+    (void)out_fresh;
+    return false;
+}
 
 int gatt_scan_get_device_data(int index, uint8_t *mac, int8_t *rssi, char *name, size_t name_len) {
     (void)index;

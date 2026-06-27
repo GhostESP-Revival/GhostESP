@@ -1,5 +1,10 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre8
+
+### Changed
+ - BLE advertiser and GATT device tracking now use the same live RSSI meter view as Wi-Fi AP tracking instead of the terminal
+
 ## Revival v2.0-pre7
 
 ### Added
