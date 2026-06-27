@@ -27,6 +27,7 @@
  - Fixed `nmea_parser` stack overflow crashes by raising the GPS parser task stack 
  - Fixed runtime GPS parsing by enabling NMEA decoding without `CONFIG_HAS_GPS` and improving UART drain/update handling
  - Fixed S3TWatch RTC init on ESP-IDF 6.0 by avoiding an `rtc_init` symbol collision that could hang WiFi scans
+ - Fixed app gallery grid keyboard navigation to move by row like the main menu
 
 ## Revival v2.0-pre6
 

@@ -1308,6 +1308,35 @@ static void apps_menu_go_back(void) {
     display_manager_switch_view(&main_menu_view);
 }
 
+static void navigate_apps_vertical(int direction) {
+    if (direction == 0) return;
+
+    if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
+        if (apps_grid_cols <= 0 || num_apps <= 0) return;
+
+        int rows = (num_apps + apps_grid_cols - 1) / apps_grid_cols;
+        if (rows <= 0) return;
+
+        int row = selected_app_index / apps_grid_cols;
+        int col = selected_app_index % apps_grid_cols;
+
+        for (int tries = 0; tries < rows; ++tries) {
+            row = (row + (direction > 0 ? 1 : -1) + rows) % rows;
+            int base = row * apps_grid_cols;
+            int candidate = base + col;
+            if (candidate >= num_apps) {
+                candidate = num_apps - 1;
+                if (candidate < base) continue;
+            }
+            select_app_item(candidate, false);
+            return;
+        }
+        return;
+    }
+
+    select_app_item(selected_app_index + (direction > 0 ? 1 : -1), false);
+}
+
 /**
  * @brief Handles the selection of app items
  */
@@ -1356,9 +1385,9 @@ static void handle_app_item_selection(int item_index) {
 static void handle_apps_button_press(int button) {
     if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
         if (button == 2) {
-            select_app_item(selected_app_index - apps_grid_cols, false);
+            navigate_apps_vertical(-1);
         } else if (button == 4) {
-            select_app_item(selected_app_index + apps_grid_cols, false);
+            navigate_apps_vertical(1);
         } else if (button == 0) {
             select_app_item(selected_app_index - 1, true);
         } else if (button == 3) {
@@ -1415,10 +1444,10 @@ static void handle_keyboard_interactions(int keyValue){
         select_app_item(selected_app_index + 1, false);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // Up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed");
-        select_app_item(selected_app_index - 1, true);
+        navigate_apps_vertical(-1);
     } else if (keyValue == LV_KEY_DOWN || keyValue == 'j' || keyValue == '.') { // Down
         ESP_LOGI(TAG, "Down arrow or 'j' pressed");
-        select_app_item(selected_app_index + 1, false);
+        navigate_apps_vertical(1);
     } else if (keyValue == LV_KEY_ENTER || keyValue == 13) { // Select
         ESP_LOGI(TAG, "Enter pressed (select)");
         handle_app_item_selection(selected_app_index);
