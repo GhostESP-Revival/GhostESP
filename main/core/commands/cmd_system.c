@@ -7,7 +7,9 @@
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
 #include "core/screen_mirror.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #include "esp_core_dump.h"
+#endif
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

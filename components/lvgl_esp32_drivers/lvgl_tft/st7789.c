@@ -265,11 +265,11 @@ void st7789_send_cmd(uint8_t cmd)
     disp_spi_send_data(&cmd, 1);
 }
 
-void st7789_send_data(void * data, uint16_t length)
+void st7789_send_data(const void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
     gpio_set_level(ST7789_DC, 1);
-    disp_spi_send_data(data, length);
+    disp_spi_send_data((uint8_t *)data, length);
 }
 
 static void st7789_send_color(void * data, size_t length)

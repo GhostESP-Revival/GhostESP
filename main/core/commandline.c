@@ -121,7 +121,6 @@ extern dns_server_handle_t dns_handle;
 #include "freertos/queue.h"
 #include "mbedtls/base64.h"
 #include "esp_partition.h"
-#include "esp_core_dump.h"
 #include "managers/aerial_detector_manager.h"
 #include "managers/flock_detector_manager.h"
 #include "managers/wigle_manager.h"

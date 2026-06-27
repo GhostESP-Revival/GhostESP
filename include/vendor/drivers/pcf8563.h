@@ -74,7 +74,7 @@ typedef enum {
 } rtc_chip_type_t;
 
 // Functions
-esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type);
+esp_err_t ghost_rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type);
 esp_err_t rtc_set_datetime(const RTC_Date *datetime);
 esp_err_t rtc_get_datetime(RTC_Date *datetime);
 esp_err_t rtc_set_alarm(const RTC_Alarm *alarm);

@@ -26,7 +26,7 @@
 #endif
 
 #ifndef CONFIG_NMEA_PARSER_TASK_STACK_SIZE
-#define CONFIG_NMEA_PARSER_TASK_STACK_SIZE 1024
+#define CONFIG_NMEA_PARSER_TASK_STACK_SIZE 4096
 #endif
 
 #ifndef CONFIG_NMEA_PARSER_TASK_PRIORITY
@@ -774,7 +774,7 @@ nmea_parser_handle_t nmea_parser_init(const nmea_parser_config_t *config) {
                                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (!esp_gps->task_stack || !esp_gps->task_tcb) {
     ESP_LOGE(GPS_TAG,
-             "alloc NMEA task resources failed (stack_words=%d free_internal=%u free_heap=%u)",
+             "alloc NMEA task resources failed (stack_bytes=%d free_internal=%u free_heap=%u)",
              (int)CONFIG_NMEA_PARSER_TASK_STACK_SIZE,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));

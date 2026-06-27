@@ -1,5 +1,6 @@
 #include "driver/i2c_master.h"
 #include "i2c_shared.h"
+#include "io_manager/i2c_bus_lock.h"
 #include "vendor/drivers/axp2101.h"
 #include <stdio.h>
 
@@ -23,7 +24,9 @@ bool axp202_is_battery_connected(void) {
   uint8_t reg = 0;
   uint8_t reg_addr = AXP202_MODE_CHGSTATUS;
 
+  bool locked = i2c_bus_lock(I2C_MASTER_NUM, 100);
   esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &reg, 1, 100);
+  if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read register 0x%02X: %s\n", __func__,
            reg_addr, esp_err_to_name(err));
@@ -31,8 +34,6 @@ bool axp202_is_battery_connected(void) {
   }
 
   bool battery_connected = IS_BIT_SET(reg, 5);
-  printf("INFO [%s]: Battery connection status: %s\n", __func__,
-         battery_connected ? "Connected" : "Not Connected");
   return battery_connected;
 }
 
@@ -45,7 +46,9 @@ bool axp202_is_charging(void) {
   uint8_t reg = 0;
   uint8_t reg_addr = AXP202_MODE_CHGSTATUS;
 
+  bool locked = i2c_bus_lock(I2C_MASTER_NUM, 100);
   esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &reg, 1, 100);
+  if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read register 0x%02X: %s\n", __func__,
            reg_addr, esp_err_to_name(err));
@@ -56,8 +59,6 @@ bool axp202_is_charging(void) {
   // On this specific AXP variant/hardware, bit 6 of REG 0x01 seems to be inverted.
   // 0 = Charging, 1 = Not Charging. Therefore, we return the inverse.
   bool is_actually_charging = !charging_bit_set; 
-  printf("INFO [%s]: Charging status: %s (Register Bit 6: %d)\n", __func__,
-         is_actually_charging ? "Charging" : "Not Charging", charging_bit_set);
   return is_actually_charging; 
 }
 
@@ -137,7 +138,9 @@ esp_err_t axp2101_get_power_level(uint8_t *power_level) {
   uint8_t reg_addr = AXP2101_REG_POWER_LEVEL;
   uint8_t data = 0;
 
+  bool locked = i2c_bus_lock(I2C_MASTER_NUM, 100);
   esp_err_t err = i2c_master_transmit_receive(s_axp_dev, &reg_addr, 1, &data, 1, 100);
+  if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
   if (err != ESP_OK) {
     printf("ERROR [%s]: Failed to read from AXP2101 register 0x%02X: %s\n",
            __func__, reg_addr, esp_err_to_name(err));
@@ -146,7 +149,6 @@ esp_err_t axp2101_get_power_level(uint8_t *power_level) {
 
   if (!(data & BIT_MASK(7))) {
     *power_level = data & (~BIT_MASK(7));
-    printf("INFO [%s]: Battery percentage: %d%%\n", __func__, *power_level);
     return ESP_OK;
   } else {
     printf("WARNING [%s]: Battery percentage value is invalid (data: 0x%02X)\n",
