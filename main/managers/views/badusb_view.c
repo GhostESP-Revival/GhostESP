@@ -51,6 +51,7 @@ static bool badusb_sd_begin(bool *display_was_suspended)
     return true;
 }
 
+
 static void badusb_sd_end(bool display_was_suspended)
 {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
