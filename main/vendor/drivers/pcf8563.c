@@ -6,6 +6,19 @@
 
 static const char *TAG = "RTC_DRIVER";
 
+// These Kconfig options only exist when HAS_RTC_CLOCK is enabled, but this driver
+// is compiled for every board. On boards without an RTC, ghost_rtc_init is never
+// called (its only caller is guarded by CONFIG_HAS_RTC_CLOCK), so these are pure
+// build-time placeholders that are never reached. Even when it is called, the RTC
+// rides an already-created shared I2C bus, so the pins are reused-not-created and
+// ignored -- hence a "not connected" sentinel rather than a real pin number.
+#ifndef CONFIG_RTC_I2C_SDA_PIN
+#define CONFIG_RTC_I2C_SDA_PIN (-1)
+#endif
+#ifndef CONFIG_RTC_I2C_SCL_PIN
+#define CONFIG_RTC_I2C_SCL_PIN (-1)
+#endif
+
 static i2c_port_num_t rtc_i2c_port;
 static uint8_t rtc_address;
 static rtc_chip_type_t rtc_chip;

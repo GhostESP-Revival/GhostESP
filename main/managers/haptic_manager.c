@@ -50,9 +50,13 @@
 #define DRV2605_MODE_AUTOCAL          0x07
 #define DRV2605_LIBRARY_ERM          0x01
 #define DRV2605_LIBRARY_LRA          0x06
-/* Open-loop drive levels for a typical ~2 V RMS LRA. */
-#define DRV2605_LRA_RATED_VOLTAGE    0x3E
-#define DRV2605_LRA_OD_CLAMP         0x8C
+/* LRA drive levels. RATED_VOLTAGE sets the closed-loop drive reference (the
+ * main "strength" knob); it is set before auto-calibration so the LRA is
+ * calibrated for this level. OD_CLAMP is the overdrive ceiling - pushed near
+ * the 3.3 V BLDO2 supply so effect onsets hit hard. Raised from the ~2 V
+ * defaults because the actuator felt weak through the watch case. */
+#define DRV2605_LRA_RATED_VOLTAGE    0x5A
+#define DRV2605_LRA_OD_CLAMP         0xA4
 /* Open-loop LRA drive period (~205 Hz), used only as a fallback if
  * auto-calibration fails. */
 #define DRV2605_LRA_OL_PERIOD        0x33
@@ -167,15 +171,18 @@ static void drv2605_log_registers(void) {
     }
 }
 
+/* DRV2605 ROM library (library 6 for LRA) effect indices. Single strong hits
+ * are far easier to feel through a watch case on the wrist than the multi-tap
+ * "double/triple click" effects, which spread their energy into weaker taps. */
 static uint8_t drv2605_effect_id(haptic_effect_t effect) {
     switch (effect) {
-        case HAPTIC_EFFECT_SELECTION:    return 12;
-        case HAPTIC_EFFECT_SUCCESS:      return 14;
-        case HAPTIC_EFFECT_WARNING:      return 1;
-        case HAPTIC_EFFECT_ERROR:        return 47;
-        case HAPTIC_EFFECT_NOTIFICATION: return 15;
+        case HAPTIC_EFFECT_SELECTION:    return 4;   /* Sharp Click 100% */
+        case HAPTIC_EFFECT_SUCCESS:      return 14;  /* Strong Buzz 100% */
+        case HAPTIC_EFFECT_WARNING:      return 10;  /* Double Click 100% */
+        case HAPTIC_EFFECT_ERROR:        return 47;  /* Buzz 1 100% */
+        case HAPTIC_EFFECT_NOTIFICATION: return 15;  /* 750 ms Alert 100% */
         case HAPTIC_EFFECT_CLICK:
-        default:                         return 10;
+        default:                         return 1;   /* Strong Click 100% */
     }
 }
 
@@ -310,7 +317,7 @@ esp_err_t haptic_manager_init(void) {
 #endif
 
     /* Short confirmation tick so init is felt without the long boot buzz. */
-    (void)drv2605_write8(DRV2605_REG_WAVESEQ1, drv2605_effect_id(HAPTIC_EFFECT_SELECTION));
+    (void)drv2605_write8(DRV2605_REG_WAVESEQ1, drv2605_effect_id(HAPTIC_EFFECT_CLICK));
     (void)drv2605_write8(DRV2605_REG_WAVESEQ2, 0x00);
     (void)drv2605_write8(DRV2605_REG_GO, DRV2605_GO_BIT);
 

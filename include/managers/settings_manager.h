@@ -158,6 +158,8 @@ typedef enum {
     SETTING_GPS_BAUD_RATE,
 } SettingsType;
 
+#define GPS_BAUD_AUTO 1U
+
 
 typedef enum {
   ALIGNMENT_CM, // Center Middle

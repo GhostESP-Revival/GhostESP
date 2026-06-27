@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "core/esp_comm_manager.h"
+#include "core/uart_share.h"
 #include "managers/status_display_manager.h"
 #include "managers/rgb_manager.h"
 #include "vendor/GPS/minmea_soft.h"
@@ -74,6 +75,150 @@ static void gps_soft_prepare_rx_pin(void);
 #define GPS_SOFT_WATCHDOG_STALL_MS 12000
 #define GPS_SOFT_WATCHDOG_RESTART_COOLDOWN_MS 30000
 #define GPS_STALE_UPDATE_TIMEOUT_MS 3000
+
+static const uint32_t gps_auto_baud_rates[] = {9600, 38400, 115200, 57600, 19200, 4800};
+
+static int gps_hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static bool gps_line_has_valid_checksum(const char *line, size_t len) {
+    if (!line || len < 7 || line[0] != '$') {
+        return false;
+    }
+
+    const char *asterisk = NULL;
+    for (size_t i = 1; i < len; i++) {
+        if (line[i] == '*') {
+            asterisk = &line[i];
+            break;
+        }
+        if (line[i] == '\r' || line[i] == '\n') {
+            return false;
+        }
+    }
+
+    if (!asterisk || (size_t)(asterisk - line + 2) >= len) {
+        return false;
+    }
+
+    int hi = gps_hex_digit(asterisk[1]);
+    int lo = gps_hex_digit(asterisk[2]);
+    if (hi < 0 || lo < 0) {
+        return false;
+    }
+
+    uint8_t crc = 0;
+    for (const char *p = line + 1; p < asterisk; p++) {
+        crc ^= (uint8_t)(*p);
+    }
+
+    return crc == (uint8_t)((hi << 4) | lo);
+}
+
+static bool gps_line_is_supported_nav_sentence(const char *line) {
+    if (!line || line[0] != '$') {
+        return false;
+    }
+
+    const char *asterisk = strchr(line, '*');
+    size_t header_len = asterisk ? (size_t)(asterisk - line) : strlen(line);
+    if (header_len < 6) {
+        return false;
+    }
+
+    const char *type = line + 3;
+    return strncmp(type, "GGA", 3) == 0 || strncmp(type, "RMC", 3) == 0 ||
+           strncmp(type, "GLL", 3) == 0 || strncmp(type, "GSA", 3) == 0 ||
+           strncmp(type, "GSV", 3) == 0 || strncmp(type, "VTG", 3) == 0;
+}
+
+static bool gps_probe_baud_once(uart_port_t uart_port, gpio_num_t rx_pin, uint32_t baud_rate) {
+    uart_config_t uart_config = {
+        .baud_rate = baud_rate,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    if (uart_share_ensure_installed(uart_port, 1024, 0, 16) != ESP_OK ||
+        uart_share_acquire(uart_port, UART_SHARE_OWNER_GPS, pdMS_TO_TICKS(1000)) != ESP_OK) {
+        return false;
+    }
+
+    bool detected = false;
+    if (uart_param_config(uart_port, &uart_config) == ESP_OK &&
+        uart_set_pin(uart_port, UART_PIN_NO_CHANGE, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) == ESP_OK) {
+        uart_flush_input(uart_port);
+
+        char line[128] = {0};
+        size_t line_len = 0;
+        bool in_sentence = false;
+        uint8_t buf[96];
+        TickType_t start = xTaskGetTickCount();
+        const TickType_t timeout = pdMS_TO_TICKS(900);
+
+        while ((xTaskGetTickCount() - start) < timeout && !detected) {
+            int read_len = uart_read_bytes(uart_port, buf, sizeof(buf), pdMS_TO_TICKS(80));
+            for (int i = 0; i < read_len && !detected; i++) {
+                char c = (char)buf[i];
+                if (c == '$') {
+                    in_sentence = true;
+                    line_len = 0;
+                    line[line_len++] = c;
+                    continue;
+                }
+
+                if (!in_sentence) {
+                    continue;
+                }
+
+                if (line_len >= sizeof(line) - 1) {
+                    in_sentence = false;
+                    line_len = 0;
+                    continue;
+                }
+
+                line[line_len++] = c;
+                line[line_len] = '\0';
+
+                if (c == '\n' || c == '\r') {
+                    detected = gps_line_is_supported_nav_sentence(line) &&
+                               gps_line_has_valid_checksum(line, line_len);
+                    in_sentence = false;
+                    line_len = 0;
+                }
+            }
+        }
+    }
+
+    uart_flush_input(uart_port);
+    (void)uart_share_release(uart_port, UART_SHARE_OWNER_GPS);
+    return detected;
+}
+
+static bool gps_detect_baud(uart_port_t uart_port, gpio_num_t rx_pin, uint32_t *out_baud) {
+    if (!out_baud) {
+        return false;
+    }
+
+    for (size_t i = 0; i < sizeof(gps_auto_baud_rates) / sizeof(gps_auto_baud_rates[0]); i++) {
+        uint32_t baud = gps_auto_baud_rates[i];
+        glog("GPS auto baud: probing %lu...\n", (unsigned long)baud);
+        if (gps_probe_baud_once(uart_port, rx_pin, baud)) {
+            *out_baud = baud;
+            glog("GPS auto baud: detected %lu.\n", (unsigned long)baud);
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static void gps_soft_acquire_pm_lock(void) {
 #ifdef CONFIG_PM_ENABLE
@@ -451,6 +596,14 @@ void gps_manager_init(GPSManager *manager) {
         ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_init");
         return;
     }
+
+    if (manager->isinitilized || nmea_hdl != NULL || gps_check_task_handle != NULL ||
+        gps_soft_watchdog_task_handle != NULL) {
+        ESP_LOGW(GPS_TAG, "GPS already active; restarting parser");
+        gps_manager_deinit(manager);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
     // If there's an existing check task, delete it
     if (gps_check_task_handle != NULL) {
         vTaskDelete(gps_check_task_handle);
@@ -600,7 +753,25 @@ void gps_manager_init(GPSManager *manager) {
     gps_soft_mode_active = false;
 
     uint32_t runtime_baud = settings_get_gps_baud_rate(&G_Settings);
-    if (runtime_baud > 0) {
+    if (runtime_baud == GPS_BAUD_AUTO) {
+#ifdef CONFIG_GPS_UART_BAUD_RATE
+        config.uart.baud_rate = CONFIG_GPS_UART_BAUD_RATE;
+#else
+        config.uart.baud_rate = 9600;
+#endif
+        if (gps_should_use_software_rx()) {
+            glog("GPS auto baud is not supported for soft RX; using %lu.\n",
+                 (unsigned long)config.uart.baud_rate);
+        } else {
+            uint32_t detected_baud = 0;
+            if (gps_detect_baud(config.uart.uart_port, (gpio_num_t)current_rx_pin, &detected_baud)) {
+                config.uart.baud_rate = detected_baud;
+            } else {
+                glog("GPS auto baud: no valid NMEA detected; using %lu.\n",
+                     (unsigned long)config.uart.baud_rate);
+            }
+        }
+    } else if (runtime_baud > 0) {
         config.uart.baud_rate = runtime_baud;
     } else {
 #ifdef CONFIG_GPS_UART_BAUD_RATE
@@ -888,7 +1059,16 @@ static void gps_soft_watchdog_task(void *pvParameters) {
 }
 
 void gps_manager_deinit(GPSManager *manager) {
-    if (manager->isinitilized) {
+    if (!manager) {
+        ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_deinit");
+        return;
+    }
+
+    bool had_gps_resources = manager->isinitilized || nmea_hdl != NULL ||
+                             gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL ||
+                             g_gps_check_task_res.stack != NULL || g_gps_check_task_res.tcb != NULL;
+
+    if (had_gps_resources) {
         // If there's an existing check task, delete it
         if (gps_check_task_handle != NULL) {
             vTaskDelete(gps_check_task_handle);

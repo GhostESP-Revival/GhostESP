@@ -49,7 +49,9 @@ void handle_gps_pin(int argc, char **argv) {
 void handle_gps_baud(int argc, char **argv) {
     if (argc < 2) {
         uint32_t current_baud = settings_get_gps_baud_rate(&G_Settings);
-        if (current_baud > 0) {
+        if (current_baud == GPS_BAUD_AUTO) {
+            glog("GPS baud rate: auto-detect\n");
+        } else if (current_baud > 0) {
             glog("GPS baud rate: %lu\n", (unsigned long)current_baud);
         } else {
 #ifdef CONFIG_GPS_UART_BAUD_RATE
@@ -58,20 +60,33 @@ void handle_gps_baud(int argc, char **argv) {
             glog("GPS baud rate: not set\n");
 #endif
         }
-        glog("Usage: gpsbaud <rate>\n");
-        glog("Common rates: 9600, 19200, 38400, 57600, 115200 (0 = reset to default)\n");
+        glog("Usage: gpsbaud <rate|auto>\n");
+        glog("Common rates: auto, 9600, 19200, 38400, 57600, 115200 (0 = reset to default)\n");
         return;
     }
 
-    long baud = atol(argv[1]);
+    long baud = 0;
+    bool auto_baud = (strcmp(argv[1], "auto") == 0 || strcmp(argv[1], "AUTO") == 0 ||
+                      strcmp(argv[1], "Auto") == 0);
+    if (auto_baud) {
+        baud = GPS_BAUD_AUTO;
+    } else {
+        baud = atol(argv[1]);
+    }
     if (baud < 0) {
         glog("Invalid baud rate.\n");
+        return;
+    }
+    if (!auto_baud && baud == GPS_BAUD_AUTO) {
+        glog("Invalid baud rate. Use 'gpsbaud auto' for auto-detect.\n");
         return;
     }
 
     settings_set_gps_baud_rate(&G_Settings, (uint32_t)baud);
     settings_save(&G_Settings);
-    if (baud == 0) {
+    if (auto_baud) {
+        glog("GPS baud rate set to auto-detect. Restart GPS to apply.\n");
+    } else if (baud == 0) {
         glog("GPS baud rate reset to default. Restart GPS to apply.\n");
     } else {
         glog("GPS baud rate set to %ld. Restart GPS to apply.\n", baud);

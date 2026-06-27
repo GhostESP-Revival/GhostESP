@@ -5,6 +5,7 @@
 ### Added
  - Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field.
  - Added DRV2605 haptic feedback for the S3TWatch
+ - Added GPS baud auto-detect and always-visible runtime GPS settings for boards without compile-time GPS enabled
 
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
@@ -21,6 +22,7 @@
  - Fixed gbt generating planar RGB565A8 icons instead of interleaved format expected by LVGL
  - Fixed random boot crashes on JIT mount boards caused by the SD card taking over the shared SPI bus while the screen was still mid-draw
  - Fixed `nmea_parser` stack overflow crashes by raising the GPS parser task stack 
+ - Fixed runtime GPS parsing by enabling NMEA decoding without `CONFIG_HAS_GPS` and improving UART drain/update handling
  - Fixed S3TWatch RTC init on ESP-IDF 6.0 by avoiding an `rtc_init` symbol collision that could hang WiFi scans
 
 ## Revival v2.0-pre6

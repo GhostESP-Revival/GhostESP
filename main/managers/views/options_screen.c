@@ -564,9 +564,7 @@ typedef enum {
     SETTINGS_CAT_ACCESSIBILITY,
     SETTINGS_CAT_LOCKSCREEN,
     SETTINGS_CAT_WARDRIVING,
-#ifdef CONFIG_HAS_GPS
     SETTINGS_CAT_GPS,
-#endif
     SETTINGS_CAT_COUNT
 } SettingsCategoryId;
 
@@ -626,9 +624,7 @@ static SettingsCategory settings_categories[] = {
     {"GhostLink", SETTINGS_CAT_GHOSTLINK, SETTINGS_ROOT_CONNECTIVITY, false, NULL},
     {"WiGLE", SETTINGS_CAT_WIGLE, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
     {"Wardriving", SETTINGS_CAT_WARDRIVING, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
-#ifdef CONFIG_HAS_GPS
-    {"GPS", SETTINGS_CAT_GPS, SETTINGS_ROOT_DATA_TOOLS, true, "CONFIG_HAS_GPS"},
-#endif
+    {"GPS", SETTINGS_CAT_GPS, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
     {"Saving", SETTINGS_CAT_SCAN_SAVING, SETTINGS_ROOT_DATA_TOOLS, false, NULL},
     {"Lock Screen", SETTINGS_CAT_LOCKSCREEN, SETTINGS_ROOT_SECURITY, false, NULL},
     {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
@@ -1202,13 +1198,11 @@ static const char * const wd_hop_options[] = {
 static const uint16_t wd_hop_values[] = {50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500};
 static const int wd_hop_count = sizeof(wd_hop_values) / sizeof(wd_hop_values[0]);
 
-#ifdef CONFIG_HAS_GPS
 static const char * const gps_baud_options[] = {
-    "Default", "4800", "9600", "19200", "38400", "57600", "115200"
+    "Default", "Auto", "4800", "9600", "19200", "38400", "57600", "115200"
 };
-static const uint32_t gps_baud_values[] = {0, 4800, 9600, 19200, 38400, 57600, 115200};
+static const uint32_t gps_baud_values[] = {0, GPS_BAUD_AUTO, 4800, 9600, 19200, 38400, 57600, 115200};
 static const int gps_baud_count = sizeof(gps_baud_values) / sizeof(gps_baud_values[0]);
-#endif
 
 static const char * const brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
@@ -1328,9 +1322,7 @@ static SettingsItem settings_items[] = {
     {"Primary Hop", SETTING_WD_HOP_PRIMARY, wd_hop_options, wd_hop_count, 2, SETTINGS_CAT_WARDRIVING, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Helper Hop", SETTING_WD_HOP_HELPER, wd_hop_options, wd_hop_count, 2, SETTINGS_CAT_WARDRIVING, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Weighted 5GHz", SETTING_WD_WEIGHTED_5G, bool_options, 2, 1, SETTINGS_CAT_WARDRIVING, false, NULL, SETTING_WIDGET_TOGGLE},
-#ifdef CONFIG_HAS_GPS
-    {"Baud Rate", SETTING_GPS_BAUD_RATE, gps_baud_options, gps_baud_count, 0, SETTINGS_CAT_GPS, true, "CONFIG_HAS_GPS", SETTING_WIDGET_VALUE_CYCLE},
-#endif
+    {"Baud Rate", SETTING_GPS_BAUD_RATE, gps_baud_options, gps_baud_count, 0, SETTINGS_CAT_GPS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 };
 
 static const int settings_items_count = sizeof(settings_items) / sizeof(settings_items[0]);
@@ -2768,7 +2760,6 @@ static void load_current_settings_values(void) {
             case SETTING_WD_WEIGHTED_5G:
                 settings_items[i].current_value = settings_get_wd_weighted_5g(&G_Settings) ? 1 : 0;
                 break;
-#ifdef CONFIG_HAS_GPS
             case SETTING_GPS_BAUD_RATE: {
                 uint32_t baud = settings_get_gps_baud_rate(&G_Settings);
                 int idx = 0;
@@ -2778,7 +2769,6 @@ static void load_current_settings_values(void) {
                 settings_items[i].current_value = idx;
                 break;
             }
-#endif
             default:
                 settings_items[i].current_value = 0;
                 break;
@@ -3247,13 +3237,11 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_WD_WEIGHTED_5G:
             settings_set_wd_weighted_5g(&G_Settings, new_value == 1);
             break;
-#ifdef CONFIG_HAS_GPS
         case SETTING_GPS_BAUD_RATE:
             if (new_value >= 0 && new_value < gps_baud_count) {
                 settings_set_gps_baud_rate(&G_Settings, gps_baud_values[new_value]);
             }
             break;
-#endif
     }
     
     // Save only the changed setting to NVS (Granular Save)
