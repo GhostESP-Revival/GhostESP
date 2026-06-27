@@ -546,6 +546,62 @@ menu "Ghost ESP Options"
             help
                 Enable configuration for S3TWatch with virtual flash storage.
 
+        config HAS_DRV2605_HAPTICS
+            bool "Enable DRV2605 Haptics"
+            default y if IS_S3TWATCH
+            default n
+            help
+                Enable a DRV2605 haptic motor driver for tactile UI feedback.
+
+        config DRV2605_I2C_SDA_PIN
+            int "DRV2605 I2C SDA Pin"
+            default 10 if IS_S3TWATCH
+            default -1
+            depends on HAS_DRV2605_HAPTICS
+            help
+                GPIO pin used for DRV2605 I2C SDA.
+
+        config DRV2605_I2C_SCL_PIN
+            int "DRV2605 I2C SCL Pin"
+            default 11 if IS_S3TWATCH
+            default -1
+            depends on HAS_DRV2605_HAPTICS
+            help
+                GPIO pin used for DRV2605 I2C SCL.
+
+        config DRV2605_I2C_PORT
+            int "DRV2605 I2C Port"
+            range 0 1
+            default 1 if IS_S3TWATCH
+            default 0
+            depends on HAS_DRV2605_HAPTICS
+            help
+                I2C controller port used for DRV2605 haptics.
+
+        config DRV2605_I2C_ADDRESS
+            hex "DRV2605 I2C Address"
+            default 0x5A
+            depends on HAS_DRV2605_HAPTICS
+            help
+                7-bit I2C address for the DRV2605 haptic driver.
+
+        config DRV2605_I2C_PULLUPS
+            bool "Enable DRV2605 I2C Internal Pullups"
+            default y
+            depends on HAS_DRV2605_HAPTICS
+            help
+                Enable ESP internal pullups on the DRV2605 I2C bus.
+
+        config DRV2605_LRA_MODE
+            bool "DRV2605 LRA Mode (linear resonance actuator)"
+            default y if IS_S3TWATCH
+            default n
+            depends on HAS_DRV2605_HAPTICS
+            help
+                Enable LRA mode and LRA waveform library for the DRV2605.
+                The LilyGo T-Watch S3 haptic motor is an LRA. Only flip
+                this off if your hardware uses an ERM (eccentric rotating mass).
+
         config HAS_INFRARED
             bool "Enable Infrared Support"
             default n

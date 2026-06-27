@@ -124,6 +124,49 @@ esp_err_t axp2101_deinit(void) {
   return ESP_OK;
 }
 
+// AXP2101 LDO control / config registers
+#define AXP2101_REG_LDO_ONOFF_CTRL0 0x90  // bit5 = BLDO2 enable
+#define AXP2101_REG_BLDO2_CFG       0x97  // BLDO2 voltage
+#define AXP2101_BLDO2_ENABLE_BIT    BIT_MASK(5)
+// BLDO outputs: 0.5V-3.5V, 100mV/step -> value = (mV - 500) / 100
+#define AXP2101_BLDO2_3V3           0x1C  // (3300 - 500) / 100 = 28
+
+esp_err_t axp2101_enable_haptic_rail(void) {
+  if (!i2c_initialized) {
+    printf("ERROR [%s]: AXP2101 is not initialized\n", __func__);
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  bool locked = i2c_bus_lock(I2C_MASTER_NUM, 100);
+
+  // Set BLDO2 to 3.3V.
+  uint8_t vol[2] = { AXP2101_REG_BLDO2_CFG, AXP2101_BLDO2_3V3 };
+  esp_err_t err = i2c_master_transmit(s_axp_dev, vol, sizeof(vol), 100);
+
+  // Enable BLDO2 (read-modify-write so other rails are untouched).
+  if (err == ESP_OK) {
+    uint8_t reg = AXP2101_REG_LDO_ONOFF_CTRL0;
+    uint8_t cur = 0;
+    err = i2c_master_transmit_receive(s_axp_dev, &reg, 1, &cur, 1, 100);
+    if (err == ESP_OK && !(cur & AXP2101_BLDO2_ENABLE_BIT)) {
+      uint8_t en[2] = { AXP2101_REG_LDO_ONOFF_CTRL0,
+                        (uint8_t)(cur | AXP2101_BLDO2_ENABLE_BIT) };
+      err = i2c_master_transmit(s_axp_dev, en, sizeof(en), 100);
+    }
+  }
+
+  if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
+
+  if (err != ESP_OK) {
+    printf("ERROR [%s]: Failed to enable BLDO2 (DRV2605 rail): %s\n", __func__,
+           esp_err_to_name(err));
+    return err;
+  }
+
+  printf("INFO [%s]: BLDO2 enabled at 3.3V for DRV2605 haptics\n", __func__);
+  return ESP_OK;
+}
+
 esp_err_t axp2101_get_power_level(uint8_t *power_level) {
   if (!i2c_initialized) {
     printf("ERROR [%s]: AXP2101 is not initialized\n", __func__);

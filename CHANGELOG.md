@@ -4,6 +4,7 @@
 
 ### Added
  - Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field.
+ - Added DRV2605 haptic feedback for the S3TWatch
 
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs

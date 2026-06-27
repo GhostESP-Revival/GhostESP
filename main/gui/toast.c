@@ -2,6 +2,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
 #include "gui/lvgl_safe.h"
+#include "managers/haptic_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/display_manager.h"
 #include "lvgl.h"
@@ -278,6 +279,21 @@ static void toast_async_cb(void *arg) {
 
 static void toast_post(const char *text, uint8_t type, uint16_t duration_ms) {
     if (!text || !text[0]) return;
+
+    switch (type) {
+        case TOAST_SUCCESS:
+            haptic_manager_play(HAPTIC_EFFECT_SUCCESS);
+            break;
+        case TOAST_WARN:
+            haptic_manager_play(HAPTIC_EFFECT_WARNING);
+            break;
+        case TOAST_ERROR:
+            haptic_manager_play(HAPTIC_EFFECT_ERROR);
+            break;
+        default:
+            haptic_manager_play(HAPTIC_EFFECT_NOTIFICATION);
+            break;
+    }
 
     toast_async_arg_t *a = malloc(sizeof(toast_async_arg_t));
     if (!a) return;

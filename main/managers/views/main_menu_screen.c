@@ -3,6 +3,7 @@
 #include "esp_wifi.h"
 #include "lvgl.h"
 #include "managers/views/app_gallery_screen.h"
+#include "managers/haptic_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "gui/asset_pack.h"
@@ -1032,6 +1033,7 @@ static void handle_menu_item_selection(int item_index) {
     } else if (target_view == &ethernet_screen_view) {
         ethernet_screen_set_return_view(&main_menu_view);
     }
+    haptic_manager_play(HAPTIC_EFFECT_SELECTION);
     display_manager_switch_view((View *)target_view);
 }
 

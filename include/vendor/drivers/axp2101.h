@@ -52,4 +52,15 @@ esp_err_t axp2101_deinit(void);
  */
 esp_err_t axp2101_get_power_level(uint8_t *power_level);
 
+/**
+ * @brief Enable the BLDO2 rail at 3.3V.
+ *
+ * On the LilyGo T-Watch S3 the DRV2605 haptic driver is powered from the
+ * AXP2101 BLDO2 output. It must be enabled (and at full voltage) before the
+ * DRV2605 can drive the actuator or reliably accept register writes.
+ *
+ * @return esp_err_t ESP_OK if successful, an error code otherwise
+ */
+esp_err_t axp2101_enable_haptic_rail(void);
+
 #endif /* AXP2101_H */

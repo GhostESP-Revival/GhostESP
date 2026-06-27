@@ -9,6 +9,7 @@
 #include "managers/display_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/ghostchi_mood.h"
+#include "managers/haptic_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
@@ -765,6 +766,15 @@ void app_main(void) {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
     }
     MEASURE_INIT_RAM("Deferred display peripherals", display_manager_init_deferred_peripherals());
+#ifdef CONFIG_HAS_DRV2605_HAPTICS
+    esp_err_t haptic_err;
+    MEASURE_INIT_RAM("Haptic Manager", haptic_err = haptic_manager_init());
+    if (haptic_err == ESP_OK) {
+        haptic_manager_play(HAPTIC_EFFECT_SUCCESS);
+    } else {
+        ESP_LOGW(TAG, "Haptic manager failed to initialize: %s", esp_err_to_name(haptic_err));
+    }
+#endif
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
         display_manager_set_rainbow_mode(true);
     }
