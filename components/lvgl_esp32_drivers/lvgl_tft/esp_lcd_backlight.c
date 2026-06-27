@@ -68,7 +68,7 @@ disp_backlight_h disp_backlight_new(const disp_backlight_config_t *config)
         ESP_ERROR_CHECK(ledc_timer_config(&LCD_backlight_timer));
         ESP_ERROR_CHECK(ledc_channel_config(&LCD_backlight_channel));
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
-        gpio_matrix_output(config->gpio_num, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + config->channel_idx, config->output_invert, 0);
+        gpio_matrix_output(config->gpio_num, ledc_periph_signal[0].speed_mode[LEDC_LOW_SPEED_MODE].sig_out_idx[config->channel_idx], config->output_invert, 0);
 #else
         gpio_iomux_out(config->gpio_num, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + config->channel_idx, config->output_invert);
 #endif
