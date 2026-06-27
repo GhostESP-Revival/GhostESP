@@ -12,6 +12,7 @@
  - Split commandline god file into separate organised files
  - Added a 250ms guard to prevent closing the wardriving view when opening it
  - Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
+ - Set default cardputer/cardputer adv GPS pin to GPIO1
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens
