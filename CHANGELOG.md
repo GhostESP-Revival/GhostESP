@@ -14,6 +14,7 @@
  - Added a 250ms guard to prevent closing the wardriving view when opening it
  - Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
  - Set default Cardputer + Cardputer ADV GPS pin to GPIO1
+ - Allow scrolling the wardriving view with keyboard arrows
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens

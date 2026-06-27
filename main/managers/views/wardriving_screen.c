@@ -29,6 +29,7 @@ extern uint32_t csv_get_unique_wifi_ap_count_including_hidden(void);
 static const char *TAG = "WardriveScreen";
 
 static lv_obj_t *root_container = NULL;
+static lv_obj_t *wardriving_content = NULL;
 static lv_timer_t *update_timer = NULL;
 
 static lv_obj_t *lbl_fix_status = NULL;
@@ -84,6 +85,8 @@ static uint32_t dim_color = 0x888888;
 static uint32_t good_color = 0x00FF00;
 static uint32_t warn_color = 0xFFAA00;
 static uint32_t error_color = 0xFF4444;
+
+static void wardriving_scroll_content(int dir);
 
 /*
  * GPS debug bitmask shown in UI as "DBG:XXXX" (hex) in the GPS Debug card.
@@ -528,7 +531,11 @@ static void wardriving_input_callback(InputEvent *event) {
         display_manager_switch_view(&main_menu_view);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t key = event->data.key_value;
-        if (key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
+        if (key == LV_KEY_UP || key == ';' || key == 'k') {
+            wardriving_scroll_content(-1);
+        } else if (key == LV_KEY_DOWN || key == '.' || key == 'j') {
+            wardriving_scroll_content(1);
+        } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
             display_manager_switch_view(&main_menu_view);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
@@ -536,6 +543,13 @@ static void wardriving_input_callback(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         display_manager_switch_view(&main_menu_view);
     }
+}
+
+static void wardriving_scroll_content(int dir) {
+    if (!wardriving_content) return;
+    lv_coord_t step = lv_obj_get_height(wardriving_content) / 2;
+    if (step < 24) step = 24;
+    lv_obj_scroll_by_bounded(wardriving_content, 0, dir > 0 ? -step : step, LV_ANIM_OFF);
 }
 
 void wardriving_view_create(void) {
@@ -648,6 +662,10 @@ void wardriving_view_create(void) {
     wardriving_view.root = root_container;
     
     lv_obj_t *content = gui_screen_create_content(root_container, GUI_STATUS_BAR_HEIGHT);
+    wardriving_content = content;
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_text_color(content, lv_color_hex(text_color), 0);
     lv_obj_set_style_pad_all(content, 4, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
@@ -845,6 +863,7 @@ void wardriving_view_destroy(void) {
         root_container = NULL;
         wardriving_view.root = NULL;
     }
+    wardriving_content = NULL;
     
     lbl_fix_status = NULL;
     lbl_fix_icon = NULL;
