@@ -698,6 +698,20 @@ static lv_img_cf_t gimg_cf(uint8_t fmt) {
     return LV_IMG_CF_TRUE_COLOR;
 }
 
+static void premultiply_indexed4_palette(lv_img_dsc_t *dsc) {
+    if (!dsc || dsc->header.cf != LV_IMG_CF_INDEXED_4BIT || !dsc->data || dsc->data_size < 64) return;
+
+    lv_color32_t *palette = (lv_color32_t *)dsc->data;
+    for (int i = 0; i < 16; ++i) {
+        uint8_t alpha = palette[i].ch.alpha;
+        if (alpha == 255) continue;
+        palette[i].ch.red = (uint8_t)(((uint16_t)palette[i].ch.red * alpha + 127) / 255);
+        palette[i].ch.green = (uint8_t)(((uint16_t)palette[i].ch.green * alpha + 127) / 255);
+        palette[i].ch.blue = (uint8_t)(((uint16_t)palette[i].ch.blue * alpha + 127) / 255);
+        palette[i].ch.alpha = 255;
+    }
+}
+
 /* lgfx_tinfl_decompressor is ~11 KB. Keep it off task stacks and make it
  * per-call so boot, deferred preload, and pack switching cannot share state. */
 static size_t tinfl_decompress_heap(void *out, size_t out_len,
@@ -1561,7 +1575,10 @@ const lv_img_dsc_t *asset_pack_get_app_icon(const lv_img_dsc_t *fallback) {
 
 const lv_img_dsc_t *asset_pack_get_background_tile(void) {
     if (!s_loaded || !s_bg_tile[0]) return NULL;
-    if (s_bg_tile_data) return &s_bg_tile_dsc;
+    if (s_bg_tile_data) {
+        premultiply_indexed4_palette(&s_bg_tile_dsc);
+        return &s_bg_tile_dsc;
+    }
 
     while (s_bg_tile[0]) {
         char path[192];
@@ -1599,6 +1616,7 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
             if (select_next_bg_candidate()) continue;
             return NULL;
         }
+        premultiply_indexed4_palette(&s_bg_tile_dsc);
         ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u scale=%d",
                  path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
                  (unsigned)s_bg_tile_dsc.header.cf, s_bg_scale_to_fill ? 1 : 0);

@@ -10,8 +10,18 @@
 #include <string.h>
 #include <time.h>
 #include <nvs.h>
+#include "sdkconfig.h"
 
 #define S_TAG "SETTINGS"
+
+static bool settings_should_use_noop_dualcomm_pins(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
+         strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0;
+#else
+  return false;
+#endif
+}
 
 // NVS Keys
 static const char *NVS_RGB_MODE_KEY = "rgb_mode";
@@ -202,13 +212,18 @@ void settings_set_defaults(FSettings *settings) {
   settings->invert_colors = false;
   settings->web_auth_enabled = false;
   settings->webui_restrict_to_ap = true;
+  if (settings_should_use_noop_dualcomm_pins()) {
+    settings->esp_comm_tx_pin = -1;
+    settings->esp_comm_rx_pin = -1;
+  } else {
 #ifdef CONFIG_IDF_TARGET_ESP32
-  settings->esp_comm_tx_pin = 17;
-  settings->esp_comm_rx_pin = 16;
+    settings->esp_comm_tx_pin = 17;
+    settings->esp_comm_rx_pin = 16;
 #else
-  settings->esp_comm_tx_pin = 6;
-  settings->esp_comm_rx_pin = 7;
+    settings->esp_comm_tx_pin = 6;
+    settings->esp_comm_rx_pin = 7;
 #endif
+  }
   settings->ap_enabled = true; // Default to enabled
   settings->power_save_enabled = false;
   settings->zebra_menus_enabled = false; // or true if you want it enabled by default
@@ -592,6 +607,11 @@ void settings_load(FSettings *settings) {
 #else
     settings->esp_comm_rx_pin = 7;
 #endif
+  }
+
+  if (settings_should_use_noop_dualcomm_pins()) {
+    settings->esp_comm_tx_pin = -1;
+    settings->esp_comm_rx_pin = -1;
   }
 
   err = nvs_get_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, &value_u8);

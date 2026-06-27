@@ -6,13 +6,14 @@
  - Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field.
  - Added DRV2605 haptic feedback for the S3TWatch
  - Added GPS baud auto-detect and always-visible runtime GPS settings for boards without compile-time GPS enabled
+ - Added ENV-III support to the Cardputer + Cardputer ADV
 
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
  - Split commandline god file into separate organised files
  - Added a 250ms guard to prevent closing the wardriving view when opening it
  - Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
- - Set default cardputer/cardputer adv GPS pin to GPIO1
+ - Set default Cardputer + Cardputer ADV GPS pin to GPIO1
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens

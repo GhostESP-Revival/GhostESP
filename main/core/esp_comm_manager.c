@@ -1247,12 +1247,20 @@ void esp_comm_manager_init_with_defaults(void) {
 }
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
-    ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes", 
+    ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (s_comm_manager) {
         printf("Already initialized\n");
         return;
     }
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0) {
+        printf("ESP Comm Manager disabled on %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
+        return;
+    }
+#endif
 
     uart_port_t desired_uart = UART_NUM_1;
     gpio_num_t resolved_tx = tx_pin;

@@ -34,6 +34,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "esp_heap_caps.h"
 #include "managers/usb_keyboard_manager.h"
 #include "managers/subghz_remote_manager.h"
@@ -671,12 +672,21 @@ void app_main(void) {
         int32_t comm_tx = G_Settings.esp_comm_tx_pin;
         int32_t comm_rx = G_Settings.esp_comm_rx_pin;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 && comm_tx == 6 && comm_rx == 7) {
+        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 &&
+            comm_tx == 6 && comm_rx == 7) {
             comm_tx = 11;
             comm_rx = 12;
+        } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
+                   strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0) {
+            comm_tx = UART_PIN_NO_CHANGE;
+            comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
-        MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
+        if (comm_tx != UART_PIN_NO_CHANGE || comm_rx != UART_PIN_NO_CHANGE) {
+            MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
+        } else {
+            ESP_LOGI(TAG, "Comm Manager disabled for this build");
+        }
     }
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
