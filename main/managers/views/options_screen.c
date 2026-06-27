@@ -23,6 +23,7 @@
 #include "managers/config_manager.h"
 #include "managers/settings_sd_backup.h"
 #include "managers/wifi_manager.h"
+#include "managers/ap_manager.h"
 #include "gui/popup.h"
 #include "gui/toast.h"
 #include "core/utils.h"
@@ -1204,6 +1205,20 @@ static const char * const gps_baud_options[] = {
 static const uint32_t gps_baud_values[] = {0, GPS_BAUD_AUTO, 4800, 9600, 19200, 38400, 57600, 115200};
 static const int gps_baud_count = sizeof(gps_baud_values) / sizeof(gps_baud_values[0]);
 
+// Timezone labels (display) and matching POSIX TZ strings (values).
+// Kept in sync with setup_wizard_screen.c so users see the same list.
+static const char * const timezone_options[] = {
+    "UTC", "EST", "CST", "MST", "PST",
+    "GMT", "CET", "EET", "IST (India)", "JST",
+    "AEST", "AWST", "NZST"
+};
+static const char * const timezone_values[] = {
+    "UTC0", "EST5EDT,M3.2.0,M11.1.0", "CST6CDT,M3.2.0,M11.1.0", "MST7MDT,M3.2.0,M11.1.0", "PST8PDT,M3.2.0,M11.1.0",
+    "GMT0", "CET-1CEST,M3.5.0,M10.5.0", "EET-2EEST,M3.5.0,M10.5.0", "IST-5:30", "JST-9",
+    "AEST-10AEDT,M10.1.0,M4.1.0", "AWST-8", "NZST-12NZDT,M9.5.0,M4.1.0"
+};
+static const int timezone_count = sizeof(timezone_values) / sizeof(timezone_values[0]);
+
 static const char * const brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
 };
@@ -1278,6 +1293,11 @@ static SettingsItem settings_items[] = {
     {"Web Auth", SETTING_WEB_AUTH, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
     {"AP Enabled", SETTING_AP_ENABLED, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
     {"WebUI AP Only", SETTING_WEBUI_AP_ONLY, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"AP SSID", SETTING_AP_SSID, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"AP Password", SETTING_AP_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"STA SSID", SETTING_STA_SSID, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"STA Password", SETTING_STA_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Timezone", SETTING_TIMEZONE, timezone_options, 13, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
 #if CONFIG_IDF_TARGET_ESP32S3
@@ -1337,7 +1357,29 @@ static int settings_item_clamped_value(SettingsItem *item) {
 
 static const char *settings_item_value_text(SettingsItem *item) {
     int value = settings_item_clamped_value(item);
-    if (!item || !item->value_options || !item->value_options[value]) return "";
+    if (!item) return "";
+    // For text-input settings, show the current value (masked for passwords)
+    switch ((SettingsType)item->setting_type) {
+        case SETTING_AP_SSID: {
+            const char *cur = settings_get_ap_ssid(&G_Settings);
+            return (cur && cur[0]) ? cur : "<set>";
+        }
+        case SETTING_AP_PASSWORD: {
+            const char *cur = settings_get_ap_password(&G_Settings);
+            return (cur && cur[0]) ? "********" : "<open>";
+        }
+        case SETTING_STA_SSID: {
+            const char *cur = settings_get_sta_ssid(&G_Settings);
+            return (cur && cur[0]) ? cur : "<not set>";
+        }
+        case SETTING_STA_PASSWORD: {
+            const char *cur = settings_get_sta_password(&G_Settings);
+            return (cur && cur[0]) ? "********" : "<empty>";
+        }
+        default:
+            break;
+    }
+    if (!item->value_options || !item->value_options[value]) return "";
     return item->value_options[value];
 }
 
@@ -1898,6 +1940,10 @@ static void iobtn_p10_kb_cb(const char *text);
 static void iobtn_p11_kb_cb(const char *text);
 static void iobtn_p12_kb_cb(const char *text);
 #endif
+static void ap_ssid_kb_cb(const char *text);
+static void ap_password_kb_cb(const char *text);
+static void sta_ssid_kb_cb(const char *text);
+static void sta_password_kb_cb(const char *text);
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 static void zigbee_capture_kb_cb(const char *text);
 #endif
@@ -2760,11 +2806,32 @@ static void load_current_settings_values(void) {
             case SETTING_WD_WEIGHTED_5G:
                 settings_items[i].current_value = settings_get_wd_weighted_5g(&G_Settings) ? 1 : 0;
                 break;
-            case SETTING_GPS_BAUD_RATE: {
+case SETTING_GPS_BAUD_RATE: {
                 uint32_t baud = settings_get_gps_baud_rate(&G_Settings);
                 int idx = 0;
                 for (int j = 0; j < gps_baud_count; j++) {
                     if (gps_baud_values[j] == baud) { idx = j; break; }
+                }
+                settings_items[i].current_value = idx;
+                break;
+            }
+            case SETTING_AP_SSID:
+            case SETTING_AP_PASSWORD:
+            case SETTING_STA_SSID:
+            case SETTING_STA_PASSWORD:
+                // action items; current_value index unused
+                settings_items[i].current_value = 0;
+                break;
+            case SETTING_TIMEZONE: {
+                const char *cur_tz = settings_get_timezone_str(&G_Settings);
+                int idx = 0;
+                if (cur_tz && cur_tz[0]) {
+                    for (int j = 0; j < timezone_count; j++) {
+                        if (strcmp(timezone_values[j], cur_tz) == 0) {
+                            idx = j;
+                            break;
+                        }
+                    }
                 }
                 settings_items[i].current_value = idx;
                 break;
@@ -3237,13 +3304,56 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_WD_WEIGHTED_5G:
             settings_set_wd_weighted_5g(&G_Settings, new_value == 1);
             break;
-        case SETTING_GPS_BAUD_RATE:
+case SETTING_GPS_BAUD_RATE:
             if (new_value >= 0 && new_value < gps_baud_count) {
                 settings_set_gps_baud_rate(&G_Settings, gps_baud_values[new_value]);
             }
             break;
+        case SETTING_AP_SSID: {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("AP SSID (max 32 chars)");
+            keyboard_view_set_initial_text(settings_get_ap_ssid(&G_Settings));
+            keyboard_view_set_start_caps(true);
+            keyboard_view_set_submit_callback(ap_ssid_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_AP_PASSWORD: {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("AP Password (8-63 chars, empty=open)");
+            keyboard_view_set_initial_text(settings_get_ap_password(&G_Settings));
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_submit_callback(ap_password_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_STA_SSID: {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("Station SSID to connect to");
+            keyboard_view_set_initial_text(settings_get_sta_ssid(&G_Settings));
+            keyboard_view_set_start_caps(true);
+            keyboard_view_set_submit_callback(sta_ssid_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_STA_PASSWORD: {
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("Station Password");
+            keyboard_view_set_initial_text(settings_get_sta_password(&G_Settings));
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_submit_callback(sta_password_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_TIMEZONE:
+            if (new_value >= 0 && new_value < timezone_count) {
+                settings_set_timezone_str(&G_Settings, timezone_values[new_value]);
+                setenv("TZ", timezone_values[new_value], 1);
+                tzset();
+            }
+            break;
     }
-    
+
     // Save only the changed setting to NVS (Granular Save)
     settings_persist_setting((SettingsType)item->setting_type);
 }
@@ -10937,6 +11047,69 @@ static void iobtn_p12_kb_cb(const char *text) {
     display_manager_switch_view(&options_menu_view);
 }
 #endif
+
+// AP/STA credentials keyboard callbacks
+static void ap_ssid_kb_cb(const char *text) {
+    if (text && text[0]) {
+        settings_set_ap_ssid(&G_Settings, text);
+        settings_persist_setting(SETTING_AP_SSID);
+        // Apply AP changes so new clients can connect with new SSID
+        ap_manager_start_services();
+    }
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_NETWORK);
+    settings_submenu_depth = 2;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    load_current_settings_values();
+    display_manager_switch_view(&options_menu_view);
+}
+
+static void ap_password_kb_cb(const char *text) {
+    // Allow empty string (= open AP); only reject null
+    settings_set_ap_password(&G_Settings, text ? text : "");
+    settings_persist_setting(SETTING_AP_PASSWORD);
+    ap_manager_start_services();
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_NETWORK);
+    settings_submenu_depth = 2;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    load_current_settings_values();
+    display_manager_switch_view(&options_menu_view);
+}
+
+static void sta_ssid_kb_cb(const char *text) {
+    if (text && text[0]) {
+        settings_set_sta_ssid(&G_Settings, text);
+        settings_persist_setting(SETTING_STA_SSID);
+        wifi_manager_configure_sta_from_settings();
+    }
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_NETWORK);
+    settings_submenu_depth = 2;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    load_current_settings_values();
+    display_manager_switch_view(&options_menu_view);
+}
+
+static void sta_password_kb_cb(const char *text) {
+    settings_set_sta_password(&G_Settings, text ? text : "");
+    settings_persist_setting(SETTING_STA_PASSWORD);
+    wifi_manager_configure_sta_from_settings();
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_NETWORK);
+    settings_submenu_depth = 2;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    load_current_settings_values();
+    display_manager_switch_view(&options_menu_view);
+}
 
 static void ssh_scan_kb_cb(const char *text) {
     if (!text || strlen(text) == 0) {

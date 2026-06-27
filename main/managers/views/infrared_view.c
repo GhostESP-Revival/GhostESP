@@ -10,6 +10,7 @@
 #include "gui/options_view.h"
 #include "gui/ios_toggle.h"
 #include "managers/status_display_manager.h"
+#include "managers/ghostchi_manager.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -128,7 +129,13 @@ static char **uni_command_names = NULL;
 static size_t uni_command_count = 0;
 static char current_universal_file[256] = "";
 static lv_obj_t *transmitting_popup = NULL;
+static lv_timer_t *transmit_popup_delay_timer = NULL;
 static TaskHandle_t universal_task_handle = NULL;
+
+// Defer creating the transmitting popup until after the epilepsy warning popup
+// finishes displaying and fading out, so its solid background color doesn't
+// flash through the semi-transparent warning animation.
+#define TRANSMIT_POPUP_DELAY_MS 2300
 static lv_obj_t *dazzler_popup = NULL;
 static lv_obj_t *dazzler_stop_btn = NULL;
 // background sd io worker for infrared
@@ -714,8 +721,32 @@ static void ir_sd_end(bool display_was_suspended)
     sd_card_jit_end(display_was_suspended);
 }
 
+static void create_transmit_popup_now(void) {
+    if (transmitting_popup && lv_obj_is_valid(transmitting_popup)) return;
+    if (!in_universals_mode) return;
+    if (universal_task_handle == NULL) return;
+
+    transmitting_popup = popup_create_container(lv_scr_act(), 200, 60, false);
+    lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(transmitting_popup);
+    lv_label_set_text(label, "Transmitting...");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(label);
+}
+
+static void create_transmit_popup_cb(lv_timer_t *timer) {
+    (void)timer;
+    transmit_popup_delay_timer = NULL;
+    create_transmit_popup_now();
+}
+
 static void cleanup_transmit_popup(void *obj) {
     (void)obj;
+    if (transmit_popup_delay_timer) {
+        lv_timer_del(transmit_popup_delay_timer);
+        transmit_popup_delay_timer = NULL;
+    }
     lvgl_obj_del_safe(&transmitting_popup);
 }
 
@@ -1023,12 +1054,14 @@ static void universal_transmit_task(void *arg) {
     free(args);
 
     printf("universal_transmit_task: start %s -> %s\n", path, command);
-    
+
+    ghostchi_manager_add_xp(1);
+
     if (strcmp(path, "TURNHISTVOFF") == 0) {
         printf("Using universal IR system for TURNHISTVOFF transmission\n");
         size_t signal_count = universal_ir_get_signal_count();
         universal_transmit_cancel = false;
-        
+
         for (size_t i = 0; i < signal_count; i++) {
             if (universal_transmit_cancel) break;
             infrared_signal_t signal;
@@ -1045,7 +1078,7 @@ static void universal_transmit_task(void *arg) {
         vTaskDelete(NULL);
         return;
     }
-    
+
     universal_transmit_cancel = false;
     long file_pos = 0;
     bool done = false;
@@ -1112,7 +1145,9 @@ static void universal_transmit_task(void *arg) {
     free(args);
 
     printf("universal_transmit_task: start %s -> %s\n", path, command);
-    
+
+    ghostchi_manager_add_xp(1);
+
     if (strcmp(path, "TURNHISTVOFF") == 0) {
         printf("Using universal IR system for TURNHISTVOFF transmission\n");
         size_t signal_count = universal_ir_get_signal_count();
@@ -2423,14 +2458,6 @@ static void command_event_execute(int idx) {
             error_popup_create("EPILEPSY WARNING\nRGB LED will flash\nduring IR transmission");
         }
 
-        transmitting_popup = popup_create_container(lv_scr_act(), 200, 60, true);
-        lv_obj_clear_flag(transmitting_popup, LV_OBJ_FLAG_SCROLLABLE);
-
-        lv_obj_t *label = lv_label_create(transmitting_popup);
-        lv_label_set_text(label, "Transmitting...");
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_center(label);
-
         UniversalTransmitArgs_t *args = heap_caps_malloc(sizeof(UniversalTransmitArgs_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!args) {
             args = heap_caps_malloc(sizeof(UniversalTransmitArgs_t), MALLOC_CAP_DEFAULT);
@@ -2465,11 +2492,23 @@ static void command_event_execute(int idx) {
             }
         }
         printf("universals job task created\n");
+
+        if (settings_get_epilepsy_warning_enabled(&G_Settings)) {
+            if (transmit_popup_delay_timer) {
+                lv_timer_del(transmit_popup_delay_timer);
+                transmit_popup_delay_timer = NULL;
+            }
+            transmit_popup_delay_timer = lv_timer_create(create_transmit_popup_cb, TRANSMIT_POPUP_DELAY_MS, NULL);
+            lv_timer_set_repeat_count(transmit_popup_delay_timer, 1);
+        } else {
+            create_transmit_popup_now();
+        }
         return;
     }
     if (idx < 0 || idx >= signal_count) return;
     ESP_LOGI(TAG, "transmitting command: %s", signals[idx].name);
     status_display_show_status("IR Transmitting...");
+    ghostchi_manager_add_xp(4);
     infrared_manager_transmit(&signals[idx]);
     status_display_show_status("IR Sent");
 }

@@ -10,6 +10,7 @@
 #include "managers/ble_manager.h"
 #include "managers/display_manager.h"
 #include "managers/infrared_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/plugin_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
@@ -755,6 +756,7 @@ static bool plugin_api_ir_send_file(const char *app_relative_path) {
     infrared_signal_t signal = {0};
     if (!plugin_api_build_app_path(app_relative_path, full_path, sizeof(full_path))) return false;
     if (!infrared_manager_read_file(full_path, &signal)) return false;
+    ghostchi_manager_add_xp(4);
     bool ok = infrared_manager_transmit(&signal);
     infrared_manager_free_signal(&signal);
     return ok;

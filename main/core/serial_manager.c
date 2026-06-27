@@ -17,6 +17,7 @@
 #endif
 #if CONFIG_HAS_INFRARED
 #include "managers/infrared_manager.h"
+#include "managers/ghostchi_manager.h"
 #endif
 #include "managers/views/terminal_screen.h"
 #if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
@@ -593,6 +594,7 @@ static void process_html_line(const char* line) {
             infrared_signal_t sig;
             memset(&sig, 0, sizeof(sig));
             if (infrared_manager_parse_buffer_single(ir_capture_buffer, &sig)) {
+                ghostchi_manager_add_xp(4);
                 bool ok = infrared_manager_transmit(&sig);
                 glog("IR: send %s\n", ok ? "OK" : "FAIL");
                 if (sig.is_raw) {

@@ -7,6 +7,7 @@
 #include "managers/ble_manager.h"
 #include "managers/ethernet_manager.h"
 #include "managers/infrared_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/subghz_remote_manager.h"
 #include "managers/views/nfc_view.h"
 #include "managers/nrf24_remote_manager.h"
@@ -956,6 +957,7 @@ bool plugin_api_ir_send_raw(uint32_t carrier_hz, const uint16_t *durations, size
     signal.payload.raw.timings_size = count;
     signal.payload.raw.frequency = carrier_hz ? carrier_hz : 38000;
     signal.payload.raw.duty_cycle = 0.33f;
+    ghostchi_manager_add_xp(4);
     bool ok = infrared_manager_transmit(&signal);
     free(timings);
     return ok;

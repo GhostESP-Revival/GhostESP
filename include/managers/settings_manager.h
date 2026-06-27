@@ -156,6 +156,13 @@ typedef enum {
     SETTING_WD_HOP_HELPER,
     SETTING_WD_WEIGHTED_5G,
     SETTING_GPS_BAUD_RATE,
+    // On-device edit actions for existing NVS-backed fields
+    SETTING_AP_SSID,
+    SETTING_AP_PASSWORD,
+    SETTING_STA_SSID,
+    SETTING_STA_PASSWORD,
+    // Timezone quick-edit
+    SETTING_TIMEZONE,
 } SettingsType;
 
 #define GPS_BAUD_AUTO 1U

@@ -1209,6 +1209,27 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u32(nvsHandle, NVS_GPS_BAUD_KEY, G_Settings.gps_baud_rate);
             key = NVS_GPS_BAUD_KEY;
             break;
+        case SETTING_AP_SSID:
+            err = nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, G_Settings.ap_ssid);
+            key = NVS_AP_SSID_KEY;
+            break;
+        case SETTING_AP_PASSWORD:
+            err = nvs_set_str(nvsHandle, NVS_AP_PASSWORD_KEY, G_Settings.ap_password);
+            key = NVS_AP_PASSWORD_KEY;
+            break;
+        case SETTING_STA_SSID:
+        case SETTING_STA_PASSWORD:
+            // Save both together since they're usually updated together
+            err = nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, G_Settings.sta_ssid);
+            if (err == ESP_OK) {
+                err = nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, G_Settings.sta_password);
+            }
+            key = NVS_STA_SSID_KEY;
+            break;
+        case SETTING_TIMEZONE:
+            err = nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, G_Settings.selected_timezone);
+            key = NVS_TIMEZONE_NAME;
+            break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
             return;

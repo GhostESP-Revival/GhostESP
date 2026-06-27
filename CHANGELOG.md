@@ -7,6 +7,8 @@
  - Added DRV2605 haptic feedback for the S3TWatch
  - Added GPS baud auto-detect and always-visible runtime GPS settings for boards without compile-time GPS enabled
  - Added ENV-III support to the Cardputer + Cardputer ADV
+ - Added on-device AP/STA SSID and password editing under Settings → Wi-Fi (was WebUI/CLI/setup-wizard only)
+ - Added Timezone quick-edit under Settings → Wi-Fi (was setup-wizard only)
 
 ### Changed
  - Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
@@ -28,6 +30,9 @@
  - Fixed runtime GPS parsing by enabling NMEA decoding without `CONFIG_HAS_GPS` and improving UART drain/update handling
  - Fixed S3TWatch RTC init on ESP-IDF 6.0 by avoiding an `rtc_init` symbol collision that could hang WiFi scans
  - Fixed app gallery grid keyboard navigation to move by row like the main menu
+ - Fixed inconsistent character spacing and centering in the encoder-only keyboard view and swapped backspace/enter for LVGL symbols
+ - Fixed flashing solid grey behind the IR transmit epilepsy warning by deferring the transmitting popup until after the warning fades
+ - Fixed universal remote button sends over-awarding Ghostchi XP (1 XP per button press instead of 4 XP per signal)
 
 ## Revival v2.0-pre6
 
