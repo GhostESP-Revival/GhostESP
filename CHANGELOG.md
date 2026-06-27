@@ -17,10 +17,10 @@
  - Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
  - Set default Cardputer + Cardputer ADV GPS pin to GPIO1
  - Allow scrolling the wardriving view with keyboard arrows
+ - Changed App Gallery Icon
 
 ### Fixed
  - Adjusted lockscreen layout for cardputer screens
- - Moved grid main menu icons up on cardputer screens
  - Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
  - Fixed inconsistent icon sizing and alignment in app gallery and main menu grid layouts across different displays
  - Fixed inability to exit SD app runner when app fails to load
@@ -32,7 +32,7 @@
  - Fixed app gallery grid keyboard navigation to move by row like the main menu
  - Fixed inconsistent character spacing and centering in the encoder-only keyboard view and swapped backspace/enter for LVGL symbols
  - Fixed flashing solid grey behind the IR transmit epilepsy warning by deferring the transmitting popup until after the warning fades
-- Fixed universal remote button sends over-awarding Ghostchi XP (1 XP per button press instead of 4 XP per signal)
+ - Fixed universal remote button sends over-awarding Ghostchi XP (1 XP per button press instead of 4 XP per signal)
  - Fixed SHUTTING DOWN popup being wider than its text on T-Embed by auto-sizing popups to fit their content
 
 ## Revival v2.0-pre6
