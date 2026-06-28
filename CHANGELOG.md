@@ -14,6 +14,7 @@
  - Fixed timed Wi-Fi scans returning 0 results when the auto-reconnect timer reconfigured STA mid-scan
  - Fixed a null-pointer crash in `lv_async_call` when invoked from non-LVGL tasks by initializing the callback before the timer goes live
  - Fixed NM-CYD-C5 internal RAM exhaustio and SD app loading (disabled memory protection so the ELF loader can allocate executable memory)
+ - Fixed a crash after a successful NFC scan caused by `free()`-ing a static NDEF pool slot instead of returning it to the pool
 
 
 ## Revival v2.0-pre7

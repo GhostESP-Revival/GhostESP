@@ -774,7 +774,9 @@ static void nfc_set_details_async(void *ptr) {
     // Resume normal I2C activity now that scanning/bruteforce has finished
     display_manager_set_low_i2c_mode(false);
 
-    free(res);
+    // res is a slot in the static nfc_ndef_pool, not a heap allocation.
+    // res->text ownership was transferred to nfc_details_text above, so don't free it here.
+    nfc_ndef_pool_free(res);
 }
 
 
