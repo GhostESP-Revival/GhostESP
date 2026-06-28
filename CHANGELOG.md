@@ -15,6 +15,7 @@
  - Fixed a null-pointer crash in `lv_async_call` when invoked from non-LVGL tasks by initializing the callback before the timer goes live
  - Fixed NM-CYD-C5 internal RAM exhaustio and SD app loading (disabled memory protection so the ELF loader can allocate executable memory)
  - Fixed a crash after a successful NFC scan caused by `free()`-ing a static NDEF pool slot instead of returning it to the pool
+ - Fixed the CYD 2.4" display freezing when no SD card is inserted by no longer tearing down SD's SPI3 bus on mount failure or unmount
 
 
 ## Revival v2.0-pre7
