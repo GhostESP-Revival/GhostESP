@@ -4,6 +4,7 @@
 
 ### Changed
  - BLE advertiser and GATT device tracking now use the same live RSSI meter view as Wi-Fi AP tracking instead of the terminal
+ - Airspace Monitor is smarter: adaptive channel dwell on kick frames for accurate rates, a learned EWMA baseline so detection adapts to the local environment, a single unified threat/insight engine, and an on-screen packets/sec sparkline
 
 ## Revival v2.0-pre7
 

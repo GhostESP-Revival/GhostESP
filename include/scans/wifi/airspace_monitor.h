@@ -14,6 +14,7 @@ typedef enum {
 } airspace_threat_level_t;
 
 #define AIRSPACE_MAX_SUSPECTS 3
+#define AIRSPACE_PPS_HISTORY 32
 
 typedef struct {
     uint8_t mac[6];
@@ -64,6 +65,25 @@ typedef struct {
 
     airspace_threat_level_t threat_level;
     char reason[64];
+
+    /* Adaptive baseline (learned "normal" for this environment). */
+    bool baseline_ready;
+    uint32_t baseline_pps;
+    uint32_t baseline_kick;
+
+    /* Adaptive dwell: true while camped on a channel to measure an attack. */
+    bool dwelling;
+
+    /* Unified insight/advice produced by the engine (single source of truth). */
+    airspace_threat_level_t insight_level;
+    char insight[64];
+    char advice[64];
+
+    /* Rolling packets-per-second history for the on-screen sparkline,
+       ordered oldest -> newest. */
+    uint16_t pps_history[AIRSPACE_PPS_HISTORY];
+    uint8_t pps_history_count;
+    uint16_t pps_history_max;
 } airspace_monitor_snapshot_t;
 
 esp_err_t airspace_monitor_start(void);
