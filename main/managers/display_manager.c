@@ -2772,6 +2772,7 @@ void hardware_input_task(void *pvParameters) {
 
           if (!skip_event) {
             InputEvent event;
+            event.is_touch_move = false; // press event (release is emitted separately)
             // event.type will be set inside the switch for specific keys
 
             if (shift_count > shift_count_before_caps && !caps_latch){ // toggle caps if weve been holding shift long enough without intteruption
@@ -2810,6 +2811,30 @@ void hardware_input_task(void *pvParameters) {
 
         }
       }
+      }
+      // Emit release events for keys that were down last poll but are now up,
+      // so the global key-repeat timer gets cancelled. Without this the matrix
+      // path only ever sends presses and the repeat spams forever (the ADV/TCA8418
+      // path emits releases explicitly, which is why it doesn't have this bug).
+      for (size_t k = 0; k < last_pressed_len; ++k) {
+        bool still_down = false;
+        for (size_t i = 0; i < gkeyboard.key_list_buffer_len; ++i) {
+          if (gkeyboard.key_list_buffer[i].x == last_pressed_keys[k].x &&
+              gkeyboard.key_list_buffer[i].y == last_pressed_keys[k].y) {
+            still_down = true;
+            break;
+          }
+        }
+        if (still_down) continue;
+        uint8_t rel_value = keyboard_get_key(&gkeyboard, last_pressed_keys[k]);
+        if (rel_value == 0) continue;
+        InputEvent rel_event;
+        rel_event.type = INPUT_TYPE_KEYBOARD;
+        rel_event.data.key_value = rel_value;
+        rel_event.is_touch_move = true; // release
+        if (xQueueSend(input_queue, &rel_event, 0) != pdTRUE) {
+          ESP_LOGD(TAG, "Failed to queue keyboard release event\n");
+        }
       }
       // update last pressed cache (cap to 16)
       last_pressed_len = gkeyboard.key_list_buffer_len;
