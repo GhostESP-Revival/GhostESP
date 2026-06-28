@@ -11,6 +11,7 @@
  - Fixed touch taps on the GATT device detail view leaking through to the underlying scan list
  - Fixed GPS failing to initialize on T-Deck: GPS now temporarily takes over the shared UART1 from the serial command interface while running and hands it back on stop
  - Wardriving/GPS view is now touch-scrollable with a bottom control bar matching the other views
+ - Fixed timed Wi-Fi scans returning 0 results when the auto-reconnect timer reconfigured STA mid-scan
 
 ## Revival v2.0-pre7
 

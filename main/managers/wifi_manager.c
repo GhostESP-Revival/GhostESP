@@ -135,6 +135,7 @@ static volatile bool wifi_connect_cancel_requested = false;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
 static int wifi_reconnect_count = 0;
 static volatile bool wifi_monitor_capture_active = false;
+static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
@@ -487,7 +488,7 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
         return true;
     }
 
-    if (ap_scan_is_running()) {
+    if (ap_scan_is_running() || wifi_timed_scan_active) {
         if (reason_out) *reason_out = "AP scan active";
         return true;
     }
@@ -3419,6 +3420,12 @@ void wifi_manager_get_scan_results_data(uint16_t *count, wifi_ap_record_t **aps)
 esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     ap_manager_stop_services();
 
+    // Mark a timed scan as active so the auto-reconnect timer defers instead of
+    // reconfiguring STA mid-scan (which aborts the scan -> 0 results). This path
+    // calls esp_wifi_scan_start() directly and never touches the ap_scan module,
+    // so ap_scan_is_running() alone wouldn't cover it.
+    wifi_timed_scan_active = true;
+
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
         printf("Failed to set WiFi mode for timed scan: %s\n", esp_err_to_name(err));
@@ -3462,6 +3469,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     }
 
 cleanup:
+    wifi_timed_scan_active = false;
     ap_manager_start_services();
     return err;
 }
