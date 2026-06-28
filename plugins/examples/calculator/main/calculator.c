@@ -537,13 +537,18 @@ static void update_selection(void) {
     }
 }
 
+static void touch_back_clicked(void *user) {
+    (void)user;
+    if (api->app_exit) api->app_exit();
+}
+
 static void create_touch_controls(void) {
     if (touch_bar) return;
     if (!has_touchscreen() || !api->ui_touch_bar_create) return;
 
     touch_bar = api->ui_touch_bar_create(NULL);
     if (!touch_bar) return;
-    if (api->ui_touch_bar_add_back) api->ui_touch_bar_add_back(touch_bar, NULL, NULL);
+    if (api->ui_touch_bar_add_back) api->ui_touch_bar_add_back(touch_bar, touch_back_clicked, NULL);
 }
 
 static void destroy_touch_bar(void) {
