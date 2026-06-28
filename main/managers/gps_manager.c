@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "core/esp_comm_manager.h"
+#include "core/serial_manager.h"
 #include "core/uart_share.h"
 #include "managers/status_display_manager.h"
 #include "managers/rgb_manager.h"
@@ -52,6 +53,19 @@ static bool gps_timeout_detected = false;
 static bool gps_soft_mode_active = false;
 static bool gps_soft_released_rgb_rmt = false;
 static bool gps_disabled_comm_for_conflict = false;
+static bool gps_released_serial_for_conflict = false;
+
+// Give the shared UART port back to the serial command interface if GPS took it
+// over (see the release in gps start). GPS owns the port via uart_share, so it
+// must be fully uninstalled before the serial manager reinstalls its own driver.
+static void gps_restore_serial_uart_if_released(void) {
+    if (!gps_released_serial_for_conflict) {
+        return;
+    }
+    uart_share_uninstall((uart_port_t)serial_manager_get_uart_num());
+    serial_manager_reacquire_uart();
+    gps_released_serial_for_conflict = false;
+}
 static volatile TickType_t gps_last_update_tick = 0;
 static volatile bool gps_has_seen_update = false;
 static bool gps_peer_preferred = false;
@@ -752,6 +766,17 @@ void gps_manager_init(GPSManager *manager) {
 
     gps_soft_mode_active = false;
 
+    // On boards where the serial command interface shares the GPS UART port
+    // (e.g. T-Deck uses UART1 for both), hand the port to GPS while it runs.
+    // The console stays available over USB-Serial-JTAG. Only the hardware-UART
+    // path conflicts; software (bit-banged) RX uses a plain GPIO instead.
+    if (!gps_should_use_software_rx() &&
+        serial_manager_get_uart_num() == (int)config.uart.uart_port) {
+        if (serial_manager_release_uart((int)config.uart.uart_port)) {
+            gps_released_serial_for_conflict = true;
+        }
+    }
+
     uint32_t runtime_baud = settings_get_gps_baud_rate(&G_Settings);
     if (runtime_baud == GPS_BAUD_AUTO) {
 #ifdef CONFIG_GPS_UART_BAUD_RATE
@@ -819,6 +844,7 @@ void gps_manager_init(GPSManager *manager) {
             ESP_LOGE(GPS_TAG, "Failed to initialize NMEA parser");
         }
         manager->isinitilized = false;
+        gps_restore_serial_uart_if_released();
         if (!preserve_dualcomm || gps_disabled_comm_for_conflict) {
             esp_comm_manager_init_with_defaults();
             gps_disabled_comm_for_conflict = false;
@@ -1127,6 +1153,7 @@ void gps_manager_deinit(GPSManager *manager) {
             gps_soft_try_reacquire_rgb_rmt();
             gps_soft_released_rgb_rmt = false;
         }
+        gps_restore_serial_uart_if_released();
         if (!gps_should_preserve_dualcomm() || gps_disabled_comm_for_conflict) {
             esp_comm_manager_init_with_defaults();
             gps_disabled_comm_for_conflict = false;

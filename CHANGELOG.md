@@ -6,6 +6,11 @@
  - BLE advertiser and GATT device tracking now use the same live RSSI meter view as Wi-Fi AP tracking instead of the terminal
  - Airspace Monitor is smarter: adaptive channel dwell on kick frames for accurate rates, a learned EWMA baseline so detection adapts to the local environment, a single unified threat/insight engine, and an on-screen packets/sec sparkline
 
+### Fixed
+ - Fixed touch taps on the GATT device detail view leaking through to the underlying scan list
+ - Fixed GPS failing to initialize on T-Deck: GPS now temporarily takes over the shared UART1 from the serial command interface while running and hands it back on stop
+ - Wardriving/GPS view is now touch-scrollable with a bottom control bar matching the other views
+
 ## Revival v2.0-pre7
 
 ### Added

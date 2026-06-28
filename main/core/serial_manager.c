@@ -69,6 +69,7 @@ EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
+static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
 
 static bool serial_should_disable_uart(void) {
   return false;
@@ -81,7 +82,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
 
   int written = 0;
 
-  if (!s_uart_disabled) {
+  if (!s_uart_disabled && !s_uart_paused) {
     written = uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
   }
 
@@ -703,8 +704,8 @@ void serial_task(void *pvParameter) {
     }
     int length = 0;
 
-    // Read data from the main UART (if not disabled)
-    if (!s_uart_disabled) {
+    // Read data from the main UART (if not disabled or temporarily handed off)
+    if (!s_uart_disabled && !s_uart_paused) {
       length = uart_read_bytes(UART_NUM, data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
     }
 
@@ -856,7 +857,7 @@ void serial_task(void *pvParameter) {
           
           // Echo newline directly to UART
           const char newline[] = "\n";
-          if (!s_uart_disabled) uart_write_bytes(UART_NUM, newline, 1);
+          if (!s_uart_disabled && !s_uart_paused) uart_write_bytes(UART_NUM, newline, 1);
 #if JTAG_SUPPORTED
           usb_serial_jtag_write_bytes((const uint8_t*)newline, 1, 0);
 #endif
@@ -1065,6 +1066,45 @@ void serial_manager_restore_console(void) {
 
 int serial_manager_get_uart_num() {
     return (int)UART_NUM;
+}
+
+bool serial_manager_release_uart(int uart_num) {
+  if (uart_num != (int)UART_NUM) {
+    return false;
+  }
+  if (s_uart_disabled || s_uart_paused || !s_serial_initialized) {
+    return false;
+  }
+  // Stop the serial task from touching the UART, then wait long enough for any
+  // in-flight uart_read_bytes() (10 ms timeout) to return before deleting the
+  // driver. USB-JTAG console input continues uninterrupted.
+  s_uart_paused = true;
+  vTaskDelay(pdMS_TO_TICKS(30));
+  uart_driver_delete(UART_NUM);
+  ESP_LOGI("SerialManager", "UART%d released for external owner", (int)UART_NUM);
+  return true;
+}
+
+void serial_manager_reacquire_uart(void) {
+  if (!s_uart_paused) {
+    return;
+  }
+  const uart_config_t uart_config = {
+      .baud_rate = CONFIG_CONSOLE_UART_BAUDRATE,
+      .data_bits = UART_DATA_8_BITS,
+      .parity = UART_PARITY_DISABLE,
+      .stop_bits = UART_STOP_BITS_1,
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+  };
+  uart_param_config(UART_NUM, &uart_config);
+  esp_err_t err = uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
+  if (err != ESP_OK) {
+    ESP_LOGW("SerialManager", "UART%d reacquire failed: %s", (int)UART_NUM,
+             esp_err_to_name(err));
+    return;
+  }
+  s_uart_paused = false;
+  ESP_LOGI("SerialManager", "UART%d reacquired", (int)UART_NUM);
 }
 
 int handle_serial_command(const char *input) {

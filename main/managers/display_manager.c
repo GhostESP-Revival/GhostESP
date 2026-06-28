@@ -2131,6 +2131,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
           strcmp(view_name, "BadUSB") == 0 ||
+          strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0);
 }
 

@@ -4065,6 +4065,9 @@ void handle_hardware_button_press_options(InputEvent *event) {
             } else if (ble_adv_detail_view &&
                        opt_touch_bluetooth_state == BLUETOOTH_MENU_ADV_DETAILS) {
                 active_detail_view = ble_adv_detail_view;
+            } else if (ble_gatt_detail_view &&
+                       opt_touch_bluetooth_state == BLUETOOTH_MENU_GATT_DETAILS) {
+                active_detail_view = ble_gatt_detail_view;
             }
 
             if (active_detail_view) {
