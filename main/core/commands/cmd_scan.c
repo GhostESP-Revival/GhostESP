@@ -32,6 +32,12 @@ static sweep_result_t g_sweep_result = {0};
 static int g_sweep_wifi_seconds = 10;
 static int g_sweep_ble_seconds = 10;
 
+static int get_next_sweep_file_index(void);
+static const char* sweep_get_auth_str(wifi_auth_mode_t auth);
+static const char* sweep_get_cipher_str(wifi_cipher_type_t cipher);
+static void sweep_get_phy_modes(wifi_ap_record_t *ap, char *buf, size_t len);
+static void sweep_write_csv_escaped(FILE *f, const char *str);
+
 void sweep_clear_result(void) {
     memset(&g_sweep_result, 0, sizeof(g_sweep_result));
 }

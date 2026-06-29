@@ -3145,21 +3145,18 @@ void wifi_manager_start_ip_lookup() {
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK || ap_info.rssi == 0) {
         printf("Not connected to an Access Point.\n");
-        TERMINAL_VIEW_ADD_TEXT("Not connected to an Access Point.\n");
         return;
     }
 
     g_mdns_result_count = 0;
+    bool store_results = (g_mdns_results != NULL);
+    bool was_running = g_mdns_scan_running;
+    g_mdns_scan_running = true;
 
     esp_netif_ip_info_t ip_info;
     if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) ==
         ESP_OK) {
-        printf("Connected.\nProceeding with IP lookup...\n");
-        TERMINAL_VIEW_ADD_TEXT("Connected.\nProceeding with IP lookup...\n");
-
-        int device_count = 0;
-        struct DeviceInfo devices[MAX_DEVICES];
-        (void)devices;
+        printf("Connected. Proceeding with IP lookup...\n");
 
         for (int s = 0; s < NUM_SERVICES; s++) {
             if (!g_mdns_scan_running) break;
@@ -3167,27 +3164,21 @@ void wifi_manager_start_ip_lookup() {
             int retries = 0;
             mdns_result_t *mdnsresult = NULL;
 
-            if (mdnsresult == NULL) {
-                while (retries < 5 && mdnsresult == NULL && g_mdns_scan_running) {
-                    esp_err_t qret = mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
-
-                    if (mdnsresult == NULL) {
-                        retries++;
-                        TERMINAL_VIEW_ADD_TEXT("Retrying mDNS query for service: %s (Attempt %d)\n",
-                                               services[s].query, retries);
-                        printf("Retrying mDNS query for service: %s (Attempt %d)\n",
-                               services[s].query, retries);
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                    }
+            while (retries < 5 && mdnsresult == NULL && g_mdns_scan_running) {
+                mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
+                if (mdnsresult == NULL) {
+                    retries++;
+                    printf("Retrying mDNS query for service: %s (Attempt %d)\n",
+                           services[s].query, retries);
+                    vTaskDelay(pdMS_TO_TICKS(500));
                 }
             }
 
             if (mdnsresult != NULL) {
                 printf("mDNS query succeeded for service: %s\n", services[s].query);
-                TERMINAL_VIEW_ADD_TEXT("mDNS query succeeded for service: %s\n", services[s].query);
 
                 mdns_result_t *current_result = mdnsresult;
-                while (current_result != NULL && device_count < MAX_DEVICES) {
+                while (current_result != NULL) {
                     char ip_str[INET_ADDRSTRLEN] = {0};
                     mdns_ip_addr_t *addr_item = current_result->addr;
                     bool has_v4 = false;
@@ -3203,28 +3194,31 @@ void wifi_manager_start_ip_lookup() {
                         strncpy(ip_str, "0.0.0.0", sizeof(ip_str));
                     }
 
-                    // Store in persistent results
-                    if (g_mdns_result_count < MDNS_MAX_DEVICES) {
-                        mdns_device_t *dev = &g_mdns_results[g_mdns_result_count];
-                        memset(dev, 0, sizeof(mdns_device_t));
-                        if (current_result->hostname) {
-                            strncpy(dev->hostname, current_result->hostname, sizeof(dev->hostname) - 1);
+                    if (store_results && g_mdns_result_count < MDNS_MAX_DEVICES) {
+                        bool duplicate = false;
+                        for (int d = 0; d < g_mdns_result_count; d++) {
+                            if (strcmp(g_mdns_results[d].ip, ip_str) == 0) {
+                                duplicate = true;
+                                break;
+                            }
                         }
-                        strncpy(dev->ip, ip_str, sizeof(dev->ip) - 1);
-                        dev->port = current_result->port;
-                        strncpy(dev->service_type, services[s].type, sizeof(dev->service_type) - 1);
-                        g_mdns_result_count++;
+                        if (!duplicate) {
+                            mdns_device_t *dev = &g_mdns_results[g_mdns_result_count];
+                            memset(dev, 0, sizeof(mdns_device_t));
+                            if (current_result->hostname) {
+                                strncpy(dev->hostname, current_result->hostname, sizeof(dev->hostname) - 1);
+                            }
+                            strncpy(dev->ip, ip_str, sizeof(dev->ip) - 1);
+                            dev->port = current_result->port;
+                            strncpy(dev->service_type, services[s].type, sizeof(dev->service_type) - 1);
+                            g_mdns_result_count++;
+                        }
                     }
 
                     printf("Device at: %s\n", ip_str);
                     printf("  Name: %s\n", current_result->hostname);
                     printf("  Type: %s\n", services[s].type);
                     printf("  Port: %u\n", current_result->port);
-                    TERMINAL_VIEW_ADD_TEXT("Device at: %s\n", ip_str);
-                    TERMINAL_VIEW_ADD_TEXT("  Name: %s\n", current_result->hostname);
-                    TERMINAL_VIEW_ADD_TEXT("  Type: %s\n", services[s].type);
-                    TERMINAL_VIEW_ADD_TEXT("  Port: %u\n", current_result->port);
-                    device_count++;
 
                     current_result = current_result->next;
                 }
@@ -3233,17 +3227,16 @@ void wifi_manager_start_ip_lookup() {
             } else {
                 printf("Failed to find devices for service: %s after %d retries\n",
                        services[s].query, retries);
-                TERMINAL_VIEW_ADD_TEXT("Failed to find devices for service: %s after %d retries\n",
-                                       services[s].query, retries);
             }
         }
     } else {
-        printf("Can't recieve network interface info.\n");
-        TERMINAL_VIEW_ADD_TEXT("Can't recieve network interface info.\n");
+        printf("Can't get network interface info.\n");
     }
 
     printf("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
-    TERMINAL_VIEW_ADD_TEXT("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
+    if (!was_running) {
+        g_mdns_scan_running = false;
+    }
 }
 
 static void wifi_manager_ip_lookup_task(void *pvParameters) {

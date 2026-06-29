@@ -30,6 +30,7 @@
 - Added `capture -channel <n>` to lock WiFi capture modes and 802.15.4 captures to a fixed channel
 - Added `wdstream` CLI streaming for companion-app wardriving without device GPS, SD, CSV, or PCAP capture requirements
 - Added spinner/detail view flow for ARP Scan Network, mDNS Discovery, and Environment Sweep with async scanning, paginated result lists, and per-item detail views
+- Improved mDNS scan: deduplicates devices across services, null-safe when run from CLI, removed unused 2KB stack allocation
 
 #### Bluetooth & BLE
 - Added BLE advertisement scan option in the Bluetooth menu
@@ -239,6 +240,7 @@
 - Hardened WebUI: API and camera endpoints now enforce Digest auth when enabled, passwords no longer leak from settings GET, AP password validation accepts exactly 8 characters, SD upload path/filename/size checks are unified, and settings_save surfaces NVS write errors
 - Fixed GitHub Actions merged binary using wrong bootloader offset for ESP32-S3/C3/C5/C6 targets
 - Added spinner/detail view flow for ARP Scan Network, mDNS Discovery, and Environment Sweep (replaces terminal dump with scan progress spinner, paginated result list, and per-item detail view)
+- Improved mDNS scan: deduplicates devices across services, null-safe when run from CLI, removed unused 2KB stack allocation
 
 ## Revival v2.0-pre8
 
