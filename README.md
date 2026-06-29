@@ -20,9 +20,18 @@ v2.0 is the largest update in the project's history, building on v1.9.10 with a 
 
 - **Redesigned UI experience**: 60 FPS rendering, toast notifications, a cleaner status bar, custom **asset packs** (icons, themes, backgrounds) loaded from SD, touch-drag scrolling, polished setup wizard styling with Home WiFi setup, and a comprehensive **accessibility suite** (font size, high contrast, reduced motion, input repeat, epilepsy-safe mode).
 - **Native SD Apps & App Gallery**: A new app system for loading tools from SD with permissions, scoped storage, custom icons, accent colors, and a central launcher. ESP32-C5 builds can also run supported app code directly from flash (XIP), avoiding the small internal-RAM ceiling for app code. Build your own apps with the **Ghost Build Tool (`gbt`)**, the native app SDK, and example apps.
+
+  <img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" />
+
 - **WiFi Airspace Monitor**: Real-time packet/threat insights with adaptive channel dwell, a learned EWMA baseline that adapts to the local environment, a unified threat/insight engine, and an on-screen packets/sec sparkline.
+
+  <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
+
 - **Expanded Ghostchi**: The companion system now has 50 levels, 27 XP sources, passive/aggressive modes, a global mood system, level-up toasts, and a persistent status-bar badge.
 - **PIN lockscreen**: A new overlay lockscreen with auto-lock support, so active captures (wardriving, sniffing) keep running while the device is locked.
+
+  <img width="320" height="170" alt="ghost_mirror_1782715595937" src="https://github.com/user-attachments/assets/e7a691ed-24db-4a06-b9e6-f204518c6fe6" />
+  
 - **Expanded BadUSB**: Trackpad/cursor control, full touch support, USB HID keyboard output mode, mouse jiggler, `type_char` CLI, and a dedicated WebUI page.
 - **Redesigned WebUI**: A completely refreshed browser interface with a dedicated BadUSB page and improved remote control flow.
 - **More on-device workflows**: SD Browser, text previews, copy/move staging, on-device PCAP browser with hc22000 export, runtime GPS baud settings, on-device AP/STA credential editing, timezone quick-edit, and live RSSI meter views.
