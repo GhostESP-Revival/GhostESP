@@ -260,7 +260,7 @@ A few things set GhostESP apart from every other ESP32 firmware:
 
 - ESP32-Wroom · ESP32-S2 · ESP32-C3 · ESP32-S3 · ESP32-C5 · ESP32-C6
 
-> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware; C5/C6 add 5 GHz and 802.15.4/Zigbee support.
+> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware; C5 has 5Ghz and 802.15.4/Zigbee support.
 
 ---
 
