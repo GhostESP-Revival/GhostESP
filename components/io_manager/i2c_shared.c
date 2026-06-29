@@ -1,4 +1,7 @@
 #include "i2c_shared.h"
+#include <esp_log.h>
+
+static const char *TAG = "i2c_shared";
 
 static esp_err_t with_temp_device(i2c_master_bus_handle_t bus,
                                   uint16_t addr,
@@ -32,14 +35,19 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
 
     esp_err_t ret = i2c_master_get_bus_handle(port, out_bus);
     if (ret == ESP_OK) {
+        ESP_LOGD(TAG, "I2C bus port %d already exists, reusing handle", port);
         if (out_created) {
             *out_created = false;
         }
         return ESP_OK;
     }
     if (ret != ESP_ERR_NOT_FOUND && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "i2c_master_get_bus_handle port %d failed: %s", port, esp_err_to_name(ret));
         return ret;
     }
+
+    ESP_LOGI(TAG, "Creating I2C master bus on port %d (SDA=%d, SCL=%d, pullup=%d)",
+             port, sda, scl, enable_internal_pullup);
 
     i2c_master_bus_config_t bus_config = {
         .i2c_port = port,
@@ -53,8 +61,14 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
     };
 
     ret = i2c_new_master_bus(&bus_config, out_bus);
-    if (ret == ESP_OK && out_created) {
-        *out_created = true;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "I2C master bus created on port %d", port);
+        if (out_created) {
+            *out_created = true;
+        }
+    } else {
+        ESP_LOGE(TAG, "i2c_new_master_bus port %d (SDA=%d, SCL=%d) failed: %s",
+                 port, sda, scl, esp_err_to_name(ret));
     }
     return ret;
 }

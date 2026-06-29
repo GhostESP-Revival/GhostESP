@@ -14,6 +14,7 @@
 #include "attacks/wifi/deauth_attack.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
@@ -297,6 +298,7 @@ static void deauth_task(void *param) {
 void deauth_attack_start(void) {
     if (!deauth_task_running) {
         ap_manager_stop_services();
+        ghostchi_manager_add_xp(3);
 
         // Ensure WiFi is fully stopped before configuring
         esp_wifi_stop();

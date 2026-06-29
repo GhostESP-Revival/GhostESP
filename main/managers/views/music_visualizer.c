@@ -5,6 +5,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/views/app_gallery_screen.h"
 #include "managers/wifi_manager.h"
 
@@ -345,7 +346,7 @@ void music_visualizer_view_create(void) {
 
     view.status_label = lv_label_create(root);
     lv_obj_set_style_text_font(view.status_label,
-                               (LV_VER_RES > 180) ? &lv_font_montserrat_24 : &lv_font_montserrat_14,
+                               (LV_VER_RES > 180) ? accessibility_get_font_title() : accessibility_get_font_body(),
                                0);
     lv_obj_set_style_text_color(view.status_label, theme_text, 0);
     lv_obj_align(view.status_label, LV_ALIGN_TOP_MID, 0, LV_VER_RES > 180 ? 12 : 6);
@@ -353,14 +354,14 @@ void music_visualizer_view_create(void) {
 
     view.endpoint_label = lv_label_create(root);
     lv_obj_set_style_text_font(view.endpoint_label,
-                               (LV_VER_RES > 180) ? &lv_font_montserrat_14 : &lv_font_montserrat_10,
+                               (LV_VER_RES > 180) ? accessibility_get_font_body() : accessibility_get_font_small(),
                                0);
     lv_obj_set_style_text_color(view.endpoint_label, theme_muted, 0);
     lv_obj_align(view.endpoint_label, LV_ALIGN_TOP_MID, 0, LV_VER_RES > 180 ? 40 : 24);
     lv_label_set_text(view.endpoint_label, current_artist);
 
     debug_label = lv_label_create(root);
-    lv_obj_set_style_text_font(debug_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(debug_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(debug_label, theme_muted, 0);
     lv_obj_align(debug_label, LV_ALIGN_BOTTOM_MID, 0, -4);
     lv_label_set_text(debug_label, "frames 0  idle");

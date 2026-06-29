@@ -2,6 +2,7 @@
 #define AP_MANAGER_H
 
 #include <esp_err.h>
+#include <esp_http_server.h>
 #include <stdbool.h>
 
 // Initialize the Access Point, DNS server, and HTTP server
@@ -28,5 +29,8 @@ esp_err_t ap_manager_reload_config(void);
 
 // get current server status
 void ap_manager_get_status(bool *server_running, bool *config_loaded_status, int *handler_count_status);
+
+// Shared guard for routes served outside ap_manager.c, such as camera streaming.
+bool ap_manager_webui_request_allowed(httpd_req_t *req);
 
 #endif // AP_MANAGER_H

@@ -11,23 +11,23 @@ weight: 5
 
 ## Install ESP-IDF
 
-GhostESP requires **ESP-IDF v5.5.3**. Follow the official Espressif guide for your OS:
+GhostESP requires **ESP-IDF v6.0**. Follow the official Espressif guide for your OS:
 
-- [Windows Installation](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32/get-started/windows-setup.html)
-- [Linux Installation](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32/get-started/linux-setup.html)
-- [macOS Installation](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32/get-started/macos-setup.html)
+- [Windows Installation](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/get-started/windows-setup.html)
+- [Linux Installation](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/get-started/linux-setup.html)
+- [macOS Installation](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/get-started/macos-setup.html)
 
 ### Quick Start (Windows)
 
 1. Install via EIM:
    ```
    winget install Espressif.EIM-CLI
-   eim install -i v5.5.3
+   eim install -i v6.0
    ```
 
 2. Or manually:
    ```
-   git clone -b v5.5.3 --recursive https://github.com/espressif/esp-idf.git
+   git clone -b v6.0 --recursive https://github.com/espressif/esp-idf.git
    cd esp-idf
    install.bat
    ```
@@ -57,7 +57,7 @@ source $IDF_PATH/export.sh
 idf.py --version
 ```
 
-Should output `ESP-IDF v5.5.3`.
+Should output `ESP-IDF v6.0`.
 
 ## Clone GhostESP
 

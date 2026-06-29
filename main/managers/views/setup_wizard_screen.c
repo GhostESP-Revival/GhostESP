@@ -4,6 +4,7 @@
 #include "managers/settings_manager.h"
 #include "managers/display_manager.h"
 #include "gui/screen_layout.h"
+#include "gui/accessibility_fonts.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "gui/lvgl_safe.h"
@@ -17,12 +18,16 @@ typedef enum {
     SETUP_STEP_WELCOME = 0,
     SETUP_STEP_AP_SSID,
     SETUP_STEP_AP_PASSWORD,
+    SETUP_STEP_STA_SSID,
+    SETUP_STEP_STA_PASSWORD,
     SETUP_STEP_COUNTRY,
     SETUP_STEP_TIMEZONE,
     SETUP_STEP_DISPLAY_TIMEOUT,
     SETUP_STEP_THEME,
     SETUP_STEP_MENU_LAYOUT,
     SETUP_STEP_TERMINAL_COLOR,
+    SETUP_STEP_EPILEPSY_WARNING,
+    SETUP_STEP_ACCESSIBILITY,
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     SETUP_STEP_IDLE_ANIMATION,
 #endif
@@ -52,6 +57,8 @@ static SetupStep current_step = SETUP_STEP_WELCOME;
 static int selected_country_index = 0;
 static char temp_ap_ssid[33] = {0};
 static char temp_ap_password[65] = {0};
+static char temp_sta_ssid[65] = {0};
+static char temp_sta_password[65] = {0};
 
 static lv_obj_t *country_list = NULL;
 static int country_cursor = 0;
@@ -70,6 +77,10 @@ static uint8_t temp_menu_layout = 0;
 static uint8_t temp_terminal_color = 0;
 static uint8_t temp_timezone = 0;
 static uint8_t temp_display_timeout = 0;
+static uint8_t temp_epilepsy_warning = 1;
+static uint8_t temp_font_size = 1;
+static uint8_t temp_reduced_motion = 0;
+static uint8_t temp_high_contrast = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static uint8_t temp_idle_animation = 0;
 #endif
@@ -90,7 +101,7 @@ static const char *display_timeout_options[] = {"5s", "10s", "30s", "60s", "Neve
 static const uint32_t display_timeout_values[] = {5000, 10000, 30000, 60000, UINT32_MAX};
 #define DISPLAY_TIMEOUT_COUNT 5
 
-static const char *theme_options[] = {"Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
+static const char *theme_options[] = {"OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 #define THEME_COUNT 17
 
 static const char *menu_layout_options[] = {"Carousel", "Grid", "List"};
@@ -105,6 +116,18 @@ static const char *idle_animation_options[] = {"Game of Life", "Ghost", "Starfie
 #define IDLE_ANIMATION_COUNT 9
 #endif
 
+static const char *epilepsy_warning_options[] = {"Off", "On"};
+#define EPILEPSY_WARNING_COUNT 2
+
+static const char *font_size_options[] = {"Small", "Normal", "Large"};
+#define FONT_SIZE_COUNT 3
+
+static const char *repeat_speed_options[] = {"Slow", "Normal", "Fast"};
+#define REPEAT_SPEED_COUNT 3
+
+static const char *accessibility_bool_options[] = {"Off", "On"};
+#define ACCESSIBILITY_BOOL_COUNT 2
+
 static void setup_wizard_create(void);
 static void setup_wizard_destroy(void);
 static void setup_wizard_input_callback(InputEvent *event);
@@ -113,6 +136,25 @@ static void show_country_screen(void);
 static void show_complete_screen(void);
 static void finish_setup(void);
 static void skip_setup(void);
+
+#define STATUS_BAR_H 18
+#define USABLE_H (LV_VER_RES - STATUS_BAR_H)
+#define USABLE_W LV_HOR_RES
+
+static void style_wizard_btn(lv_obj_t *btn, lv_color_t bg, lv_coord_t radius) {
+    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, radius, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+}
+
+static int get_card_width(int list_pad) {
+    int item_w = USABLE_W - list_pad * 4 - 10;
+    int max_w = USABLE_W * 86 / 100;
+    if (item_w > max_w) item_w = max_w;
+    if (item_w < 70) item_w = USABLE_W - list_pad * 2;
+    return item_w;
+}
 
 static void ap_ssid_callback(const char *text) {
     if (text && strlen(text) > 0) {
@@ -145,6 +187,32 @@ static void ap_password_callback(const char *text) {
             strncpy(temp_ap_password, "GhostESP", sizeof(temp_ap_password) - 1);
         }
     }
+    current_step = SETUP_STEP_STA_SSID;
+    keyboard_view_set_submit_callback(NULL);
+    display_manager_switch_view(&setup_wizard_view);
+}
+
+static void sta_ssid_callback(const char *text) {
+    if (text && strlen(text) > 0) {
+        strncpy(temp_sta_ssid, text, sizeof(temp_sta_ssid) - 1);
+        temp_sta_ssid[sizeof(temp_sta_ssid) - 1] = '\0';
+        current_step = SETUP_STEP_STA_PASSWORD;
+    } else {
+        temp_sta_ssid[0] = '\0';
+        temp_sta_password[0] = '\0';
+        current_step = SETUP_STEP_COUNTRY;
+    }
+    keyboard_view_set_submit_callback(NULL);
+    display_manager_switch_view(&setup_wizard_view);
+}
+
+static void sta_password_callback(const char *text) {
+    if (text && strlen(text) > 0) {
+        strncpy(temp_sta_password, text, sizeof(temp_sta_password) - 1);
+        temp_sta_password[sizeof(temp_sta_password) - 1] = '\0';
+    } else {
+        temp_sta_password[0] = '\0';
+    }
     current_step = SETUP_STEP_COUNTRY;
     keyboard_view_set_submit_callback(NULL);
     display_manager_switch_view(&setup_wizard_view);
@@ -160,7 +228,8 @@ static void start_btn_event_cb(lv_event_t *e) {
     } else {
         temp_ap_ssid[0] = '\0';
     }
-    keyboard_view_set_placeholder("AP SSID");
+    keyboard_view_set_placeholder("Device AP SSID");
+    keyboard_view_set_initial_text(temp_ap_ssid);
     keyboard_view_set_submit_callback(ap_ssid_callback);
     keyboard_view_set_return_view(&setup_wizard_view);
     display_manager_switch_view(&keyboard_view);
@@ -189,21 +258,19 @@ static void update_welcome_btn_focus(void) {
     }
 }
 
-#define STATUS_BAR_H 18
-#define USABLE_H (LV_VER_RES - STATUS_BAR_H)
-#define USABLE_W LV_HOR_RES
-
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_12;
-    if (LV_VER_RES <= 280) return &lv_font_montserrat_14;
-    return &lv_font_montserrat_16;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    if (LV_VER_RES <= 280) return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
+    return fs == 0 ? &lv_font_montserrat_14 : (fs == 1 ? &lv_font_montserrat_16 : &lv_font_montserrat_18);
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 200) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 200) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_14);
+    return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
 }
 
 static void show_welcome_screen(void) {
@@ -225,7 +292,8 @@ static void show_welcome_screen(void) {
     lv_obj_t *desc = lv_label_create(root);
     lv_label_set_text(desc, 
         "In this setup you can:\n"
-        "Configure AP credentials\n"
+        "Configure device AP credentials\n"
+        "Save your home WiFi\n"
         "Set your region\n"
         "Customize device appearance");
     lv_obj_set_style_text_color(desc, lv_color_hex(0xAAAAAA), 0);
@@ -248,6 +316,7 @@ static void show_welcome_screen(void) {
     welcome_start_btn = lv_btn_create(root);
     lv_obj_set_size(welcome_start_btn, btn_w, btn_h);
     lv_obj_align(welcome_start_btn, LV_ALIGN_TOP_MID, -btn_offset, btn_y);
+    style_wizard_btn(welcome_start_btn, lv_color_hex(0x333333), 5);
     lv_obj_t *start_label = lv_label_create(welcome_start_btn);
     lv_label_set_text(start_label, "Start");
     lv_obj_center(start_label);
@@ -256,6 +325,7 @@ static void show_welcome_screen(void) {
     welcome_skip_btn = lv_btn_create(root);
     lv_obj_set_size(welcome_skip_btn, btn_w, btn_h);
     lv_obj_align(welcome_skip_btn, LV_ALIGN_TOP_MID, btn_offset, btn_y);
+    style_wizard_btn(welcome_skip_btn, lv_color_hex(0x333333), 5);
     lv_obj_t *skip_label = lv_label_create(welcome_skip_btn);
     lv_label_set_text(skip_label, "Skip");
     lv_obj_center(skip_label);
@@ -323,17 +393,17 @@ static void show_option_screen(const char *title_text, const char **options, int
     lv_obj_align(option_list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_style_bg_opa(option_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(option_list, 0, 0);
+    lv_obj_set_style_shadow_width(option_list, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(option_list, list_pad, 0);
     lv_obj_set_flex_flow(option_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(option_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    int item_w = USABLE_W - list_pad * 4 - 10;
+    int item_w = get_card_width(list_pad);
     
     for (int i = 0; i < count; i++) {
         lv_obj_t *btn = lv_btn_create(option_list);
         lv_obj_set_size(btn, item_w, btn_h);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), 0);
-        lv_obj_set_style_radius(btn, 4, 0);
+        style_wizard_btn(btn, lv_color_hex(0x333333), 4);
         
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, options[i]);
@@ -406,17 +476,17 @@ static void show_country_screen(void) {
     lv_obj_align(country_list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_style_bg_opa(country_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(country_list, 0, 0);
+    lv_obj_set_style_shadow_width(country_list, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(country_list, list_pad, 0);
     lv_obj_set_flex_flow(country_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(country_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    int item_w = USABLE_W - list_pad * 4 - 10;
+    int item_w = get_card_width(list_pad);
     
     for (int i = 0; i < (int)COUNTRY_COUNT; i++) {
         lv_obj_t *btn = lv_btn_create(country_list);
         lv_obj_set_size(btn, item_w, btn_h);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), 0);
-        lv_obj_set_style_radius(btn, 4, 0);
+        style_wizard_btn(btn, lv_color_hex(0x333333), 4);
 
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, wifi_countries[i].name);
@@ -460,29 +530,37 @@ static void show_complete_screen(void) {
     lv_obj_set_style_text_font(title, title_font, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
 
-    char summary[256];
+    char summary[320];
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     snprintf(summary, sizeof(summary),
-             "AP: %s | Region: %s\n"
+             "Device AP: %s\n"
+             "Home WiFi: %s | Region: %s\n"
              "Theme: %s | Menu: %s\n"
              "Terminal: %s\n"
-             "Animation: %s",
+             "Animation: %s\n"
+             "Epilepsy Warn: %s",
              temp_ap_ssid[0] ? temp_ap_ssid : "(default)",
+             temp_sta_ssid[0] ? temp_sta_ssid : "Skipped",
              wifi_countries[selected_country_index].name,
              theme_options[temp_theme],
              menu_layout_options[temp_menu_layout],
              terminal_color_options[temp_terminal_color],
-             idle_animation_options[temp_idle_animation]);
+             idle_animation_options[temp_idle_animation],
+             temp_epilepsy_warning ? "On" : "Off");
 #else
     snprintf(summary, sizeof(summary),
-             "AP: %s | Region: %s\n"
+             "Device AP: %s\n"
+             "Home WiFi: %s | Region: %s\n"
              "Theme: %s | Menu: %s\n"
-             "Terminal: %s",
+             "Terminal: %s\n"
+             "Epilepsy Warn: %s",
              temp_ap_ssid[0] ? temp_ap_ssid : "(default)",
+             temp_sta_ssid[0] ? temp_sta_ssid : "Skipped",
              wifi_countries[selected_country_index].name,
              theme_options[temp_theme],
              menu_layout_options[temp_menu_layout],
-             terminal_color_options[temp_terminal_color]);
+             terminal_color_options[temp_terminal_color],
+             temp_epilepsy_warning ? "On" : "Off");
 #endif
 
     lv_obj_t *info = lv_label_create(root);
@@ -504,7 +582,7 @@ static void show_complete_screen(void) {
     lv_obj_t *finish_btn = lv_btn_create(root);
     lv_obj_set_size(finish_btn, btn_w, btn_h);
     lv_obj_align(finish_btn, LV_ALIGN_BOTTOM_MID, 0, -btn_bottom);
-    lv_obj_set_style_bg_color(finish_btn, lv_color_hex(0xFFFFFF), 0);
+    style_wizard_btn(finish_btn, lv_color_hex(0xFFFFFF), 5);
     lv_obj_t *finish_label = lv_label_create(finish_btn);
     lv_label_set_text(finish_label, "Finish");
     lv_obj_set_style_text_color(finish_label, lv_color_hex(0x000000), 0);
@@ -547,6 +625,10 @@ static void finish_setup(void) {
     if (temp_ap_password[0]) {
         settings_set_ap_password(&G_Settings, temp_ap_password);
     }
+    if (temp_sta_ssid[0]) {
+        settings_set_sta_ssid(&G_Settings, temp_sta_ssid);
+        settings_set_sta_password(&G_Settings, temp_sta_password);
+    }
     settings_set_wifi_country(&G_Settings, (uint8_t)selected_country_index);
     apply_wifi_country(selected_country_index);
     settings_set_timezone_str(&G_Settings, timezone_values[temp_timezone]);
@@ -557,6 +639,10 @@ static void finish_setup(void) {
     settings_set_menu_theme(&G_Settings, temp_theme);
     settings_set_menu_layout(&G_Settings, temp_menu_layout);
     settings_set_terminal_text_color(&G_Settings, terminal_color_values[temp_terminal_color]);
+    settings_set_epilepsy_warning_enabled(&G_Settings, temp_epilepsy_warning == 1);
+    settings_set_font_size(&G_Settings, temp_font_size);
+    settings_set_high_contrast(&G_Settings, temp_high_contrast == 1);
+    settings_set_reduced_motion(&G_Settings, temp_reduced_motion == 1);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     settings_set_status_idle_animation(&G_Settings, (IdleAnimation)temp_idle_animation);
 #endif
@@ -573,6 +659,7 @@ static void skip_setup(void) {
     
     ESP_LOGI(TAG, "Skipping setup wizard");
     settings_set_setup_complete(&G_Settings, true);
+    settings_set_menu_layout(&G_Settings, 2);
     settings_save(&G_Settings);
     display_manager_switch_view(&main_menu_view);
 }
@@ -580,9 +667,9 @@ static void skip_setup(void) {
 static void setup_wizard_create(void) {
     ESP_LOGI(TAG, "Creating setup wizard, step=%d", current_step);
     
-    display_manager_fill_screen(lv_color_hex(0x121212));
-    
-    root = gui_screen_create_root(NULL, "Setup", lv_color_hex(0x121212), LV_OPA_TRANSP);
+    display_manager_fill_screen(lv_color_hex(GUI_DEFAULT_BG_COLOR));
+
+    root = gui_screen_create_root_no_bg(NULL, "Setup", lv_color_hex(GUI_DEFAULT_BG_COLOR), LV_OPA_TRANSP);
     setup_wizard_view.root = root;
 
     switch (current_step) {
@@ -590,29 +677,63 @@ static void setup_wizard_create(void) {
             show_welcome_screen();
             break;
         case SETUP_STEP_AP_SSID: {
-            const char *cur_ssid = settings_get_ap_ssid(&G_Settings);
-            if (cur_ssid && cur_ssid[0]) {
-                strncpy(temp_ap_ssid, cur_ssid, sizeof(temp_ap_ssid) - 1);
-                temp_ap_ssid[sizeof(temp_ap_ssid) - 1] = '\0';
-            } else {
-                temp_ap_ssid[0] = '\0';
+            if (temp_ap_ssid[0] == '\0') {
+                const char *cur_ssid = settings_get_ap_ssid(&G_Settings);
+                if (cur_ssid && cur_ssid[0]) {
+                    strncpy(temp_ap_ssid, cur_ssid, sizeof(temp_ap_ssid) - 1);
+                    temp_ap_ssid[sizeof(temp_ap_ssid) - 1] = '\0';
+                }
             }
-            keyboard_view_set_placeholder("AP SSID");
+            keyboard_view_set_placeholder("Device AP SSID");
+            keyboard_view_set_initial_text(temp_ap_ssid);
             keyboard_view_set_submit_callback(ap_ssid_callback);
             keyboard_view_set_return_view(&setup_wizard_view);
             display_manager_switch_view(&keyboard_view);
             return;
         }
         case SETUP_STEP_AP_PASSWORD: {
-            const char *cur_pass = settings_get_ap_password(&G_Settings);
-            if (cur_pass && cur_pass[0]) {
-                strncpy(temp_ap_password, cur_pass, sizeof(temp_ap_password) - 1);
-                temp_ap_password[sizeof(temp_ap_password) - 1] = '\0';
-            } else {
-                temp_ap_password[0] = '\0';
+            if (temp_ap_password[0] == '\0') {
+                const char *cur_pass = settings_get_ap_password(&G_Settings);
+                if (cur_pass && cur_pass[0]) {
+                    strncpy(temp_ap_password, cur_pass, sizeof(temp_ap_password) - 1);
+                    temp_ap_password[sizeof(temp_ap_password) - 1] = '\0';
+                }
             }
-            keyboard_view_set_placeholder("AP Password");
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_placeholder("Device AP Password");
+            keyboard_view_set_initial_text(temp_ap_password);
             keyboard_view_set_submit_callback(ap_password_callback);
+            keyboard_view_set_return_view(&setup_wizard_view);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETUP_STEP_STA_SSID: {
+            if (temp_sta_ssid[0] == '\0') {
+                const char *cur_ssid = settings_get_sta_ssid(&G_Settings);
+                if (cur_ssid && cur_ssid[0]) {
+                    strncpy(temp_sta_ssid, cur_ssid, sizeof(temp_sta_ssid) - 1);
+                    temp_sta_ssid[sizeof(temp_sta_ssid) - 1] = '\0';
+                }
+            }
+            keyboard_view_set_placeholder("Home WiFi SSID (blank skips)");
+            keyboard_view_set_initial_text(temp_sta_ssid);
+            keyboard_view_set_submit_callback(sta_ssid_callback);
+            keyboard_view_set_return_view(&setup_wizard_view);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETUP_STEP_STA_PASSWORD: {
+            if (temp_sta_password[0] == '\0') {
+                const char *cur_pass = settings_get_sta_password(&G_Settings);
+                if (cur_pass && cur_pass[0]) {
+                    strncpy(temp_sta_password, cur_pass, sizeof(temp_sta_password) - 1);
+                    temp_sta_password[sizeof(temp_sta_password) - 1] = '\0';
+                }
+            }
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_placeholder("Home WiFi Password");
+            keyboard_view_set_initial_text(temp_sta_password);
+            keyboard_view_set_submit_callback(sta_password_callback);
             keyboard_view_set_return_view(&setup_wizard_view);
             display_manager_switch_view(&keyboard_view);
             return;
@@ -664,6 +785,16 @@ static void setup_wizard_create(void) {
             show_option_screen("Terminal Color", terminal_color_options, TERMINAL_COLOR_COUNT, temp_terminal_color);
             break;
         }
+        case SETUP_STEP_EPILEPSY_WARNING:
+            temp_epilepsy_warning = settings_get_epilepsy_warning_enabled(&G_Settings) ? 1 : 0;
+            show_option_screen("Epilepsy Warning", epilepsy_warning_options, EPILEPSY_WARNING_COUNT, temp_epilepsy_warning);
+            break;
+        case SETUP_STEP_ACCESSIBILITY:
+            temp_font_size = settings_get_font_size(&G_Settings);
+            temp_high_contrast = settings_get_high_contrast(&G_Settings);
+            temp_reduced_motion = settings_get_reduced_motion(&G_Settings);
+            show_option_screen("Accessibility", font_size_options, FONT_SIZE_COUNT, temp_font_size);
+            break;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         case SETUP_STEP_IDLE_ANIMATION:
             temp_idle_animation = (uint8_t)settings_get_status_idle_animation(&G_Settings);
@@ -792,6 +923,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -812,16 +945,22 @@ static void setup_wizard_input_callback(InputEvent *event) {
                                     next_step = SETUP_STEP_TERMINAL_COLOR;
                                     prev_step = SETUP_STEP_THEME;
                                 } else if (current_step == SETUP_STEP_TERMINAL_COLOR) {
+                                    next_step = SETUP_STEP_EPILEPSY_WARNING;
+                                    prev_step = SETUP_STEP_MENU_LAYOUT;
+                                } else if (current_step == SETUP_STEP_EPILEPSY_WARNING) {
+                                    next_step = SETUP_STEP_ACCESSIBILITY;
+                                    prev_step = SETUP_STEP_TERMINAL_COLOR;
+                                } else if (current_step == SETUP_STEP_ACCESSIBILITY) {
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                     next_step = SETUP_STEP_IDLE_ANIMATION;
 #else
                                     next_step = SETUP_STEP_COMPLETE;
 #endif
-                                    prev_step = SETUP_STEP_MENU_LAYOUT;
+                                    prev_step = SETUP_STEP_EPILEPSY_WARNING;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                                 } else if (current_step == SETUP_STEP_IDLE_ANIMATION) {
                                     next_step = SETUP_STEP_COMPLETE;
-                                    prev_step = SETUP_STEP_TERMINAL_COLOR;
+                                    prev_step = SETUP_STEP_ACCESSIBILITY;
 #endif
                                 }
                                 
@@ -909,7 +1048,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 current_step = SETUP_STEP_TIMEZONE;
                 display_manager_switch_view(&setup_wizard_view);
             } else if (idx == 0) { // Left/Back
-                current_step = SETUP_STEP_WELCOME;
+                current_step = SETUP_STEP_STA_SSID;
                 display_manager_switch_view(&setup_wizard_view);
             }
         } else if (event->type == INPUT_TYPE_KEYBOARD) {
@@ -929,7 +1068,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 current_step = SETUP_STEP_TIMEZONE;
                 display_manager_switch_view(&setup_wizard_view);
             } else if (kv == LV_KEY_ESC || kv == 29 || kv == '`') { // esc
-                current_step = SETUP_STEP_WELCOME;
+                current_step = SETUP_STEP_STA_SSID;
                 display_manager_switch_view(&setup_wizard_view);
             }
         }
@@ -948,7 +1087,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
         }
 #endif
     } else if ((current_step == SETUP_STEP_TIMEZONE || current_step == SETUP_STEP_DISPLAY_TIMEOUT || current_step == SETUP_STEP_THEME || current_step == SETUP_STEP_MENU_LAYOUT ||
-                current_step == SETUP_STEP_TERMINAL_COLOR
+                current_step == SETUP_STEP_TERMINAL_COLOR || current_step == SETUP_STEP_EPILEPSY_WARNING || current_step == SETUP_STEP_ACCESSIBILITY
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 || current_step == SETUP_STEP_IDLE_ANIMATION
 #endif
@@ -975,18 +1114,26 @@ static void setup_wizard_input_callback(InputEvent *event) {
             prev_step = SETUP_STEP_THEME;
         } else if (current_step == SETUP_STEP_TERMINAL_COLOR) {
             count = TERMINAL_COLOR_COUNT;
+            next_step = SETUP_STEP_EPILEPSY_WARNING;
+            prev_step = SETUP_STEP_MENU_LAYOUT;
+        } else if (current_step == SETUP_STEP_EPILEPSY_WARNING) {
+            count = EPILEPSY_WARNING_COUNT;
+            next_step = SETUP_STEP_ACCESSIBILITY;
+            prev_step = SETUP_STEP_TERMINAL_COLOR;
+        } else if (current_step == SETUP_STEP_ACCESSIBILITY) {
+            count = FONT_SIZE_COUNT;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             next_step = SETUP_STEP_IDLE_ANIMATION;
 #else
             next_step = SETUP_STEP_COMPLETE;
 #endif
-            prev_step = SETUP_STEP_MENU_LAYOUT;
+            prev_step = SETUP_STEP_EPILEPSY_WARNING;
         }
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         else if (current_step == SETUP_STEP_IDLE_ANIMATION) {
             count = IDLE_ANIMATION_COUNT;
             next_step = SETUP_STEP_COMPLETE;
-            prev_step = SETUP_STEP_TERMINAL_COLOR;
+            prev_step = SETUP_STEP_ACCESSIBILITY;
         }
 #endif
 
@@ -1004,6 +1151,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1027,6 +1176,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1050,6 +1201,8 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 else if (current_step == SETUP_STEP_THEME) temp_theme = option_cursor;
                 else if (current_step == SETUP_STEP_MENU_LAYOUT) temp_menu_layout = option_cursor;
                 else if (current_step == SETUP_STEP_TERMINAL_COLOR) temp_terminal_color = option_cursor;
+                else if (current_step == SETUP_STEP_EPILEPSY_WARNING) temp_epilepsy_warning = option_cursor;
+                else if (current_step == SETUP_STEP_ACCESSIBILITY) temp_font_size = option_cursor;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
@@ -1085,11 +1238,17 @@ void setup_wizard_reset_and_open(void) {
     selected_country_index = 0;
     temp_ap_ssid[0] = '\0';
     temp_ap_password[0] = '\0';
+    temp_sta_ssid[0] = '\0';
+    temp_sta_password[0] = '\0';
     temp_timezone = 0;
     temp_display_timeout = 0;
     temp_theme = 0;
     temp_menu_layout = 0;
     temp_terminal_color = 0;
+    temp_epilepsy_warning = 1;
+    temp_font_size = 1;
+    temp_reduced_motion = 0;
+    temp_high_contrast = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     temp_idle_animation = 0;
 #endif

@@ -54,6 +54,27 @@ uint8_t wifi_channels_build_from_ap_results(uint8_t *channels, uint8_t max_count
 bool wifi_channels_is_5ghz(uint8_t channel);
 
 /**
+ * @brief Check if a channel is in a DFS range.
+ *
+ * DFS channels can be unreliable for rapid passive monitor hopping because
+ * the driver may reject repeated channel changes while parked on them.
+ *
+ * @param channel Channel number to check
+ * @return true if the channel is DFS, false otherwise
+ */
+bool wifi_channels_is_dfs(uint8_t channel);
+
+/**
+ * @brief Check if a channel is safe for realtime monitor hopping.
+ *
+ * Allows 2.4GHz channels and non-DFS 5GHz channels supported by the target.
+ *
+ * @param channel Channel number to check
+ * @return true if suitable for realtime monitor hopping
+ */
+bool wifi_channels_is_safe_monitor_channel(uint8_t channel);
+
+/**
  * @brief Get the band name for a channel
  * 
  * @param channel Channel number

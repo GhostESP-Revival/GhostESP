@@ -10,6 +10,7 @@
 //
 #include "managers/aerial_detector_manager.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "core/glog.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -825,10 +826,10 @@ static AerialDevice* find_or_create_device(const uint8_t *mac) {
     
     AerialDevice *device = &devices[device_count++];
     memset(device, 0, sizeof(AerialDevice));
-    strcpy(device->mac, mac_str);
-    strcpy(device->device_id, "Unknown");
-    strcpy(device->operator_id, "N/A");
-    strcpy(device->description, "N/A");
+    strlcpy(device->mac, mac_str, sizeof(device->mac));
+    strlcpy(device->device_id, "Unknown", sizeof(device->device_id));
+    strlcpy(device->operator_id, "N/A", sizeof(device->operator_id));
+    strlcpy(device->description, "N/A", sizeof(device->description));
     device->type = AERIAL_TYPE_UNKNOWN;
     device->status = AERIAL_STATUS_UNKNOWN;
     device->altitude = -1000.0f;
@@ -1015,6 +1016,7 @@ static void notify_callback(AerialDevice *device) {
     if (user_callback) {
         user_callback(device, user_callback_data);
     }
+    ghostchi_manager_add_xp(8);
     
     // emit tracker-style update for the tracked device
     if (device && device->is_tracked) {

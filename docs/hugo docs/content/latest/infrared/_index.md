@@ -2,7 +2,7 @@
 title: "Infrared"
 description: "Overview of GhostESP's infrared capabilities"
 keywords: ["infrared", "IR", "remote control", "signal learning", "NEC", "Kaseikyo"]
-weight: 30
+weight: 320
 aliases:
   - "/infrared/"
 ---

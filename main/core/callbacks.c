@@ -5,12 +5,14 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
 #include "scans/wifi/wifi_channels.h"
+#include "managers/settings_manager.h"
 #include <ctype.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
@@ -23,6 +25,7 @@
 #include <esp_timer.h>  // For esp_timer_get_time
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "gui/toast.h"
 
 // prototypes for static inline helpers
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
@@ -112,6 +115,7 @@ static StaticTask_t *peer_gps_stream_tcb = NULL;
 static uint32_t ble_wd_seen_hashes[BLE_WD_SEEN_SIZE];
 static uint16_t ble_wd_seen_idx = 0;
 static uint32_t ble_wd_unique_count = 0;
+static portMUX_TYPE ble_wd_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static uint32_t ble_wd_hash_mac(const uint8_t *addr) {
     uint32_t hash = 2166136261u;
@@ -123,13 +127,19 @@ static uint32_t ble_wd_hash_mac(const uint8_t *addr) {
 }
 
 uint32_t ble_wardriving_get_unique_device_count(void) {
-    return ble_wd_unique_count;
+    uint32_t count;
+    portENTER_CRITICAL(&ble_wd_mux);
+    count = ble_wd_unique_count;
+    portEXIT_CRITICAL(&ble_wd_mux);
+    return count;
 }
 
 void ble_wardriving_reset_unique_device_count(void) {
+    portENTER_CRITICAL(&ble_wd_mux);
     memset(ble_wd_seen_hashes, 0, sizeof(ble_wd_seen_hashes));
     ble_wd_seen_idx = 0;
     ble_wd_unique_count = 0;
+    portEXIT_CRITICAL(&ble_wd_mux);
 }
 #endif
 
@@ -140,6 +150,7 @@ static void stop_wardrive_heartbeat(void);
 static uint8_t wardrive_channels[WIFI_CHANNELS_MAX];
 static uint8_t wardrive_channel_count = 0;
 static uint8_t wardrive_channel_idx = 0;
+static portMUX_TYPE wardrive_ch_mux = portMUX_INITIALIZER_UNLOCKED;
 
 typedef enum {
     WARDRIVE_ROLE_PRIMARY = 0,
@@ -169,6 +180,8 @@ static wardrive_helper_dedupe_t wardrive_helper_dedupe[WARDRIVE_HELPER_DEDUPE_SI
 static uint8_t wardrive_helper_dedupe_idx = 0;
 static uint8_t wardrive_forced_helper_channels[WIFI_CHANNELS_MAX] = {0};
 static uint8_t wardrive_forced_helper_channel_count = 0;
+static uint16_t wardrive_helper_hop_override_ms = 0; // 0 = use local setting
+static bool wardrive_weighted_5g_override = false;    // true if primary told us to use weighted
 
 static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
 static void gps_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
@@ -583,7 +596,14 @@ static void peer_gps_stream_task(void *arg) {
 }
 
 static uint32_t wardrive_get_hop_interval_ms(void) {
-    uint32_t interval_ms = CHANNEL_HOP_INTERVAL_MS;
+    uint32_t interval_ms;
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        interval_ms = wardrive_helper_hop_override_ms > 0
+            ? wardrive_helper_hop_override_ms
+            : settings_get_wd_hop_helper_ms(&G_Settings);
+    } else {
+        interval_ms = settings_get_wd_hop_primary_ms(&G_Settings);
+    }
     if (interval_ms < 40) {
         interval_ms = 40;
     }
@@ -627,6 +647,10 @@ static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels) {
     return full_count;
 }
 
+static bool wardrive_is_common_5g_channel(uint8_t ch) {
+    return (ch >= 36 && ch <= 48) || (ch >= 149 && ch <= 165);
+}
+
 static void wardrive_build_channel_list(void) {
     uint8_t full_channels[WIFI_CHANNELS_MAX] = {0};
     uint8_t channels_24[WIFI_CHANNELS_MAX] = {0};
@@ -649,8 +673,16 @@ static void wardrive_build_channel_list(void) {
         wardrive_channel_count = full_count;
     } else if (wardrive_role == WARDRIVE_ROLE_PRIMARY) {
         if (channels_5_count > 0 && channels_24_count > 0) {
+            bool use_weighted = settings_get_wd_weighted_5g(&G_Settings);
             memcpy(wardrive_channels, channels_5, channels_5_count);
             wardrive_channel_count = channels_5_count;
+            if (use_weighted) {
+                for (uint8_t i = 0; i < channels_5_count && wardrive_channel_count < WIFI_CHANNELS_MAX; i++) {
+                    if (wardrive_is_common_5g_channel(channels_5[i])) {
+                        wardrive_channels[wardrive_channel_count++] = channels_5[i];
+                    }
+                }
+            }
         } else {
             for (uint8_t i = 0; i < full_count && wardrive_channel_count < WIFI_CHANNELS_MAX; i += 2) {
                 wardrive_channels[wardrive_channel_count++] = full_channels[i];
@@ -668,6 +700,14 @@ static void wardrive_build_channel_list(void) {
                 wardrive_channels[wardrive_channel_count++] = full_channels[i];
             }
         }
+        if (wardrive_weighted_5g_override && wardrive_channel_count > 0) {
+            uint8_t base_count = wardrive_channel_count;
+            for (uint8_t i = 0; i < base_count && wardrive_channel_count < WIFI_CHANNELS_MAX; i++) {
+                if (wardrive_is_common_5g_channel(wardrive_channels[i])) {
+                    wardrive_channels[wardrive_channel_count++] = wardrive_channels[i];
+                }
+            }
+        }
     }
 
     if (wardrive_channel_count == 0) {
@@ -676,14 +716,17 @@ static void wardrive_build_channel_list(void) {
     }
 
     ESP_LOGI(TAG,
-             "Wardrive: role=%s channels=%d/%d assist=%s bands(2.4=%d,5=%d) forced_helper=%d",
+             "Wardrive: role=%s channels=%d/%d assist=%s bands(2.4=%d,5=%d) forced_helper=%d hop=%lums weighted=%s",
              wardrive_role == WARDRIVE_ROLE_PRIMARY ? "primary" : "helper",
              wardrive_channel_count,
              full_count,
              wardrive_peer_assist_active ? "on" : "off",
              channels_24_count,
              channels_5_count,
-             wardrive_forced_helper_channel_count);
+             wardrive_forced_helper_channel_count,
+             (unsigned long)wardrive_get_hop_interval_ms(),
+             (wardrive_role == WARDRIVE_ROLE_PRIMARY && settings_get_wd_weighted_5g(&G_Settings)) ||
+             (wardrive_role == WARDRIVE_ROLE_HELPER && wardrive_weighted_5g_override) ? "on" : "off");
 }
 
 static uint8_t wardrive_parse_channel_csv(const char *csv, uint8_t *out, uint8_t out_max) {
@@ -757,6 +800,7 @@ static hs_entry_t hs_table[HS_TABLE_MAX];
 static uint8_t hs_count_local = 0;
 static uint8_t hs_insert_idx_local = 0;
 static uint32_t hs_found_count = 0;
+static portMUX_TYPE hs_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_pcap_enabled = true;
 
 static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
@@ -764,14 +808,20 @@ static inline bool mac_equal(const uint8_t *a, const uint8_t *b) {
 }
 
 uint32_t wifi_callbacks_get_handshake_count(void) {
-    return hs_found_count;
+    uint32_t count;
+    portENTER_CRITICAL(&hs_mux);
+    count = hs_found_count;
+    portEXIT_CRITICAL(&hs_mux);
+    return count;
 }
 
 void wifi_callbacks_reset_handshake_tracking(void) {
+    portENTER_CRITICAL(&hs_mux);
     memset(hs_table, 0, sizeof(hs_table));
     hs_count_local = 0;
     hs_insert_idx_local = 0;
     hs_found_count = 0;
+    portEXIT_CRITICAL(&hs_mux);
 }
 
 void wifi_callbacks_set_pcap_enabled(bool enabled) {
@@ -787,20 +837,31 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
                                          uint64_t replay,
                                          bool from_ap,
                                          uint8_t msg_type) {
+    bool log_handshake = false;
+    char log_ap_str[18];
+    uint8_t log_ap_msg = 0;
+    uint8_t log_sta_msg = 0;
+
+    portENTER_CRITICAL(&hs_mux);
     for (uint8_t i = 0; i < hs_count_local; i++) {
         hs_entry_t *e = &hs_table[i];
         if (mac_equal(e->ap, ap) && mac_equal(e->sta, sta) && e->replay == replay) {
             if (from_ap) e->ap_msg = msg_type; else e->sta_msg = msg_type;
             if (e->ap_msg && e->sta_msg) {
                 hs_found_count++;
-                char ap_str[18];
-                snprintf(ap_str, sizeof(ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                snprintf(log_ap_str, sizeof(log_ap_str), "%02x:%02x:%02x:%02x:%02x:%02x",
                          e->ap[0], e->ap[1], e->ap[2], e->ap[3], e->ap[4], e->ap[5]);
-                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
-                     ap_str, msg_name(e->ap_msg), msg_name(e->sta_msg));
+                log_ap_msg = e->ap_msg;
+                log_sta_msg = e->sta_msg;
+                log_handshake = true;
                 // reset to avoid duplicate notifications for same replay
                 e->ap_msg = 0;
                 e->sta_msg = 0;
+            }
+            portEXIT_CRITICAL(&hs_mux);
+            if (log_handshake) {
+                glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
+                     log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
             }
             return;
         }
@@ -818,6 +879,7 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
     ne->replay = replay;
     ne->ap_msg = from_ap ? msg_type : 0;
     ne->sta_msg = from_ap ? 0 : msg_type;
+    portEXIT_CRITICAL(&hs_mux);
 }
 
 typedef struct {
@@ -929,7 +991,10 @@ static bool pcap_pool_init(void) {
 
     size_t slots = PCAP_POOL_SLOTS_DEFAULT;
     while (slots >= PCAP_POOL_SLOTS_MIN) {
-        pcap_pool_slot_t *pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_8BIT);
+        pcap_pool_slot_t *pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!pool) {
+            pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_8BIT);
+        }
         if (pool != NULL) {
             s_pcap_pool = pool;
             s_pcap_pool_slots = slots;
@@ -1266,8 +1331,10 @@ static void channel_hop_timer_callback(void *arg) {
     if (!pineap_detection_active)
         return;
 
+    portENTER_CRITICAL(&wardrive_ch_mux);
     wardrive_channel_idx = (wardrive_channel_idx + 1) % wardrive_channel_count;
     current_channel = wardrive_channels[wardrive_channel_idx];
+    portEXIT_CRITICAL(&wardrive_ch_mux);
     esp_wifi_set_channel(current_channel, WIFI_SECOND_CHAN_NONE);
 }
 
@@ -1423,6 +1490,7 @@ static esp_err_t start_wardrive_channel_hopping(void) {
     err = esp_timer_start_periodic(wardrive_hop_timer, (uint64_t)interval_ms * 1000ULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start wardrive hop timer: %s", esp_err_to_name(err));
+        toast_show("Wardrive hop failed", TOAST_ERROR);
         return err;
     }
     ESP_LOGI(TAG,
@@ -2046,6 +2114,25 @@ bool wardriving_set_helper_channels_from_csv(const char *csv) {
     return true;
 }
 
+void wardriving_set_helper_hop_ms(uint16_t ms) {
+    wardrive_helper_hop_override_ms = ms;
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        wardrive_apply_hop_interval();
+    }
+}
+
+void wardriving_set_helper_weighted_5g(bool enabled) {
+    wardrive_weighted_5g_override = enabled;
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        wardrive_build_channel_list();
+        wardrive_channel_idx = 0;
+        if (wardrive_channel_count > 0) {
+            wardrive_channel = wardrive_channels[0];
+            (void)esp_wifi_set_channel(wardrive_channel, WIFI_SECOND_CHAN_NONE);
+        }
+    }
+}
+
 void start_wardriving(void) {
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
     wardrive_forced_helper_channel_count = 0;
@@ -2070,6 +2157,8 @@ void stop_wardriving(void) {
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
     wardrive_peer_assist_active = false;
     wardrive_forced_helper_channel_count = 0;
+    wardrive_helper_hop_override_ms = 0;
+    wardrive_weighted_5g_override = false;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
 }
@@ -2313,6 +2402,7 @@ static void trim_trailing(char *str) {
 
 void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,
                        void *event_data) {
+    static bool gps_fix_xp_awarded = false;
     switch (event_id) {
     case GPS_UPDATE:
         gps = (gps_t *)event_data;
@@ -2322,12 +2412,17 @@ void gps_event_handler(void *event_handler_arg, esp_event_base_t event_base, int
         
         // Add status display messages for GPS fix status
         if (gps->valid && gps->fix >= GPS_FIX_GPS && gps->fix_mode >= GPS_MODE_2D && gps->sats_in_use > 0) {
+            if (!gps_fix_xp_awarded) {
+                ghostchi_manager_add_xp(15);
+                gps_fix_xp_awarded = true;
+            }
             if (gps->fix_mode == GPS_MODE_3D) {
                 status_display_show_status("GPS 3D Lock");
             } else {
                 status_display_show_status("GPS 2D Lock");
             }
         } else if (gps->valid && gps->fix == GPS_FIX_INVALID) {
+            gps_fix_xp_awarded = false;
             status_display_show_status("GPS No Fix");
         }
         break;
@@ -2968,6 +3063,7 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
 
     uint32_t mac_hash = ble_wd_hash_mac(event->disc.addr.val);
     bool already_seen = false;
+    portENTER_CRITICAL(&ble_wd_mux);
     for (int i = 0; i < BLE_WD_SEEN_SIZE; i++) {
         if (ble_wd_seen_hashes[i] == mac_hash) { already_seen = true; break; }
     }
@@ -2976,6 +3072,7 @@ void ble_wardriving_callback(struct ble_gap_event *event, void *arg) {
         ble_wd_seen_idx = (ble_wd_seen_idx + 1) % BLE_WD_SEEN_SIZE;
         ble_wd_unique_count++;
     }
+    portEXIT_CRITICAL(&ble_wd_mux);
 
     wardriving_data_t wardriving_data = {0};
     wardriving_data.ble_data.is_ble_device = true;

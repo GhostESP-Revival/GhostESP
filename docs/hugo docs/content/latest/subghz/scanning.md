@@ -16,8 +16,9 @@ Monitor radio activity across 64 channels in real-time to detect signals on supp
 ### On-device UI
 
 1. Open **Menu → SubGHz → Capture**.
-2. The device will start scanning the current frequency band.
-3. Signal strength is displayed across 64 channels.
+2. Select **Start** from the popup menu to begin scanning.
+3. The device will scan the current frequency band.
+4. Signal strength is displayed across 64 channels.
 4. Use **Cycle Frequency** to switch between bands (315, 390, 433.92, 868.35, 915 MHz).
 5. Press **Back** to stop scanning.
 
@@ -61,7 +62,7 @@ The scanner displays signal strength across 64 channels within the selected band
 
 ## Notes
 
-- SubGHz scanning is not available on builds without CC1101 hardware (CONFIG_HAS_SUBGHZ or CONFIG_HAS_SUBGHZ_REMOTE must be set).
+- SubGHz scanning requires CC1101 hardware with `CONFIG_HAS_SUBGHZ` enabled. `CONFIG_HAS_SUBGHZ_REMOTE` only enables a display-only remote UI that routes commands to a peer — it does not enable scanning itself.
 - Scanning is mutually exclusive with other SubGHz operations; starting a new scan will stop any ongoing capture or transmission.
 - Signal strength is displayed as relative levels; higher values indicate stronger signals.
 - Some devices transmit intermittently; leave the scanner running for several minutes to detect periodic signals.

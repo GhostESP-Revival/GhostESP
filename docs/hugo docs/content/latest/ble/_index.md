@@ -2,7 +2,7 @@
 title: "Bluetooth LE"
 description: "Overview of GhostESP's BLE capabilities"
 keywords: ["Bluetooth", "BLE", "scanning", "attacks", "wireless security"]
-weight: 25
+weight: 110
 aliases:
   - "/ble/"
 ---

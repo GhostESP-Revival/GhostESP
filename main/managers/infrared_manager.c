@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/sd_card_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -21,6 +22,7 @@
 #include <strings.h>
 #include "managers/infrared_timings.h"
 #include "managers/infrared_protocols.h"
+#include "gui/toast.h"
 #include "soc/soc_caps.h"
 #include "freertos/queue.h"
 #include "esp_timer.h"
@@ -712,6 +714,9 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
 
     rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
     ESP_LOGI(TAG_IR_MANAGER, "ir signal transmission complete (name: %s, status: %s)", signal->name, ok ? "OK" : "FAIL");
+    if (!ok) {
+        toast_show("IR send failed", TOAST_ERROR);
+    }
     return ok;
 }
 
@@ -724,6 +729,7 @@ bool infrared_manager_bruteforce(const char *path, uint32_t delay_ms) {
         ESP_LOGE(TAG_IR_MANAGER, "failed to read IR list for brute force from file: %s", path);
         return false;
     }
+    ghostchi_manager_add_xp(1);
     for (size_t i = 0; i < count; i++) {
         infrared_manager_transmit(&signals[i]);
         vTaskDelay(pdMS_TO_TICKS(delay_ms));

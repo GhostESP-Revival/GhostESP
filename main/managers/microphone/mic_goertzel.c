@@ -9,6 +9,7 @@
 
 #include "managers/microphone/mic_goertzel.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -124,19 +125,28 @@ esp_err_t goertzel_init(uint32_t sample_rate) {
         b->ring_size = band_block_sizes[i];
         b->inv_block_size_half = 2.0f / (float)b->ring_size;
         
-        b->sample_ring = (int32_t *)calloc(b->ring_size, sizeof(int32_t));
+        // Allocate ring buffers from PSRAM to save internal RAM
+        b->sample_ring = (int32_t *)heap_caps_calloc(b->ring_size, sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!b->sample_ring) {
-            ESP_LOGE(TAG, "Failed to allocate ring buffer");
-            return ESP_ERR_NO_MEM;
+            ESP_LOGW(TAG, "PSRAM alloc failed for ring buffer, falling back to internal");
+            b->sample_ring = (int32_t *)calloc(b->ring_size, sizeof(int32_t));
+            if (!b->sample_ring) {
+                ESP_LOGE(TAG, "Failed to allocate ring buffer");
+                return ESP_ERR_NO_MEM;
+            }
         }
 
         // Hanning window: w[n] = 0.5*(1 - cos(2π*n/(N-1)))
         // Reduces sidelobe energy from -13 dB (rectangular) to ~-31 dB,
         // eliminating cross-band leakage from loud off-frequency tones.
-        b->window = (float *)malloc(b->ring_size * sizeof(float));
+        b->window = (float *)heap_caps_malloc(b->ring_size * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!b->window) {
-            ESP_LOGE(TAG, "Failed to allocate window buffer");
-            return ESP_ERR_NO_MEM;
+            ESP_LOGW(TAG, "PSRAM alloc failed for window buffer, falling back to internal");
+            b->window = (float *)malloc(b->ring_size * sizeof(float));
+            if (!b->window) {
+                ESP_LOGE(TAG, "Failed to allocate window buffer");
+                return ESP_ERR_NO_MEM;
+            }
         }
         float win_sum = 0.0f;
         for (int n = 0; n < b->ring_size; n++) {

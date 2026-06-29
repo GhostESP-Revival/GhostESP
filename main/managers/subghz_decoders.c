@@ -2367,6 +2367,13 @@ int32_t subghz_protocol_te(const char *protocol) {
     return 0;
 }
 
+int subghz_normalize_decoded_bits(const char *protocol, int bits) {
+    if (protocol && strcmp(protocol, "KeeLoq") == 0 && bits >= 64) {
+        return 64;
+    }
+    return bits;
+}
+
 bool subghz_decode_signal(const int32_t *dur, size_t count, subghz_decoded_signal_t *result) {
     if (!dur || count < 4 || !result) return false;
 

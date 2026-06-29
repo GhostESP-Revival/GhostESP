@@ -65,6 +65,26 @@ esp_err_t uart_share_ensure_installed(uart_port_t uart_num, int rx_buffer_size, 
     return ESP_OK;
 }
 
+esp_err_t uart_share_uninstall(uart_port_t uart_num) {
+    uart_share_state_t* st = uart_share_state_get(uart_num);
+    if (!st || !st->mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xSemaphoreTake(st->mutex, portMAX_DELAY);
+
+    esp_err_t err = ESP_OK;
+    if (st->installed) {
+        err = uart_driver_delete(uart_num);
+        st->installed = false;
+        st->owner = UART_SHARE_OWNER_NONE;
+        st->event_queue = NULL;
+    }
+
+    xSemaphoreGive(st->mutex);
+    return err;
+}
+
 esp_err_t uart_share_acquire(uart_port_t uart_num, uart_share_owner_t owner, TickType_t timeout) {
     uart_share_state_t* st = uart_share_state_get(uart_num);
     if (!st || !st->mutex) {

@@ -40,6 +40,8 @@ Record Wi-Fi network traffic and save it to the SD card. You can then review the
 - **-pwn**: Records frames from `Pwnagotchi` devices.
 - **-wps**: Captures Wi-Fi Protected Setup traffic to confirm whether a router exposes WPS enrolment.
 - **-802154** (ESP32-C5/C6 only): Records IEEE 802.15.4 frames when you supply `capture -802154`.
+- **-ble**: Records BLE packets for offline analysis.
+- **-skimmer**: Detects payment terminal Bluetooth skimmers and captures their BLE traffic.
 
 ## Verify
 - Confirm the SD card contains a `.pcap` file.

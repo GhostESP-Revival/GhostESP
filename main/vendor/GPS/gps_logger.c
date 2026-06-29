@@ -6,6 +6,7 @@
 #include "managers/gps_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/wigle_manager.h"
+#include "gui/toast.h"
 #include "managers/views/terminal_screen.h"
 #include "sys/time.h"
 #include "vendor/GPS/MicroNMEA.h"
@@ -86,6 +87,7 @@ static TaskHandle_t csv_flush_task = NULL;
 static volatile bool csv_flush_requested = false;
 static volatile bool csv_closing = false;
 static bool csv_header_pending_uart = false;
+static char *csv_data_line = NULL;
 
 static void csv_request_flush(void) {
     csv_flush_requested = true;
@@ -627,11 +629,13 @@ esp_err_t csv_file_open(const char *base_file_name) {
     char file_name[GPS_MAX_FILE_NAME_LENGTH];
 
     if (!csv_buffer) {
-        csv_buffer = (char *)calloc(1, GPS_BUFFER_SIZE);
+        csv_buffer = (char *)heap_caps_calloc(1, GPS_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!csv_buffer) csv_buffer = (char *)calloc(1, GPS_BUFFER_SIZE);
         if (!csv_buffer) return ESP_ERR_NO_MEM;
     }
     if (!csv_pre_header) {
-        csv_pre_header = (char *)calloc(1, CSV_PRE_HEADER_SIZE);
+        csv_pre_header = (char *)heap_caps_calloc(1, CSV_PRE_HEADER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!csv_pre_header) csv_pre_header = (char *)calloc(1, CSV_PRE_HEADER_SIZE);
         if (!csv_pre_header) { free(csv_buffer); csv_buffer = NULL; return ESP_ERR_NO_MEM; }
     }
     buffer_offset = 0;
@@ -750,10 +754,18 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
              time_to_use.minute,
              time_to_use.second);
 
-    static char data_line[CSV_GPS_BUFFER_SIZE];
     int len;
 
     if (csv_mutex) xSemaphoreTake(csv_mutex, portMAX_DELAY);
+
+    if (!csv_data_line) {
+        csv_data_line = (char *)malloc(CSV_GPS_BUFFER_SIZE);
+        if (!csv_data_line) {
+            if (csv_mutex) xSemaphoreGive(csv_mutex);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    char *data_line = csv_data_line;
 
     if (data->ble_data.is_ble_device) {
         uint32_t hash = wd_hash_mac(data->ble_data.ble_mac);
@@ -1036,6 +1048,7 @@ void csv_file_close() {
                 wigle_queue_add(csv_file_path);
             }
         }
+        toast_show("GPS log saved", TOAST_SUCCESS);
     }
     buffer_offset = 0;
     csv_header_pending_uart = false;
@@ -1145,8 +1158,8 @@ static void format_coordinates(double lat, double lon, char *lat_str, char *lon_
     int lon_deg = (int)fabs(lon);
     double lon_min = (fabs(lon) - lon_deg) * 60;
 
-    sprintf(lat_str, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
-    sprintf(lon_str, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
+    snprintf(lat_str, 20, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
+    snprintf(lon_str, 20, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
 }
 
 float get_accuracy_percentage(float hdop) {
@@ -1292,6 +1305,7 @@ void csv_file_close_fast() {
                 wigle_queue_add(csv_file_path);
             }
         }
+        toast_show("GPS log saved", TOAST_SUCCESS);
     }
     if (csv_mutex != NULL) {
         vSemaphoreDelete(csv_mutex);

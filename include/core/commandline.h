@@ -10,7 +10,7 @@
 typedef void (*CommandFunction)(int argc, char **argv);
 
 typedef struct Command {
-  char *name;
+  const char *name;
   CommandFunction function;
   struct Command *next;
 } Command;
@@ -25,9 +25,6 @@ void handle_unknown_command(const char *cmd);
 extern TaskHandle_t VisualizerHandle;
 
 void register_commands();
-
-// Settings command handler
-void handle_settings_cmd(int argc, char **argv);
 
 // Stop command handler
 void handle_stop_flipper(int argc, char **argv);
