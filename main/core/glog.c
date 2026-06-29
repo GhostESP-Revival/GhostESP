@@ -18,6 +18,8 @@ static SemaphoreHandle_t s_glog_mutex;
 static volatile int s_glog_defer = 0;
 static char *s_glog_q[GLOG_DEFER_MAX];
 static uint8_t s_q_head = 0, s_q_tail = 0, s_q_count = 0;
+static glog_capture_fn_t s_glog_capture_fn;
+static void *s_glog_capture_user;
 
 static inline void glog_lock(void) {
     if (!s_glog_mutex) {
@@ -103,6 +105,17 @@ void glog(const char *fmt, ...) {
     glog_unlock();
 
     glog_emit(buf);
+
+    glog_capture_fn_t cb = s_glog_capture_fn;
+    void *cu = s_glog_capture_user;
+    if (cb) cb(buf, cu);
+}
+
+void glog_set_capture(glog_capture_fn_t fn, void *user) {
+    glog_lock();
+    s_glog_capture_fn = fn;
+    s_glog_capture_user = user;
+    glog_unlock();
 }
 
 void glog_set_defer(int on) {

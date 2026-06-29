@@ -17,6 +17,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/settings_manager.h"
@@ -396,6 +397,7 @@ void beacon_spam_start(const char *ssid) {
             return;
         }
         rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);
+        ghostscript_emit_event("attack_started", "beacon");
     } else {
         glog("Beacon transmission already running.\n");
         status_display_show_status("Beacon Active");
@@ -441,6 +443,7 @@ void beacon_spam_stop(void) {
         // Now restart services
         ap_manager_init();
         status_display_show_status("Beacon Stopped");
+        ghostscript_emit_event("attack_stopped", "beacon");
     }
 }
 

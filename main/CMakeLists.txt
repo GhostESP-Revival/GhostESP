@@ -121,6 +121,16 @@ if(CONFIG_ENABLE_NATIVE_SD_APPS)
     list(APPEND required_components elf_loader)
 endif()
 
+if(CONFIG_ENABLE_GHOSTSCRIPT)
+    list(APPEND required_components lua)
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/lua/src")
+else()
+    list(FILTER app_sources EXCLUDE REGEX "managers/ghostscript_.*\\.c")
+    list(FILTER app_sources EXCLUDE REGEX "managers/views/ghostscript_.*\\.c")
+    list(FILTER sources EXCLUDE REGEX "managers/ghostscript_.*\\.c")
+    list(FILTER sources EXCLUDE REGEX "managers/views/ghostscript_.*\\.c")
+endif()
+
 # Add IEEE 802.15.4 component for Zigbee capture on ESP32-C5/C6
 if(idf_target STREQUAL "esp32c5" OR idf_target STREQUAL "esp32c6")
     list(APPEND required_components ieee802154)

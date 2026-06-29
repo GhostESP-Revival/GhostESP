@@ -5,6 +5,7 @@
 #include "core/glog.h"
 #include "managers/settings_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "soc/gpio_periph.h"
 #include "soc/io_mux_reg.h"
 #include "sys/time.h"
@@ -369,6 +370,11 @@ void gps_manager_update_local_snapshot(const gps_t *fix) {
     taskENTER_CRITICAL(&gps_state_lock);
     gps_local_snapshot = *fix;
     taskEXIT_CRITICAL(&gps_state_lock);
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
+    char gps_payload[64];
+    snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
+        has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
+    ghostscript_emit_event(has_fix ? "gps_update" : "gps_fix", gps_payload);
 }
 
 void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
@@ -403,6 +409,11 @@ void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
     gps_peer_last_update_tick = xTaskGetTickCount();
     gps_peer_has_seen_update = true;
     taskEXIT_CRITICAL(&gps_state_lock);
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
+    char gps_payload[64];
+    snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
+        has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
+    ghostscript_emit_event(has_fix ? "gps_update" : "gps_fix", gps_payload);
 }
 
 bool gps_manager_get_local_gps_snapshot(gps_t *out_gps) {

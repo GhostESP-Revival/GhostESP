@@ -1,5 +1,9 @@
 #include "managers/views/app_gallery_screen.h"
 #include "managers/views/ghostchi_screen.h"
+#include "sdkconfig.h"
+#if CONFIG_ENABLE_GHOSTSCRIPT
+#include "managers/views/ghostscript_browser_view.h"
+#endif
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/music_visualizer.h"
 #include "managers/views/plugin_runner_view.h"
@@ -141,6 +145,15 @@ static const app_item_t builtin_app_items[] = {
         .palette_index = 1,
         .view = &sd_browser_view,
     },
+#if CONFIG_ENABLE_GHOSTSCRIPT
+    {
+        .name = "GhostScript",
+        .asset_key = NULL,
+        .symbol_icon = LV_SYMBOL_FILE,
+        .palette_index = 5,
+        .view = &ghostscript_browser_view,
+    },
+#endif
     {
         .name = "Ghostchi",
         .asset_key = "ghost",
@@ -184,7 +197,11 @@ static const app_item_t builtin_app_items[] = {
 #endif
 };
 
+<<<<<<< HEAD
 #define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT * 2 + 12)
+=======
+#define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT + 10)
+>>>>>>> 7fbf878746cb59bd15b10f6b0f6c5248005043ac
 static app_item_t *app_items = NULL;
 static int num_apps = 0;
 lv_obj_t *back_button = NULL;
