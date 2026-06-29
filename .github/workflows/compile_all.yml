@@ -168,12 +168,19 @@ jobs:
           fi
           FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
           FLASH_SIZE=${FLASH_SIZE:-4MB}
-          python3 -m esptool --chip ${{ matrix.target.idf_target }} merge_bin \
+          IDF_TARGET="${{ matrix.target.idf_target }}"
+          if [ "$IDF_TARGET" = "esp32" ] || [ "$IDF_TARGET" = "esp32s2" ]; then
+            BOOT_OFFSET=0x1000
+          else
+            BOOT_OFFSET=0x0
+          fi
+          python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
             --flash_mode dio \
+            --flash_freq 40m \
             --flash_size "$FLASH_SIZE" \
             --target-offset 0x0 \
-            0x1000 "$ARTIFACT_DIR/bootloader.bin" \
+            "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
             0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
 

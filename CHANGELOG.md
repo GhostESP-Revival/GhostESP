@@ -5,6 +5,7 @@
 - Fixes for Marauder V8 and Pancake configs - @H4W9
 - Removed 2 redundant toast notifications when opening native SD apps
 - Hardened WebUI: API and camera endpoints now enforce Digest auth when enabled, passwords no longer leak from settings GET, AP password validation accepts exactly 8 characters, SD upload path/filename/size checks are unified, and settings_save surfaces NVS write errors
+- Fixed GitHub Actions merged binary using wrong bootloader offset for ESP32-S3/C3/C5/C6 targets
 
 ## Revival v2.0-pre8
 
