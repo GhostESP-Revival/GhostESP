@@ -26,16 +26,35 @@
 #endif
 
 #ifndef CONFIG_NMEA_PARSER_TASK_STACK_SIZE
-#define CONFIG_NMEA_PARSER_TASK_STACK_SIZE 1024
+#define CONFIG_NMEA_PARSER_TASK_STACK_SIZE 4096
 #endif
 
 #ifndef CONFIG_NMEA_PARSER_TASK_PRIORITY
 #define CONFIG_NMEA_PARSER_TASK_PRIORITY 3
 #endif
 
+#ifndef CONFIG_NMEA_STATEMENT_GGA
+#define CONFIG_NMEA_STATEMENT_GGA 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_GSA
+#define CONFIG_NMEA_STATEMENT_GSA 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_GSV
+#define CONFIG_NMEA_STATEMENT_GSV 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_RMC
+#define CONFIG_NMEA_STATEMENT_RMC 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_GLL
+#define CONFIG_NMEA_STATEMENT_GLL 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_VTG
+#define CONFIG_NMEA_STATEMENT_VTG 1
+#endif
+
 #define NMEA_PARSER_RUNTIME_BUFFER_SIZE                                        \
   (CONFIG_NMEA_PARSER_RING_BUFFER_SIZE / 2)
-#define NMEA_MAX_STATEMENT_ITEM_LENGTH (16)
+#define NMEA_MAX_STATEMENT_ITEM_LENGTH (32)
 #define NMEA_EVENT_LOOP_QUEUE_SIZE (16)
 
 /**
@@ -45,6 +64,8 @@
 ESP_EVENT_DEFINE_BASE(ESP_NMEA_EVENT);
 
 static const char *GPS_TAG = "nmea_parser";
+
+static void esp_drain_uart_data(esp_gps_t *esp_gps, size_t pending_len);
 
 /**
  * @brief parse latitude or longitude
@@ -503,29 +524,39 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
       esp_gps->item_num++;
     }
     /* End of statement */
-    else if (*d == '\r') {
+    else if (*d == '\r' || *d == '\n') {
+      if (esp_gps->item_pos == 0 && esp_gps->cur_statement == STATEMENT_UNKNOWN) {
+        d++;
+        continue;
+      }
+
       /* Convert received CRC from string (hex) to number */
       uint8_t crc = (uint8_t)strtol(esp_gps->item_str, NULL, 16);
       /* CRC passed */
       if (esp_gps->crc == crc) {
+        bool sentence_supported = false;
         switch (esp_gps->cur_statement) {
 #if CONFIG_NMEA_STATEMENT_GGA
         case STATEMENT_GGA:
           esp_gps->parsed_statement |= 1 << STATEMENT_GGA;
+          sentence_supported = true;
           break;
 #endif
 #if CONFIG_NMEA_STATEMENT_GSA
         case STATEMENT_GSA:
           esp_gps->parsed_statement |= 1 << STATEMENT_GSA;
+          sentence_supported = true;
           break;
 #endif
 #if CONFIG_NMEA_STATEMENT_RMC
         case STATEMENT_RMC:
           esp_gps->parsed_statement |= 1 << STATEMENT_RMC;
+          sentence_supported = true;
           break;
 #endif
 #if CONFIG_NMEA_STATEMENT_GSV
         case STATEMENT_GSV:
+          sentence_supported = true;
           if (esp_gps->sat_num == esp_gps->sat_count) {
             esp_gps->parsed_statement |= 1 << STATEMENT_GSV;
           }
@@ -534,24 +565,28 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
 #if CONFIG_NMEA_STATEMENT_GLL
         case STATEMENT_GLL:
           esp_gps->parsed_statement |= 1 << STATEMENT_GLL;
+          sentence_supported = true;
           break;
 #endif
 #if CONFIG_NMEA_STATEMENT_VTG
         case STATEMENT_VTG:
           esp_gps->parsed_statement |= 1 << STATEMENT_VTG;
+          sentence_supported = true;
           break;
 #endif
         default:
           break;
         }
-        /* Check if all statements have been parsed */
-        if (((esp_gps->parsed_statement) & esp_gps->all_statements) ==
-            esp_gps->all_statements) {
-          esp_gps->parsed_statement = 0;
-          /* Send signal to notify that GPS information has been updated */
+        if (sentence_supported) {
           esp_event_post_to(esp_gps->event_loop_hdl, ESP_NMEA_EVENT, GPS_UPDATE,
                             &(esp_gps->parent), sizeof(gps_t),
                             100 / portTICK_PERIOD_MS);
+        }
+
+        /* Keep the legacy complete-set tracking for callers that inspect parsed_statement. */
+        if (((esp_gps->parsed_statement) & esp_gps->all_statements) ==
+            esp_gps->all_statements) {
+          esp_gps->parsed_statement = 0;
         }
       } else {
         ESP_LOGD(GPS_TAG, "CRC Error for statement:%s", esp_gps->buffer);
@@ -561,6 +596,13 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
         esp_event_post_to(esp_gps->event_loop_hdl, ESP_NMEA_EVENT, GPS_UNKNOWN,
                           esp_gps->buffer, len, 100 / portTICK_PERIOD_MS);
       }
+
+      esp_gps->asterisk = 0;
+      esp_gps->item_num = 0;
+      esp_gps->item_pos = 0;
+      esp_gps->item_str[0] = '\0';
+      esp_gps->cur_statement = STATEMENT_UNKNOWN;
+      esp_gps->crc = 0;
     }
     /* Other non-space character */
     else {
@@ -568,9 +610,13 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
         /* Add to CRC */
         esp_gps->crc ^= (uint8_t)(*d);
       }
-      /* Add character to item */
-      esp_gps->item_str[esp_gps->item_pos++] = *d;
-      esp_gps->item_str[esp_gps->item_pos] = '\0';
+      /* Add character to item (bounded: over-long fields are truncated rather
+       * than overrunning item_str into the rest of the struct, which would
+       * corrupt the parent gps_t / UART handles and crash on next use). */
+      if (esp_gps->item_pos < NMEA_MAX_STATEMENT_ITEM_LENGTH - 1) {
+        esp_gps->item_str[esp_gps->item_pos++] = *d;
+        esp_gps->item_str[esp_gps->item_pos] = '\0';
+      }
     }
     /* Process next character */
     d++;
@@ -584,29 +630,49 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
  * @param esp_gps esp_gps_t type object
  */
 static void esp_handle_uart_pattern(esp_gps_t *esp_gps) {
-  int pos = uart_pattern_pop_pos(esp_gps->uart_port);
-  if (pos != -1) {
-    if (pos >= (NMEA_PARSER_RUNTIME_BUFFER_SIZE - 1)) {
-      ESP_LOGW(GPS_TAG, "NMEA line too long (pos=%d)", pos);
-      uart_flush_input(esp_gps->uart_port);
-      if (esp_gps->event_queue) {
-        xQueueReset(esp_gps->event_queue);
-      }
-      return;
-    }
-    /* read one line(include '\n') */
-    int read_len = uart_read_bytes(esp_gps->uart_port, esp_gps->buffer, pos + 1,
-                                   100 / portTICK_PERIOD_MS);
-    /* make sure the line is a standard string */
-    esp_gps->buffer[read_len] = '\0';
+  while (uart_pattern_pop_pos(esp_gps->uart_port) != -1) {
+  }
+  esp_drain_uart_data(esp_gps, 0);
+}
 
-    /* Send new line to handle */
-    if (gps_decode(esp_gps, read_len + 1) != ESP_OK) {
-      ESP_LOGW(GPS_TAG, "GPS decode line failed");
+static void esp_drain_uart_data(esp_gps_t *esp_gps, size_t pending_len) {
+  if (!esp_gps || !esp_gps->buffer) {
+    return;
+  }
+
+  while (1) {
+    size_t buffered = 0;
+    if (uart_get_buffered_data_len(esp_gps->uart_port, &buffered) == ESP_OK && buffered > pending_len) {
+      pending_len = buffered;
     }
-  } else {
-    ESP_LOGW(GPS_TAG, "Pattern Queue Size too small");
-    uart_flush_input(esp_gps->uart_port);
+
+    if (pending_len == 0) {
+      break;
+    }
+
+    size_t to_read = pending_len;
+    if (to_read > NMEA_PARSER_RUNTIME_BUFFER_SIZE - 1) {
+      to_read = NMEA_PARSER_RUNTIME_BUFFER_SIZE - 1;
+    }
+
+    int read_len = uart_read_bytes(esp_gps->uart_port,
+                                   esp_gps->buffer,
+                                   to_read,
+                                   pdMS_TO_TICKS(20));
+    if (read_len <= 0) {
+      break;
+    }
+
+    esp_gps->buffer[read_len] = '\0';
+    if (gps_decode(esp_gps, (size_t)read_len) != ESP_OK) {
+      ESP_LOGW(GPS_TAG, "GPS decode chunk failed");
+    }
+
+    if ((size_t)read_len >= pending_len) {
+      pending_len = 0;
+    } else {
+      pending_len -= (size_t)read_len;
+    }
   }
 }
 
@@ -622,6 +688,7 @@ static void nmea_parser_task_entry(void *arg) {
     if (xQueueReceive(esp_gps->event_queue, &event, pdMS_TO_TICKS(200))) {
       switch (event.type) {
       case UART_DATA:
+        esp_drain_uart_data(esp_gps, event.size);
         break;
       case UART_FIFO_OVF:
         ESP_LOGW(GPS_TAG, "HW FIFO Overflow");
@@ -630,13 +697,10 @@ static void nmea_parser_task_entry(void *arg) {
         break;
       case UART_BUFFER_FULL:
         ESP_LOGW(GPS_TAG, "Ring Buffer Full");
-        // Read and discard data until we clear the buffer
-        uint8_t temp_buffer[64];
-        while (uart_read_bytes(esp_gps->uart_port, temp_buffer,
-                               sizeof(temp_buffer), 0) > 0) {
-          // Small delay to prevent task starvation
-          vTaskDelay(pdMS_TO_TICKS(1));
-        }
+        /* Drop the whole RX buffer in one shot and resync. The previous
+         * 64-bytes-at-a-time drain with a 1ms delay per chunk could never keep
+         * up at high baud, so it just re-overflowed continuously. */
+        uart_flush_input(esp_gps->uart_port);
         xQueueReset(esp_gps->event_queue);
         break;
       case UART_BREAK:
@@ -656,8 +720,10 @@ static void nmea_parser_task_entry(void *arg) {
         break;
       }
     }
-    /* Drive the event loop */
-    esp_event_loop_run(esp_gps->event_loop_hdl, pdMS_TO_TICKS(50));
+    /* Drive the event loop. Keep this short so the task returns to draining the
+     * UART promptly; a long block here lets the RX ring buffer overflow at high
+     * baud (this was 50ms, which caused continuous "Ring Buffer Full" at 115200). */
+    esp_event_loop_run(esp_gps->event_loop_hdl, pdMS_TO_TICKS(10));
   }
   vTaskDelete(NULL);
 }
@@ -774,7 +840,7 @@ nmea_parser_handle_t nmea_parser_init(const nmea_parser_config_t *config) {
                                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (!esp_gps->task_stack || !esp_gps->task_tcb) {
     ESP_LOGE(GPS_TAG,
-             "alloc NMEA task resources failed (stack_words=%d free_internal=%u free_heap=%u)",
+             "alloc NMEA task resources failed (stack_bytes=%d free_internal=%u free_heap=%u)",
              (int)CONFIG_NMEA_PARSER_TASK_STACK_SIZE,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));

@@ -217,25 +217,45 @@
         {{ $homePath := strings.TrimSuffix ($homeLink | relURL) "/" }}
         <a href="{{ $homeLink | relURL }}" class="sidebar__link{{ if eq $currentPath $homePath }} sidebar__link--active{{ end }}">Home</a>
         {{ if $versionRoot }}
-          {{ range $versionRoot.Sections.ByWeight }}
-            {{ $section := . }}
-            {{ $sectionRel := $section.RelPermalink }}
-            {{ $pages := where $section.Pages "Draft" false }}
-            {{ if gt (len $pages) 0 }}
-              {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
-              {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
-              <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
-                <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
-                  <span>{{ $section.LinkTitle }}</span>
-                  <span class="sidebar__group-icon" aria-hidden="true"></span>
-                </button>
-                <div class="collapse{{ if $isActive }} show{{ end }} sidebar__group-items" id="{{ $groupID }}">
-                  <a href="{{ $section.RelPermalink }}" class="sidebar__sublink{{ if eq $currentPage $section }} sidebar__sublink--active{{ end }}">Overview</a>
-                  {{ range (where $pages "File" "!=" nil).ByWeight }}
-                    <a href="{{ .RelPermalink }}" class="sidebar__sublink{{ if eq . $currentPage }} sidebar__sublink--active{{ end }}">{{ .LinkTitle }}</a>
-                  {{ end }}
-                </div>
-              </div>
+          {{ $categories := slice
+            (dict "label" "" "min" 1 "max" 99)
+            (dict "label" "Wireless" "min" 100 "max" 199)
+            (dict "label" "Sensors" "min" 200 "max" 399)
+            (dict "label" "Apps & I/O" "min" 400 "max" 599)
+            (dict "label" "Developer" "min" 600 "max" 999)
+          }}
+          {{ range $categories }}
+            {{ $cat := . }}
+            {{ $catSections := slice }}
+            {{ range $versionRoot.Sections.ByWeight }}
+              {{ $w := .Weight }}
+              {{ if and (ge $w $cat.min) (le $w $cat.max) }}
+                {{ $catSections = $catSections | append . }}
+              {{ end }}
+            {{ end }}
+            {{ if gt (len $catSections) 0 }}
+              {{ with $cat.label }}<div class="sidebar__category">{{ . }}</div>{{ end }}
+              {{ range $catSections }}
+                {{ $section := . }}
+                {{ $sectionRel := $section.RelPermalink }}
+                {{ $pages := where $section.Pages "Draft" false }}
+                {{ if gt (len $pages) 0 }}
+                  {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
+                  {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
+                  <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
+                    <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
+                      <span>{{ $section.LinkTitle }}</span>
+                      <span class="sidebar__group-icon" aria-hidden="true"></span>
+                    </button>
+                    <div class="collapse{{ if $isActive }} show{{ end }} sidebar__group-items" id="{{ $groupID }}">
+                      <a href="{{ $section.RelPermalink }}" class="sidebar__sublink{{ if eq $currentPage $section }} sidebar__sublink--active{{ end }}">Overview</a>
+                      {{ range (where $pages "File" "!=" nil).ByWeight }}
+                        <a href="{{ .RelPermalink }}" class="sidebar__sublink{{ if eq . $currentPage }} sidebar__sublink--active{{ end }}">{{ .LinkTitle }}</a>
+                      {{ end }}
+                    </div>
+                  </div>
+                {{ end }}
+              {{ end }}
             {{ end }}
           {{ end }}
           {{ range $versionRoot.RegularPages.ByWeight }}

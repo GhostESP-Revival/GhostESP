@@ -6,6 +6,9 @@
 
 #pragma once
 
+#include "esp_netif.h"
+#include "lwip/ip4_addr.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

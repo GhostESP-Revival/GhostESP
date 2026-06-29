@@ -39,6 +39,8 @@ extern FSettings G_Settings;
 extern void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback);
 extern void wifi_manager_stop_monitor_mode(void);
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+
 // SAE MAC pool configuration
 #define SAE_MAC_POOL_SIZE 8
 #define SAE_PRECOMPUTE_LIMIT 8
@@ -656,11 +658,6 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 void sae_flood_start(const char *password) {
-#if !defined(CONFIG_IDF_TARGET_ESP32C5) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-    glog("SAE flood attack only supported on ESP32-C5 and ESP32-C6\n");
-    return;
-#endif
-
     if (sae_flood_running) {
         glog("SAE flood attack already running\n");
         return;
@@ -857,3 +854,24 @@ void sae_flood_help(void) {
 bool sae_flood_is_running(void) {
     return sae_flood_running;
 }
+
+#else // !(CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6)
+
+void sae_flood_start(const char *password) {
+    (void)password;
+    glog("SAE flood attack only supported on ESP32-C5 and ESP32-C6\n");
+}
+
+void sae_flood_stop(void) {
+}
+
+void sae_flood_help(void) {
+    glog("SAE Flood Attack - Only supported on ESP32-C5/C6\n");
+    glog("Commands: saeflood, stopsaeflood, saefloodhelp\n");
+}
+
+bool sae_flood_is_running(void) {
+    return false;
+}
+
+#endif // CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6

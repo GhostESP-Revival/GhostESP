@@ -67,11 +67,11 @@ weight: 10
 
 - **Stuck on “Bruteforcing keys… 0%”.** GhostESP is testing dictionaries. Use the **Skip** button if you only need publicly readable blocks.
 
-- **UID reads but data is empty.** The card may be write-protected or needs a key not present in your dictionaries. You can add it to your user dictionary in `mnt/ghostesp/nfc/mfc_user_keys.nfc` and then try rescanning.
+- **UID reads but data is empty.** The card may be write-protected or needs a key not present in your dictionaries. You can add it to your user dictionary in `/mnt/ghostesp/nfc/mfc_user_dict.nfc` and then try rescanning.
 
 ## FAQ
 
-- **Which keys does GhostESP try?** Your User Keys list runs first, followed by bundled common keys and then the Flipper Zero Mifare Classic dictionary.
+- **Which keys does GhostESP try?** Your session keys and User Dictionary run first, followed by the embedded common keys, default keys, and then the fallback SD dictionary.
 
 - **What do the sector labels mean?** Mifare Classic memory is split into numbered sectors, each protected by Key A and Key B. A listed sector means at least one key unlocked it during the scan.
 

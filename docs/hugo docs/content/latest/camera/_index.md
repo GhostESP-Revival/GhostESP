@@ -1,7 +1,7 @@
 ---
 title: "Camera"
 description: "Camera-based features for boards with onboard sensors"
-weight: 45
+weight: 330
 ---
 
 Camera features are available on builds that enable `CONFIG_HAS_CAMERA`. The camera module supports:

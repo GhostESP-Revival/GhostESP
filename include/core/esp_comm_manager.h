@@ -4,6 +4,7 @@
 #include "driver/gpio.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #define DEFAULT_BAUD_RATE 115200
 
@@ -31,8 +32,12 @@ typedef struct {
 } comm_peer_t;
 
 typedef void (*comm_command_callback_t)(const char* command, const char* data, void* user_data);
+typedef void (*comm_response_callback_t)(const uint8_t* data, size_t length, void* user_data);
+typedef void (*comm_data_callback_t)(const uint8_t* data, size_t length, void* user_data);
 
-#define COMM_MAX_STREAM_CHANNELS 9
+
+#define COMM_MAX_STREAM_CHANNELS 10
+#define COMM_STREAM_CHANNEL_COMMAND 0
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
 #define COMM_STREAM_CHANNEL_WARDRIVE 3
@@ -41,6 +46,7 @@ typedef void (*comm_command_callback_t)(const char* command, const char* data, v
 #define COMM_STREAM_CHANNEL_ETHERNET      6
 #define COMM_STREAM_CHANNEL_MIC_AMPLITUDE 7  // MIC audio data for RGB visualizer
 #define COMM_STREAM_CHANNEL_SUBGHZ 8
+#define COMM_STREAM_CHANNEL_AUDIO 9          // MP3 audio stream for DAC playback
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 
@@ -50,16 +56,23 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin);
 bool esp_comm_manager_start_discovery(void);
 bool esp_comm_manager_connect_to_peer(const char* peer_name);
 bool esp_comm_manager_send_command(const char* command, const char* data);
+bool esp_comm_manager_send_command_line(const char* command_line);
 bool esp_comm_manager_is_connected(void);
 comm_state_t esp_comm_manager_get_state(void);
 void esp_comm_manager_set_command_callback(comm_command_callback_t callback, void* user_data);
+void esp_comm_manager_set_response_callback(comm_response_callback_t callback, void* user_data);
+void esp_comm_manager_set_data_callback(comm_data_callback_t callback, void* user_data);
 void esp_comm_manager_disconnect(void);
 void esp_comm_manager_deinit(void);
 bool esp_comm_manager_send_response(const uint8_t* data, size_t length);
 void esp_comm_manager_set_remote_command_flag(bool is_remote);
 bool esp_comm_manager_is_remote_command(void);
+bool esp_comm_manager_should_forward_output(void);
 
 bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t length);
+bool esp_comm_manager_send_stream_wait(uint8_t channel, const uint8_t* data, size_t length, uint32_t wait_ms);
 bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callback_t callback, void* user_data);
+bool esp_comm_manager_get_peer_name(char* out, size_t out_len);
+bool esp_comm_manager_get_pins(gpio_num_t* tx_pin, gpio_num_t* rx_pin);
 
 #endif // ESP_COMM_MANAGER_H

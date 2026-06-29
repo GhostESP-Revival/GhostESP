@@ -17,18 +17,18 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 ### CAME
 - **Common use**: Gate and garage door remotes
 - **Frequency**: 433.92 MHz
-- **Bit length**: 24 bits
+- **Bit length**: 12, 18, 24, 25, or 42 bits
 - **Variants**: CAME, CAME Atomo
 
 ### Nice Flo
 - **Common use**: Nice brand gate openers
 - **Frequency**: 433.92 MHz
-- **Bit length**: 24 bits
+- **Bit length**: 12 or 24 bits
 
 ### Nice Flor S
 - **Common use**: Nice brand gate systems
 - **Frequency**: 433.92 MHz
-- **Bit length**: Variable
+- **Bit length**: 52 or 76 bits
 
 ### PT2260 / PT2262
 - **Common use**: Generic remote controls, alarm sensors
@@ -39,56 +39,56 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 ### Chamberlain
 - **Common use**: Chamberlain garage door openers
 - **Frequency**: 315 MHz, 390 MHz
-- **Bit length**: Variable
+- **Bit length**: 7-9 bits
 - **Note**: Some models use rolling codes
 
 ### Linear
 - **Common use**: Linear brand gate operators
 - **Frequency**: 310 MHz, 315 MHz, 390 MHz
-- **Bit length**: 24 bits
+- **Bit length**: 10 bits (Linear), 8 bits (Linear D3)
 - **Variants**: Linear, Linear Delta3
 
 ### KeeLoq
 - **Common use**: Secure garage door and vehicle remotes
-- **Frequency**: 433.92 MHz, 868 MHz
+- **Frequency**: 315 MHz, 433.92 MHz, 868 MHz
 - **Bit length**: 64 bits
 - **Note**: Uses rolling code encryption; replay may fail
 
 ### Holtek
 - **Common use**: Holtek-based remote controls
 - **Frequency**: 433.92 MHz
-- **Bit length**: 12-24 bits
+- **Bit length**: 40+ bits (Holtek), 12 bits (Holtek HT12X)
 - **Variants**: Holtek, Holtek HT12X
 
 ### FAAC SLH
 - **Common use**: FAAC gate automation systems
 - **Frequency**: 433.92 MHz
-- **Bit length**: Variable
+- **Bit length**: 64 bits
 
 ### Alutech AT-4N
 - **Common use**: Alutech gate systems
 - **Frequency**: 433.92 MHz
-- **Bit length**: Variable
+- **Bit length**: 72 bits
 
 ### Marantec
 - **Common use**: Marantec garage door openers
 - **Frequency**: 868 MHz
-- **Bit length**: Variable
+- **Bit length**: 49 bits
 
 ### Unilarm
 - **Common use**: Alarm systems
 - **Frequency**: 433.92 MHz
-- **Bit length**: 24 bits
+- **Bit length**: 25 bits
 
 ### Gangqi
 - **Common use**: Asian market remotes
 - **Frequency**: 433.92 MHz
-- **Bit length**: Variable
+- **Bit length**: 34 bits
 
 ### Doitrand
 - **Common use**: Various remote controls
 - **Frequency**: 433.92 MHz
-- **Bit length**: Variable
+- **Bit length**: 37 bits
 
 ### Gate TX
 - **Common use**: Generic gate transmitters

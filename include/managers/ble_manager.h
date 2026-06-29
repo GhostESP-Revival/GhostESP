@@ -61,6 +61,8 @@ void ble_list_airtags(void);
 void ble_select_airtag(int index);
 void ble_start_spoofing_selected_airtag(void);
 void ble_stop_spoofing(void);
+bool ble_start_custom_adv(const uint8_t *data, size_t len);
+bool ble_stop_custom_adv(void);
 
 // GATT service enumeration functions
 void ble_start_gatt_scan(void);

@@ -958,7 +958,7 @@ bool fuel_gauge_manager_get_data(fuel_gauge_data_t *data) {
 
     data->is_initialized = true;
 
-    ESP_LOGI(TAG, "MAX17048: raw=%d%% v_soc=%d%% out=%d%% %dmV %dmA %s",
+    ESP_LOGD(TAG, "MAX17048: raw=%d%% v_soc=%d%% out=%d%% %dmV %dmA %s",
              raw_perc, voltage_soc, data->percentage, data->voltage_mv,
              data->current_ma, data->is_charging ? "CHG" : "DIS");
 

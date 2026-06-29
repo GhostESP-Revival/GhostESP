@@ -197,7 +197,7 @@ When using command line mode, you'll need to manually configure Wireshark to cap
 - This is expected behavior for live capture
 
 ### Country setting not applied
-- Run `setcountry <code>` before starting capture (e.g., `setcountry US`)
+- Run `setcountry <code>` before starting capture (e.g., `setcountry US`) — **ESP32-C5 only**
 - Restart the device after changing country
 - Verify with `info` command that country is set correctly
 

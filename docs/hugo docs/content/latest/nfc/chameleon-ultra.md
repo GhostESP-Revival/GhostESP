@@ -6,7 +6,7 @@ weight: 5
 
 ## Overview
 
-GhostESP can control a Chameleon Ultra over BLE. Once paired, use the same NFC scan/save flows as with a PN532.
+GhostESP can control a Chameleon Ultra over BLE. Once paired, use the NFC scan/save flows — note that the Chameleon Ultra uses a different backend (BLE GATT protocol) than the PN532 (SPI/I2C), so some behavior differs.
 
 ## Prerequisites
 
@@ -70,7 +70,7 @@ Chameleon Ultra support is available on the following GhostESP builds:
 
 ### Saving Dumps
 
-- **Save HF scans:** After `chameleon scanhf` completes, run `chameleon savehf <name>` to write the dump to `/mnt/ghostesp/chameleon/`.
+- **Save HF scans:** After `chameleon scanhf` completes, run `chameleon savehf <name>` to write the dump to `/mnt/ghostesp/nfc/`.
 - **Name files clearly:** Use short descriptive names without spaces, for example `office_door`.
 
 

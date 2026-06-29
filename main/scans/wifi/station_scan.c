@@ -16,6 +16,7 @@
 #include "core/glog.h"
 #include "core/utils.h"
 #include "managers/ap_manager.h"
+#include "managers/ghostchi_manager.h"
 #include "managers/rgb_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -471,6 +472,7 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
 // ============================================================================
 
 void station_scan_start(void) {
+    ghostchi_manager_add_xp(3);
     // Get AP scan results
     uint16_t ap_count = 0;
     wifi_ap_record_t *scanned_aps = NULL;
@@ -562,6 +564,11 @@ void station_scan_stop(void) {
 
     // Stop monitor mode
     esp_wifi_set_promiscuous(false);
+
+    // If station_scan_start ran the initial-AP-scan path, it called
+    // ap_manager_stop_services() and never restored the AP. Restore it now
+    // so the WebUI comes back regardless of which caller invoked stop.
+    ap_manager_start_services();
 
     glog("Station Scan Stopped. Found %d stations.\n", station_count);
 }

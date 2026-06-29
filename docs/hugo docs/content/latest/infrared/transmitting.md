@@ -10,7 +10,7 @@ weight: 20
 2. Pick a Flipper-compatible `.ir` file. GhostESP parses the sections inside the file and lists every named button.
 3. Tap a button entry to transmit. The configured LED should flash pink if not in stealth mode.
 
-> **Tip:** If you see “No .ir files” in the Remotes or Universals lists, try reinserting your SD card and rebooting the device. Ensure the `/ghostesp/infrared/remotes` and `/ghostesp/infrared/universals` folders exist on the card.
+> **Tip:** If you see “No .ir files” in the Remotes or Universals lists, try reinserting your SD card and rebooting the device. Ensure the `/mnt/ghostesp/infrared/remotes` and `/mnt/ghostesp/infrared/universals` folders exist on the card.
 
 ### Universal libraries
 
@@ -37,10 +37,10 @@ Use `ir send` to transmit a signal from an existing `.ir` file:
 
 ```
 # Send the first signal in the file
-ir send /ghostesp/infrared/remotes/TV.ir
+ir send /mnt/ghostesp/infrared/remotes/TV.ir
 
 # Send the 3rd signal (index 2)
-ir send /ghostesp/infrared/remotes/TV.ir 2
+ir send /mnt/ghostesp/infrared/remotes/TV.ir 2
 ```
 
 ### Inline Sending

@@ -62,6 +62,8 @@ jobs:
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
           - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip" }
+          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip" }
+          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip" }
           - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip" }
           - { name: "TDisplayS3-Touch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",               zip_name: "LilyGo-TDisplayS3-Touch.zip" }
           - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }
@@ -78,6 +80,8 @@ jobs:
           - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip" }
           - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip" }
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
+          - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
+          - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
 
     steps:
       - uses: actions/checkout@v4
@@ -164,12 +168,19 @@ jobs:
           fi
           FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
           FLASH_SIZE=${FLASH_SIZE:-4MB}
-          python3 -m esptool --chip ${{ matrix.target.idf_target }} merge_bin \
+          IDF_TARGET="${{ matrix.target.idf_target }}"
+          if [ "$IDF_TARGET" = "esp32" ] || [ "$IDF_TARGET" = "esp32s2" ]; then
+            BOOT_OFFSET=0x1000
+          else
+            BOOT_OFFSET=0x0
+          fi
+          python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
             --flash_mode dio \
+            --flash_freq 40m \
             --flash_size "$FLASH_SIZE" \
             --target-offset 0x0 \
-            0x1000 "$ARTIFACT_DIR/bootloader.bin" \
+            "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
             0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
 

@@ -1,8 +1,9 @@
 #include "gui/theme_palette_api.h"
+#include "gui/asset_pack.h"
 #include "managers/settings_manager.h"
 
 static const uint32_t s_theme_accents[THEME_PALETTE_THEME_COUNT] = {
-    0x1976D2, // Default
+    0x1976D2, // OG
     0xFFCDD2, // Pastel
     0x263238, // Dark
     0xFFFFFF, // Bright
@@ -70,10 +71,14 @@ static uint32_t mix_rgb(uint32_t from, uint32_t to, uint8_t amount) {
 }
 
 uint32_t theme_palette_get(uint8_t theme, int slot) {
+    uint32_t override = 0;
+    if (slot == 0 && asset_pack_get_color(ASSET_PACK_COLOR_ACCENT, &override)) {
+        return override;
+    }
     theme = theme_palette_clamp(theme);
     if (slot < 0 || slot >= THEME_PALETTE_SLOT_COUNT) slot = 0;
 
-    uint32_t accent = s_theme_accents[theme];
+    uint32_t accent = theme_palette_get_accent(theme);
     if (slot == 0) {
         return accent;
     }
@@ -113,12 +118,45 @@ uint32_t theme_palette_get(uint8_t theme, int slot) {
 }
 
 uint32_t theme_palette_get_accent(uint8_t theme) {
+    if (settings_get_high_contrast(&G_Settings)) {
+        return 0xFFFF00; // Bright yellow for maximum contrast
+    }
+    uint32_t override = 0;
+    if (asset_pack_get_color(ASSET_PACK_COLOR_ACCENT, &override)) {
+        return override;
+    }
     return s_theme_accents[theme_palette_clamp(theme)];
 }
 
 static uint32_t theme_surface_get(uint8_t theme, theme_surface_slot_t slot) {
     (void)theme;
     if (slot < 0 || slot >= THEME_SURFACE_SLOT_COUNT) slot = THEME_SURFACE_BG;
+
+    if (settings_get_high_contrast(&G_Settings)) {
+        static const uint32_t high_contrast_surfaces[THEME_SURFACE_SLOT_COUNT] = {
+            0x000000,  // BG: pure black
+            0x000000,  // Surface: pure black
+            0x1A1A1A,  // SurfaceAlt: near-black
+            0xFFFFFF,  // Text: pure white
+            0xCCCCCC   // TextMuted: light gray
+        };
+        return high_contrast_surfaces[slot];
+    }
+
+    uint32_t override = 0;
+    int override_slot = -1;
+    switch (slot) {
+        case THEME_SURFACE_BG: override_slot = ASSET_PACK_COLOR_BACKGROUND; break;
+        case THEME_SURFACE_CARD: override_slot = ASSET_PACK_COLOR_SURFACE; break;
+        case THEME_SURFACE_CARD_ALT: override_slot = ASSET_PACK_COLOR_SURFACE_ALT; break;
+        case THEME_SURFACE_TEXT: override_slot = ASSET_PACK_COLOR_TEXT; break;
+        case THEME_SURFACE_TEXT_MUTED: override_slot = ASSET_PACK_COLOR_TEXT_MUTED; break;
+        default: break;
+    }
+    if (override_slot >= 0 && asset_pack_get_color(override_slot, &override)) {
+        return override;
+    }
+
     uint8_t shade = settings_get_menu_bg_shade(&G_Settings);
     if (shade >= MENU_BG_SHADE_COUNT) shade = 1;
     return s_shade_surfaces[shade][slot];
@@ -145,6 +183,9 @@ uint32_t theme_palette_get_text_muted(uint8_t theme) {
 }
 
 bool theme_palette_is_bright(uint8_t theme) {
+    if (settings_get_high_contrast(&G_Settings)) {
+        return true; // Yellow accent is bright; selected text should be dark.
+    }
     return theme_color_luma(theme_palette_get_accent(theme_palette_clamp(theme))) >= 160U;
 }
 

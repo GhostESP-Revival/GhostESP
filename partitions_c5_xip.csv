@@ -1,0 +1,17 @@
+# Shared partition table for ESP32-C5 boards with >4MB flash that run native SD
+# apps from flash (CONFIG_ELF_LOADER_C5_FLASH_XIP). Identical to the stock 4MB
+# partitions.csv but appends a 1MB "napps" partition holding the relocated .text
+# of the currently loaded app, mapped instruction-executable in place.
+#
+# napps ends at 0x500000, so this table fits ANY C5 board with >=5MB flash
+# (8MB and 16MB alike — flash beyond the last partition is simply unused). The
+# loader finds the partition by label/subtype at runtime, so the same table and
+# firmware work across every >4MB C5 board. 4MB boards have no room for napps and
+# the loader cleanly reports it (flash-XIP unavailable there).
+#
+# Offsets are 64KB-aligned for the C5 MMU page size.
+# Name,     Type, SubType,  Offset,   Size,    Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+app0,       app,  factory,  0x10000,  0x3D0000,
+coredump,   data, coredump, 0x3E0000, 0x20000,
+napps,      data, 0xFE,     0x400000, 0x100000,

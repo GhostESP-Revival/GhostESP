@@ -13,6 +13,7 @@
 #include "scans/wifi/port_scan.h"
 #include "core/network_constants.h"
 #include "core/glog.h"
+#include "managers/ghostchi_manager.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -735,6 +736,7 @@ void port_scan_subnet_async(void) {
         glog("Port scan already in progress\n");
         return;
     }
+    ghostchi_manager_add_xp(3);
     
     g_port_scan_cancel = false;
     xTaskCreate(port_scan_subnet_task, "port_scan", 8192, NULL, 5, &g_port_scan_task_handle);

@@ -24,11 +24,11 @@ GhostESP's PN532 stack focuses on ISO14443A tags. This page summarizes current s
 - **Models:** 1K, 4K, Mini (via SAK/ATQA detection).
 
 - **Read:** Sector-by-sector brute-force with layered keys:
-  - User dictionary file on the SD card (`/mnt/ghostesp/nfc/mfc_user_keys.nfc`), which you will have to edit manually.
+  - User dictionary file on the SD card (`/mnt/ghostesp/nfc/mfc_user_dict.nfc`), which you will have to edit manually.
   - Built-in common keys.
   - Flipper Zero dictionary pre-compiled in.
 
-- **User Dictionary:** Successful keys are appended to `/mnt/ghostesp/nfc/mfc_user_keys.nfc` for future scans.
+- **User Dictionary:** Successful keys are appended to `/mnt/ghostesp/nfc/mfc_user_dict.nfc` for future scans.
 
 - **Save:** Unlocked sectors and recovered keys are stored in Flipper formatted `.nfc` files.
 
@@ -46,6 +46,7 @@ GhostESP's PN532 stack focuses on ISO14443A tags. This page summarizes current s
 
 ## Unsupported Families
 
-- **MIFARE DESFire / Plus:** Not supported.
+- **MIFARE DESFire:** Detection and version identification supported (reads PICC version, models DESFire 2K/4K/8K). Full read/write not implemented.
+- **MIFARE Plus:** Not supported.
 - **ISO14443B, ISO15693, FeliCa:** Not supported by the current PN532 integration.
 - **Emulation / Peer-to-Peer:** Not supported.

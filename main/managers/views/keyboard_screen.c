@@ -4,11 +4,14 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "gui/screen_layout.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/design_tokens.h"
+#include "gui/theme_palette_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "managers/settings_manager.h"
 #include "gui/lvgl_safe.h"
 #include <string.h>
 #include <ctype.h>
@@ -16,6 +19,35 @@
 #define KEYBOARD_COLUMNS 10
 
 static const char *TAG = "keyboard_screen";
+
+uint32_t theme_palette_get_background(uint8_t theme);
+uint32_t theme_palette_get_surface(uint8_t theme);
+uint32_t theme_palette_get_text(uint8_t theme);
+uint32_t theme_palette_get_accent(uint8_t theme);
+uint32_t theme_palette_get_text_muted(uint8_t theme);
+bool theme_palette_is_bright(uint8_t theme);
+
+static inline lv_color_t kb_bg(void) {
+    return lv_color_hex(theme_palette_get_background(settings_get_menu_theme(&G_Settings)));
+}
+static inline lv_color_t kb_surface(void) {
+    return lv_color_hex(theme_palette_get_surface(settings_get_menu_theme(&G_Settings)));
+}
+static inline lv_color_t kb_text(void) {
+    return lv_color_hex(theme_palette_get_text(settings_get_menu_theme(&G_Settings)));
+}
+static inline lv_color_t kb_accent(void) {
+    return lv_color_hex(theme_palette_get_accent(settings_get_menu_theme(&G_Settings)));
+}
+static inline bool kb_is_bright(void) {
+    return theme_palette_is_bright(settings_get_menu_theme(&G_Settings));
+}
+static inline lv_color_t kb_sel_text(void) {
+    return kb_is_bright() ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
+}
+static inline lv_coord_t kb_radius(void) {
+    return settings_get_menu_rounded(&G_Settings) ? GUI_RADIUS_SM / 2 : 0;
+}
 
 static View *keyboard_return_view = NULL;
 
@@ -27,25 +59,29 @@ static char pending_initial_text[128] = {0};
 static bool has_pending_initial_text = false;
 static bool start_with_caps = true;
 static KeyboardSubmitCallback submit_callback = NULL;
+static KeyboardImmediateCallback immediate_callback = NULL;
 
 static bool is_caps = true;
 static bool is_symbols_mode = false;
 static bool is_capslock = false;
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
 static lv_obj_t *encoder_cont = NULL;
+static lv_obj_t *encoder_selector = NULL;
+static int encoder_selector_w = 0;
+static int encoder_selector_h = 0;
 static lv_obj_t *encoder_labels[50];
 static const char *encoder_alpha_items[41] = {
     "Aa","A","B","C","D","E","F","G","H","I","J",
     "K","L","M","N","O","P","Q","R","S","T",
     "U","V","W","X","Y","Z","0","1","2","3",
-    "4","5","6","7","8","9","SPA","SYM","<-","ENT"
+    "4","5","6","7","8","9","SPA","SYM",LV_SYMBOL_BACKSPACE,LV_SYMBOL_NEW_LINE
 };
 static const int encoder_alpha_count = 41;
 static const char *encoder_sym_items[40] = {
     "1","2","3","4","5","6","7","8","9","0",
     "!","@","#","$","%","^","&","*","(",")",
     "-","_","=","+","[","]","{","}","\\","|",
-    ";",":","'","\"","<",">","?","/","ABC","ENT"
+    ";",":","'","\"","<",">","?","/","ABC",LV_SYMBOL_NEW_LINE
 };
 static const int encoder_sym_count = 40;
 static const char **encoder_items = NULL;
@@ -56,6 +92,12 @@ static int encoder_screen_width = 0;
 static int encoder_offset_x = 0;
 static bool encoder_sym_mode = false;
 static bool encoder_uppercase = true;
+
+static void encoder_set_item_text(int i);
+static void encoder_set_item_style(int i);
+static void encoder_position_item(int i);
+static void encoder_position_selector(void);
+static int encoder_scroll_x_for_index(int i);
 #endif
 
 static char placeholder[64] = "Enter text...";
@@ -83,17 +125,25 @@ static lv_obj_t *key_btns[5][KEYBOARD_COLUMNS];
 
 static void init_keyboard_styles(void) {
     if (styles_inited) return;
+    lv_color_t surface = kb_surface();
+    lv_color_t text = kb_text();
+    lv_coord_t radius = kb_radius();
+
     lv_style_init(&style_key_btn);
-    lv_style_set_bg_color(&style_key_btn, lv_color_hex(0xFFFFFF));
+    lv_style_set_bg_color(&style_key_btn, surface);
     lv_style_set_bg_opa(&style_key_btn, LV_OPA_COVER);
-    lv_style_set_border_color(&style_key_btn, lv_color_hex(0x333333));
+    lv_style_set_border_color(&style_key_btn, text);
+    lv_style_set_border_opa(&style_key_btn, LV_OPA_50);
     lv_style_set_border_width(&style_key_btn, 1);
-    lv_style_set_radius(&style_key_btn, 3);
+    lv_style_set_radius(&style_key_btn, radius);
+    lv_style_set_pad_ver(&style_key_btn, 1);
+    lv_style_set_pad_hor(&style_key_btn, 2);
 
     lv_style_init(&style_key_label);
-    lv_style_set_text_color(&style_key_label, lv_color_hex(0x000000));
-    lv_style_set_text_font(&style_key_label, &lv_font_montserrat_14);
+    lv_style_set_text_color(&style_key_label, text);
+    lv_style_set_text_font(&style_key_label, accessibility_get_font_body());
 
+    saved_key_radius = radius;
     styles_inited = true;
 }
 
@@ -180,15 +230,22 @@ static const char* get_key_label(const char *key, bool caps, bool symbols_mode) 
 }
 
 static void style_shift_key(lv_obj_t *btn, lv_obj_t *label, bool capslock, bool caps) {
+    lv_color_t accent = kb_accent();
+    lv_color_t sel_fg = kb_sel_text();
+    lv_color_t text = kb_text();
+    lv_color_t surface = kb_surface();
     if (capslock) {
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x00BFFF), 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_bg_color(btn, accent, 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(label, sel_fg, 0);
     } else if (caps) {
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0xFFD600), 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_color(btn, accent, 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
+        lv_obj_set_style_text_color(label, sel_fg, 0);
     } else {
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_color(btn, surface, 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(label, text, 0);
     }
 }
 
@@ -293,17 +350,23 @@ static void submit_text() {
     }
 }
 
+static void emit_immediate_char(char c) {
+    if (immediate_callback) immediate_callback(c);
+}
+
 static void add_char_to_buffer(char c) {
     if (input_len < sizeof(input_buffer) - 1) {
         // Use capslock or SHIFT if active, otherwise lowercase
         bool use_caps = is_capslock || is_caps;
         if (isalpha((unsigned char)c)) {
-            input_buffer[input_len++] = use_caps ? toupper((unsigned char)c) : tolower((unsigned char)c);
+            c = use_caps ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+            input_buffer[input_len++] = c;
         } else {
             input_buffer[input_len++] = c; // Add non-alphabetic characters unchanged
         }
         input_buffer[input_len] = '\0';
         update_input_label();
+        emit_immediate_char(c);
     }
     if (is_caps && !is_capslock) {
         is_caps = false; // Reset to lowercase after any key press unless capslock is on
@@ -328,6 +391,7 @@ static void add_char_to_buffer_raw(char c) {
         input_buffer[input_len++] = c;
         input_buffer[input_len] = '\0';
         update_input_label();
+        emit_immediate_char(c);
     }
 }
 
@@ -335,6 +399,7 @@ static void remove_char_from_buffer() {
     if (input_len > 0) {
         input_buffer[--input_len] = '\0';
         update_input_label();
+        emit_immediate_char('\b');
     }
 }
 
@@ -384,7 +449,7 @@ static void update_key_labels() {
                             lv_label_set_text(key_label, "");
                             lv_obj_add_flag(key_btn, LV_OBJ_FLAG_HIDDEN);
                         }
-                        lv_obj_set_style_text_color(key_label, lv_color_hex(0x000000), 0);
+                        lv_obj_set_style_text_color(key_label, kb_text(), 0);
                     }
                 }
             }
@@ -629,6 +694,53 @@ static void keyboard_build_step(lv_timer_t *t) {
 #endif
 }
 
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
+static void encoder_set_item_text(int i) {
+    const char *txt = encoder_items[i];
+    if (!encoder_sym_mode && strlen(txt) == 1 && isalpha((unsigned char)txt[0])) {
+        char tmp[2] = { encoder_uppercase ? (char)toupper((unsigned char)txt[0]) : (char)tolower((unsigned char)txt[0]), '\0' };
+        lv_label_set_text(encoder_labels[i], tmp);
+    } else {
+        lv_label_set_text(encoder_labels[i], txt);
+    }
+}
+
+static void encoder_set_item_style(int i) {
+    if (i == encoder_sel_idx) {
+        lv_obj_set_style_text_color(encoder_labels[i], kb_text(), 0);
+        lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_title(), 0);
+    } else {
+        lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
+        lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_body(), 0);
+    }
+}
+
+static void encoder_position_item(int i) {
+    int cont_h = lv_obj_get_height(encoder_cont);
+    int slot_center_x = encoder_offset_x + i * encoder_item_spacing;
+    int lbl_w = lv_obj_get_width(encoder_labels[i]);
+    int lbl_h = lv_obj_get_height(encoder_labels[i]);
+    if (lbl_w <= 0) lbl_w = encoder_item_spacing / 2;
+    if (lbl_h <= 0) lbl_h = cont_h;
+    lv_obj_set_pos(encoder_labels[i],
+        slot_center_x - lbl_w / 2,
+        (cont_h - lbl_h) / 2);
+}
+
+static void encoder_position_selector(void) {
+    if (!encoder_selector) return;
+    int cont_h = lv_obj_get_height(encoder_cont);
+    int slot_center_x = encoder_offset_x + encoder_sel_idx * encoder_item_spacing;
+    lv_obj_set_pos(encoder_selector,
+        slot_center_x - encoder_selector_w / 2,
+        cont_h - encoder_selector_h - 2);
+}
+
+static int encoder_scroll_x_for_index(int i) {
+    return encoder_offset_x + i * encoder_item_spacing - encoder_screen_width / 2;
+}
+#endif
+
 static void destroy_key_buttons(void) {
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     for (int r = 0; r < num_rows; r++) {
@@ -662,22 +774,28 @@ static void keyboard_create() {
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
 
-    root = gui_screen_create_root(NULL, "Keyboard", lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root(NULL, "Keyboard", kb_bg(), LV_OPA_COVER);
     keyboard_view.root = root;
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_HOR_RES, screen_height);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(root, kb_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     int padding = 5;
     int display_height = 40;
+    lv_color_t text = kb_text();
+    lv_color_t surface = kb_surface();
+    lv_coord_t radius = kb_radius();
     input_label = lv_label_create(root);
     lv_obj_set_size(input_label, LV_HOR_RES - 2 * padding, display_height - 2 * padding);
-    lv_obj_set_style_bg_color(input_label, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(input_label, surface, 0);
     lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(input_label, text, 0);
     lv_obj_set_style_pad_all(input_label, padding, 0);
-    lv_obj_set_style_radius(input_label, 5, 0);
+    lv_obj_set_style_radius(input_label, radius, 0);
+    lv_obj_set_style_border_width(input_label, 1, 0);
+    lv_obj_set_style_border_color(input_label, text, 0);
+    lv_obj_set_style_border_opa(input_label, LV_OPA_30, 0);
     lv_obj_set_pos(input_label, padding, status_bar_height + padding);
     lv_label_set_long_mode(input_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     update_input_label();
@@ -687,8 +805,8 @@ static void keyboard_create() {
     // hide root while building to avoid heavy invalidation churn
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     // zero out radii during build to bypass rounded-rect mask paths
-    saved_key_radius = 3;
-    saved_input_label_radius = 5;
+    saved_key_radius = kb_radius();
+    saved_input_label_radius = kb_radius();
     lv_style_set_radius(&style_key_btn, 0);
     lv_obj_set_style_radius(input_label, 0, 0);
     radius_override_active = true;
@@ -715,36 +833,43 @@ static void keyboard_create() {
     encoder_item_count = encoder_alpha_count;
     encoder_sym_mode = false;
     encoder_sel_idx = 0;
+    encoder_uppercase = true;
     encoder_screen_width = LV_HOR_RES;
-    encoder_item_spacing = display_height;
-    encoder_offset_x = (encoder_screen_width / 2) - (encoder_item_spacing / 2);
+    // Slot width: wider than the container so the title-font's widest glyph
+    // (e.g. "W", "M") still leaves a visible gap to its neighbors.
+    encoder_item_spacing = LV_MAX(display_height + 8, 48);
+    // First slot's center sits one half-spacing from the container's left edge.
+    encoder_offset_x = encoder_item_spacing / 2;
     lv_obj_set_scroll_dir(encoder_cont, LV_DIR_LEFT | LV_DIR_RIGHT);
     lv_obj_set_scrollbar_mode(encoder_cont, LV_SCROLLBAR_MODE_OFF);
-    // pad right to allow last items to center
+    // pad right so the last slot can scroll all the way to center
     lv_obj_set_style_pad_right(encoder_cont, encoder_screen_width, 0);
-    // create and position each item label (centered, avoid clipping)
-    for(int i = 0; i < encoder_item_count; i++) {
+
+    // selection indicator: thin underline beneath the active slot
+    encoder_selector_w = LV_MAX(display_height / 3, 14);
+    encoder_selector_h = 2;
+    encoder_selector = lv_obj_create(encoder_cont);
+    lv_obj_remove_style_all(encoder_selector);
+    lv_obj_set_style_bg_color(encoder_selector, kb_accent(), 0);
+    lv_obj_set_style_bg_opa(encoder_selector, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(encoder_selector, 1, 0);
+    lv_obj_set_size(encoder_selector, encoder_selector_w, encoder_selector_h);
+
+    // create each label with its final text + style
+    for (int i = 0; i < encoder_item_count; i++) {
         encoder_labels[i] = lv_label_create(encoder_cont);
-        const char *txt = encoder_items[i];
-        if(!encoder_sym_mode && strlen(txt)==1 && isalpha((unsigned char)txt[0])) {
-            char tmp[2] = { encoder_uppercase ? toupper((unsigned char)txt[0]) : tolower((unsigned char)txt[0]), '\0' };
-            lv_label_set_text(encoder_labels[i], tmp);
-        } else {
-            lv_label_set_text(encoder_labels[i], txt);
-        }
-        if(i == encoder_sel_idx) {
-            lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_text_font(encoder_labels[i], &lv_font_montserrat_24, 0);
-        } else {
-            lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(0x888888), 0);
-            lv_obj_set_style_text_font(encoder_labels[i], &lv_font_montserrat_14, 0);
-        }
-        int lbl_w = lv_obj_get_width(encoder_labels[i]);
-        int lbl_h = 24; // font height
-        lv_obj_set_pos(encoder_labels[i],
-            encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2,
-            (display_height - lbl_h) / 2);
+        encoder_set_item_text(i);
+        encoder_set_item_style(i);
     }
+    // flush layout so lv_obj_get_width/height return real values
+    lv_obj_update_layout(encoder_cont);
+    // position every label centered within its slot
+    for (int i = 0; i < encoder_item_count; i++) {
+        encoder_position_item(i);
+    }
+    encoder_position_selector();
+    lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
+
     // ensure encoder builds unhide the root and restore radii
     if (radius_override_active) {
         lv_style_set_radius(&style_key_btn, saved_key_radius);
@@ -785,6 +910,7 @@ static void keyboard_destroy() {
         pressed_btn_id = -1;
         input_label = NULL;
         submit_callback = NULL;
+        immediate_callback = NULL;
         input_len = 0;
         input_buffer[0] = '\0';
         is_symbols_mode = false;
@@ -792,6 +918,7 @@ static void keyboard_destroy() {
         is_capslock = false;
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_cont = NULL;
+        encoder_selector = NULL;
         encoder_item_count = 0;
         encoder_screen_width = 0;
         encoder_item_spacing = 0;
@@ -835,26 +962,29 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;
-        int scroll_x = encoder_sel_idx * encoder_item_spacing;
-        lv_obj_scroll_to_x(encoder_cont, scroll_x, LV_ANIM_OFF);
+        lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
         if (prev >= 0 && prev < encoder_item_count) {
-            lv_obj_set_style_text_color(encoder_labels[prev], lv_color_hex(0x888888), 0);
-            lv_obj_set_style_text_font(encoder_labels[prev], &lv_font_montserrat_14, 0);
+            encoder_set_item_style(prev);
+            // re-position the de-selected label: the body font may have a
+            // different measured width than the title font it had moments ago,
+            // so it needs to be re-centered in its slot.
+            encoder_position_item(prev);
         }
-        lv_obj_set_style_text_color(encoder_labels[encoder_sel_idx], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_font(encoder_labels[encoder_sel_idx], &lv_font_montserrat_24, 0);
+        encoder_set_item_style(encoder_sel_idx);
+        encoder_position_item(encoder_sel_idx);
+        encoder_position_selector();
         if (event->data.encoder.button) {
             const char *sel = encoder_items[encoder_sel_idx];
             if(strcmp(sel, "Aa") == 0) {
                 // toggle case
                 encoder_uppercase = !encoder_uppercase;
-                // update labels
-                for(int j = 0; j < encoder_item_count; j++) {
-                    const char *t = encoder_items[j];
-                    if(!encoder_sym_mode && strlen(t)==1 && isalpha((unsigned char)t[0])) {
-                        char tmp2[2] = { encoder_uppercase ? toupper((unsigned char)t[0]) : tolower((unsigned char)t[0]), '\0' };
-                        lv_label_set_text(encoder_labels[j], tmp2);
-                    }
+                // refresh text on every alpha item
+                for (int j = 0; j < encoder_item_count; j++) {
+                    encoder_set_item_text(j);
+                }
+                lv_obj_update_layout(encoder_cont);
+                for (int j = 0; j < encoder_item_count; j++) {
+                    encoder_position_item(j);
                 }
                 return;
             }
@@ -865,17 +995,17 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 encoder_item_count = encoder_sym_count;
                 encoder_sym_mode = true;
                 encoder_sel_idx = 0;
-                // rebuild labels for symbol mode
                 for (int i = 0; i < encoder_item_count; i++) {
                     encoder_labels[i] = lv_label_create(encoder_cont);
-                    lv_label_set_text(encoder_labels[i], encoder_items[i]);
-                    bool sel_i = (i == encoder_sel_idx);
-                    lv_obj_set_style_text_color(encoder_labels[i], sel_i ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x888888), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_24 : &lv_font_montserrat_14, 0);
-                    int lbl_w = lv_obj_get_width(encoder_labels[i]);
-                    int enc_h = lv_obj_get_height(encoder_cont);
-                    lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);
+                    encoder_set_item_text(i);
+                    encoder_set_item_style(i);
                 }
+                lv_obj_update_layout(encoder_cont);
+                for (int i = 0; i < encoder_item_count; i++) {
+                    encoder_position_item(i);
+                }
+                encoder_position_selector();
+                lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
             } else if (encoder_sym_mode && strcmp(sel, "ABC") == 0) {
                 // switch back to alpha mode
                 for (int i = 0; i < encoder_item_count; i++) lv_obj_del(encoder_labels[i]);
@@ -883,22 +1013,22 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 encoder_item_count = encoder_alpha_count;
                 encoder_sym_mode = false;
                 encoder_sel_idx = 0;
-                // rebuild labels for alpha mode
                 for (int i = 0; i < encoder_item_count; i++) {
                     encoder_labels[i] = lv_label_create(encoder_cont);
-                    lv_label_set_text(encoder_labels[i], encoder_items[i]);
-                    bool sel_i = (i == encoder_sel_idx);
-                    lv_obj_set_style_text_color(encoder_labels[i], sel_i ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x888888), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? &lv_font_montserrat_24 : &lv_font_montserrat_14, 0);
-                    int lbl_w = lv_obj_get_width(encoder_labels[i]);
-                    int enc_h = lv_obj_get_height(encoder_cont);
-                    lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);
+                    encoder_set_item_text(i);
+                    encoder_set_item_style(i);
                 }
+                lv_obj_update_layout(encoder_cont);
+                for (int i = 0; i < encoder_item_count; i++) {
+                    encoder_position_item(i);
+                }
+                encoder_position_selector();
+                lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
             } else if (strcmp(sel, "SPA") == 0) {
                 add_char_to_buffer(' ');
-            } else if (strcmp(sel, "<-") == 0) {
+            } else if (strcmp(sel, LV_SYMBOL_BACKSPACE) == 0) {
                 remove_char_from_buffer();
-            } else if (strcmp(sel, "ENT") == 0) {
+            } else if (strcmp(sel, LV_SYMBOL_NEW_LINE) == 0) {
                 submit_text();
             } else {
                 char c = sel[0];
@@ -1162,7 +1292,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                                 int child_idx = 1 + key_index;
                                 pressed_key_btn = lv_obj_get_child(root, child_idx);
                                 if (pressed_key_btn) {
-                                    lv_obj_set_style_bg_color(pressed_key_btn, lv_color_hex(0xFF9800), 0); // Orange highlight
+                                    lv_obj_set_style_bg_color(pressed_key_btn, kb_accent(), 0);
                                 }
                             }
                             key_index++;
@@ -1220,7 +1350,8 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
             lv_obj_t *key_label = lv_obj_get_child(pressed_key_btn, 0);
             const char *label_text = lv_label_get_text(key_label);
             if (strcmp(label_text, LV_SYMBOL_UP) != 0) {
-                lv_obj_set_style_bg_color(pressed_key_btn, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_bg_color(pressed_key_btn, kb_surface(), 0);
+                lv_obj_set_style_bg_opa(pressed_key_btn, LV_OPA_COVER, 0);
             }
             pressed_key_btn = NULL;
             // Always update key labels to refresh SHIFT key highlight
@@ -1232,8 +1363,14 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         if (c == '`') {
             display_manager_switch_view(&options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
-            submit_text();
+            if (immediate_callback) {
+                // Real-time typing mode (e.g. BadUSB): send Enter, don't close
+                immediate_callback('\n');
+            } else {
+                submit_text();
+            }
         } else if (c == '\b') {
+            if (input_len == 0 && immediate_callback) immediate_callback('\b');
             remove_char_from_buffer();
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);
@@ -1252,6 +1389,10 @@ static void get_keyboard_callback(void **callback) {
 
 void keyboard_view_set_submit_callback(KeyboardSubmitCallback cb){
     submit_callback = cb;
+}
+
+void keyboard_view_set_immediate_callback(KeyboardImmediateCallback cb){
+    immediate_callback = cb;
 }
 
 void keyboard_view_set_placeholder(const char *text){
@@ -1364,6 +1505,12 @@ static void build_key_matrix(void) {
     int display_height = 40;
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y - padding;
+    int matrix_width = screen_width - 2 * padding;
+    int key_target = matrix_width / KEYBOARD_COLUMNS;
+    int matrix_height = key_target * num_rows * 9 / 5;
+    if (matrix_height > keys_area_height) matrix_height = keys_area_height;
+    if (matrix_height < 1) matrix_height = keys_area_height;
+    int matrix_y = keys_start_y + (keys_area_height - matrix_height) / 2;
 
     const char *(*current_keys)[10] = get_current_keys();
     const int *row_lens = get_current_row_lengths();
@@ -1421,16 +1568,25 @@ static void build_key_matrix(void) {
     if (!key_matrix) {
         key_matrix = lv_btnmatrix_create(root);
         lv_obj_remove_style_all(key_matrix);
-        lv_obj_set_pos(key_matrix, padding, keys_start_y);
-        lv_obj_set_size(key_matrix, screen_width - 2 * padding, keys_area_height);
-        lv_obj_set_style_bg_opa(key_matrix, LV_OPA_TRANSP, 0);
+        lv_obj_set_pos(key_matrix, padding, matrix_y);
+        lv_obj_set_size(key_matrix, matrix_width, matrix_height);
+        lv_obj_set_style_bg_color(key_matrix, kb_surface(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(key_matrix, LV_OPA_10, LV_PART_MAIN);
+        lv_obj_set_style_radius(key_matrix, kb_radius(), LV_PART_MAIN);
+        lv_obj_set_style_pad_all(key_matrix, 2, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(key_matrix, 3, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(key_matrix, 2, LV_PART_MAIN);
         lv_obj_add_style(key_matrix, &style_key_btn, LV_PART_ITEMS);
         lv_obj_add_style(key_matrix, &style_key_label, LV_PART_ITEMS);
         lv_obj_add_event_cb(key_matrix, key_matrix_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     } else {
-        lv_obj_set_pos(key_matrix, padding, keys_start_y);
-        lv_obj_set_size(key_matrix, screen_width - 2 * padding, keys_area_height);
+        lv_obj_set_pos(key_matrix, padding, matrix_y);
+        lv_obj_set_size(key_matrix, matrix_width, matrix_height);
     }
+
+    lv_obj_set_style_text_font(key_matrix,
+                               key_target <= 22 ? &lv_font_montserrat_12 : &lv_font_montserrat_14,
+                               LV_PART_ITEMS);
 
     lv_btnmatrix_set_map(key_matrix, btn_map);
 
@@ -1459,10 +1615,14 @@ static void build_key_matrix(void) {
         }
     }
 
-    lv_obj_set_style_bg_color(key_matrix, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(key_matrix, lv_color_hex(0x000000), LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(key_matrix, lv_color_hex(0x000000), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(key_matrix, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(key_matrix, kb_surface(), LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(key_matrix, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(key_matrix, kb_text(), LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_color_t accent = kb_accent();
+    lv_color_t sel_fg = kb_sel_text();
+    lv_obj_set_style_bg_color(key_matrix, accent, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(key_matrix, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(key_matrix, sel_fg, LV_PART_ITEMS | LV_STATE_CHECKED);
 
     // any rebuild invalidates previous focus id; it will be re-established on next joystick move
     joy_focused_btn_id = -1;
@@ -1558,7 +1718,8 @@ static void apply_selection_highlight(void) {
             if ((uint32_t)child_idx < child_count) {
                 lv_obj_t *btn = lv_obj_get_child(root, child_idx);
                 if (btn) {
-                    lv_obj_set_style_border_color(btn, lv_color_hex(0x666666), 0);
+                    lv_obj_set_style_border_color(btn, kb_text(), 0);
+                    lv_obj_set_style_border_opa(btn, LV_OPA_30, 0);
                     lv_obj_set_style_border_width(btn, 1, 0);
                 }
             }
@@ -1568,8 +1729,8 @@ static void apply_selection_highlight(void) {
     // highlight current cursor key
     lv_obj_t *btn = get_key_button_at(cursor_row, cursor_col);
     if (btn) {
-        lv_obj_set_style_border_color(btn, lv_color_hex(0x00BFFF), 0);
-        lv_obj_set_style_border_width(btn, 2, 0);
+        lv_obj_set_style_border_color(btn, kb_accent(), 0);
+        lv_obj_set_style_border_width(btn, 3, 0);
         selected_key_btn = btn;
     } else {
         selected_key_btn = NULL;

@@ -40,7 +40,7 @@ void ap_scan_start(void);
 esp_err_t ap_scan_start_async(void);
 
 /**
- * @brief Check if async scan is still running
+ * @brief Check if an AP scan is still running
  * 
  * @return true if scan is in progress, false otherwise
  */

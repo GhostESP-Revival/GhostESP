@@ -59,24 +59,26 @@ Attempts to connect to common ports and retrieve service information (HTTP, SSH,
 
 ### TCP Port Scanning
 
-Scan specific ports on a target:
+Scan ports on a target using range format:
 
 ```
-ethports <ip> <port>
+ethports <ip> <start-end>
 ```
 
 **Examples**:
 ```
-ethports 192.168.1.100 80
-ethports 192.168.1.100 22,80,443
+ethports 192.168.1.100 80-80
+ethports 192.168.1.100 22-443
 ```
+
+> **Note:** Port scanning uses range format (`start-end`), not comma-separated lists. To scan a single port, use the same number for start and end (e.g., `80-80`). To scan common ports on the gateway, omit the port argument.
 
 ### Scan Gateway
 
 Scan the gateway (DHCP server):
 
 ```
-ethports local 80
+ethports local
 ```
 
 ### Scan All Ports
@@ -115,6 +117,19 @@ ethdns <domain>
 **Example**:
 ```
 ethdns google.com
+```
+
+### Reverse DNS Lookup
+
+Resolve an IP address to a hostname:
+
+```
+ethdns reverse <ip_address>
+```
+
+**Example**:
+```
+ethdns reverse 8.8.8.8
 ```
 
 ## Statistics
