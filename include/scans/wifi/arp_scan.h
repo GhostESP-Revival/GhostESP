@@ -14,6 +14,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "esp_err.h"
+
+#ifdef CONFIG_SPIRAM
+#define ARP_SCAN_MAX_RESULTS 256
+#else
+#define ARP_SCAN_MAX_RESULTS 64
+#endif
 
 /**
  * @brief Structure representing a discovered ARP host
@@ -34,60 +41,21 @@ typedef struct {
     size_t num_active_hosts;  ///< Number of active hosts found
 } arp_scanner_ctx_t;
 
-/**
- * @brief Initialize ARP scanner context
- * 
- * @return arp_scanner_ctx_t* Pointer to initialized context, or NULL on failure
- */
 arp_scanner_ctx_t *arp_scanner_init(void);
-
-/**
- * @brief Clean up ARP scanner context
- * 
- * @param ctx Context to clean up
- */
 void arp_scanner_cleanup(arp_scanner_ctx_t *ctx);
-
-/**
- * @brief Scan run options for ARP subnet scan
- */
-typedef struct {
-    bool force_save;
-    bool write_csv;
-} arp_scan_run_options_t;
-
-/**
- * @brief Scan subnet for active hosts using ARP
- * 
- * @return true on success, false on failure
- */
 bool arp_scan_subnet(void);
-
-/**
- * @brief Scan subnet with optional save flags
- */
-bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts);
-
-/**
- * @brief Print ARP scan results
- */
 void arp_scan_print_results(void);
-
-/**
- * @brief Send ARP request to target IP
- * 
- * @param target_ip Target IP address string
- * @return true if ARP request sent successfully, false otherwise
- */
 bool send_arp_request(const char *target_ip);
-
-/**
- * @brief Get ARP table entry for IP address
- * 
- * @param ip IP address string
- * @param mac Buffer to store MAC address (6 bytes)
- * @return true if entry found, false otherwise
- */
 bool get_arp_table_entry(const char *ip, uint8_t *mac);
+
+esp_err_t arp_scan_start_async(void);
+bool arp_scan_check_done(void);
+void arp_scan_finish_async(void);
+bool arp_scan_is_running(void);
+void arp_scan_cancel(void);
+
+int arp_scan_get_count(void);
+const arp_host_t* arp_scan_get_host(int index);
+void arp_scan_clear_results(void);
 
 #endif // ARP_SCAN_H

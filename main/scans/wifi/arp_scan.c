@@ -9,8 +9,8 @@
  */
 
 #include "scans/wifi/arp_scan.h"
-#include "core/arp_scan_save.h"
 #include "core/glog.h"
+#include "core/scan_saver.h"
 #include "core/utils.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -39,6 +39,12 @@ static const char *TAG = "ARPScan";
 #define ARP_RESPONSE_WAIT_MS 250
 #define MAX_RETRIES 3
 
+// Persistent result storage (heap-allocated)
+static arp_host_t *g_arp_results = NULL;
+static int g_arp_result_count = 0;
+static volatile bool g_arp_scan_running = false;
+static volatile bool g_arp_scan_done = false;
+
 // ============================================================================
 // Internal Helpers (Module-specific)
 // ============================================================================
@@ -53,12 +59,15 @@ static void format_host_entry(char *buffer, size_t size, size_t index, const cha
 }
 
 /**
- * @brief Log a host entry
+ * @brief Log and save a host entry
  */
-static void log_host_entry(size_t index, const char *ip, const uint8_t *mac) {
+static void log_host_entry(scan_file_t *sf, size_t index, const char *ip, const uint8_t *mac) {
     char entry[80];
     format_host_entry(entry, sizeof(entry), index, ip, mac);
     glog("%s\n", entry);
+    if (sf && sf->fp) {
+        scan_file_printf(sf, "%s\n", entry);
+    }
 }
 
 /**
@@ -361,12 +370,6 @@ static void process_batch(arp_scanner_ctx_t *ctx, int batch_start, int batch_end
  * @brief Scan subnet for active hosts using ARP
  */
 bool arp_scan_subnet(void) {
-    return arp_scan_subnet_ex(NULL);
-}
-
-bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts) {
-    const bool force_save = opts && opts->force_save;
-    const bool write_csv = opts && opts->write_csv;
     arp_scanner_ctx_t *ctx = arp_scanner_init();
     if (!ctx) {
         glog("Failed to initialize ARP scanner context\n");
@@ -388,6 +391,12 @@ bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts) {
     const int total_hosts = END_HOST - START_HOST + 1;
     
     for (int batch_start = START_HOST; batch_start <= END_HOST; batch_start += BATCH_SIZE) {
+        if (!g_arp_scan_running) {
+            glog("ARP scan cancelled\n");
+            arp_scanner_cleanup(ctx);
+            return false;
+        }
+
         int batch_end = (batch_start + BATCH_SIZE - 1 > END_HOST) ? END_HOST : batch_start + BATCH_SIZE - 1;
         
         // Progress update
@@ -404,15 +413,33 @@ bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts) {
         }
     }
 
+    // Copy results to persistent storage
+    g_arp_result_count = 0;
+    int limit = (int)ctx->num_active_hosts;
+    if (limit > ARP_SCAN_MAX_RESULTS) limit = ARP_SCAN_MAX_RESULTS;
+    for (int i = 0; i < limit; i++) {
+        memcpy(&g_arp_results[i], &ctx->hosts[i], sizeof(arp_host_t));
+    }
+    g_arp_result_count = limit;
+
+    // Open scan file for saving results
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "arp_scan", "txt") == ESP_OK);
+
     // Final summary
     glog("\n=== ARP Scan Results ===\n");
     glog("Found %zu active hosts on %s0/24:\n", ctx->num_active_hosts, ctx->subnet_prefix);
+    
+    if (saving) {
+        scan_file_printf(&sf, "--- ARP Scan Results (%zu hosts) ---\n", ctx->num_active_hosts);
+        scan_file_printf(&sf, "Subnet: %s0/24\n\n", ctx->subnet_prefix);
+    }
     
     if (ctx->num_active_hosts > 0) {
         glog("\nActive hosts:\n");
         
         for (size_t i = 0; i < ctx->num_active_hosts; i++) {
-            log_host_entry(i + 1, ctx->hosts[i].ip, ctx->hosts[i].mac);
+            log_host_entry(&sf, i + 1, ctx->hosts[i].ip, ctx->hosts[i].mac);
         }
     } else {
         glog("No active hosts found.\n");
@@ -421,30 +448,79 @@ bool arp_scan_subnet_ex(const arp_scan_run_options_t *opts) {
     glog("\nARP scan completed.\n");
     ESP_LOGI(TAG, "ARP scan completed. Found %zu active hosts", ctx->num_active_hosts);
 
-    char scanner_ip[16] = {0};
-    esp_netif_t *sta_netif = get_wifi_sta_netif();
-    if (sta_netif) {
-        esp_netif_ip_info_t ip_info;
-        if (esp_netif_get_ip_info(sta_netif, &ip_info) == ESP_OK) {
-            esp_ip4addr_ntoa(&ip_info.ip, scanner_ip, sizeof(scanner_ip));
-        }
+    if (saving) {
+        scan_file_close(&sf);
     }
-
-    char saved_path[128];
-    arp_scan_save_input_t save_in = {
-        .subnet_prefix = ctx->subnet_prefix,
-        .iface = ARP_SCAN_IFACE_WIFI,
-        .scanner_ip = scanner_ip[0] ? scanner_ip : NULL,
-        .hosts = ctx->hosts,
-        .host_count = ctx->num_active_hosts,
-        .force_save = force_save,
-        .write_csv = write_csv,
-    };
-    esp_err_t save_err = arp_scan_save_results(&save_in, saved_path, sizeof(saved_path));
-    arp_scan_save_report_status(save_err, saved_path[0] ? saved_path : NULL);
 
     arp_scanner_cleanup(ctx);
     return true;
+}
+
+/**
+ * @brief FreeRTOS task wrapper for async ARP scan
+ */
+static void arp_scan_task(void *pvParameters) {
+    (void)pvParameters;
+    arp_scan_subnet();
+    g_arp_scan_done = true;
+    vTaskDelete(NULL);
+}
+
+esp_err_t arp_scan_start_async(void) {
+    if (g_arp_scan_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    arp_scan_clear_results();
+    g_arp_results = malloc(sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
+    if (!g_arp_results) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(g_arp_results, 0, sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
+    g_arp_scan_running = true;
+    g_arp_scan_done = false;
+    BaseType_t ret = xTaskCreate(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        g_arp_scan_running = false;
+        free(g_arp_results);
+        g_arp_results = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+bool arp_scan_check_done(void) {
+    return g_arp_scan_done;
+}
+
+void arp_scan_finish_async(void) {
+    g_arp_scan_running = false;
+}
+
+bool arp_scan_is_running(void) {
+    return g_arp_scan_running && !g_arp_scan_done;
+}
+
+void arp_scan_cancel(void) {
+    g_arp_scan_running = false;
+}
+
+int arp_scan_get_count(void) {
+    return g_arp_result_count;
+}
+
+const arp_host_t* arp_scan_get_host(int index) {
+    if (index < 0 || index >= g_arp_result_count) {
+        return NULL;
+    }
+    return &g_arp_results[index];
+}
+
+void arp_scan_clear_results(void) {
+    g_arp_result_count = 0;
+    if (g_arp_results) {
+        free(g_arp_results);
+        g_arp_results = NULL;
+    }
 }
 
 /**
