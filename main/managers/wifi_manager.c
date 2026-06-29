@@ -93,6 +93,12 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
 #define MDNS_NAME_BUF_LEN 65
 #define ARP_DELAY_MS 500
 
+// Persistent mDNS result storage (heap-allocated)
+static mdns_device_t *g_mdns_results = NULL;
+static int g_mdns_result_count = 0;
+static volatile bool g_mdns_scan_running = false;
+static volatile bool g_mdns_scan_done = false;
+
 #define BEACON_LIST_MAX 16
 #define BEACON_SSID_MAX_LEN 32
 
@@ -3143,6 +3149,8 @@ void wifi_manager_start_ip_lookup() {
         return;
     }
 
+    g_mdns_result_count = 0;
+
     esp_netif_ip_info_t ip_info;
     if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) ==
         ESP_OK) {
@@ -3154,11 +3162,13 @@ void wifi_manager_start_ip_lookup() {
         (void)devices;
 
         for (int s = 0; s < NUM_SERVICES; s++) {
+            if (!g_mdns_scan_running) break;
+
             int retries = 0;
             mdns_result_t *mdnsresult = NULL;
 
             if (mdnsresult == NULL) {
-                while (retries < 5 && mdnsresult == NULL) {
+                while (retries < 5 && mdnsresult == NULL && g_mdns_scan_running) {
                     esp_err_t qret = mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
 
                     if (mdnsresult == NULL) {
@@ -3193,6 +3203,19 @@ void wifi_manager_start_ip_lookup() {
                         strncpy(ip_str, "0.0.0.0", sizeof(ip_str));
                     }
 
+                    // Store in persistent results
+                    if (g_mdns_result_count < MDNS_MAX_DEVICES) {
+                        mdns_device_t *dev = &g_mdns_results[g_mdns_result_count];
+                        memset(dev, 0, sizeof(mdns_device_t));
+                        if (current_result->hostname) {
+                            strncpy(dev->hostname, current_result->hostname, sizeof(dev->hostname) - 1);
+                        }
+                        strncpy(dev->ip, ip_str, sizeof(dev->ip) - 1);
+                        dev->port = current_result->port;
+                        strncpy(dev->service_type, services[s].type, sizeof(dev->service_type) - 1);
+                        g_mdns_result_count++;
+                    }
+
                     printf("Device at: %s\n", ip_str);
                     printf("  Name: %s\n", current_result->hostname);
                     printf("  Type: %s\n", services[s].type);
@@ -3219,8 +3242,68 @@ void wifi_manager_start_ip_lookup() {
         TERMINAL_VIEW_ADD_TEXT("Can't recieve network interface info.\n");
     }
 
-    printf("IP Scan Done.\n");
-    TERMINAL_VIEW_ADD_TEXT("IP Scan Done...\n");
+    printf("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
+    TERMINAL_VIEW_ADD_TEXT("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
+}
+
+static void wifi_manager_ip_lookup_task(void *pvParameters) {
+    (void)pvParameters;
+    wifi_manager_start_ip_lookup();
+    g_mdns_scan_done = true;
+    vTaskDelete(NULL);
+}
+
+esp_err_t wifi_manager_start_ip_lookup_async(void) {
+    if (g_mdns_scan_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    wifi_manager_ip_lookup_clear();
+    g_mdns_results = malloc(sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
+    if (!g_mdns_results) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(g_mdns_results, 0, sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
+    g_mdns_scan_running = true;
+    g_mdns_scan_done = false;
+    BaseType_t ret = xTaskCreate(wifi_manager_ip_lookup_task, "mdns_scan", 8192, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        g_mdns_scan_running = false;
+        free(g_mdns_results);
+        g_mdns_results = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+bool wifi_manager_ip_lookup_check_done(void) {
+    return g_mdns_scan_done;
+}
+
+void wifi_manager_ip_lookup_finish_async(void) {
+    g_mdns_scan_running = false;
+}
+
+bool wifi_manager_ip_lookup_is_running(void) {
+    return g_mdns_scan_running && !g_mdns_scan_done;
+}
+
+int wifi_manager_ip_lookup_get_count(void) {
+    return g_mdns_result_count;
+}
+
+const mdns_device_t* wifi_manager_ip_lookup_get_device(int index) {
+    if (index < 0 || index >= g_mdns_result_count) {
+        return NULL;
+    }
+    return &g_mdns_results[index];
+}
+
+void wifi_manager_ip_lookup_clear(void) {
+    g_mdns_result_count = 0;
+    if (g_mdns_results) {
+        free(g_mdns_results);
+        g_mdns_results = NULL;
+    }
 }
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     if (ssid == NULL || ssid[0] == '\0') {

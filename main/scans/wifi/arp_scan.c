@@ -39,6 +39,12 @@ static const char *TAG = "ARPScan";
 #define ARP_RESPONSE_WAIT_MS 250
 #define MAX_RETRIES 3
 
+// Persistent result storage (heap-allocated)
+static arp_host_t *g_arp_results = NULL;
+static int g_arp_result_count = 0;
+static volatile bool g_arp_scan_running = false;
+static volatile bool g_arp_scan_done = false;
+
 // ============================================================================
 // Internal Helpers (Module-specific)
 // ============================================================================
@@ -385,6 +391,12 @@ bool arp_scan_subnet(void) {
     const int total_hosts = END_HOST - START_HOST + 1;
     
     for (int batch_start = START_HOST; batch_start <= END_HOST; batch_start += BATCH_SIZE) {
+        if (!g_arp_scan_running) {
+            glog("ARP scan cancelled\n");
+            arp_scanner_cleanup(ctx);
+            return false;
+        }
+
         int batch_end = (batch_start + BATCH_SIZE - 1 > END_HOST) ? END_HOST : batch_start + BATCH_SIZE - 1;
         
         // Progress update
@@ -400,6 +412,15 @@ bool arp_scan_subnet(void) {
             report_progress(scanned, total_hosts, ctx->num_active_hosts);
         }
     }
+
+    // Copy results to persistent storage
+    g_arp_result_count = 0;
+    int limit = (int)ctx->num_active_hosts;
+    if (limit > ARP_SCAN_MAX_RESULTS) limit = ARP_SCAN_MAX_RESULTS;
+    for (int i = 0; i < limit; i++) {
+        memcpy(&g_arp_results[i], &ctx->hosts[i], sizeof(arp_host_t));
+    }
+    g_arp_result_count = limit;
 
     // Open scan file for saving results
     scan_file_t sf = SCAN_FILE_INIT;
@@ -433,6 +454,73 @@ bool arp_scan_subnet(void) {
 
     arp_scanner_cleanup(ctx);
     return true;
+}
+
+/**
+ * @brief FreeRTOS task wrapper for async ARP scan
+ */
+static void arp_scan_task(void *pvParameters) {
+    (void)pvParameters;
+    arp_scan_subnet();
+    g_arp_scan_done = true;
+    vTaskDelete(NULL);
+}
+
+esp_err_t arp_scan_start_async(void) {
+    if (g_arp_scan_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    arp_scan_clear_results();
+    g_arp_results = malloc(sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
+    if (!g_arp_results) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(g_arp_results, 0, sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
+    g_arp_scan_running = true;
+    g_arp_scan_done = false;
+    BaseType_t ret = xTaskCreate(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        g_arp_scan_running = false;
+        free(g_arp_results);
+        g_arp_results = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+bool arp_scan_check_done(void) {
+    return g_arp_scan_done;
+}
+
+void arp_scan_finish_async(void) {
+    g_arp_scan_running = false;
+}
+
+bool arp_scan_is_running(void) {
+    return g_arp_scan_running && !g_arp_scan_done;
+}
+
+void arp_scan_cancel(void) {
+    g_arp_scan_running = false;
+}
+
+int arp_scan_get_count(void) {
+    return g_arp_result_count;
+}
+
+const arp_host_t* arp_scan_get_host(int index) {
+    if (index < 0 || index >= g_arp_result_count) {
+        return NULL;
+    }
+    return &g_arp_results[index];
+}
+
+void arp_scan_clear_results(void) {
+    g_arp_result_count = 0;
+    if (g_arp_results) {
+        free(g_arp_results);
+        g_arp_results = NULL;
+    }
 }
 
 /**

@@ -171,6 +171,25 @@ void handle_setrgbcount(int argc, char **argv);
 void handle_scanall(int argc, char **argv);
 void handle_sweep_cmd(int argc, char **argv);
 
+typedef struct {
+    int ap_count;
+    int station_count;
+    int flipper_count;
+    int gatt_count;
+    int zigbee_count;
+    int current_phase;
+    int total_phases;
+    bool done;
+    bool running;
+} sweep_result_t;
+
+void sweep_start_async(int wifi_seconds, int ble_seconds);
+bool sweep_check_done(void);
+void sweep_finish_async(void);
+bool sweep_is_running(void);
+const sweep_result_t* sweep_get_result(void);
+void sweep_clear_result(void);
+
 // Audio commands
 void handle_audio_cmd(int argc, char **argv);
 #ifdef CONFIG_HAS_MIC

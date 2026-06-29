@@ -171,6 +171,27 @@ void wifi_manager_configure_sta_from_settings(void);
 
 void wifi_manager_start_ip_lookup();
 
+#ifdef CONFIG_SPIRAM
+#define MDNS_MAX_DEVICES 128
+#else
+#define MDNS_MAX_DEVICES 48
+#endif
+
+typedef struct {
+    char hostname[64];
+    char ip[16];
+    uint16_t port;
+    char service_type[32];
+} mdns_device_t;
+
+esp_err_t wifi_manager_start_ip_lookup_async(void);
+bool wifi_manager_ip_lookup_check_done(void);
+void wifi_manager_ip_lookup_finish_async(void);
+bool wifi_manager_ip_lookup_is_running(void);
+int wifi_manager_ip_lookup_get_count(void);
+const mdns_device_t* wifi_manager_ip_lookup_get_device(int index);
+void wifi_manager_ip_lookup_clear(void);
+
 void wifi_manager_connect_wifi(const char *ssid, const char *password);
 
 void wifi_manager_cancel_connect(void);
