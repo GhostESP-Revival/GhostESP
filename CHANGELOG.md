@@ -1,5 +1,8 @@
 # Ghost ESP Changelog
 
+## Revival v2.0-pre9
+- Fixes for Marauder V8 and Pancake configs - @H4W9
+
 ## Revival v2.0-pre8
 
 ### Changed
