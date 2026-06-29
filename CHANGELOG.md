@@ -1,5 +1,236 @@
 # Ghost ESP Changelog
 
+## Revival v2.0
+
+### Added
+
+#### Security & Lock Screen
+- Added PIN lock screen with lock on wake and auto-lock settings
+- Added Ghostchi companion lockscreen mode with no-PIN support and a global mood system
+
+#### Native SD Apps & App Gallery
+- Added native SD apps loaded from the SD card with permissions, scoped storage, and launch-failure quarantine
+- Added App Gallery for discovering and launching SD apps with custom icons and accent colors
+- Added `apps` CLI to list, reload, inspect, launch, stop, and reset native SD apps
+- Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field
+- Added native app SDK/docs and example apps for Device Inspector and ESP32 Finder
+- Added a separate `nrf24` native SD app permission
+- Added small native SD app helpers for capability checks and SubGHz replay
+- Added Ghost Build Tool (`gbt`) for scaffolding, building, and packaging apps and firmware
+
+#### SD Browser & File Management
+- Added SD Browser app for paginated file/folder browsing, rename, delete, text preview, and file copy/move operations
+- Added Paste Here / Cancel File Op rows so SD browser file operations work across touch, keyboard, joystick, and encoder controls
+
+#### WiFi & Networking
+- Added WiFi Airspace Monitor with realtime packet/threat insights, fast channel hopping, suspect device cards, adaptive channel dwell, EWMA baseline, and packets/sec sparkline
+- Added WPA3 compliance checker to WiFi > Scan & Select menu and CLI (`wpa3check`)
+- Added SSH Scan, NetBIOS Scan, HTTP Banner Scan, and SNMP Probe to WiFi > Network menu and CLI
+- Added per-host keyboard-input variants ("Scan SSH Host...", etc.) for targeted scanning
+- Added `capture -channel <n>` to lock WiFi capture modes and 802.15.4 captures to a fixed channel
+- Added `wdstream` CLI streaming for companion-app wardriving without device GPS, SD, CSV, or PCAP capture requirements
+
+#### Bluetooth & BLE
+- Added BLE advertisement scan option in the Bluetooth menu
+- Added OUI prefix/vendor filtered BLE device scanning with RGB match pulses
+- Added scanning spinner and details view for `GATT Scan` in the Bluetooth menu
+- Added RSSI meter view for real-time signal strength tracking with a pulsing ring indicator
+- Added support for assigning a GhostLink connected chip to act as a blebridge between a main chip and the android companion app
+
+#### GPS & Wardriving
+- Added GPS baud auto-detect and always-visible runtime GPS settings for boards without compile-time GPS enabled
+- Added runtime-configurable GPS baud rate (settings, `gpsbaud` CLI, WebUI, and a new GPS menu under Scans & Data)
+- Added Wardriving settings for per-chip hop intervals and weighted 5GHz channel hopping, synced over GhostLink
+
+#### Hardware Support
+- Added support for the LilyGo T-Dongle-S3 with WebUI BadUSB support
+- Added support for the LilyGo T-Dongle-C5
+- Added Marauder V8 hardware build - @H4W9
+- Added Pancake C5 hardware build - @H4W9
+- Added DRV2605 haptic feedback for the S3TWatch
+- Added ENV-III support to the Cardputer + Cardputer ADV
+
+#### BadUSB & USB
+- Added a trackpad option to BadUSB
+- Added proper touch support to the BadUSB view
+- Added USB Keyboard Mode for forwarding on-device keystrokes over USB HID
+- Added mouse jiggler to BadUSB
+- Added `badusb type_char` CLI command for typing single ASCII characters
+
+#### Custom Asset Packs & Theming
+- Added custom asset packs loaded from SD with custom icons, colors, and backgrounds
+- Added a "Card Background" setting in Appearance to hide the card surface/shadow/border on main menu and apps gallery items
+- Added an "Invert Carousel" setting in Appearance that flips the slide direction
+- Added a "Terminal Font" setting in Display to change the font size of the terminal view (Small / Normal / Large)
+
+#### UI & Accessibility
+- Added toast notification system
+- Added epilepsy warning toggle (disables flashing LED effect popups)
+- Added accessibility settings: Font size (Small/Normal/Large), High contrast mode, Reduced motion, Input repeat speed (Slow/Normal/Fast)
+- Added on-device AP/STA SSID and password editing under Settings → Wi-Fi
+- Added Timezone quick-edit under Settings → Wi-Fi
+- Added subcategories to the Settings view and re-organised the options
+- Added reusable LVGL confirmation popups for dangerous UI actions
+- Added reusable select overlay for option picker rows
+- Added fullscreen option to `popup_create_container` so popups can fill the screen under the status bar
+- Added a small progress bar to the boot screen so SD mount, asset pack load, and app scan no longer happen while using the device
+- Added Display Timeout options: 15s, 2m, and 5m
+- Added on-device PCAP browser with hc22000 markers under WiFi > Capture
+- Added PCAP to hc22000 export on displays
+
+#### Ghostchi Companion
+- Added 5 new Ghostchi images. "Banshee" by @pr3
+- Added Ghostchi activity counters to state file
+- Added level-up toast notification
+- Added persistent level badge in the status bar visible on every screen
+- Added Settings > Info with a read-only device, runtime, build, and credits page sourced from `chipinfo`
+- Expanded Ghostchi levels from 10 to 50 with a smooth quadratic curve
+- Expanded Ghostchi XP system from 3 sources to 27 across WiFi, BLE, GPS, IR, NFC, SubGHz, BadUSB, attacks, scans, games, plugins, and settings
+
+### Changed
+
+#### UI & Display
+- Increased LVGL display refresh target from 30 FPS to 60 FPS
+- Polished status bar with cleaner accent border, brighter title with truncation, softer semantic status colors
+- Polished detail view to match main menu styling
+- Polished number pad screen with theme-aware lockscreen-style numpad grid
+- Polished keyboard screen with theme-aware key styling and accent highlights
+- Changed startup logo to new logo and removed "GhostESP: Revival" text from splash screen
+- Removed border from popups
+- Replaced DEL label with the backspace symbol
+- Skipping the setup wizard now defaults the main menu to List layout
+- Replaced on/off settings rows with iOS style toggles
+- Reduced status bar title font size to body font for a cleaner look
+- Apps Gallery now renders the asset pack background image
+- Larger lockscreen numpad on taller displays with solid keys and proper contrast
+- Lockscreen shows the asset pack background instead of a solid color
+- Made command lookup case-insensitive (`SCANAP` now works)
+- Reduced the brief white screen before splash by keeping the backlight off until the first splash frame is drawn
+- Removed "SD card mounted" toast during boot
+- Removed "IR sent" toast notification
+- Removed 2 redundant toast notifications when opening native SD apps
+- Slimmed and rounded the terminal's bottom touch controls to match the rest of the UI
+- Stopped logging unknown commands to command history so typos no longer pollute arrow-up
+- Themed the terminal's input bar and back button via the palette instead of hardcoded colors
+- Reduced `sd tree` walker memory from ~16 KB to ~600 B and made it work on devices without PSRAM
+- Plugin icons now recolor to their manifest accent color, unless overridden by an asset pack
+
+#### Performance & Optimization
+- Optimized WiFi, BLE, mbedTLS, and LWIP buffer sizes for all non-PSRAM configs
+- Compressed OUI list to save free up flash space
+- Cached the DualComm line check per row to keep the split-view terminal smooth
+- ESP32-C5 native SD apps now execute their code from flash (XIP) instead of internal RAM, lifting the ~25 KB executable-size ceiling on app code for C5 boards with more than 4 MB flash
+
+#### Architecture & Code Quality
+- Split commandline god file into separate organised files
+- Wake/auto-lock now floats the lockscreen as an overlay instead of switching views, so active captures (wardriving, sniffing) keep running while locked
+- Made native SD app launch failures diagnostic-only instead of quarantining apps
+- Tightened native SD app storage scope and path checks
+- Extracted the repeated tiered popup sizing math into `popup_calc_size` helpers
+- Moved the per-view "mount SD on demand" boilerplate into shared `sd_card_jit_begin` / `sd_card_jit_end` helpers
+- Added `gui_screen_create_root_default` and a `GUI_DEFAULT_BG_COLOR` constant for views that want a flat non-theme background
+- Easy Learn in the Infrared menu now uses an iOS-style toggle row like the settings ones
+- Completely redesigned the WebUI and added a dedicated BadUSB page
+- Sorry about making you wait 7 seconds to shut down your TEmbed, that's now down to 4
+- Improved rotary encoder: raised debounce to 3 ms, added quadrature transition validation, capped pending step accumulation, and moved direct-GPIO encoder sampling to a dedicated 1 kHz task
+- Renamed "Default" named theme to OG since it wasn't actually the default theme
+- Renamed "Scan LAN Devices" to "mDNS Discovery" in the WiFi > Network menu for accuracy
+- Removed "Select LAN" from the WiFi > Network menu (it was a duplicate of Select AP)
+- Made BadUSB keyboard startup async so GhostLink doesn't block
+- Changed BadUSB popup to wait for actual VSENSE state before showing "Waiting for USB"
+- Made `generate_uuid` take a caller-owned buffer so concurrent DIAL binds can no longer race on its static storage
+- Hardened `serial_task` against OOM by checking the UART buffer allocation
+- Made `glog` copy the formatted line to a heap buffer before unlocking and fixed the deferred-queue leak when defer mode is turned off
+- Replaced the `VLA` in `get_query_param` with a fixed 512-byte buffer
+- Replaced a few `sprintf`/`strcpy`/`strcat` sites in GPS coordinate formatting, aerial detector init, and the AP query-param helper with bounded variants
+- Replaced the placeholder ghost sprite on small screens with the real GhostESP logo
+
+#### Hardened WebUI
+- API and camera endpoints now enforce Digest auth when enabled
+- Passwords no longer leak from settings GET
+- AP password validation accepts exactly 8 characters
+- SD upload path/filename/size checks are unified
+- Settings_save surfaces NVS write errors
+
+### Fixed
+- Fixed number pad touchscreen input
+- Fixed apps gallery not respecting the "Item Borders" setting
+- Fixed apps gallery list view icon misalignment and tiling artifact
+- Fixed Cardputer (non-ADV) keyboard spamming input by emitting key-release events so the global key-repeat timer stops when keys are let go
+- Fixed touch taps on the GATT device detail view leaking through to the underlying scan list
+- Fixed GPS failing to initialize on T-Deck: GPS now temporarily takes over the shared UART1 from the serial command interface while running and hands it back on stop
+- Wardriving/GPS view is now touch-scrollable with a bottom control bar matching the other views
+- Fixed timed Wi-Fi scans returning 0 results when the auto-reconnect timer reconfigured STA mid-scan
+- Fixed a null-pointer crash in `lv_async_call` when invoked from non-LVGL tasks by initializing the callback before the timer goes live
+- Fixed NM-CYD-C5 internal RAM exhaustion and SD app loading (disabled memory protection so the ELF loader can allocate executable memory)
+- Fixed a crash after a successful NFC scan caused by `free()`-ing a static NDEF pool slot instead of returning it to the pool
+- Fixed the CYD 2.4" display freezing when no SD card is inserted by no longer tearing down SD's SPI3 bus on mount failure or unmount
+- Fixed serial console staying dead after stopping BadUSB on the S3. The native USB-Serial-JTAG driver is now re-installed once TinyUSB releases the bus
+- Fixed asset pack auto-selecting an installed pack on boot when the user hadn't picked one, so a pack dropped on the SD is no longer made active without manual selection
+- Fixed "Scan SSH" menu item previously failing due to missing required argument
+- Fixed asset pack background image not properly filling the screen on some devices
+- Fixed GhostNet WebUI staying down after `scan -t`, `scanap`, and `scansta` failures or early stops
+- Fixed `stopscan` always bringing the AP back, even when the Wi-Fi driver restart errored
+- Fixed `station_scan_stop` to restore GhostNet so the WebUI returns when stopping a station scan
+- Fixed Banshee (Wired Hatters) 100% screen brightness appearing dimmer than 90% caused by LEDC PWM producing a flat DC signal instead of a waveform at duty=0
+- Fixed inconsistent vertical alignment of asset pack icons in the main menu and apps gallery grid cards by anchoring icons to a fixed top padding instead of centering their bounding boxes
+- Fixed double-free in DIAL `send_command` where `url_params`/`body_params` were freed before `goto cleanup` and then freed again at the cleanup label
+- Fixed leak of `full_url` and all preceding allocations on the OOM path in DIAL `send_command` by routing through the cleanup label
+- Fixed unchecked `esp_http_client_init` in DIAL `send_command` that could crash if the client handle came back NULL
+- Fixed leaks of `g_app_url` when the DIAL `Application-Url` header arrived more than once
+- Fixed realloc-to-same-pointer in M5Stack keyboard, MIFARE Classic universal command loading, and Chameleon/MIFARE cache init paths so an OOM no longer leaks the previous allocation and then dereferences NULL
+- Freed `filepath` on every exit path of `sinkhole_download_task` so each blocklist download no longer leaks it
+- Made `sd_cli_cleanup` free the `strdup`'d path table so repeated `sd ls` calls stop leaking
+- Cleared partial PRF output on allocation failure so a future caller of `wpa_derive_ptk` never sees stale data on `false`
+- Fixed panic in Infrared when reopening the Remotes list. `clear_ir_file_paths` now always resets `ir_file_capacity`, and the duplicate manual frees in `back_event_cb` and `infrared_view_destroy` route through it so `load_ir_file_list_from_dir` can no longer write through a stale-but-freed pointer
+- Fixed `chameleon` (no args) double-printing its help on the on-screen terminal
+- Fixed `help` (no args) printing the category list twice
+- Fixed `select -a 1,2,3` corrupting later `select` calls by switching to a re-entrant, non-mutating tokenizer
+- Fixed audio decode task leaking decoder buffers on deinit by adding a self-exit semaphore so the task can free its own state
+- Fixed audio receiver ring buffer producer/consumer race by serializing `head`/`tail` updates with a `portMUX`
+- Fixed BLE stack restart racing NimBLE stop/deinit
+- Fixed DIAL bind overflowing `gsession`/`SID`/`listID` with server-controlled bytes
+- Fixed DNS sinkhole silently clobbering forward ring slot 0 under load
+- Fixed duplicate `powerprinter` entry in `help printer`
+- Fixed Invert Colors setting not refreshing the screen until something else triggered a redraw
+- Fixed Waveshare 7-inch (ESP32-S3-Touch-LCD-7) backlight and touch
+- Fixed Wigle "already uploaded" check stalling uploads on long histories by caching the on-disk log in RAM
+- Fixed integer overflow in mic visualizer reactive color calculation causing incorrect colors at high volumes
+- Fixed mic visualizer bloom and peak meter decay being inverted (higher smoothing = faster decay)
+- Fixed mic visualizer waveform trail rendering backwards (oldest samples were brightest)
+- Fixed mic visualizer spectrum distance fade underflow on strips longer than ~60 LEDs
+- Wired up mic smoothing setting to band release rate so it affects all visualizer modes
+- Fixed mic visualizer mode state not resetting on first frame when starting in default mode
+- Moved NRF24, SubGHz, and MIC visualizer task stacks to PSRAM to fix internal RAM exhaustion
+- Moved Goertzel ring buffers and MIC sample buffer to PSRAM to free up internal RAM
+- Fixed LoadProhibited crash on deferred SD card init failure
+- WiFi now auto-reconnects after BLE/Chameleon suspend, with bounded retry on involuntary disconnects
+- Adjusted lockscreen layout for cardputer screens
+- Fixed SD browser keyboard input causing rapid scrolling on cardputer key hold
+- Fixed inconsistent icon sizing and alignment in app gallery and main menu grid layouts across different displays
+- Fixed inability to exit SD app runner when app fails to load
+- Fixed gbt generating planar RGB565A8 icons instead of interleaved format expected by LVGL
+- Fixed random boot crashes on JIT mount boards caused by the SD card taking over the shared SPI bus while the screen was still mid-draw
+- Fixed `nmea_parser` stack overflow crashes by raising the GPS parser task stack
+- Fixed runtime GPS parsing by enabling NMEA decoding without `CONFIG_HAS_GPS` and improving UART drain/update handling
+- Fixed S3TWatch RTC init on ESP-IDF 6.0 by avoiding an `rtc_init` symbol collision that could hang WiFi scans
+- Fixed app gallery grid keyboard navigation to move by row like the main menu
+- Fixed inconsistent character spacing and centering in the encoder-only keyboard view and swapped backspace/enter for LVGL symbols
+- Fixed flashing solid grey behind the IR transmit epilepsy warning by deferring the transmitting popup until after the warning fades
+- Fixed universal remote button sends over-awarding Ghostchi XP (1 XP per button press instead of 4 XP per signal)
+- Fixed SHUTTING DOWN popup being wider than its text on T-Embed by auto-sizing popups to fit their content
+- Fixed detail view wrap-around and selection behaving erratically with joystick/encoder input
+- Fixed lockscreen rejecting correct PIN when Wi-Fi is off (BLE scan stops STA); key now uses stable STA MAC with legacy fallback
+- Fixed wrong PIN after lock-on-wake; wake input is consumed and queued input is briefly ignored after lock
+- Fixed detail view being orphaned over the rebuilt main menu after dim+lock; rebuilt after unlock
+- Fixed `scan_status` spinner lingering on `lv_layer_top()` across lockscreen entry
+- Fixed main menu touch scrolling feeling less responsive than settings
+- Fixed fullscreen LVGL popups not filling the runtime display area below the status bar on some configs
+- Fixed saved RGB pins being ignored at boot on boards with `CONFIG_NUM_LEDS=0` when the LED count was never set, causing `setrgbpins` to appear to not persist across reboots
+- Fixed BLE scans over-awarding Ghostchi XP
+- Fixed BLE scan RGB getting stuck instead of pulsing
+- Fixed GitHub Actions merged binary using wrong bootloader offset for ESP32-S3/C3/C5/C6 targets
+
 ## Revival v2.0-pre9
 - ESP32-C5 native SD apps now execute their code from flash (XIP) instead of internal RAM, lifting the ~25 KB executable-size ceiling on app code for C5 boards with more than 4 MB flash
 - Fixes for Marauder V8 and Pancake configs - @H4W9
