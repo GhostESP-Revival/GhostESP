@@ -1,4 +1,5 @@
 #include "managers/camera_stream_manager.h"
+#include "managers/ap_manager.h"
 #include "managers/motion_detector_manager.h"
 #include "core/glog.h"
 #include "core/serial_manager.h"
@@ -213,6 +214,7 @@ CameraStreamState camera_stream_get_state(void) {
 }
 
 esp_err_t camera_stream_api_handler(httpd_req_t *req) {
+    if (!ap_manager_webui_request_allowed(req)) return ESP_OK;
     char content[256];
     int command_len = req->content_len;
     if (command_len <= 0 || command_len >= (int)sizeof(content)) {
@@ -260,6 +262,7 @@ esp_err_t camera_stream_api_handler(httpd_req_t *req) {
 }
 
 esp_err_t camera_stream_page_handler(httpd_req_t *req) {
+    if (!ap_manager_webui_request_allowed(req)) return ESP_OK;
     const char *html =
         "<!DOCTYPE html><html><head><title>GhostESP Camera</title>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -352,6 +355,7 @@ esp_err_t camera_stream_page_handler(httpd_req_t *req) {
 }
 
 esp_err_t camera_stream_http_handler(httpd_req_t *req) {
+    if (!ap_manager_webui_request_allowed(req)) return ESP_OK;
     if (!stream_running) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "text/plain");

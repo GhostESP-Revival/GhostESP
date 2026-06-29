@@ -15,6 +15,7 @@
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
+#include "gui/accessibility_fonts.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -28,6 +29,7 @@ extern uint32_t csv_get_unique_wifi_ap_count_including_hidden(void);
 static const char *TAG = "WardriveScreen";
 
 static lv_obj_t *root_container = NULL;
+static lv_obj_t *wardriving_content = NULL;
 static lv_timer_t *update_timer = NULL;
 
 static lv_obj_t *lbl_fix_status = NULL;
@@ -49,6 +51,66 @@ static bool wardriving_scan_mode = false;
 static bool wardriving_ble_mode = false;
 static bool wardriving_peer_helper_active = false;
 static bool touch_press_active = false;
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+#define WD_SCROLL_BTN_SIZE 28
+#define WD_SCROLL_BTN_PADDING 3
+static lv_obj_t *touch_bar = NULL;
+static lv_obj_t *wd_scroll_up_btn = NULL;
+static lv_obj_t *wd_scroll_down_btn = NULL;
+static lv_obj_t *wd_back_btn = NULL;
+
+static int wd_touch_start_x, wd_touch_start_y;
+static int wd_touch_last_x, wd_touch_last_y;
+static bool wd_touch_started;
+static bool wd_touch_dragged;
+static int wd_touch_drag_axis;
+static lv_obj_t *wd_touch_scroll_target;
+static const int WD_TAP_THRESHOLD = 14;
+
+static int wardriving_touch_bar_height(void) {
+    return WD_SCROLL_BTN_SIZE + WD_SCROLL_BTN_PADDING * 2;
+}
+
+static int wd_resolve_drag_axis(int total_dx, int total_dy) {
+    int abs_dx = abs(total_dx);
+    int abs_dy = abs(total_dy);
+    if (abs_dx < WD_TAP_THRESHOLD && abs_dy < WD_TAP_THRESHOLD) return 0;
+    if (abs_dy >= abs_dx + 4) return 1; /* vertical */
+    if (abs_dx >= abs_dy + 4) return 2; /* horizontal */
+    return 0;
+}
+
+static int wd_clamp_drag_delta(int delta) {
+    if (abs(delta) <= 1) return 0;
+    if (delta > 36) return 36;
+    if (delta < -36) return -36;
+    return delta;
+}
+
+static void wd_touch_reset(void) {
+    wd_touch_started = false;
+    wd_touch_dragged = false;
+    wd_touch_drag_axis = 0;
+    wd_touch_scroll_target = NULL;
+}
+
+static bool wd_point_in_obj(const lv_obj_t *obj, const lv_point_t *p) {
+    if (!obj || !lv_obj_is_valid(obj)) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return p->x >= area.x1 && p->x <= area.x2 && p->y >= area.y1 && p->y <= area.y2;
+}
+#endif
+
+/*
+ * Input-settle guard: the same tap/click that selects this view from the menu
+ * can still be in flight when the view switches in. Without this guard the
+ * fresh view sees that entry event and the "any input returns to menu" handler
+ * bounces straight back out. Swallow inputs for a short window after create.
+ */
+#define WARDRIVING_INPUT_SETTLE_US (250 * 1000)
+static int64_t wardriving_view_ready_us = 0;
 
 static bool should_force_gps_deinit_on_exit(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -74,6 +136,8 @@ static uint32_t dim_color = 0x888888;
 static uint32_t good_color = 0x00FF00;
 static uint32_t warn_color = 0xFFAA00;
 static uint32_t error_color = 0xFF4444;
+
+static void wardriving_scroll_content(int dir);
 
 /*
  * GPS debug bitmask shown in UI as "DBG:XXXX" (hex) in the GPS Debug card.
@@ -102,23 +166,26 @@ static uint32_t error_color = 0xFF4444;
 #define WD_DBG_RF_NAV_SEEN      (1u << 15)
 
 static const lv_font_t *get_title_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_14;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_18;
-    return &lv_font_montserrat_24;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_14);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_18);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_14 : (fs == 1 ? &lv_font_montserrat_18 : &lv_font_montserrat_24);
+    return fs == 0 ? &lv_font_montserrat_18 : (fs == 1 ? &lv_font_montserrat_24 : &lv_font_montserrat_24);
 }
 
 static const lv_font_t *get_body_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    if (LV_VER_RES <= 240) return &lv_font_montserrat_12;
-    return &lv_font_montserrat_14;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    if (LV_VER_RES <= 240) return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
+    return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
 }
 
 static const lv_font_t *get_small_font(void) {
-    if (LV_VER_RES <= 100) return &lv_font_montserrat_8;
-    if (LV_VER_RES <= 160) return &lv_font_montserrat_10;
-    return &lv_font_montserrat_12;
+    uint8_t fs = settings_get_font_size(&G_Settings);
+    if (LV_VER_RES <= 100) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_8 : &lv_font_montserrat_10);
+    if (LV_VER_RES <= 160) return fs == 0 ? &lv_font_montserrat_8 : (fs == 1 ? &lv_font_montserrat_10 : &lv_font_montserrat_12);
+    return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
 }
 
 static const char *get_fix_status_string(gps_t *gps) {
@@ -492,18 +559,110 @@ static void update_display_cb(lv_timer_t *timer) {
 }
 
 static void wardriving_input_callback(InputEvent *event) {
+    /* Ignore the entry event (and any input still settling) right after the
+     * view opens, so the tap/click that selected this view can't close it. */
+    if (wardriving_view_ready_us != 0 &&
+        (esp_timer_get_time() - wardriving_view_ready_us) < WARDRIVING_INPUT_SETTLE_US) {
+        if (event->type == INPUT_TYPE_TOUCH &&
+            event->data.touch_data.state == LV_INDEV_STATE_PR) {
+            /* Don't let a swallowed press arm a later release. */
+#ifdef CONFIG_USE_TOUCHSCREEN
+            wd_touch_reset();
+#else
+            touch_press_active = false;
+#endif
+        }
+        return;
+    }
+
     if (event->type == INPUT_TYPE_TOUCH) {
+#ifdef CONFIG_USE_TOUCHSCREEN
+        lv_indev_data_t *data = &event->data.touch_data;
+        if (data->state == LV_INDEV_STATE_PR) {
+            /* Control-bar buttons take priority over scrolling. */
+            if (wd_point_in_obj(wd_scroll_up_btn, &data->point)) {
+                wardriving_scroll_content(-1);
+                wd_touch_reset();
+                return;
+            }
+            if (wd_point_in_obj(wd_scroll_down_btn, &data->point)) {
+                wardriving_scroll_content(1);
+                wd_touch_reset();
+                return;
+            }
+            if (wd_point_in_obj(wd_back_btn, &data->point)) {
+                wd_touch_reset();
+                display_manager_switch_view(&main_menu_view);
+                return;
+            }
+
+            if (!wd_touch_started) {
+                wd_touch_started = true;
+                wd_touch_dragged = false;
+                wd_touch_drag_axis = 0;
+                wd_touch_start_x = data->point.x;
+                wd_touch_start_y = data->point.y;
+                wd_touch_last_x = data->point.x;
+                wd_touch_last_y = data->point.y;
+                wd_touch_scroll_target = NULL;
+            } else {
+                int dy = data->point.y - wd_touch_last_y;
+                wd_touch_last_x = data->point.x;
+                wd_touch_last_y = data->point.y;
+
+                if (!wd_touch_dragged) {
+                    wd_touch_drag_axis = wd_resolve_drag_axis(data->point.x - wd_touch_start_x,
+                                                              data->point.y - wd_touch_start_y);
+                    wd_touch_dragged = wd_touch_drag_axis != 0;
+                }
+
+                if (wd_touch_dragged && wd_touch_drag_axis == 1 && wardriving_content) {
+                    bool live = settings_get_touch_drag_scroll(&G_Settings);
+                    if (live) {
+                        dy = wd_clamp_drag_delta(dy);
+                        if (dy) display_manager_queue_scroll(wardriving_content, dy);
+                    } else {
+                        wd_touch_scroll_target = wardriving_content;
+                    }
+                }
+            }
+            return;
+        }
+        if (data->state == LV_INDEV_STATE_REL) {
+            if (!wd_touch_started) return;
+            bool was_dragged = wd_touch_dragged;
+            int release_dy = data->point.y - wd_touch_start_y;
+            lv_obj_t *release_target = wd_touch_scroll_target;
+            wd_touch_reset();
+            if (was_dragged) {
+                /* Release-on-release: apply the accumulated drag distance when
+                 * live drag scrolling is disabled. */
+                if (release_target && lv_obj_is_valid(release_target) &&
+                    !settings_get_touch_drag_scroll(&G_Settings) && release_dy) {
+                    display_manager_queue_scroll(release_target, release_dy);
+                }
+                return;
+            }
+            /* A plain tap in the content area does nothing; exit is via Back. */
+            return;
+        }
+#else
         if (event->data.touch_data.state == LV_INDEV_STATE_PR) {
             touch_press_active = true;
         } else if (event->data.touch_data.state == LV_INDEV_STATE_REL && touch_press_active) {
             touch_press_active = false;
             display_manager_switch_view(&main_menu_view);
         }
+#endif
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         display_manager_switch_view(&main_menu_view);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t key = event->data.key_value;
-        if (key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
+        if (key == LV_KEY_UP || key == ';' || key == 'k') {
+            wardriving_scroll_content(-1);
+        } else if (key == LV_KEY_DOWN || key == '.' || key == 'j') {
+            wardriving_scroll_content(1);
+        } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
             display_manager_switch_view(&main_menu_view);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
@@ -512,6 +671,80 @@ static void wardriving_input_callback(InputEvent *event) {
         display_manager_switch_view(&main_menu_view);
     }
 }
+
+static void wardriving_scroll_content(int dir) {
+    if (!wardriving_content) return;
+    lv_coord_t step = lv_obj_get_height(wardriving_content) / 2;
+    if (step < 24) step = 24;
+    lv_obj_scroll_by_bounded(wardriving_content, 0, dir > 0 ? -step : step, LV_ANIM_OFF);
+}
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+static void wd_scroll_up_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(-1); }
+static void wd_scroll_down_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(1); }
+static void wd_back_cb(lv_event_t *e) { (void)e; display_manager_switch_view(&main_menu_view); }
+
+/* Bottom control bar styled identically to the other touch views: circular
+ * scroll-up (left) and scroll-down (right) buttons flanking a Back button. */
+static void create_touch_control_bar(lv_obj_t *root) {
+    if (!root) return;
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bar_bg = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
+
+    const int bar_h = wardriving_touch_bar_height();
+
+    touch_bar = lv_obj_create(root);
+    lv_obj_remove_style_all(touch_bar);
+    lv_obj_set_size(touch_bar, LV_HOR_RES, bar_h);
+    lv_obj_align(touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(touch_bar, bar_bg, 0);
+    lv_obj_set_style_bg_opa(touch_bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    wd_scroll_up_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(wd_scroll_up_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
+    lv_obj_align(wd_scroll_up_btn, LV_ALIGN_LEFT_MID, WD_SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(wd_scroll_up_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(wd_scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wd_scroll_up_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(wd_scroll_up_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(wd_scroll_up_btn, wd_scroll_up_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *up_label = lv_label_create(wd_scroll_up_btn);
+    lv_label_set_text(up_label, LV_SYMBOL_UP);
+    lv_obj_set_style_text_color(up_label, ctrl_text, 0);
+    lv_obj_center(up_label);
+
+    wd_back_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(wd_back_btn, WD_SCROLL_BTN_SIZE + 24, WD_SCROLL_BTN_SIZE);
+    lv_obj_align(wd_back_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(wd_back_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(wd_back_btn, 5, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(wd_back_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wd_back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(wd_back_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(wd_back_btn, wd_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = lv_label_create(wd_back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_set_style_text_color(back_label, ctrl_text, 0);
+    lv_obj_center(back_label);
+
+    wd_scroll_down_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(wd_scroll_down_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
+    lv_obj_align(wd_scroll_down_btn, LV_ALIGN_RIGHT_MID, -WD_SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(wd_scroll_down_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(wd_scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wd_scroll_down_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(wd_scroll_down_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(wd_scroll_down_btn, wd_scroll_down_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *down_label = lv_label_create(wd_scroll_down_btn);
+    lv_label_set_text(down_label, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_color(down_label, ctrl_text, 0);
+    lv_obj_center(down_label);
+}
+#endif
 
 void wardriving_view_create(void) {
     if (wardriving_view.root != NULL) {
@@ -577,8 +810,14 @@ void wardriving_view_create(void) {
         if (esp_comm_manager_is_connected()) {
             char helper_args[256] = "--helper";
             char helper_plan_csv[192] = {0};
+            uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
+            bool weighted = settings_get_wd_weighted_5g(&G_Settings);
             if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                snprintf(helper_args, sizeof(helper_args), "--helper --channels %s", helper_plan_csv);
+                snprintf(helper_args, sizeof(helper_args), "--helper --channels %s --hop %u%s",
+                         helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
+            } else {
+                snprintf(helper_args, sizeof(helper_args), "--helper --hop %u%s",
+                         (unsigned)hop_ms, weighted ? " --weighted" : "");
             }
             peer_helper_ok = esp_comm_manager_send_command("startwd", helper_args);
             glog(peer_helper_ok
@@ -617,6 +856,15 @@ void wardriving_view_create(void) {
     wardriving_view.root = root_container;
     
     lv_obj_t *content = gui_screen_create_content(root_container, GUI_STATUS_BAR_HEIGHT);
+    wardriving_content = content;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    /* Leave room for the bottom control bar so the last card isn't hidden. */
+    lv_obj_set_size(content, LV_HOR_RES,
+                    LV_VER_RES - GUI_STATUS_BAR_HEIGHT - wardriving_touch_bar_height());
+#endif
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_text_color(content, lv_color_hex(text_color), 0);
     lv_obj_set_style_pad_all(content, 4, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
@@ -755,11 +1003,18 @@ void wardriving_view_create(void) {
                           : "GPS Info";
     display_manager_add_status_bar(bar_title);
 
+#ifdef CONFIG_USE_TOUCHSCREEN
+    create_touch_control_bar(root_container);
+#endif
+
     if ((wardriving_scan_mode || wardriving_ble_mode) && !csv_ok && lbl_sd_status) {
         lv_obj_clear_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
     }
 
     update_timer = lv_timer_create(update_display_cb, 500, NULL);
+
+    /* Arm the input-settle guard once the view is fully built. */
+    wardriving_view_ready_us = esp_timer_get_time();
 }
 
 void wardriving_view_destroy(void) {
@@ -811,6 +1066,14 @@ void wardriving_view_destroy(void) {
         root_container = NULL;
         wardriving_view.root = NULL;
     }
+    wardriving_content = NULL;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    touch_bar = NULL;
+    wd_scroll_up_btn = NULL;
+    wd_scroll_down_btn = NULL;
+    wd_back_btn = NULL;
+    wd_touch_reset();
+#endif
     
     lbl_fix_status = NULL;
     lbl_fix_icon = NULL;
@@ -826,6 +1089,7 @@ void wardriving_view_destroy(void) {
     compass_arc = NULL;
     compass_needle = NULL;
     wardriving_peer_helper_active = false;
+    wardriving_view_ready_us = 0;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
 }

@@ -26,6 +26,7 @@
 #include "managers/status_display_manager.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
@@ -129,6 +130,7 @@ typedef struct {
     int8_t last_rssi;
     int8_t min_rssi;
     int8_t max_rssi;
+    int64_t last_rx_us;   // esp_timer timestamp of the last matching advertisement
     bool active;
 } TrackingState;
 
@@ -894,6 +896,7 @@ static void gatt_track_scan_callback(struct ble_gap_event *event, size_t len) {
         glog("[%s] RSSI: %d dBm, Min: %d, Max: %d, %s\n",
              bars[bar_idx], rssi, g_tracking.min_rssi, g_tracking.max_rssi, direction);
         g_tracking.last_rssi = rssi;
+        g_tracking.last_rx_us = esp_timer_get_time();
     }
 }
 
@@ -938,17 +941,28 @@ void gatt_scan_start(void) {
  * @brief Stop scanning for BLE devices
  */
 void gatt_scan_stop(void) {
+    bool was_scanning = g_enum_state.scan_active;
+    bool had_connection = gatt_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    bool was_enumerating = g_enum_state.enum_in_progress;
+    bool was_tracking = g_tracking.active;
+
+    if (!was_scanning && !had_connection && !was_enumerating && !was_tracking) {
+        return;
+    }
+
     g_enum_state.scan_active = false;
+    g_enum_state.enum_in_progress = false;
+    g_tracking.active = false;
     ble_unregister_handler(gatt_scan_callback);
+    ble_unregister_handler(gatt_track_scan_callback);
     
-    if (gatt_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+    if (had_connection) {
         ble_gap_terminate(gatt_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         gatt_conn_handle = BLE_HS_CONN_HANDLE_NONE;
     }
-    g_enum_state.enum_in_progress = false;
     
     // Save results to file
-    if (discovered_gatt_devices && discovered_gatt_device_count > 0) {
+    if (was_scanning && discovered_gatt_devices && discovered_gatt_device_count > 0) {
         scan_file_t sf = SCAN_FILE_INIT;
         if (scan_file_open(&sf, "gatt_scan", "txt") == ESP_OK) {
             scan_file_printf(&sf, "--- GATT Devices (%u) ---\n", discovered_gatt_device_count);
@@ -967,8 +981,10 @@ void gatt_scan_stop(void) {
         }
     }
     
-    glog("GATT scan stopped. Found %u devices.\n", discovered_gatt_device_count);
-    status_display_show_status("GATT Stopped");
+    if (was_scanning) {
+        glog("GATT scan stopped. Found %u devices.\n", discovered_gatt_device_count);
+        status_display_show_status("GATT Stopped");
+    }
 }
 
 /**
@@ -1169,6 +1185,7 @@ void gatt_scan_track_device(void) {
     g_tracking.last_rssi = dev->rssi;
     g_tracking.min_rssi = dev->rssi;
     g_tracking.max_rssi = dev->rssi;
+    g_tracking.last_rx_us = esp_timer_get_time();
     g_tracking.active = true;
     
     status_display_show_status("Tracking...");
@@ -1187,6 +1204,24 @@ void gatt_scan_stop_tracking(void) {
         glog("Tracking stopped.\n");
         status_display_show_status("Track Stopped");
     }
+}
+
+/**
+ * @brief Get live RSSI status for the tracked device
+ */
+bool gatt_scan_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!g_tracking.active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = g_tracking.last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // Consider the reading "live" if a matching advertisement arrived recently.
+        *out_fresh = (g_tracking.last_rx_us != 0) && ((now - g_tracking.last_rx_us) < 1500000);
+    }
+    return true;
 }
 
 /**

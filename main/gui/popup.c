@@ -30,6 +30,17 @@ struct popup_t {
 	int height;
 };
 
+struct popup_confirm_t {
+    popup_confirm_t **owner;
+    lv_obj_t *root;
+    lv_obj_t *card;
+    lv_obj_t *cancel_btn;
+    lv_obj_t *confirm_btn;
+    popup_confirm_cb_t on_confirm;
+    void *user_data;
+    int selected;
+};
+
 static const lv_coord_t DEFAULT_MARGIN = 6;
 static const char *TAG = "PopupLayout";
 
@@ -66,6 +77,36 @@ static bool popup_theme_is_bright(void) {
 static lv_coord_t clamp_button_width(lv_coord_t desired, lv_coord_t min_w, lv_coord_t max_w);
 static lv_coord_t popup_measure_button_text_width(lv_obj_t *btn, lv_coord_t padding, lv_coord_t fallback);
 
+static lv_coord_t popup_runtime_width(void) {
+    lv_disp_t *disp = lv_disp_get_default();
+    lv_coord_t w = disp ? lv_disp_get_hor_res(disp) : LV_HOR_RES;
+    return w > 0 ? w : LV_HOR_RES;
+}
+
+static lv_coord_t popup_runtime_height(void) {
+    lv_disp_t *disp = lv_disp_get_default();
+    lv_coord_t h = disp ? lv_disp_get_ver_res(disp) : LV_VER_RES;
+    return h > 0 ? h : LV_VER_RES;
+}
+
+static void popup_calc_fullscreen_area(lv_obj_t *parent, lv_coord_t *x, lv_coord_t *y, lv_coord_t *w, lv_coord_t *h) {
+    (void)parent;
+    lv_coord_t screen_w = popup_runtime_width();
+    lv_coord_t screen_h = popup_runtime_height();
+    lv_coord_t top_y = GUI_STATUS_BAR_H;
+    lv_coord_t content_h = screen_h - GUI_STATUS_BAR_H;
+
+    if (content_h <= 0) {
+        top_y = 0;
+        content_h = screen_h;
+    }
+
+    if (x) *x = 0;
+    if (y) *y = top_y;
+    if (w) *w = screen_w;
+    if (h) *h = content_h;
+}
+
 popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 	if (!parent) parent = lv_scr_act();
 	popup_t *p = (popup_t*)malloc(sizeof(popup_t));
@@ -78,12 +119,11 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 	lv_obj_set_size(p->container, width, height);
 	lv_obj_align(p->container, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_style_bg_color(p->container, popup_get_surface_color(), 0);
-	lv_obj_set_style_border_color(p->container, popup_get_accent_color(), 0);
-	lv_obj_set_style_border_width(p->container, 1, 0);
+	lv_obj_set_style_border_width(p->container, 0, 0);
 	lv_obj_set_style_radius(p->container, GUI_RADIUS_MD, 0);
-	lv_obj_set_style_shadow_width(p->container, 12, 0);
+	lv_obj_set_style_shadow_width(p->container, 8, 0);
 	lv_obj_set_style_shadow_color(p->container, lv_color_hex(0x000000), 0);
-	lv_obj_set_style_shadow_opa(p->container, LV_OPA_30, 0);
+	lv_obj_set_style_shadow_opa(p->container, LV_OPA_20, 0);
 	lv_obj_clear_flag(p->container, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_style_pad_top(p->container, GUI_SAFEAREA_VER, 0);
 	lv_obj_set_style_pad_bottom(p->container, GUI_SAFEAREA_VER, 0);
@@ -92,16 +132,19 @@ popup_t *popup_create(lv_obj_t *parent, int width, int height) {
 
 	p->title_label = lv_label_create(p->container);
 	lv_obj_set_style_text_color(p->title_label, popup_get_text_color(), 0);
+	lv_obj_set_style_text_font(p->title_label, gui_font_title(), 0);
 	lv_obj_align(p->title_label, LV_ALIGN_TOP_MID, 0, 10);
 
 	p->body_label = lv_label_create(p->container);
 	lv_obj_set_style_text_color(p->body_label, popup_get_text_muted_color(), 0);
+	lv_obj_set_style_text_font(p->body_label, gui_font_body(), 0);
 	lv_obj_align(p->body_label, LV_ALIGN_CENTER, 0, -8);
 
 	p->btn_container = lv_obj_create(p->container);
 	lv_obj_set_size(p->btn_container, width - (DEFAULT_MARGIN * 2), 40);
 	lv_obj_align(p->btn_container, LV_ALIGN_BOTTOM_MID, 0, -8);
-	lv_obj_set_style_bg_color(p->btn_container, popup_get_surface_alt_color(), 0);
+	lv_obj_set_style_bg_opa(p->btn_container, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(p->btn_container, 0, 0);
 	lv_obj_clear_flag(p->btn_container, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_style_pad_all(p->btn_container, 0, 0);
 
@@ -138,22 +181,31 @@ static lv_coord_t popup_measure_button_text_width(lv_obj_t *btn, lv_coord_t padd
     return width;
 }
 
-lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height) {
-    return popup_create_container_with_offset(parent, width, height, 0);
+lv_obj_t *popup_create_container(lv_obj_t *parent, int width, int height, bool fullscreen) {
+    return popup_create_container_with_offset(parent, width, height, 0, fullscreen);
 }
 
-lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset) {
-    	if (!parent) parent = lv_scr_act();
+lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int height, lv_coord_t y_offset, bool fullscreen) {
+	if (!parent) parent = lv_scr_act();
 	lv_obj_t *container = lv_obj_create(parent);
-    	lv_obj_set_size(container, width, height);
-	lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
-    	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
-	lv_obj_set_style_border_color(container, popup_get_accent_color(), 0);
-    lv_obj_set_style_border_width(container, 1, 0);
-    lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
-    lv_obj_set_style_shadow_width(container, 12, 0);
-    lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(container, LV_OPA_30, 0);
+	if (fullscreen) {
+		lv_coord_t x = 0, top_y = 0, screen_w = 0, content_h = 0;
+		popup_calc_fullscreen_area(parent, &x, &top_y, &screen_w, &content_h);
+		lv_obj_add_flag(container, LV_OBJ_FLAG_IGNORE_LAYOUT);
+		lv_obj_set_size(container, screen_w, content_h);
+		lv_obj_align(container, LV_ALIGN_TOP_LEFT, x, top_y);
+		lv_obj_set_style_radius(container, 0, 0);
+		lv_obj_set_style_shadow_width(container, 0, 0);
+	} else {
+		lv_obj_set_size(container, width, height);
+		lv_obj_align(container, LV_ALIGN_CENTER, 0, y_offset);
+		lv_obj_set_style_radius(container, GUI_RADIUS_MD, 0);
+		lv_obj_set_style_shadow_width(container, 8, 0);
+		lv_obj_set_style_shadow_color(container, lv_color_hex(0x000000), 0);
+		lv_obj_set_style_shadow_opa(container, LV_OPA_20, 0);
+	}
+	lv_obj_set_style_bg_color(container, popup_get_surface_color(), 0);
+    lv_obj_set_style_border_width(container, 0, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_top(container, GUI_SAFEAREA_VER, 0);
     lv_obj_set_style_pad_bottom(container, GUI_SAFEAREA_VER, 0);
@@ -167,32 +219,23 @@ lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, i
     if (!container) return NULL;
     lv_obj_t *btn = lv_btn_create(container);
     lv_obj_set_size(btn, btn_w, btn_h);
-    lv_color_t bg = popup_get_surface_alt_color();
-    lv_color_t border = popup_get_text_muted_color();
 
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_border_color(btn, border, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_width(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_height(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_height(btn, 0, LV_PART_MAIN | LV_STATE_FOCUSED | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_align(btn, align, x_ofs, y_ofs);
     if (cb) lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label_text ? label_text : "");
     if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
     lv_obj_center(lbl);
     return btn;
 }
@@ -200,7 +243,7 @@ lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, i
 lv_obj_t *popup_create_title_label(lv_obj_t *container, const char *title, const lv_font_t *font, lv_coord_t y_ofs) {
     if (!container) return NULL;
     lv_obj_t *lbl = lv_label_create(container);
-    if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_font(lbl, font ? font : gui_font_title(), 0);
     lv_obj_set_style_text_color(lbl, popup_get_text_color(), 0);
     lv_label_set_text(lbl, title ? title : "");
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y_ofs);
@@ -212,7 +255,7 @@ lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coor
     lv_obj_t *lbl = lv_label_create(container);
     if (width > 0) lv_obj_set_width(lbl, width);
     if (wrap) lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-    if (font) lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_font(lbl, font ? font : gui_font_body(), 0);
     lv_obj_set_style_text_color(lbl, popup_get_text_muted_color(), 0);
     lv_label_set_text(lbl, text ? text : "");
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y_ofs);
@@ -235,12 +278,13 @@ lv_obj_t *popup_add_button(popup_t *p, const char *label, lv_event_cb_t event_cb
 	int btn_w = (p->width - (DEFAULT_MARGIN * 2) - 8) / 2; // default width for up to 2 buttons
 	lv_obj_set_size(btn, btn_w, 32);
 	lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), 0);
-	lv_obj_set_style_border_color(btn, popup_get_text_muted_color(), 0);
-	lv_obj_set_style_border_width(btn, 1, 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_set_style_radius(btn, GUI_RADIUS_SM, 0);
 	lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, user_data);
 
 	lv_obj_t *lbl = lv_label_create(btn);
 	lv_label_set_text(lbl, label ? label : "");
+	lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
 	lv_obj_center(lbl);
 
 	// position buttons horizontally
@@ -283,12 +327,192 @@ popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *
 	return p;
 }
 
+static void popup_confirm_update_selection(popup_confirm_t *p) {
+    if (!p) return;
+    popup_set_button_selected(p->cancel_btn, p->selected == 0);
+    popup_set_button_selected(p->confirm_btn, p->selected == 1);
+}
+
+static void popup_confirm_cancel_event_cb(lv_event_t *e) {
+    popup_confirm_t *p = (popup_confirm_t *)lv_event_get_user_data(e);
+    if (!p) return;
+    popup_confirm_cancel(p->owner);
+}
+
+static void popup_confirm_confirm_event_cb(lv_event_t *e) {
+    popup_confirm_t *p = (popup_confirm_t *)lv_event_get_user_data(e);
+    if (!p) return;
+    popup_confirm_t **owner = p->owner;
+    p->selected = 1;
+    popup_confirm_select(owner);
+}
+
+static bool popup_confirm_point_inside(lv_obj_t *obj, lv_coord_t x, lv_coord_t y) {
+    if (!obj || !lv_obj_is_valid(obj)) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2;
+}
+
+popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, const char *title, const char *body, const char *confirm_label, const char *cancel_label, popup_confirm_cb_t on_confirm, void *user_data) {
+    if (!handle) return NULL;
+    popup_confirm_close(handle);
+    if (!parent) parent = lv_layer_top();
+
+    popup_confirm_t *p = (popup_confirm_t *)calloc(1, sizeof(*p));
+    if (!p) return NULL;
+
+    lv_coord_t root_x = 0;
+    lv_coord_t root_y = 0;
+    lv_coord_t screen_w = 0;
+    lv_coord_t content_h = 0;
+    popup_calc_fullscreen_area(parent, &root_x, &root_y, &screen_w, &content_h);
+
+    lv_coord_t card_w = screen_w - 20;
+    if (card_w > 320) card_w = 320;
+    if (card_w < 108) card_w = screen_w > 8 ? screen_w - 8 : screen_w;
+    lv_coord_t card_h = content_h - 16;
+    if (card_h > 170) card_h = 170;
+    if (card_h < 112) card_h = content_h > 4 ? content_h - 4 : content_h;
+
+    p->owner = handle;
+    p->on_confirm = on_confirm;
+    p->user_data = user_data;
+    p->selected = 0;
+
+    p->root = lv_obj_create(parent);
+    if (!p->root) {
+        free(p);
+        return NULL;
+    }
+    lv_obj_remove_style_all(p->root);
+    lv_obj_add_flag(p->root, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(p->root, screen_w, content_h);
+    lv_obj_align(p->root, LV_ALIGN_TOP_LEFT, root_x, root_y);
+    lv_obj_set_style_bg_color(p->root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(p->root, LV_OPA_60, 0);
+    lv_obj_add_flag(p->root, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(p->root, LV_OBJ_FLAG_SCROLLABLE);
+
+    p->card = lv_obj_create(p->root);
+    if (!p->card) {
+        lvgl_obj_del_safe(&p->root);
+        free(p);
+        return NULL;
+    }
+    lv_obj_set_size(p->card, card_w, card_h);
+    lv_obj_center(p->card);
+    lv_obj_set_style_bg_color(p->card, popup_get_surface_color(), 0);
+    lv_obj_set_style_border_width(p->card, 0, 0);
+    lv_obj_set_style_radius(p->card, GUI_RADIUS_MD, 0);
+    lv_obj_set_style_shadow_width(p->card, 8, 0);
+    lv_obj_set_style_shadow_color(p->card, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_opa(p->card, LV_OPA_20, 0);
+    lv_obj_clear_flag(p->card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_left(p->card, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(p->card, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_top(p->card, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(p->card, GUI_SAFEAREA_VER, 0);
+
+    lv_coord_t title_y = (card_h <= 120) ? 8 : 12;
+    lv_coord_t body_y = title_y + ((card_h <= 120) ? 24 : 32);
+    lv_coord_t button_h = (card_h <= 120) ? 28 : 32;
+    lv_coord_t body_w = card_w - (GUI_SAFEAREA_HOR * 2) - 10;
+    if (body_w < 80) body_w = card_w - 10;
+
+    popup_create_title_label(p->card, title ? title : "Confirm", gui_font_title(), title_y);
+    lv_obj_t *body_label = popup_create_body_label(p->card, body ? body : "Are you sure?", body_w, true, gui_font_body(), body_y);
+    if (body_label) {
+        lv_obj_set_style_text_align(body_label, LV_TEXT_ALIGN_CENTER, 0);
+    }
+
+    p->cancel_btn = popup_add_styled_button(p->card, cancel_label ? cancel_label : "Cancel", 84, button_h,
+                                           LV_ALIGN_BOTTOM_LEFT, 0, -10, gui_font_body(), popup_confirm_cancel_event_cb, p);
+    p->confirm_btn = popup_add_styled_button(p->card, confirm_label ? confirm_label : "Confirm", 84, button_h,
+                                            LV_ALIGN_BOTTOM_RIGHT, 0, -10, gui_font_body(), popup_confirm_confirm_event_cb, p);
+    lv_obj_t *btns[2] = { p->cancel_btn, p->confirm_btn };
+    PopupButtonLayoutConfig cfg = {
+        .min_w = (card_w <= 180) ? 58 : 76,
+        .max_w = (card_w <= 180) ? 96 : 132,
+        .min_threshold = (card_w <= 180) ? 48 : 62,
+        .gap = (card_w <= 180) ? 8 : 14,
+    };
+    popup_layout_buttons_responsive(p->card, btns, 2, -10, &cfg);
+    popup_confirm_update_selection(p);
+
+    lv_obj_move_foreground(p->root);
+    lv_obj_set_style_transform_zoom(p->card, 256, 0);
+    lv_obj_set_style_opa(p->card, LV_OPA_COVER, 0);
+    *handle = p;
+    return p;
+}
+
+bool popup_confirm_is_open(popup_confirm_t *p) {
+    return p && p->root && lv_obj_is_valid(p->root);
+}
+
+bool popup_confirm_handle_touch(popup_confirm_t **handle, const lv_indev_data_t *data) {
+    if (!handle || !popup_confirm_is_open(*handle)) return false;
+    if (!data) return true;
+
+    popup_confirm_t *p = *handle;
+    bool on_cancel = popup_confirm_point_inside(p->cancel_btn, data->point.x, data->point.y);
+    bool on_confirm = popup_confirm_point_inside(p->confirm_btn, data->point.x, data->point.y);
+
+    if (on_cancel) popup_confirm_set_selected(p, 0);
+    else if (on_confirm) popup_confirm_set_selected(p, 1);
+
+    if (data->state == LV_INDEV_STATE_REL) {
+        if (on_cancel) popup_confirm_cancel(handle);
+        else if (on_confirm) popup_confirm_select(handle);
+    }
+
+    return true;
+}
+
+void popup_confirm_close(popup_confirm_t **handle) {
+    if (!handle || !*handle) return;
+    popup_confirm_t *p = *handle;
+    *handle = NULL;
+    lvgl_obj_del_safe(&p->root);
+    free(p);
+}
+
+void popup_confirm_cancel(popup_confirm_t **handle) {
+    popup_confirm_close(handle);
+}
+
+void popup_confirm_select(popup_confirm_t **handle) {
+    if (!handle || !*handle) return;
+    popup_confirm_t *p = *handle;
+    if (p->selected == 0) {
+        popup_confirm_close(handle);
+        return;
+    }
+    popup_confirm_cb_t cb = p->on_confirm;
+    void *user = p->user_data;
+    popup_confirm_close(handle);
+    if (cb) cb(user);
+}
+
+void popup_confirm_set_selected(popup_confirm_t *p, int selected) {
+    if (!popup_confirm_is_open(p)) return;
+    p->selected = selected ? 1 : 0;
+    popup_confirm_update_selection(p);
+}
+
+void popup_confirm_move(popup_confirm_t *p, int delta) {
+    if (!popup_confirm_is_open(p) || delta == 0) return;
+    p->selected = p->selected == 0 ? 1 : 0;
+    popup_confirm_update_selection(p);
+}
+
 void popup_set_button_selected(lv_obj_t *btn, bool selected) {
     if (!btn || !lv_obj_is_valid(btn)) return;
     if (selected) {
 		lv_color_t accent = popup_get_accent_color();
 		lv_obj_set_style_bg_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
-		lv_obj_set_style_border_color(btn, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 		lv_obj_t *lbl = lv_obj_get_child(btn, 0);
 		if (lbl) {
 			if (popup_theme_is_bright()) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
@@ -296,9 +520,9 @@ void popup_set_button_selected(lv_obj_t *btn, bool selected) {
 		}
     } else {
 		lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
-		lv_obj_set_style_border_color(btn, popup_get_text_muted_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
+		lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, popup_get_text_color(), 0);
+        if (lbl) lv_obj_set_style_text_color(lbl, popup_get_accent_color(), 0);
     }
 }
 
@@ -365,6 +589,31 @@ static bool popup_is_small_screen(lv_obj_t *popup) {
     lv_disp_t *disp = lv_disp_get_default();
     if (!disp) return false;
     return lv_disp_get_hor_res(disp) <= 240;
+}
+
+void popup_calc_size(popup_calc_size_t *out) {
+    popup_calc_size_ex(out, 110);
+}
+
+void popup_calc_size_ex(popup_calc_size_t *out, lv_coord_t min_h) {
+    if (!out) return;
+
+    lv_coord_t screen_w = popup_runtime_width();
+    lv_coord_t screen_h = popup_runtime_height();
+
+    out->width = (screen_w <= 240) ? (screen_w - 20) : (screen_w - 30);
+
+    if (screen_h <= 135) {
+        out->height = 130;
+        out->y_offset = 0;
+    } else if (screen_h <= 200) {
+        out->height = (screen_h < 200) ? (screen_h - 30) : 160;
+        if (out->height < min_h) out->height = min_h;
+        out->y_offset = 10;
+    } else {
+        out->height = (screen_h <= 240) ? 140 : 160;
+        out->y_offset = 10;
+    }
 }
 
 static void popup_apply_button_label_center(lv_obj_t *btn) {

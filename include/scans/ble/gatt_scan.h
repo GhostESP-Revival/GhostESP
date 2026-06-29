@@ -83,6 +83,20 @@ void gatt_scan_track_device(void);
 void gatt_scan_stop_tracking(void);
 
 /**
+ * @brief Get live RSSI status for the tracked device
+ *
+ * Mirrors wifi_manager_get_track_status(): returns false when no device is
+ * being tracked. *out_rssi receives the last seen RSSI and *out_fresh is true
+ * when a matching advertisement arrived recently (so the meter can dim when
+ * the signal goes stale).
+ *
+ * @param out_rssi Output pointer for the last RSSI value (may be NULL)
+ * @param out_fresh Output pointer for the freshness flag (may be NULL)
+ * @return true if tracking is active, false otherwise
+ */
+bool gatt_scan_get_track_status(int8_t *out_rssi, bool *out_fresh);
+
+/**
  * @brief Get data for a discovered device
  * 
  * @param index Index of the device in the discovered list

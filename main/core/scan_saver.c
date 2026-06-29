@@ -2,6 +2,7 @@
 #include "core/utils.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "gui/toast.h"
 #include <string.h>
 #include <stdarg.h>
 #include <sys/stat.h>
@@ -35,6 +36,9 @@ static void ensure_scans_dir(void) {
 
 esp_err_t scan_file_open(scan_file_t *sf, const char *prefix, const char *extension) {
     if (!sf || !prefix || !extension) return ESP_ERR_INVALID_ARG;
+#ifdef CONFIG_IS_S3TWATCH
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
     if (!settings_get_auto_save_scans(&G_Settings)) return ESP_ERR_NOT_SUPPORTED;
 
     if (sf->fp) {
@@ -90,6 +94,7 @@ void scan_file_close(scan_file_t *sf) {
         fclose(sf->fp);
         sf->fp = NULL;
         printf("Scan file saved\n");
+        toast_show("Scan saved", TOAST_SUCCESS);
     }
     if (sf->jit_mounted) {
         sd_card_unmount_after_flush(sf->display_suspended);

@@ -2,79 +2,188 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
-extern const uint8_t ouis_json_start[] asm("_binary_ouis_json_start");
-extern const uint8_t ouis_json_end[]   asm("_binary_ouis_json_end");
+extern const uint8_t ouis_bin_start[] asm("_binary_ouis_bin_start");
+extern const uint8_t ouis_bin_end[]   asm("_binary_ouis_bin_end");
 
-static void normalize_prefix(const char *mac, char *out6) {
-    int oi = 0;
-    for (const char *p = mac; *p && oi < 6; ++p) {
-        if ((*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F') || (*p >= 'a' && *p <= 'f')) {
-            out6[oi++] = (char)toupper((unsigned char)*p);
-        }
-    }
-    while (oi < 6) out6[oi++] = '\0';
-    out6[6] = '\0';
+typedef struct __attribute__((packed)) {
+    uint8_t  oui[3];
+    uint16_t idx;
+} oui_entry_t;
+
+typedef struct __attribute__((packed)) {
+    uint16_t count;
+    uint16_t reserved;
+} oui_header_t;
+
+static const oui_header_t *oui_header(void) {
+    return (const oui_header_t *)ouis_bin_start;
 }
 
-static bool is_locally_administered(const char *mac) {
-    // check laa bit: second least significant bit of first octet
-    int hi = 0, lo = 0;
-    if (!isxdigit((int)mac[0]) || !isxdigit((int)mac[1])) return false;
-    hi = (mac[0] <= '9' ? mac[0]-'0' : toupper(mac[0])-'A'+10);
-    lo = (mac[1] <= '9' ? mac[1]-'0' : toupper(mac[1])-'A'+10);
-    int first_octet = (hi<<4) | lo;
-    return (first_octet & 0x02) != 0;
+static const oui_entry_t *oui_entries(void) {
+    return (const oui_entry_t *)(ouis_bin_start + sizeof(oui_header_t));
+}
+
+static const uint8_t *oui_string_table(void) {
+    return (const uint8_t *)ouis_bin_start + sizeof(oui_header_t)
+           + sizeof(oui_entry_t) * oui_header()->count;
+}
+
+static void parse_prefix(const char *mac, uint8_t out3[3], int *out_nibbles) {
+    int nibbles = 0;
+    int oi = 0;
+    for (const char *p = mac; *p && oi < 3; ++p) {
+        char c = *p;
+        if (!isxdigit((int)(unsigned char)c)) continue;
+        char hi = (char)toupper((unsigned char)c);
+        if (++nibbles & 1) {
+            out3[oi] = (uint8_t)((hi <= '9' ? hi - '0' : hi - 'A' + 10) << 4);
+        } else {
+            out3[oi] |= (uint8_t)(hi <= '9' ? hi - '0' : hi - 'A' + 10);
+            oi++;
+        }
+    }
+    while (oi < 3) out3[oi++] = 0;
+    *out_nibbles = nibbles;
+}
+
+static bool is_locally_administered(const uint8_t oui[3]) {
+    // LAA bit: bit 1 of the first transmitted octet.
+    return (oui[0] & 0x02) != 0;
 }
 
 static void to_proper_caps(char *s) {
-    // properly capitalise: first letter upper, rest lower for each token split by space or hyphen
     bool new_word = true;
     for (size_t i = 0; s[i]; ++i) {
-        if (s[i] == ' ' || s[i] == '-' || s[i] == '_' ) { new_word = true; continue; }
+        if (s[i] == ' ' || s[i] == '-' || s[i] == '_') { new_word = true; continue; }
         if (new_word) { s[i] = (char)toupper((unsigned char)s[i]); new_word = false; }
-        else { s[i] = (char)tolower((unsigned char)s[i]); }
+        else          { s[i] = (char)tolower((unsigned char)s[i]); }
     }
 }
 
-// naive streaming scan of embedded json: {"FC3497":"espressif",...}
-static bool lookup_vendor(const char *prefix6, char *out_vendor, size_t out_sz) {
-    const char *buf = (const char*)ouis_json_start;
-    const char *end = (const char*)ouis_json_end;
-    const size_t len = (size_t)(end - buf);
-    if (len == 0) return false;
-    // search for "PREFIX"
-    char keypat[16];
-    // pattern like "FC3497"
-    snprintf(keypat, sizeof(keypat), "\"%s\"", prefix6);
-    const char *p = buf;
-    while (p && p < end) {
-        const char *k = strstr(p, keypat);
-        if (!k || k >= end) break;
-        const char *colon = strchr(k + strlen(keypat), ':');
-        if (!colon || colon >= end) break;
-        const char *q1 = strchr(colon + 1, '"');
-        if (!q1 || q1 >= end) break;
-        const char *q2 = strchr(q1 + 1, '"');
-        if (!q2 || q2 >= end) break;
-        size_t vlen = (size_t)(q2 - (q1 + 1));
-        if (vlen >= out_sz) vlen = out_sz - 1;
-        memcpy(out_vendor, q1 + 1, vlen);
-        out_vendor[vlen] = '\0';
-        to_proper_caps(out_vendor);
-        return true;
-    
-        // move forward
-        p = k + 1;
+static bool contains_ci(const char *haystack, const char *needle) {
+    if (needle == NULL || needle[0] == '\0') return true;
+    if (haystack == NULL) return false;
+
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0) return true;
+
+    for (const char *h = haystack; *h; h++) {
+        size_t i = 0;
+        while (i < needle_len && h[i] &&
+               tolower((unsigned char)h[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == needle_len) return true;
+    }
+
+    return false;
+}
+
+static bool vendor_in_list(char vendors[][64], int count, const char *vendor) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(vendors[i], vendor) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool lookup_vendor(const uint8_t oui3[3], char *out_vendor, size_t out_sz) {
+    const oui_header_t *h = oui_header();
+    const oui_entry_t *es = oui_entries();
+    uint16_t lo = 0, hi = h->count;
+    while (lo < hi) {
+        uint16_t mid = (uint16_t)(lo + ((hi - lo) >> 1));
+        const oui_entry_t *e = &es[mid];
+        int cmp = memcmp(e->oui, oui3, 3);
+        if (cmp == 0) {
+            const uint8_t *strs = oui_string_table();
+            const char *v = (const char *)&strs[e->idx];
+            size_t vlen = 0;
+            while (vlen < 256 && v[vlen] != '\0') vlen++;
+            if (vlen >= out_sz) vlen = out_sz - 1;
+            memcpy(out_vendor, v, vlen);
+            out_vendor[vlen] = '\0';
+            to_proper_caps(out_vendor);
+            return true;
+        }
+        if (cmp < 0) lo = (uint16_t)(mid + 1);
+        else         hi = mid;
     }
     return false;
 }
 
 bool ouis_lookup_vendor(const char *mac, char *out_vendor, size_t out_sz) {
-    char p6[8] = {0};
-    normalize_prefix(mac, p6);
-    if (strlen(p6) < 6 || is_locally_administered(p6)) {
-        return false;
+    uint8_t p3[3] = {0};
+    int nibbles = 0;
+    parse_prefix(mac, p3, &nibbles);
+    if (nibbles < 6) return false;
+    if (is_locally_administered(p3)) return false;
+    return lookup_vendor(p3, out_vendor, out_sz);
+}
+
+bool ouis_parse_prefix(const char *prefix, uint8_t out_oui[3]) {
+    if (prefix == NULL || out_oui == NULL) return false;
+
+    uint8_t parsed[3] = {0};
+    int nibbles = 0;
+    parse_prefix(prefix, parsed, &nibbles);
+    if (nibbles < 6) return false;
+
+    memcpy(out_oui, parsed, sizeof(parsed));
+    return true;
+}
+
+bool ouis_lookup_vendor_bytes(const uint8_t oui[3], char *out_vendor, size_t out_sz) {
+    if (oui == NULL || out_vendor == NULL || out_sz == 0) return false;
+    if (is_locally_administered(oui)) return false;
+    return lookup_vendor(oui, out_vendor, out_sz);
+}
+
+int ouis_foreach_unique_vendor(const char *filter, ouis_vendor_iter_cb_t callback,
+                               void *user_data, int max_results) {
+    if (callback == NULL || max_results <= 0) return 0;
+
+    const oui_header_t *h = oui_header();
+    const oui_entry_t *es = oui_entries();
+    const uint8_t *strs = oui_string_table();
+    char (*seen)[64] = NULL;
+    int seen_count = 0;
+    int seen_cap = max_results;
+
+    seen = calloc((size_t)seen_cap, sizeof(*seen));
+    if (seen == NULL) return 0;
+
+    for (uint16_t i = 0; i < h->count; i++) {
+        const char *raw = (const char *)&strs[es[i].idx];
+        char vendor[64];
+        size_t vlen = 0;
+        while (vlen < sizeof(vendor) - 1 && raw[vlen] != '\0') vlen++;
+        memcpy(vendor, raw, vlen);
+        vendor[vlen] = '\0';
+        to_proper_caps(vendor);
+
+        if (!contains_ci(vendor, filter) || vendor_in_list(seen, seen_count, vendor)) {
+            continue;
+        }
+
+        strncpy(seen[seen_count], vendor, sizeof(seen[seen_count]) - 1);
+        seen[seen_count][sizeof(seen[seen_count]) - 1] = '\0';
+        seen_count++;
+
+        if (!callback(vendor, user_data)) {
+            break;
+        }
+
+        if (max_results > 0 && seen_count >= max_results) {
+            break;
+        }
     }
-    return lookup_vendor(p6, out_vendor, out_sz);
+
+    free(seen);
+    return seen_count;
 }

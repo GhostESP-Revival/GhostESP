@@ -10,6 +10,7 @@
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
+#include "gui/accessibility_fonts.h"
 #include "core/esp_comm_manager.h"
 
 #include "driver/gpio.h"
@@ -808,7 +809,7 @@ static void nrf24_graph_draw_event(lv_event_t *e) {
     lv_draw_label_dsc_t label_dsc;
     lv_draw_label_dsc_init(&label_dsc);
     label_dsc.color = text;
-    label_dsc.font = &lv_font_montserrat_10;
+    label_dsc.font = accessibility_get_font_small();
 
     lv_coord_t y_label_x1 = plot_x1 - 18;
     lv_coord_t y_label_x2 = plot_x1 - 2;
@@ -884,7 +885,7 @@ static void nrf24_graph_draw_event(lv_event_t *e) {
         lv_draw_label_dsc_t alert_lbl;
         lv_draw_label_dsc_init(&alert_lbl);
         alert_lbl.color = alert_text;
-        alert_lbl.font = &lv_font_montserrat_10;
+        alert_lbl.font = accessibility_get_font_small();
 
         const char *jam_str = nrf24_jam_type_str(s_jam_type);
         if (!jam_str) jam_str = "JAMMING";
@@ -1359,13 +1360,13 @@ void nrf24_analyzer_create(void) {
     s_status_label = lv_label_create(s_content);
     lv_label_set_text(s_status_label, "Initializing analyzer...");
     lv_obj_set_style_text_color(s_status_label, text, 0);
-    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_status_label, accessibility_get_font_body(), 0);
     lv_obj_align(s_status_label, LV_ALIGN_TOP_LEFT, 8, 6);
 
     s_freq_label = lv_label_create(s_content);
     lv_label_set_text(s_freq_label, "Peak CH:000  2.400 GHz  0%");
     lv_obj_set_style_text_color(s_freq_label, text, 0);
-    lv_obj_set_style_text_font(s_freq_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_freq_label, accessibility_get_font_small(), 0);
     lv_obj_align(s_freq_label, LV_ALIGN_TOP_LEFT, 8, 24);
 
     int button_h = (LV_VER_RES <= 170) ? 28 : 34;

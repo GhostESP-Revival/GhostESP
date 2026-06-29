@@ -1,0 +1,19 @@
+{
+  "id": "{{APP_ID}}",
+  "name": "{{APP_NAME}}",
+  "version": "0.1.0",
+  "author": "GhostESP",
+  "description": "A GhostESP native SD app.",
+  "category": "Tools",
+  "entry": "{{APP_SYMBOL}}.so",
+  "target": "esp32s3",
+  "api_version": 1,
+  "manifest_version": 1,
+  "package_version": 1,
+  "data_version": 1,
+  "storage_scope": "app",
+  "permissions": ["ui"],
+  "memory_limit": 32768,
+  "stack_size": 4096,
+  "requires_psram": false
+}

@@ -21,7 +21,7 @@ extern "C" {
 #define GPS_EPOCH_YEAR 2000 // GPS dates are relative to year 2000
 #define GPS_MIN_YEAR 0 // Minimum valid year offset (2000)
 #define GPS_MAX_YEAR 99 // Maximum valid year offset (2099)
-#define NMEA_MAX_STATEMENT_ITEM_LENGTH (16)
+#define NMEA_MAX_STATEMENT_ITEM_LENGTH (32)
 
 /**
  * @brief Declare of NMEA Parser Event base

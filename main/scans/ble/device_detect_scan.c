@@ -351,11 +351,11 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
 
     // Keep the NimBLE callback path non-blocking so scan stop/deinit can complete promptly.
     if (device->type == BLE_DETECT_DEVICE_FLIPPER) {
-        rgb_manager_set_color(&rgb_manager, -1, 255, 165, 0, false);
+        rgb_manager_pulse_async(&rgb_manager, 255, 165, 0);
     } else if (device->type == BLE_DETECT_DEVICE_AIRTAG) {
-        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 255, false);
+        rgb_manager_pulse_async(&rgb_manager, 0, 0, 255);
     } else if (device->type == BLE_DETECT_DEVICE_SKIMMER) {
-        rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
+        rgb_manager_pulse_async(&rgb_manager, 255, 0, 0);
     }
 
     if (s_tracking.active && device->type == s_tracking.type &&

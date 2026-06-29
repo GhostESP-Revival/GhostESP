@@ -6,6 +6,7 @@
 #include "managers/chameleon_manager.h"
 #include "managers/nfc/mifare_attack.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostchi_manager.h"
 
 #ifdef CONFIG_NFC_CHAMELEON
 #include "host/ble_hs.h"
@@ -149,6 +150,7 @@ static void chameleon_resume_ap(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
         esp_err_t err_init = ap_manager_init();
         if (err_init == ESP_OK) {
+            wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
         }
         if (err_init != ESP_OK) {
@@ -435,6 +437,11 @@ static void cu_mfc_cache_begin(MFC_TYPE t, const uint8_t *uid, uint8_t uid_len, 
     int sec_bits = (sectors + 7) >> 3;
     g_cu_mfc_cache.key_a_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
     g_cu_mfc_cache.key_b_valid = (uint8_t*)calloc((size_t)sec_bits, 1);
+    if (!g_cu_mfc_cache.blocks || !g_cu_mfc_cache.known_bits ||
+        !g_cu_mfc_cache.key_a || !g_cu_mfc_cache.key_b ||
+        !g_cu_mfc_cache.key_a_valid || !g_cu_mfc_cache.key_b_valid) {
+        cu_mfc_cache_reset();
+    }
 }
 
 static inline void cu_bitset_set(uint8_t *arr, int idx) { arr[(unsigned)idx >> 3] |= (uint8_t)(1u << (idx & 7)); }
@@ -2254,6 +2261,7 @@ bool chameleon_manager_read_hf_card(void) {
     g_cached_details_text = chameleon_manager_build_cached_details();
     g_cached_details_session++;
     
+    ghostchi_manager_add_xp(8);
     return true;
 }
 
@@ -3101,6 +3109,7 @@ bool chameleon_manager_read_ntag_card(void) {
         g_cached_details_text = chameleon_manager_build_cached_details();
         g_cached_details_session++;
     }
+    if (g_last_ntag_dump.valid) ghostchi_manager_add_xp(8);
     return g_last_ntag_dump.valid;
 }
 

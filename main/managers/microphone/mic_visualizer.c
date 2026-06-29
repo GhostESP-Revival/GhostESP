@@ -16,6 +16,7 @@
 #include "managers/microphone/mic_goertzel.h"
 #include "core/esp_comm_manager.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -36,9 +37,14 @@ static float amplitude_follower = 0.0f;
 
 static void mic_visualizer_task(void *arg) {
     int32_t *samples = NULL;
-    
+
     size_t buffer_size = (CONFIG_MIC_BUFFER_SAMPLES * 2) * sizeof(int32_t);
-    samples = (int32_t *)malloc(buffer_size);
+    // Allocate sample buffer from PSRAM to save internal RAM
+    samples = (int32_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!samples) {
+        ESP_LOGW(TAG, "PSRAM sample buffer alloc failed, falling back to internal");
+        samples = (int32_t *)malloc(buffer_size);
+    }
     if (samples == NULL) {
         ESP_LOGE(TAG, "Failed to allocate sample buffer");
         vTaskDelete(NULL);
@@ -188,19 +194,39 @@ esp_err_t mic_visualizer_start(void) {
     }
     
     mic_visualizer_running = true;
-    
-    BaseType_t ret = xTaskCreate(mic_visualizer_task, 
-                                 "mic_visualizer", 
-                                 8192,  // Increased for Goertzel ring buffers
-                                 NULL, 
-                                 5, 
-                                 &mic_visualizer_task_handle);
-    
-    if (ret != pdPASS) {
-        mic_visualizer_running = false;
-        ESP_LOGE(TAG, "Failed to create MIC visualizer task");
-        return ESP_ERR_NO_MEM;
-    }
+
+    // Allocate task stack from PSRAM to save internal RAM
+    const uint32_t stack_size = 8192;
+    StackType_t *stack_buf = (StackType_t *)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!stack_buf) {
+        ESP_LOGW(TAG, "PSRAM stack alloc failed, falling back to internal");
+        BaseType_t ret = xTaskCreate(mic_visualizer_task, "mic_visualizer", stack_size, NULL, 5, &mic_visualizer_task_handle);
+        if (ret != pdPASS) {
+            mic_visualizer_running = false;
+            ESP_LOGE(TAG, "Failed to create MIC visualizer task");
+            return ESP_ERR_NO_MEM;
+        }
+        } else {
+            StaticTask_t *task_buf = (StaticTask_t *)malloc(sizeof(StaticTask_t));
+            if (!task_buf) {
+                free(stack_buf);
+                BaseType_t ret = xTaskCreate(mic_visualizer_task, "mic_visualizer", stack_size, NULL, 5, &mic_visualizer_task_handle);
+                if (ret != pdPASS) {
+                    mic_visualizer_running = false;
+                    ESP_LOGE(TAG, "Failed to create MIC visualizer task");
+                    return ESP_ERR_NO_MEM;
+                }
+            } else {
+                mic_visualizer_task_handle = xTaskCreateStatic(mic_visualizer_task, "mic_visualizer", stack_size, NULL, 5, stack_buf, task_buf);
+                if (!mic_visualizer_task_handle) {
+                    free(stack_buf);
+                    free(task_buf);
+                    mic_visualizer_running = false;
+                    ESP_LOGE(TAG, "Failed to create MIC visualizer task");
+                    return ESP_ERR_NO_MEM;
+                }
+            }
+        }
     
     ESP_LOGI(TAG, "MIC visualizer started");
     return ESP_OK;

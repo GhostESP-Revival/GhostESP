@@ -50,8 +50,11 @@ static bool prf(const uint8_t *key, size_t key_len,
 while (offset < out_len) {
         counter++;
         size_t r_len = 20 + data_len + 1;
-        uint8_t *r = (uint8_t *)malloc(r_len);
-        if (!r) return false;
+    uint8_t *r = (uint8_t *)malloc(r_len);
+    if (!r) {
+        memset(out, 0, out_len);
+        return false;
+    }
         memcpy(r, hash, 20);
         memcpy(r + 20, data, data_len);
         r[20 + data_len] = counter;

@@ -50,6 +50,15 @@ lv_res_t lv_async_call(lv_async_cb_t async_xcb, void * user_data)
     if(info == NULL)
         return LV_RES_INV;
 
+    /*Populate the info struct BEFORE creating the timer. lv_timer_create() inserts
+     *the timer into the active list immediately with period 0, so it can fire on the
+     *very next lv_timer_handler() pass. If the handler runs on another task (as it
+     *does here) it could otherwise execute lv_async_timer_cb() before info->cb is set,
+     *and since lv_mem_alloc() does not zero memory that read a garbage/NULL pointer
+     *and jumped to it (Guru Meditation, MEPC=0).*/
+    info->cb = async_xcb;
+    info->user_data = user_data;
+
     /*Create a new timer*/
     lv_timer_t * timer = lv_timer_create(lv_async_timer_cb, 0, info);
 
@@ -57,9 +66,6 @@ lv_res_t lv_async_call(lv_async_cb_t async_xcb, void * user_data)
         lv_mem_free(info);
         return LV_RES_INV;
     }
-
-    info->cb = async_xcb;
-    info->user_data = user_data;
 
     lv_timer_set_repeat_count(timer, 1);
     return LV_RES_OK;

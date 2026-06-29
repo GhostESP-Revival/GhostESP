@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #define ENCODER_RPM_SMOOTHING_SIZE 4
+#define ENCODER_MAX_PENDING_STEPS 16  ///< cap queued detents to avoid event flooding
 
 #ifdef __cplusplus
 extern "C" {

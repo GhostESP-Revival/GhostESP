@@ -1,9 +1,23 @@
 #include "vendor/drivers/pcf8563.h"
 #include "i2c_shared.h"
+#include "io_manager/i2c_bus_lock.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "RTC_DRIVER";
+
+// These Kconfig options only exist when HAS_RTC_CLOCK is enabled, but this driver
+// is compiled for every board. On boards without an RTC, ghost_rtc_init is never
+// called (its only caller is guarded by CONFIG_HAS_RTC_CLOCK), so these are pure
+// build-time placeholders that are never reached. Even when it is called, the RTC
+// rides an already-created shared I2C bus, so the pins are reused-not-created and
+// ignored -- hence a "not connected" sentinel rather than a real pin number.
+#ifndef CONFIG_RTC_I2C_SDA_PIN
+#define CONFIG_RTC_I2C_SDA_PIN (-1)
+#endif
+#ifndef CONFIG_RTC_I2C_SCL_PIN
+#define CONFIG_RTC_I2C_SCL_PIN (-1)
+#endif
 
 static i2c_port_num_t rtc_i2c_port;
 static uint8_t rtc_address;
@@ -20,14 +34,20 @@ static uint8_t _dec_to_bcd(uint8_t val) {
 }
 
 // Generic RTC initialization
-esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type) {
+esp_err_t ghost_rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_type) {
   rtc_i2c_port = i2c_port;
   rtc_address = addr;
   rtc_chip = chip_type;
 
-  esp_err_t ret = i2c_master_get_bus_handle(rtc_i2c_port, &rtc_i2c_bus);
+  esp_err_t ret = i2c_shared_get_or_create_bus(rtc_i2c_port,
+                                               CONFIG_RTC_I2C_SDA_PIN,
+                                               CONFIG_RTC_I2C_SCL_PIN,
+                                               true,
+                                               &rtc_i2c_bus,
+                                               NULL);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "I2C bus %d not available: %s", (int)rtc_i2c_port, esp_err_to_name(ret));
+    rtc_i2c_bus = NULL;
     return ret;
   }
   if (rtc_i2c_dev) {
@@ -36,7 +56,9 @@ esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_t
   }
   ret = i2c_shared_add_device(rtc_i2c_bus, rtc_address, 100000, &rtc_i2c_dev);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to attach RTC device: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Failed to attach RTC device 0x%02X on I2C bus %d: %s",
+             rtc_address, (int)rtc_i2c_port, esp_err_to_name(ret));
+    rtc_i2c_dev = NULL;
     return ret;
   }
   
@@ -62,18 +84,30 @@ esp_err_t rtc_init(i2c_port_num_t i2c_port, uint8_t addr, rtc_chip_type_t chip_t
 
 // Legacy PCF8563 initialization for backward compatibility
 esp_err_t pcf8563_init(i2c_port_num_t i2c_port, uint8_t addr) {
-  return rtc_init(i2c_port, addr, RTC_CHIP_PCF8563);
+  return ghost_rtc_init(i2c_port, addr, RTC_CHIP_PCF8563);
 }
 
 static esp_err_t _read_register(uint8_t reg, uint8_t *data, size_t len) {
-  return i2c_master_transmit_receive(rtc_i2c_dev, &reg, 1, data, len, 1000);
+  if (!rtc_i2c_dev) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  bool locked = i2c_bus_lock(rtc_i2c_port, 1000);
+  esp_err_t ret = i2c_master_transmit_receive(rtc_i2c_dev, &reg, 1, data, len, 1000);
+  if (locked) i2c_bus_unlock(rtc_i2c_port);
+  return ret;
 }
 
 static esp_err_t _write_register(uint8_t reg, const uint8_t *data, size_t len) {
+  if (!rtc_i2c_dev) {
+    return ESP_ERR_INVALID_STATE;
+  }
   uint8_t buffer[1 + len];
   buffer[0] = reg;
   memcpy(&buffer[1], data, len);
-  return i2c_master_transmit(rtc_i2c_dev, buffer, sizeof(buffer), 1000);
+  bool locked = i2c_bus_lock(rtc_i2c_port, 1000);
+  esp_err_t ret = i2c_master_transmit(rtc_i2c_dev, buffer, sizeof(buffer), 1000);
+  if (locked) i2c_bus_unlock(rtc_i2c_port);
+  return ret;
 }
 
 esp_err_t rtc_set_datetime(const RTC_Date *datetime) {

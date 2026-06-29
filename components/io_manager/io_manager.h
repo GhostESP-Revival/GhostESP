@@ -54,6 +54,16 @@ void io_manager_scan_i2c(void);
 esp_err_t i2c_write_reg8_direct(uint8_t addr, uint8_t reg, uint8_t val);
 esp_err_t i2c_read_reg8_direct(uint8_t addr, uint8_t reg, uint8_t *val);
 
+/**
+ * @brief Pulse the DAC RESET line low for 200ms via IO expander.
+ *
+ * Configures the configured expander pin as output, pulls it low for 200ms,
+ * then drives it high. Used to reset the TLV320DAC3100 on startup.
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t io_manager_dac_reset_pulse(void);
+
 #ifdef __cplusplus
 }
 #endif

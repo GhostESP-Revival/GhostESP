@@ -175,9 +175,8 @@ char *url_encode(const char *str) {
   return encoded;
 }
 
-char *generate_uuid() {
-  static char uuid[37]; // 36 characters + null terminator
-  snprintf(uuid, sizeof(uuid), "%08x-%04x-%04x-%04x-%08x%04x",
+void generate_uuid(char *uuid, size_t uuid_len) {
+  snprintf(uuid, uuid_len, "%08x-%04x-%04x-%04x-%08x%04x",
            (unsigned int)esp_random(),            // 8 hex digits
            (unsigned int)(esp_random() & 0xFFFF), // 4 hex digits
            (unsigned int)(esp_random() & 0xFFFF), // 4 hex digits
@@ -185,7 +184,6 @@ char *generate_uuid() {
            (unsigned int)(esp_random()), // First 8 hex digits of the last part
            (unsigned int)(esp_random() &
                           0xFFFF)); // Last 4 hex digits of the last part
-  return uuid;
 }
 
 char *generate_zx() {
@@ -280,7 +278,6 @@ esp_err_t send_command(const char *command, const char *video_id,
     body_params = malloc(body_params_len);
     if (!body_params) {
       ESP_LOGE(TAG, "Failed to allocate memory for body parameters");
-      free(url_params);
       goto cleanup;
     }
     snprintf(body_params, body_params_len,
@@ -293,7 +290,6 @@ esp_err_t send_command(const char *command, const char *video_id,
     body_params = malloc(body_params_len);
     if (!body_params) {
       ESP_LOGE(TAG, "Failed to allocate memory for body parameters");
-      free(url_params);
       goto cleanup;
     }
     snprintf(body_params, body_params_len,
@@ -305,14 +301,12 @@ esp_err_t send_command(const char *command, const char *video_id,
     body_params = malloc(body_params_len);
     if (!body_params) {
       ESP_LOGE(TAG, "Failed to allocate memory for body parameters");
-      free(url_params);
       goto cleanup;
     }
     snprintf(body_params, body_params_len, "count=1&req0__sc=%s",
              encoded_command);
   } else {
     ESP_LOGE(TAG, "Unsupported command: %s", command);
-    free(url_params);
     goto cleanup;
   }
   ESP_LOGI(TAG, "Body Parameters: %s", body_params);
@@ -320,8 +314,6 @@ esp_err_t send_command(const char *command, const char *video_id,
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (free_heap < DIAL_MIN_FREE_HEAP_FOR_HTTPS) {
     ESP_LOGE(TAG, "Insufficient heap for HTTPS: %u bytes free, need %d", free_heap, DIAL_MIN_FREE_HEAP_FOR_HTTPS);
-    free(url_params);
-    free(body_params);
     goto cleanup;
   }
 
@@ -343,6 +335,10 @@ esp_err_t send_command(const char *command, const char *video_id,
       .buffer_size_tx = DIAL_HTTP_BUFFER_SIZE,
   };
   esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) {
+    ESP_LOGE(TAG, "Failed to initialize HTTP client");
+    goto cleanup;
+  }
 
   // Set the request body
   esp_http_client_set_post_field(client, body_params, strlen(body_params));
@@ -352,8 +348,7 @@ esp_err_t send_command(const char *command, const char *video_id,
   char *full_url = malloc(full_url_len);
   if (full_url == NULL) {
     ESP_LOGE(TAG, "Failed to allocate memory for full_url");
-    esp_http_client_cleanup(client);
-    return ESP_FAIL;
+    goto cleanup;
   }
   snprintf(full_url, full_url_len, "%s?%s", config.url, url_params);
   esp_http_client_set_url(client, full_url);
@@ -402,7 +397,7 @@ esp_err_t bind_session_id(Device *device) {
     return ESP_ERR_INVALID_ARG;
   }
 
-  strcpy(device->UUID, generate_uuid());
+  generate_uuid(device->UUID, sizeof(device->UUID));
 
   // Generate ZX parameter
   char *zx = generate_zx();
@@ -542,10 +537,25 @@ esp_err_t bind_session_id(Device *device) {
   char *lid_item = result.listId;
 
   if (gsession_item && sid_item) {
-    strcpy(device->gsession, gsession_item);
-    strcpy(device->SID, sid_item);
-    if (lid_item && lid_item) {
-      strcpy(device->listID, lid_item);
+    if (strnlen(gsession_item, sizeof(device->gsession)) >= sizeof(device->gsession) ||
+        strnlen(sid_item,     sizeof(device->SID))     >= sizeof(device->SID)     ||
+        (lid_item && strnlen(lid_item, sizeof(device->listID)) >= sizeof(device->listID))) {
+      ESP_LOGE(TAG, "Bind response field exceeds buffer; aborting bind");
+      esp_http_client_cleanup(client);
+      free(resp_buf.buffer);
+      free(encoded_loungeIdToken);
+      free(encoded_UUID);
+      free(encoded_zx);
+      free(encoded_name);
+      free(zx);
+      free(url_params);
+      free(full_url);
+      return ESP_FAIL;
+    }
+    snprintf(device->gsession, sizeof(device->gsession), "%s", gsession_item);
+    snprintf(device->SID,     sizeof(device->SID),     "%s", sid_item);
+    if (lid_item) {
+      snprintf(device->listID, sizeof(device->listID), "%s", lid_item);
     }
     ESP_LOGI(TAG, "Session bound successfully.");
   } else {
@@ -598,6 +608,9 @@ char *extract_token_from_json(const char *json_response) {
 
   char *token = strdup(lounge_token->valuestring);
   cJSON_Delete(json);
+  if (!token) {
+    ESP_LOGE(TAG, "Failed to allocate memory for token");
+  }
   return token;
 }
 
@@ -809,6 +822,7 @@ esp_err_t _http_event_header_handler(esp_http_client_event_t *evt) {
     ESP_LOGI(TAG, "Header: %s: %s", evt->header_key, evt->header_value);
     if (strcasecmp(evt->header_key, "Application-Url") == 0) {
       if (evt->header_value != NULL) {
+        free(g_app_url);
         g_app_url = strdup(evt->header_value);
       }
     }
@@ -890,6 +904,10 @@ char *get_dial_application_url(const char *location_url) {
     g_app_url = NULL;
     esp_http_client_cleanup(client);
     free(path);
+    if (!app_url_copy) {
+      ESP_LOGE(TAG, "Failed to allocate memory for app URL copy");
+      return NULL;
+    }
     return app_url_copy;
   } else {
     ESP_LOGE(TAG, "Couldn't find 'Application-Url' in the headers.");

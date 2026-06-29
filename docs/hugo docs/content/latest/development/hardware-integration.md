@@ -28,13 +28,6 @@ In menuconfig under **Ghost ESP Options → Misc Options**:
 
 When the compass is on the IO expander (`CONFIG_COMPASS_ON_EXPANDER`), I2C communication uses bit-banged GPIO through the expander rather than hardware I2C. This is slower but allows pin expansion.
 
-```c
-// Joystick manager checks for IO expander
-#ifdef CONFIG_USE_IO_EXPANDER
-esp_err_t joystick_io_expander_init(void);
-#endif
-```
-
 ## Shared TFT/SD SPI Bus
 
 Some boards share SPI pins between the TFT display and SD card to reduce pin count.
@@ -47,18 +40,7 @@ Enable `CONFIG_SHARED_TFT_SD_SPI` in menuconfig when:
 
 ### How It Works
 
-The SD card manager coordinates with LVGL to avoid bus conflicts:
-
-```c
-// sd_card_manager.c pauses LVGL during SD operations
-bool shared_spi_guard_active = false;
-if (is_shared_display_sd_spi()) {
-    shared_spi_guard_active = true;
-    // LVGL display updates paused
-}
-// ... SD operation ...
-shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
-```
+The SD card manager coordinates with LVGL to avoid bus conflicts by suspending the LVGL display task during SD operations:
 
 ### Performance Impact
 
