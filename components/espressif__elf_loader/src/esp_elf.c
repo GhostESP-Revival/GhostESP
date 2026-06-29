@@ -44,6 +44,7 @@
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32C5
+#ifndef CONFIG_ELF_LOADER_C5_FLASH_XIP
 static void esp_elf_sync_exec_region(void *addr, size_t size)
 {
     if (!addr || !size) {
@@ -66,6 +67,7 @@ static void esp_elf_sync_exec_region(void *addr, size_t size)
                     ESP_CACHE_MSYNC_FLAG_INVALIDATE |
                     ESP_CACHE_MSYNC_FLAG_TYPE_INST);
 }
+#endif /* !CONFIG_ELF_LOADER_C5_FLASH_XIP */
 
 static void esp_elf_zero_exec_region(void *addr, size_t size)
 {
@@ -807,7 +809,15 @@ int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf)
     }
 
 #if CONFIG_IDF_TARGET_ESP32C5
-#ifndef CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
+#ifdef CONFIG_ELF_LOADER_C5_FLASH_XIP
+    /* Relocation wrote into the RAM staging buffer; program it to flash and make
+     * the in-place mapping fetchable. .text now lives only in flash. */
+    ret = esp_elf_c5_xip_commit(elf);
+    if (ret) {
+        ESP_LOGE(TAG, "flash-XIP commit failed ret=%d", ret);
+        return ret;
+    }
+#elif !defined(CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR)
     esp_elf_sync_exec_region(elf->psegment, elf->ssize);
 #else
     esp_elf_sync_exec_region((void *)elf->sec[ELF_SEC_PLT].addr, elf->sec[ELF_SEC_PLT].size);

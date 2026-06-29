@@ -1015,6 +1015,10 @@ The load will fail with `ELC: exec alloc N -> 0x0 internal=0 exec=0` if the app'
 - Use `memory_limit` in `manifest.json` conservatively (the tracked limit covers `app_malloc`/`app_calloc` usage, but the .so's executable sections consume separate internal heap).
 - Reduce code size (link-time optimization, strip unused functions, enable `-Os`).
 
+### Flash-XIP on ESP32-C5 (>4 MB flash)
+
+C5 firmware builds with a dedicated `napps` flash partition (boards with more than 4 MB of flash) lift the internal-RAM ceiling entirely. The loader stages relocation in RAM, programs the relocated `.text` into the `napps` partition, and executes it **in place** from the flash mapping. `.data`/`.bss`/`.got` still live in RAM, but the app's executable footprint in internal SRAM drops to near zero — a typical app consumes only a few hundred bytes of internal heap regardless of code size. An identical relocated image already resident in the partition is reused on subsequent launches, so repeat loads do not re-erase flash. This is on by default on supported C5 boards; 4 MB C5 boards have no room for the partition and fall back to the internal-RAM exec path above.
+
 ### Non-Executable Data PSRAM Preference
 
 The loader allocates non-executable sections (`.data`, `.bss`) with **PSRAM-first** on targets that have PSRAM, falling back to internal RAM. The firmware itself also prefers PSRAM for its internal structures:
