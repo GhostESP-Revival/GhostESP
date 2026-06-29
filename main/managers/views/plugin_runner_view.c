@@ -378,7 +378,6 @@ static void plugin_runner_launch_pending(void) {
 
     runner_set_title_now(loaded->manifest && loaded->manifest->valid ? loaded->manifest->name : "SD App");
     ESP_LOGI(TAG, "Starting app %s", s_pending_app_id);
-    toast_show_duration("Starting app...", TOAST_INFO, 1000);
     err = plugin_loader_start(loaded);
     if (err != ESP_OK) {
         runner_set_title_now("Start Failed");

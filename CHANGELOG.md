@@ -3,6 +3,7 @@
 ## Revival v2.0-pre9
 - ESP32-C5 native SD apps now execute their code from flash (XIP) instead of internal RAM, lifting the ~25 KB executable-size ceiling on app code for C5 boards with more than 4 MB flash
 - Fixes for Marauder V8 and Pancake configs - @H4W9
+- Removed 2 redundant toast notifications when opening native SD apps
 
 ## Revival v2.0-pre8
 

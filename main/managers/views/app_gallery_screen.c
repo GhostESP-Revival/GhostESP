@@ -1363,9 +1363,6 @@ static void handle_app_item_selection(int item_index) {
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
 
     if (app_items[item_index].plugin_id[0] != '\0') {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Opening %.52s...", app_items[item_index].name);
-        toast_show_duration(msg, TOAST_INFO, 1200);
         plugin_runner_set_app(app_items[item_index].plugin_id);
         display_manager_switch_view(&plugin_runner_view);
         return;
