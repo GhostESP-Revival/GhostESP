@@ -326,7 +326,7 @@ typedef struct {
 void settings_init(FSettings *settings);
 void settings_deinit(void);
 void settings_load(FSettings *settings);
-void settings_save(const FSettings *settings);
+esp_err_t settings_save(const FSettings *settings);
 void settings_save_sta_credentials(const FSettings *settings);
 void settings_set_defaults(FSettings *settings);
 

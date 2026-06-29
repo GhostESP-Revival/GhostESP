@@ -4,6 +4,7 @@
 - ESP32-C5 native SD apps now execute their code from flash (XIP) instead of internal RAM, lifting the ~25 KB executable-size ceiling on app code for C5 boards with more than 4 MB flash
 - Fixes for Marauder V8 and Pancake configs - @H4W9
 - Removed 2 redundant toast notifications when opening native SD apps
+- Hardened WebUI: API and camera endpoints now enforce Digest auth when enabled, passwords no longer leak from settings GET, AP password validation accepts exactly 8 characters, SD upload path/filename/size checks are unified, and settings_save surfaces NVS write errors
 
 ## Revival v2.0-pre8
 

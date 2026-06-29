@@ -100,6 +100,20 @@ static esp_err_t teardown_mdns(void);
 #define AUTH_MAX_HDR_LEN 512            // max size for Authorization header (increased for Digest)
 #define AUTH_MAX_DECODE_LEN 256         // max decoded credential length
 
+static bool is_safe_mnt_path(const char *path, bool allow_root) {
+    if (!path || strncmp(path, "/mnt", 4) != 0) return false;
+    if (path[4] != '\0' && path[4] != '/') return false;
+    if (!allow_root && path[4] == '\0') return false;
+    if (strstr(path, "..") != NULL) return false;
+    return true;
+}
+
+static bool is_safe_upload_filename(const char *name) {
+    if (!name || name[0] == '\0' || strlen(name) >= 128) return false;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
+    return strchr(name, '/') == NULL && strchr(name, '\\') == NULL && strstr(name, "..") == NULL;
+}
+
 static bool is_ip_in_ap_subnet(uint32_t addr_net_order) {
     ip4_addr_t addr = { .addr = addr_net_order };
     const ip4_addr_t base = { .addr = WEBUI_AP_SUBNET_BASE_ADDR };
@@ -107,7 +121,7 @@ static bool is_ip_in_ap_subnet(uint32_t addr_net_order) {
     return ip4_addr_netcmp(&addr, &base, &mask);
 }
 
-static bool webui_request_allowed(httpd_req_t *req) {
+static bool webui_origin_allowed(httpd_req_t *req) {
     if (!settings_get_webui_restrict_to_ap(&G_Settings)) {
         return true;
     }
@@ -162,7 +176,7 @@ deny:
 
 #define WEBUI_GUARD_OR_RETURN(req) \
     do {                           \
-        if (!webui_request_allowed(req)) return ESP_OK; \
+        if (!ap_manager_webui_request_allowed(req)) return ESP_OK; \
     } while (0)
 
 // simple global backoff state (very small memory footprint)
@@ -312,7 +326,7 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
         if (key_ret == ESP_OK && strlen(encoded_value) > 0) {
             url_decode(decoded_value, encoded_value);
             ESP_LOGI(TAG, "SD card query path: %s (decoded from %s)", decoded_value, encoded_value);
-            if (strncmp(decoded_value, "/mnt", 4) == 0) {
+            if (is_safe_mnt_path(decoded_value, true)) {
                 strncpy(path_param, decoded_value, sizeof(path_param) - 1);
                 path_param[sizeof(path_param) - 1] = '\0';
             } else {
@@ -392,7 +406,7 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
 static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
     char buf[512];
-    int received = httpd_req_recv(req, buf, sizeof(buf));
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
         ESP_LOGE(TAG, "Failed to receive request payload.");
         httpd_resp_set_status(req, "400 Bad Request");
@@ -421,19 +435,11 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
 
     const char *file_path = path_item->valuestring;
 
-    if (strncmp(file_path, "/mnt", 4) != 0) {
+    if (!is_safe_mnt_path(file_path, false)) {
         ESP_LOGE(TAG, "Path traversal rejected: %s", file_path);
         cJSON_Delete(json);
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"error\": \"Access denied: path must be under /mnt.\"}");
-        return ESP_FAIL;
-    }
-
-    if (strstr(file_path, "..") != NULL) {
-        ESP_LOGE(TAG, "Path traversal rejected (..): %s", file_path);
-        cJSON_Delete(json);
-        httpd_resp_set_status(req, "403 Forbidden");
-        httpd_resp_sendstr(req, "{\"error\": \"Access denied.\"}");
         return ESP_FAIL;
     }
 
@@ -497,6 +503,11 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
 esp_err_t get_query_param(httpd_req_t *req, const char *key, char *value, size_t max_len) {
     size_t query_len = httpd_req_get_url_query_len(req) + 1;
 
+    if (query_len > 512) {
+        ESP_LOGE(TAG, "Query string too long.");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     if (query_len > 1) { // >1 because query string starts with '?'
         char *query = malloc(query_len);
         if (!query) {
@@ -539,17 +550,10 @@ esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
         if (httpd_query_key_value(query, "path", path, sizeof(path)) == ESP_OK) {
             snprintf(filepath, sizeof(filepath), "%s", path);
 
-            if (strncmp(filepath, "/mnt", 4) != 0) {
+            if (!is_safe_mnt_path(filepath, false)) {
                 ESP_LOGE(TAG, "Path traversal rejected in delete: %s", filepath);
                 httpd_resp_set_status(req, "403 Forbidden");
                 httpd_resp_send(req, "Access denied: path must be under /mnt", HTTPD_RESP_USE_STRLEN);
-                return ESP_FAIL;
-            }
-
-            if (strstr(filepath, "..") != NULL) {
-                ESP_LOGE(TAG, "Path traversal rejected in delete (..): %s", filepath);
-                httpd_resp_set_status(req, "403 Forbidden");
-                httpd_resp_send(req, "Access denied", HTTPD_RESP_USE_STRLEN);
                 return ESP_FAIL;
             }
 
@@ -589,6 +593,18 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
         httpd_resp_sendstr(req, "{\"error\": \"Missing or invalid 'path' query parameter.\"}");
         return ESP_FAIL;
     }
+    if (!is_safe_mnt_path(path_param, true)) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\": \"Access denied: path must be under /mnt.\"}");
+        return ESP_FAIL;
+    }
+    if (req->content_len <= 0 || req->content_len > MAX_FILE_SIZE) {
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\": \"Upload too large or empty.\"}");
+        return ESP_FAIL;
+    }
     ESP_LOGI(TAG, "Upload path: %s", path_param);
 
     // Buffer for receiving data
@@ -622,8 +638,16 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
                     filename_start += strlen("filename=\"");
                     char *filename_end = strstr(filename_start, "\"");
                     if (filename_end) {
+                        size_t filename_len = filename_end - filename_start;
+                        if (filename_len >= 128) filename_len = 127;
                         char original_filename[128] = {0};
-                        strncpy(original_filename, filename_start, filename_end - filename_start);
+                        memcpy(original_filename, filename_start, filename_len);
+                        if (!is_safe_upload_filename(original_filename)) {
+                            free(buf);
+                            httpd_resp_set_status(req, "400 Bad Request");
+                            httpd_resp_sendstr(req, "{\"error\": \"Invalid filename.\"}");
+                            return ESP_FAIL;
+                        }
 
                         // Allocate memory for the full file path
                         size_t file_path_size = strlen(path_param) + strlen(original_filename) + 2;
@@ -658,6 +682,15 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
             // Write subsequent chunks of file data
             fwrite(buf, 1, received, file);
         }
+
+        if (total_received > MAX_FILE_SIZE) {
+            if (file) fclose(file);
+            free(file_path);
+            free(buf);
+            httpd_resp_set_status(req, "413 Payload Too Large");
+            httpd_resp_sendstr(req, "{\"error\": \"Upload too large.\"}");
+            return ESP_FAIL;
+        }
     }
     
     free(buf);
@@ -671,18 +704,16 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
             long file_size = ftell(file);
             fseek(file, 0, SEEK_SET);
             
-            char *file_buf = malloc(file_size + 1);
-            if (file_buf) {
-                fread(file_buf, 1, file_size, file);
-                file_buf[file_size] = '\0';
-                
-                char *end_boundary = strstr(file_buf, "\r\n--");
+            long tail_len = file_size < 512 ? file_size : 512;
+            char tail[513] = {0};
+            if (tail_len > 0 && fseek(file, file_size - tail_len, SEEK_SET) == 0) {
+                size_t read_len = fread(tail, 1, tail_len, file);
+                tail[read_len] = '\0';
+                char *end_boundary = strstr(tail, "\r\n--");
                 if (end_boundary) {
-                    long new_size = end_boundary - file_buf;
-                    rewind(file);
+                    long new_size = (file_size - tail_len) + (end_boundary - tail);
                     ftruncate(fileno(file), new_size);
                 }
-                free(file_buf);
             }
             fclose(file);
         }
@@ -808,7 +839,7 @@ esp_err_t ap_manager_init(void) {
                            ? settings_get_ap_ssid(&G_Settings)
                            : "GhostNet";
 
-    const char *password = strlen(settings_get_ap_password(&G_Settings)) > 8
+    const char *password = strlen(settings_get_ap_password(&G_Settings)) >= 8
                                ? settings_get_ap_password(&G_Settings)
                                : "GhostNet";
 
@@ -1154,9 +1185,52 @@ void ap_manager_stop_services_keep_wifi(void) {
     teardown_mdns();
 }
 
+static bool webui_session_cookie_valid(httpd_req_t *req, const char *password) {
+    size_t cookie_len = httpd_req_get_hdr_value_len(req, "Cookie");
+    if (cookie_len == 0 || cookie_len >= 512) return false;
+
+    char cookie_buf[512];
+    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) != ESP_OK) return false;
+
+    char *sess_pos = strstr(cookie_buf, "session=");
+    if (!sess_pos) return false;
+    sess_pos += strlen("session=");
+
+    char session_token[256] = {0};
+    size_t si = 0;
+    while (*sess_pos && *sess_pos != ';' && si + 1 < sizeof(session_token)) {
+        session_token[si++] = *sess_pos++;
+    }
+
+    return si > 0 && validate_stateless_nonce(password, strlen(password), session_token, 300) == 0;
+}
+
+bool ap_manager_webui_request_allowed(httpd_req_t *req) {
+    if (!webui_origin_allowed(req)) return false;
+    if (!settings_get_web_auth_enabled(&G_Settings)) return true;
+
+    const char *password = settings_get_ap_password(&G_Settings);
+    if (!password || strlen(password) < 8) password = "GhostNet";
+    if (webui_session_cookie_valid(req, password)) return true;
+
+    char nonce[128] = {0};
+    if (generate_stateless_nonce(password, strlen(password), nonce, sizeof(nonce)) != 0) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "Authentication error");
+        return false;
+    }
+
+    char www[256];
+    snprintf(www, sizeof(www), "Digest realm=\"Protected Area\", qop=\"auth\", nonce=\"%s\", algorithm=MD5", nonce);
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", www);
+    httpd_resp_sendstr(req, "Authentication required");
+    return false;
+}
+
 // Handler for GET requests (serves the HTML page)
 static esp_err_t http_get_handler(httpd_req_t *req) {
-    WEBUI_GUARD_OR_RETURN(req);
+    if (!webui_origin_allowed(req)) return ESP_OK;
     printf("Received HTTP GET request: %s\n", req->uri);
 
     if (!settings_get_web_auth_enabled(&G_Settings)) {
@@ -1181,29 +1255,10 @@ static esp_err_t http_get_handler(httpd_req_t *req) {
     // attempt session cookie first
     const FSettings *settings_local = &G_Settings;
     const char *expected_password_local = settings_get_ap_password(settings_local);
-    if (!expected_password_local || strlen(expected_password_local) == 0) expected_password_local = "GhostNet";
+    if (!expected_password_local || strlen(expected_password_local) < 8) expected_password_local = "GhostNet";
 
-    size_t cookie_len = httpd_req_get_hdr_value_len(req, "Cookie");
-    if (cookie_len > 0 && cookie_len < 512) {
-        char cookie_buf[512];
-        if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
-            char *sess_pos = strstr(cookie_buf, "session=");
-            if (sess_pos) {
-                sess_pos += strlen("session=");
-                char session_token[256] = {0};
-                size_t si = 0;
-                while (*sess_pos && *sess_pos != ';' && si + 1 < sizeof(session_token)) {
-                    session_token[si++] = *sess_pos++;
-                }
-                session_token[si] = '\0';
-                if (si > 0) {
-                    if (validate_stateless_nonce(expected_password_local, strlen(expected_password_local), session_token, 300) == 0) {
-                        // valid session cookie -> serve page
-                        return respond_with_site(req);
-                    }
-                }
-            }
-        }
+    if (webui_session_cookie_valid(req, expected_password_local)) {
+        return respond_with_site(req);
     }
 
     size_t auth_len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -1212,7 +1267,7 @@ static esp_err_t http_get_handler(httpd_req_t *req) {
         // send Digest challenge
         const FSettings *settings = &G_Settings;
         const char *pwd = settings_get_ap_password(settings);
-        if (!pwd || strlen(pwd) == 0) pwd = "GhostNet";
+        if (!pwd || strlen(pwd) < 8) pwd = "GhostNet";
         char nonce[128] = {0};
         if (generate_stateless_nonce(pwd, strlen(pwd), nonce, sizeof(nonce)) != 0) {
             httpd_resp_set_status(req, "500 Internal Server Error");
@@ -1311,7 +1366,7 @@ digest_fail:
     // issue new Digest challenge
     const FSettings *settings = &G_Settings;
     const char *pwd = settings_get_ap_password(settings);
-    if (!pwd || strlen(pwd) == 0) pwd = "GhostNet";
+    if (!pwd || strlen(pwd) < 8) pwd = "GhostNet";
     char nonce2[128] = {0};
     generate_stateless_nonce(pwd, strlen(pwd), nonce2, sizeof(nonce2));
     char www2[256];
@@ -1501,7 +1556,17 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
 
     cJSON *ap_password = cJSON_GetObjectItem(root, "ap_password");
     if (cJSON_IsString(ap_password) && ap_password->valuestring) {
-        settings_set_ap_password(settings, ap_password->valuestring);
+        size_t ap_password_len = strlen(ap_password->valuestring);
+        if (ap_password_len > 0 && (ap_password_len < 8 || ap_password_len > 63)) {
+            cJSON_Delete(root);
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"error\": \"AP password must be empty or 8-63 characters.\"}");
+            return ESP_FAIL;
+        }
+        if (ap_password_len > 0) {
+            settings_set_ap_password(settings, ap_password->valuestring);
+        }
     }
 
     cJSON *rgb_mode = cJSON_GetObjectItem(root, "rainbow_mode");
@@ -1541,7 +1606,9 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
 
     cJSON *portal_password = cJSON_GetObjectItem(root, "portal_password");
     if (cJSON_IsString(portal_password) && portal_password->valuestring) {
-        settings_set_portal_password(settings, portal_password->valuestring);
+        if (portal_password->valuestring[0] != '\0') {
+            settings_set_portal_password(settings, portal_password->valuestring);
+        }
     }
 
     cJSON *portal_ap_ssid = cJSON_GetObjectItem(root, "portal_ap_ssid");
@@ -1630,7 +1697,14 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
     }
     glog("About to Save Settings\n");
 
-    settings_save(settings);
+    esp_err_t save_err = settings_save(settings);
+    if (save_err != ESP_OK) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\": \"Failed to save settings.\"}");
+        return ESP_FAIL;
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"settings_updated\"}");
@@ -1652,14 +1726,14 @@ static esp_err_t api_settings_get_handler(httpd_req_t *req) {
 
     cJSON_AddNumberToObject(root, "broadcast_speed", settings_get_broadcast_speed(settings));
     cJSON_AddStringToObject(root, "ap_ssid", settings_get_ap_ssid(settings));
-    cJSON_AddStringToObject(root, "ap_password", settings_get_ap_password(settings));
+    cJSON_AddStringToObject(root, "ap_password", "");
     cJSON_AddNumberToObject(root, "rgb_mode", settings_get_rgb_mode(settings));
     cJSON_AddNumberToObject(root, "rgb_speed", settings_get_rgb_speed(settings));
     cJSON_AddNumberToObject(root, "channel_delay", settings_get_channel_delay(settings));
 
     cJSON_AddStringToObject(root, "portal_url", settings_get_portal_url(settings));
     cJSON_AddStringToObject(root, "portal_ssid", settings_get_portal_ssid(settings));
-    cJSON_AddStringToObject(root, "portal_password", settings_get_portal_password(settings));
+    cJSON_AddStringToObject(root, "portal_password", "");
     cJSON_AddStringToObject(root, "portal_ap_ssid", settings_get_portal_ap_ssid(settings));
     cJSON_AddStringToObject(root, "portal_domain", settings_get_portal_domain(settings));
     cJSON_AddBoolToObject(root, "portal_offline_mode", settings_get_portal_offline_mode(settings));
