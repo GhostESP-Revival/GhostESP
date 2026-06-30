@@ -258,14 +258,18 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
-/* CYD 2.4" keeps display+touch on SPI2 while SD owns SPI3 by itself. On the
- * classic ESP32, tearing the SPI3 bus down with spi_bus_free() disturbs the
- * live SPI2 display and freezes it. So on this board we leave SD's bus
- * initialized instead of freeing it (a later (re)mount reuses it via
- * ESP_ERR_INVALID_STATE, already handled). Every other board frees as before. */
+/* Every CYD board (and any classic-ESP32 board with the same topology) keeps
+ * its display on SPI2 while SD owns a separate SPI3 bus: display and SD use
+ * different pins, so is_shared_display_sd_spi() is false and sd_spi_host_id()
+ * picks SPI3_HOST for SD. On the classic ESP32, tearing that SPI3 bus down
+ * with spi_bus_free() on mount failure (no card) or unmount disturbs the live
+ * SPI2 display and freezes it. So in that topology we leave SD's bus
+ * initialized instead of freeing it; a later (re)mount reuses it via
+ * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
+ * shares the display's bus are unaffected (the shared-bus path handles them). */
 static bool sd_keep_spi_bus_for_board(void) {
-#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "CYD2USB2.4Inch") == 0;
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN) && defined(SPI3_HOST)
+  return !is_shared_display_sd_spi();
 #else
   return false;
 #endif
@@ -619,11 +623,10 @@ esp_err_t sd_card_init(void) {
 #endif
 
   bool gating_template = false;
-  /* On the CYD 2.4" the display+touch live on SPI2 while SD gets SPI3 to
-   * itself, so SD genuinely *owns* the SPI3 bus (bus_init_success == true).
-   * Other CYDs share SD's host with touch, so SD only reuses an already-init
-   * bus and never frees it. See sd_keep_spi_bus_for_board() for why freeing it
-   * freezes the display; keep the bus alive on mount failure (no card) here. */
+  /* On classic-ESP32 boards whose SD owns a separate SPI3 bus (every CYD
+   * variant), SD genuinely *owns* that bus (bus_init_success == true).
+   * See sd_keep_spi_bus_for_board() for why freeing it freezes the display;
+   * keep the bus alive on mount failure (no card) here. */
   bool keep_bus_on_failure = sd_keep_spi_bus_for_board();
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
   gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||

@@ -1,5 +1,10 @@
 # Ghost ESP Changelog
 
+## Revival v2.0.1
+
+### Fixed
+- Extended the SD display-freeze fix to all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template, so CYD2432S028R and the other CYD variants no longer freeze when an SD card is inserted
+
 ## Revival v2.0
 
 ### Added
