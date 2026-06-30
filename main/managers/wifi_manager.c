@@ -2038,8 +2038,8 @@ void wifi_manager_init(void) {
     ESP_LOGI(TAG, "wifi_manager: starting WiFi (esp_wifi_start)...");
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "wifi_manager: WiFi started, free internal RAM: %d bytes", 
-             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    
+              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+     
     // Additional WiFi stability settings
     // Set maximum TX power to improve signal strength
     esp_wifi_set_max_tx_power(78); // 19.5 dBm (78/4)

@@ -103,6 +103,8 @@ void pn532_reset(pn532_io_handle_t io_handle)
 
 esp_err_t pn532_write_command(pn532_io_handle_t io_handle, const uint8_t *cmd, uint8_t cmdlen, int timeout)
 {
+    if (io_handle == NULL || cmd == NULL || io_handle->pn532_write == NULL)
+        return ESP_ERR_INVALID_STATE;
     uint8_t checksum = PN532_HOST_TO_PN532;
     uint8_t command[256];
     int idx = 0;
@@ -121,11 +123,15 @@ esp_err_t pn532_write_command(pn532_io_handle_t io_handle, const uint8_t *cmd, u
 
 esp_err_t pn532_read_data(pn532_io_handle_t io_handle, uint8_t *buffer, uint8_t length, int32_t timeout)
 {
+    if (io_handle == NULL || buffer == NULL || io_handle->pn532_read == NULL)
+        return ESP_ERR_INVALID_STATE;
     return io_handle->pn532_read(io_handle, buffer, length, timeout);
 }
 
 esp_err_t pn532_wait_ready(pn532_io_handle_t io_handle, int32_t timeout)
 {
+    if (io_handle == NULL || io_handle->pn532_is_ready == NULL)
+        return ESP_ERR_INVALID_STATE;
     TickType_t start_ticks = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout > 0) ? pdMS_TO_TICKS(timeout) : portMAX_DELAY;
     // if IRQ available, poll aggressively with yield (GPIO reads are fast)

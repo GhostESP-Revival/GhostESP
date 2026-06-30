@@ -1,14 +1,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
 #include "managers/nfc/ntag_t2.h"
 #include "managers/nfc/ndef.h"
 #include <stdio.h>
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool ntag_t2_read_user_memory(pn532_io_handle_t io,
                               uint8_t **out_buf,
                               size_t *out_len,

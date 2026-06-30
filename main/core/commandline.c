@@ -242,6 +242,10 @@ void register_commands() {
     command_init();
     register_command("help", handle_help);
     register_command("mem", handle_mem_cmd);
+#if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
+    register_command("nfc", handle_nfc_cmd);
+    register_command("nfctest", handle_nfctest_cmd);
+#endif
     register_command("scanap", cmd_wifi_scan_start);
     register_command("scansta", handle_sta_scan);
     register_command("scanlocal", handle_ip_lookup);

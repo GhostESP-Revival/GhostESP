@@ -21,7 +21,7 @@ int mfc_first_block_of_sector(MFC_TYPE t, int sector);
 
 // Builds a compact summary. Tries default keys, does not write.
 // Returns malloc'd string which caller must free.
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 char* mfc_build_details_summary(pn532_io_handle_t io,
                                 const uint8_t* uid,
                                 uint8_t uid_len,

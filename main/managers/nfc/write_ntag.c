@@ -1,5 +1,5 @@
 #include "managers/nfc/write_ntag.h"
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
 #include "esp_log.h"
@@ -130,7 +130,7 @@ char *ntag_file_build_details(const ntag_file_image_t *img) {
     return out;
 }
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool ntag_write_to_tag(pn532_io_handle_t io,
                        const ntag_file_image_t *img,
                        bool (*progress_cb)(int current, int total, void *user),

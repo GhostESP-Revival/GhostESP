@@ -32,7 +32,7 @@ typedef struct {
 // This is intentionally conservative to avoid false positives.
 bool desfire_is_desfire_candidate(uint16_t atqa, uint8_t sak);
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 // Try to query DESFire version info via native GET_VERSION.
 // Returns true on success and fills out struct, false if command fails or
 // response is not recognized.

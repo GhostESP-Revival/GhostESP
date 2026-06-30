@@ -86,6 +86,10 @@ if(CONFIG_HAS_NFC)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp-idf-pn532/include")
 endif()
 
+if(CONFIG_NFC_ST25R3916)
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp-idf-st25r3916/include")
+endif()
+
 
 set(sources ${app_sources})
 
@@ -95,6 +99,10 @@ set(sources ${app_sources})
 ## so export pn532 headers whenever NFC support is on
 if(CONFIG_HAS_NFC)
     list(APPEND required_components esp-idf-pn532)
+endif()
+
+if(CONFIG_NFC_ST25R3916)
+    list(APPEND required_components esp-idf-st25r3916)
 endif()
 
 if(idf_target STREQUAL "esp32s3" AND (CONFIG_USE_CARDPUTER OR CONFIG_USE_CARDPUTER_ADV))

@@ -34,8 +34,8 @@ static DESFIRE_MODEL desfire_model_from_size_byte(uint8_t size_byte,
     }
 }
 
- #ifdef CONFIG_NFC_PN532
- bool desfire_get_version(pn532_io_handle_t io, desfire_version_t *out) {
+ #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
+  bool desfire_get_version(pn532_io_handle_t io, desfire_version_t *out) {
      if (!io || !out) return false;
      memset(out, 0, sizeof(*out));
 

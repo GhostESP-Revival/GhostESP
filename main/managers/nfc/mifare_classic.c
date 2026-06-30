@@ -6,7 +6,7 @@
 #include "managers/sd_card_manager.h"
 #include "gui/toast.h"
 #include "esp_log.h"
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
 #include "managers/fuel_gauge_manager.h"
@@ -23,7 +23,7 @@ char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
                                   const char* card_label);
 
 #define MFC_TAG "MFC"
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 static void crc_a_calc(const uint8_t *data, size_t len, uint8_t out[2]);
 #endif
 
@@ -91,7 +91,7 @@ static uint8_t *g_sector_key_b_valid = NULL; // bitset per sector
 // Forward declaration for session reset function
 static void mfc_session_reset(void);
 
-#ifndef CONFIG_NFC_PN532
+#if !defined(CONFIG_NFC_PN532) && !defined(CONFIG_NFC_ST25R3916)
 static void mfc_session_reset(void) {
 }
 #endif
@@ -165,7 +165,7 @@ static inline void mfc_cache_record_sector_key(int sector, bool usedB, const uin
     }
 }
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 // Minimal PRNG analysis: try to capture a few nonces; if duplicates appear quickly, mark as weak
 static bool g_prng_checked = false;
 static bool g_prng_weak = false;
@@ -1382,7 +1382,7 @@ int mfc_first_block_of_sector(MFC_TYPE t, int sector) {
     return sector * 4;
 }
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 static esp_err_t mfc_auth_block(pn532_io_handle_t io, uint8_t block, bool use_key_b,
                                 const uint8_t key[6], const uint8_t *uid, uint8_t uid_len) {
     if (!io || !uid || uid_len < 4) return ESP_ERR_INVALID_ARG;

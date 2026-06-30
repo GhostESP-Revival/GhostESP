@@ -104,6 +104,13 @@ void handle_stop_flipper(int argc, char **argv) {
         stopped_any = true;
     }
 
+#if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
+    if (nfc_cli_stop()) {
+        glog("Stopped NFC scanner.\n");
+        stopped_any = true;
+    }
+#endif
+
     if (wdstream_stop_and_wait("stop")) {
         stopped_any = true;
     }

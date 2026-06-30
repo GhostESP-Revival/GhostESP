@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool ntag_t2_read_user_memory(pn532_io_handle_t io,
                               uint8_t **out_buf,
                               size_t *out_len,
