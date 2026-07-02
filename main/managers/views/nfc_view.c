@@ -10,6 +10,8 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "managers/views/error_popup.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
@@ -70,6 +72,10 @@ static const char* nfc_get_detected_title(void);
 #endif
 #ifdef CONFIG_NFC_ST25R3916
 #include "st25r3916_adapter.h"
+#include "st25r3916_iso15693.h"
+#include "st25r3916.h"
+#include "st25r3916_reg.h"
+#include "managers/nfc/picopass.h"
 #endif
 #endif
 
@@ -178,7 +184,7 @@ static bool nfc_emu_active = false;
 // jit sd helpers for somethingsomething template (mirror infrared behavior)
 static bool nfc_sd_begin(bool *display_was_suspended)
 {
-    return sd_card_jit_begin(display_was_suspended, false);
+    return sd_card_jit_begin(display_was_suspended, true);
 }
 
 static void nfc_sd_end(bool display_was_suspended)
@@ -665,6 +671,9 @@ static void nfc_progress_update_async(void *ptr) {
 static volatile bool nfc_scan_cancel = false;
 static volatile bool nfc_save_in_progress = false;
 static volatile bool nfc_attack_in_progress = false;
+#ifdef CONFIG_NFC_ST25R3916
+static volatile bool nfc_scan_picopass_only = false;
+#endif
 
 // Expose cancel status to MIFARE Classic layer (cooperative cancellation)
 bool nfc_is_scan_cancelled(void) { return nfc_scan_cancel; }
@@ -772,11 +781,6 @@ static void nfc_set_details_async(void *ptr) {
         lv_obj_clear_state(nfc_scan_more_btn, LV_STATE_DISABLED);
     }
     // don't stomp the title here; let scan/progress or details phases set it to avoid flicker
-    if (!nfc_details_visible) {
-        if (nfc_type_label && lv_obj_is_valid(nfc_type_label)) {
-            lv_label_set_text(nfc_type_label, "Scan complete - press More");
-        }
-    }
     // If already showing details, update label
     if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
         lv_label_set_text(nfc_title_label, nfc_detected_title);
@@ -819,6 +823,55 @@ static void nfc_set_details_async(void *ptr) {
 
 
 #ifdef NFC_HAS_LOCAL_READER
+#ifdef CONFIG_NFC_ST25R3916
+static void nfc_build_and_set_details_picopass(PicopassDeviceData *dev_data) {
+    char *text = (char *)malloc(512);
+    if (!text) return;
+
+    char *w = text;
+    size_t cap = 512;
+    int n = snprintf(w, cap, "PicoPass / iCLASS\n");
+    if (n > 0) { w += n; cap -= n; }
+
+    /* CSN */
+    n = snprintf(w, cap, "CSN:");
+    if (n > 0) { w += n; cap -= n; }
+    for (int i = 0; i < PICOPASS_UID_LEN && cap > 3; i++) {
+        n = snprintf(w, cap, " %02X", dev_data->AA1[PICOPASS_CSN_BLOCK_INDEX].data[i]);
+        if (n > 0) { w += n; cap -= n; }
+    }
+    n = snprintf(w, cap, "\n");
+    if (n > 0) { w += n; cap -= n; }
+
+    PicopassPacs *pacs = &dev_data->pacs;
+    if (pacs->record.valid) {
+        n = snprintf(w, cap, "FC: %u  CN: %u  Bits: %u\n",
+                     pacs->record.FacilityCode, pacs->record.CardNumber, pacs->record.bitLength);
+        if (n > 0) { w += n; cap -= n; }
+    }
+
+    const char *enc_str = "Unknown";
+    if (pacs->encryption == PicopassEncryptionNone) enc_str = "None";
+    else if (pacs->encryption == PicopassEncryptionDES) enc_str = "DES";
+    else if (pacs->encryption == PicopassEncryption3DES) enc_str = "3DES";
+    n = snprintf(w, cap, "Encryption: %s\n", enc_str);
+    if (n > 0) { w += n; cap -= n; }
+
+    if (pacs->sio) {
+        n = snprintf(w, cap, "SIO: present\n");
+        if (n > 0) { w += n; cap -= n; }
+    }
+
+    ndef_details_result_t *res = nfc_ndef_pool_alloc();
+    if (!res) { free(text); return; }
+    res->text = text;
+    res->text_len = strlen(text);
+    res->session = nfc_scan_session;
+    if (display_manager_is_available()) display_manager_lvgl_async_call(nfc_set_details_async, res);
+    else { free(text); nfc_ndef_pool_free(res); }
+}
+#endif
+
 static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, uint8_t uid_len) {
     // Prefer MIFARE Classic summary if SAK indicates Classic
     if (mfc_is_classic_sak(g_sak)) {
@@ -1052,10 +1105,6 @@ static void nfc_refresh_cu_details_from_cache(void) {
             lv_label_set_text(nfc_title_label, nfc_get_detected_title());
             lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22);
         }
-        if (!nfc_details_visible && nfc_type_label && lv_obj_is_valid(nfc_type_label)) {
-            lv_label_set_text(nfc_type_label, "Scan complete - press More");
-        }
-
         // Refresh layout/selection now that button set has changed
         update_nfc_buttons_layout();
         update_nfc_popup_selection();
@@ -1304,6 +1353,65 @@ static void nfc_scan_task(void *arg) {
         return;
     }
 
+#ifdef CONFIG_NFC_ST25R3916
+    if (nfc_scan_picopass_only) {
+        /* Dedicated PicoPass/iCLASS scan: stay in NFC-V mode for the whole
+         * scan instead of interleaving with ISO14443A polling. */
+        st25r3916_set_mode_picopass();
+        while (!nfc_scan_cancel) {
+            vTaskDelay(pdMS_TO_TICKS(20)); /* Give card time to power up */
+
+            PicopassDeviceData *pp_data =
+                heap_caps_calloc(1, sizeof(PicopassDeviceData), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!pp_data) pp_data = calloc(1, sizeof(PicopassDeviceData));
+            if (pp_data) {
+                esp_err_t pp_err = picopass_detect(pp_data);
+                ESP_LOGI(TAGT, "scan_task: picopass_detect returned %s", esp_err_to_name(pp_err));
+                if (pp_err == ESP_OK && !nfc_scan_cancel) {
+                    ESP_LOGI(TAGT, "scan_task: PicoPass/iCLASS detected");
+                    status_display_show_status("iCLASS Tag Found");
+
+                    esp_err_t auth_err = picopass_auth_and_read(pp_data);
+                    if (auth_err == ESP_OK) {
+                        picopass_parse_credential(pp_data->AA1, &pp_data->pacs);
+                        picopass_parse_wiegand(pp_data->pacs.credential, &pp_data->pacs.record);
+                    } else {
+                        ESP_LOGW(TAGT, "scan_task: PicoPass auth failed: %s", esp_err_to_name(auth_err));
+                    }
+
+                    /* Store CSN as the "UID" for save compatibility */
+                    g_uid_len = PICOPASS_UID_LEN;
+                    memcpy(g_uid, pp_data->AA1[PICOPASS_CSN_BLOCK_INDEX].data, PICOPASS_UID_LEN);
+                    g_atqa = 0; g_sak = 0; g_model = NTAG2XX_UNKNOWN;
+
+                    if (nfc_uid_label && lv_obj_is_valid(nfc_uid_label)) {
+                        char csn_text[64];
+                        int pos = snprintf(csn_text, sizeof(csn_text), "CSN:");
+                        for (int i = 0; i < PICOPASS_UID_LEN && pos < (int)sizeof(csn_text) - 4; i++) {
+                            pos += snprintf(csn_text + pos, sizeof(csn_text) - pos, " %02X",
+                                            pp_data->AA1[PICOPASS_CSN_BLOCK_INDEX].data[i]);
+                        }
+                        lv_label_set_text(nfc_uid_label, csn_text);
+                    }
+                    if (nfc_type_label && lv_obj_is_valid(nfc_type_label)) {
+                        lv_label_set_text(nfc_type_label, "Type: PicoPass/iCLASS");
+                    }
+
+                    nfc_build_and_set_details_picopass(pp_data);
+
+                    /* Save reference for save button */
+                    EXT_RAM_BSS_ATTR static PicopassDeviceData s_picopass_data;
+                    memcpy(&s_picopass_data, pp_data, sizeof(PicopassDeviceData));
+                    free(pp_data);
+                    break;
+                }
+                free(pp_data);
+            }
+        }
+        goto scan_task_done;
+    }
+#endif
+
     while (!nfc_scan_cancel) {
         uint8_t uid[8] = {0};
         uint8_t uid_len = 0;
@@ -1327,9 +1435,13 @@ static void nfc_scan_task(void *arg) {
             nfc_build_and_set_details(g_pn532, uid + 1, uid_len);
             break;
         }
+
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
+#ifdef CONFIG_NFC_ST25R3916
+scan_task_done:
+#endif
     if (g_pn532) {
         if (nfc_scan_cancel) {
             ESP_LOGI(TAGT, "scan_task: releasing PN532 (cancel=%d)", nfc_scan_cancel);
@@ -2001,10 +2113,22 @@ void nfc_option_event_cb(lv_event_t *e) {
     }
 
     if (strcmp(opt, "Scan") == 0) {
+#ifdef CONFIG_NFC_ST25R3916
+        nfc_scan_picopass_only = false;
+#endif
         create_nfc_scan_popup();
         nfc_option_invoked = false;
         return;
     }
+
+#ifdef CONFIG_NFC_ST25R3916
+    if (strcmp(opt, "PicoPass") == 0) {
+        nfc_scan_picopass_only = true;
+        create_nfc_scan_popup();
+        nfc_option_invoked = false;
+        return;
+    }
+#endif
 
     if (strcmp(opt, "Emulate") == 0) {
         nfc_enter_emulate_list();
@@ -2352,6 +2476,37 @@ static bool write_flipper_nfc_file(void) {
         return true;
     }
 
+#ifdef CONFIG_NFC_ST25R3916
+    /* PicoPass/iCLASS save: g_atqa==0 && g_sak==0 && uid_len==8 indicates PicoPass */
+    if (g_atqa == 0 && g_sak == 0 && g_uid_len == PICOPASS_UID_LEN) {
+        snprintf(path, sizeof(path), "%s/picopass_%s.picopass", dir, uid_part);
+
+        /* Re-detect and re-auth to get fresh data for save */
+        PicopassDeviceData *pp_save =
+            heap_caps_calloc(1, sizeof(PicopassDeviceData), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!pp_save) pp_save = calloc(1, sizeof(PicopassDeviceData));
+        if (pp_save) {
+            st25r3916_field_off();
+            st25r3916_set_mode_picopass();
+            st25r3916_field_on();
+            if (picopass_detect(pp_save) == ESP_OK) {
+                picopass_auth_and_read(pp_save);
+                picopass_parse_credential(pp_save->AA1, &pp_save->pacs);
+                picopass_parse_wiegand(pp_save->pacs.credential, &pp_save->pacs.record);
+            }
+            bool pp_ok = (picopass_save_file(path, pp_save) == ESP_OK);
+            free(pp_save);
+            st25r3916_set_mode_nfca();
+            if (did) nfc_sd_end(susp);
+            if (pp_ok) ESP_LOGI(TAG, "PicoPass file saved: %s", path);
+            else ESP_LOGE(TAG, "Failed to save PicoPass file");
+            return pp_ok;
+        }
+        if (did) nfc_sd_end(susp);
+        return false;
+    }
+#endif
+
     // Non-Classic (NTAG/Ultralight) path
     const char *model_str = ntag_t2_model_str(g_model);
     snprintf(path, sizeof(path), "%s/%s_%s.nfc", dir, model_str, uid_part);
@@ -2520,7 +2675,11 @@ static void create_nfc_scan_popup(void) {
 
     // Fonts
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
-    nfc_title_label = popup_create_title_label(nfc_scan_popup, "Scanning NFC...", title_font, 22);
+    const char *scan_title = "Scanning NFC...";
+#ifdef CONFIG_NFC_ST25R3916
+    if (nfc_scan_picopass_only) scan_title = "Scanning PicoPass...";
+#endif
+    nfc_title_label = popup_create_title_label(nfc_scan_popup, scan_title, title_font, 22);
 
     // Placeholder fields (UID / Type)
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -2999,9 +3158,17 @@ static void nfc_show_details_view(bool show) {
 static bool has_nfc_ext(const char *name) {
     if (!name) return false;
     size_t len = strlen(name);
-    if (len < 4) return false;
-    const char *ext = name + (len - 4);
-    return (ext[0] == '.' && (ext[1] == 'n' || ext[1] == 'N') && (ext[2] == 'f' || ext[2] == 'F') && (ext[3] == 'c' || ext[3] == 'C'));
+    if (len >= 4) {
+        const char *ext = name + (len - 4);
+        if (ext[0] == '.' && (ext[1] == 'n' || ext[1] == 'N') && (ext[2] == 'f' || ext[2] == 'F') && (ext[3] == 'c' || ext[3] == 'C'))
+            return true;
+    }
+    if (len >= 9) {
+        const char *ext = name + (len - 9);
+        if (strcasecmp(ext, ".picopass") == 0)
+            return true;
+    }
+    return false;
 }
 
 static void nfc_clear_write_list(void) {
@@ -3344,6 +3511,9 @@ static void back_to_root_menu(void) {
     if (scan_btn) lv_obj_set_user_data(scan_btn, (void *)"Scan");
 #if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
     nfc_add_backend_item();
+#endif
+#ifdef CONFIG_NFC_ST25R3916
+    options_view_add_item(g_nfc_ov, "PicoPass", nfc_option_event_cb, (void *)"PicoPass");
 #endif
     options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
     options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
@@ -4712,11 +4882,51 @@ static void create_saved_details_popup(const char *path) {
     if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
     saved_details_parsed_view = false;
 
-    // parse file and show details (supports MIFARE Classic, DESFire, and NTAG)
+    // parse file and show details (supports MIFARE Classic, DESFire, NTAG, and PicoPass)
     bool susp_load = false; bool did_load = nfc_sd_begin(&susp_load);
     char *title = NULL;
     char *mfc_det = NULL;
     char *df_det = NULL;
+
+    /* Check if this is a .picopass file */
+    size_t path_len = strlen(path);
+    bool is_picopass = (path_len >= 9 && strcasecmp(path + path_len - 9, ".picopass") == 0);
+    if (is_picopass) {
+        FILE *pf = fopen(path, "r");
+        if (pf) {
+            char line[256];
+            char *details = (char *)malloc(1024);
+            if (details) {
+                details[0] = '\0';
+                char *w = details;
+                size_t cap = 1024;
+                lv_label_set_text(saved_title_label, "PicoPass / iCLASS");
+                while (fgets(line, sizeof(line), pf) && cap > 10) {
+                    /* Skip header lines */
+                    if (strncmp(line, "Filetype:", 9) == 0) continue;
+                    if (strncmp(line, "Version:", 8) == 0) continue;
+                    if (line[0] == '#') continue;
+                    /* Trim trailing newline */
+                    size_t llen = strlen(line);
+                    while (llen > 0 && (line[llen-1] == '\n' || line[llen-1] == '\r')) line[--llen] = '\0';
+                    if (llen == 0) continue;
+                    int n = snprintf(w, cap, "%s\n", line);
+                    if (n > 0) { w += n; cap -= n; }
+                }
+                fclose(pf);
+                if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                saved_details_text = details;
+            } else {
+                fclose(pf);
+            }
+        }
+        if (saved_details_text) {
+            if (did_load) nfc_sd_end(susp_load);
+            lv_label_set_text(saved_details_label, saved_details_text);
+            return;
+        }
+    }
+
 #if defined(NFC_HAS_LOCAL_READER) || defined(CONFIG_NFC_CHAMELEON)
     mfc_det = build_mfc_details_from_file(path, &title);
 #endif
@@ -4962,6 +5172,9 @@ void nfc_view_create(void) {
     if (scan_btn) lv_obj_set_user_data(scan_btn, (void *)"Scan");
 #if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
     nfc_add_backend_item();
+#endif
+#ifdef CONFIG_NFC_ST25R3916
+    options_view_add_item(g_nfc_ov, "PicoPass", nfc_option_event_cb, (void *)"PicoPass");
 #endif
     options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
     options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");

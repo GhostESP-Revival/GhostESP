@@ -25,6 +25,11 @@
 #include "pn532.h"
 #include "pn532_driver.h"
 
+#ifdef CONFIG_NFC_ST25R3916
+#include "managers/nfc/picopass.h"
+#include "st25r3916_iso15693.h"
+#endif
+
 #ifdef CONFIG_NFC_PN532
 #include "driver/i2c_types.h"
 #include "pn532_driver_i2c.h"
@@ -1436,6 +1441,109 @@ static void nfc_cli_handle_hardnested(int argc, char **argv) {
     nfc_cli_start_hardnested(known_block, known_key_b, known_key, target_block, target_key_b, samples);
 }
 
+#ifdef CONFIG_NFC_ST25R3916
+static void nfc_cli_handle_picopass(int argc, char **argv) {
+    bool save = false;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "save") == 0 || strcmp(argv[i], "dump") == 0) save = true;
+    }
+
+    nfc_cli_ctx_t *ctx = calloc(1, sizeof(nfc_cli_ctx_t));
+    if (!ctx) return;
+    ctx->once = true;
+    ctx->save = save;
+
+    if (!nfc_cli_init(ctx)) {
+        glog("NFC: init failed\n");
+        free(ctx);
+        return;
+    }
+
+    glog("NFC: scanning for PicoPass/iCLASS%s...\n", save ? " (will save)" : "");
+
+    st25r3916_set_mode_picopass();
+    st25r3916_field_on();
+
+    PicopassDeviceData *dev_data = calloc(1, sizeof(PicopassDeviceData));
+    if (!dev_data) {
+        nfc_cli_release(ctx);
+        free(ctx);
+        return;
+    }
+
+    int64_t start_us = esp_timer_get_time();
+    for (;;) {
+        if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
+            glog("NFC: stopped\n");
+            break;
+        }
+
+        esp_err_t err = picopass_detect(dev_data);
+        if (err == ESP_OK) {
+            char csn_text[32] = {0};
+            int pos = 0;
+            for (int i = 0; i < PICOPASS_UID_LEN; i++) {
+                pos += snprintf(csn_text + pos, sizeof(csn_text) - pos, "%02X%s",
+                                dev_data->AA1[0].data[i], (i + 1 < PICOPASS_UID_LEN) ? ":" : "");
+            }
+            glog("NFC: PicoPass/iCLASS CSN=%s\n", csn_text);
+
+            err = picopass_auth_and_read(dev_data);
+            if (err == ESP_OK) {
+                picopass_parse_credential(dev_data->AA1, &dev_data->pacs);
+                picopass_parse_wiegand(dev_data->pacs.credential, &dev_data->pacs.record);
+
+                if (dev_data->pacs.record.valid) {
+                    glog("  PACS: FC=%u CN=%u (%ubit)\n",
+                         dev_data->pacs.record.FacilityCode,
+                         dev_data->pacs.record.CardNumber,
+                         dev_data->pacs.record.bitLength);
+                }
+                glog("  Encryption: 0x%02X, Biometrics: %s, PIN len: %u, SIO: %s\n",
+                     dev_data->pacs.encryption,
+                     dev_data->pacs.biometrics ? "yes" : "no",
+                     dev_data->pacs.pin_length,
+                     dev_data->pacs.sio ? "yes" : "no");
+
+                if (save) {
+                    const char *dir = "/mnt/ghostesp/nfc";
+                    bool susp = false;
+                    if (sd_card_jit_begin(&susp, true)) {
+                        sd_card_create_directory(dir);
+                        char csn_part[40] = {0};
+                        int cp = 0;
+                        for (int i = 0; i < PICOPASS_UID_LEN && cp < (int)sizeof(csn_part) - 3; i++) {
+                            cp += snprintf(csn_part + cp, sizeof(csn_part) - cp, "%02X%s",
+                                           dev_data->AA1[0].data[i],
+                                           (i + 1 < PICOPASS_UID_LEN) ? "-" : "");
+                        }
+                        char path[192];
+                        snprintf(path, sizeof(path), "%s/picopass_%s.picopass", dir, csn_part);
+                        if (picopass_save_file(path, dev_data) == ESP_OK) {
+                            glog("  Saved: %s\n", path);
+                        }
+                        sd_card_jit_end(susp);
+                    }
+                }
+            } else {
+                glog("  Auth failed; CSN/config/AIA read OK\n");
+            }
+            break;
+        } else if (esp_timer_get_time() - start_us > 10000000) {
+            glog("NFC: no PicoPass/iCLASS tag found\n");
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
+    free(dev_data);
+    st25r3916_field_off();
+    nfc_cli_release(ctx);
+    free(ctx);
+}
+#endif
+
 static void nfc_cli_help(void) {
     glog("NFC commands:\n");
     glog("  nfc backend [auto|pn532|st25r]  show/set local backend\n");
@@ -1443,6 +1551,7 @@ static void nfc_cli_help(void) {
     glog("  nfc once [parse]   scan until one tag or 10s timeout\n");
     glog("  nfc save|dump      scan one tag and save Flipper .nfc\n");
     glog("  nfc hardnested known <blk> <A|B> <key> target <blk> <A|B> [samples N]\n");
+    glog("  nfc picopass [save]  scan for PicoPass/iCLASS (ST25R only)\n");
     glog("  nfc status         show NFC task state\n");
     glog("  nfc stop           stop scan/emulation\n");
     glog("  nfc emulate uid <uid> [atqa <hex>] [sak <hex>]\n");
@@ -1498,6 +1607,12 @@ void handle_nfc_cmd(int argc, char **argv) {
         nfc_cli_handle_emulate(argc, argv);
 #else
         glog("NFC: emulation requires ST25R3916 support\n");
+#endif
+    } else if (strcmp(argv[1], "picopass") == 0 || strcmp(argv[1], "iclass") == 0) {
+#ifdef CONFIG_NFC_ST25R3916
+        nfc_cli_handle_picopass(argc, argv);
+#else
+        glog("NFC: PicoPass/iCLASS requires ST25R3916 support\n");
 #endif
     } else {
         nfc_cli_help();

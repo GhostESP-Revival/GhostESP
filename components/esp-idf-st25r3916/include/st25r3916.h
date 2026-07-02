@@ -44,6 +44,13 @@ bool st25r3916_field_is_on(void);
 /** @brief Configure the analog/protocol front-end for ISO14443-A polling. */
 esp_err_t st25r3916_set_mode_nfca(void);
 
+/** @brief Configure the analog/protocol front-end for ISO15693 / NFC-V polling. */
+esp_err_t st25r3916_set_mode_nfcv(void);
+
+/** @brief Configure the analog/protocol front-end for PicoPass/iCLASS polling.
+ *  Uses NFC-V framing with 100% ASK modulation (required by PicoPass). */
+esp_err_t st25r3916_set_mode_picopass(void);
+
 /* --- Register / command pass-through (through the active bus) ------------ */
 
 esp_err_t st25r3916_reg_read(uint8_t addr, uint8_t *out_value);

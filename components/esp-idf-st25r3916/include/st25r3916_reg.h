@@ -3,12 +3,20 @@
 // Clean-room ST25R3916 register/command definitions transcribed from the public
 // ST datasheet DS12484 Rev 8 (Table 13 direct commands, Table 17 Space-A
 // registers, and the per-register bit tables). Register addresses and bit
-// positions are hardware facts taken from that datasheet. No ST SLA0044 or
-// third-party driver source is used.
+// positions are hardware facts taken from that datasheet. No ST SLA0044
+// vendor driver source is used.
 //
-// Target-mode bit values (PT_DEF, PT_MOD, MODE target bits) cross-checked
-// against Flipper Zero Momentum-Firmware lib/drivers/st25r3916_reg.h (GPL-3.0,
-// https://github.com/Next-Flip/Momentum-Firmware).
+// The following bit values are cross-checked against Flipper Zero
+// Momentum-Firmware (GPL-3.0-or-later), since Flipper Zero uses the same
+// ST25R3916 silicon and the datasheet alone does not specify every value:
+//   - Target-mode bits (PT_DEF, PT_MOD, MODE target bits):
+//     lib/drivers/st25r3916_reg.h
+//   - ISO15693 "subcarrier stream" mode bits (MODE_TR_AM, STREAM_MODE
+//     scf/scp/stx fields, RX_CONF1-4, CORR_CONF1-2, AUX_MOD):
+//     lib/drivers/st25r3916_reg.h and
+//     targets/f7/furi_hal/furi_hal_nfc_iso15693.c
+//   https://github.com/Next-Flip/Momentum-Firmware
+//   Copyright (c) Flipper Devices Inc., Momentum-Firmware contributors.
 
 #ifndef ST25R3916_REG_H
 #define ST25R3916_REG_H
@@ -122,13 +130,37 @@ extern "C" {
 /* ===== IO configuration register 2 (0x01), DS Table 20 ===== */
 #define ST25R3916_IO_CONF2_IO_DRV_LVL (1 << 2) /**< Stronger MISO/IRQ output drivers. */
 
-/* ===== Mode definition register (0x03), DS Table 22/23/24 ===== */
+/* ===== Mode definition register (0x03), DS Table 22/23/24 =====
+ * The chip has no native ISO15693 framing engine (unlike NFC-A/B/F). ISO15693
+ * (and PicoPass, which reuses the ISO15693 PHY) instead uses om=1110
+ * "subcarrier stream" mode: the chip only handles subcarrier
+ * modulation/demodulation, while VCD->VICC pulse-position coding (TX) and
+ * VICC->VCD Manchester decoding (RX) are done in software
+ * (st25r3916_iso15693.c). Confirmed against Flipper Zero Momentum-Firmware
+ * targets/f7/furi_hal/furi_hal_nfc_iso15693.c (GPL-3.0, same ST25R3916
+ * silicon) since the ST25R3916 datasheet alone does not document the
+ * required RX_CONF/CORR_CONF calibration for this mode. */
 #define ST25R3916_MODE_TARGET       (1 << 7) /**< targ: target/listen mode. */
 /* targ = 0 (initiator), om<6:3> selects technology; NFC-A poll/listen = om 0001. */
 #define ST25R3916_MODE_INITIATOR    0x00
 #define ST25R3916_MODE_OM_NFCA      (0x1 << 3) /**< om = 0001: NFC-A / ISO14443A poll. */
+#define ST25R3916_MODE_OM_SUBCARRIER_STREAM (0xE << 3) /**< om = 1110: subcarrier stream (used for ISO15693/PicoPass). */
 #define ST25R3916_MODE_POLL_NFCA    (ST25R3916_MODE_INITIATOR | ST25R3916_MODE_OM_NFCA)
+#define ST25R3916_MODE_POLL_NFCV    (ST25R3916_MODE_INITIATOR | ST25R3916_MODE_OM_SUBCARRIER_STREAM)
 #define ST25R3916_MODE_TARGET_NFCA  (ST25R3916_MODE_TARGET | ST25R3916_MODE_OM_NFCA)
+#define ST25R3916_MODE_TRANSPARENT  0x01 /**< om = 0001 with transparent mode bit. */
+#define ST25R3916_MODE_OM_MASK      (0xF << 3)
+#define ST25R3916_MODE_TR_AM        (1 << 2) /**< tr_am: TX modulation type. */
+#define ST25R3916_MODE_TR_AM_OOK    (0 << 2) /**< OOK modulation (required for ISO15693). */
+
+/* ===== Stream mode definition register (0x09), DS Table 35 =====
+ * din (subcarrier factor, RX) / dout (stream TX pulse rate) / report period,
+ * per ISO/IEC 15693-2 single-subcarrier high-data-rate timing: RX subcarrier
+ * ~423.75 kHz (fc/32), TX pulse tick fc/128 (9.44 us BTU), 8 pulses grouped
+ * per reported RX byte. */
+#define ST25R3916_STREAM_MODE_SCF_SC424   (1 << 5) /**< scf: ~424 kHz subcarrier RX demod. */
+#define ST25R3916_STREAM_MODE_SCP_8PULSES (3 << 3) /**< scp: 8 sub-carrier pulses per reporting period. */
+#define ST25R3916_STREAM_MODE_STX_106     (0 << 0) /**< stx: fc/128 stream TX pulse tick. */
 
 /* ===== NFCIP-1 passive target definition register (0x08), DS Table 32 ===== */
 #define ST25R3916_PT_DEF_FDEL_MASK     0xF0
@@ -184,6 +216,26 @@ extern "C" {
 #define ST25R3916_CORR_CONF1_MOMENTUM       0x51 /**< corr_s0 | corr_s4 | corr_s6. */
 #define ST25R3916_AUX_MOD_LM_EXT            (1 << 5) /**< Enable external load modulation. */
 #define ST25R3916_AUX_MOD_LM_DRI            (1 << 4) /**< Enable internal load modulation driver. */
+#define ST25R3916_AUX_MOD_DIS_REG_AM        (1 << 7) /**< Disable regulator-based AM (use resistive/driver AM instead). */
+#define ST25R3916_AUX_MOD_RES_AM            (1 << 3) /**< Enable resistive AM modulation. */
+
+/* ===== Receiver configuration registers (0x0B-0x0E), ISO15693 calibration =====
+ * DS Table 37-40. Values below are the ISO15693 receive-path calibration
+ * (high-pass/low-pass corner, AGC, correlator summation) confirmed against
+ * Flipper Zero Momentum-Firmware furi_hal_nfc_iso15693.c (GPL-3.0), since the
+ * datasheet documents the bit fields but not which combination is required
+ * for reliable ISO15693 subcarrier demodulation. */
+#define ST25R3916_RX_CONF1_Z12K       (1 << 0) /**< z12k: 1st stage high-pass corner 12 kHz. */
+#define ST25R3916_RX_CONF1_H80        (1 << 1) /**< h80: 3rd stage high-pass corner 80 kHz. */
+#define ST25R3916_RX_CONF1_LP_600KHZ  (1 << 4) /**< lp: low-pass corner 600 kHz. */
+#define ST25R3916_RX_CONF2_AGC6_3     (1 << 0) /**< agc_ratio: 6 dB/3 dB AGC ratio. */
+#define ST25R3916_RX_CONF2_AGC_M      (1 << 2) /**< agc_m: AGC algorithm with reset. */
+#define ST25R3916_RX_CONF2_AGC_EN     (1 << 3) /**< agc_en: enable AGC. */
+#define ST25R3916_RX_CONF2_SQM_DYN    (1 << 5) /**< sqm_dyn: squelch auto-activation on TX end. */
+#define ST25R3916_CORR_CONF1_CORR_S0  (1 << 0)
+#define ST25R3916_CORR_CONF1_CORR_S1  (1 << 1)
+#define ST25R3916_CORR_CONF1_CORR_S4  (1 << 4)
+#define ST25R3916_CORR_CONF2_CORR_S8  (1 << 0)
 
 /* ===== External field detector threshold registers ===== */
 #define ST25R3916_FIELD_THRESH_ACT_MOMENTUM   0x11 /**< 105 mV target/RFE activation thresholds. */
@@ -209,6 +261,10 @@ extern "C" {
 
 /* ===== Passive target modulation register (0x29), DS Table 80 ===== */
 #define ST25R3916_PT_MOD_INTERNAL_LM 0x0F /**< ptm_res=0 (1.0Ω strong), pt_res=15 (High-Z non-mod). */
+
+/* ===== ISO15693 transmit flags (NFCIP-1 / ISO15693), DS Table 27 ===== */
+#define ST25R3916_ISO15693_NO_TX_CRC (1 << 7) /**< Suppress TX CRC for ISO15693. */
+#define ST25R3916_ISO15693_NO_RX_CRC (1 << 6) /**< Do not check RX CRC for ISO15693. */
 
 /* ===== IC identity register (0x3F), DS Table 117 ===== */
 #define ST25R3916_IC_TYPE_SHIFT 3    /**< IC type in bits [7:3]. */

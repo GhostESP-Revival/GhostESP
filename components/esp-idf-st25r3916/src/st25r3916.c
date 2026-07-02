@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Part of GhostESP (https://github.com/GhostESP). GPLv3.
 // Clean-room ST25R3916 driver authored from ST datasheet DS12484 Rev 8.
-// No vendor (ST SLA0044) or other third-party driver source is used.
+// No vendor (ST SLA0044) or other third-party driver source is used, with one
+// documented exception: the ISO15693 "subcarrier stream" register
+// configuration in st25r3916_set_mode_nfcv() (RX_CONF1-4, CORR_CONF1-2,
+// STREAM_MODE, AUX_MOD values) is adapted from Flipper Zero
+// Momentum-Firmware's furi_hal_nfc_iso15693.c (GPL-3.0-or-later), because
+// the datasheet documents the register bit fields but not which combination
+// is required for reliable ISO15693 subcarrier demodulation:
+//   https://github.com/Next-Flip/Momentum-Firmware/blob/dev/targets/f7/furi_hal/furi_hal_nfc_iso15693.c
+//   Copyright (c) Flipper Devices Inc., Momentum-Firmware contributors.
 
 #include "st25r3916.h"
 #include "st25r3916_reg.h"
@@ -175,6 +183,8 @@ esp_err_t st25r3916_set_mode_nfca(void) {
   if (!s.init) return ESP_ERR_INVALID_STATE;
   st25r3916_reg_write(ST25R3916_REG_MODE, ST25R3916_MODE_POLL_NFCA);
   st25r3916_reg_write(ST25R3916_REG_BIT_RATE, 0x00);  // 106 kb/s TX and RX
+  /* Restore AUX register to default (NFC CRC enabled) */
+  st25r3916_reg_write(ST25R3916_REG_AUX, 0x00);
   /* Normal framing: hardware handles parity, no anti-collision split byte.
    * (Crypto1 later flips NO_TX_PAR/NO_RX_PAR for manual parity.) */
   st25r3916_reg_modify(ST25R3916_REG_ISO14443A_NFC,
@@ -182,6 +192,59 @@ esp_err_t st25r3916_set_mode_nfca(void) {
                            ST25R3916_ISO14443A_ANTCL,
                        0x00);
   return ESP_OK;
+}
+
+esp_err_t st25r3916_set_mode_nfcv(void) {
+  if (!s.init) return ESP_ERR_INVALID_STATE;
+
+  /* Full chip reset to clear any NFC-A mode settings. The chip has no native
+   * ISO15693 framing engine, so this configures "subcarrier stream" mode
+   * (om=1110): VCD/VICC coding is handled in software, see
+   * st25r3916_iso15693.c and the ST25R3916_MODE_OM_SUBCARRIER_STREAM comment
+   * in st25r3916_reg.h for why these particular register values are used. */
+  st25r3916_field_off();
+  st25r3916_cmd(ST25R3916_CMD_SET_DEFAULT);
+  delay_ms(2);
+
+  st25r3916_reg_write(ST25R3916_REG_OP_CONTROL, ST25R3916_OP_CONTROL_EN);
+  delay_ms(5);
+
+  st25r3916_cmd(ST25R3916_CMD_ADJUST_REGULATORS);
+  delay_ms(6);
+
+  st25r3916_reg_modify(ST25R3916_REG_MODE, ST25R3916_MODE_OM_MASK | ST25R3916_MODE_TR_AM,
+                       ST25R3916_MODE_OM_SUBCARRIER_STREAM | ST25R3916_MODE_TR_AM_OOK);
+  st25r3916_reg_write(ST25R3916_REG_STREAM_MODE,
+                      ST25R3916_STREAM_MODE_SCF_SC424 | ST25R3916_STREAM_MODE_STX_106 |
+                          ST25R3916_STREAM_MODE_SCP_8PULSES);
+  st25r3916_reg_modify(ST25R3916_REG_AUX_MOD, ST25R3916_AUX_MOD_DIS_REG_AM | ST25R3916_AUX_MOD_RES_AM, 0x00);
+
+  /* ISO15693 receive-path calibration (subcarrier demod, AGC, correlator). */
+  st25r3916_reg_write(ST25R3916_REG_RX_CONF1,
+                      ST25R3916_RX_CONF1_Z12K | ST25R3916_RX_CONF1_H80 | ST25R3916_RX_CONF1_LP_600KHZ);
+  st25r3916_reg_write(ST25R3916_REG_RX_CONF2,
+                      ST25R3916_RX_CONF2_AGC6_3 | ST25R3916_RX_CONF2_AGC_M |
+                          ST25R3916_RX_CONF2_AGC_EN | ST25R3916_RX_CONF2_SQM_DYN);
+  st25r3916_reg_write(ST25R3916_REG_RX_CONF3, 0x00);
+  st25r3916_reg_write(ST25R3916_REG_RX_CONF4, 0x00);
+  st25r3916_reg_write(ST25R3916_REG_CORR_CONF1,
+                      ST25R3916_CORR_CONF1_CORR_S0 | ST25R3916_CORR_CONF1_CORR_S1 |
+                          ST25R3916_CORR_CONF1_CORR_S4);
+  st25r3916_reg_write(ST25R3916_REG_CORR_CONF2, ST25R3916_CORR_CONF2_CORR_S8);
+
+  /* Turn on field with RX enabled */
+  st25r3916_reg_write(ST25R3916_REG_OP_CONTROL, ST25R3916_OP_CONTROL_FIELD_ON);
+  delay_ms(5);
+  st25r3916_cmd(ST25R3916_CMD_RESET_RXGAIN);
+
+  s.field_on = true;
+  return ESP_OK;
+}
+
+esp_err_t st25r3916_set_mode_picopass(void) {
+  /* PicoPass reuses the ISO15693 PHY as-is; only the CRC preset used when
+   * encoding/decoding frames differs (handled in software, see picopass.c). */
+  return st25r3916_set_mode_nfcv();
 }
 
 /* --- FIFO --------------------------------------------------------------- */
