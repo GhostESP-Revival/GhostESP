@@ -36,15 +36,28 @@ static SemaphoreHandle_t s_sd_jit_mutex = NULL;
 static uint32_t s_sd_jit_mount_depth = 0;
 static bool s_sd_jit_display_suspended = false;
 
-// track SPI bus initialization and mount type locally so we only free what we
-// initialized and always clear initialized state on unmount
+// Track SPI bus ownership locally so cleanup only frees a bus SD initialized
+// itself, while still clearing reused-host bookkeeping on unmount/failure.
 static bool s_spi_bus_initialized = false;
+static bool s_spi_bus_owned_by_sd = false;
 static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
+
+static void sd_spi_bus_track(int host_id, bool owned_by_sd) {
+  s_spi_bus_initialized = owned_by_sd;
+  s_spi_bus_owned_by_sd = owned_by_sd;
+  s_spi_host_id = host_id;
+}
+
+static void sd_spi_bus_clear_tracking(void) {
+  s_spi_bus_initialized = false;
+  s_spi_bus_owned_by_sd = false;
+  s_spi_host_id = -1;
+}
 
 /* time multiplex spi when display and sd share the spi bus */
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDISPLAY_S3)
@@ -242,8 +255,7 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
     int host_id = preferred_hosts[i];
     esp_err_t probe_ret = spi_bus_initialize(host_id, bus_config, dma_channel);
     if (probe_ret == ESP_OK) {
-      s_spi_bus_initialized = true;
-      s_spi_host_id = host_id;
+      sd_spi_bus_track(host_id, true);
       ESP_LOGI(TAG, "Selected free SD SPI host: %s", sd_spi_host_name(host_id));
       return host_id;
     }
@@ -276,13 +288,18 @@ static bool sd_keep_spi_bus_for_board(void) {
 }
 
 static void sd_spi_bus_release_if_tracked(void) {
-  ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
-           s_spi_bus_initialized, s_spi_host_id);
-  if (s_spi_bus_initialized && s_spi_host_id >= 0) {
-    ESP_LOGD(TAG, "Freeing SPI bus host %d", s_spi_host_id);
+  ESP_LOGI(TAG, "sd_spi_bus_release_if_tracked: initialized=%d owned=%d host=%d",
+           s_spi_bus_initialized, s_spi_bus_owned_by_sd, s_spi_host_id);
+  if (s_spi_host_id >= 0) {
+    if (!s_spi_bus_owned_by_sd || sd_keep_spi_bus_for_board()) {
+      ESP_LOGI(TAG, "Skipping spi_bus_free for reused SPI host %d", s_spi_host_id);
+      sd_spi_bus_clear_tracking();
+      return;
+    }
+
+    ESP_LOGI(TAG, "Freeing SPI bus host %d", s_spi_host_id);
     spi_bus_free(s_spi_host_id);
-    s_spi_bus_initialized = false;
-    s_spi_host_id = -1;
+    sd_spi_bus_clear_tracking();
   }
 }
 
@@ -457,12 +474,8 @@ esp_err_t sd_card_init(void) {
     return ESP_OK;
   }
 
-  /* Clean up stale tracked SPI state before a fresh init attempt. On the
-   * CYD 2.4" we deliberately keep SD's bus alive (see
-   * sd_keep_spi_bus_for_board); freeing it here would freeze the live
-   * display. A reused bus is fine — the mount below handles INVALID_STATE. */
-  if (s_mount_type == MOUNT_SPI && s_spi_bus_initialized &&
-      !sd_keep_spi_bus_for_board()) {
+  /* Clean up stale tracked SPI state before a fresh init attempt. */
+  if (s_spi_host_id >= 0) {
     sd_spi_bus_release_if_tracked();
   }
   sd_card_manager.card = NULL;
@@ -765,11 +778,10 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret == ESP_ERR_INVALID_STATE) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, false);
     } else {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -784,11 +796,10 @@ esp_err_t sd_card_init(void) {
     ESP_LOGI(TAG, "ESP32: spi_bus_initialize returned %s", esp_err_to_name(bus_ret));
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = sd_host_id;
+      sd_spi_bus_track(sd_host_id, true);
     } else if (bus_ret == ESP_ERR_INVALID_STATE) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", sd_host_id);
-      s_spi_host_id = sd_host_id;
+      sd_spi_bus_track(sd_host_id, false);
     } else {
       ESP_LOGE(TAG, "ESP32: spi_bus_initialize failed with %s", esp_err_to_name(bus_ret));
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
@@ -806,8 +817,7 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -830,8 +840,9 @@ esp_err_t sd_card_init(void) {
       esp_err_t bus_ret = spi_bus_initialize(host_id, &bus_config, dmabus);
       if (bus_ret == ESP_OK) {
         bus_init_success = true;
-        s_spi_bus_initialized = true;
-        s_spi_host_id = host_id;
+        sd_spi_bus_track(host_id, true);
+      } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+        sd_spi_bus_track(host_id, false);
       } else if (bus_ret != ESP_ERR_INVALID_STATE) {
         shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
         printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -850,8 +861,7 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -893,9 +903,9 @@ esp_err_t sd_card_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-    if (bus_init_success && !keep_bus_on_failure) {
-      sd_spi_bus_release_if_tracked();
-    }
+    (void)bus_init_success;
+    (void)keep_bus_on_failure;
+    sd_spi_bus_release_if_tracked();
     if (display_was_suspended) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
@@ -1005,8 +1015,9 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
       return bus_ret;
     }
     if (bus_ret == ESP_OK) {
-      s_spi_bus_initialized = true;
-      s_spi_host_id = host_id;
+      sd_spi_bus_track(host_id, true);
+    } else {
+      sd_spi_bus_track(host_id, false);
     }
   }
 

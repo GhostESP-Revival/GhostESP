@@ -868,14 +868,12 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
             bool susp = false;
             bool ok = false;
             if (nfc_sd_begin(&susp)) {
-                ok = mfc_hardnested_capture_file(io, uid, uid_len, g_atqa, g_sak,
-                                                 known_block, known_key_b, known_key,
-                                                 target_block, target_key_b,
-                                                 256, "/mnt/ghostesp/nfc",
-                                                 path, sizeof(path));
+                ok = mfc_hardnested_capture_missing_file(io, uid, uid_len, g_atqa, g_sak,
+                                                         4096, "/mnt/ghostesp/nfc",
+                                                         path, sizeof(path));
                 nfc_sd_end(susp);
             }
-            const char *line = ok ? "Nested log: /nfc/.nested.log\n" : "Nested log: capture failed\n";
+            const char *line = ok ? "Nested log: /nfc/.nested.log\n" : "Nested log: capture incomplete\n";
             size_t old_len = strlen(text);
             size_t line_len = strlen(line);
             char *with_log = (char*)malloc(old_len + line_len + 1);

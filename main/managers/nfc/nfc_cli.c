@@ -38,6 +38,8 @@
 #endif
 
 #define NFC_CLI_TASK_NAME "nfc_cli"
+#define NFC_CLI_HARDNESTED_DEFAULT_MAX_SAMPLES 4096
+#define NFC_CLI_HARDNESTED_MAX_SAMPLES 8192
 
 typedef struct {
     pn532_io_t io;
@@ -1009,7 +1011,7 @@ static void nfc_cli_start_hardnested(uint8_t known_block, bool known_key_b,
     memcpy(ctx->hn_known_key, known_key, 6);
     ctx->hn_target_block = target_block;
     ctx->hn_target_key_b = target_key_b;
-    ctx->hn_samples = samples ? samples : 64;
+    ctx->hn_samples = samples ? samples : NFC_CLI_HARDNESTED_DEFAULT_MAX_SAMPLES;
 
     BaseType_t ok = xTaskCreate(nfc_cli_scan_task, NFC_CLI_TASK_NAME, 8192, ctx, 5, &s_nfc_cli_task);
     if (ok != pdPASS) {
@@ -1389,7 +1391,7 @@ static void nfc_cli_handle_hardnested(int argc, char **argv) {
     bool known_key_b = false;
     bool target_key_b = false;
     uint8_t known_key[6] = {0};
-    uint16_t samples = 64;
+    uint16_t samples = NFC_CLI_HARDNESTED_DEFAULT_MAX_SAMPLES;
     bool have_known = false;
     bool have_target = false;
     bool have_key = false;
@@ -1423,11 +1425,11 @@ static void nfc_cli_handle_hardnested(int argc, char **argv) {
 
     if (!have_known || !have_target || !have_key) {
         glog("NFC: usage: nfc hardnested known <block> <A|B> <12hexkey> target <block> <A|B> [samples N]\n");
-        glog("NFC: example: nfc hardnested known 3 A FFFFFFFFFFFF target 7 A samples 128\n");
+        glog("NFC: example: nfc hardnested known 3 A FFFFFFFFFFFF target 7 A samples 4096\n");
         return;
     }
 
-    if (samples > 512) samples = 512;
+    if (samples > NFC_CLI_HARDNESTED_MAX_SAMPLES) samples = NFC_CLI_HARDNESTED_MAX_SAMPLES;
     if (nfc_backend_get() != NFC_BACKEND_ST25R3916) {
         glog("NFC: note: ST25R backend gives raw nonce parity; PN532 may expose less useful samples\n");
     }

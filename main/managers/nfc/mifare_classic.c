@@ -1093,8 +1093,9 @@ static int mfc_nested_collect_samples(pn532_io_handle_t io, const uint8_t *uid, 
         }
         samples[got].nt_enc = ((uint32_t)resp[0] << 24) | ((uint32_t)resp[1] << 16) |
                               ((uint32_t)resp[2] << 8) | resp[3];
-        samples[got].par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
-                                     ((resp[6] & 1) << 1) | (resp[7] & 1));
+        uint8_t raw_par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
+                                    ((resp[6] & 1) << 1) | (resp[7] & 1));
+        samples[got].par = (uint8_t)(raw_par ^ 0x0F);  // Momentum dict matching uses encrypted parity bits.
         got++;
         if (g_prog_cb) g_prog_cb(got, wanted_samples, g_prog_user);
     }
@@ -1612,6 +1613,170 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
     return true;
 }
 
+/* Hardnested coverage and valid-sum collection mirrors Momentum-Firmware's
+ * enhanced MIFARE Classic poller by noproto (GPL-3.0):
+ * https://github.com/Next-Flip/Momentum-Firmware */
+#define MFC_HARDNESTED_UNIQUE_MSBS 256
+#define MFC_HARDNESTED_RETRY_MAX 3
+#define MFC_HARDNESTED_DEFAULT_MAX_SAMPLES 4096
+#define MFC_HARDNESTED_MAX_SAMPLE_LIMIT 8192
+
+static const uint16_t MFC_HARDNESTED_VALID_SUMS[] = {
+    0, 32, 56, 64, 80, 96, 104, 112, 120, 128,
+    136, 144, 152, 160, 176, 192, 200, 224, 256,
+};
+
+static uint8_t mfc_hardnested_even_parity32(uint32_t x) {
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x ^= x >> 2;
+    x ^= x >> 1;
+    return (uint8_t)(x & 1u);
+}
+
+static uint16_t mfc_hardnested_sample_budget(uint16_t samples) {
+    if (samples == 0) samples = MFC_HARDNESTED_DEFAULT_MAX_SAMPLES;
+    if (samples < MFC_HARDNESTED_UNIQUE_MSBS) samples = MFC_HARDNESTED_UNIQUE_MSBS;
+    if (samples > MFC_HARDNESTED_MAX_SAMPLE_LIMIT) samples = MFC_HARDNESTED_MAX_SAMPLE_LIMIT;
+    return samples;
+}
+
+static bool mfc_hardnested_valid_sum(uint16_t sum) {
+    for (size_t i = 0; i < sizeof(MFC_HARDNESTED_VALID_SUMS) / sizeof(MFC_HARDNESTED_VALID_SUMS[0]); ++i) {
+        if (sum == MFC_HARDNESTED_VALID_SUMS[i]) return true;
+    }
+    return false;
+}
+
+static uint32_t mfc_cuid_from_uid(const uint8_t *uid, uint8_t uid_len) {
+    if (!uid || uid_len < 4) return 0;
+    const uint8_t *u = &uid[uid_len - 4];
+    return ((uint32_t)u[0] << 24) | ((uint32_t)u[1] << 16) | ((uint32_t)u[2] << 8) | u[3];
+}
+
+static bool mfc_hardnested_prepare_log(const char *out_dir, char *path, size_t path_len,
+                                       char *out_path, size_t out_path_len) {
+    if (!out_dir || !path || path_len == 0) return false;
+    sd_card_create_directory(out_dir);
+    snprintf(path, path_len, "%s/.nested.log", out_dir);
+    if (out_path && out_path_len) snprintf(out_path, out_path_len, "%s", path);
+    if (!sd_card_exists(path) && sd_card_write_file(path, "", 0) != ESP_OK) return false;
+    return true;
+}
+
+static void mfc_hardnested_reset_coverage(uint8_t seen[32], uint16_t *msb_count,
+                                          uint16_t *msb_par_sum) {
+    memset(seen, 0, 32);
+    if (msb_count) *msb_count = 0;
+    if (msb_par_sum) *msb_par_sum = 0;
+}
+
+static bool mfc_hardnested_append_sample(const char *path, int target_sector, bool target_key_b,
+                                         uint32_t cuid, uint32_t nt_enc, uint8_t par) {
+    char buf[192];
+    int pos = snprintf(buf, sizeof(buf),
+                       "Sec %d key %c cuid %08lx nt0 00000000 ks0 %08lx par0 %u%u%u%u\n",
+                       target_sector, target_key_b ? 'B' : 'A', (unsigned long)cuid,
+                       (unsigned long)nt_enc, (par >> 3) & 1, (par >> 2) & 1,
+                       (par >> 1) & 1, par & 1);
+    return (pos > 0) && (sd_card_append_file(path, buf, (size_t)pos) == ESP_OK);
+}
+
+static bool mfc_hardnested_capture_target_file(pn532_io_handle_t io,
+                                               const uint8_t* uid,
+                                               uint8_t uid_len,
+                                               MFC_TYPE t,
+                                               uint8_t known_block,
+                                               bool known_key_b,
+                                               const uint8_t known_key[6],
+                                               uint8_t target_block,
+                                               bool target_key_b,
+                                               uint16_t samples,
+                                               const char* out_dir,
+                                               char* out_path,
+                                               size_t out_path_len) {
+    if (!io || !uid || uid_len < 4 || !known_key || !out_dir) return false;
+
+    char path[192];
+    if (!mfc_hardnested_prepare_log(out_dir, path, sizeof(path), out_path, out_path_len)) return false;
+
+    uint16_t max_samples = mfc_hardnested_sample_budget(samples);
+    uint32_t cuid = mfc_cuid_from_uid(uid, uid_len);
+    int target_sector = mfc_sector_of_block(t, target_block);
+    if (target_sector < 0) target_sector = 0;
+
+    uint8_t seen[32] = {0};
+    uint16_t msb_count = 0;
+    uint16_t msb_par_sum = 0;
+    uint8_t retry_count = 0;
+    uint16_t got = 0;
+
+    ESP_LOGI(MFC_TAG, "Hardnested: collect sector=%d key=%c max=%u", target_sector,
+             target_key_b ? 'B' : 'A', (unsigned)max_samples);
+    mfc_call_on_phase(target_sector, target_block, target_key_b, MFC_HARDNESTED_UNIQUE_MSBS);
+    if (g_prog_cb) g_prog_cb(0, MFC_HARDNESTED_UNIQUE_MSBS, g_prog_user);
+
+    for (uint16_t i = 0; i < max_samples; ++i) {
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+
+        (void)pn532_in_list_passive_target(io);
+        if (mfc_auth_block(io, known_block, known_key_b, known_key, uid, uid_len) != ESP_OK) {
+            ESP_LOGD(MFC_TAG, "Hardnested: known auth failed idx=%u", (unsigned)i);
+            continue;
+        }
+
+        uint8_t cmd[2] = { target_key_b ? MIFARE_CMD_AUTH_B : MIFARE_CMD_AUTH_A, target_block };
+        uint8_t resp[16] = {0};
+        uint8_t resp_len = sizeof(resp);
+        esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
+        if (err != ESP_OK || resp_len < 8) {
+            ESP_LOGD(MFC_TAG, "Hardnested: sample failed idx=%u err=%d len=%u",
+                     (unsigned)i, (int)err, (unsigned)resp_len);
+            continue;
+        }
+
+        uint32_t nt_enc = ((uint32_t)resp[0] << 24) | ((uint32_t)resp[1] << 16) |
+                          ((uint32_t)resp[2] << 8) | resp[3];
+        uint8_t par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
+                                ((resp[6] & 1) << 1) | (resp[7] & 1));
+        uint8_t nested_par = (uint8_t)(par ^ 0x0F);
+        if (!mfc_hardnested_append_sample(path, target_sector, target_key_b, cuid, nt_enc, par)) {
+            ESP_LOGE(MFC_TAG, "Hardnested: failed to append nested log");
+            return false;
+        }
+        got++;
+
+        uint8_t msb = (uint8_t)(nt_enc >> 24);
+        if (!BITSET_TEST(seen, msb)) {
+            BITSET_SET(seen, msb);
+            msb_count++;
+            msb_par_sum += mfc_hardnested_even_parity32((uint32_t)(nested_par & 0x08));
+            if (g_prog_cb) g_prog_cb(msb_count, MFC_HARDNESTED_UNIQUE_MSBS, g_prog_user);
+        }
+
+        if (msb_count == MFC_HARDNESTED_UNIQUE_MSBS) {
+            if (mfc_hardnested_valid_sum(msb_par_sum)) {
+                ESP_LOGI(MFC_TAG, "Hardnested: complete sector=%d key=%c samples=%u sum=%u",
+                         target_sector, target_key_b ? 'B' : 'A', (unsigned)got,
+                         (unsigned)msb_par_sum);
+                return true;
+            }
+            retry_count++;
+            ESP_LOGW(MFC_TAG, "Hardnested: invalid parity sum=%u retry=%u", (unsigned)msb_par_sum,
+                     (unsigned)retry_count);
+            if (retry_count >= MFC_HARDNESTED_RETRY_MAX) break;
+            mfc_hardnested_reset_coverage(seen, &msb_count, &msb_par_sum);
+            if (g_prog_cb) g_prog_cb(0, MFC_HARDNESTED_UNIQUE_MSBS, g_prog_user);
+        }
+    }
+
+    ESP_LOGW(MFC_TAG, "Hardnested: incomplete sector=%d key=%c samples=%u msb=%u sum=%u",
+             target_sector, target_key_b ? 'B' : 'A', (unsigned)got, (unsigned)msb_count,
+             (unsigned)msb_par_sum);
+    return false;
+}
+
 bool mfc_hardnested_capture_file(pn532_io_handle_t io,
                                  const uint8_t* uid,
                                  uint8_t uid_len,
@@ -1626,78 +1791,68 @@ bool mfc_hardnested_capture_file(pn532_io_handle_t io,
                                  const char* out_dir,
                                  char* out_path,
                                  size_t out_path_len) {
-    if (!io || !uid || uid_len == 0 || !known_key || !out_dir) return false;
-    if (samples == 0) samples = 64;
-    if (samples > 512) samples = 512;
+    (void)atqa;
+    return mfc_hardnested_capture_target_file(io, uid, uid_len, mfc_type_from_sak(sak), known_block,
+                                              known_key_b, known_key, target_block, target_key_b,
+                                              samples, out_dir, out_path, out_path_len);
+}
 
-    sd_card_create_directory(out_dir);
+bool mfc_hardnested_capture_missing_file(pn532_io_handle_t io,
+                                         const uint8_t* uid,
+                                         uint8_t uid_len,
+                                         uint16_t atqa,
+                                         uint8_t sak,
+                                         uint16_t samples_per_key,
+                                         const char* out_dir,
+                                         char* out_path,
+                                         size_t out_path_len) {
+    (void)atqa;
+    if (!io || !uid || uid_len < 4 || !out_dir) return false;
+    if (!g_mfc_cache || g_mfc_type == MFC_UNKNOWN || !mfc_cache_matches(uid, uid_len)) return false;
 
-    char uid_part[40] = {0};
-    int up = 0;
-    for (uint8_t i = 0; i < uid_len && up < (int)sizeof(uid_part) - 3; ++i) {
-        up += snprintf(uid_part + up, sizeof(uid_part) - up, "%02X%s", uid[i],
-                       (i + 1 < uid_len) ? "-" : "");
+    uint8_t known_block = 0;
+    uint8_t unused_target_block = 0;
+    bool known_key_b = false;
+    bool unused_target_key_b = false;
+    uint8_t known_key[6] = {0};
+    if (!mfc_get_hardnested_defaults(&known_block, &known_key_b, known_key,
+                                     &unused_target_block, &unused_target_key_b)) {
+        return false;
     }
+
+    MFC_TYPE t = g_mfc_type != MFC_UNKNOWN ? g_mfc_type : mfc_type_from_sak(sak);
+    int sectors = mfc_sector_count(t);
+    if (sectors <= 0) return false;
 
     char path[192];
-    snprintf(path, sizeof(path), "%s/.nested.log", out_dir);
-    if (out_path && out_path_len) snprintf(out_path, out_path_len, "%s", path);
+    if (!mfc_hardnested_prepare_log(out_dir, path, sizeof(path), out_path, out_path_len)) return false;
 
-    uint32_t cuid = 0;
-    if (uid_len >= 4) {
-        const uint8_t *u = &uid[uid_len - 4];
-        cuid = ((uint32_t)u[0] << 24) | ((uint32_t)u[1] << 16) | ((uint32_t)u[2] << 8) | u[3];
-    }
-    int target_sector = mfc_sector_of_block(mfc_type_from_sak(sak), target_block);
-    if (target_sector < 0) target_sector = 0;
-
-    char buf[192];
-    /* Output intentionally matches Momentum-Firmware's MFC nested log lines:
-     * `Sec <n> key <A/B> cuid <hex> nt0 <hex> ks0 <hex> par0 <bits>`.
-     * Momentum stores this in `/ext/nfc/.nested.log`; GhostESP mirrors that as
-     * `/mnt/ghostesp/nfc/.nested.log` for PC-side conversion/solving. */
-    if (!sd_card_exists(path)) {
-        if (sd_card_write_file(path, "", 0) != ESP_OK) return false;
-    }
-
-    uint16_t got = 0;
-    for (uint16_t i = 0; i < samples; ++i) {
-        if (mfc_call_should_cancel()) break;
-        (void)pn532_in_list_passive_target(io);
-        if (mfc_auth_block(io, known_block, known_key_b, known_key, uid, uid_len) != ESP_OK) {
-            int pos = snprintf(buf, sizeof(buf), "sample=%u error=known_auth_failed\n", (unsigned)i);
-            if (pos > 0) (void)sd_card_append_file(path, buf, (size_t)pos);
-            continue;
-        }
-
-        uint8_t cmd[2] = { target_key_b ? MIFARE_CMD_AUTH_B : MIFARE_CMD_AUTH_A, target_block };
-        uint8_t resp[16] = {0};
-        uint8_t resp_len = sizeof(resp);
-        esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
-        if (err == ESP_OK && resp_len >= 4) {
-            got++;
-            uint32_t nt_enc = ((uint32_t)resp[0] << 24) | ((uint32_t)resp[1] << 16) |
-                              ((uint32_t)resp[2] << 8) | resp[3];
-            uint8_t par = 0;
-            if (resp_len >= 8) {
-                par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
-                                ((resp[6] & 1) << 1) | (resp[7] & 1));
+    int targets = 0;
+    int completed = 0;
+    for (int s = 0; s < sectors; ++s) {
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+        uint8_t target_block = (uint8_t)(mfc_first_block_of_sector(t, s) + mfc_blocks_in_sector(t, s) - 1);
+        if (!(g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s))) {
+            targets++;
+            if (mfc_hardnested_capture_target_file(io, uid, uid_len, t, known_block, known_key_b,
+                                                   known_key, target_block, false, samples_per_key,
+                                                   out_dir, out_path, out_path_len)) {
+                completed++;
             }
-            int pos = snprintf(buf, sizeof(buf),
-                               "Sec %d key %c cuid %08lX nt0 00000000 ks0 %08lX par0 %u%u%u%u\n",
-                               target_sector, target_key_b ? 'B' : 'A',
-                               (unsigned long)cuid, (unsigned long)nt_enc,
-                               (par >> 3) & 1, (par >> 2) & 1, (par >> 1) & 1, par & 1);
-            (void)sd_card_append_file(path, buf, (size_t)pos);
-        } else {
-            ESP_LOGD(MFC_TAG, "nested capture sample failed idx=%u err=%d len=%u",
-                     (unsigned)i, (int)err, (unsigned)resp_len);
         }
-
-        if (g_prog_cb) g_prog_cb((int)(i + 1), samples, g_prog_user);
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+        if (!(g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s))) {
+            targets++;
+            if (mfc_hardnested_capture_target_file(io, uid, uid_len, t, known_block, known_key_b,
+                                                   known_key, target_block, true, samples_per_key,
+                                                   out_dir, out_path, out_path_len)) {
+                completed++;
+            }
+        }
     }
 
-    return got > 0;
+    ESP_LOGI(MFC_TAG, "Hardnested: missing-key capture complete %d/%d", completed, targets);
+    return targets > 0 && completed == targets;
 }
 
 bool mfc_get_hardnested_defaults(uint8_t *known_block,
