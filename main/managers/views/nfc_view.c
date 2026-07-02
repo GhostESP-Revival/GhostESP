@@ -6,6 +6,7 @@
 #include "gui/accessibility_fonts.h"
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
+#include "gui/ios_toggle.h"
 #include "managers/status_display_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -1015,39 +1016,64 @@ static bool using_chameleon_backend(void) {
 }
 
 #if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
-static void nfc_backend_item_text(char *out, size_t out_len) {
-    if (!out || out_len == 0) return;
-    const char *name = nfc_backend_name(nfc_backend_get());
-    snprintf(out, out_len, "Backend: %s", name ? name : "unknown");
+// The backend row is an iOS-style toggle: off = PN532, on = ST25R3916. The
+// choice is persisted in NVS by nfc_backend_set(). AUTO (if ever set via CLI)
+// reads as off here so the toggle always shows a concrete backend.
+static bool nfc_backend_is_st25r(void) {
+    return nfc_backend_get() == NFC_BACKEND_ST25R3916;
 }
 
-static void nfc_update_backend_item(void) {
+static void nfc_backend_item_text(char *out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    snprintf(out, out_len, "%s", nfc_backend_is_st25r() ? "Using ST25R" : "Using PN532");
+}
+
+static lv_obj_t *nfc_backend_find_toggle(void) {
+    if (!backend_btn || !lv_obj_is_valid(backend_btn)) return NULL;
+    uint32_t n = lv_obj_get_child_cnt(backend_btn);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(backend_btn, i);
+        if (child && lv_obj_get_user_data(child) == IOS_TOGGLE_USER_DATA) return child;
+    }
+    return NULL;
+}
+
+static void nfc_update_backend_item(bool animate) {
     if (!backend_btn || !lv_obj_is_valid(backend_btn)) return;
     lv_obj_t *label = lv_obj_get_child(backend_btn, 0);
-    if (!label) return;
-    char text[32];
-    nfc_backend_item_text(text, sizeof(text));
-    lv_label_set_text(label, text);
+    if (label) {
+        char text[32];
+        nfc_backend_item_text(text, sizeof(text));
+        lv_label_set_text(label, text);
+    }
+    lv_obj_t *toggle = nfc_backend_find_toggle();
+    if (toggle) ios_toggle_set_value(toggle, nfc_backend_is_st25r(), animate);
 }
 
 static void nfc_backend_event_cb(lv_event_t *e) {
-    (void)e;
-    nfc_backend_t backend = nfc_backend_get();
-    if (backend == NFC_BACKEND_AUTO) {
-        backend = NFC_BACKEND_PN532;
-    } else if (backend == NFC_BACKEND_PN532) {
-        backend = NFC_BACKEND_ST25R3916;
-    } else {
-        backend = NFC_BACKEND_AUTO;
-    }
-    nfc_backend_set(backend);
-    nfc_update_backend_item();
+    nfc_backend_set(nfc_backend_is_st25r() ? NFC_BACKEND_PN532 : NFC_BACKEND_ST25R3916);
+    // Touch events carry `e` (animate the knob); encoder/keyboard events pass
+    // NULL, so snap without animation the same way the IR settings rows do.
+    nfc_update_backend_item(e != NULL);
 }
 
 static lv_obj_t *nfc_add_backend_item(void) {
     char text[32];
     nfc_backend_item_text(text, sizeof(text));
     backend_btn = options_view_add_item(g_nfc_ov, text, nfc_backend_event_cb, NULL);
+    if (backend_btn) {
+        lv_obj_set_flex_flow(backend_btn, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(backend_btn, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_t *label = lv_obj_get_child(backend_btn, 0);
+        if (label) {
+            lv_obj_set_flex_grow(label, 1);
+            lv_obj_set_width(label, LV_SIZE_CONTENT);
+        }
+        lv_obj_t *toggle = ios_toggle_create(backend_btn);
+        lv_obj_update_layout(backend_btn);
+        ios_toggle_set_value(toggle, nfc_backend_is_st25r(), false);
+    }
     return backend_btn;
 }
 #endif

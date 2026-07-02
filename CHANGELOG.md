@@ -3,25 +3,28 @@
 ## Revival v2.1.0
 
 ### Added
-- Runtime NFC backend selector (`auto` / `pn532` / `st25r`) via UI row and `nfc backend` CLI command; `auto` tries PN532 first, then ST25R3916
-- ST25R3916/ST25R3916B NFC frontend (SPI and I2C) with software Crypto1, card emulation (Type 2/NTAG and MIFARE Classic), and raw nested nonce/parity capture (NFC-A listener register values and emulation behavior referenced from [flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware))
-- MIFARE Classic nested key recovery (ST25R3916): captures encrypted nested nonces, classifies weak/hard PRNG, filters dictionaries locally against Crypto1/parity constraints, and RF-verifies candidates before accepting them (@[noproto](https://github.com/noproto))
-- Momentum-compatible `.nested.log` export at `/mnt/ghostesp/nfc/.nested.log` for PC-side hardnested solving when on-device recovery is not enough (@[noproto](https://github.com/noproto))
-- `nfc hardnested` CLI command for manual nested nonce capture (@[noproto](https://github.com/noproto))
-- NTAG Type 2 metadata parsing (GET_VERSION, signature, counters, static/dynamic locks, CFG protection) and write-safety checks
+- NFC backend selector (`auto` / `pn532` / `st25r`) via UI and `nfc backend` CLI; `auto` tries PN532, then ST25R3916
+- ST25R3916/ST25R3916B NFC frontend (SPI and I2C) with software Crypto1 and card emulation (Type 2/NTAG and MIFARE Classic); listener and emulation behavior referenced from [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware)
+- MIFARE Classic nested key recovery on ST25R3916: captures encrypted nonces, classifies weak/hard PRNG, filters dictionaries against Crypto1/parity, and RF-verifies candidates ([@noproto](https://github.com/noproto))
+- Momentum-compatible `.nested.log` export at `/mnt/ghostesp/nfc/.nested.log` for PC-side hardnested solving ([@noproto](https://github.com/noproto))
+- `nfc hardnested` CLI command for manual nested nonce capture ([@noproto](https://github.com/noproto))
+- PicoPass / iCLASS support on ST25R3916, based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
+- NDEF tag generation
+- NTAG Type 2 metadata parsing (GET_VERSION, signature, counters, static/dynamic locks, CFG protection) with write-safety checks
 - DESFire version/UID detection summary
 
 ### Changed
-- MIFARE Classic failed-auth path no longer retries the same wrong key or probes for tag removal on every dictionary miss, speeding up brute-force (especially on ST25R I2C)
+- MIFARE Classic failed-auth path no longer retries the wrong key or probes for tag removal on every dictionary miss, speeding up brute-force (especially on ST25R I2C)
 - NFC scan popup details are now left-aligned and compact
 - Faster NTAG initial popup via `ntag_t2_read_user_memory_fast()`
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
+- Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 
 ### Fixed
 - NFC scan crash when the ST25R path hit raw PN532 function pointers through NTAG ops
 - ST25R3916 Crypto1 TX/RX encrypted byte and 4-bit ACK/NAK state handling
 - MIFARE Classic summary skipping block reads after a successful default-key auth
-- Extended the SD display-freeze fix to all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template, so CYD2432S028R and the other CYD variants no longer freeze when an SD card is inserted
+- SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template, so CYD2432S028R and other CYD variants no longer freeze with an SD card inserted
 
 ## Revival v2.0.0
 
