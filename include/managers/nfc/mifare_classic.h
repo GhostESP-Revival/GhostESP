@@ -38,6 +38,26 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
                            const char* out_dir,
                            char* out_path,
                            size_t out_path_len);
+
+bool mfc_hardnested_capture_file(pn532_io_handle_t io,
+                                 const uint8_t* uid,
+                                 uint8_t uid_len,
+                                 uint16_t atqa,
+                                 uint8_t sak,
+                                 uint8_t known_block,
+                                 bool known_key_b,
+                                 const uint8_t known_key[6],
+                                 uint8_t target_block,
+                                 bool target_key_b,
+                                 uint16_t samples,
+                                 const char* out_dir,
+                                 char* out_path,
+                                 size_t out_path_len);
+bool mfc_get_hardnested_defaults(uint8_t *known_block,
+                                 bool *known_key_b,
+                                 uint8_t known_key[6],
+                                 uint8_t *target_block,
+                                 bool *target_key_b);
 #endif
 
 typedef void (*mfc_progress_cb_t)(int current, int total, void* user);

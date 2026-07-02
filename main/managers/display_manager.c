@@ -277,6 +277,10 @@ static TaskHandle_t input_task_handle = NULL;
  * match the existing idempotent suspend/resume semantics. */
 static volatile bool s_lvgl_gate_closed = false;
 static volatile bool s_lvgl_gate_parked = false;
+/* Serializes every cross-task entry into LVGL's internal timer list/heap
+ * (lv_timer_handler() and lv_async_call()); see the creation site for why
+ * this must be recursive. */
+static SemaphoreHandle_t s_lvgl_call_mutex = NULL;
 static lv_timer_t *status_update_timer = NULL;
 static lv_timer_t *rainbow_timer = NULL;
 static uint16_t rainbow_hue = 0;
@@ -1726,6 +1730,21 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     return;
   }
 
+  /* LVGL (lv_async_call/lv_timer_create/lv_mem_alloc) is not thread-safe: the
+   * tick task walks/mutates the timer list and internal heap in lv_timer_handler()
+   * while background tasks (NFC scan progress, IR/WiFi/BLE progress, etc.) call
+   * lv_async_call() concurrently with no synchronization, corrupting timer nodes
+   * and producing garbage callback pointers (Guru Meditation in lv_async_timer_cb).
+   * A single recursive mutex serializes every entry point into LVGL's internal
+   * state; recursive so an LVGL event callback that itself calls
+   * display_manager_lvgl_async_call() while already inside lv_timer_handler()
+   * (same task) can re-enter without deadlocking. */
+  s_lvgl_call_mutex = xSemaphoreCreateRecursiveMutex();
+  if (s_lvgl_call_mutex == NULL) {
+    ESP_LOGE(TAG, "Failed to create LVGL call mutex\n");
+    return;
+  }
+
   input_queue = xQueueCreate(32, sizeof(InputEvent));
   if (input_queue == NULL) {
     ESP_LOGE(TAG, "Failed to create input queue\n");
@@ -1932,6 +1951,26 @@ static void dm_switch_wait_async_cb(void *param) {
   free(call);
 }
 
+lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
+  if (!cb) return LV_RES_INV;
+  if (!s_lvgl_call_mutex) {
+    /* Called before display_manager_init() finished creating the mutex; there
+     * is no concurrent lv_timer_handler() running yet, so this is safe. */
+    return lv_async_call(cb, user_data);
+  }
+  /* lv_timer_handler() can hold this mutex through an entire frame flush, which
+   * may run well past MUTEX_TIMEOUT_MS (tuned for the unrelated, short dm-state
+   * critical sections elsewhere in this file), so give enqueueing callers more
+   * room before dropping the call. */
+  if (xSemaphoreTakeRecursive(s_lvgl_call_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    ESP_LOGW(TAG, "display_manager_lvgl_async_call: timed out waiting for LVGL call mutex");
+    return LV_RES_INV;
+  }
+  lv_res_t res = lv_async_call(cb, user_data);
+  xSemaphoreGiveRecursive(s_lvgl_call_mutex);
+  return res;
+}
+
 typedef struct {
   void (*fn)(void *);
   void *arg;
@@ -1951,7 +1990,7 @@ void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
     if (!call) return;
     call->fn = fn;
     call->arg = arg;
-    lv_async_call(dm_run_on_lvgl_async_cb, call);
+    display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call);
     return;
   }
   fn(arg);
@@ -1963,7 +2002,7 @@ void display_manager_switch_view(View *view) {
   if (!call) return;
   call->fn = dm_switch_async_cb;
   call->arg = view;
-  lv_async_call(dm_run_on_lvgl_async_cb, call);
+  display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call);
 }
 
 bool display_manager_switch_view_and_wait_for_refresh(View *view) {
@@ -1991,7 +2030,7 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
   call->view = view;
   call->done = done;
 
-  lv_async_call(dm_switch_wait_async_cb, call);
+  display_manager_lvgl_async_call(dm_switch_wait_async_cb, call);
   if (xSemaphoreTake(done, pdMS_TO_TICKS(2000)) != pdTRUE) {
     ESP_LOGW(TAG, "Timed out waiting for first view refresh");
     return false;
@@ -3598,7 +3637,15 @@ void lvgl_tick_task(void *arg) {
           s_lvgl_gate_parked = false;
       }
       processEvent();
+      /* Hold the same recursive mutex background tasks take in
+       * display_manager_lvgl_async_call() for the whole timer/render pass, so a
+       * concurrent lv_async_call() from another task can never mutate LVGL's
+       * timer list or internal heap while this task is walking/allocating in it.
+       * portMAX_DELAY is safe here: the only other holders are brief enqueue
+       * calls that always release promptly. */
+      if (s_lvgl_call_mutex) xSemaphoreTakeRecursive(s_lvgl_call_mutex, portMAX_DELAY);
       lv_timer_handler();
+      if (s_lvgl_call_mutex) xSemaphoreGiveRecursive(s_lvgl_call_mutex);
       lv_tick_inc(10);
       // Monitor input queue backlog periodically
       TickType_t now = xTaskGetTickCount();

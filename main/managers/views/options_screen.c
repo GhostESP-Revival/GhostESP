@@ -8388,7 +8388,7 @@ static void wigle_test_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_test_result_async, args);
+    display_manager_lvgl_async_call(wigle_test_result_async, args);
 }
 
 static void wigle_manual_upload_result_async(void *data) {
@@ -8413,7 +8413,7 @@ static void wigle_manual_upload_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_manual_upload_result_async, args);
+    display_manager_lvgl_async_call(wigle_manual_upload_result_async, args);
 }
 
 static void wigle_stats_result_async(void *data) {
@@ -8439,7 +8439,7 @@ static void wigle_stats_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_stats_result_async, args);
+    display_manager_lvgl_async_call(wigle_stats_result_async, args);
 }
 
 static void back_event_cb(lv_event_t *e) {

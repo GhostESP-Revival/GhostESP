@@ -4,6 +4,8 @@
 // MIFARE Classic reader auth + encrypted exchange for the ST25R3916.
 // The three-pass handshake and keystream/parity construction follow the
 // publicly documented Crypto1 protocol (proxmark3 / academic literature).
+// Nested/hardnested nonce capture reference: Momentum-Firmware work by noproto,
+// including MIFARE Classic key recovery improvements #3822.
 
 #include "st25r3916_mifare.h"
 #include "st25r3916_iso14443a.h"
@@ -63,10 +65,9 @@ esp_err_t st25r3916_mifare_auth(crypto1_t *c, const uint8_t *uid, uint8_t uid_le
     txd[i] = (uint8_t)(ks ^ nr[i]);
     txp[i] = (uint8_t)(crypto1_filter(c->odd) ^ crypto1_odd_parity8(nr[i]));
   }
-  uint32_t suc = crypto1_prng_successor(nt, 32);
+  uint32_t ar = crypto1_prng_successor(nt, 64);
   for (int i = 4; i < 8; i++) {
-    suc = crypto1_prng_successor(suc, 8);
-    uint8_t arb = (uint8_t)(suc & 0xFF);
+    uint8_t arb = (uint8_t)(ar >> (24 - ((i - 4) * 8)));
     uint8_t ks = crypto1_byte(c, 0, 0);
     txd[i] = (uint8_t)(ks ^ arb);
     txp[i] = (uint8_t)(crypto1_filter(c->odd) ^ crypto1_odd_parity8(arb));
@@ -78,7 +79,9 @@ esp_err_t st25r3916_mifare_auth(crypto1_t *c, const uint8_t *uid, uint8_t uid_le
   err = st25r3916_nfca_transceive_bits(txd, txp, 8, atd, atp, sizeof(atd), &an, NULL, NULL, 30);
   if (err != ESP_OK || an < 4) return ESP_ERR_INVALID_RESPONSE;
 
-  uint32_t at = crypto1_word(c, 0, 0) ^ be32(atd);
+  uint8_t at_plain[4];
+  for (int i = 0; i < 4; i++) at_plain[i] = (uint8_t)(crypto1_byte(c, 0, 0) ^ atd[i]);
+  uint32_t at = be32(at_plain);
   if (at != crypto1_prng_successor(nt, 96)) {
     ESP_LOGD(TAG, "auth verify failed (block %u)", block);
     return ESP_ERR_INVALID_RESPONSE;
@@ -113,9 +116,11 @@ esp_err_t st25r3916_mifare_xfer(crypto1_t *c, const uint8_t *plain, uint16_t ple
 
   /* 4-bit ACK/NAK: decrypt the nibble with 4 keystream bits. */
   if (rn == 0 && res_bits > 0) {
-    uint8_t ks = 0;
-    for (int b = 0; b < 4; b++) ks |= (uint8_t)(crypto1_bit(c, 0, 0) << b);
-    uint8_t ack = (uint8_t)((ks ^ res_val) & 0x0F);
+    uint8_t ack = 0;
+    for (int b = 0; b < 4; b++) {
+      uint8_t enc_bit = (uint8_t)((res_val >> b) & 1u);
+      ack |= (uint8_t)((crypto1_bit(c, 0, 0) ^ enc_bit) << b);
+    }
     if (out && out_cap >= 1) {
       out[0] = ack;
       if (out_len) *out_len = 1;
@@ -135,4 +140,29 @@ esp_err_t st25r3916_mifare_xfer(crypto1_t *c, const uint8_t *plain, uint16_t ple
   if (out) memcpy(out, dec, copy);
   if (out_len) *out_len = copy;
   return ESP_OK;
+}
+
+esp_err_t st25r3916_mifare_nested_auth_raw(crypto1_t *c, uint8_t key_type, uint8_t block,
+                                            uint8_t nt_enc[4], uint8_t nt_par[4]) {
+  if (!c || !nt_enc || !nt_par) return ESP_ERR_INVALID_ARG;
+  if (key_type != 0x60 && key_type != 0x61) return ESP_ERR_INVALID_ARG;
+
+  uint8_t plain[4] = {key_type, block, 0, 0};
+  crc_a(plain, 2, &plain[2]);
+
+  uint8_t ed[4], ep[4];
+  for (uint16_t i = 0; i < sizeof(plain); i++) {
+    uint8_t ks = crypto1_byte(c, 0, 0);
+    ed[i] = (uint8_t)(ks ^ plain[i]);
+    ep[i] = (uint8_t)(crypto1_filter(c->odd) ^ crypto1_odd_parity8(plain[i]));
+  }
+
+  uint16_t rn = 0;
+  uint8_t residual_bits = 0, residual = 0;
+  esp_err_t err = st25r3916_nfca_transceive_bits(ed, ep, sizeof(ed), nt_enc, nt_par, 4, &rn,
+                                                 &residual_bits, &residual, 30);
+  (void)residual_bits;
+  (void)residual;
+  if (err != ESP_OK) return err;
+  return (rn == 4) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }

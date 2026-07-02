@@ -37,7 +37,7 @@ static inline adapter_state_t *state_of(pn532_io_handle_t io) {
 /* --- high-level vtable implementations ---------------------------------- */
 
 static esp_err_t hl_activate_once(adapter_state_t *st) {
-  esp_err_t err = st25r3916_nfca_activate(st->uid, &st->uid_len, &st->atqa, &st->sak);
+  esp_err_t err = st25r3916_nfca_activate_ex(st->uid, &st->uid_len, &st->atqa, &st->sak, 2, 20);
   st->activated = (err == ESP_OK);
   st->armed = false;  // (re)selection resets any MIFARE Crypto1 session
   return err;
@@ -46,7 +46,8 @@ static esp_err_t hl_activate_once(adapter_state_t *st) {
 static esp_err_t adapter_list_passive_target(pn532_io_handle_t io) {
   adapter_state_t *st = state_of(io);
   if (!st) return ESP_ERR_INVALID_STATE;
-  int tries = (st->retries == 0xFF || st->retries == 0) ? 1 : st->retries;
+  int tries = (st->retries == 0xFF || st->retries == 0) ? 3 : st->retries;
+  if (tries > 5) tries = 5;
   esp_err_t err = ESP_ERR_NOT_FOUND;
   for (int i = 0; i < tries; i++) {
     err = hl_activate_once(st);
@@ -105,6 +106,30 @@ static esp_err_t adapter_data_exchange(pn532_io_handle_t io, const uint8_t *tx, 
   }
 
   if (st->armed) {
+    if (tx_len == 2 && (tx[0] == 0x60 || tx[0] == 0x61)) {
+      uint8_t nt[4] = {0};
+      uint8_t par[4] = {0};
+      esp_err_t err = st25r3916_mifare_nested_auth_raw(&st->cipher, tx[0], tx[1], nt, par);
+      st->armed = false;
+      if (err != ESP_OK) {
+        if (rx_len) *rx_len = 0;
+        return err;
+      }
+      uint16_t cap = rx_len ? *rx_len : 0;
+      if (cap >= 8 && rx) {
+        memcpy(rx, nt, 4);
+        memcpy(rx + 4, par, 4);
+        *rx_len = 8;
+      } else if (cap >= 4 && rx) {
+        memcpy(rx, nt, 4);
+        *rx_len = 4;
+      } else if (rx_len) {
+        *rx_len = 0;
+        return ESP_ERR_INVALID_SIZE;
+      }
+      return ESP_OK;
+    }
+
     uint16_t cap = rx_len ? *rx_len : 0;
     uint16_t got = 0;
     esp_err_t err = st25r3916_mifare_xfer(&st->cipher, tx, tx_len, rx, cap, &got);

@@ -71,6 +71,9 @@ esp_err_t st25r3916_nfca_reqa(uint16_t *atqa, int timeout_ms);
 /** @brief Send WUPA (short frame); returns the 2-byte ATQA. */
 esp_err_t st25r3916_nfca_wupa(uint16_t *atqa, int timeout_ms);
 
+/** @brief Send HLTA. A timeout/no-response from the card is considered success. */
+esp_err_t st25r3916_nfca_halt(int timeout_ms);
+
 /**
  * @brief Full ISO14443-3A activation: REQA + anti-collision cascade + SELECT.
  *
@@ -81,6 +84,10 @@ esp_err_t st25r3916_nfca_wupa(uint16_t *atqa, int timeout_ms);
  * @return ESP_OK on success, ESP_ERR_NOT_FOUND if no tag answered.
  */
 esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak);
+
+/** @brief Activation with explicit retry control for strict/noisy RF environments. */
+esp_err_t st25r3916_nfca_activate_ex(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa,
+                                     uint8_t *sak, uint8_t retries, int timeout_ms);
 
 #ifdef __cplusplus
 }

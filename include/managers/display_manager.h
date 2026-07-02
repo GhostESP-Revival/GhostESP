@@ -199,6 +199,15 @@ void display_manager_resume_lvgl_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
 
+/* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
+ * heap are not thread-safe, and the render task calls lv_timer_handler() on a
+ * dedicated tick task with no locking of its own; calling lv_async_call()
+ * directly from any other task races that task and can corrupt a timer node,
+ * producing a garbage callback pointer (Guru Meditation in lv_async_timer_cb).
+ * Every call site outside display_manager.c must go through this instead of
+ * calling lv_async_call() directly. */
+lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data);
+
 /* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
  * instead of running it on every touch sample. The accumulator is flushed
  * once per LVGL tick (10ms) inside processEvent, which collapses up to

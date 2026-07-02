@@ -12,6 +12,12 @@ for PN532 so the app code can switch between frontends without a big rewrite.
 - Flipper Zero / Momentum-Firmware was useful reference material for the real-world
   ST25R3916 register values around NFC-A listener mode, load modulation, field
   thresholds, and emulation behavior.
+- MIFARE Classic nested/hardnested capture follows Momentum-Firmware's practical
+  `.nested.log` line format so captures can be moved into similar PC-side
+  cracking/conversion workflows. Credit to noproto for the
+  `.nested.log` constants/path, nested/hardnested workflow reference, and the
+  MIFARE Classic Key Recovery Improvements (#3822) encrypted nonce collection
+  and logging reference.
 - This component is our driver for GhostESP. It does not pull in ST RFAL or vendor
   middleware.
 

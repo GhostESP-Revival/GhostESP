@@ -1073,7 +1073,7 @@ static void universal_transmit_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(150));
             }
         }
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1127,7 +1127,7 @@ static void universal_transmit_task(void *arg) {
     }
     
     printf("universal_transmit_task: finished processing %s\n", path);
-    lv_async_call(cleanup_transmit_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
     universal_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -1164,7 +1164,7 @@ static void universal_transmit_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(150));
             }
         }
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1175,7 +1175,7 @@ static void universal_transmit_task(void *arg) {
     if (!f) {
         printf("universal_transmit_task: fopen failed for %s\n", path);
         if (did) ir_sd_end(susp);
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1272,7 +1272,7 @@ static void universal_transmit_task(void *arg) {
     fclose(f);
     if (did) ir_sd_end(susp);
     printf("universal_transmit_task: finished processing %s\n", path);
-    lv_async_call(cleanup_transmit_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
     universal_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -2813,7 +2813,7 @@ void signal_preview_save_cb(lv_event_t *e)
 {
     // Transition to keyboard view for naming
     status_display_show_status("IR Saving...");
-    lv_async_call(cleanup_signal_preview_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_signal_preview_popup, NULL);
     keyboard_view_set_placeholder("Enter signal name");
     
     // Use different callbacks based on whether we're adding to existing remote, easy learn mode, or creating new
@@ -3507,7 +3507,7 @@ static void ir_learning_task(void *arg) {
     // Ensure manager is initialized
     if (!infrared_manager_rx_init()) {
         ESP_LOGE(TAG, "Failed to init infrared manager RX");
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
         ir_learning_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -3515,7 +3515,7 @@ static void ir_learning_task(void *arg) {
 
     if (!infrared_manager_rx_is_initialized()) {
         ESP_LOGE(TAG, "IR RX not initialized");
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
         ir_learning_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -3537,13 +3537,13 @@ static void ir_learning_task(void *arg) {
 
             // Signal received successfully, show preview popup
             if (is_easy_mode) {
-                lv_async_call(cleanup_easy_learn_popup, NULL);
+                display_manager_lvgl_async_call(cleanup_easy_learn_popup, NULL);
             } else {
-                lv_async_call(cleanup_learning_popup, NULL);
+                display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
             }
 
             // Create and show signal preview popup
-            lv_async_call((lv_async_cb_t)create_signal_preview_popup, NULL);
+            display_manager_lvgl_async_call((lv_async_cb_t)create_signal_preview_popup, NULL);
 
             ir_learning_task_handle = NULL;
             vTaskDelete(NULL);
@@ -3568,7 +3568,7 @@ static void ir_learning_task(void *arg) {
             learned_signal.payload.raw.timings_size = 0;
         }
 
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
     }
 
     ir_learning_task_handle = NULL;

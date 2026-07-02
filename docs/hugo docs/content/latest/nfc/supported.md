@@ -6,7 +6,7 @@ weight: 40
 
 ## Overview
 
-GhostESP's PN532 stack focuses on ISO14443A tags. This page summarizes current support.
+GhostESP's NFC stack focuses on ISO14443A tags. It runs on either a PN532 or an ST25R3916/ST25R3916B frontend (selectable at runtime). This page summarizes current support.
 
 ## NTAG / Ultralight
 
@@ -36,6 +36,12 @@ GhostESP's PN532 stack focuses on ISO14443A tags. This page summarizes current s
 
 - **Notes:** UI shows progress as “Bruteforcing keys…” and “Reading sectors…” while blocks are cached. Classic tags with the well-known magic backdoor are detected; when enabled, GhostESP can read blocks without authenticating that sector first.
 
+- **Nested / hardnested (ST25R3916 only):** once at least one key is recovered, the software Crypto1 path captures encrypted nested nonces + parity and filters dictionaries locally, then RF-verifies the candidate. Hard-PRNG cards that resist local recovery are exported to `/mnt/ghostesp/nfc/.nested.log` in Momentum-compatible format for PC-side solving.
+
+## MIFARE DESFire
+
+- **Detection:** Detection and version identification supported (reads PICC version, models DESFire 2K/4K/8K). Full read/write not implemented.
+
 ## Other ISO14443A
 
 - **Detection:** GhostESP reports UID, ATQA, SAK, and basic type info for ISO14443A tags that don’t fit the above categories.
@@ -46,7 +52,11 @@ GhostESP's PN532 stack focuses on ISO14443A tags. This page summarizes current s
 
 ## Unsupported Families
 
-- **MIFARE DESFire:** Detection and version identification supported (reads PICC version, models DESFire 2K/4K/8K). Full read/write not implemented.
 - **MIFARE Plus:** Not supported.
-- **ISO14443B, ISO15693, FeliCa:** Not supported by the current PN532 integration.
-- **Emulation / Peer-to-Peer:** Not supported.
+- **ISO14443B, ISO15693, FeliCa:** Not supported by the current integration.
+
+## Emulation (ST25R3916 only)
+
+- **Type 2 / NTAG:** memory image emulation supported (SPI transport works reliably; I2C transport may be timing-limited with strict readers like the Flipper Zero).
+- **MIFARE Classic:** sector image emulation supported via software Crypto1.
+- **PN532:** cannot emulate in this build; emulation always routes to the ST25R3916 backend regardless of the selected backend.

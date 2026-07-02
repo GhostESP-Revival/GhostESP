@@ -173,7 +173,7 @@ char *desfire_build_details_summary(const desfire_version_t *ver,
     char *out = (char *)malloc(cap);
     if (!out) return NULL;
 
-    int len = snprintf(out, cap, "Card: %s\nUID:", label);
+    int len = snprintf(out, cap, "Type: %s\nUID:", label);
     if (len < 0 || (size_t)len >= cap) {
         free(out);
         return NULL;
@@ -185,7 +185,7 @@ char *desfire_build_details_summary(const desfire_version_t *ver,
     }
 
     len += snprintf(out + len, cap - (size_t)len,
-                    "\nATQA: %02X %02X | SAK: %02X\n",
+                    "\nATQA: %02X %02X  SAK: %02X\n",
                     (atqa >> 8) & 0xFF,
                     atqa & 0xFF,
                     sak);
@@ -197,7 +197,7 @@ char *desfire_build_details_summary(const desfire_version_t *ver,
     if (ver && ver->storage_bytes) {
         unsigned kb = (unsigned)(ver->storage_bytes / 1024U);
         len += snprintf(out + len, cap - (size_t)len,
-                        "Storage: %u bytes (~%u KB)\n",
+                        "Mem: %u B (~%u KB)\n",
                         (unsigned)ver->storage_bytes,
                         kb);
     }

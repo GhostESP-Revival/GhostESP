@@ -22,6 +22,9 @@ static const char *TAG = "st25r3916_nfca";
 #define NFCA_CT      0x88 /**< Cascade tag, prepended to continuation UIDs. */
 #define NFCA_SAK_CASCADE 0x04 /**< SAK bit 2 set: UID not complete, cascade. */
 
+#define NFCA_DEFAULT_RETRIES 2
+#define NFCA_DEFAULT_TIMEOUT_MS 20
+
 #define NFCA_RX_SCRATCH 264
 
 static esp_err_t nfca_wait_rxe(int timeout_ms) {
@@ -35,6 +38,15 @@ static esp_err_t nfca_wait_rxe(int timeout_ms) {
     esp_rom_delay_us(100);
   }
   return ESP_ERR_TIMEOUT;
+}
+
+static void nfca_cleanup_after_error(void) {
+  st25r3916_fifo_clear();
+  st25r3916_irq_clear();
+  st25r3916_reg_modify(ST25R3916_REG_ISO14443A_NFC,
+                       ST25R3916_ISO14443A_NO_TX_PAR | ST25R3916_ISO14443A_NO_RX_PAR |
+                           ST25R3916_ISO14443A_ANTCL,
+                       0x00);
 }
 
 esp_err_t st25r3916_nfca_transceive(const uint8_t *tx, uint16_t tx_len, bool with_crc,
@@ -59,20 +71,35 @@ esp_err_t st25r3916_nfca_transceive(const uint8_t *tx, uint16_t tx_len, bool wit
   /* Wait for end of transmission, then for the response. */
   st25r3916_irq_wait_main(ST25R3916_IRQ_MAIN_TXE, 20);
   esp_err_t err = nfca_wait_rxe(timeout_ms);
-  if (err != ESP_OK) return err;
+  if (err != ESP_OK) {
+    nfca_cleanup_after_error();
+    return err;
+  }
 
   uint8_t eerr = 0;
   st25r3916_irq_update(NULL, NULL, &eerr);
-  if (with_crc && (eerr & ST25R3916_IRQ_ERR_CRC)) return ESP_ERR_INVALID_CRC;
-  if (eerr & ST25R3916_IRQ_ERR_HFE) return ESP_ERR_INVALID_RESPONSE;  // hard framing error
+  if (with_crc && (eerr & ST25R3916_IRQ_ERR_CRC)) {
+    nfca_cleanup_after_error();
+    return ESP_ERR_INVALID_CRC;
+  }
+  if (eerr & (ST25R3916_IRQ_ERR_HFE | ST25R3916_IRQ_ERR_SFE)) {
+    nfca_cleanup_after_error();
+    return ESP_ERR_INVALID_RESPONSE;
+  }
 
   uint16_t n = st25r3916_fifo_count();
-  if (n == 0) return ESP_ERR_INVALID_RESPONSE;
+  if (n == 0) {
+    nfca_cleanup_after_error();
+    return ESP_ERR_INVALID_RESPONSE;
+  }
   if (n > NFCA_RX_SCRATCH) n = NFCA_RX_SCRATCH;
 
   uint8_t scratch[NFCA_RX_SCRATCH];
   err = st25r3916_fifo_read(scratch, n);
-  if (err != ESP_OK) return err;
+  if (err != ESP_OK) {
+    nfca_cleanup_after_error();
+    return err;
+  }
 
   uint16_t payload = n;
   if (with_crc && payload >= 2) payload -= 2;  // FIFO holds received CRC (DS 4.2); strip it
@@ -83,7 +110,26 @@ esp_err_t st25r3916_nfca_transceive(const uint8_t *tx, uint16_t tx_len, bool wit
   } else if (rx_len) {
     *rx_len = payload;
   }
+  st25r3916_irq_clear();
   return ESP_OK;
+}
+
+static esp_err_t nfca_transceive_retry(const uint8_t *tx, uint16_t tx_len, bool with_crc,
+                                       bool anticoll, uint8_t *rx, uint16_t rx_cap,
+                                       uint16_t *rx_len, int timeout_ms, uint8_t retries) {
+  if (retries == 0) retries = 1;
+  esp_err_t last = ESP_ERR_TIMEOUT;
+  for (uint8_t i = 0; i < retries; i++) {
+    last = st25r3916_nfca_transceive(tx, tx_len, with_crc, anticoll, rx, rx_cap, rx_len,
+                                     timeout_ms);
+    if (last == ESP_OK) return ESP_OK;
+    if (last == ESP_ERR_INVALID_CRC || last == ESP_ERR_INVALID_RESPONSE || last == ESP_ERR_TIMEOUT) {
+      esp_rom_delay_us(300);
+      continue;
+    }
+    break;
+  }
+  return last;
 }
 
 /* --- bit-level transceive with manual parity (MIFARE Crypto1) ----------- */
@@ -187,13 +233,20 @@ static esp_err_t nfca_short_frame(uint8_t direct_cmd, uint16_t *atqa, int timeou
 
   st25r3916_irq_wait_main(ST25R3916_IRQ_MAIN_TXE, 20);
   esp_err_t err = nfca_wait_rxe(timeout_ms);
-  if (err != ESP_OK) return err;
+  if (err != ESP_OK) {
+    nfca_cleanup_after_error();
+    return err;
+  }
 
   uint16_t n = st25r3916_fifo_count();
-  if (n < 2) return ESP_ERR_NOT_FOUND;  // expect 2-byte ATQA
+  if (n < 2) {
+    nfca_cleanup_after_error();
+    return ESP_ERR_NOT_FOUND;
+  }
   uint8_t buf[4] = {0};
   st25r3916_fifo_read(buf, (n > 2) ? 2 : n);
   if (atqa) *atqa = (uint16_t)((buf[1] << 8) | buf[0]);  // ATQA little-endian on the air
+  st25r3916_irq_clear();
   return ESP_OK;
 }
 
@@ -205,12 +258,31 @@ esp_err_t st25r3916_nfca_wupa(uint16_t *atqa, int timeout_ms) {
   return nfca_short_frame(ST25R3916_CMD_TRANSMIT_WUPA, atqa, timeout_ms);
 }
 
-esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak) {
+esp_err_t st25r3916_nfca_halt(int timeout_ms) {
+  static const uint8_t hlta[2] = {0x50, 0x00};
+  uint8_t rx[2] = {0};
+  uint16_t rx_len = 0;
+  esp_err_t err = st25r3916_nfca_transceive(hlta, sizeof(hlta), true, false, rx, sizeof(rx),
+                                           &rx_len, timeout_ms > 0 ? timeout_ms : 5);
+  return (err == ESP_ERR_TIMEOUT) ? ESP_OK : err;
+}
+
+esp_err_t st25r3916_nfca_activate_ex(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa,
+                                     uint8_t *sak, uint8_t retries, int timeout_ms) {
   if (!uid || !uid_len) return ESP_ERR_INVALID_ARG;
   *uid_len = 0;
+  if (retries == 0) retries = NFCA_DEFAULT_RETRIES;
+  if (timeout_ms <= 0) timeout_ms = NFCA_DEFAULT_TIMEOUT_MS;
 
   uint16_t atqa_local = 0;
-  esp_err_t err = st25r3916_nfca_reqa(&atqa_local, 20);
+  esp_err_t err = ESP_ERR_NOT_FOUND;
+  for (uint8_t i = 0; i < retries; i++) {
+    err = st25r3916_nfca_reqa(&atqa_local, timeout_ms);
+    if (err == ESP_OK) break;
+    err = st25r3916_nfca_wupa(&atqa_local, timeout_ms);
+    if (err == ESP_OK) break;
+    esp_rom_delay_us(500);
+  }
   if (err != ESP_OK) return ESP_ERR_NOT_FOUND;
   if (atqa) *atqa = atqa_local;
 
@@ -222,8 +294,8 @@ esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa
     uint8_t ac_tx[2] = {sel_codes[level], NFCA_NVB_AC};
     uint8_t ac_rx[8] = {0};
     uint16_t ac_len = 0;
-    err = st25r3916_nfca_transceive(ac_tx, sizeof(ac_tx), false, true, ac_rx, sizeof(ac_rx),
-                                    &ac_len, 20);
+    err = nfca_transceive_retry(ac_tx, sizeof(ac_tx), false, true, ac_rx, sizeof(ac_rx),
+                                &ac_len, timeout_ms, retries);
     if (err != ESP_OK) return err;
     if (ac_len < 5) return ESP_ERR_INVALID_RESPONSE;
 
@@ -238,14 +310,15 @@ esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa
                          ac_rx[2],         ac_rx[3],     ac_rx[4]};
     uint8_t sak_rx[2] = {0};
     uint16_t sak_len = 0;
-    err = st25r3916_nfca_transceive(sel_tx, sizeof(sel_tx), true, false, sak_rx, sizeof(sak_rx),
-                                    &sak_len, 20);
+    err = nfca_transceive_retry(sel_tx, sizeof(sel_tx), true, false, sak_rx, sizeof(sak_rx),
+                                &sak_len, timeout_ms, retries);
     if (err != ESP_OK) return err;
     if (sak_len < 1) return ESP_ERR_INVALID_RESPONSE;
     last_sak = sak_rx[0];
 
     if (last_sak & NFCA_SAK_CASCADE) {
       /* UID incomplete: first byte was the cascade tag (0x88); keep the next 3. */
+      if (ac_rx[0] != NFCA_CT) return ESP_ERR_INVALID_RESPONSE;
       if (*uid_len + 3 > 10) return ESP_ERR_INVALID_SIZE;
       memcpy(&uid[*uid_len], &ac_rx[1], 3);
       *uid_len += 3;
@@ -258,5 +331,10 @@ esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa
   }
 
   if (sak) *sak = last_sak;
-  return ESP_OK;
+  return (*uid_len == 4 || *uid_len == 7 || *uid_len == 10) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak) {
+  return st25r3916_nfca_activate_ex(uid, uid_len, atqa, sak, NFCA_DEFAULT_RETRIES,
+                                    NFCA_DEFAULT_TIMEOUT_MS);
 }

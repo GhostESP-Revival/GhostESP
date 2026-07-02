@@ -45,6 +45,13 @@ typedef struct {
     bool parse;
     bool once;
     bool save;
+    bool hardnested;
+    uint8_t hn_known_block;
+    bool hn_known_key_b;
+    uint8_t hn_known_key[6];
+    uint8_t hn_target_block;
+    bool hn_target_key_b;
+    uint16_t hn_samples;
     bool emulate;
     uint8_t emu_uid[10];
     uint8_t emu_uid_len;
@@ -355,10 +362,11 @@ static void nfc_cli_scan_task(void *arg) {
     int64_t last_print_us = 0;
     int64_t start_us = esp_timer_get_time();
 
-    glog("NFC: scanning%s%s%s. Use 'stop' or 'nfc stop' to stop.\n",
+    glog("NFC: scanning%s%s%s%s. Use 'stop' or 'nfc stop' to stop.\n",
          ctx->once ? " once" : "",
          ctx->parse ? " with parsing" : "",
-         ctx->save ? " and save" : "");
+         ctx->save ? " and save" : "",
+         ctx->hardnested ? " for hardnested capture" : "");
 
     for (;;) {
         if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
@@ -386,11 +394,34 @@ static void nfc_cli_scan_task(void *arg) {
                 if (ctx->save && (!same || ctx->once)) {
                     nfc_cli_save_detected(ctx->nfc, uid, uid_len, atqa, sak);
                 }
+                if (ctx->hardnested && (!same || ctx->once)) {
+                    if (!mfc_is_classic_sak(sak)) {
+                        glog("NFC: hardnested capture needs a MIFARE Classic tag\n");
+                    } else {
+                        bool susp = false;
+                        char path[192] = {0};
+                        bool ok = false;
+                        if (sd_card_jit_begin(&susp, true)) {
+                            ok = mfc_hardnested_capture_file(ctx->nfc, uid, uid_len, atqa, sak,
+                                                            ctx->hn_known_block,
+                                                            ctx->hn_known_key_b,
+                                                            ctx->hn_known_key,
+                                                            ctx->hn_target_block,
+                                                            ctx->hn_target_key_b,
+                                                            ctx->hn_samples,
+                                                            "/mnt/ghostesp/nfc",
+                                                            path, sizeof(path));
+                            sd_card_jit_end(susp);
+                        }
+                        if (ok) glog("NFC: hardnested capture saved: %s\n", path);
+                        else glog("NFC: hardnested capture failed\n");
+                    }
+                }
                 memcpy(last_uid, uid, uid_len);
                 last_uid_len = uid_len;
                 last_print_us = now;
             }
-            if (ctx->once) break;
+            if (ctx->once || ctx->hardnested) break;
         } else if (ctx->once && esp_timer_get_time() - start_us > 10000000) {
             glog("NFC: no tag found\n");
             break;
@@ -556,6 +587,11 @@ static void nfc_cli_free_ctx(nfc_cli_ctx_t *ctx) {
     free(ctx);
 }
 
+static uint8_t nfc_cli_type2_mem_byte(const nfc_cli_ctx_t *ctx, size_t off) {
+    if (!ctx || !ctx->emu_mem || ctx->emu_mem_len == 0) return 0x00;
+    return ctx->emu_mem[off % ctx->emu_mem_len];
+}
+
 /* Outcome of handling one reader frame in ACTIVE state. */
 typedef enum {
     NFC_T2_UNHANDLED = 0,  /* not a command we answer; no response sent */
@@ -593,13 +629,19 @@ static nfc_t2_result_t nfc_cli_type2_response(nfc_cli_ctx_t *ctx, const uint8_t 
         return NFC_T2_LINK_RESET; \
     } while (0)
 
+#define NFC_T2_NAK_KEEP_ACTIVE() \
+    do { \
+        return st25r3916_target_nfca_respond_bits(0x00, 4) == ESP_OK \
+                   ? NFC_T2_RESPONDED : NFC_T2_UNHANDLED; \
+    } while (0)
+
     switch (rx[0]) {
         case 0x30: {  // READ: 4 pages starting at requested page
             if (rx_len != 2) return NFC_T2_LINK_RESET;
             if (rx[1] >= ctx->emu_pages_total) NFC_T2_NAK_SLEEP();
             size_t off = (size_t)rx[1] * 4;
             for (uint16_t i = 0; i < 16; i++) {
-                rsp[i] = (off + i < ctx->emu_mem_len) ? ctx->emu_mem[off + i] : 0x00;
+                rsp[i] = nfc_cli_type2_mem_byte(ctx, off + i);
             }
             rsp_len = 16;
             break;
@@ -614,12 +656,12 @@ static nfc_t2_result_t nfc_cli_type2_response(nfc_cli_ctx_t *ctx, const uint8_t 
             if (rsp_len > sizeof(rsp)) rsp_len = sizeof(rsp);
             size_t off = (size_t)rx[1] * 4;
             for (uint16_t i = 0; i < rsp_len; i++) {
-                rsp[i] = (off + i < ctx->emu_mem_len) ? ctx->emu_mem[off + i] : 0x00;
+                rsp[i] = nfc_cli_type2_mem_byte(ctx, off + i);
             }
             break;
         }
         case 0x60:   // GET_VERSION is one byte; 60 xx is MIFARE Classic AUTH A probe
-            if (rx_len != 1) return NFC_T2_IGNORED;
+            if (rx_len != 1) NFC_T2_NAK_KEEP_ACTIVE();
             memcpy(rsp, nfc_cli_ntag_version(ctx->emu_pages_total), 8);
             rsp_len = 8;
             break;
@@ -675,7 +717,8 @@ static nfc_t2_result_t nfc_cli_type2_response(nfc_cli_ctx_t *ctx, const uint8_t 
          * i.e. STOP + GOTO_SENSE.  HLTA is the exception: a real tag enters
          * HALT/SLEEP so the reader can exclude it from further REQA rounds. */
         case 0x50:  // HALT
-            return NFC_T2_HALT_SLEEP;
+            if (rx_len == 2 && rx[1] == 0x00) return NFC_T2_HALT_SLEEP;
+            return NFC_T2_LINK_RESET;
         case 0x52:  // WUPA / REQA received while ACTIVE
         case 0x53:  // Flipper proprietary SelCmd
             return NFC_T2_LINK_RESET;
@@ -691,6 +734,7 @@ static nfc_t2_result_t nfc_cli_type2_response(nfc_cli_ctx_t *ctx, const uint8_t 
     }
 
 #undef NFC_T2_NAK_SLEEP
+#undef NFC_T2_NAK_KEEP_ACTIVE
 
     return st25r3916_target_nfca_respond(rsp, rsp_len, true) == ESP_OK
                ? NFC_T2_RESPONDED : NFC_T2_UNHANDLED;
@@ -946,6 +990,35 @@ static void nfc_cli_start(bool once, bool parse, bool save) {
     }
 }
 
+static void nfc_cli_start_hardnested(uint8_t known_block, bool known_key_b,
+                                     const uint8_t known_key[6], uint8_t target_block,
+                                     bool target_key_b, uint16_t samples) {
+    if (s_nfc_cli_task) {
+        glog("NFC: task already running\n");
+        return;
+    }
+    nfc_cli_ctx_t *ctx = (nfc_cli_ctx_t *)calloc(1, sizeof(nfc_cli_ctx_t));
+    if (!ctx) {
+        glog("NFC: out of memory\n");
+        return;
+    }
+    ctx->once = true;
+    ctx->hardnested = true;
+    ctx->hn_known_block = known_block;
+    ctx->hn_known_key_b = known_key_b;
+    memcpy(ctx->hn_known_key, known_key, 6);
+    ctx->hn_target_block = target_block;
+    ctx->hn_target_key_b = target_key_b;
+    ctx->hn_samples = samples ? samples : 64;
+
+    BaseType_t ok = xTaskCreate(nfc_cli_scan_task, NFC_CLI_TASK_NAME, 8192, ctx, 5, &s_nfc_cli_task);
+    if (ok != pdPASS) {
+        s_nfc_cli_task = NULL;
+        free(ctx);
+        glog("NFC: failed to start hardnested capture task\n");
+    }
+}
+
 static bool nfc_cli_parse_u8(const char *s, uint8_t *out) {
     if (!s || !out || !*s) return false;
     char *end = NULL;
@@ -994,6 +1067,41 @@ static bool nfc_cli_parse_uid(const char *s, uint8_t *uid, uint8_t *uid_len) {
     memcpy(uid, out, n);
     *uid_len = n;
     return true;
+}
+
+static bool nfc_cli_parse_key6(const char *s, uint8_t key[6]) {
+    if (!s || !key) return false;
+    uint8_t out[6] = {0};
+    size_t n = 0;
+    int high = -1;
+    for (const char *p = s; *p; p++) {
+        if (*p == ':' || *p == '-' || *p == ' ') continue;
+        int v = nfc_cli_hex_nibble(*p);
+        if (v < 0) return false;
+        if (high < 0) {
+            high = v;
+        } else {
+            if (n >= sizeof(out)) return false;
+            out[n++] = (uint8_t)((high << 4) | v);
+            high = -1;
+        }
+    }
+    if (high >= 0 || n != sizeof(out)) return false;
+    memcpy(key, out, sizeof(out));
+    return true;
+}
+
+static bool nfc_cli_parse_key_type(const char *s, bool *key_b) {
+    if (!s || !key_b || !*s) return false;
+    if (s[0] == 'A' || s[0] == 'a' || s[0] == '0') {
+        *key_b = false;
+        return true;
+    }
+    if (s[0] == 'B' || s[0] == 'b' || s[0] == '1') {
+        *key_b = true;
+        return true;
+    }
+    return false;
 }
 
 #ifdef CONFIG_NFC_ST25R3916
@@ -1275,12 +1383,64 @@ static void nfc_cli_handle_emulate(int argc, char **argv) {
 }
 #endif
 
+static void nfc_cli_handle_hardnested(int argc, char **argv) {
+    uint8_t known_block = 0;
+    uint8_t target_block = 0;
+    bool known_key_b = false;
+    bool target_key_b = false;
+    uint8_t known_key[6] = {0};
+    uint16_t samples = 64;
+    bool have_known = false;
+    bool have_target = false;
+    bool have_key = false;
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "known") == 0 && i + 3 < argc) {
+            if (!nfc_cli_parse_u8(argv[++i], &known_block) ||
+                !nfc_cli_parse_key_type(argv[++i], &known_key_b) ||
+                !nfc_cli_parse_key6(argv[++i], known_key)) {
+                have_known = false;
+                break;
+            }
+            have_known = true;
+            have_key = true;
+        } else if (strcmp(argv[i], "target") == 0 && i + 2 < argc) {
+            if (!nfc_cli_parse_u8(argv[++i], &target_block) ||
+                !nfc_cli_parse_key_type(argv[++i], &target_key_b)) {
+                have_target = false;
+                break;
+            }
+            have_target = true;
+        } else if ((strcmp(argv[i], "samples") == 0 || strcmp(argv[i], "-n") == 0) && i + 1 < argc) {
+            uint16_t n = 0;
+            if (!nfc_cli_parse_u16(argv[++i], &n) || n == 0) break;
+            samples = n;
+        } else {
+            have_known = false;
+            break;
+        }
+    }
+
+    if (!have_known || !have_target || !have_key) {
+        glog("NFC: usage: nfc hardnested known <block> <A|B> <12hexkey> target <block> <A|B> [samples N]\n");
+        glog("NFC: example: nfc hardnested known 3 A FFFFFFFFFFFF target 7 A samples 128\n");
+        return;
+    }
+
+    if (samples > 512) samples = 512;
+    if (nfc_backend_get() != NFC_BACKEND_ST25R3916) {
+        glog("NFC: note: ST25R backend gives raw nonce parity; PN532 may expose less useful samples\n");
+    }
+    nfc_cli_start_hardnested(known_block, known_key_b, known_key, target_block, target_key_b, samples);
+}
+
 static void nfc_cli_help(void) {
     glog("NFC commands:\n");
     glog("  nfc backend [auto|pn532|st25r]  show/set local backend\n");
     glog("  nfc scan [parse]   start continuous ISO14443-A scan\n");
     glog("  nfc once [parse]   scan until one tag or 10s timeout\n");
     glog("  nfc save|dump      scan one tag and save Flipper .nfc\n");
+    glog("  nfc hardnested known <blk> <A|B> <key> target <blk> <A|B> [samples N]\n");
     glog("  nfc status         show NFC task state\n");
     glog("  nfc stop           stop scan/emulation\n");
     glog("  nfc emulate uid <uid> [atqa <hex>] [sak <hex>]\n");
@@ -1325,6 +1485,8 @@ void handle_nfc_cmd(int argc, char **argv) {
         nfc_cli_start(true, nfc_cli_has_arg(argc, argv, "parse", "-p"), false);
     } else if (strcmp(argv[1], "save") == 0 || strcmp(argv[1], "dump") == 0) {
         nfc_cli_start(true, true, true);
+    } else if (strcmp(argv[1], "hardnested") == 0 || strcmp(argv[1], "hn") == 0) {
+        nfc_cli_handle_hardnested(argc, argv);
     } else if (strcmp(argv[1], "stop") == 0) {
         glog(nfc_cli_stop() ? "NFC: stopping\n" : "NFC: not running\n");
     } else if (strcmp(argv[1], "status") == 0) {

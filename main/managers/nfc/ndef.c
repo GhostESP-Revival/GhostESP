@@ -382,6 +382,7 @@ static bool ndef_parse_wifi(const uint8_t *payload, size_t payload_len, char **o
                         uint16_t auth = ((uint16_t)payload[pos] << 8) | payload[pos + 1];
                         switch (auth) {
                         case 0x0001: auths = "Open"; break;
+                        case 0x0004: auths = "WEP"; break;
                         case 0x0002: auths = "WPA Personal"; break;
                         case 0x0008: auths = "WPA Enterprise"; break;
                         case 0x0010: auths = "WPA2 Enterprise"; break;
@@ -570,13 +571,13 @@ char* ndef_build_details_from_message(const uint8_t* ndef_msg,
     char *w = out; *w = '\0';
 
     if (!card_label) card_label = "NTAG2xx";
-    append_fmt(&w, &cap, "Card: %s | UID:", card_label);
+    append_fmt(&w, &cap, "Type: %s\nUID:", card_label);
     for (uint8_t i = 0; i < uid_len && cap > 3; ++i)
         append_fmt(&w, &cap, " %02X", uid[i]);
     append_str(&w, &cap, "\n");
 
     if (!ndef_msg || ndef_len == 0) {
-        append_str(&w, &cap, "No NDEF message found\n");
+        append_str(&w, &cap, "NDEF: none\n");
         return out;
     }
 
@@ -594,7 +595,7 @@ char* ndef_build_details_from_message(const uint8_t* ndef_msg,
             if (flags & 0x40) break;
         }
     }
-    append_fmt(&w, &cap, "NDEF: %uB, %u rec\n", (unsigned)ndef_len, (unsigned)rc_count);
+    append_fmt(&w, &cap, "NDEF: %u B / %u rec\n", (unsigned)ndef_len, (unsigned)rc_count);
 
     size_t mpos = 0; size_t mend = ndef_len; int rec_idx = 0;
     while (mpos < mend) {
@@ -634,7 +635,7 @@ char* ndef_build_details_from_tlv(const uint8_t* tlv_area,
     char *w = out; *w = '\0';
 
     if (!card_label) card_label = "TAG";
-    append_fmt(&w, &cap, "Card: %s | UID:", card_label);
+    append_fmt(&w, &cap, "Type: %s\nUID:", card_label);
     for (uint8_t i = 0; i < uid_len && cap > 3; ++i)
         append_fmt(&w, &cap, " %02X", uid[i]);
     append_str(&w, &cap, "\n");

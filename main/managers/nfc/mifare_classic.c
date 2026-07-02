@@ -1,3 +1,6 @@
+// MIFARE Classic nested/hardnested capture and `.nested.log` workflow reference:
+// Momentum-Firmware work by noproto, including key recovery improvements #3822.
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -6,8 +9,12 @@
 #include "managers/sd_card_manager.h"
 #include "gui/toast.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
+#endif
+#if defined(CONFIG_NFC_ST25R3916)
+#include "crypto1.h"
 #endif
 #include "managers/fuel_gauge_manager.h"
 #include "freertos/FreeRTOS.h"
@@ -166,7 +173,22 @@ static inline void mfc_cache_record_sector_key(int sector, bool usedB, const uin
 }
 
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
-// Minimal PRNG analysis: try to capture a few nonces; if duplicates appear quickly, mark as weak
+#define MFC_NESTED_ANALYZE_NT_COUNT 5
+#define MFC_NESTED_NT_HARD_MINIMUM 3
+
+static bool mfc_is_weak_prng_nonce(uint32_t nonce) {
+    if (nonce == 0) return false;
+    uint16_t x = (uint16_t)(nonce >> 16);
+    x = (uint16_t)((x & 0xffu) << 8) | (uint16_t)(x >> 8);
+    for (uint8_t i = 0; i < 16; ++i) {
+        x = (uint16_t)((x >> 1) | (uint16_t)(x ^ (x >> 2) ^ (x >> 3) ^ (x >> 5)) << 15);
+    }
+    x = (uint16_t)((x & 0xffu) << 8) | (uint16_t)(x >> 8);
+    return x == (uint16_t)(nonce & 0xffffu);
+}
+
+// PRNG analysis mirrors Momentum's weak/hard split: collect a few plaintext tag
+// nonces and count how many do not fit the weak 16-bit PRNG relation.
 static bool g_prng_checked = false;
 static bool g_prng_weak = false;
 static bool mfc_get_nonce(pn532_io_handle_t io, uint8_t block, bool key_b, uint8_t nt[4]){
@@ -186,21 +208,21 @@ static void mfc_analyze_prng_once(pn532_io_handle_t io){
     }
     g_prng_checked = true;
     if (!io) return;
-    uint8_t seen[8][4]; int n=0;
-    for (int i=0;i<8;i++){
+    int n = 0;
+    int hard = 0;
+    for (int i = 0; i < MFC_NESTED_ANALYZE_NT_COUNT; i++){
         uint8_t nt[4];
         if (mfc_get_nonce(io, 0, false, nt)){
-            memcpy(seen[n++], nt, 4);
-            // crude duplicate check
-            for (int a=0;a<n-1;a++){
-                if (memcmp(seen[a], nt, 4)==0){ g_prng_weak = true; break; }
-            }
-            if (g_prng_weak) break;
+            uint32_t nt32 = ((uint32_t)nt[0] << 24) | ((uint32_t)nt[1] << 16) |
+                            ((uint32_t)nt[2] << 8) | nt[3];
+            n++;
+            if (!mfc_is_weak_prng_nonce(nt32)) hard++;
         } else {
             break;
         }
     }
-    ESP_LOGI(MFC_TAG, "PRNG analysis: samples=%d weak=%d", n, (int)g_prng_weak);
+    g_prng_weak = (n > 0) && (hard < MFC_NESTED_NT_HARD_MINIMUM);
+    ESP_LOGI(MFC_TAG, "PRNG analysis: samples=%d hard=%d weak=%d", n, hard, (int)g_prng_weak);
     // Raw 0x60/0x61 via InCommunicateThru can disturb selection; reselect to restore state
     (void)pn532_in_list_passive_target(io);
 }
@@ -237,6 +259,9 @@ static void mfc_harvest_trailer_keys(pn532_io_handle_t io, MFC_TYPE t, int secto
 // After unlocking with A or B, try to find the complementary key using user dict only (lightweight)
 static void mfc_try_find_complementary_user_key(pn532_io_handle_t io, MFC_TYPE t, int sector, uint8_t auth_blk,
                                                 const uint8_t *uid, uint8_t uid_len, bool usedB_cur);
+static bool mfc_try_nested_dict_recovery(pn532_io_handle_t io, MFC_TYPE t, int sector,
+                                         bool target_key_b, const uint8_t *uid, uint8_t uid_len,
+                                         uint8_t out_key[6]);
 // Card presence detection functions
 static bool mfc_tag_is_present(pn532_io_handle_t io, const uint8_t* uid, uint8_t uid_len);
 static bool mfc_wait_for_tag_return(pn532_io_handle_t io, const uint8_t* uid, uint8_t uid_len);
@@ -921,6 +946,241 @@ static void mfc_try_find_complementary_user_key(pn532_io_handle_t io, MFC_TYPE t
     }
 }
 
+#if defined(CONFIG_NFC_ST25R3916)
+#define MFC_NESTED_LOCAL_SAMPLES 8
+#define MFC_NESTED_LOCAL_WEAK_SAMPLES 2
+
+typedef struct {
+    uint32_t nt_enc;
+    uint8_t par;
+} mfc_nested_sample_t;
+
+static inline uint8_t mfc_even_parity32(uint32_t x) {
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x ^= x >> 2;
+    x ^= x >> 1;
+    return (uint8_t)(x & 1u);
+}
+
+static inline uint8_t mfc_even_parity8(uint8_t x) {
+    return mfc_even_parity32(x);
+}
+
+static uint8_t mfc_crypto1_rollback_bit(crypto1_t *c, uint32_t in, int encrypted) {
+    uint32_t t;
+    uint32_t out;
+    uint8_t ret;
+
+    c->odd &= 0xffffffu;
+    t = c->odd;
+    c->odd = c->even;
+    c->even = t;
+
+    out = c->even & 1u;
+    out ^= 0x870804u & (c->even >>= 1);
+    out ^= 0x29CE5Cu & c->odd;
+    out ^= !!in;
+    ret = crypto1_filter(c->odd);
+    out ^= ret & (uint8_t)(!!encrypted);
+
+    c->even |= (uint32_t)mfc_even_parity32(out) << 23;
+    return ret;
+}
+
+static uint32_t mfc_crypto1_rollback_word(crypto1_t *c, uint32_t in, int encrypted) {
+    uint32_t ret = 0;
+    for (int i = 31; i >= 0; --i) {
+        ret |= (uint32_t)mfc_crypto1_rollback_bit(c, (in >> (i ^ 24)) & 1u, encrypted) << (24 ^ i);
+    }
+    return ret;
+}
+
+static uint64_t mfc_key_to_u64(const uint8_t key[6]) {
+    uint64_t out = 0;
+    for (int i = 0; i < 6; ++i) out = (out << 8) | key[i];
+    return out;
+}
+
+static uint32_t mfc_nested_decrypt_nt_enc(uint32_t cuid, uint32_t nt_enc, const uint8_t key[6]) {
+    crypto1_t c;
+    crypto1_init(&c, mfc_key_to_u64(key));
+    crypto1_word(&c, nt_enc ^ cuid, 1);
+    return nt_enc ^ mfc_crypto1_rollback_word(&c, nt_enc ^ cuid, 1);
+}
+
+static bool mfc_nested_nonce_matches_parity(uint32_t nt, uint32_t ks, uint8_t par) {
+    return (mfc_even_parity8((uint8_t)(nt >> 24)) == (((par >> 3) & 1u) ^ ((ks >> 16) & 1u))) &&
+           (mfc_even_parity8((uint8_t)(nt >> 16)) == (((par >> 2) & 1u) ^ ((ks >> 8) & 1u))) &&
+           (mfc_even_parity8((uint8_t)(nt >> 8)) == (((par >> 1) & 1u) ^ (ks & 1u)));
+}
+
+static bool mfc_nested_candidate_matches(const mfc_nested_sample_t *samples, int sample_count,
+                                         uint32_t cuid, const uint8_t key[6], bool require_weak_prng) {
+    if (!samples || sample_count <= 0 || !key) return false;
+    for (int i = 0; i < sample_count; ++i) {
+        uint32_t nt = mfc_nested_decrypt_nt_enc(cuid, samples[i].nt_enc, key);
+        uint32_t ks = nt ^ samples[i].nt_enc;
+        if (require_weak_prng && !mfc_is_weak_prng_nonce(nt)) return false;
+        if (!mfc_nested_nonce_matches_parity(nt, ks, samples[i].par)) return false;
+    }
+    return true;
+}
+
+static bool mfc_nested_search_key_list(pn532_io_handle_t io, uint8_t target_block, bool target_key_b,
+                                       const uint8_t *uid, uint8_t uid_len,
+                                       const mfc_nested_sample_t *samples, int sample_count,
+                                       uint32_t cuid, bool require_weak_prng,
+                                       const uint8_t *keys, int key_count, uint8_t out_key[6]) {
+    if (!keys || key_count <= 0) return false;
+    for (int i = 0; i < key_count; ++i) {
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
+        const uint8_t *key = &keys[i * 6];
+        if (mfc_nested_candidate_matches(samples, sample_count, cuid, key, require_weak_prng)) {
+            if (mfc_auth_block(io, target_block, target_key_b, key, uid, uid_len) == ESP_OK) {
+                memcpy(out_key, key, 6);
+                return true;
+            }
+            ESP_LOGD(MFC_TAG, "Nested: local candidate failed RF verify idx=%d", i + 1);
+        }
+        if (g_prog_cb) g_prog_cb(i + 1, key_count, g_prog_user);
+    }
+    return false;
+}
+
+static bool mfc_nested_find_anchor(MFC_TYPE t, uint8_t *known_block, bool *known_key_b, uint8_t known_key[6]) {
+    int sectors = mfc_sector_count(t);
+    if (sectors <= 0) return false;
+    for (int s = 0; s < sectors; ++s) {
+        if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s)) {
+            *known_block = mfc_auth_target_block(t, s);
+            *known_key_b = false;
+            memcpy(known_key, &g_sector_key_a[s * 6], 6);
+            return true;
+        }
+        if (g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s)) {
+            *known_block = mfc_auth_target_block(t, s);
+            *known_key_b = true;
+            memcpy(known_key, &g_sector_key_b[s * 6], 6);
+            return true;
+        }
+    }
+    return false;
+}
+
+static int mfc_nested_collect_samples(pn532_io_handle_t io, const uint8_t *uid, uint8_t uid_len,
+                                      uint8_t known_block, bool known_key_b, const uint8_t known_key[6],
+                                      uint8_t target_block, bool target_key_b,
+                                      int wanted_samples,
+                                      mfc_nested_sample_t samples[MFC_NESTED_LOCAL_SAMPLES]) {
+    int got = 0;
+    if (wanted_samples <= 0 || wanted_samples > MFC_NESTED_LOCAL_SAMPLES) wanted_samples = MFC_NESTED_LOCAL_SAMPLES;
+    for (int i = 0; i < wanted_samples; ++i) {
+        if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) break;
+        (void)pn532_in_list_passive_target(io);
+        if (mfc_auth_block(io, known_block, known_key_b, known_key, uid, uid_len) != ESP_OK) {
+            continue;
+        }
+
+        uint8_t cmd[2] = { target_key_b ? MIFARE_CMD_AUTH_B : MIFARE_CMD_AUTH_A, target_block };
+        uint8_t resp[16] = {0};
+        uint8_t resp_len = sizeof(resp);
+        esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
+        if (err != ESP_OK || resp_len < 8) {
+            ESP_LOGD(MFC_TAG, "Nested: sample failed idx=%d err=%d len=%u", i, (int)err, (unsigned)resp_len);
+            continue;
+        }
+        samples[got].nt_enc = ((uint32_t)resp[0] << 24) | ((uint32_t)resp[1] << 16) |
+                              ((uint32_t)resp[2] << 8) | resp[3];
+        samples[got].par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
+                                     ((resp[6] & 1) << 1) | (resp[7] & 1));
+        got++;
+        if (g_prog_cb) g_prog_cb(got, wanted_samples, g_prog_user);
+    }
+    (void)pn532_in_list_passive_target(io);
+    return got;
+}
+
+static bool mfc_try_nested_dict_recovery(pn532_io_handle_t io, MFC_TYPE t, int sector,
+                                         bool target_key_b, const uint8_t *uid, uint8_t uid_len,
+                                         uint8_t out_key[6]) {
+    if (!io || !uid || uid_len < 4 || !out_key) return false;
+    if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) return false;
+    if (target_key_b) {
+        if (g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, sector)) return false;
+    } else {
+        if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, sector)) return false;
+    }
+
+    uint8_t known_block = 0;
+    bool known_key_b = false;
+    uint8_t known_key[6] = {0};
+    if (!mfc_nested_find_anchor(t, &known_block, &known_key_b, known_key)) return false;
+
+    uint8_t target_block = (uint8_t)(mfc_first_block_of_sector(t, sector) + mfc_blocks_in_sector(t, sector) - 1);
+    mfc_nested_sample_t samples[MFC_NESTED_LOCAL_SAMPLES] = {0};
+    int sample_goal = g_prng_weak ? MFC_NESTED_LOCAL_WEAK_SAMPLES : MFC_NESTED_LOCAL_SAMPLES;
+    int sample_min = g_prng_weak ? 1 : MFC_NESTED_LOCAL_SAMPLES;
+    ESP_LOGI(MFC_TAG, "Nested: collect sector=%d key=%c via anchor blk=%u key=%c prng=%s samples=%d",
+             sector, target_key_b ? 'B' : 'A', known_block, known_key_b ? 'B' : 'A',
+             g_prng_weak ? "weak" : "hard", sample_goal);
+    int sample_count = mfc_nested_collect_samples(io, uid, uid_len, known_block, known_key_b, known_key,
+                                                  target_block, target_key_b, sample_goal, samples);
+    if (sample_count < sample_min) {
+        ESP_LOGI(MFC_TAG, "Nested: insufficient samples sector=%d key=%c got=%d",
+                 sector, target_key_b ? 'B' : 'A', sample_count);
+        return false;
+    }
+
+    uint32_t cuid = ((uint32_t)uid[uid_len - 4] << 24) | ((uint32_t)uid[uid_len - 3] << 16) |
+                    ((uint32_t)uid[uid_len - 2] << 8) | uid[uid_len - 1];
+    mfc_user_dict_ensure_loaded();
+    if (g_prog_cb) g_prog_cb(0, g_user_key_count > 0 ? g_user_key_count : 1, g_prog_user);
+    if (mfc_nested_search_key_list(io, target_block, target_key_b, uid, uid_len,
+                                   samples, sample_count, cuid, g_prng_weak,
+                                   g_user_keys, g_user_key_count, out_key)) {
+        ESP_LOGI(MFC_TAG, "Nested: verified from user dict sector=%d key=%c", sector, target_key_b ? 'B' : 'A');
+        goto accept;
+    }
+
+#if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
+    mfc_dict_ensure_loaded();
+    if (g_prog_cb) g_prog_cb(0, g_dict_key_count > 0 ? g_dict_key_count : 1, g_prog_user);
+    if (mfc_nested_search_key_list(io, target_block, target_key_b, uid, uid_len,
+                                   samples, sample_count, cuid, g_prng_weak,
+                                   g_dict_keys, g_dict_key_count, out_key)) {
+        ESP_LOGI(MFC_TAG, "Nested: verified from embedded dict sector=%d key=%c", sector, target_key_b ? 'B' : 'A');
+        goto accept;
+    }
+#endif
+
+    if (mfc_nested_search_key_list(io, target_block, target_key_b, uid, uid_len,
+                                   samples, sample_count, cuid, g_prng_weak, &DEFAULT_KEYS[0][0],
+                                   (int)(sizeof(DEFAULT_KEYS) / sizeof(DEFAULT_KEYS[0])), out_key)) {
+        ESP_LOGI(MFC_TAG, "Nested: verified from defaults sector=%d key=%c", sector, target_key_b ? 'B' : 'A');
+        goto accept;
+    }
+    ESP_LOGI(MFC_TAG, "Nested: no local dict candidate sector=%d key=%c", sector, target_key_b ? 'B' : 'A');
+    return false;
+
+accept:
+    mfc_record_working_key(out_key, target_key_b);
+    mfc_cache_record_sector_key(sector, target_key_b, out_key);
+    ESP_LOGI(MFC_TAG, "Nested: accepted sector=%d key=%c %02X%02X%02X%02X%02X%02X",
+             sector, target_key_b ? 'B' : 'A', out_key[0], out_key[1], out_key[2],
+             out_key[3], out_key[4], out_key[5]);
+    return true;
+}
+#else
+static bool mfc_try_nested_dict_recovery(pn532_io_handle_t io, MFC_TYPE t, int sector,
+                                         bool target_key_b, const uint8_t *uid, uint8_t uid_len,
+                                         uint8_t out_key[6]) {
+    (void)io; (void)t; (void)sector; (void)target_key_b; (void)uid; (void)uid_len; (void)out_key;
+    return false;
+}
+#endif
+
 
 bool mfc_is_classic_sak(uint8_t sak) {
     return (sak == 0x08) || (sak == 0x18) || (sak == 0x09);
@@ -1351,6 +1611,137 @@ bool mfc_save_flipper_file(pn532_io_handle_t io,
     toast_show("NFC dump saved", TOAST_SUCCESS);
     return true;
 }
+
+bool mfc_hardnested_capture_file(pn532_io_handle_t io,
+                                 const uint8_t* uid,
+                                 uint8_t uid_len,
+                                 uint16_t atqa,
+                                 uint8_t sak,
+                                 uint8_t known_block,
+                                 bool known_key_b,
+                                 const uint8_t known_key[6],
+                                 uint8_t target_block,
+                                 bool target_key_b,
+                                 uint16_t samples,
+                                 const char* out_dir,
+                                 char* out_path,
+                                 size_t out_path_len) {
+    if (!io || !uid || uid_len == 0 || !known_key || !out_dir) return false;
+    if (samples == 0) samples = 64;
+    if (samples > 512) samples = 512;
+
+    sd_card_create_directory(out_dir);
+
+    char uid_part[40] = {0};
+    int up = 0;
+    for (uint8_t i = 0; i < uid_len && up < (int)sizeof(uid_part) - 3; ++i) {
+        up += snprintf(uid_part + up, sizeof(uid_part) - up, "%02X%s", uid[i],
+                       (i + 1 < uid_len) ? "-" : "");
+    }
+
+    char path[192];
+    snprintf(path, sizeof(path), "%s/.nested.log", out_dir);
+    if (out_path && out_path_len) snprintf(out_path, out_path_len, "%s", path);
+
+    uint32_t cuid = 0;
+    if (uid_len >= 4) {
+        const uint8_t *u = &uid[uid_len - 4];
+        cuid = ((uint32_t)u[0] << 24) | ((uint32_t)u[1] << 16) | ((uint32_t)u[2] << 8) | u[3];
+    }
+    int target_sector = mfc_sector_of_block(mfc_type_from_sak(sak), target_block);
+    if (target_sector < 0) target_sector = 0;
+
+    char buf[192];
+    /* Output intentionally matches Momentum-Firmware's MFC nested log lines:
+     * `Sec <n> key <A/B> cuid <hex> nt0 <hex> ks0 <hex> par0 <bits>`.
+     * Momentum stores this in `/ext/nfc/.nested.log`; GhostESP mirrors that as
+     * `/mnt/ghostesp/nfc/.nested.log` for PC-side conversion/solving. */
+    if (!sd_card_exists(path)) {
+        if (sd_card_write_file(path, "", 0) != ESP_OK) return false;
+    }
+
+    uint16_t got = 0;
+    for (uint16_t i = 0; i < samples; ++i) {
+        if (mfc_call_should_cancel()) break;
+        (void)pn532_in_list_passive_target(io);
+        if (mfc_auth_block(io, known_block, known_key_b, known_key, uid, uid_len) != ESP_OK) {
+            int pos = snprintf(buf, sizeof(buf), "sample=%u error=known_auth_failed\n", (unsigned)i);
+            if (pos > 0) (void)sd_card_append_file(path, buf, (size_t)pos);
+            continue;
+        }
+
+        uint8_t cmd[2] = { target_key_b ? MIFARE_CMD_AUTH_B : MIFARE_CMD_AUTH_A, target_block };
+        uint8_t resp[16] = {0};
+        uint8_t resp_len = sizeof(resp);
+        esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
+        if (err == ESP_OK && resp_len >= 4) {
+            got++;
+            uint32_t nt_enc = ((uint32_t)resp[0] << 24) | ((uint32_t)resp[1] << 16) |
+                              ((uint32_t)resp[2] << 8) | resp[3];
+            uint8_t par = 0;
+            if (resp_len >= 8) {
+                par = (uint8_t)(((resp[4] & 1) << 3) | ((resp[5] & 1) << 2) |
+                                ((resp[6] & 1) << 1) | (resp[7] & 1));
+            }
+            int pos = snprintf(buf, sizeof(buf),
+                               "Sec %d key %c cuid %08lX nt0 00000000 ks0 %08lX par0 %u%u%u%u\n",
+                               target_sector, target_key_b ? 'B' : 'A',
+                               (unsigned long)cuid, (unsigned long)nt_enc,
+                               (par >> 3) & 1, (par >> 2) & 1, (par >> 1) & 1, par & 1);
+            (void)sd_card_append_file(path, buf, (size_t)pos);
+        } else {
+            ESP_LOGD(MFC_TAG, "nested capture sample failed idx=%u err=%d len=%u",
+                     (unsigned)i, (int)err, (unsigned)resp_len);
+        }
+
+        if (g_prog_cb) g_prog_cb((int)(i + 1), samples, g_prog_user);
+    }
+
+    return got > 0;
+}
+
+bool mfc_get_hardnested_defaults(uint8_t *known_block,
+                                 bool *known_key_b,
+                                 uint8_t known_key[6],
+                                 uint8_t *target_block,
+                                 bool *target_key_b) {
+    if (!known_block || !known_key_b || !known_key || !target_block || !target_key_b) return false;
+    if (!g_mfc_cache || g_mfc_type == MFC_UNKNOWN || g_mfc_uid_len == 0) return false;
+    int sectors = mfc_sector_count(g_mfc_type);
+    if (sectors <= 0) return false;
+
+    int known_sector = -1;
+    for (int s = 0; s < sectors; ++s) {
+        if (g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s)) {
+            known_sector = s;
+            *known_key_b = false;
+            memcpy(known_key, &g_sector_key_a[s * 6], 6);
+            break;
+        }
+        if (g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s)) {
+            known_sector = s;
+            *known_key_b = true;
+            memcpy(known_key, &g_sector_key_b[s * 6], 6);
+            break;
+        }
+    }
+    if (known_sector < 0) return false;
+    *known_block = mfc_auth_target_block(g_mfc_type, known_sector);
+
+    for (int s = 0; s < sectors; ++s) {
+        if (!(g_sector_key_a_valid && BITSET_TEST(g_sector_key_a_valid, s))) {
+            *target_key_b = false;
+            *target_block = (uint8_t)(mfc_first_block_of_sector(g_mfc_type, s) + mfc_blocks_in_sector(g_mfc_type, s) - 1);
+            return true;
+        }
+        if (!(g_sector_key_b_valid && BITSET_TEST(g_sector_key_b_valid, s))) {
+            *target_key_b = true;
+            *target_block = (uint8_t)(mfc_first_block_of_sector(g_mfc_type, s) + mfc_blocks_in_sector(g_mfc_type, s) - 1);
+            return true;
+        }
+    }
+    return false;
+}
 #endif // CONFIG_NFC_PN532
 
 MFC_TYPE mfc_type_from_sak(uint8_t sak) {
@@ -1396,36 +1787,24 @@ static esp_err_t mfc_auth_block(pn532_io_handle_t io, uint8_t block, bool use_ke
     uint8_t resp_len = sizeof(resp);
     esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
     if (err != ESP_OK) {
-        // If user requested cancel, bail out immediately to avoid extra I2C ops
         if (mfc_call_should_cancel()) {
             return err;
         }
-        // Check if authentication failed due to card removal
-        if (!mfc_tag_is_present(io, uid, uid_len)) {
-            // Card was removed, wait for it to return
-            if (!mfc_wait_for_tag_return(io, uid, uid_len)) {
-                // User cancelled while waiting
-                return ESP_ERR_INVALID_STATE;
-            }
-            // Card returned, reselect and retry authentication
-            (void)pn532_in_list_passive_target(io);
-            resp_len = sizeof(resp);
-            err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
-        } else {
-            // Failed AUTH can desync the tag; reselect to restore state for next attempts
-            (void)pn532_in_list_passive_target(io);
-            // Retry once after reselect
-            resp_len = sizeof(resp);
-            err = pn532_in_data_exchange(io, cmd, sizeof(cmd), resp, &resp_len);
-        }
+        // Wrong dictionary keys are expected. Retrying the same failed AUTH doubles
+        // brute-force time, especially on ST25R I2C/software Crypto1. Reselect only
+        // to restore card state for the next candidate.
+        (void)pn532_in_list_passive_target(io);
     }
     return err;
 }
 
 static esp_err_t mfc_read_block(pn532_io_handle_t io, uint8_t block, uint8_t out16[16]) {
+    if (!io || !out16) return ESP_ERR_INVALID_ARG;
     uint8_t cmd[2] = { MIFARE_CMD_READ, block };
     uint8_t resp_len = 16;
-    return pn532_in_data_exchange(io, cmd, sizeof(cmd), out16, &resp_len);
+    esp_err_t err = pn532_in_data_exchange(io, cmd, sizeof(cmd), out16, &resp_len);
+    if (err != ESP_OK) return err;
+    return (resp_len == 16) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
 static const char* mfc_type_str(MFC_TYPE t) {
@@ -1722,20 +2101,21 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
             }
             if (g_prog_cb) g_prog_cb(k+1, (int)(sizeof(DEFAULT_KEYS)/6), g_prog_user);
         }
-        if (ok) continue;
-        for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !ok; ++k) {
-            if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
-            if (mfc_auth_block(io, auth_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
-                readable++; b_cnt++; ok = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
-                if (spos < (int)sizeof(sec_buf) - 6) spos += snprintf(sec_buf + spos, sizeof(sec_buf) - spos, "%dB ", s);
-                mfc_cache_record_sector_key(s, true, DEFAULT_KEYS[k]);
-                usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
-                ESP_LOGI("MFC", "Summary: sector=%d auth success via defaults B (idx=%d)", s, k);
-                break;
-            } else {
-                ESP_LOGD("MFC", "Summary: sector=%d defaults B (idx=%d) failed", s, k);
+        if (!ok) {
+            for (int k = 0; k < (int)(sizeof(DEFAULT_KEYS)/6) && !ok; ++k) {
+                if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) break; // skip defaults on fast-finish
+                if (mfc_auth_block(io, auth_blk, true, DEFAULT_KEYS[k], uid, uid_len) == ESP_OK) {
+                    readable++; b_cnt++; ok = true; mfc_record_working_key(DEFAULT_KEYS[k], true);
+                    if (spos < (int)sizeof(sec_buf) - 6) spos += snprintf(sec_buf + spos, sizeof(sec_buf) - spos, "%dB ", s);
+                    mfc_cache_record_sector_key(s, true, DEFAULT_KEYS[k]);
+                    usedB_cur = true; used_key_cur = DEFAULT_KEYS[k];
+                    ESP_LOGI("MFC", "Summary: sector=%d auth success via defaults B (idx=%d)", s, k);
+                    break;
+                } else {
+                    ESP_LOGD("MFC", "Summary: sector=%d defaults B (idx=%d) failed", s, k);
+                }
+                if (g_prog_cb) g_prog_cb(k+1, (int)(sizeof(DEFAULT_KEYS)/6), g_prog_user);
             }
-            if (g_prog_cb) g_prog_cb(k+1, (int)(sizeof(DEFAULT_KEYS)/6), g_prog_user);
         }
 #if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
         if (!ok) {
@@ -1758,6 +2138,26 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
                 ESP_LOGI("MFC", "Summary: sector=%d auth success via embedded dict %c", s, usedB ? 'B' : 'A');
             } else {
                 ESP_LOGD("MFC", "Summary: sector=%d embedded dict failed", s);
+            }
+        }
+#endif
+#if defined(CONFIG_NFC_ST25R3916)
+        if (!ok && !mfc_call_should_skip_dict()) {
+            uint8_t nested_key[6] = {0};
+            ESP_LOGI("MFC", "Summary: try nested local recovery sector=%d", s);
+            mfc_call_on_phase(s, auth_blk, false, MFC_NESTED_LOCAL_SAMPLES);
+            if (mfc_try_nested_dict_recovery(io, t, s, false, uid, uid_len, nested_key)) {
+                readable++; a_cnt++; ok = true;
+                if (spos < (int)sizeof(sec_buf) - 6) spos += snprintf(sec_buf + spos, sizeof(sec_buf) - spos, "%dA ", s);
+                usedB_cur = false;
+                used_key_cur = &g_sector_key_a[s * 6];
+                ESP_LOGI("MFC", "Summary: sector=%d auth success via nested local A", s);
+            } else if (mfc_try_nested_dict_recovery(io, t, s, true, uid, uid_len, nested_key)) {
+                readable++; b_cnt++; ok = true;
+                if (spos < (int)sizeof(sec_buf) - 6) spos += snprintf(sec_buf + spos, sizeof(sec_buf) - spos, "%dB ", s);
+                usedB_cur = true;
+                used_key_cur = &g_sector_key_b[s * 6];
+                ESP_LOGI("MFC", "Summary: sector=%d auth success via nested local B", s);
             }
         }
 #endif
@@ -1791,9 +2191,9 @@ char* mfc_build_details_summary(pn532_io_handle_t io,
 
     size_t cap = 1024; char *out = (char*)malloc(cap); if (!out) { fuel_gauge_manager_set_paused(false); return NULL; }
     char *w = out; size_t rem = cap; int n = 0;
-    n = snprintf(w, rem, "Card: %s | UID:", mfc_type_str(t)); w += n; rem -= n;
+    n = snprintf(w, rem, "Type: %s\nUID:", mfc_type_str(t)); w += n; rem -= n;
     for (uint8_t i = 0; i < uid_len && rem > 4; ++i) { n = snprintf(w, rem, " %02X", uid[i]); w += n; rem -= n; }
-    n = snprintf(w, rem, "\nATQA: %02X %02X | SAK: %02X\n", (atqa>>8)&0xFF, atqa&0xFF, sak); w+=n; rem-=n;
+    n = snprintf(w, rem, "\nATQA: %02X %02X  SAK: %02X\n", (atqa>>8)&0xFF, atqa&0xFF, sak); w+=n; rem-=n;
     // Compute accurate key counts discovered so far
     int found_a = 0, found_b = 0;
     for (int i = 0; i < sectors; ++i) {

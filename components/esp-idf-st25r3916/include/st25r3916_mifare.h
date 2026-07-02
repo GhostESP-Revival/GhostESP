@@ -44,6 +44,16 @@ esp_err_t st25r3916_mifare_auth(crypto1_t *c, const uint8_t *uid, uint8_t uid_le
 esp_err_t st25r3916_mifare_xfer(crypto1_t *c, const uint8_t *plain, uint16_t plen, uint8_t *out,
                                 uint16_t out_cap, uint16_t *out_len);
 
+/**
+ * @brief Send an encrypted nested AUTH command while a Crypto1 session is armed.
+ *
+ * Returns the raw encrypted tag nonce bytes and their received parity bits. This
+ * is intended for offline nested/hardnested capture; the caller should reselect
+ * and re-authenticate before collecting another sample.
+ */
+esp_err_t st25r3916_mifare_nested_auth_raw(crypto1_t *c, uint8_t key_type, uint8_t block,
+                                           uint8_t nt_enc[4], uint8_t nt_par[4]);
+
 #ifdef __cplusplus
 }
 #endif
