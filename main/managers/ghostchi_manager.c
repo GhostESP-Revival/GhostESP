@@ -2,6 +2,7 @@
 
 #include "core/callbacks.h"
 #include "core/utils.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -117,11 +118,11 @@ static bool s_monitor_active = false;
 static bool s_deauth_active = false;
 static bool s_deauth_used = false;
 static ghostchi_snapshot_t s_snapshot;
-static ghostchi_learn_entry_t s_learn[GHOSTCHI_LEARN_MAX];
+EXT_RAM_BSS_ATTR static ghostchi_learn_entry_t s_learn[GHOSTCHI_LEARN_MAX];
 static size_t s_learn_count = 0;
 static bool s_storage_ready = false;
 static char s_session_log_path[128];
-static char s_session_log_buffer[GHOSTCHI_SESSION_LOG_BUFFER_SIZE];
+EXT_RAM_BSS_ATTR static char s_session_log_buffer[GHOSTCHI_SESSION_LOG_BUFFER_SIZE];
 static size_t s_session_log_buffer_len = 0;
 static uint32_t s_phase_deadline_ms = 0;
 static uint32_t s_handshakes_before = 0;

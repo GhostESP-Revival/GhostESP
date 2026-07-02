@@ -16,6 +16,7 @@
 #include "managers/ble_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
@@ -50,7 +51,7 @@ typedef struct {
 } AirTagDevice;
 
 // Discovered AirTag storage
-static AirTagDevice discovered_airtags[MAX_AIRTAGS];
+EXT_RAM_BSS_ATTR static AirTagDevice discovered_airtags[MAX_AIRTAGS];
 static int discovered_airtag_count = 0;
 static int selected_airtag_index = -1;
 static TickType_t airtag_last_rssi_log[MAX_AIRTAGS];

@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include <stdio.h>
@@ -134,7 +135,7 @@ typedef struct {
 } AirTagDevice;
 
 #define AIRTAG_RSSI_LOG_INTERVAL_MS 3000
-static AirTagDevice discovered_airtags[MAX_AIRTAGS];
+EXT_RAM_BSS_ATTR static AirTagDevice discovered_airtags[MAX_AIRTAGS];
 static int discovered_airtag_count = 0;
 static int selected_airtag_index = -1; // Index of the AirTag selected for spoofing
 static TickType_t airtag_last_rssi_log[MAX_AIRTAGS];

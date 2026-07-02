@@ -1,5 +1,6 @@
 #include "managers/views/subghz_view.h"
 #include "sdkconfig.h"
+#include "esp_attr.h"
 
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
@@ -257,12 +258,12 @@ static bool s_wf_remote_have_cursor = false;
 static uint8_t s_levels[SUBGHZ_SCANNER_CHANNEL_COUNT] = {0};
 static uint8_t s_peaks[SUBGHZ_SCANNER_CHANNEL_COUNT] = {0};
 static uint8_t s_cursor = 0;
-static int32_t s_capture_raw[SUBGHZ_RAW_MAX_DURATIONS] = {0};
+EXT_RAM_BSS_ATTR static int32_t s_capture_raw[SUBGHZ_RAW_MAX_DURATIONS] = {0};
 static size_t s_capture_raw_count = 0;
 static uint8_t s_capture_preview_cursor = 0;
 static bool s_capture_buffer_valid = false;
 static char s_capture_name[SUBGHZ_SNAPSHOT_NAME_MAX] = "capture";
-static int32_t s_remote_raw_work[SUBGHZ_RAW_MAX_DURATIONS] = {0};
+EXT_RAM_BSS_ATTR static int32_t s_remote_raw_work[SUBGHZ_RAW_MAX_DURATIONS] = {0};
 static size_t s_remote_raw_expected = 0;
 static size_t s_remote_raw_received = 0;
 static subghz_decoded_signal_t s_remote_decoded = {0};

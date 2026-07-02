@@ -16,6 +16,7 @@
 #include "managers/ble_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
@@ -58,7 +59,7 @@ typedef struct {
     int8_t rssi;
 } FlipperDevice;
 
-static FlipperDevice discovered_flippers[MAX_FLIPPERS];
+EXT_RAM_BSS_ATTR static FlipperDevice discovered_flippers[MAX_FLIPPERS];
 static int discovered_flipper_count = 0;
 static int selected_flipper_index = -1;
 static volatile bool flipper_scan_active = false;

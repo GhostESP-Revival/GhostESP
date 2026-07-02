@@ -1,6 +1,7 @@
 #include "managers/views/terminal_screen.h"
 #include "core/serial_manager.h"
 #include "core/commandline.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -135,7 +136,7 @@ typedef struct {
   bool is_dualcomm; // precomputed at insert time, read in draw callback
 } TermLine;
 
-static TermLine term_lines[MAX_TERMINAL_LINES];
+EXT_RAM_BSS_ATTR static TermLine term_lines[MAX_TERMINAL_LINES];
 static uint16_t term_line_head = 0;   // index of oldest
 static uint16_t term_line_count = 0;  // number of valid lines
 static size_t term_text_bytes = 0;    // total bytes across stored lines

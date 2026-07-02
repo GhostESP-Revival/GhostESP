@@ -9,6 +9,7 @@
 #include "core/ouis.h"       // For OUI vendor lookup
 #include "managers/ghostchi_manager.h"
 #include "vendor/pcap.h"     // For pcap_is_wireshark_mode()
+#include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h" // Add include for heap stats
@@ -152,8 +153,8 @@ volatile bool ap_sta_has_ip = false;
 
 // Port definitions moved to core/network_constants.c
 
-static char PORTALURL[512] = "";
-static char domain_str[128] = "";
+EXT_RAM_BSS_ATTR static char PORTALURL[512] = "";
+EXT_RAM_BSS_ATTR static char domain_str[128] = "";
 EventGroupHandle_t wifi_event_group;
 wifi_ap_record_t selected_ap;
 wifi_ap_record_t *selected_aps = NULL;
@@ -175,8 +176,8 @@ dns_server_handle_t dns_handle_take(void) {
 esp_netif_t *wifiAP;
 esp_netif_t *wifiSTA;
 static bool login_done = false;
-static char current_creds_filename[128] = "";
-static char current_keystrokes_filename[128] = "";
+EXT_RAM_BSS_ATTR static char current_creds_filename[128] = "";
+EXT_RAM_BSS_ATTR static char current_keystrokes_filename[128] = "";
 static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
@@ -208,9 +209,9 @@ static void portal_clear_file_cache(void) {
 
 #define PORTAL_KEYSTROKE_BUF_SZ 512
 #define PORTAL_CREDS_BUF_SZ 384
-static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
+EXT_RAM_BSS_ATTR static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
 static size_t s_portal_keystroke_len = 0;
-static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
+EXT_RAM_BSS_ATTR static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
 static size_t s_portal_creds_len = 0;
 
 static void portal_flush_buffers_to_sd(void) {
@@ -4063,12 +4064,12 @@ static bool karma_running = false;
 static TaskHandle_t karma_task_handle = NULL;
 
 // Add these globals near your other Karma variables
-static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
+EXT_RAM_BSS_ATTR static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
 static int karma_ssid_count = 0;
 static int karma_ssid_index = 0;
 static uint32_t last_ssid_change_time = 0;
 static bool karma_ssid_manual_mode = false;
-static char karma_portal_file[256] = "default";
+static char karma_portal_file[256] = "default"; // non-zero initializer: must stay in .data, not PSRAM .bss
 
 
 // Helper to add SSID to cache if not present

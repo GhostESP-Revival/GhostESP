@@ -13,6 +13,7 @@
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
 #include "managers/views/error_popup.h"
+#include "esp_attr.h"
 #include "managers/views/keyboard_screen.h"
 #include "core/serial_manager.h"
 #include "core/esp_comm_manager.h"
@@ -65,7 +66,7 @@ static const char *badusb_main_options[] = {
 };
 
 #define BADUSB_SETTINGS_COUNT 8
-static char settings_labels[BADUSB_SETTINGS_COUNT][80];
+EXT_RAM_BSS_ATTR static char settings_labels[BADUSB_SETTINGS_COUNT][80];
 static const char *settings_options[BADUSB_SETTINGS_COUNT + 1];
 static const char *kb_layout_names[] = {"US", "DE", "FR", "UK", "ES"};
 
@@ -88,7 +89,7 @@ static void populate_settings_labels(void) {
 
 #define MAX_SCRIPTS 32
 #define MAX_SCRIPT_NAME 64
-static char script_names[MAX_SCRIPTS][MAX_SCRIPT_NAME];
+EXT_RAM_BSS_ATTR static char script_names[MAX_SCRIPTS][MAX_SCRIPT_NAME];
 static const char *script_options[MAX_SCRIPTS + 2];
 static int script_count = 0;
 

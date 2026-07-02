@@ -13,6 +13,7 @@
 #include "gui/accessibility_fonts.h"
 #include "gui/asset_pack.h"
 #include "gui/theme_palette_api.h"
+#include "esp_attr.h"
 #include "gui/design_tokens.h"
 #include "gui/ios_toggle.h"
 #include "io_manager.h"
@@ -148,7 +149,7 @@ static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
 static int ble_gatt_last_count = -1;
 static int selected_ble_gatt_index = -1;
-static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
+EXT_RAM_BSS_ATTR static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
 static const char *ble_oui_vendor_options[BLE_OUI_VENDOR_MAX_RESULTS + 2];
 static int ble_oui_vendor_count = 0;
 static int selected_station_index = -1;
