@@ -2,26 +2,26 @@
 
 ## Revival v2.1.0
 
-### Added
-- NFC backend selector (`auto` / `pn532` / `st25r`) via UI and `nfc backend` CLI; `auto` tries PN532, then ST25R3916
-- ST25R3916/ST25R3916B NFC frontend (SPI and I2C) with software Crypto1 and card emulation (Type 2/NTAG and MIFARE Classic); listener and emulation behavior referenced from [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware)
-- MIFARE Classic nested key recovery on ST25R3916: captures encrypted nonces, classifies weak/hard PRNG, filters dictionaries against Crypto1/parity, and RF-verifies candidates ([@noproto](https://github.com/noproto))
-- Momentum-compatible `.nested.log` export at `/mnt/ghostesp/nfc/.nested.log` for PC-side hardnested solving ([@noproto](https://github.com/noproto))
-- `nfc hardnested` CLI command for manual nested nonce capture ([@noproto](https://github.com/noproto))
-- PicoPass / iCLASS support on ST25R3916, based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
-- NDEF tag generation
-- NTAG Type 2 metadata parsing (GET_VERSION, signature, counters, static/dynamic locks, CFG protection) with write-safety checks
-- DESFire version/UID detection summary
+### NFC
+- Added ST25R3916/ST25R3916B NFC frontend (SPI and I2C) with software Crypto1, card emulation (Type 2/NTAG and MIFARE Classic), and listener behavior referenced from [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware)
+- Added NFC backend selector (`auto` / `pn532` / `st25r`) in UI and `nfc backend` CLI; `auto` probes PN532 then ST25R3916
+- Added MIFARE Classic nested key recovery on ST25R3916 (encrypted nonce capture, weak/hard PRNG classification, dictionary filtering, RF verification) — based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) work by [@noproto](https://github.com/noproto)
+- Added Momentum-compatible `.nested.log` export at `/mnt/ghostesp/nfc/.nested.log` and `nfc hardnested` CLI command — based on work by [@noproto](https://github.com/noproto)
+- Added PicoPass / iCLASS support on ST25R3916, based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
+- Added NDEF tag generation (URL, Text, Phone, Email, Wi-Fi, vCard, Android App)
+- Added NTAG Type 2 metadata parsing (GET_VERSION, signature, counters, locks, CFG protection) with write-safety checks
+- Added DESFire version/UID detection summary
+- Reorganized the NFC menu into submenus
+- Added an NFC Credits page listing upstream contributors
+- Improved MIFARE Classic progress feedback in the scan popup with clearer phase labels
+- Fixed MIFARE Classic summary skipping block reads after a successful default-key auth
+- NFC scan popup details are now left-aligned and slightly more compact
 
-### Changed
-- MIFARE Classic failed-auth path no longer retries the wrong key or probes for tag removal on every dictionary miss, speeding up brute-force (especially on ST25R I2C)
-- NFC scan popup details are now left-aligned and compact
+### Other Changes
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
-
-### Fixed
-- MIFARE Classic summary skipping block reads after a successful default-key auth
 - SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template
+
 
 ## Revival v2.0.0
 
