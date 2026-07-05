@@ -15,6 +15,14 @@
 // Wiegand/PACS parsing based on Flipper Zero Momentum-Firmware picopass_device.c
 //   by Eric Betts (bettse), Patrick Cunningham, Tiernan Messmer.
 
+// This entire file is ST25R3916-specific; every caller already guards its
+// use of picopass_* with #ifdef CONFIG_NFC_ST25R3916 (see nfc_cli.c), so
+// compiling to nothing here on boards without that hardware is safe -- the
+// st25r3916.h include path is also only added to the build when this config
+// is set (see main/CMakeLists.txt), so without this guard the file fails to
+// compile at all on those boards.
+#ifdef CONFIG_NFC_ST25R3916
+
 #include "managers/nfc/picopass.h"
 #include "managers/nfc/loclass/optimized_cipher.h"
 #include "st25r3916.h"
@@ -458,3 +466,5 @@ esp_err_t picopass_save_file(const char *path, const PicopassDeviceData *data) {
     ESP_LOGI(TAG, "saved .picopass to %s (%d blocks)", path, (int)app_limit);
     return ESP_OK;
 }
+
+#endif // CONFIG_NFC_ST25R3916
