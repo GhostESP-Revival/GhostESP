@@ -476,6 +476,7 @@ static void peer_ota_background_check_task(void *arg) {
     peer_ota_manager_background_check();
     vTaskDelete(NULL);
 }
+#endif
 
 static void deferred_sd_init_task(void *arg) {
     // Short initial delay: the splash holds the screen during boot work, so we
@@ -874,6 +875,7 @@ void app_main(void) {
     }
 #endif
 
+#if GHOSTESP_OTA_SUPPORTED
     if (peer_ota_manager_is_supported()) {
         BaseType_t peer_ota_task_rc = xTaskCreate(peer_ota_background_check_task, "Peer OTA Check", 4096, NULL,
                                                    tskIDLE_PRIORITY + 1, NULL);
@@ -881,6 +883,7 @@ void app_main(void) {
             ESP_LOGE(TAG, "Failed to create peer OTA background check task");
         }
     }
+#endif
 
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {
