@@ -467,6 +467,7 @@ static void ota_background_check_task(void *arg) {
 }
 #endif
 
+#if GHOSTESP_OTA_SUPPORTED
 static void peer_ota_background_check_task(void *arg) {
     (void)arg;
     // GhostLink connects independently of Wi-Fi, but give the boot sequence
