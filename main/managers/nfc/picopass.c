@@ -433,29 +433,13 @@ esp_err_t picopass_save_file(const char *path, const PicopassDeviceData *data) {
         return ESP_FAIL;
     }
 
-    const PicopassPacs *pacs = &data->pacs;
     const PicopassBlock *AA1 = data->AA1;
 
-    /* Flipper Format header */
+    /* Flipper Picopass device format. Only the header and space-separated block
+     * hex are written, exactly as flipper_format emits, so files load on a real
+     * Flipper. Decoded PACS is intentionally not stored (Flipper derives it). */
     fprintf(f, "Filetype: Flipper Picopass device\n");
     fprintf(f, "Version: 1\n");
-
-    if(pacs->record.valid) {
-        fprintf(f, "Facility Code: %u\n", pacs->record.FacilityCode);
-        fprintf(f, "Card Number: %u\n", pacs->record.CardNumber);
-        fprintf(f, "Credential: ");
-        for(int i = 0; i < PICOPASS_BLOCK_LEN; i++) fprintf(f, "%02X", pacs->credential[i]);
-        fprintf(f, "\n");
-        if(pacs->pin_length > 0) {
-            fprintf(f, "PIN: ");
-            for(int i = 0; i < PICOPASS_BLOCK_LEN; i++) fprintf(f, "%02X", pacs->pin0[i]);
-            fprintf(f, "\n");
-            fprintf(f, "PIN(cont.): ");
-            for(int i = 0; i < PICOPASS_BLOCK_LEN; i++) fprintf(f, "%02X", pacs->pin1[i]);
-            fprintf(f, "\n");
-        }
-    }
-
     fprintf(f, "# Picopass blocks\n");
 
     size_t app_limit = AA1[PICOPASS_CONFIG_BLOCK_INDEX].data[0];
@@ -464,7 +448,9 @@ esp_err_t picopass_save_file(const char *path, const PicopassDeviceData *data) {
 
     for(size_t i = 0; i < app_limit; i++) {
         fprintf(f, "Block %d: ", (int)i);
-        for(int j = 0; j < PICOPASS_BLOCK_LEN; j++) fprintf(f, "%02X", AA1[i].data[j]);
+        for(int j = 0; j < PICOPASS_BLOCK_LEN; j++) {
+            fprintf(f, "%s%02X", j ? " " : "", AA1[i].data[j]);
+        }
         fprintf(f, "\n");
     }
 

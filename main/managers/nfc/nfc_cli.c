@@ -303,7 +303,9 @@ static bool nfc_cli_save_detected(pn532_io_handle_t io, const uint8_t *uid, uint
                                   uint16_t atqa, uint8_t sak) {
     char path[192] = {0};
     if (mfc_is_classic_sak(sak)) {
+        mfc_user_dict_begin_batch();
         char *summary = mfc_build_details_summary(io, uid, uid_len, atqa, sak);
+        mfc_user_dict_end_batch();
         if (summary) {
             glog("%s\n", summary);
             free(summary);
@@ -332,7 +334,9 @@ static void nfc_cli_print_parsed(pn532_io_handle_t io, const uint8_t *uid, uint8
     char *text = NULL;
 
     if (mfc_is_classic_sak(sak)) {
+        mfc_user_dict_begin_batch();
         text = mfc_build_details_summary(io, uid, uid_len, atqa, sak);
+        mfc_user_dict_end_batch();
     } else if (desfire_is_desfire_candidate(atqa, sak)) {
         desfire_version_t ver;
         bool have_ver = desfire_get_version(io, &ver);
@@ -405,21 +409,18 @@ static void nfc_cli_scan_task(void *arg) {
                     if (!mfc_is_classic_sak(sak)) {
                         glog("NFC: hardnested capture needs a MIFARE Classic tag\n");
                     } else {
-                        bool susp = false;
                         char path[192] = {0};
-                        bool ok = false;
-                        if (sd_card_jit_begin(&susp, true)) {
-                            ok = mfc_hardnested_capture_file(ctx->nfc, uid, uid_len, atqa, sak,
-                                                            ctx->hn_known_block,
-                                                            ctx->hn_known_key_b,
-                                                            ctx->hn_known_key,
-                                                            ctx->hn_target_block,
-                                                            ctx->hn_target_key_b,
-                                                            ctx->hn_samples,
-                                                            "/mnt/ghostesp/nfc",
-                                                            path, sizeof(path));
-                            sd_card_jit_end(susp);
-                        }
+                        /* No outer mount held: the capture self-mounts per chunk
+                         * so the display stays live during the RF collection. */
+                        bool ok = mfc_hardnested_capture_file(ctx->nfc, uid, uid_len, atqa, sak,
+                                                             ctx->hn_known_block,
+                                                             ctx->hn_known_key_b,
+                                                             ctx->hn_known_key,
+                                                             ctx->hn_target_block,
+                                                             ctx->hn_target_key_b,
+                                                             ctx->hn_samples,
+                                                             "/mnt/ghostesp/nfc",
+                                                             path, sizeof(path));
                         if (ok) glog("NFC: hardnested capture saved: %s\n", path);
                         else glog("NFC: hardnested capture failed\n");
                     }

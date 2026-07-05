@@ -45,7 +45,9 @@ If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
   - **Weak PRNG** cards need only a couple of samples; decrypted nonces must satisfy the weak 16-bit PRNG relation.
   - **Hard PRNG** cards require more samples and the recovered candidate is RF-verified before being trusted.
 
-- **Nested log export.** If local recovery cannot fully solve the card, GhostESP appends a Momentum-compatible line to `/mnt/ghostesp/nfc/.nested.log` so you can finish the crack on a PC with your normal hardnested solver. The on-screen summary notes whether the nested log was written.
+- **Nested log export.** If local recovery cannot fully solve the card, GhostESP writes Momentum-compatible hardnested samples to `/mnt/ghostesp/nfc/.nested.log` so you can finish the crack on a PC with your normal hardnested solver. Each new capture starts with a fresh log: if `.nested.log` already exists, GhostESP deletes any existing `.nested.log.old`, renames `.nested.log` to `.nested.log.old`, then creates a new `.nested.log`. The on-screen summary notes whether the nested log was written.
+
+- **Using cracked keys.** `.nested.log` is output-only; GhostESP does not parse cracked solver output back into keys. Add recovered keys to `/mnt/ghostesp/nfc/mfc_user_dict.nfc` as raw 6-byte hex keys, one per line, such as `A0A1A2A3A4A5`. Do not paste labelled solver/log lines like `Sec 1 key A ...`; only the actual 12 hex digits should be in the user dictionary.
 
 - **Skip option:** Tap **Skip** to bypass dictionaries when you only need public sectors.
 

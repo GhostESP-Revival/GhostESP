@@ -54,6 +54,7 @@ struct pn532_io_t {
     esp_err_t (*hl_communicate_thru)(pn532_io_handle_t io_handle, const uint8_t *send_buffer,
                                      uint8_t send_buffer_length, uint8_t *response, uint8_t *response_length);
     esp_err_t (*hl_set_passive_activation_retries)(pn532_io_handle_t io_handle, uint8_t maxRetries);
+    esp_err_t (*hl_mfc_auth_recover)(pn532_io_handle_t io_handle);
 
     gpio_num_t reset;
     gpio_num_t irq;

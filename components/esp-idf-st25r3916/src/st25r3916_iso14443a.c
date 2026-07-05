@@ -268,7 +268,7 @@ esp_err_t st25r3916_nfca_halt(int timeout_ms) {
 }
 
 esp_err_t st25r3916_nfca_activate_ex(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa,
-                                     uint8_t *sak, uint8_t retries, int timeout_ms) {
+                                      uint8_t *sak, uint8_t retries, int timeout_ms) {
   if (!uid || !uid_len) return ESP_ERR_INVALID_ARG;
   *uid_len = 0;
   if (retries == 0) retries = NFCA_DEFAULT_RETRIES;
@@ -332,6 +332,63 @@ esp_err_t st25r3916_nfca_activate_ex(uint8_t *uid, uint8_t *uid_len, uint16_t *a
 
   if (sak) *sak = last_sak;
   return (*uid_len == 4 || *uid_len == 7 || *uid_len == 10) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+esp_err_t st25r3916_nfca_reselect_uid(const uint8_t *uid, uint8_t uid_len, uint16_t *atqa,
+                                      uint8_t *sak, int timeout_ms) {
+  if (!uid || !(uid_len == 4 || uid_len == 7 || uid_len == 10)) return ESP_ERR_INVALID_ARG;
+  if (timeout_ms <= 0) timeout_ms = 5;
+
+  uint16_t atqa_local = 0;
+  esp_err_t err = st25r3916_nfca_wupa(&atqa_local, timeout_ms);
+  if (err != ESP_OK) return err;
+  if (atqa) *atqa = atqa_local;
+
+  static const uint8_t sel_codes[3] = {NFCA_SEL_CL1, NFCA_SEL_CL2, NFCA_SEL_CL3};
+  uint8_t last_sak = 0;
+  int levels = (uid_len == 4) ? 1 : ((uid_len == 7) ? 2 : 3);
+
+  for (int level = 0; level < levels; ++level) {
+    uint8_t sel_tx[7] = {sel_codes[level], NFCA_NVB_SEL, 0, 0, 0, 0, 0};
+
+    if (uid_len == 4) {
+      memcpy(&sel_tx[2], uid, 4);
+    } else if (uid_len == 7) {
+      if (level == 0) {
+        sel_tx[2] = NFCA_CT;
+        memcpy(&sel_tx[3], uid, 3);
+      } else {
+        memcpy(&sel_tx[2], &uid[3], 4);
+      }
+    } else {
+      if (level == 0) {
+        sel_tx[2] = NFCA_CT;
+        memcpy(&sel_tx[3], uid, 3);
+      } else if (level == 1) {
+        sel_tx[2] = NFCA_CT;
+        memcpy(&sel_tx[3], &uid[3], 3);
+      } else {
+        memcpy(&sel_tx[2], &uid[6], 4);
+      }
+    }
+
+    sel_tx[6] = (uint8_t)(sel_tx[2] ^ sel_tx[3] ^ sel_tx[4] ^ sel_tx[5]);
+
+    uint8_t sak_rx[2] = {0};
+    uint16_t sak_len = 0;
+    err = st25r3916_nfca_transceive(sel_tx, sizeof(sel_tx), true, false, sak_rx, sizeof(sak_rx),
+                                    &sak_len, timeout_ms);
+    if (err != ESP_OK) return err;
+    if (sak_len < 1) return ESP_ERR_INVALID_RESPONSE;
+    last_sak = sak_rx[0];
+
+    bool should_cascade = level < (levels - 1);
+    if (should_cascade && !(last_sak & NFCA_SAK_CASCADE)) return ESP_ERR_INVALID_RESPONSE;
+    if (!should_cascade && (last_sak & NFCA_SAK_CASCADE)) return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  if (sak) *sak = last_sak;
+  return ESP_OK;
 }
 
 esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak) {

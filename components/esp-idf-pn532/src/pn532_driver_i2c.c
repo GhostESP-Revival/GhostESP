@@ -74,6 +74,7 @@ esp_err_t pn532_new_driver_i2c(gpio_num_t sda,
     io_handle->hl_data_exchange = NULL;
     io_handle->hl_communicate_thru = NULL;
     io_handle->hl_set_passive_activation_retries = NULL;
+    io_handle->hl_mfc_auth_recover = NULL;
 
 #ifdef CONFIG_ENABLE_IRQ_ISR
     io_handle->IRQQueue = NULL;

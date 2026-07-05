@@ -13,6 +13,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_rom_sys.h"
 
 static const char *TAG = "st25r3916_adapter";
 
@@ -153,6 +154,24 @@ static esp_err_t adapter_set_retries(pn532_io_handle_t io, uint8_t retries) {
   return ESP_OK;
 }
 
+static esp_err_t adapter_mfc_auth_recover(pn532_io_handle_t io) {
+  adapter_state_t *st = state_of(io);
+  if (!st || !st->activated || st->uid_len == 0) return ESP_ERR_INVALID_STATE;
+  st->armed = false;
+
+  /* A failed Classic AUTH can leave the tag waiting for encrypted auth frames;
+   * plaintext HLTA/WUPA is not always enough to recover. Drop the RF field to
+   * force the PICC back to idle before the next dictionary candidate. */
+  (void)st25r3916_field_off();
+  esp_rom_delay_us(5000);
+  (void)st25r3916_field_on();
+
+  esp_err_t err = st25r3916_nfca_reselect_uid(st->uid, st->uid_len, &st->atqa, &st->sak, 10);
+  if (err == ESP_OK) return ESP_OK;
+
+  return adapter_list_passive_target(io);
+}
+
 /* --- lifecycle (low-level pn532_io_t hooks) ----------------------------- */
 
 static void adapter_release_io(pn532_io_handle_t io) {
@@ -191,6 +210,7 @@ static void bind_vtable(pn532_io_handle_t io, adapter_state_t *st, gpio_num_t rs
   io->hl_data_exchange = adapter_data_exchange;
   io->hl_communicate_thru = adapter_communicate_thru;
   io->hl_set_passive_activation_retries = adapter_set_retries;
+  io->hl_mfc_auth_recover = adapter_mfc_auth_recover;
 }
 
 static adapter_state_t *alloc_state(void) {

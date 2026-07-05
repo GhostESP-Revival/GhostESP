@@ -67,9 +67,19 @@ bool mfc_get_hardnested_defaults(uint8_t *known_block,
                                  uint8_t known_key[6],
                                  uint8_t *target_block,
                                  bool *target_key_b);
+bool mfc_has_unread_blocks(void);
 #endif
 
 typedef void (*mfc_progress_cb_t)(int current, int total, void* user);
 void mfc_set_progress_callback(mfc_progress_cb_t cb, void* user);
 
 void mfc_set_attack_hooks(const mfc_attack_hooks_t *hooks);
+
+// Add a manually-entered MIFARE Classic key (12 hex digits, ' '/':' tolerated)
+// to the user dictionary. Returns false if the string isn't exactly 6 bytes.
+bool mfc_add_user_key_hex(const char *hex);
+
+// Batch user-dict writes across a brute-force: begin defers per-key SD writes
+// (keys stay cached in RAM); end persists all newly-found keys in one mount.
+void mfc_user_dict_begin_batch(void);
+void mfc_user_dict_end_batch(void);

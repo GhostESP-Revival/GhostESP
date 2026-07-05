@@ -16,15 +16,12 @@
 ### Changed
 - MIFARE Classic failed-auth path no longer retries the wrong key or probes for tag removal on every dictionary miss, speeding up brute-force (especially on ST25R I2C)
 - NFC scan popup details are now left-aligned and compact
-- Faster NTAG initial popup via `ntag_t2_read_user_memory_fast()`
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 
 ### Fixed
-- NFC scan crash when the ST25R path hit raw PN532 function pointers through NTAG ops
-- ST25R3916 Crypto1 TX/RX encrypted byte and 4-bit ACK/NAK state handling
 - MIFARE Classic summary skipping block reads after a successful default-key auth
-- SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template, so CYD2432S028R and other CYD variants no longer freeze with an SD card inserted
+- SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template
 
 ## Revival v2.0.0
 

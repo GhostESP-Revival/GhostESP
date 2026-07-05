@@ -89,6 +89,10 @@ esp_err_t st25r3916_nfca_activate(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa
 esp_err_t st25r3916_nfca_activate_ex(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa,
                                      uint8_t *sak, uint8_t retries, int timeout_ms);
 
+/** @brief Wake and reselect a known UID without a full anti-collision search. */
+esp_err_t st25r3916_nfca_reselect_uid(const uint8_t *uid, uint8_t uid_len, uint16_t *atqa,
+                                      uint8_t *sak, int timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

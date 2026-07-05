@@ -7,6 +7,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/options_view.h"
 #include "gui/ios_toggle.h"
+#include "gui/toast.h"
 #include "managers/status_display_manager.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -132,6 +133,8 @@ static int num_items = 0; // will be set when building menu
 // write file list state
 static bool in_write_list = false;
 static bool in_emulate_list = false;
+static bool in_mfc_menu = false;
+static bool in_tools_menu = false;
 static char **nfc_file_paths = NULL;
 static size_t nfc_file_count = 0;
 static char **nfc_emu_file_paths = NULL;
@@ -150,6 +153,7 @@ static size_t saved_file_count = 0;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
 static touch_drag_t nfc_touch_drag = {0};
+static touch_drag_t nfc_credits_drag = {0};
 #if CONFIG_LV_TOUCH_CONTROLLER_XPT2046
 static const int NFC_SWIPE_THRESHOLD_RATIO = 1;
 #else
@@ -217,6 +221,9 @@ static lv_obj_t *keys_up_btn = NULL;
 static lv_obj_t *keys_down_btn = NULL;
 static lv_obj_t *keys_scroll = NULL;
 static int keys_popup_selected = 0;
+static lv_obj_t *nfc_credits_popup = NULL;
+static lv_obj_t *nfc_credits_close_btn = NULL;
+static lv_obj_t *nfc_credits_scroll = NULL;
 
 // UI hook from MIFARE Classic layer to indicate sector/block/key phase
 // (implementation moved below after static phase variables are declared)
@@ -247,6 +254,7 @@ static bool nfc_details_visible = false;
 static bool nfc_save_visible = false;
 // When true, the MFC layer is performing a second-pass cache fill (live-read) after bruteforce.
 static bool nfc_cache_fill_phase = false;
+static bool nfc_hardnested_phase = false;  // true while collecting hardnested nonces
 // When true, UI requests to skip dictionary attempts (basic read only)
 static bool nfc_dict_skip_requested = false;
 // When true, a tag was removed and we're waiting for re-present
@@ -337,7 +345,7 @@ static void nfc_set_paused_async(void *ptr) {
             lv_label_set_text(nfc_title_label, "Paused - present tag to continue");
         } else {
             if (nfc_cache_fill_phase) lv_label_set_text(nfc_title_label, "Reading sectors... 0%");
-            else if (!nfc_details_visible) lv_label_set_text(nfc_title_label, "Bruteforcing keys... 0%");
+            else if (!nfc_details_visible) lv_label_set_text(nfc_title_label, "Unlocking card... 0%");
             else { lv_label_set_text(nfc_title_label, "NFC Tag"); lv_obj_align(nfc_title_label, LV_ALIGN_TOP_MID, 0, 22); }
         }
     }
@@ -424,6 +432,8 @@ static void update_nfc_write_buttons_layout(void);
 // Generate-tag flow (NDEF record builder UI)
 static void nfc_enter_generate_list(void);
 static void nfc_clear_generate_list(void);
+static void nfc_enter_mfc_menu(void);
+static void nfc_enter_tools_menu(void);
 // saved flow
 static void saved_enter_list(void);
 void saved_clear_list(void);
@@ -458,6 +468,9 @@ static void update_keys_buttons_layout(void);
 static void update_keys_buttons_layout(void);
 static void keys_scroll_up_cb(lv_event_t *e);
 static void keys_scroll_down_cb(lv_event_t *e);
+static void create_nfc_credits_popup(void);
+static void cleanup_nfc_credits_popup(void *obj);
+static void nfc_credits_close_cb(lv_event_t *e);
 
 // chameleon ultra popup (basic controls)
 static lv_obj_t *cu_popup = NULL;
@@ -630,7 +643,8 @@ static void nfc_progress_update_async(void *ptr) {
         if (nfc_paused) snprintf(title, sizeof(title), "Paused - present tag to continue");
         else if (nfc_cache_fill_phase) snprintf(title, sizeof(title), "Reading sectors... %d%%", percent);
         else if (nfc_dict_skip_requested) snprintf(title, sizeof(title), "Basic read (skipping dict) ...");
-        else if (bruteforce_active) snprintf(title, sizeof(title), "Bruteforcing keys... %d%%", percent);
+        else if (nfc_hardnested_phase) snprintf(title, sizeof(title), "Collecting nonces... %d%%", percent);
+        else if (bruteforce_active) snprintf(title, sizeof(title), "Unlocking card... %d%%", percent);
         else if (nfc_details_ready) snprintf(title, sizeof(title), "%s", nfc_get_detected_title());
         else snprintf(title, sizeof(title), "Scanning NFC...");
         lv_label_set_text(nfc_title_label, title);
@@ -661,8 +675,8 @@ static void nfc_progress_update_async(void *ptr) {
     }
     if (nfc_details_label && lv_obj_is_valid(nfc_details_label)) {
         char info[96];
-        if (dp->t > 0) snprintf(info, sizeof(info), "Dictionary: %d/%d (%d%%)%s", dp->c, dp->t, percent, phase);
-        else snprintf(info, sizeof(info), "Dictionary: %d (unknown total)%s", dp->c, phase);
+        if (dp->t > 0) snprintf(info, sizeof(info), "MFC progress: %d/%d (%d%%)%s", dp->c, dp->t, percent, phase);
+        else snprintf(info, sizeof(info), "MFC progress: %d (unknown total)%s", dp->c, phase);
         lv_label_set_text(nfc_details_label, info);
         lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
     }
@@ -775,6 +789,7 @@ static void nfc_set_details_async(void *ptr) {
     mfc_phase_sector = -1;
     mfc_phase_first_block = -1;
     mfc_phase_total = 0;
+    nfc_hardnested_phase = false;
     // Revert label back to More after bruteforce completes
     if (nfc_scan_more_btn && lv_obj_is_valid(nfc_scan_more_btn)) {
         lv_obj_t *lbl = lv_obj_get_child(nfc_scan_more_btn, 0);
@@ -825,14 +840,44 @@ static void nfc_set_details_async(void *ptr) {
 
 #ifdef NFC_HAS_LOCAL_READER
 #ifdef CONFIG_NFC_ST25R3916
-static void nfc_build_and_set_details_picopass(PicopassDeviceData *dev_data) {
-    char *text = (char *)malloc(512);
-    if (!text) return;
+/* Classify the credential the way the Flipper picopass read-success screen
+ * does, from the booleans the parser already sets. SE/SIO and elite take
+ * priority over a plain legacy/standard credential. */
+static const char *picopass_card_type_str(const PicopassPacs *pacs) {
+    if (pacs->se_enabled || pacs->sio) return "iCLASS SE";
+    if (pacs->elite_kdf) return "iCLASS Elite";
+    if (pacs->legacy) return "iCLASS Legacy";
+    return "PicoPass";
+}
 
-    char *w = text;
-    size_t cap = 512;
-    int n = snprintf(w, cap, "PicoPass / iCLASS\n");
+// Render the read-success summary into `w`. Shared by the live scan path and
+// the saved-.picopass viewer so both show identical info.
+static void picopass_format_summary(const PicopassDeviceData *dev_data, char *w, size_t cap) {
+    const PicopassPacs *pacs = &dev_data->pacs;
+
+    /* Card type header. */
+    int n = snprintf(w, cap, "%s\n", picopass_card_type_str(pacs));
     if (n > 0) { w += n; cap -= n; }
+
+    /* Credential first: decoded Wiegand when available, else the raw block so
+     * the user still sees something on non-26-bit / undecoded formats. */
+    if (pacs->record.valid) {
+        n = snprintf(w, cap, "Facility Code: %u\n", pacs->record.FacilityCode);
+        if (n > 0) { w += n; cap -= n; }
+        n = snprintf(w, cap, "Card Number: %u\n", pacs->record.CardNumber);
+        if (n > 0) { w += n; cap -= n; }
+        n = snprintf(w, cap, "Format: %u-bit\n", pacs->record.bitLength);
+        if (n > 0) { w += n; cap -= n; }
+    } else if (!picopass_is_memset(pacs->credential, 0x00, PICOPASS_BLOCK_LEN)) {
+        n = snprintf(w, cap, "Credential:");
+        if (n > 0) { w += n; cap -= n; }
+        for (int i = 0; i < PICOPASS_BLOCK_LEN && cap > 3; i++) {
+            n = snprintf(w, cap, " %02X", pacs->credential[i]);
+            if (n > 0) { w += n; cap -= n; }
+        }
+        n = snprintf(w, cap, "\n");
+        if (n > 0) { w += n; cap -= n; }
+    }
 
     /* CSN */
     n = snprintf(w, cap, "CSN:");
@@ -843,25 +888,12 @@ static void nfc_build_and_set_details_picopass(PicopassDeviceData *dev_data) {
     }
     n = snprintf(w, cap, "\n");
     if (n > 0) { w += n; cap -= n; }
+}
 
-    PicopassPacs *pacs = &dev_data->pacs;
-    if (pacs->record.valid) {
-        n = snprintf(w, cap, "FC: %u  CN: %u  Bits: %u\n",
-                     pacs->record.FacilityCode, pacs->record.CardNumber, pacs->record.bitLength);
-        if (n > 0) { w += n; cap -= n; }
-    }
-
-    const char *enc_str = "Unknown";
-    if (pacs->encryption == PicopassEncryptionNone) enc_str = "None";
-    else if (pacs->encryption == PicopassEncryptionDES) enc_str = "DES";
-    else if (pacs->encryption == PicopassEncryption3DES) enc_str = "3DES";
-    n = snprintf(w, cap, "Encryption: %s\n", enc_str);
-    if (n > 0) { w += n; cap -= n; }
-
-    if (pacs->sio) {
-        n = snprintf(w, cap, "SIO: present\n");
-        if (n > 0) { w += n; cap -= n; }
-    }
+static void nfc_build_and_set_details_picopass(PicopassDeviceData *dev_data) {
+    char *text = (char *)malloc(512);
+    if (!text) return;
+    picopass_format_summary(dev_data, text, 512);
 
     ndef_details_result_t *res = nfc_ndef_pool_alloc();
     if (!res) { free(text); return; }
@@ -870,6 +902,43 @@ static void nfc_build_and_set_details_picopass(PicopassDeviceData *dev_data) {
     res->session = nfc_scan_session;
     if (display_manager_is_available()) display_manager_lvgl_async_call(nfc_set_details_async, res);
     else { free(text); nfc_ndef_pool_free(res); }
+}
+
+// Parse the `Block N: XX XX ...` lines of a Flipper .picopass file back into
+// AA1 blocks, then derive PACS the same way the live read path does. Returns
+// false if the file has no parseable blocks. (Assumes PICOPASS_BLOCK_LEN == 8,
+// matching the Flipper block width.)
+static bool picopass_load_and_parse_file(const char *path, PicopassDeviceData *out) {
+    FILE *pf = fopen(path, "r");
+    if (!pf) return false;
+    memset(out, 0, sizeof(*out));
+    char line[256];
+    bool any = false;
+    while (fgets(line, sizeof(line), pf)) {
+        int idx = -1;
+        if (sscanf(line, "Block %d:", &idx) != 1) continue;
+        if (idx < 0 || idx >= PICOPASS_MAX_APP_LIMIT) continue;
+        const char *p = strchr(line, ':');
+        if (!p) continue;
+        unsigned int b[PICOPASS_BLOCK_LEN];
+        if (sscanf(p + 1, " %x %x %x %x %x %x %x %x",
+                   &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]) != PICOPASS_BLOCK_LEN)
+            continue;
+        for (int j = 0; j < PICOPASS_BLOCK_LEN; j++) out->AA1[idx].data[j] = (uint8_t)b[j];
+        any = true;
+    }
+    fclose(pf);
+    if (!any) return false;
+
+    picopass_parse_credential(out->AA1, &out->pacs);
+    /* legacy/SE flags are set by picopass_detect(), not parse_credential, so
+     * reproduce them here from the app-issuer area (block 5). */
+    out->pacs.legacy = picopass_is_memset(out->AA1[5].data, 0xFF, PICOPASS_BLOCK_LEN);
+    out->pacs.se_enabled = (memcmp(out->AA1[5].data, "\xff\xff\xff\x00\x06\xff\xff\xff", 8) == 0);
+    if (!picopass_is_memset(out->pacs.credential, 0x00, PICOPASS_BLOCK_LEN)) {
+        picopass_parse_wiegand(out->pacs.credential, &out->pacs.record);
+    }
+    return true;
 }
 #endif
 
@@ -900,10 +969,12 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
     }
 
         mfc_set_progress_callback(mfc_dict_progress_cb, NULL);
-        if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) lv_label_set_text(nfc_title_label, "Bruteforcing keys... 0%");
+        if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) lv_label_set_text(nfc_title_label, "Unlocking card... 0%");
         // Reduce I2C contention during PN532 scanning/bruteforce
         display_manager_set_low_i2c_mode(true);
+        mfc_user_dict_begin_batch();
         char *text = mfc_build_details_summary(io, uid, uid_len, g_atqa, g_sak);
+        mfc_user_dict_end_batch();  // persist all keys found this attack in one mount
         // Check if scan was cancelled during MIFARE processing (e.g., while paused)
         if (nfc_scan_cancel || !text) {
             if (text) free(text);
@@ -913,20 +984,20 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
 
         uint8_t known_block = 0, target_block = 0, known_key[6] = {0};
         bool known_key_b = false, target_key_b = false;
-        if (!nfc_scan_cancel &&
+        if (!nfc_scan_cancel && mfc_has_unread_blocks() &&
             mfc_get_hardnested_defaults(&known_block, &known_key_b, known_key, &target_block, &target_key_b)) {
+            nfc_hardnested_phase = true;  // progress handler now shows "Collecting nonces..."
             if (nfc_title_label && lv_obj_is_valid(nfc_title_label)) {
-                lv_label_set_text(nfc_title_label, "Collecting nested log...");
+                lv_label_set_text(nfc_title_label, "Collecting nonces... 0%");
             }
             char path[192] = {0};
-            bool susp = false;
-            bool ok = false;
-            if (nfc_sd_begin(&susp)) {
-                ok = mfc_hardnested_capture_missing_file(io, uid, uid_len, g_atqa, g_sak,
-                                                         4096, "/mnt/ghostesp/nfc",
-                                                         path, sizeof(path));
-                nfc_sd_end(susp);
-            }
+            /* No outer mount held: the capture self-mounts per chunk (see
+             * mfc_nested_write_sd) so the display stays live during the long
+             * RF collection instead of freezing for the whole capture. */
+            bool ok = mfc_hardnested_capture_missing_file(io, uid, uid_len, g_atqa, g_sak,
+                                                          4096, "/mnt/ghostesp/nfc",
+                                                          path, sizeof(path));
+            nfc_hardnested_phase = false;
             const char *line = ok ? "Nested log: /nfc/.nested.log\n" : "Nested log: capture incomplete\n";
             size_t old_len = strlen(text);
             size_t line_len = strlen(line);
@@ -1490,6 +1561,10 @@ static void highlight_selected(void) {
     if (g_nfc_ov) options_view_set_selected(g_nfc_ov, selected_index);
 }
 
+static bool nfc_is_submenu_open(void) {
+    return in_write_list || in_saved_list || in_emulate_list || in_generate_list || in_mfc_menu || in_tools_menu;
+}
+
 // forward declare back_event_cb so it can be used before its definition
 static void back_event_cb(lv_event_t *e);
 // forward declare option dispatcher used by multiple input paths
@@ -1730,6 +1805,65 @@ void nfc_view_input_cb(InputEvent *event) {
         }
         return;
     }
+    // Handle credits popup input
+    if (nfc_credits_popup && lv_obj_is_valid(nfc_credits_popup)) {
+        if (event->type == INPUT_TYPE_TOUCH) {
+            lv_indev_data_t *d = &event->data.touch_data;
+            if (d->state == LV_INDEV_STATE_PR) {
+                /* Determine if the press started on the Close button; if so we
+                 * treat it as a tap and never start a drag. */
+                bool on_close = false;
+                if (nfc_credits_close_btn && lv_obj_is_valid(nfc_credits_close_btn)) {
+                    lv_area_t a; lv_obj_get_coords(nfc_credits_close_btn, &a);
+                    if (d->point.x >= a.x1 && d->point.x <= a.x2 && d->point.y >= a.y1 && d->point.y <= a.y2) on_close = true;
+                }
+#ifdef CONFIG_USE_TOUCHSCREEN
+                if (!on_close && nfc_credits_scroll && lv_obj_is_valid(nfc_credits_scroll)) {
+                    if (!nfc_credits_drag.started) touch_drag_begin(&nfc_credits_drag, d);
+                    else touch_drag_update(&nfc_credits_drag, d, nfc_credits_scroll);
+                } else {
+                    touch_drag_reset(&nfc_credits_drag);
+                }
+#endif
+                return;
+            } else {
+                /* Release */
+#ifdef CONFIG_USE_TOUCHSCREEN
+                bool was_dragged = nfc_credits_drag.started ? touch_drag_release(&nfc_credits_drag, d) : false;
+                if (was_dragged) { display_manager_flush_pending_scroll(); return; }
+#endif
+                if (nfc_credits_close_btn && lv_obj_is_valid(nfc_credits_close_btn)) {
+                    lv_area_t a; lv_obj_get_coords(nfc_credits_close_btn, &a);
+                    if (d->point.x >= a.x1 && d->point.x <= a.x2 && d->point.y >= a.y1 && d->point.y <= a.y2) { nfc_credits_close_cb(NULL); return; }
+                }
+                return;
+            }
+        }
+#ifdef CONFIG_USE_ENCODER
+        else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+            nfc_credits_close_cb(NULL);
+            return;
+        }
+#endif
+        else if (event->type == INPUT_TYPE_JOYSTICK) {
+            if (event->data.joystick_index == 1 || event->data.joystick_index == 0) { nfc_credits_close_cb(NULL); return; }
+            if (event->data.joystick_index == 2 && nfc_credits_scroll) lv_obj_scroll_by_bounded(nfc_credits_scroll, 0, 40, LV_ANIM_OFF);
+            if (event->data.joystick_index == 4 && nfc_credits_scroll) lv_obj_scroll_by_bounded(nfc_credits_scroll, 0, -40, LV_ANIM_OFF);
+        } else if (event->type == INPUT_TYPE_ENCODER) {
+            if (event->data.encoder.button) { nfc_credits_close_cb(NULL); return; }
+            if (event->data.encoder.direction != 0 && nfc_credits_scroll) {
+                lv_obj_scroll_by_bounded(nfc_credits_scroll, 0, event->data.encoder.direction > 0 ? -40 : 40, LV_ANIM_OFF);
+            }
+        } else if (event->type == INPUT_TYPE_KEYBOARD) {
+            int kv = event->data.key_value;
+            if (kv == 13 || kv == 10 || kv == 27 || kv == 'c' || kv == 'C') { nfc_credits_close_cb(NULL); return; }
+            if ((kv == 44 || kv == ',' || kv == 59 || kv == ';') && nfc_credits_scroll) lv_obj_scroll_by_bounded(nfc_credits_scroll, 0, 40, LV_ANIM_OFF);
+            if ((kv == 47 || kv == '/' || kv == 46 || kv == '.') && nfc_credits_scroll) lv_obj_scroll_by_bounded(nfc_credits_scroll, 0, -40, LV_ANIM_OFF);
+        }
+        return;
+    }
+
+
     // Handle keys popup input
     if (keys_popup && lv_obj_is_valid(keys_popup)) {
         if (event->type == INPUT_TYPE_TOUCH) {
@@ -2077,7 +2211,7 @@ void nfc_view_input_cb(InputEvent *event) {
                 return;
             }
         }
-        if (in_write_list || in_emulate_list || in_generate_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
 #endif
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int btn = event->data.joystick_index;
@@ -2089,7 +2223,7 @@ void nfc_view_input_cb(InputEvent *event) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_index);
             if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
         } else if (btn == 0) {
-            if (in_write_list || in_emulate_list || in_generate_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
@@ -2111,11 +2245,11 @@ void nfc_view_input_cb(InputEvent *event) {
         } else if (kv == 47 || kv == '/' || kv == 46 || kv == '.') {
             if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, 1); selected_index = options_view_get_selected(g_nfc_ov); }
         } else if (kv == 29 || kv == '`') {
-            if (in_write_list || in_emulate_list || in_generate_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
         }
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        if (in_write_list || in_emulate_list || in_generate_list) back_to_root_menu(); else if (in_saved_list) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
 #endif
     }
 }
@@ -2148,13 +2282,25 @@ void nfc_option_event_cb(lv_event_t *e) {
     }
 
 #ifdef CONFIG_NFC_ST25R3916
-    if (strcmp(opt, "PicoPass") == 0) {
+    if (strcmp(opt, "iCLASS / PicoPass") == 0) {
         nfc_scan_picopass_only = true;
         create_nfc_scan_popup();
         nfc_option_invoked = false;
         return;
     }
 #endif
+
+    if (strcmp(opt, "MIFARE Classic") == 0) {
+        nfc_enter_mfc_menu();
+        nfc_option_invoked = false;
+        return;
+    }
+
+    if (strcmp(opt, "Tools") == 0) {
+        nfc_enter_tools_menu();
+        nfc_option_invoked = false;
+        return;
+    }
 
     if (strcmp(opt, "Emulate") == 0) {
         nfc_enter_emulate_list();
@@ -2168,7 +2314,7 @@ void nfc_option_event_cb(lv_event_t *e) {
         return;
     }
 
-    if (strcmp(opt, "Generate") == 0) {
+    if (strcmp(opt, "Generate NDEF") == 0) {
         nfc_enter_generate_list();
         nfc_option_invoked = false;
         return;
@@ -2188,6 +2334,12 @@ void nfc_option_event_cb(lv_event_t *e) {
 
     if (strcmp(opt, "Chameleon Ultra") == 0) {
         create_cu_popup();
+        nfc_option_invoked = false;
+        return;
+    }
+
+    if (strcmp(opt, "NFC Credits") == 0) {
+        create_nfc_credits_popup();
         nfc_option_invoked = false;
         return;
     }
@@ -2234,7 +2386,7 @@ static void scroll_nfc_down(lv_event_t *e) {
     update_nfc_scroll_buttons_visibility();
 }
 static void back_event_cb(lv_event_t *e) {
-    if (in_write_list || in_saved_list || in_emulate_list || in_generate_list) back_to_root_menu();
+    if (nfc_is_submenu_open()) back_to_root_menu();
     else display_manager_switch_view(&main_menu_view);
 }
 
@@ -3341,6 +3493,28 @@ static void nfc_generate_text_cb(lv_event_t *e) {
     display_manager_switch_view(&keyboard_view);
 }
 
+#ifdef NFC_HAS_LOCAL_READER
+// Manually add a MIFARE Classic key to the user dictionary via the keyboard.
+static void nfc_add_key_kb_cb(const char *text) {
+    if (text && *text) {
+        if (mfc_add_user_key_hex(text)) {
+            toast_show("Key added to user dict", TOAST_SUCCESS);
+        } else {
+            toast_show("Invalid key (need 12 hex)", TOAST_ERROR);
+        }
+    }
+    display_manager_switch_view(&nfc_view);
+}
+static void nfc_add_key_cb(lv_event_t *e) {
+    (void)e;
+    keyboard_view_set_submit_callback(nfc_add_key_kb_cb);
+    keyboard_view_set_placeholder("A0A1A2A3A4A5");
+    keyboard_view_set_start_caps(false);
+    keyboard_view_set_return_view(&nfc_view);
+    display_manager_switch_view(&keyboard_view);
+}
+#endif
+
 static void nfc_gen_phone_kb_cb(const char *text) {
     if (!text || !*text) { display_manager_switch_view(&nfc_view); return; }
     char uri[144];
@@ -3495,6 +3669,7 @@ static void nfc_clear_generate_list(void) {
 static void nfc_enter_generate_list(void) {
     if (!g_nfc_ov) return;
     in_generate_list = true;
+    in_tools_menu = false;
     nfc_clear_generate_list();
     options_view_clear(g_nfc_ov);
 #if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
@@ -3518,12 +3693,63 @@ static void nfc_enter_generate_list(void) {
 }
 // ---- end generate-tag flow ----------------------------------------------
 
+static void nfc_enter_mfc_menu(void) {
+    if (!g_nfc_ov) return;
+    in_mfc_menu = true;
+    in_tools_menu = false;
+    options_view_clear(g_nfc_ov);
+#if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
+    backend_btn = NULL;
+#endif
+
+    options_view_set_title(g_nfc_ov, "MIFARE Classic");
+#ifdef NFC_HAS_LOCAL_READER
+    options_view_add_item(g_nfc_ov, "Add MFC Key", nfc_add_key_cb, NULL);
+#endif
+    options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+    options_view_add_back_row(g_nfc_ov, back_event_cb, NULL);
+#endif
+    num_items = options_view_get_item_count(g_nfc_ov);
+    selected_index = 0;
+    options_view_set_selected(g_nfc_ov, 0);
+    update_nfc_scroll_buttons_visibility();
+}
+
+static void nfc_enter_tools_menu(void) {
+    if (!g_nfc_ov) return;
+    in_tools_menu = true;
+    in_mfc_menu = false;
+    options_view_clear(g_nfc_ov);
+#if defined(CONFIG_NFC_PN532) && defined(CONFIG_NFC_ST25R3916)
+    backend_btn = NULL;
+#endif
+
+    options_view_set_title(g_nfc_ov, "NFC Tools");
+    options_view_add_item(g_nfc_ov, "Generate NDEF", nfc_option_event_cb, (void *)"Generate NDEF");
+    options_view_add_item(g_nfc_ov, "Emulate", nfc_option_event_cb, (void *)"Emulate");
+    emulate_btn = options_view_add_item(g_nfc_ov, "Write", nfc_option_event_cb, (void *)"Write");
+#if defined(CONFIG_NFC_CHAMELEON)
+    options_view_add_item(g_nfc_ov, "Chameleon Ultra", nfc_option_event_cb, (void *)"Chameleon Ultra");
+#endif
+    options_view_add_item(g_nfc_ov, "NFC Credits", nfc_option_event_cb, (void *)"NFC Credits");
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+    options_view_add_back_row(g_nfc_ov, back_event_cb, NULL);
+#endif
+    num_items = options_view_get_item_count(g_nfc_ov);
+    selected_index = 0;
+    options_view_set_selected(g_nfc_ov, 0);
+    update_nfc_scroll_buttons_visibility();
+}
+
 static void back_to_root_menu(void) {
     if (!root || !g_nfc_ov) return;
     in_write_list = false;
     in_emulate_list = false;
     in_saved_list = false;
     in_generate_list = false;
+    in_mfc_menu = false;
+    in_tools_menu = false;
     nfc_clear_write_list();
     nfc_clear_emulate_list();
     nfc_clear_generate_list();
@@ -3539,16 +3765,11 @@ static void back_to_root_menu(void) {
     nfc_add_backend_item();
 #endif
 #ifdef CONFIG_NFC_ST25R3916
-    options_view_add_item(g_nfc_ov, "PicoPass", nfc_option_event_cb, (void *)"PicoPass");
+    options_view_add_item(g_nfc_ov, "iCLASS / PicoPass", nfc_option_event_cb, (void *)"iCLASS / PicoPass");
 #endif
     options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
-    options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
-#if defined(CONFIG_NFC_CHAMELEON)
-    options_view_add_item(g_nfc_ov, "Chameleon Ultra", nfc_option_event_cb, (void *)"Chameleon Ultra");
-#endif
-    options_view_add_item(g_nfc_ov, "Generate", nfc_option_event_cb, (void *)"Generate");
-    options_view_add_item(g_nfc_ov, "Emulate", nfc_option_event_cb, (void *)"Emulate");
-    emulate_btn = options_view_add_item(g_nfc_ov, "Write", nfc_option_event_cb, (void *)"Write");
+    options_view_add_item(g_nfc_ov, "MIFARE Classic", nfc_option_event_cb, (void *)"MIFARE Classic");
+    options_view_add_item(g_nfc_ov, "Tools", nfc_option_event_cb, (void *)"Tools");
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
     options_view_add_back_row(g_nfc_ov, nfc_option_event_cb, (void *)"__BACK_OPTION__");
 #endif
@@ -4006,6 +4227,77 @@ keys_cleanup:
     update_keys_buttons_layout();
     keys_popup_selected = 1; // default focus on Close
     update_keys_popup_selection();
+}
+
+static void nfc_credits_close_cb(lv_event_t *e) { (void)e; cleanup_nfc_credits_popup(NULL); }
+
+static void cleanup_nfc_credits_popup(void *obj) {
+    (void)obj;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    touch_drag_reset(&nfc_credits_drag);
+#endif
+    lvgl_obj_del_safe(&nfc_credits_popup);
+    nfc_credits_close_btn = NULL;
+    nfc_credits_scroll = NULL;
+}
+
+static void create_nfc_credits_popup(void) {
+    if (!root) return;
+    if (nfc_credits_popup && lv_obj_is_valid(nfc_credits_popup)) cleanup_nfc_credits_popup(NULL);
+
+    /* Credits benefit from a tall, scrollable area. Use most of the screen
+     * height rather than the shared popup_calc_size caps (which top out at
+     * 140-160px) so the attribution is readable without constant scrolling. */
+    lv_coord_t screen_w = LV_HOR_RES;
+    lv_coord_t screen_h = LV_VER_RES;
+    int popup_w = (screen_w <= 240) ? (screen_w - 20) : (screen_w - 30);
+    int popup_h = screen_h - 24;
+    if (popup_h < 120) popup_h = 120;
+    if (popup_h > screen_h - 10) popup_h = screen_h - 10;
+    int y_offset = (screen_h - popup_h) / 2;
+    if (y_offset < 0) y_offset = 0;
+
+    nfc_credits_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset, true);
+    if (nfc_credits_popup) lv_obj_add_flag(nfc_credits_popup, LV_OBJ_FLAG_CLICKABLE);
+
+    const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
+    const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
+
+    popup_create_title_label(nfc_credits_popup, "NFC Credits", title_font, 10);
+
+    int scroll_h = popup_h - 76;
+    if (scroll_h < 60) scroll_h = 60;
+    nfc_credits_scroll = popup_create_scroll_area(nfc_credits_popup, popup_w - 24, scroll_h, LV_ALIGN_TOP_MID, 0, 30);
+
+    const char *credits =
+        "GhostESP NFC parser support is based on Next-Flip Momentum-Firmware "
+        "and Flipper NFC work.\n\n"
+        "MIFARE Classic hardnested/nested nonce collection is ported from "
+        "Momentum-Firmware work by noproto.\n\n"
+        "Momentum NFC/NDEF blame includes WillyJL, xMasterX, noproto, "
+        "Methodius, gornekich, hedger, Leptopt1los, hazardousvoltage, YaBa, "
+        "ted-logan, tomholford, luu176, and mxcdoam.\n\n"
+        "ST25R3916 NFC-V and target-mode behavior was cross-referenced with "
+        "Momentum/Flipper NFC HAL work.\n\n"
+        "PicoPass/iCLASS support is based on bettse/picopass, carried by "
+        "Momentum via Momentum-Apps. Includes holiman/loclass and "
+        "RfidResearchGroup/proxmark3 work.\n\n"
+        "PicoPass acknowledgements are preserved from bettse/picopass, including "
+        "Iceman and the Proxmark3 community.\n\n"
+        "GhostESP NFC integration and ports in this tree are by jaylikesbunda and deki.";
+
+    lv_obj_t *body = popup_create_body_label(nfc_credits_scroll, credits, popup_w - 42, true, body_font, 0);
+    if (body) {
+        lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_LEFT, 0);
+    }
+
+    int btn_w = (LV_HOR_RES <= 240) ? 80 : 90;
+    int btn_h = (LV_HOR_RES <= 240) ? 30 : 34;
+    nfc_credits_close_btn = popup_add_styled_button(nfc_credits_popup, "Close", btn_w, btn_h,
+                                                    LV_ALIGN_BOTTOM_MID, 0, -8, body_font,
+                                                    nfc_credits_close_cb, NULL);
+    if (nfc_credits_close_btn) popup_set_button_selected(nfc_credits_close_btn, true);
 }
 
 // ---- chameleon ultra basic popup ----
@@ -4918,6 +5210,28 @@ static void create_saved_details_popup(const char *path) {
     size_t path_len = strlen(path);
     bool is_picopass = (path_len >= 9 && strcasecmp(path + path_len - 9, ".picopass") == 0);
     if (is_picopass) {
+#ifdef CONFIG_NFC_ST25R3916
+        /* Preferred: parse the blocks and render the same summary as a live
+         * read. Falls through to the raw line dump below if parsing fails. */
+        PicopassDeviceData *pp = (PicopassDeviceData *)malloc(sizeof(PicopassDeviceData));
+        if (pp) {
+            if (picopass_load_and_parse_file(path, pp)) {
+                char *details = (char *)malloc(512);
+                if (details) {
+                    picopass_format_summary(pp, details, 512);
+                    lv_label_set_text(saved_title_label, "PicoPass / iCLASS");
+                    if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                    saved_details_text = details;
+                }
+            }
+            free(pp);
+        }
+        if (saved_details_text) {
+            if (did_load) nfc_sd_end(susp_load);
+            lv_label_set_text(saved_details_label, saved_details_text);
+            return;
+        }
+#endif
         FILE *pf = fopen(path, "r");
         if (pf) {
             char line[256];
@@ -5200,15 +5514,11 @@ void nfc_view_create(void) {
     nfc_add_backend_item();
 #endif
 #ifdef CONFIG_NFC_ST25R3916
-    options_view_add_item(g_nfc_ov, "PicoPass", nfc_option_event_cb, (void *)"PicoPass");
+    options_view_add_item(g_nfc_ov, "iCLASS / PicoPass", nfc_option_event_cb, (void *)"iCLASS / PicoPass");
 #endif
     options_view_add_item(g_nfc_ov, "Saved", nfc_option_event_cb, (void *)"Saved");
-    options_view_add_item(g_nfc_ov, "User Keys", nfc_option_event_cb, (void *)"User Keys");
-#if defined(CONFIG_NFC_CHAMELEON)
-    options_view_add_item(g_nfc_ov, "Chameleon Ultra", nfc_option_event_cb, (void *)"Chameleon Ultra");
-#endif
-    options_view_add_item(g_nfc_ov, "Generate", nfc_option_event_cb, (void *)"Generate");
-    emulate_btn = options_view_add_item(g_nfc_ov, "Write", nfc_option_event_cb, (void *)"Write");
+    options_view_add_item(g_nfc_ov, "MIFARE Classic", nfc_option_event_cb, (void *)"MIFARE Classic");
+    options_view_add_item(g_nfc_ov, "Tools", nfc_option_event_cb, (void *)"Tools");
     num_items = options_view_get_item_count(g_nfc_ov);
 
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
@@ -5241,12 +5551,15 @@ void nfc_view_destroy(void) {
     in_emulate_list = false;
     // cleanup chameleon popup
     cleanup_cu_popup(NULL);
+    cleanup_nfc_credits_popup(NULL);
     // Cleanup saved popup and list
     popup_confirm_close(&saved_delete_confirm_popup);
     cleanup_saved_details_popup(NULL);
     saved_clear_list();
     in_saved_list = false;
     in_generate_list = false;
+    in_mfc_menu = false;
+    in_tools_menu = false;
     nfc_option_invoked = false;
 #ifdef CONFIG_USE_TOUCHSCREEN
     touch_drag_reset(&nfc_touch_drag);

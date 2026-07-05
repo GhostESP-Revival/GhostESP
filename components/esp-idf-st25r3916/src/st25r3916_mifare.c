@@ -33,6 +33,13 @@ static inline uint32_t be32(const uint8_t *p) {
   return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
+static const uint8_t *cuid_bytes_from_uid(const uint8_t *uid, uint8_t uid_len) {
+  if (!uid || uid_len < 4) return NULL;
+  // cuid is the last 4 UID bytes for all lengths, matching Flipper/Momentum's
+  // iso14443_3a_get_cuid(). Keep this identical to the host-side derivation.
+  return uid + (uid_len - 4);
+}
+
 esp_err_t st25r3916_mifare_auth(crypto1_t *c, const uint8_t *uid, uint8_t uid_len, uint8_t block,
                                 uint8_t key_type, const uint8_t key[6]) {
   if (!c || !uid || uid_len < 4 || !key) return ESP_ERR_INVALID_ARG;
@@ -40,7 +47,9 @@ esp_err_t st25r3916_mifare_auth(crypto1_t *c, const uint8_t *uid, uint8_t uid_le
 
   uint64_t k = 0;
   for (int i = 0; i < 6; i++) k = (k << 8) | key[i];
-  uint32_t cuid = be32(uid + (uid_len - 4));
+  const uint8_t *cuid_bytes = cuid_bytes_from_uid(uid, uid_len);
+  if (!cuid_bytes) return ESP_ERR_INVALID_ARG;
+  uint32_t cuid = be32(cuid_bytes);
 
   /* Pass 1: send AUTH (cmd+block+CRC) and read the 4-byte tag nonce (plaintext,
    * no CRC on the response) via a raw transceive. */

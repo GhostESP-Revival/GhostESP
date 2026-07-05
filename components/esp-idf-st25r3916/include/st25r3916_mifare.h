@@ -24,7 +24,7 @@ extern "C" {
  * go through st25r3916_mifare_xfer() until the tag is halted or reselected.
  *
  * @param c        Cipher state to initialize/sync.
- * @param uid      Tag UID (the last 4 bytes are used as cuid).
+ * @param uid      Tag UID (Momentum/Flipper CUID bytes are used for Crypto1).
  * @param uid_len  UID length.
  * @param block    Block number to authenticate.
  * @param key_type 0x60 = key A, 0x61 = key B.
