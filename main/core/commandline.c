@@ -8,6 +8,7 @@
 #include "esp_sntp.h"
 #include "esp_mac.h"
 #include "managers/ap_manager.h"
+#include "managers/ota_manager.h"
 #include "sdkconfig.h"
 #include "vendor/drivers/pcf8563.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -295,9 +296,14 @@ void register_commands() {
     register_command("commstatus", handle_comm_status);
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
+#if GHOSTESP_OTA_SUPPORTED
+    // Only registered on 8MB/16MB boards -- these handlers live in
+    // peer_ota_manager.c, so registering them unconditionally would pull
+    // that file's static buffers into every board's BSS for nothing.
     register_command("otarecv", handle_otarecv_cmd);
     register_command("otastatus", handle_otastatus_cmd);
     register_command("otaabort", handle_otaabort_cmd);
+#endif
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blescan", handle_ble_scan_cmd);

@@ -18,6 +18,7 @@
 - NFC scan popup details are now left-aligned and slightly more compact
 
 ### Other Changes
+- Added OTA firmware updates over Wi-Fi (with automatic rollback on bad flashes) for boards with enough flash, plus a GhostLink peer-relay path and an SD-card install path for boards without one
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template

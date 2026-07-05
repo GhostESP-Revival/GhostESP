@@ -669,12 +669,19 @@ void app_main(void) {
 #endif
 #endif
 
+#if GHOSTESP_OTA_SUPPORTED
+    // Gated the same as the ota_manager_init() call above -- peer_ota_manager.c
+    // and self_ota_manager.c are only ever meaningfully used on 8MB/16MB boards
+    // (somethingsomething/somethingsomething2 today), but without this guard
+    // these calls would reference their symbols unconditionally on every board,
+    // pulling both files' static buffers into every 4MB build's BSS for nothing.
     if (peer_ota_manager_is_supported()) {
         peer_ota_manager_init();
     }
     if (self_ota_manager_is_supported()) {
         MEASURE_INIT_RAM("Self-OTA manager init", self_ota_manager_init());
     }
+#endif
 
     // Apply timezone from settings
     const char *tz = settings_get_timezone_str(&G_Settings);
