@@ -3965,7 +3965,9 @@ static void update_nfc_emu_popup_selection(void) {
 static void cleanup_nfc_emu_popup(void *obj) {
     (void)obj;
     if (nfc_emu_active) {
+#if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
         nfc_cli_stop();
+#endif
         nfc_emu_active = false;
     }
     lvgl_obj_del_safe(&nfc_emu_popup);

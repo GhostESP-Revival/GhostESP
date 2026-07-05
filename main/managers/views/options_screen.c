@@ -584,6 +584,7 @@ static void ble_adv_set_subtext(int found_count) {
 #include "managers/settings_manager.h"
 #include "managers/ota_manager.h"
 #include "managers/peer_ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "esp_log.h"
 #include "core/glog.h"
 #include <stdio.h>
@@ -3621,15 +3622,26 @@ static void apply_setting_change(int setting_index, int new_value) {
             return;
         }
         case SETTING_OTA_INSTALL_UPDATE: {
-            if (!ota_manager_is_supported() && !peer_ota_manager_is_supported()) {
+            if (!ota_manager_is_supported() && !peer_ota_manager_is_supported() &&
+                !self_ota_manager_is_supported()) {
                 error_popup_create("This board reflashes manually (see release notes)");
                 return;
             }
             // peer_ota_manager_start_full_update() relays to the peer first
-            // (if this board has one) and only then updates this board's own
-            // firmware -- falls back to a plain self-update otherwise.
+            // (if this board has one), then updates this board's own
+            // firmware -- via ota_manager if it has a real OTA table, or
+            // self_ota_manager's single-partition self-overwrite otherwise
+            // (currently just somethingsomething, which has neither Wi-Fi-
+            // less nor spare flash for a second slot). That self-flash path
+            // has no rollback net, so warn accordingly.
             esp_err_t err = peer_ota_manager_start_full_update();
-            error_popup_create(err == ESP_OK ? "Installing update..." : "No update available -- check first");
+            if (err != ESP_OK) {
+                error_popup_create("No update available -- check first");
+            } else if (self_ota_manager_is_supported()) {
+                error_popup_create("Installing update...\n\nDo NOT power off during flashing.");
+            } else {
+                error_popup_create("Installing update...");
+            }
             return;
         }
         case SETTING_OTA_CHECK_PEER: {

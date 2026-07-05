@@ -15,12 +15,18 @@
 // Wiegand/PACS parsing based on Flipper Zero Momentum-Firmware picopass_device.c
 //   by Eric Betts (bettse), Patrick Cunningham, Tiernan Messmer.
 
+#include "sdkconfig.h"
+
 // This entire file is ST25R3916-specific; every caller already guards its
 // use of picopass_* with #ifdef CONFIG_NFC_ST25R3916 (see nfc_cli.c), so
 // compiling to nothing here on boards without that hardware is safe -- the
 // st25r3916.h include path is also only added to the build when this config
 // is set (see main/CMakeLists.txt), so without this guard the file fails to
-// compile at all on those boards.
+// compile at all on those boards. sdkconfig.h must be included above before
+// this check -- nothing else in this file pulls it in early enough on its
+// own, so without it CONFIG_NFC_ST25R3916 reads as undefined here even when
+// the board actually has it enabled, silently compiling the whole file to
+// nothing (confirmed: this was the actual cause of a real build failure).
 #ifdef CONFIG_NFC_ST25R3916
 
 #include "managers/nfc/picopass.h"

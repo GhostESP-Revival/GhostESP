@@ -15,6 +15,7 @@
 #include "managers/settings_manager.h"
 #include "managers/ota_manager.h"
 #include "managers/peer_ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
 #include "managers/plugin_manager.h"
@@ -670,6 +671,9 @@ void app_main(void) {
 
     if (peer_ota_manager_is_supported()) {
         peer_ota_manager_init();
+    }
+    if (self_ota_manager_is_supported()) {
+        MEASURE_INIT_RAM("Self-OTA manager init", self_ota_manager_init());
     }
 
     // Apply timezone from settings

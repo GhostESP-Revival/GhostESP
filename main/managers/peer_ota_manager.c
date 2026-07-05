@@ -1,5 +1,6 @@
 #include "managers/peer_ota_manager.h"
 #include "managers/ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
@@ -372,11 +373,20 @@ static void peer_ota_full_update_task(void *pv) {
     }
 
     // Peer is done (or had nothing to do) -- now update this board itself,
-    // if a self-update is available. ota_manager_start_update() spawns its
-    // own task and returns immediately; once it succeeds it reboots this
+    // if a self-update is available. Both start_update() calls spawn their
+    // own task and return immediately; once one succeeds it reboots this
     // board, which is the natural end of this combined flow.
     if (ota_manager_is_supported() && ota_manager_get_status().state == OTA_STATE_UPDATE_AVAILABLE) {
         ota_manager_start_update();
+    } else if (self_ota_manager_is_supported()) {
+        // somethingsomething has no dual-partition table of its own (8MB
+        // flash can't fit one alongside the required napps reservation), so
+        // it falls back to the single-partition self-overwrite path instead.
+        // Unlike the branch above there's no separate "update available"
+        // flag to check first -- self_ota_manager_start_update() does its
+        // own manifest/version check and simply reports "Already up to
+        // date" via status if there's nothing newer.
+        self_ota_manager_start_update();
     }
     vTaskDelete(NULL);
 }
