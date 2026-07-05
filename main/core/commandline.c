@@ -295,6 +295,9 @@ void register_commands() {
     register_command("commstatus", handle_comm_status);
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
+    register_command("otarecv", handle_otarecv_cmd);
+    register_command("otastatus", handle_otastatus_cmd);
+    register_command("otaabort", handle_otaabort_cmd);
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blescan", handle_ble_scan_cmd);

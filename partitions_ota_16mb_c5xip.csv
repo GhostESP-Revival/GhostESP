@@ -1,0 +1,15 @@
+# OTA (A/B) partition table for 16MB ESP32-C5 boards that use the flash-XIP
+# SD-app loader (napps partition): NM-CYD-C5, TDongleC5.
+#
+# napps stays fixed at 0x400000/0x100000 (same offset as the non-OTA
+# partitions_c5_xip.csv) since the flash-XIP loader finds it by label/subtype.
+# OTA slots are placed in the spare space above napps instead of the tight
+# pre-napps gap, since 16MB flash has plenty of room there.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+otadata,    data, ota,      0x10000,  0x2000,
+coredump,   data, coredump, 0x20000,  0x20000,
+napps,      data, 0xFE,     0x400000, 0x100000,
+ota_0,      app,  ota_0,    0x500000, 0x580000,
+ota_1,      app,  ota_1,    0xA80000, 0x580000,

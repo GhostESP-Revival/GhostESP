@@ -163,6 +163,16 @@ typedef enum {
     SETTING_STA_PASSWORD,
     // Timezone quick-edit
     SETTING_TIMEZONE,
+    // OTA firmware update
+    SETTING_OTA_CHANNEL,
+    SETTING_OTA_UPDATE_AVAILABLE,
+    SETTING_OTA_LAST_CHECK_TIME,
+    // OTA UI actions (not NVS-backed -- handled entirely in options_screen.c)
+    SETTING_OTA_CHECK_NOW,
+    SETTING_OTA_INSTALL_UPDATE,
+    SETTING_OTA_CHECK_PEER,
+    SETTING_OTA_UPDATE_PEER,
+    SETTING_OTA_INSTALL_FROM_SD,
 } SettingsType;
 
 #define GPS_BAUD_AUTO 1U
@@ -278,6 +288,11 @@ typedef struct {
   char wigle_api_key[129];
   bool wigle_auto_upload; // Auto-upload CSVs at boot when WiFi connected
   bool wigle_donate; // Whether to donate uploads to Wigle
+
+  // OTA firmware update (8MB/16MB boards only, see ota_manager)
+  uint8_t ota_channel;          // 0=stable, 1=prerelease
+  bool ota_update_available;    // set by the background update-check task
+  uint32_t ota_last_check_time; // unix timestamp of last background check
   // IO expander programmable buttons (P10, P11, P12) - command to run when pressed, empty = send as joystick
   char io_btn_p10_cmd[129];
   char io_btn_p11_cmd[129];
@@ -503,6 +518,13 @@ uint8_t settings_get_wifi_country(const FSettings *settings);
 
 void settings_set_wigle_auto_upload(FSettings *settings, bool enabled);
 bool settings_get_wigle_auto_upload(const FSettings *settings);
+
+void settings_set_ota_channel(FSettings *settings, uint8_t channel);
+uint8_t settings_get_ota_channel(const FSettings *settings);
+void settings_set_ota_update_available(FSettings *settings, bool available);
+bool settings_get_ota_update_available(const FSettings *settings);
+void settings_set_ota_last_check_time(FSettings *settings, uint32_t timestamp);
+uint32_t settings_get_ota_last_check_time(const FSettings *settings);
 void settings_set_wigle_donate(FSettings *settings, bool enabled);
 bool settings_get_wigle_donate(const FSettings *settings);
 

@@ -226,6 +226,11 @@ void handle_comm_disconnect(int argc, char **argv);
 void handle_comm_setpins(int argc, char **argv);
 void cmd_comm_register_callback(void);
 
+// GhostLink peer-flashing commands (see managers/peer_ota_manager.c)
+void handle_otarecv_cmd(int argc, char **argv);
+void handle_otastatus_cmd(int argc, char **argv);
+void handle_otaabort_cmd(int argc, char **argv);
+
 // Aerial and Flock commands
 void handle_aerial_scan_cmd(int argc, char **argv);
 void handle_aerial_list_cmd(int argc, char **argv);

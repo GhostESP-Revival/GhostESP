@@ -1,0 +1,8 @@
+# OTA (A/B) partition table for 16MB boards without flash-XIP/storage extras:
+# JC3248W535EN, marauderv4, TDongleS3, TEmbedC1101.
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+otadata,    data, ota,      0x10000,  0x2000,
+ota_0,      app,  ota_0,    0x20000,  0x600000,
+ota_1,      app,  ota_1,    0x620000, 0x600000,
+coredump,   data, coredump, 0xC20000, 0x20000,

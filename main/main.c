@@ -13,6 +13,8 @@
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
 #include "managers/plugin_manager.h"
@@ -453,6 +455,27 @@ static bool start_boot_app_discovery_task(void) {
     return true;
 }
 
+#if GHOSTESP_OTA_SUPPORTED
+static void ota_background_check_task(void *arg) {
+    (void)arg;
+    // Let Wi-Fi connect (if configured) before hitting the network; this is
+    // a low-priority, check-only pass -- it must never download or flash.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    ota_manager_background_check();
+    vTaskDelete(NULL);
+}
+#endif
+
+static void peer_ota_background_check_task(void *arg) {
+    (void)arg;
+    // GhostLink connects independently of Wi-Fi, but give the boot sequence
+    // a moment to settle either way -- this is a low-priority, check-only
+    // pass -- it must never download or flash.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    peer_ota_manager_background_check();
+    vTaskDelete(NULL);
+}
+
 static void deferred_sd_init_task(void *arg) {
     // Short initial delay: the splash holds the screen during boot work, so we
     // only need enough time for splash_create to render the progress bar.
@@ -634,6 +657,21 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing Settings");
     MEASURE_INIT_RAM("Settings init", settings_init(&G_Settings));
 
+#if GHOSTESP_OTA_SUPPORTED
+    MEASURE_INIT_RAM("OTA manager init", ota_manager_init());
+#ifndef CONFIG_WITH_SCREEN
+    // Screen-less boards (e.g. somethingsomething2 / Banshee S3) never reach
+    // the display-init confirm-boot-ok hook further down (it's compiled out
+    // entirely for them) -- settings having loaded successfully is as good a
+    // "did boot succeed" checkpoint as this board gets.
+    ota_manager_confirm_boot_ok();
+#endif
+#endif
+
+    if (peer_ota_manager_is_supported()) {
+        peer_ota_manager_init();
+    }
+
     // Apply timezone from settings
     const char *tz = settings_get_timezone_str(&G_Settings);
     if (tz && strlen(tz) > 0) {
@@ -776,6 +814,11 @@ void app_main(void) {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
     }
     MEASURE_INIT_RAM("Deferred display peripherals", display_manager_init_deferred_peripherals());
+#if GHOSTESP_OTA_SUPPORTED
+    // Boot got this far without crashing -- confirm the image and cancel any
+    // pending bootloader rollback (no-op if this wasn't a post-OTA boot).
+    ota_manager_confirm_boot_ok();
+#endif
 #ifdef CONFIG_HAS_DRV2605_HAPTICS
     esp_err_t haptic_err;
     MEASURE_INIT_RAM("Haptic Manager", haptic_err = haptic_manager_init());
@@ -807,6 +850,24 @@ void app_main(void) {
                                             tskIDLE_PRIORITY + 1, NULL);
         if (sd_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create SD Init task");
+        }
+    }
+
+#if GHOSTESP_OTA_SUPPORTED
+    {
+        BaseType_t ota_task_rc = xTaskCreate(ota_background_check_task, "OTA Check", 4096, NULL,
+                                              tskIDLE_PRIORITY + 1, NULL);
+        if (ota_task_rc != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create OTA background check task");
+        }
+    }
+#endif
+
+    if (peer_ota_manager_is_supported()) {
+        BaseType_t peer_ota_task_rc = xTaskCreate(peer_ota_background_check_task, "Peer OTA Check", 4096, NULL,
+                                                   tskIDLE_PRIORITY + 1, NULL);
+        if (peer_ota_task_rc != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create peer OTA background check task");
         }
     }
 

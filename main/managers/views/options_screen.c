@@ -582,6 +582,8 @@ static void ble_adv_set_subtext(int found_count) {
 #include "core/wpa_crypto.h"
 #include "attacks/wifi/gtk_abuse.h"
 #include "managers/settings_manager.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
 #include "esp_log.h"
 #include "core/glog.h"
 #include <stdio.h>
@@ -640,6 +642,9 @@ typedef enum {
     SETTINGS_CAT_LOCKSCREEN,
     SETTINGS_CAT_WARDRIVING,
     SETTINGS_CAT_GPS,
+#if GHOSTESP_OTA_SUPPORTED
+    SETTINGS_CAT_FIRMWARE_UPDATE,
+#endif
     SETTINGS_CAT_COUNT
 } SettingsCategoryId;
 
@@ -705,6 +710,9 @@ static SettingsCategory settings_categories[] = {
     {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Setup", SETTINGS_CAT_SYSTEM_TOOLS, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Transfer or Reset", SETTINGS_CAT_BACKUP_RESET, SETTINGS_ROOT_SYSTEM, false, NULL},
+#if GHOSTESP_OTA_SUPPORTED
+    {"Firmware Update", SETTINGS_CAT_FIRMWARE_UPDATE, SETTINGS_ROOT_SYSTEM, true, "CONFIG_ESPTOOLPY_FLASHSIZE_8MB or CONFIG_ESPTOOLPY_FLASHSIZE_16MB"},
+#endif
 };
 
 static int current_settings_root = -1;
@@ -1265,6 +1273,9 @@ static const char * const idle_animation_options[] = {"Game of Life", "Ghost", "
 static const char * const idle_delay_options[] = {"Never", "5s", "10s", "30s"};
 #endif
 static const char * const action_options[] = {"Press OK"};
+#if GHOSTESP_OTA_SUPPORTED
+static const char * const ota_channel_options[] = {"Stable", "Prerelease"};
+#endif
 static const char *asset_pack_options[ASSET_PACK_INSTALLED_MAX + 1];
 static int asset_pack_option_count = 1;
 static const char * const font_size_options[] = {"Small", "Normal", "Large"};
@@ -1387,6 +1398,14 @@ static SettingsItem settings_items[] = {
     {"Export Settings SD", SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Import Settings SD", SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#if GHOSTESP_OTA_SUPPORTED
+    {"Update Channel", SETTING_OTA_CHANNEL, ota_channel_options, 2, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Check for Updates", SETTING_OTA_CHECK_NOW, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Install Update", SETTING_OTA_INSTALL_UPDATE, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Check Peer Update", SETTING_OTA_CHECK_PEER, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Update Peer", SETTING_OTA_UPDATE_PEER, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Install from SD Card", SETTING_OTA_INSTALL_FROM_SD, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
 
     {"Auto Upload", SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Donate Data", SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -3242,6 +3261,11 @@ static void load_current_settings_values(void) {
             case SETTING_WIGLE_DONATE:
                 settings_items[i].current_value = settings_get_wigle_donate(&G_Settings) ? 1 : 0;
                 break;
+#if GHOSTESP_OTA_SUPPORTED
+            case SETTING_OTA_CHANNEL:
+                settings_items[i].current_value = settings_get_ota_channel(&G_Settings);
+                break;
+#endif
 #if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
             case SETTING_MIC_VISUALIZER_MODE:
                 settings_items[i].current_value = (int)settings_get_mic_visualizer_mode(&G_Settings);
@@ -3577,6 +3601,74 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_WIGLE_DONATE:
             settings_set_wigle_donate(&G_Settings, new_value == 1);
             break;
+#if GHOSTESP_OTA_SUPPORTED
+        case SETTING_OTA_CHANNEL:
+            settings_set_ota_channel(&G_Settings, (uint8_t)new_value);
+            settings_persist_setting(SETTING_OTA_CHANNEL);
+            break;
+        case SETTING_OTA_CHECK_NOW: {
+            // On boards paired with a GhostLink peer (currently just
+            // somethingsomething), check both this board's own update and
+            // its peer's -- it's the peer that has no Wi-Fi of its own.
+            bool started_any = false;
+            if (ota_manager_is_supported()) {
+                started_any = (ota_manager_check_now() == ESP_OK) || started_any;
+            }
+            if (peer_ota_manager_is_supported()) {
+                started_any = (peer_ota_manager_check_now() == ESP_OK) || started_any;
+            }
+            error_popup_create(started_any ? "Checking for updates..." : "Update check not available");
+            return;
+        }
+        case SETTING_OTA_INSTALL_UPDATE: {
+            if (!ota_manager_is_supported() && !peer_ota_manager_is_supported()) {
+                error_popup_create("This board reflashes manually (see release notes)");
+                return;
+            }
+            // peer_ota_manager_start_full_update() relays to the peer first
+            // (if this board has one) and only then updates this board's own
+            // firmware -- falls back to a plain self-update otherwise.
+            esp_err_t err = peer_ota_manager_start_full_update();
+            error_popup_create(err == ESP_OK ? "Installing update..." : "No update available -- check first");
+            return;
+        }
+        case SETTING_OTA_CHECK_PEER: {
+            if (!peer_ota_manager_is_supported()) {
+                error_popup_create("No GhostLink peer configured for this board");
+                return;
+            }
+            esp_err_t err = peer_ota_manager_check_now();
+            error_popup_create(err == ESP_OK ? "Checking peer for updates..." : "GhostLink not connected");
+            return;
+        }
+        case SETTING_OTA_UPDATE_PEER: {
+            if (!peer_ota_manager_is_supported()) {
+                error_popup_create("No GhostLink peer configured for this board");
+                return;
+            }
+            esp_err_t err = peer_ota_manager_start_update();
+            if (err == ESP_ERR_INVALID_STATE) {
+                error_popup_create("GhostLink not connected");
+            } else {
+                error_popup_create(err == ESP_OK ? "Flashing peer..." : "Failed to start peer update");
+            }
+            return;
+        }
+        case SETTING_OTA_INSTALL_FROM_SD: {
+            esp_err_t err = ota_manager_start_update_from_sd();
+            if (err == ESP_ERR_INVALID_STATE) {
+                error_popup_create("SD card not mounted");
+            } else if (err == ESP_ERR_NOT_SUPPORTED) {
+                error_popup_create("This board reflashes manually (see release notes)");
+            } else {
+                // Whether firmware_update.bin actually exists is only known
+                // once the background task runs -- check the status/error
+                // message if this doesn't complete.
+                error_popup_create(err == ESP_OK ? "Checking SD card..." : "Failed to start SD update");
+            }
+            return;
+        }
+#endif
         case SETTING_LOAD_CONFIG: {
             // Load config from SD card
             esp_err_t config_err = config_manager_load_from_sd();

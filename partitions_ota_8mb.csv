@@ -1,0 +1,8 @@
+# OTA (A/B) partition table for 8MB boards without flash-XIP/storage extras:
+# sunton7inch, waveshare7inch, xiao_esp32s3, xiao_esp32s3_sense.
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+otadata,    data, ota,      0x10000,  0x2000,
+ota_0,      app,  ota_0,    0x20000,  0x3D0000,
+ota_1,      app,  ota_1,    0x3F0000, 0x3D0000,
+coredump,   data, coredump, 0x7C0000, 0x20000,

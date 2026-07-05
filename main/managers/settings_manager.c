@@ -82,6 +82,9 @@ static const char *NVS_WIFI_COUNTRY_KEY = "wifi_country";
 static const char *NVS_WIGLE_API_KEY = "wigle_api_key";
 static const char *NVS_WIGLE_DONATE_KEY = "wigle_donate";
 static const char *NVS_WIGLE_AUTO_UPLOAD_KEY = "wigle_auto_ul";
+static const char *NVS_OTA_CHANNEL_KEY = "ota_channel";
+static const char *NVS_OTA_UPDATE_AVAIL_KEY = "ota_avail";
+static const char *NVS_OTA_LAST_CHECK_KEY = "ota_last_chk";
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *NVS_STATUS_IDLE_ANIM_KEY = "idle_anim"; // nvs keys must be <=15 chars
 static const char *NVS_STATUS_IDLE_TIMEOUT_KEY = "idle_to_ms";
@@ -241,6 +244,9 @@ void settings_set_defaults(FSettings *settings) {
   strcpy(settings->wigle_api_key, "");
   settings->wigle_auto_upload = false; // Default to off
   settings->wigle_donate = true; // Default to donating
+  settings->ota_channel = 0; // Default to stable channel
+  settings->ota_update_available = false;
+  settings->ota_last_check_time = 0;
   settings->io_btn_p10_cmd[0] = '\0';
   settings->io_btn_p11_cmd[0] = '\0';
   settings->io_btn_p12_cmd[0] = '\0';
@@ -510,6 +516,28 @@ void settings_load(FSettings *settings) {
     printf("Failed to load Wigle auto-upload setting: %s\n", esp_err_to_name(err));
   }
   settings->wigle_auto_upload = (auto_upload_val != 0);
+
+  // Load OTA settings
+  uint8_t ota_channel_val = 0;
+  err = nvs_get_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, &ota_channel_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA channel setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_channel = ota_channel_val;
+
+  uint8_t ota_avail_val = 0;
+  err = nvs_get_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, &ota_avail_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA update-available setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_update_available = (ota_avail_val != 0);
+
+  uint32_t ota_last_check_val = 0;
+  err = nvs_get_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, &ota_last_check_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA last-check setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_last_check_time = ota_last_check_val;
 
   str_size = sizeof(settings->io_btn_p10_cmd);
   err = nvs_get_str(nvsHandle, NVS_IO_BTN_P10_CMD_KEY, settings->io_btn_p10_cmd, &str_size);
@@ -1102,6 +1130,18 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WIGLE_DONATE_KEY, G_Settings.wigle_donate ? 1 : 0);
             key = NVS_WIGLE_DONATE_KEY;
             break;
+        case SETTING_OTA_CHANNEL:
+            err = nvs_set_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, G_Settings.ota_channel);
+            key = NVS_OTA_CHANNEL_KEY;
+            break;
+        case SETTING_OTA_UPDATE_AVAILABLE:
+            err = nvs_set_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, G_Settings.ota_update_available ? 1 : 0);
+            key = NVS_OTA_UPDATE_AVAIL_KEY;
+            break;
+        case SETTING_OTA_LAST_CHECK_TIME:
+            err = nvs_set_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, G_Settings.ota_last_check_time);
+            key = NVS_OTA_LAST_CHECK_KEY;
+            break;
         case SETTING_MIC_VISUALIZER_MODE:
             err = nvs_set_u8(nvsHandle, NVS_MIC_VISUALIZER_MODE_KEY, (uint8_t)G_Settings.mic_visualizer_mode);
             key = NVS_MIC_VISUALIZER_MODE_KEY;
@@ -1376,6 +1416,9 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIGLE_DONATE_KEY, settings->wigle_donate ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIGLE_AUTO_UPLOAD_KEY, settings->wigle_auto_upload ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, settings->ota_channel));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, settings->ota_update_available ? 1 : 0));
+    NVS_SET(nvs_set_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, settings->ota_last_check_time));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P10_CMD_KEY, settings->io_btn_p10_cmd));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P11_CMD_KEY, settings->io_btn_p11_cmd));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P12_CMD_KEY, settings->io_btn_p12_cmd));
@@ -1913,6 +1956,30 @@ void settings_set_wigle_auto_upload(FSettings *settings, bool enabled) {
 
 bool settings_get_wigle_auto_upload(const FSettings *settings) {
   return settings->wigle_auto_upload;
+}
+
+void settings_set_ota_channel(FSettings *settings, uint8_t channel) {
+  settings->ota_channel = channel;
+}
+
+uint8_t settings_get_ota_channel(const FSettings *settings) {
+  return settings->ota_channel;
+}
+
+void settings_set_ota_update_available(FSettings *settings, bool available) {
+  settings->ota_update_available = available;
+}
+
+bool settings_get_ota_update_available(const FSettings *settings) {
+  return settings->ota_update_available;
+}
+
+void settings_set_ota_last_check_time(FSettings *settings, uint32_t timestamp) {
+  settings->ota_last_check_time = timestamp;
+}
+
+uint32_t settings_get_ota_last_check_time(const FSettings *settings) {
+  return settings->ota_last_check_time;
 }
 
 void settings_set_wigle_donate(FSettings *settings, bool enabled) {

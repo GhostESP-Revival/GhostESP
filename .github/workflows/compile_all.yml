@@ -44,10 +44,10 @@ jobs:
           - { name: "esp32c6-generic",         idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",                 zip_name: "esp32c6-generic.zip" }
           - { name: "Awok V5",                 idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32v5_awok.zip" }
           - { name: "ghostboard",              idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",                      zip_name: "ghostboard.zip" }
-          - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip" }
+          - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip", ota: true, ota_slot_size: 6291456, board_key: "marauderv4" }
           - { name: "MarauderV6&AwokDual",     idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv6",                      zip_name: "MarauderV6_AwokDual.zip" }
           - { name: "AwokMini",                idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.awokmini",                        zip_name: "AwokMini.zip" }
-          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip" }
+          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip", ota: true, ota_slot_size: 4001792, board_key: "cardputer" }
           - { name: "Heltec V3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.heltecv3",                        zip_name: "HeltecV3.zip" }
           - { name: "CYD2USB",                 idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB",                         zip_name: "CYD2USB.zip" }
           - { name: "CYDMicroUSB",             idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDMicroUSB",                     zip_name: "CYDMicroUSB.zip" }
@@ -55,30 +55,30 @@ jobs:
           - { name: "CYD2USB2.4_Inch",         idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",                  zip_name: "CYD2USB2.4Inch.zip" }
           - { name: "CYD2USB2.4_Inch_C",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient",        zip_name: "CYD2USB2.4Inch_C.zip" }
           - { name: "CYD2432S028R",            idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",                    zip_name: "CYD2432S028R.zip" }
-          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip" }
+          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip", ota: true, ota_slot_size: 4001792, board_key: "waveshare7inch" }
           - { name: "Crowtech_LCD",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",                   zip_name: "Crowtech_LCD.zip" }
-          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip" }
-          - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip" }
+          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip", ota: true, ota_slot_size: 4001792, board_key: "sunton7inch" }
+          - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip", ota: true, ota_slot_size: 6291456, board_key: "JC3248W535EN" }
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
-          - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip" }
-          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip" }
-          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip" }
-          - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip" }
+          - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo TEmbedC1101" }
+          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo T-Dongle-S3" }
+          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip", ota: true, ota_slot_size: 5767168, board_key: "LilyGo T-Dongle-C5" }
+          - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip", ota: true, ota_slot_size: 4194304, board_key: "S3TWatch" }
           - { name: "TDisplayS3-Touch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",               zip_name: "LilyGo-TDisplayS3-Touch.zip" }
           - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }
           - { name: "RabbitLabs_Minion",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.minion",                         zip_name: "RabbitLabs_Minion.zip" }
           - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
-          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip" }
+          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4001792, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
-          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip" }
-          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip" }
+          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", ota: true, ota_slot_size: 5767168, board_key: "somethingsomething" }
+          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
-          - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip" }
+          - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip", ota: true, ota_slot_size: 5767168, board_key: "NM-CYD-C5" }
           - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
-          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip" }
-          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip" }
+          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3_sense" }
+          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3" }
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
           - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
           - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
@@ -153,6 +153,19 @@ jobs:
           fi
           echo "Bootloader found at $BOOTLOADER_PATH"
 
+      - name: Check OTA Slot Size
+        if: matrix.target.ota == true
+        run: |
+          APP_BIN="build/Ghost_ESP_IDF.bin"
+          APP_SIZE=$(stat -c%s "$APP_BIN")
+          SLOT_SIZE=${{ matrix.target.ota_slot_size }}
+          echo "App binary: $APP_SIZE bytes; OTA slot budget: $SLOT_SIZE bytes"
+          if [ "$APP_SIZE" -ge "$SLOT_SIZE" ]; then
+            echo "Error: ${{ matrix.target.name }} firmware ($APP_SIZE bytes) does not fit its OTA slot ($SLOT_SIZE bytes)."
+            echo "Either trim the build for this target or revisit its partition table (see partitions_ota_*.csv)."
+            exit 1
+          fi
+
       - name: Package Artifacts into ZIP
         run: |
           . ~/esp-idf/export.sh
@@ -191,6 +204,137 @@ jobs:
         with:
           name: artifact-${{ matrix.target.zip_name }}
           path: ${{ matrix.target.zip_name }}
+
+      # Publishes the app-only binary (not the merged/manual-flash image) to
+      # Cloudflare R2 for OTA. Only runs for the OTA-eligible boards, and
+      # only on an intentional release run -- never on plain PR builds -- to
+      # keep R2 usage well inside the free tier. Requires R2_ACCOUNT_ID,
+      # R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME repo secrets
+      # (see the R2 bucket setup notes below the workflow).
+      - name: Publish OTA binary to R2
+        if: matrix.target.ota == true && github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          pip install --quiet awscli
+          APP_BIN="build/Ghost_ESP_IDF.bin"
+          SHA256=$(sha256sum "$APP_BIN" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$APP_BIN")
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BOARD_KEY="${{ matrix.target.board_key }}"
+          OBJECT_KEY="firmware/${BOARD_KEY}/${GITHUB_RUN_NUMBER}-${SHORT_SHA}.bin"
+
+          aws s3 cp "$APP_BIN" "s3://${{ secrets.R2_BUCKET_NAME }}/${OBJECT_KEY}" \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
+            || { echo "Failed to upload $BOARD_KEY firmware to R2"; exit 1; }
+
+          echo "R2_OBJECT_KEY=${OBJECT_KEY}" >> "$GITHUB_ENV"
+          echo "R2_SHA256=${SHA256}" >> "$GITHUB_ENV"
+          echo "R2_SIZE=${SIZE}" >> "$GITHUB_ENV"
+
+          mkdir -p ota_manifest_fragment
+          cat > "ota_manifest_fragment/${BOARD_KEY}.json" <<EOF
+          {
+            "board_key": "${BOARD_KEY}",
+            "sha256": "${SHA256}",
+            "size": ${SIZE},
+            "commit": "${SHORT_SHA}",
+            "build_number": ${GITHUB_RUN_NUMBER},
+            "object_key": "${OBJECT_KEY}"
+          }
+          EOF
+
+      - name: Upload OTA manifest fragment
+        if: matrix.target.ota == true && github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-fragment-${{ matrix.target.board_key }}
+          path: ota_manifest_fragment/${{ matrix.target.board_key }}.json
+
+  publish_ota_manifest:
+    name: Publish OTA Manifest to R2
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download OTA manifest fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ota-fragment-*
+          path: ota_fragments
+
+      - name: Determine channel and version
+        id: ota_version
+        run: |
+          if [ "${{ github.event.inputs.buildType }}" = "prerelease" ]; then
+            echo "channel=prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          fi
+          VERSION=$(grep -o 'GHOSTESP_VERSION "[^"]*"' include/core/ghostesp_version.h | cut -d'"' -f2)
+          echo "version=${VERSION:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble ota-manifest.json
+        env:
+          CHANNEL: ${{ steps.ota_version.outputs.channel }}
+          VERSION: ${{ steps.ota_version.outputs.version }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          channel = os.environ["CHANNEL"]
+          version = os.environ["VERSION"]
+          # Set this repo secret to the bucket's public/custom-domain base URL
+          # once provisioned (e.g. https://ota.ghostesp.dev) -- see the R2
+          # setup notes below this workflow. Left blank, download_url is a
+          # placeholder the client won't be able to resolve.
+          public_base = os.environ.get("R2_PUBLIC_BASE", "").rstrip("/")
+
+          manifest = {
+              "schema_version": 1,
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "boards": {},
+          }
+
+          for frag_path in sorted(glob.glob("ota_fragments/ota-fragment-*/*.json")):
+              with open(frag_path, "r", encoding="utf-8") as fp:
+                  frag = json.load(fp)
+              board_key = frag["board_key"]
+              key = f"{board_key}-prerelease" if channel == "prerelease" else board_key
+              manifest["boards"][key] = {
+                  "channel": channel,
+                  "version": version,
+                  "build_number": frag["build_number"],
+                  "commit": frag["commit"],
+                  "sha256": frag["sha256"],
+                  "size": frag["size"],
+                  "download_url": f"{public_base}/{frag['object_key']}" if public_base else frag["object_key"],
+              }
+
+          with open("ota-manifest.json", "w", encoding="utf-8") as fp:
+              json.dump(manifest, fp, indent=2, sort_keys=True)
+              fp.write("\n")
+
+          print(f"Assembled manifest with {len(manifest['boards'])} board entries")
+          PY
+
+      - name: Upload manifest to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          pip install --quiet awscli
+          aws s3 cp ota-manifest.json "s3://${{ secrets.R2_BUCKET_NAME }}/ota-manifest.json" \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
+            || { echo "Failed to upload ota-manifest.json to R2"; exit 1; }
 
   update_manifest_for_commit:
     name: Update Commit Manifest (push)
