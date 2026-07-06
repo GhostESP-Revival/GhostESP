@@ -14,8 +14,10 @@
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
+#if defined(CONFIG_NFC_ST25R3916)
 #include "crypto1.h"
 #include <math.h>
+#endif
 #include "managers/fuel_gauge_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1947,6 +1949,7 @@ static bool mfc_hardnested_append_sample(const char *path, int target_sector, bo
     return mfc_nested_write_sd(path, buf, (size_t)pos);
 }
 
+#if defined(CONFIG_NFC_ST25R3916)
 #define MFC_NESTED_CALIBRATION_COUNT 12
 
 // Measure the PRNG advancement window between consecutive nested auths, mirroring
@@ -2031,6 +2034,7 @@ static bool mfc_hardnested_calibrate(pn532_io_handle_t io, uint8_t known_block,
     *out_d_max = (uint16_t)(dmax + 3);
     return true;
 }
+#endif // CONFIG_NFC_ST25R3916
 
 static bool mfc_hardnested_capture_target_file(pn532_io_handle_t io,
                                                const uint8_t* uid,
@@ -2060,6 +2064,7 @@ static bool mfc_hardnested_capture_target_file(pn532_io_handle_t io,
      * (uncalibrated) 256-MSB collection. Non-fatal: on failure we fall back to
      * plain collection. d_min/d_max are reserved for a future calibrated
      * on-device recovery; the collection below is unchanged for now. */
+#if defined(CONFIG_NFC_ST25R3916)
     uint16_t cal_d_min = 0, cal_d_max = 0;
     bool cal_static = false;
     if (mfc_hardnested_calibrate(io, known_block, known_key_b, known_key, uid, uid_len, cuid,
@@ -2074,6 +2079,7 @@ static bool mfc_hardnested_capture_target_file(pn532_io_handle_t io,
         ESP_LOGD(MFC_TAG, "Hardnested: calibration unavailable; using uncalibrated collection");
     }
     (void)cal_d_min; (void)cal_d_max;
+#endif
 
     uint8_t seen[32] = {0};
     uint16_t msb_count = 0;
