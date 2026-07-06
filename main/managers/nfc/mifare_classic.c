@@ -14,10 +14,8 @@
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
-#if defined(CONFIG_NFC_ST25R3916)
 #include "crypto1.h"
 #include <math.h>
-#endif
 #include "managers/fuel_gauge_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
