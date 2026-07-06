@@ -1,5 +1,8 @@
 #include "managers/self_ota_manager.h"
 #include "managers/ota_manager.h"
+
+#if GHOSTESP_OTA_SUPPORTED
+
 #include "managers/settings_manager.h"
 #include "core/glog.h"
 #include "managers/status_display_manager.h"
@@ -280,3 +283,12 @@ esp_err_t self_ota_manager_start_update(void) {
     BaseType_t rc = xTaskCreate(self_ota_update_task, "self_ota", 12288, NULL, 5, NULL);
     return (rc == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }
+
+#else
+
+bool self_ota_manager_is_supported(void) { return false; }
+esp_err_t self_ota_manager_init(void) { return ESP_OK; }
+SelfOtaStatus self_ota_manager_get_status(void) { return (SelfOtaStatus){ .state = SELF_OTA_STATE_IDLE }; }
+esp_err_t self_ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
+
+#endif

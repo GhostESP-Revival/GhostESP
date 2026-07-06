@@ -1,5 +1,8 @@
 #include "managers/peer_ota_manager.h"
 #include "managers/ota_manager.h"
+
+#if GHOSTESP_OTA_SUPPORTED
+
 #include "managers/self_ota_manager.h"
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
@@ -556,3 +559,18 @@ void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv) {
     const char *msg = s_peer_last_result_ok ? "DONE" : "ERROR:verify";
     esp_comm_manager_send_response((const uint8_t *)msg, strlen(msg));
 }
+
+#else
+
+bool peer_ota_manager_is_supported(void) { return false; }
+esp_err_t peer_ota_manager_init(void) { return ESP_OK; }
+void peer_ota_manager_background_check(void) {}
+esp_err_t peer_ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t peer_ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t peer_ota_manager_start_full_update(void) { return ESP_ERR_NOT_SUPPORTED; }
+PeerOtaStatus peer_ota_manager_get_status(void) { return (PeerOtaStatus){ .state = PEER_OTA_STATE_IDLE }; }
+void peer_ota_manager_handle_otarecv_cmd(int argc, char **argv) { (void)argc; (void)argv; }
+void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv) { (void)argc; (void)argv; }
+void peer_ota_manager_handle_otaabort_cmd(int argc, char **argv) { (void)argc; (void)argv; }
+
+#endif

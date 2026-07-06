@@ -1,4 +1,7 @@
 #include "managers/ota_manager.h"
+
+#if GHOSTESP_OTA_SUPPORTED
+
 #include "managers/settings_manager.h"
 #include "managers/sd_card_manager.h"
 #include "core/glog.h"
@@ -731,3 +734,26 @@ esp_err_t ota_manager_start_update_from_sd(void) {
                                 OTA_DOWNLOAD_TASK_STACK_BYTES, NULL, 5, NULL);
     return (rc == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }
+
+#else
+
+bool ota_manager_is_supported(void) { return false; }
+esp_err_t ota_manager_init(void) { return ESP_OK; }
+esp_err_t ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_background_check(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_start_update_from_sd(void) { return ESP_ERR_NOT_SUPPORTED; }
+OtaStatus ota_manager_get_status(void) { return (OtaStatus){ .state = OTA_STATE_IDLE }; }
+esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channel, OtaManifestEntry *out_entry) {
+    (void)board_key;
+    (void)channel;
+    if (out_entry) *out_entry = (OtaManifestEntry){0};
+    return ESP_ERR_NOT_SUPPORTED;
+}
+void ota_manager_confirm_boot_ok(void) {}
+esp_err_t ota_manager_raw_write_begin(size_t image_size) { (void)image_size; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_raw_write_chunk(const uint8_t *data, size_t len) { (void)data; (void)len; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_raw_write_finish(const char *expected_sha256_hex) { (void)expected_sha256_hex; return ESP_ERR_NOT_SUPPORTED; }
+void ota_manager_raw_write_abort(void) {}
+
+#endif
