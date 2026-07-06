@@ -136,7 +136,7 @@ typedef struct {
   bool is_dualcomm; // precomputed at insert time, read in draw callback
 } TermLine;
 
-EXT_RAM_BSS_ATTR static TermLine term_lines[MAX_TERMINAL_LINES];
+static TermLine *term_lines = NULL;
 static uint16_t term_line_head = 0;   // index of oldest
 static uint16_t term_line_count = 0;  // number of valid lines
 static size_t term_text_bytes = 0;    // total bytes across stored lines
@@ -162,16 +162,27 @@ static void *terminal_alloc_buffer(size_t size) {
 }
 
 static bool ensure_terminal_buffers(void) {
-  if (term_ring) {
+  if (term_ring && term_lines) {
     return true;
   }
 
-  term_ring = terminal_alloc_buffer(MAX_TEXT_LENGTH);
+  if (!term_ring) {
+    term_ring = terminal_alloc_buffer(MAX_TEXT_LENGTH);
+  }
   if (!term_ring) {
     ESP_LOGE(TAG, "Failed to allocate terminal ring buffer");
     return false;
   }
   memset(term_ring, 0, MAX_TEXT_LENGTH);
+
+  if (!term_lines) {
+    term_lines = terminal_alloc_buffer(sizeof(TermLine) * MAX_TERMINAL_LINES);
+  }
+  if (!term_lines) {
+    ESP_LOGE(TAG, "Failed to allocate terminal line buffer");
+    return false;
+  }
+  memset(term_lines, 0, sizeof(TermLine) * MAX_TERMINAL_LINES);
 
   return true;
 }
@@ -270,6 +281,7 @@ static void scroll_to_bottom_if_needed(bool was_near_bottom) {
 // ========== Virtualized terminal helpers ==========
 
 static void clear_lines(void) {
+  if (!term_lines) return;
   for (uint16_t i = 0; i < term_line_count; i++) {
     uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
     if (term_lines[idx].text) {
@@ -284,7 +296,7 @@ static void clear_lines(void) {
 }
 
 static void drop_oldest_line(void) {
-  if (term_line_count == 0) return;
+  if (!term_lines || term_line_count == 0) return;
   uint16_t idx = term_line_head;
   if (term_lines[idx].text) {
     term_text_bytes -= strlen(term_lines[idx].text);
@@ -297,6 +309,7 @@ static void drop_oldest_line(void) {
 }
 
 static void append_line(const char *line, size_t len) {
+  if (!ensure_terminal_buffers()) return;
   // allocate and copy
   char *copy = (char *)malloc(len + 1);
   if (!copy) return;

@@ -82,7 +82,11 @@ list(REMOVE_ITEM m5gfx_sources "${lgfx_miniz_source}")
 list(APPEND app_sources ${axs15231b_sources} ${image_sources} "${lgfx_miniz_source}")
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls app_update esp_https_ota spi_flash)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls spi_flash)
+
+if(CONFIG_ESPTOOLPY_FLASHSIZE_8MB OR CONFIG_ESPTOOLPY_FLASHSIZE_16MB)
+    list(APPEND required_components app_update esp_https_ota)
+endif()
 
 # Optionally add extra include directories
 set(extra_includes "")
@@ -91,7 +95,7 @@ if(CONFIG_USE_IO_EXPANDER)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/io_manager")
 endif()
 
-if(CONFIG_HAS_NFC)
+if(CONFIG_NFC_PN532 OR CONFIG_NFC_ST25R3916)
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp-idf-pn532/include")
 endif()
 
@@ -106,7 +110,7 @@ set(sources ${app_sources})
 
 ## nfc build control: main still compiles NFC sources when NFC is enabled,
 ## so export pn532 headers whenever NFC support is on
-if(CONFIG_HAS_NFC)
+if(CONFIG_NFC_PN532 OR CONFIG_NFC_ST25R3916)
     list(APPEND required_components esp-idf-pn532)
 endif()
 

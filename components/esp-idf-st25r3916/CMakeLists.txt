@@ -22,4 +22,6 @@ idf_component_register(
         esp-idf-pn532
         io_manager
 )
+else()
+idf_component_register()
 endif()
