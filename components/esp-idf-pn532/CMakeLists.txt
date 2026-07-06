@@ -1,3 +1,4 @@
+if(CONFIG_HAS_NFC)
 idf_component_register(
     SRCS
         src/pn532.c
@@ -8,5 +9,6 @@ idf_component_register(
     REQUIRES
         driver io_manager
 )
+endif()
 
 

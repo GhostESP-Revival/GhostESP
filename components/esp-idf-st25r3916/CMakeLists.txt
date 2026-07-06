@@ -1,3 +1,4 @@
+if(CONFIG_NFC_ST25R3916)
 idf_component_register(
     SRCS
         src/st25r3916.c
@@ -21,3 +22,4 @@ idf_component_register(
         esp-idf-pn532
         io_manager
 )
+endif()
