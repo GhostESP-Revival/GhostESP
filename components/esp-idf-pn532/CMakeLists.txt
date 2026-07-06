@@ -17,4 +17,7 @@ idf_component_register(
         esp_driver_gpio
         esp_driver_i2c
         io_manager
+    PRIV_REQUIRES
+        esp_driver_gpio
+        esp_driver_i2c
 )
