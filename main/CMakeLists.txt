@@ -50,11 +50,13 @@ list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 # Exclude camera managers until camera support is enabled.
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
-# Exclude OTA managers; only linked on 8MB/16MB flash where OTA is supported
-list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/ota_manager.c")
-list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/peer_ota_manager.c")
-list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/self_ota_manager.c")
+# Exclude OTA managers from the glob; only linked on 8MB/16MB flash where OTA is supported.
+set(ghostesp_ota_supported OFF)
 if(CONFIG_ESPTOOLPY_FLASHSIZE_8MB OR CONFIG_ESPTOOLPY_FLASHSIZE_16MB)
+    set(ghostesp_ota_supported ON)
+endif()
+list(FILTER app_sources EXCLUDE REGEX "managers/(ota_manager|peer_ota_manager|self_ota_manager)\\.c$")
+if(ghostesp_ota_supported)
     list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/ota_manager.c")
     list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/peer_ota_manager.c")
     list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/self_ota_manager.c")
@@ -84,7 +86,7 @@ list(APPEND app_sources ${axs15231b_sources} ${image_sources} "${lgfx_miniz_sour
 
 set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls spi_flash)
 
-if(CONFIG_ESPTOOLPY_FLASHSIZE_8MB OR CONFIG_ESPTOOLPY_FLASHSIZE_16MB)
+if(ghostesp_ota_supported)
     list(APPEND required_components app_update esp_https_ota)
 endif()
 
