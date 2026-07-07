@@ -12,10 +12,12 @@
 
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
@@ -507,14 +509,165 @@ esp_err_t peer_ota_manager_start_update(void) {
 // ---------------------------------------------------------------------------
 
 #define PEER_OTA_RECEIVE_TIMEOUT_MS 45000
+#define PEER_OTA_RX_TASK_STACK_BYTES 6144
+#define PEER_OTA_RX_QUEUE_LEN 16
+#define PEER_OTA_RX_CHUNK_MAX 64
+
+typedef enum {
+    PEER_OTA_RX_MSG_BEGIN,
+    PEER_OTA_RX_MSG_CHUNK,
+    PEER_OTA_RX_MSG_ABORT,
+} peer_ota_rx_msg_type_t;
+
+typedef struct {
+    peer_ota_rx_msg_type_t type;
+    size_t image_size;
+    size_t length;
+    uint8_t data[PEER_OTA_RX_CHUNK_MAX];
+} peer_ota_rx_msg_t;
 
 static bool s_peer_receiving;
 static size_t s_peer_expected_size;
 static size_t s_peer_received;
+static size_t s_peer_queued;
 static char s_peer_expected_sha256[65];
 static bool s_peer_last_result_ok;
 static bool s_peer_have_result;
 static esp_timer_handle_t s_peer_receive_timeout_timer;
+static QueueHandle_t s_peer_rx_queue;
+static TaskHandle_t s_peer_rx_task_handle;
+static StackType_t *s_peer_rx_task_stack;
+static StaticTask_t *s_peer_rx_task_tcb;
+static SemaphoreHandle_t s_peer_begin_sem;
+static esp_err_t s_peer_begin_result;
+static volatile bool s_peer_abort_requested;
+static bool s_peer_reboot_pending;
+static bool s_peer_reboot_task_started;
+
+static void peer_ota_finish_and_maybe_reboot_task(void *pv);
+
+static void peer_ota_request_worker_abort(TickType_t wait_ticks) {
+    s_peer_abort_requested = true;
+    if (!s_peer_rx_queue) {
+        return;
+    }
+    peer_ota_rx_msg_t msg = { .type = PEER_OTA_RX_MSG_ABORT };
+    (void)xQueueSendToFront(s_peer_rx_queue, &msg, wait_ticks);
+}
+
+static void peer_ota_mark_receive_failed(void) {
+    if (s_peer_receive_timeout_timer) {
+        esp_timer_stop(s_peer_receive_timeout_timer);
+    }
+    s_peer_receiving = false;
+    esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_OTA, NULL, NULL);
+    s_peer_have_result = true;
+    s_peer_last_result_ok = false;
+    s_peer_reboot_pending = false;
+}
+
+static void peer_ota_rx_worker_task(void *pv) {
+    (void)pv;
+    bool raw_active = false;
+
+    for (;;) {
+        peer_ota_rx_msg_t msg;
+        if (xQueueReceive(s_peer_rx_queue, &msg, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        if (msg.type == PEER_OTA_RX_MSG_ABORT || s_peer_abort_requested) {
+            if (raw_active) {
+                ota_manager_raw_write_abort();
+                raw_active = false;
+            }
+            s_peer_abort_requested = false;
+            if (msg.type == PEER_OTA_RX_MSG_ABORT) {
+                continue;
+            }
+        }
+
+        if (msg.type == PEER_OTA_RX_MSG_BEGIN) {
+            s_peer_begin_result = ota_manager_raw_write_begin(msg.image_size);
+            raw_active = (s_peer_begin_result == ESP_OK);
+            if (s_peer_begin_sem) {
+                xSemaphoreGive(s_peer_begin_sem);
+            }
+            continue;
+        }
+
+        if (msg.type != PEER_OTA_RX_MSG_CHUNK || !s_peer_receiving || !raw_active) {
+            continue;
+        }
+
+        if (ota_manager_raw_write_chunk(msg.data, msg.length) != ESP_OK) {
+            ota_manager_raw_write_abort();
+            raw_active = false;
+            peer_ota_mark_receive_failed();
+            continue;
+        }
+
+        s_peer_received += msg.length;
+        if (s_peer_received >= s_peer_expected_size) {
+            if (s_peer_receive_timeout_timer) {
+                esp_timer_stop(s_peer_receive_timeout_timer);
+            }
+            s_peer_receiving = false;
+            esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_OTA, NULL, NULL);
+            esp_err_t err = ota_manager_raw_write_finish(s_peer_expected_sha256);
+            raw_active = false;
+            s_peer_have_result = true;
+            s_peer_last_result_ok = (err == ESP_OK);
+            s_peer_reboot_pending = (err == ESP_OK);
+        }
+    }
+}
+
+static bool peer_ota_ensure_rx_worker(void) {
+    if (!s_peer_begin_sem) {
+        s_peer_begin_sem = xSemaphoreCreateBinary();
+        if (!s_peer_begin_sem) {
+            return false;
+        }
+    }
+    if (!s_peer_rx_queue) {
+        s_peer_rx_queue = xQueueCreate(PEER_OTA_RX_QUEUE_LEN, sizeof(peer_ota_rx_msg_t));
+        if (!s_peer_rx_queue) {
+            return false;
+        }
+    }
+    if (s_peer_rx_task_handle) {
+        return true;
+    }
+
+    const uint32_t stack_words = (PEER_OTA_RX_TASK_STACK_BYTES + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+    s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t),
+                                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    s_peer_rx_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
+                                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_peer_rx_task_stack || !s_peer_rx_task_tcb) {
+        if (s_peer_rx_task_stack) {
+            heap_caps_free(s_peer_rx_task_stack);
+            s_peer_rx_task_stack = NULL;
+        }
+        if (s_peer_rx_task_tcb) {
+            heap_caps_free(s_peer_rx_task_tcb);
+            s_peer_rx_task_tcb = NULL;
+        }
+        return false;
+    }
+
+    s_peer_rx_task_handle = xTaskCreateStatic(peer_ota_rx_worker_task, "peer_ota_rx", stack_words,
+                                              NULL, tskIDLE_PRIORITY + 2,
+                                              s_peer_rx_task_stack, s_peer_rx_task_tcb);
+    if (!s_peer_rx_task_handle) {
+        heap_caps_free(s_peer_rx_task_stack);
+        heap_caps_free(s_peer_rx_task_tcb);
+        s_peer_rx_task_stack = NULL;
+        s_peer_rx_task_tcb = NULL;
+    }
+    return s_peer_rx_task_handle != NULL;
+}
 
 static void peer_ota_finish_and_maybe_reboot_task(void *pv) {
     bool ok = (bool)(intptr_t)pv;
@@ -532,14 +685,8 @@ static void peer_ota_finish_and_maybe_reboot_task(void *pv) {
 // silent, e.g. GhostLink dropped entirely), and an explicit "otaabort" from
 // the primary (its own download failed after the handshake).
 static void peer_ota_abort_receive(void) {
-    if (s_peer_receive_timeout_timer) {
-        esp_timer_stop(s_peer_receive_timeout_timer);
-    }
-    s_peer_receiving = false;
-    esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_OTA, NULL, NULL);
-    ota_manager_raw_write_abort();
-    s_peer_have_result = true;
-    s_peer_last_result_ok = false;
+    peer_ota_mark_receive_failed();
+    peer_ota_request_worker_abort(pdMS_TO_TICKS(100));
 }
 
 static void peer_ota_receive_timeout_cb(void *arg) {
@@ -572,23 +719,24 @@ static void peer_ota_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
         esp_timer_stop(s_peer_receive_timeout_timer);
         esp_timer_start_once(s_peer_receive_timeout_timer, (uint64_t)PEER_OTA_RECEIVE_TIMEOUT_MS * 1000);
     }
-    if (ota_manager_raw_write_chunk(data, length) != ESP_OK) {
+    if (length > PEER_OTA_RX_CHUNK_MAX) {
         peer_ota_abort_receive();
         return;
     }
-    s_peer_received += length;
-    if (s_peer_received >= s_peer_expected_size) {
+    peer_ota_rx_msg_t msg = {
+        .type = PEER_OTA_RX_MSG_CHUNK,
+        .length = length,
+    };
+    memcpy(msg.data, data, length);
+    if (xQueueSend(s_peer_rx_queue, &msg, pdMS_TO_TICKS(PEER_OTA_SEND_WAIT_MS)) != pdTRUE) {
+        peer_ota_abort_receive();
+        return;
+    }
+    s_peer_queued += length;
+    if (s_peer_queued >= s_peer_expected_size) {
         if (s_peer_receive_timeout_timer) {
             esp_timer_stop(s_peer_receive_timeout_timer);
         }
-        s_peer_receiving = false;
-        esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_OTA, NULL, NULL);
-        esp_err_t err = ota_manager_raw_write_finish(s_peer_expected_sha256);
-        s_peer_have_result = true;
-        s_peer_last_result_ok = (err == ESP_OK);
-        BaseType_t rc = xTaskCreate(peer_ota_finish_and_maybe_reboot_task, "peer_ota_fin", 2048,
-                                     (void *)(intptr_t)s_peer_last_result_ok, tskIDLE_PRIORITY + 1, NULL);
-        (void)rc;
     }
 }
 
@@ -608,8 +756,8 @@ void peer_ota_manager_handle_otarecv_cmd(int argc, char **argv) {
         return;
     }
 
-    if (ota_manager_raw_write_begin(size) != ESP_OK) {
-        esp_comm_manager_send_response((const uint8_t *)"ERROR:begin", strlen("ERROR:begin"));
+    if (!peer_ota_ensure_rx_worker()) {
+        esp_comm_manager_send_response((const uint8_t *)"ERROR:no_mem", strlen("ERROR:no_mem"));
         return;
     }
 
@@ -617,7 +765,28 @@ void peer_ota_manager_handle_otarecv_cmd(int argc, char **argv) {
     s_peer_expected_sha256[sizeof(s_peer_expected_sha256) - 1] = '\0';
     s_peer_expected_size = size;
     s_peer_received = 0;
+    s_peer_queued = 0;
     s_peer_have_result = false;
+    s_peer_last_result_ok = false;
+    s_peer_abort_requested = false;
+    s_peer_reboot_pending = false;
+    s_peer_reboot_task_started = false;
+    xSemaphoreTake(s_peer_begin_sem, 0);
+
+    peer_ota_rx_msg_t msg = {
+        .type = PEER_OTA_RX_MSG_BEGIN,
+        .image_size = size,
+    };
+    if (xQueueSend(s_peer_rx_queue, &msg, pdMS_TO_TICKS(100)) != pdTRUE ||
+        xSemaphoreTake(s_peer_begin_sem, pdMS_TO_TICKS(PEER_OTA_RESPONSE_WAIT_MS)) != pdTRUE ||
+        s_peer_begin_result != ESP_OK) {
+        peer_ota_request_worker_abort(pdMS_TO_TICKS(100));
+        s_peer_have_result = true;
+        s_peer_last_result_ok = false;
+        esp_comm_manager_send_response((const uint8_t *)"ERROR:begin", strlen("ERROR:begin"));
+        return;
+    }
+
     s_peer_receiving = true;
 
     esp_comm_manager_register_stream_handler(COMM_STREAM_CHANNEL_OTA, peer_ota_stream_rx_cb, NULL);
@@ -654,6 +823,12 @@ void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv) {
     }
     const char *msg = s_peer_last_result_ok ? "DONE" : "ERROR:verify";
     esp_comm_manager_send_response((const uint8_t *)msg, strlen(msg));
+    if (s_peer_reboot_pending && !s_peer_reboot_task_started) {
+        s_peer_reboot_task_started = true;
+        BaseType_t rc = xTaskCreate(peer_ota_finish_and_maybe_reboot_task, "peer_ota_fin", 2048,
+                                     (void *)(intptr_t)true, tskIDLE_PRIORITY + 1, NULL);
+        (void)rc;
+    }
 }
 
 void peer_ota_manager_handle_otainfo_cmd(int argc, char **argv) {
