@@ -3,22 +3,21 @@
 ## Revival v2.1.0
 
 ### NFC
-- Added ST25R3916/ST25R3916B NFC frontend (SPI and I2C) with software Crypto1, card emulation (Type 2/NTAG and MIFARE Classic), and listener behavior referenced from [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware)
-- Added NFC backend selector (`auto` / `pn532` / `st25r`) in UI and `nfc backend` CLI; `auto` probes PN532 then ST25R3916
-- Added MIFARE Classic nested key recovery on ST25R3916 (encrypted nonce capture, weak/hard PRNG classification, dictionary filtering, RF verification) — based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) work by [@noproto](https://github.com/noproto)
-- Added Momentum-compatible `.nested.log` export at `/mnt/ghostesp/nfc/.nested.log` and `nfc hardnested` CLI command — based on work by [@noproto](https://github.com/noproto)
-- Added PicoPass / iCLASS support on ST25R3916, based on [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
-- Added NDEF tag generation (URL, Text, Phone, Email, Wi-Fi, vCard, Android App)
-- Added NTAG Type 2 metadata parsing (GET_VERSION, signature, counters, locks, CFG protection) with write-safety checks
-- Added DESFire version/UID detection summary
-- Reorganized the NFC menu into submenus
-- Added an NFC Credits page listing upstream contributors
-- Improved MIFARE Classic progress feedback in the scan popup with clearer phase labels
-- Fixed MIFARE Classic summary skipping block reads after a successful default-key auth
-- NFC scan popup details are now left-aligned and slightly more compact
+- Added ST25R3916/ST25R3916B NFC support over SPI or I2C, plus an `auto` / `pn532` / `st25r` backend selector in UI and CLI
+- Added more NFC tag tools: MIFARE Classic nested recovery, PicoPass/iCLASS reads, NDEF creation, NTAG metadata, and DESFire summaries, with credits to [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [@noproto](https://github.com/noproto), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
+- Added Momentum-compatible nested logs at `/mnt/ghostesp/nfc/.nested.log` and the `nfc hardnested` CLI command
+- Cleaned up the NFC menu, scan popup, progress labels, and credits page
+- Fixed MIFARE Classic summaries skipping block reads after default-key auth
+
+### Firmware Updates (OTA)
+- Added Wi-Fi firmware updates from **Settings > Firmware Update**, with verification and rollback protection on supported boards
+- Added Stable / Prerelease update channels and clearer build comparisons for upgrades, reinstalls, and rollbacks
+- Added GhostLink peer updates, so a primary device can download firmware and safely flash its paired peer
+- Added offline SD card installs from `/ghostesp/firmware_update.bin`, with optional `.sha256` verification
+- Added the Banshee C5 updater flow with recovery if an update fails
 
 ### Other Changes
-- Added OTA firmware updates over Wi-Fi (with automatic rollback on bad flashes) for boards with enough flash, plus a GhostLink peer-relay path and an SD-card install path for boards without one
+- Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template

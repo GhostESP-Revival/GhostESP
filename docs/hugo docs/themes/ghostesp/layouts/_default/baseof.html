@@ -313,5 +313,9 @@
     {{ $asset := . | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
+  {{ with resources.Get "js/compat-table.js" }}
+    {{ $asset := . | fingerprint }}
+    <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
 </body>
 </html>

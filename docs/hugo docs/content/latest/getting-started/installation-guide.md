@@ -1,7 +1,7 @@
 ---
 title: "Installation Guide"
 description: "Flash GhostESP firmware to your ESP32 device"
-weight: 10
+weight: 20
 toc: true
 ---
 
@@ -121,7 +121,7 @@ GhostESP boots automatically and creates a Wi-Fi access point called `GhostNet` 
 - Control GhostESP directly from your Flipper.
 
 **Qt6 Desktop App**
-- [Download and install](../../scripts/control%20app/) for advanced features and customization.
+- See the [Control App]({{< relref "latest/companion-tools/control-app.md" >}}) guide to install the desktop GUI for advanced features and customization.
 
 **Touch Screen** (Supported Boards Only)
 - Navigate menus with touch gestures.

@@ -1,18 +1,45 @@
 ---
 title: "Supported Hardware"
 description: "Device compatibility matrix for GhostESP features"
-weight: 15
+weight: 10
 toc: true
 ---
 
 ## Overview
 
-GhostESP runs on a variety of ESP32 boards with varying feature support. This compatibility matrix helps you identify which features are available on your device.
+GhostESP runs on a variety of ESP32 boards with varying feature support. This compatibility matrix helps you identify which features are built in or preconfigured for each release build.
 
 ## Compatibility Matrix
 
+<div class="compat-controls" data-compat-controls data-table="#hardware-compat-table">
+  <label class="compat-controls__search">
+    <span>Search boards</span>
+    <input type="search" placeholder="Cardputer, Banshee, ESP32..." autocomplete="off" data-compat-search>
+  </label>
+  <fieldset class="compat-controls__features">
+    <legend>Require Features</legend>
+    <label><input type="checkbox" data-compat-feature="Bluetooth"> Bluetooth</label>
+    <label><input type="checkbox" data-compat-feature="NFC (PN532)"> PN532 NFC</label>
+    <label><input type="checkbox" data-compat-feature="NFC (Chameleon)"> Chameleon NFC</label>
+    <label><input type="checkbox" data-compat-feature="IR TX"> IR TX</label>
+    <label><input type="checkbox" data-compat-feature="IR RX"> IR RX</label>
+    <label><input type="checkbox" data-compat-feature="GPS Default"> GPS default</label>
+    <label><input type="checkbox" data-compat-feature="Keyboard"> Keyboard</label>
+    <label><input type="checkbox" data-compat-feature="Display"> Display</label>
+    <label><input type="checkbox" data-compat-feature="SD Default"> SD default</label>
+    <label><input type="checkbox" data-compat-feature="OTA"> OTA</label>
+    <label><input type="checkbox" data-compat-feature="Native SD Apps"> Native SD Apps</label>
+  </fieldset>
+  <div class="compat-controls__status" aria-live="polite">
+    <span data-compat-count></span>
+    <button type="button" data-compat-clear>Clear filters</button>
+  </div>
+</div>
+
+<p class="compat-empty" data-compat-empty hidden>No boards match the selected filters.</p>
+
 <div class="compat-table">
-  <table>
+  <table id="hardware-compat-table">
     <thead>
       <tr>
         <th>Board</th>
@@ -21,48 +48,62 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
         <th>NFC (Chameleon)</th>
         <th>IR TX</th>
         <th>IR RX</th>
-        <th>GPS</th>
+        <th>GPS Default</th>
         <th>Keyboard</th>
         <th>Display</th>
-        <th>SD Card</th>
+        <th>SD Default</th>
+        <th>OTA</th>
+        <th>Native SD Apps</th>
       </tr>
     </thead>
     <tbody>
-      <tr><th scope="row">CYD2USB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">CYDMicroUSB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">CYDDualUSB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">CYD2432S028R</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">CYD 2.4″ variants</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">Waveshare 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">Crowtech 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">Sunton 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">Cardputer</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">Cardputer ADV</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">MarauderV4</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">MarauderV6</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">AwokMini</th><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">Awok V5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
-      <tr><th scope="row">T-Display S3 Touch</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">S3TWatch</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>has 4MB vfs partition</td></tr>
-      <tr><th scope="row">TEmbed C1101</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">GhostBoard</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">T-Deck</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">JCMK DevBoardPro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">RabbitLabs Minion</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td></tr>
-      <tr><th scope="row">Lolin S3 Pro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">XIAO ESP32-S3 Sense</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">XIAO ESP32-C5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">Flipper JCMK GPS</th><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32-S2 (generic)</th><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32-C3 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32-S3 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32-C5 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">ESP32-C6 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td></tr>
-      <tr><th scope="row">Heltec V3</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>Status Display</td><td>✓</td></tr>
+      <tr><th scope="row">CYD2USB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CYDMicroUSB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CYDDualUSB</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CYD2432S028R</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CYD 2.4″ variants</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Waveshare 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">Crowtech 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Sunton 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">Cardputer</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">Cardputer ADV</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">MarauderV4</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">Marauder V8</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
+      <tr><th scope="row">Marauder Pancake</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
+      <tr><th scope="row">MarauderV6</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">AwokMini</th><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Awok V5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">T-Dongle-S3</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">T-Dongle-C5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">T-Display S3 Touch</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">S3TWatch</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>has 4MB vfs partition</td><td>✓</td><td>✗</td></tr>
+      <tr><th scope="row">TEmbed C1101</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">Banshee</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Updater + peer</td><td>✓</td></tr>
+      <tr><th scope="row">GhostBoard</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Poltergeist</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">T-Deck</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
+      <tr><th scope="row">JCMK DevBoardPro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">RabbitLabs Minion</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Lolin S3 Pro</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✓</td></tr>
+      <tr><th scope="row">XIAO ESP32-S3 Sense</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">XIAO ESP32-C5</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✓</td></tr>
+      <tr><th scope="row">Flipper JCMK GPS</th><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32-S2 (generic)</th><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32-C3 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32-S3 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32-C5 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">ESP32-C6 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">Heltec V3</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
     </tbody>
   </table>
 </div>
+
+**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Updater + peer` means Banshee uses the C5 updater app for its display MCU and GhostLink peer update for the S3. `Manual` means USB/manual flashing is required for that release build.
+
+**Native SD Apps:** `✓` means the release build supports loading native `.gapp` apps from SD.
+
+**GPS Default / SD Default:** these columns describe the release build's default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so `✗` does not mean the feature is impossible on custom wiring.
 
 ## Camera Support
 
@@ -85,13 +126,18 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | Cardputer | `ESP32-S3-Cardputer.zip` | <img src="../images/m5_cardputer.jpg" alt="M5 Stack Cardputer"> |
 | Cardputer ADV | `CardputerADV.zip` | |
 | MarauderV4 | `MarauderV4_FlipperHub.zip` | |
+| Marauder V8 | `MarauderV8.zip` | |
+| Marauder Pancake | `MarauderPancake.zip` | |
 | MarauderV6 & AwokDual | `MarauderV6_AwokDual.zip` | |
 | AwokMini | `AwokMini.zip` | |
 | Awok V5 | `esp32v5_awok.zip` | |
+| LilyGo T-Dongle-S3 | `LilyGo-TDongleS3.zip` | |
+| LilyGo T-Dongle-C5 | `LilyGo-TDongleC5.zip` | |
 | T-Display S3 Touch | `LilyGo-TDisplayS3-Touch.zip` | |
 | S3TWatch | `LilyGo-S3TWatch-2020.zip` | |
 | TEmbed CC1101 | `LilyGo-TEmbedC1101.zip` | <img src="../images/lilygo_tembed_cc1101.jpg" alt="Lily Go Tembed cc1101"> |
 | GhostBoard | `ghostboard.zip` | <img src="../images/rabbit_labs_ghost_board_black.jpg" alt="Black Rabbit Labs Ghost Board"> |
+| RabbitLabs Poltergeist | `Poltergeist.zip` | |
 | T-Deck | `LilyGo-T-Deck.zip` | <img src="../images/lilygo_tdeck_plus.jpg" alt="LilyGo T-Deck Plus"> |
 | JCMK DevBoardPro | `JCMK_DevBoardPro.zip` | |
 | RabbitLabs Minion | `RabbitLabs_Minion.zip` | <img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"> |

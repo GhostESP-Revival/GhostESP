@@ -33,8 +33,9 @@ void popup_destroy(popup_t *p);
 // convenience: create, set text, add buttons, and show
 popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *title, const char *body, const char **buttons, int button_count, lv_event_cb_t *cbs, void **user_datas);
 
-// reusable confirmation popup for dangerous actions. The handle slot is set to
-// NULL when the popup is closed by touch or by popup_confirm_cancel/select().
+// reusable confirmation popup for dangerous actions. Pass cancel_label == NULL
+// for a single dismiss/confirm button. The handle slot is set to NULL when the
+// popup is closed by touch or by popup_confirm_cancel/select().
 popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, const char *title, const char *body, const char *confirm_label, const char *cancel_label, popup_confirm_cb_t on_confirm, void *user_data);
 bool popup_confirm_is_open(popup_confirm_t *p);
 bool popup_confirm_handle_touch(popup_confirm_t **handle, const lv_indev_data_t *data);

@@ -230,6 +230,7 @@ void cmd_comm_register_callback(void);
 void handle_otarecv_cmd(int argc, char **argv);
 void handle_otastatus_cmd(int argc, char **argv);
 void handle_otaabort_cmd(int argc, char **argv);
+void handle_otainfo_cmd(int argc, char **argv);
 
 // Aerial and Flock commands
 void handle_aerial_scan_cmd(int argc, char **argv);

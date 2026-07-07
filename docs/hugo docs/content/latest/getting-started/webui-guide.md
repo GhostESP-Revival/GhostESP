@@ -1,7 +1,7 @@
 ---
 title: "WebUI"
 description: "Access and control GhostESP through the web interface."
-weight: 35
+weight: 30
 ---
 
 The WebUI allows you to configure GhostESP and manage files from your browser.
@@ -95,8 +95,6 @@ Manage a GhostLink connection between a paired ESP32 device:
 ## Important Limitations
 
 ### Wi-Fi and BLE Commands Require GhostLink
-
-The WebUI cannot directly run Wi-Fi or BLE commands (e.g., `scanap`, `karma start`, `blescan`). These commands require the device's radio hardware, which conflicts with hosting the Wi-Fi access point.
 
 **To run Wi-Fi or BLE commands from the WebUI:**
 

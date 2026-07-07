@@ -20,3 +20,7 @@ void handle_otastatus_cmd(int argc, char **argv) {
 void handle_otaabort_cmd(int argc, char **argv) {
     peer_ota_manager_handle_otaabort_cmd(argc, argv);
 }
+
+void handle_otainfo_cmd(int argc, char **argv) {
+    peer_ota_manager_handle_otainfo_cmd(argc, argv);
+}

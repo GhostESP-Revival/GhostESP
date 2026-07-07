@@ -25,6 +25,7 @@ typedef struct {
     OtaState state;
     char latest_version[32];
     char latest_commit[16];
+    long latest_build_number;
     size_t image_size;
     size_t bytes_downloaded;
     char error_msg[128];
@@ -51,7 +52,7 @@ bool ota_manager_is_supported(void);
 esp_err_t ota_manager_init(void);
 
 // Manual check: fetches ota-manifest.json, populates status, and moves to
-// OTA_STATE_UPDATE_AVAILABLE if a newer version exists for this board.
+// OTA_STATE_UPDATE_AVAILABLE if a firmware image exists for this board.
 // Spawns a background task; call ota_manager_get_status() to poll the result.
 esp_err_t ota_manager_check_now(void);
 

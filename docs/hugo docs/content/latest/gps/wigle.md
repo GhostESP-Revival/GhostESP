@@ -221,7 +221,7 @@ You can load WiGLE credentials and WiFi settings from a config file on your SD c
    - **GUI**: Settings → WiGLE → Load Config from SD
    - **CLI**: `loadconfig`
 
-See [SD Card Configuration](../../getting-started/sd-card-config) for complete documentation.
+See [SD Card Configuration]({{< relref "sd-card-config.md" >}}) for complete documentation.
 
 ## Troubleshooting
 

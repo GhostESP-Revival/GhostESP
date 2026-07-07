@@ -378,7 +378,8 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     p->owner = handle;
     p->on_confirm = on_confirm;
     p->user_data = user_data;
-    p->selected = 0;
+    bool has_cancel = (cancel_label != NULL);
+    p->selected = has_cancel ? 0 : 1;
 
     p->root = lv_obj_create(parent);
     if (!p->root) {
@@ -426,10 +427,13 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
         lv_obj_set_style_text_align(body_label, LV_TEXT_ALIGN_CENTER, 0);
     }
 
-    p->cancel_btn = popup_add_styled_button(p->card, cancel_label ? cancel_label : "Cancel", 84, button_h,
-                                           LV_ALIGN_BOTTOM_LEFT, 0, -10, gui_font_body(), popup_confirm_cancel_event_cb, p);
+    if (has_cancel) {
+        p->cancel_btn = popup_add_styled_button(p->card, cancel_label, 84, button_h,
+                                               LV_ALIGN_BOTTOM_LEFT, 0, -10, gui_font_body(), popup_confirm_cancel_event_cb, p);
+    }
     p->confirm_btn = popup_add_styled_button(p->card, confirm_label ? confirm_label : "Confirm", 84, button_h,
-                                            LV_ALIGN_BOTTOM_RIGHT, 0, -10, gui_font_body(), popup_confirm_confirm_event_cb, p);
+                                            has_cancel ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_MID,
+                                            0, -10, gui_font_body(), popup_confirm_confirm_event_cb, p);
     lv_obj_t *btns[2] = { p->cancel_btn, p->confirm_btn };
     PopupButtonLayoutConfig cfg = {
         .min_w = (card_w <= 180) ? 58 : 76,
@@ -437,7 +441,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
         .min_threshold = (card_w <= 180) ? 48 : 62,
         .gap = (card_w <= 180) ? 8 : 14,
     };
-    popup_layout_buttons_responsive(p->card, btns, 2, -10, &cfg);
+    popup_layout_buttons_responsive(p->card, has_cancel ? btns : &btns[1], has_cancel ? 2 : 1, -10, &cfg);
     popup_confirm_update_selection(p);
 
     lv_obj_move_foreground(p->root);
@@ -485,7 +489,7 @@ void popup_confirm_cancel(popup_confirm_t **handle) {
 void popup_confirm_select(popup_confirm_t **handle) {
     if (!handle || !*handle) return;
     popup_confirm_t *p = *handle;
-    if (p->selected == 0) {
+    if (p->cancel_btn && p->selected == 0) {
         popup_confirm_close(handle);
         return;
     }
@@ -497,12 +501,14 @@ void popup_confirm_select(popup_confirm_t **handle) {
 
 void popup_confirm_set_selected(popup_confirm_t *p, int selected) {
     if (!popup_confirm_is_open(p)) return;
+    if (!p->cancel_btn) selected = 1;
     p->selected = selected ? 1 : 0;
     popup_confirm_update_selection(p);
 }
 
 void popup_confirm_move(popup_confirm_t *p, int delta) {
     if (!popup_confirm_is_open(p) || delta == 0) return;
+    if (!p->cancel_btn) return;
     p->selected = p->selected == 0 ? 1 : 0;
     popup_confirm_update_selection(p);
 }

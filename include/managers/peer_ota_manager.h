@@ -21,6 +21,7 @@ typedef struct {
     bool peer_connected;
     char peer_version[32];
     long peer_build_number;
+    long peer_current_build_number;
     size_t bytes_sent;
     size_t total_bytes;
     char error_msg[128];
@@ -52,13 +53,6 @@ esp_err_t peer_ota_manager_check_now(void);
 // peer_ota_manager_get_status() for progress/result.
 esp_err_t peer_ota_manager_start_update(void);
 
-// Combined "update peer then self" flow -- the primary (somethingsomething)
-// has its own real dual-partition OTA table too, but should always relay to
-// its network-less peer first and only update itself once that succeeds (or
-// wasn't needed). Falls back to a plain self-only update on any other
-// direct-OTA board that isn't paired with a peer.
-esp_err_t peer_ota_manager_start_full_update(void);
-
 PeerOtaStatus peer_ota_manager_get_status(void);
 
 // --- Peer-side entry points --------------------------------------------
@@ -76,5 +70,8 @@ void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv);
 // without committing anything. A receive-timeout watchdog covers the case
 // where this command itself never arrives (e.g. GhostLink dropped).
 void peer_ota_manager_handle_otaabort_cmd(int argc, char **argv);
+
+// Returns the peer's currently-running build/version to its primary.
+void peer_ota_manager_handle_otainfo_cmd(int argc, char **argv);
 
 #endif // PEER_OTA_MANAGER_H

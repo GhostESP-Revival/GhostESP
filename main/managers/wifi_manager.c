@@ -28,6 +28,9 @@
 #include "managers/ap_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "managers/status_display_manager.h"
 #include "gui/toast.h"
 #include "nvs_flash.h"
@@ -51,6 +54,8 @@
 #include "core/scan_saver.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
+#include "core/ghostesp_version.h"
+#include "core/esp_comm_manager.h"
 #include "core/utils.h" // Add utils include
 #include <inttypes.h>
 #include "managers/default_portal.h"
@@ -144,8 +149,11 @@ static int wifi_reconnect_count = 0;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
+#define WIFI_OTA_AUTO_CHECK_TIMEOUT_MS 30000
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
+static volatile bool ota_auto_check_running = false;
+static volatile bool ota_auto_check_done = false;
 
 static bool karma_portal_active = false;
 
@@ -660,6 +668,113 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data);
 static void wifi_retry_timer_callback(void* arg);
 
+static bool wait_for_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        OtaStatus status = ota_manager_get_status();
+        if (status.state == OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static bool wait_for_self_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        SelfOtaStatus status = self_ota_manager_get_status();
+        if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == SELF_OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static bool wait_for_peer_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        PeerOtaStatus status = peer_ota_manager_get_status();
+        if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == PEER_OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static void ota_auto_check_task(void *arg) {
+    (void)arg;
+    bool update_available = false;
+
+    if (ota_manager_is_supported()) {
+        if (ota_manager_check_now() == ESP_OK && wait_for_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            OtaStatus status = ota_manager_get_status();
+            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+                glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
+                     status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+                update_available = true;
+            }
+        }
+    } else if (self_ota_manager_is_supported()) {
+        if (self_ota_manager_check_now() == ESP_OK && wait_for_self_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            SelfOtaStatus status = self_ota_manager_get_status();
+            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+                glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
+                     status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+                update_available = true;
+            }
+        }
+    }
+
+    if (peer_ota_manager_is_supported() && esp_comm_manager_is_connected()) {
+        if (peer_ota_manager_check_now() == ESP_OK && wait_for_peer_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            PeerOtaStatus status = peer_ota_manager_get_status();
+            if (status.peer_current_build_number >= 0 &&
+                status.peer_build_number > status.peer_current_build_number) {
+                glog("There is a new update available: GhostLink peer firmware %s (build %ld > %ld)\n",
+                     status.peer_version, status.peer_build_number, status.peer_current_build_number);
+                update_available = true;
+            }
+        }
+    }
+
+    if (update_available) {
+        toast_show("There is a new update available", TOAST_INFO);
+    }
+
+    ota_auto_check_done = true;
+    ota_auto_check_running = false;
+    vTaskDelete(NULL);
+}
+
+static void schedule_ota_auto_check(void) {
+    if (ota_auto_check_running || ota_auto_check_done) return;
+    ota_auto_check_running = true;
+    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 6144, NULL,
+                                tskIDLE_PRIORITY + 1, NULL);
+    if (rc != pdPASS) {
+        ota_auto_check_running = false;
+        glog("Failed to start automatic firmware update check\n");
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                                void *event_data)
 {
@@ -744,6 +859,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         if (settings_get_wigle_auto_upload(&G_Settings)) {
             wigle_upload_all_async();
         }
+        schedule_ota_auto_check();
     }
 }
 // Removed old wifi_retry_timer_callback - using unified retry system
@@ -1894,6 +2010,7 @@ void wifi_manager_stop_monitor_mode() {
         return;
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(NULL));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
     status_display_show_status("Monitor Stopped");
 

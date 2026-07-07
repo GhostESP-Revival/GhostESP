@@ -1,7 +1,7 @@
 ---
 title: "GhostLink"
 description: "GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting."
-weight: 30
+weight: 90
 ---
 
 GhostLink connects two ESP32 devices so one can host the AP while the other runs attacks.

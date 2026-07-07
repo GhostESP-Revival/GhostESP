@@ -49,6 +49,90 @@ static const char *TAG = "OtaManager";
 #define OTA_SD_FIRMWARE_PATH "/mnt/ghostesp/firmware_update.bin"
 #define OTA_SD_SHA256_PATH "/mnt/ghostesp/firmware_update.sha256"
 
+typedef struct {
+    const char *template_key;
+    const char *manifest_key;
+} ota_board_key_alias_t;
+
+static const ota_board_key_alias_t OTA_BOARD_KEY_ALIASES[] = {
+    {"marauderv4", "MarauderV4_FlipperHub"},
+    {"cardputer", "ESP32-S3-Cardputer"},
+    {"waveshare7inch", "Waveshare_LCD"},
+    {"sunton7inch", "Sunton_LCD"},
+    {"LilyGo TEmbedC1101", "LilyGo-TEmbedC1101"},
+    {"LilyGo T-Dongle-S3", "LilyGo-TDongleS3"},
+    {"LilyGo T-Dongle-C5", "LilyGo-TDongleC5"},
+    {"Cardputer ADV", "CardputerADV"},
+    {"somethingsomething", "Banshee_C5"},
+    {"somethingsomething2", "Banshee_S3"},
+    {"xiao_esp32s3_sense", "XIAO_S3_Sense"},
+    {"xiao_esp32s3", "XIAO_S3"},
+};
+
+static bool ota_key_seen(const char *const *keys, size_t count, const char *key) {
+    if (!key || key[0] == '\0') return true;
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(keys[i], key) == 0) return true;
+    }
+    return false;
+}
+
+static size_t ota_manifest_keys_for_board(const char *board_key, const char **keys, size_t max_keys) {
+    size_t count = 0;
+    if (!keys || max_keys == 0) return 0;
+
+    if (!ota_key_seen(keys, count, board_key)) {
+        keys[count++] = board_key;
+    }
+
+    for (size_t i = 0; i < sizeof(OTA_BOARD_KEY_ALIASES) / sizeof(OTA_BOARD_KEY_ALIASES[0]); i++) {
+        const ota_board_key_alias_t *alias = &OTA_BOARD_KEY_ALIASES[i];
+        const char *candidate = NULL;
+
+        if (board_key && strcmp(board_key, alias->template_key) == 0) {
+            candidate = alias->manifest_key;
+        } else if (board_key && strcmp(board_key, alias->manifest_key) == 0) {
+            candidate = alias->template_key;
+        }
+
+        if (candidate && !ota_key_seen(keys, count, candidate)) {
+            keys[count++] = candidate;
+            if (count >= max_keys) break;
+        }
+    }
+
+    return count;
+}
+
+static void ota_resolve_download_url(const char *raw_url, char *out, size_t out_len) {
+    if (!raw_url || !out || out_len == 0) return;
+    out[0] = '\0';
+
+    if (strncmp(raw_url, "https://", 8) == 0 || strncmp(raw_url, "http://", 7) == 0) {
+        strncpy(out, raw_url, out_len - 1);
+        out[out_len - 1] = '\0';
+        return;
+    }
+
+    const char *manifest = GHOSTESP_OTA_MANIFEST_URL;
+    const char *scheme = strstr(manifest, "://");
+    if (!scheme) return;
+
+    const char *host_start = scheme + 3;
+    const char *path_start = strchr(host_start, '/');
+    if (!path_start) return;
+
+    if (raw_url[0] == '/') {
+        size_t origin_len = (size_t)(path_start - manifest);
+        snprintf(out, out_len, "%.*s%s", (int)origin_len, manifest, raw_url);
+        return;
+    }
+
+    const char *last_slash = strrchr(manifest, '/');
+    size_t base_len = last_slash ? (size_t)(last_slash + 1 - manifest) : (size_t)(path_start + 1 - manifest);
+    snprintf(out, out_len, "%.*s%s", (int)base_len, manifest, raw_url);
+}
+
 static SemaphoreHandle_t s_status_mutex;
 static OtaStatus s_status;
 
@@ -77,8 +161,22 @@ static void ota_set_error(const char *msg) {
     xSemaphoreGive(s_status_mutex);
 }
 
+static void ota_clear_available_state(void) {
+    xSemaphoreTake(s_status_mutex, portMAX_DELAY);
+    memset(&s_status, 0, sizeof(s_status));
+    s_status.state = OTA_STATE_IDLE;
+    xSemaphoreGive(s_status_mutex);
+    s_download_url[0] = '\0';
+    s_expected_sha256[0] = '\0';
+}
+
 bool ota_manager_is_supported(void) {
 #if GHOSTESP_OTA_SUPPORTED
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        return false;
+    }
+#endif
     return esp_ota_get_next_update_partition(NULL) != NULL;
 #else
     return false;
@@ -219,15 +317,22 @@ esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channe
         return ESP_FAIL;
     }
 
-    char prerelease_key[64];
+    const char *lookup_keys[4] = {0};
+    size_t lookup_key_count = ota_manifest_keys_for_board(board_key, lookup_keys,
+                                                          sizeof(lookup_keys) / sizeof(lookup_keys[0]));
+    char prerelease_key[96];
     cJSON *entry = NULL;
     if (channel == 1) {
-        snprintf(prerelease_key, sizeof(prerelease_key), "%s-prerelease", board_key);
-        entry = cJSON_GetObjectItem(boards, prerelease_key);
+        for (size_t i = 0; i < lookup_key_count && !entry; i++) {
+            snprintf(prerelease_key, sizeof(prerelease_key), "%s-prerelease", lookup_keys[i]);
+            entry = cJSON_GetObjectItem(boards, prerelease_key);
+        }
     }
     if (!entry) {
-        // No prerelease published for this board -- fall back to stable.
-        entry = cJSON_GetObjectItem(boards, board_key);
+        // No prerelease published for this board -- fall back to stable aliases.
+        for (size_t i = 0; i < lookup_key_count && !entry; i++) {
+            entry = cJSON_GetObjectItem(boards, lookup_keys[i]);
+        }
     }
     if (!entry) {
         cJSON_Delete(root);
@@ -254,7 +359,7 @@ esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channe
     }
     out_entry->size = (j_size && cJSON_IsNumber(j_size)) ? (size_t)j_size->valuedouble : 0;
     if (j_url && cJSON_IsString(j_url)) {
-        strncpy(out_entry->download_url, j_url->valuestring, sizeof(out_entry->download_url) - 1);
+        ota_resolve_download_url(j_url->valuestring, out_entry->download_url, sizeof(out_entry->download_url));
     }
     out_entry->found = true;
 
@@ -280,18 +385,16 @@ static esp_err_t ota_fetch_and_parse_manifest(bool *out_update_available) {
         return err;
     }
     if (!entry.found) {
-        ota_set_state(OTA_STATE_IDLE);
+        ota_clear_available_state();
         return ESP_OK;
     }
-
-    long local_build = (long)(GHOSTESP_BUILD_NUMBER);
-    bool update_available = (entry.build_number > 0) && (entry.build_number > local_build);
 
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     strncpy(s_status.latest_version, entry.version, sizeof(s_status.latest_version) - 1);
     strncpy(s_status.latest_commit, entry.commit, sizeof(s_status.latest_commit) - 1);
+    s_status.latest_build_number = entry.build_number;
     s_status.image_size = entry.size;
-    s_status.state = update_available ? OTA_STATE_UPDATE_AVAILABLE : OTA_STATE_IDLE;
+    s_status.state = OTA_STATE_UPDATE_AVAILABLE;
     xSemaphoreGive(s_status_mutex);
 
     strncpy(s_download_url, entry.download_url, sizeof(s_download_url) - 1);
@@ -299,7 +402,7 @@ static esp_err_t ota_fetch_and_parse_manifest(bool *out_update_available) {
     strncpy(s_expected_sha256, entry.sha256, sizeof(s_expected_sha256) - 1);
     s_expected_sha256[sizeof(s_expected_sha256) - 1] = '\0';
 
-    *out_update_available = update_available;
+    *out_update_available = true;
     return ESP_OK;
 #endif
 }

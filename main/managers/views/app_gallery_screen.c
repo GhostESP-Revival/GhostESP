@@ -1072,7 +1072,7 @@ static void apps_plugin_reload_done(void *arg) {
 
 #if CONFIG_ENABLE_NATIVE_SD_APPS
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
-        toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 3500);
+        toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 1500);
     }
 #endif
 

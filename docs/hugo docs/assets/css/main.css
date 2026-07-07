@@ -1197,6 +1197,95 @@ html[data-theme="light"] .content__body .chroma .err {
 }
 
 /* Compatibility and vendor tables */
+.compat-controls {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  margin: 1.5rem 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.compat-controls__search {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.compat-controls__search input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-alt);
+  color: var(--fg);
+}
+
+.compat-controls__features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.compat-controls__features legend {
+  width: 100%;
+  margin-bottom: 0.25rem;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.compat-controls__features label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-alt);
+  cursor: pointer;
+  user-select: none;
+}
+
+.compat-controls__features input {
+  accent-color: var(--accent);
+}
+
+.compat-controls__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.compat-controls__status button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-alt);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.compat-controls__status button:hover {
+  border-color: var(--accent);
+}
+
+.compat-empty {
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.75rem;
+  color: var(--fg-muted);
+  background: var(--surface);
+}
+
 .compat-table,
 .vendor-table {
   --compat-bg: #ffffff;

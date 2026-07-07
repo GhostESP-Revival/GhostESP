@@ -86,7 +86,7 @@ list(REMOVE_ITEM m5gfx_sources "${lgfx_miniz_source}")
 list(APPEND app_sources ${axs15231b_sources} ${image_sources} "${lgfx_miniz_source}")
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls app_update esp_https_ota spi_flash)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls app_update esp_https_ota spi_flash bootloader_support)
 
 # Optionally add extra include directories
 set(extra_includes "")
@@ -179,6 +179,37 @@ list(APPEND required_components esp_audio_codec)
 
 set(embed_files_list "core/ouis.bin")
 
+if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(banshee_c5_updater_build_dir "${CMAKE_SOURCE_DIR}/ota_updater/build_banshee_c5_updater_auto")
+    set(banshee_c5_updater_sdkconfig_defaults "${CMAKE_SOURCE_DIR}/ota_updater/sdkconfig.defaults")
+    file(REMOVE_RECURSE "${banshee_c5_updater_build_dir}")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env
+                "IDF_TARGET=esp32c5"
+                "${Python3_EXECUTABLE}" "$ENV{IDF_PATH}/tools/idf.py"
+                -C "${CMAKE_SOURCE_DIR}/ota_updater"
+                -B "${banshee_c5_updater_build_dir}"
+                -DSDKCONFIG=${banshee_c5_updater_build_dir}/sdkconfig
+                -DSDKCONFIG_DEFAULTS=${banshee_c5_updater_sdkconfig_defaults}
+                build
+        RESULT_VARIABLE banshee_c5_updater_build_result
+        OUTPUT_VARIABLE banshee_c5_updater_build_output
+        ERROR_VARIABLE banshee_c5_updater_build_error
+    )
+    if(NOT banshee_c5_updater_build_result EQUAL 0)
+        message(FATAL_ERROR "Failed to build Banshee C5 updater app:\n${banshee_c5_updater_build_output}\n${banshee_c5_updater_build_error}")
+    endif()
+
+    set(banshee_c5_updater_built_bin "${banshee_c5_updater_build_dir}/Ghost_ESP_Banshee_C5_Updater.bin")
+    if(NOT EXISTS "${banshee_c5_updater_built_bin}")
+        message(FATAL_ERROR "Banshee C5 updater build did not produce ${banshee_c5_updater_built_bin}")
+    endif()
+    set(banshee_c5_updater_bin "${CMAKE_SOURCE_DIR}/ota_updater/banshee_c5_updater.bin")
+    configure_file("${banshee_c5_updater_built_bin}" "${banshee_c5_updater_bin}" COPYONLY)
+    list(APPEND embed_files_list "${banshee_c5_updater_bin}")
+endif()
+
 if(CONFIG_HAS_NFC)
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
@@ -199,6 +230,10 @@ if(idf_target STREQUAL "esp32s2")
 endif()
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-incompatible-pointer-types -Wno-unused-local-typedefs)
+
+if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE GHOSTESP_BANSHEE_C5_UPDATER_EMBEDDED=1)
+endif()
 
 idf_build_get_property(idf_path IDF_PATH)
 target_include_directories(${COMPONENT_LIB} PRIVATE

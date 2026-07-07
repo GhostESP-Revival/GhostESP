@@ -1,7 +1,9 @@
 ---
 title: "SD Card Configuration"
 description: "Automatically load WiFi and WiGLE settings from SD card"
-weight: 25
+weight: 15
+aliases:
+  - "/getting-started/sd-card-config/"
 ---
 
 Load WiFi credentials and WiGLE settings from a configuration file on your SD card for quick device setup.
@@ -225,6 +227,6 @@ Donate=true
 
 ## See Also
 
-- [WiGLE Upload Guide](../gps/wigle) - Complete WiGLE integration documentation
-- [SD Card Setup](sd-card) - SD card formatting and mounting
-- [WiFi Configuration](../wifi/) - WiFi setup and management
+- [WiGLE Upload Guide]({{< relref "wigle.md" >}}) - Complete WiGLE integration documentation
+- [SD Card Setup]({{< relref "latest/getting-started/sd-card.md" >}}) - SD card formatting and mounting
+- [WiFi Configuration]({{< relref "../wifi/_index.md" >}}) - WiFi setup and management

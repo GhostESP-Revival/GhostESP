@@ -70,6 +70,7 @@
 #include "managers/views/splash_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/tdongle_status_screen.h"
+#include "gui/popup.h"
 #include "gui/screen_layout.h"
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 #include "managers/views/nrf24_analyzer_view.h"
@@ -116,6 +117,52 @@ static void apply_main_menu_background_cb(void *arg) {
     (void)arg;
     gui_screen_apply_background(main_menu_view.root);
 }
+
+#if GHOSTESP_OTA_SUPPORTED
+static char s_self_ota_boot_error[160];
+static popup_confirm_t *s_self_ota_boot_popup = NULL;
+
+static void self_ota_boot_popup_dismiss_cb(void *user_data) {
+    (void)user_data;
+}
+
+static void self_ota_show_boot_popup(void) {
+    popup_confirm_show(&s_self_ota_boot_popup, lv_layer_top(), "Update Failed",
+                       s_self_ota_boot_error, "Close", NULL,
+                       self_ota_boot_popup_dismiss_cb, NULL);
+}
+
+static void self_ota_boot_error_popup_timer_cb(lv_timer_t *timer) {
+    lv_timer_del(timer);
+    if (s_self_ota_boot_error[0] != '\0') {
+        self_ota_show_boot_popup();
+        s_self_ota_boot_error[0] = '\0';
+    }
+}
+
+static void schedule_self_ota_boot_error_popup_cb(void *arg) {
+    (void)arg;
+    if (s_self_ota_boot_error[0] == '\0') return;
+
+    lv_timer_t *timer = lv_timer_create(self_ota_boot_error_popup_timer_cb, 1200, NULL);
+    if (timer) {
+        lv_timer_set_repeat_count(timer, 1);
+    } else {
+        self_ota_show_boot_popup();
+        s_self_ota_boot_error[0] = '\0';
+    }
+}
+
+static void maybe_schedule_self_ota_boot_error_popup(void) {
+    if (!self_ota_manager_is_supported()) return;
+
+    SelfOtaStatus status = self_ota_manager_get_status();
+    if (status.state != SELF_OTA_STATE_FAILED || status.error_msg[0] == '\0') return;
+
+    snprintf(s_self_ota_boot_error, sizeof(s_self_ota_boot_error), "%s", status.error_msg);
+    display_manager_run_on_lvgl(schedule_self_ota_boot_error_popup_cb, NULL);
+}
+#endif
 
 static void splash_asset_pack_progress_cb(float pct, const char *stage, void *user) {
     (void)user;
@@ -831,6 +878,7 @@ void app_main(void) {
     // Boot got this far without crashing -- confirm the image and cancel any
     // pending bootloader rollback (no-op if this wasn't a post-OTA boot).
     ota_manager_confirm_boot_ok();
+    maybe_schedule_self_ota_boot_error_popup();
 #endif
 #ifdef CONFIG_HAS_DRV2605_HAPTICS
     esp_err_t haptic_err;

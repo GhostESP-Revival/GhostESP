@@ -1,6 +1,6 @@
 ---
 title: "FAQ"
-weight: 40
+weight: 120
 description: Frequently asked questions about GhostESP setup, credentials, and troubleshooting.
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "CLI Reference"
 description: "Common GhostESP CLI commands grouped by category."
-weight: 20
+weight: 40
 toc: true
 ---
 

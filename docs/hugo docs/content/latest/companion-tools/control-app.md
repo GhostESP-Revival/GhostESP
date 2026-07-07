@@ -1,7 +1,9 @@
 ---
 title: "Control App"
 description: "Use the Ghost ESP Commander desktop application to control your device via serial connection."
-weight: 40
+weight: 10
+aliases:
+  - "/getting-started/control-app/"
 ---
 
 The **Ghost ESP Commander** is a desktop GUI application that provides comprehensive control over your GhostESP device through a serial connection. It offers WiFi/BLE scanning, packet capture, custom commands, firmware flashing, and more—all from an intuitive graphical interface.
@@ -245,7 +247,7 @@ The command and display areas can be resized by dragging the splitter between th
 ### Command Errors
 
 - **Verify firmware version**: Ensure your device firmware supports the commands you're trying to use
-- **Check command syntax**: Refer to the [Command Line Reference]({{< relref "command-line-reference.md" >}}) for correct syntax
+- **Check command syntax**: Refer to the [Command Line Reference]({{< relref "latest/getting-started/command-line-reference.md" >}}) for correct syntax
 - **View error messages**: Check the log area for detailed error information
 
 ### UI Overlay Covers Controls
@@ -281,40 +283,15 @@ The command and display areas can be resized by dragging the splitter between th
 - **Check virtual environment**: The app should create it automatically, but you can delete `ghost-control-venv` and restart to recreate it
 - **View error messages**: Check the terminal output for specific error messages
 
-## Tips and Best Practices
-
-### Efficient Workflow
-
-- **Keep connected**: Maintain the serial connection for best performance
-- **Use tabs**: Organize your work using the different feature tabs
-- **Monitor logs**: Keep an eye on the log area for important messages
-- **Custom commands**: Use the custom command field for quick operations not covered by tabs
-
-### Firmware Flashing
-
-- **Use release bundles**: For official firmware, the Release Bundle panel is the easiest method
-- **Verify chip type**: Always select the correct chip type before flashing
-- **Read instructions**: The Flasher Output window provides helpful guidance for each panel
-- **Backup first**: If possible, backup your current firmware before flashing
-
-### Performance
-
-- **Close other serial apps**: Don't run multiple applications that access the same serial port
-- **Adjust baud rate**: If experiencing issues, try a lower baud rate
-- **Resize panes**: Adjust the display/log splitter to optimize your workflow
-
 ## Next Steps
 
-- Explore the [Command Line Reference]({{< relref "command-line-reference.md" >}}) to learn about all available commands
-- Set up [GhostLink]({{< relref "dual-communication.md" >}}) for dual-device operations
+- Explore the [Command Line Reference]({{< relref "latest/getting-started/command-line-reference.md" >}}) to learn about all available commands
+- Set up [GhostLink]({{< relref "latest/getting-started/dual-communication.md" >}}) for dual-device operations
 - Review [Wi-Fi Basics]({{< relref "../wifi/basics.md" >}}) to understand wireless attacks
 - Check out [BLE Scanning]({{< relref "../ble/scanning.md" >}}) for Bluetooth operations
 
 ## Notes
 
-- **Development tool**: This application is designed for development and diagnostics
-- **Responsible use**: Always comply with local regulations when using network diagnostic tools
-- **Cross-platform**: The application works on Windows, macOS, and Linux
-- **Automatic setup**: Dependencies are installed automatically on first run
-- **Virtual environment**: The app uses its own Python virtual environment to avoid conflicts with system packages
+- **Responsible use**: This is a development and diagnostics tool — always comply with local regulations when using network diagnostic tools.
+- **Cross-platform**: Works on Windows, macOS, and Linux. On first run it auto-creates its own Python virtual environment and installs dependencies.
 

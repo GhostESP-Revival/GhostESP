@@ -303,6 +303,7 @@ void register_commands() {
     register_command("otarecv", handle_otarecv_cmd);
     register_command("otastatus", handle_otastatus_cmd);
     register_command("otaabort", handle_otaabort_cmd);
+    register_command("otainfo", handle_otainfo_cmd);
 #endif
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -426,7 +427,6 @@ void register_commands() {
 
     glog("Registered Commands\n");
 }
-
 
 
 

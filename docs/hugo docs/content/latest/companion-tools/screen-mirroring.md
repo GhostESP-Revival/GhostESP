@@ -1,7 +1,9 @@
 ---
 title: "Screen Mirroring"
 description: "Mirror your GhostESP display to your desktop for easier viewing and remote control."
-weight: 35
+weight: 20
+aliases:
+  - "/getting-started/screen-mirroring/"
 ---
 
 View and control your device's screen from your computer.
@@ -114,8 +116,6 @@ The virtual D-pad on the right side mirrors the physical controls on your device
 
 If colors appear wrong (inverted or incorrect), click the **Swap** button to toggle byte order. This forces a full screen refresh.
 
-**Note on CYD Color Issues**: CYD devices use 8-bit color mode during mirroring, which inherently produces less accurate colors than 16-bit modes. If toggling the **Swap** button doesn't fully resolve color issues on a CYD device, this is expected behavior due to the 8-bit limitation.
-
 ## Command Line Options
 
 | Option | Description |
@@ -178,9 +178,6 @@ python ghost_mirror.py COM3 --baud 921600
 
 ## Notes
 
-- **Baud Rates**: Desktop script uses 115200 baud by default. CYD devices **require 460800 baud** for proper operation.
-- **Color Modes**: Most devices support 16-bit color. CYD devices use 8-bit color mode, resulting in reduced color accuracy and potential slowdowns.
-- **Performance**: CYD devices may experience frame rate reductions and occasional slowdowns due to 8-bit mode and serial bandwidth limitations. This is normal and expected behavior.
 - **Web vs Desktop**: The desktop script offers better performance and more features. The web-based mirror is a convenience option that works without additional software installation.
 - **Device Display**: The mirror only shows content when the device's display is actively updating.
 - **Input Control**: Virtual D-pad buttons and keyboard shortcuts send commands as text over the same serial connection.

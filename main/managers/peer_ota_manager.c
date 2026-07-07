@@ -7,6 +7,7 @@
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
+#include "core/ghostesp_version.h"
 #include "managers/status_display_manager.h"
 
 #include "esp_http_client.h"
@@ -28,6 +29,8 @@
 #define PEER_OTA_RESPONSE_WAIT_MS 10000
 #define PEER_OTA_BACKGROUND_MIN_INTERVAL_SEC (24 * 60 * 60)
 #define PEER_OTA_DOWNLOAD_TASK_STACK_BYTES 12288
+#define PEER_OTA_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
+#define PEER_OTA_DOWNLOAD_RANGE_ATTEMPTS 5
 
 static SemaphoreHandle_t s_status_mutex;
 static PeerOtaStatus s_status;
@@ -38,30 +41,81 @@ static PeerOtaStatus s_status;
 // only held for the duration of a single request/response round trip.
 
 static SemaphoreHandle_t s_response_sem;
-static char s_response_buf[128];
+static char s_response_buf[256];
+static size_t s_response_len;
+static const char *s_response_expected[4];
+static size_t s_response_expected_count;
+
+static bool peer_ota_capture_expected_response(void) {
+    for (size_t i = 0; i < s_response_expected_count; i++) {
+        const char *match = strstr(s_response_buf, s_response_expected[i]);
+        if (!match) continue;
+
+        size_t len = strcspn(match, "\r\n");
+        if (len >= sizeof(s_response_buf)) len = sizeof(s_response_buf) - 1;
+        memmove(s_response_buf, match, len);
+        s_response_buf[len] = '\0';
+        s_response_len = len;
+        return true;
+    }
+    return false;
+}
 
 static void peer_ota_response_cb(const uint8_t *data, size_t length, void *user_data) {
     (void)user_data;
-    size_t copy_len = length < sizeof(s_response_buf) - 1 ? length : sizeof(s_response_buf) - 1;
-    memcpy(s_response_buf, data, copy_len);
-    s_response_buf[copy_len] = '\0';
-    xSemaphoreGive(s_response_sem);
+    if (!data || length == 0) return;
+
+    size_t copy_len = length;
+    if (copy_len > sizeof(s_response_buf) - 1 - s_response_len) {
+        copy_len = sizeof(s_response_buf) - 1 - s_response_len;
+    }
+    if (copy_len > 0) {
+        memcpy(s_response_buf + s_response_len, data, copy_len);
+        s_response_len += copy_len;
+        s_response_buf[s_response_len] = '\0';
+    }
+
+    if (peer_ota_capture_expected_response()) {
+        xSemaphoreGive(s_response_sem);
+        return;
+    }
+
+    if (s_response_len >= sizeof(s_response_buf) - 1) {
+        size_t keep = sizeof(s_response_buf) / 2;
+        memmove(s_response_buf, s_response_buf + s_response_len - keep, keep);
+        s_response_len = keep;
+        s_response_buf[s_response_len] = '\0';
+    }
 }
 
 // Sends `command`/`data` over GhostLink and waits up to timeout_ms for a
 // response. On success, copies the response text into out_response and
 // returns true. Not reentrant -- callers must serialize (this whole feature
 // only ever runs one relay at a time).
-static bool peer_ota_send_and_wait(const char *command, const char *data,
-                                    char *out_response, size_t out_len, uint32_t timeout_ms) {
+static bool peer_ota_send_and_wait_for(const char *command, const char *data,
+                                       char *out_response, size_t out_len, uint32_t timeout_ms,
+                                       const char *expected_a, const char *expected_b,
+                                       const char *expected_c) {
     if (!s_response_sem) {
         s_response_sem = xSemaphoreCreateBinary();
         if (!s_response_sem) return false;
     }
     xSemaphoreTake(s_response_sem, 0); // drain any stale signal
+    s_response_buf[0] = '\0';
+    s_response_len = 0;
+    s_response_expected_count = 0;
+    if (expected_a) s_response_expected[s_response_expected_count++] = expected_a;
+    if (expected_b) s_response_expected[s_response_expected_count++] = expected_b;
+    if (expected_c) s_response_expected[s_response_expected_count++] = expected_c;
 
     esp_comm_manager_set_response_callback(peer_ota_response_cb, NULL);
-    bool sent = esp_comm_manager_send_command(command, data);
+    char command_line[128];
+    if (data && data[0]) {
+        snprintf(command_line, sizeof(command_line), "%s %s", command, data);
+    } else {
+        snprintf(command_line, sizeof(command_line), "%s", command);
+    }
+    bool sent = esp_comm_manager_send_command_line(command_line);
     if (!sent) {
         esp_comm_manager_set_response_callback(NULL, NULL);
         return false;
@@ -75,6 +129,12 @@ static bool peer_ota_send_and_wait(const char *command, const char *data,
         out_response[out_len - 1] = '\0';
     }
     return got;
+}
+
+static bool peer_ota_send_and_wait(const char *command, const char *data,
+                                    char *out_response, size_t out_len, uint32_t timeout_ms) {
+    return peer_ota_send_and_wait_for(command, data, out_response, out_len, timeout_ms,
+                                      "OK", "ERROR", NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,13 +192,25 @@ static void peer_ota_do_check(void) {
         ota_manager_fetch_manifest_entry(PEER_OTA_PEER_BOARD_KEY, channel, &entry);
     }
 
+    long peer_current_build = -1;
+    if (connected) {
+        char info_response[128] = {0};
+        if (peer_ota_send_and_wait_for("otainfo", NULL, info_response, sizeof(info_response),
+                                       3000, "BUILD", NULL, NULL)) {
+            (void)sscanf(info_response, "BUILD %ld", &peer_current_build);
+        }
+    }
+
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     s_status.peer_connected = connected;
+    s_status.peer_current_build_number = peer_current_build;
     if (entry.found) {
         strncpy(s_status.peer_version, entry.version, sizeof(s_status.peer_version) - 1);
         s_status.peer_build_number = entry.build_number;
         s_status.state = PEER_OTA_STATE_UPDATE_AVAILABLE;
     } else {
+        s_status.peer_version[0] = '\0';
+        s_status.peer_build_number = entry.found ? entry.build_number : -1;
         s_status.state = PEER_OTA_STATE_IDLE;
     }
     xSemaphoreGive(s_status_mutex);
@@ -224,12 +296,88 @@ static void peer_ota_send_abort(void) {
     peer_ota_send_and_wait("otaabort", NULL, response, sizeof(response), 3000);
 }
 
+// Same rationale as self_ota_download_with_retries(): a single long-lived
+// HTTPS response to the manifest CDN reliably drops mid-stream on some
+// networks. Since bytes are forwarded to the peer as they arrive (rather
+// than staged in a local buffer), ctx->total_sent already IS the resumable
+// progress counter -- each retry just re-requests the next Range starting
+// from wherever the peer stream got to.
+static bool peer_ota_stream_download_with_retries(const char *url, size_t image_size,
+                                                    peer_ota_stream_ctx_t *ctx) {
+    while (ctx->total_sent < image_size) {
+        size_t chunk_start = ctx->total_sent;
+        size_t chunk_end = chunk_start + PEER_OTA_DOWNLOAD_RANGE_CHUNK_SIZE - 1;
+        if (chunk_end >= image_size) chunk_end = image_size - 1;
+        size_t target = chunk_end + 1;
+        bool made_progress = false;
+
+        for (int attempt = 1; attempt <= PEER_OTA_DOWNLOAD_RANGE_ATTEMPTS; attempt++) {
+            size_t before = ctx->total_sent;
+
+            esp_http_client_config_t http_config = {
+                .url = url,
+                .timeout_ms = 60000,
+                .crt_bundle_attach = esp_crt_bundle_attach,
+                .event_handler = peer_ota_stream_http_event_handler,
+                .user_data = ctx,
+                .buffer_size = 2048,
+            };
+            esp_http_client_handle_t client = esp_http_client_init(&http_config);
+            if (!client) {
+                return false;
+            }
+
+            char range_header[64];
+            snprintf(range_header, sizeof(range_header), "bytes=%u-%u", (unsigned)before, (unsigned)chunk_end);
+            esp_http_client_set_header(client, "Range", range_header);
+
+            esp_err_t err = esp_http_client_perform(client);
+            int status = esp_http_client_get_status_code(client);
+            esp_http_client_cleanup(client);
+
+            if (!ctx->ok) {
+                // Peer-side stream send failed -- not an HTTP problem, retrying
+                // the download won't help.
+                return false;
+            }
+
+            bool status_ok = (status == 206) || (before == 0 && status == 200);
+            if (!status_ok) {
+                glog("Peer OTA relay unexpected HTTP status %d for range %u-%u\n",
+                     status, (unsigned)before, (unsigned)chunk_end);
+                return false;
+            }
+
+            if (ctx->total_sent >= target) {
+                made_progress = true;
+                break;
+            }
+
+            if (ctx->total_sent > before) {
+                glog("Peer OTA relay range interrupted (err=%s, http=%d, got=%u/%u), continuing\n",
+                     esp_err_to_name(err), status, (unsigned)ctx->total_sent, (unsigned)image_size);
+                made_progress = true;
+                break;
+            }
+
+            glog("Peer OTA relay range made no progress (err=%s, http=%d, range=%u-%u, attempt=%d)\n",
+                 esp_err_to_name(err), status, (unsigned)chunk_start, (unsigned)chunk_end, attempt);
+            vTaskDelay(pdMS_TO_TICKS(400 * attempt));
+        }
+
+        if (!made_progress) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // Runs the full peer-relay flow synchronously (handshake -> stream straight
 // through -> wait for peer's result), updating s_status as it goes. Returns
 // true only if the peer confirmed a successful, verified write (it will be
 // rebooting into the new image). Does not touch this board's own firmware --
-// see peer_ota_manager_start_full_update() for the combined "peer then self"
-// sequence.
+// see peer_ota_manager_start_update() (explicit peer-only) below.
 static bool peer_ota_run_update_once(void) {
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     s_status.state = PEER_OTA_STATE_CHECKING;
@@ -252,6 +400,17 @@ static bool peer_ota_run_update_once(void) {
         return false;
     }
 
+    long peer_current_build = -1;
+    char info_response[128] = {0};
+    if (peer_ota_send_and_wait_for("otainfo", NULL, info_response, sizeof(info_response),
+                                   3000, "BUILD", NULL, NULL)) {
+        (void)sscanf(info_response, "BUILD %ld", &peer_current_build);
+    }
+    xSemaphoreTake(s_status_mutex, portMAX_DELAY);
+    s_status.peer_current_build_number = peer_current_build;
+    s_status.peer_build_number = entry.build_number;
+    xSemaphoreGive(s_status_mutex);
+
     // Handshake first -- the peer needs to know the expected size/hash
     // before any bytes arrive, since we're streaming straight through rather
     // than staging a pre-verified copy locally.
@@ -264,7 +423,8 @@ static bool peer_ota_run_update_once(void) {
     char cmd_data[96];
     snprintf(cmd_data, sizeof(cmd_data), "%u %s", (unsigned)entry.size, entry.sha256);
     char response[128] = {0};
-    if (!peer_ota_send_and_wait("otarecv", cmd_data, response, sizeof(response), PEER_OTA_RESPONSE_WAIT_MS) ||
+    if (!peer_ota_send_and_wait_for("otarecv", cmd_data, response, sizeof(response), PEER_OTA_RESPONSE_WAIT_MS,
+                                    "READY", "ERROR", NULL) ||
         strncmp(response, "READY", 5) != 0) {
         glog("Peer did not ack otarecv (response='%s')\n", response);
         peer_ota_set_error("Peer did not accept update");
@@ -277,27 +437,10 @@ static bool peer_ota_run_update_once(void) {
     status_display_show_status("Flashing peer...");
 
     peer_ota_stream_ctx_t ctx = { .total_sent = 0, .ok = true };
-    esp_http_client_config_t http_config = {
-        .url = entry.download_url,
-        .timeout_ms = 60000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler = peer_ota_stream_http_event_handler,
-        .user_data = &ctx,
-        .buffer_size = 1024,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (!client) {
-        peer_ota_set_error("Failed to init HTTP client");
-        peer_ota_send_abort();
-        return false;
-    }
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || status != 200 || !ctx.ok || ctx.total_sent != entry.size) {
-        glog("Peer firmware relay failed (err=%s, http=%d, got=%u/%u)\n",
-             esp_err_to_name(err), status, (unsigned)ctx.total_sent, (unsigned)entry.size);
+    if (!peer_ota_stream_download_with_retries(entry.download_url, entry.size, &ctx) ||
+        ctx.total_sent != entry.size) {
+        glog("Peer firmware relay failed (got=%u/%u)\n",
+             (unsigned)ctx.total_sent, (unsigned)entry.size);
         peer_ota_set_error("Peer firmware relay failed");
         peer_ota_send_abort();
         return false;
@@ -309,7 +452,8 @@ static bool peer_ota_run_update_once(void) {
     // single query, in case the peer's last chunk is still being processed.
     bool peer_done = false;
     for (int attempt = 0; attempt < 5 && !peer_done; attempt++) {
-        if (peer_ota_send_and_wait("otastatus", NULL, response, sizeof(response), PEER_OTA_RESPONSE_WAIT_MS)) {
+        if (peer_ota_send_and_wait_for("otastatus", NULL, response, sizeof(response), PEER_OTA_RESPONSE_WAIT_MS,
+                                       "DONE", "ERROR", "PENDING")) {
             if (strncmp(response, "DONE", 4) == 0) {
                 peer_done = true;
                 break;
@@ -355,54 +499,6 @@ esp_err_t peer_ota_manager_start_update(void) {
     // do not divide by sizeof(StackType_t) here.
     BaseType_t rc = xTaskCreate(peer_ota_update_task, "peer_ota", PEER_OTA_DOWNLOAD_TASK_STACK_BYTES,
                                 NULL, 5, NULL);
-    return (rc == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
-}
-
-// Combined flow for the primary (somethingsomething), which now has its own
-// real dual-partition OTA table too: update the network-less peer first,
-// then this board's own firmware. If a peer update is available but fails,
-// self-update is skipped -- reboot only once the peer relay has actually
-// succeeded (or wasn't needed), so a bad peer attempt can still be retried
-// without this board having already moved to new firmware itself.
-static void peer_ota_full_update_task(void *pv) {
-    (void)pv;
-
-    PeerOtaStatus peer_status = peer_ota_manager_get_status();
-    if (peer_status.state == PEER_OTA_STATE_UPDATE_AVAILABLE) {
-        if (!peer_ota_run_update_once()) {
-            vTaskDelete(NULL);
-            return;
-        }
-    }
-
-    // Peer is done (or had nothing to do) -- now update this board itself,
-    // if a self-update is available. Both start_update() calls spawn their
-    // own task and return immediately; once one succeeds it reboots this
-    // board, which is the natural end of this combined flow.
-    if (ota_manager_is_supported() && ota_manager_get_status().state == OTA_STATE_UPDATE_AVAILABLE) {
-        ota_manager_start_update();
-    } else if (self_ota_manager_is_supported()) {
-        // somethingsomething has no dual-partition table of its own (8MB
-        // flash can't fit one alongside the required napps reservation), so
-        // it falls back to the single-partition self-overwrite path instead.
-        // Unlike the branch above there's no separate "update available"
-        // flag to check first -- self_ota_manager_start_update() does its
-        // own manifest/version check and simply reports "Already up to
-        // date" via status if there's nothing newer.
-        self_ota_manager_start_update();
-    }
-    vTaskDelete(NULL);
-}
-
-// Combined "update peer then self" entry point used by somethingsomething's
-// Firmware Update screen. Falls back to a self-only update on any other
-// direct-OTA board (where there's no peer to relay to first).
-esp_err_t peer_ota_manager_start_full_update(void) {
-    if (!peer_ota_manager_is_supported()) {
-        return ota_manager_is_supported() ? ota_manager_start_update() : ESP_ERR_NOT_SUPPORTED;
-    }
-    BaseType_t rc = xTaskCreate(peer_ota_full_update_task, "peer_ota_full",
-                                PEER_OTA_DOWNLOAD_TASK_STACK_BYTES, NULL, 5, NULL);
     return (rc == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
@@ -560,6 +656,14 @@ void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv) {
     esp_comm_manager_send_response((const uint8_t *)msg, strlen(msg));
 }
 
+void peer_ota_manager_handle_otainfo_cmd(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char response[64];
+    snprintf(response, sizeof(response), "BUILD %ld VERSION %s", (long)GHOSTESP_BUILD_NUMBER, GHOSTESP_VERSION);
+    esp_comm_manager_send_response((const uint8_t *)response, strlen(response));
+}
+
 #else
 
 bool peer_ota_manager_is_supported(void) { return false; }
@@ -567,10 +671,10 @@ esp_err_t peer_ota_manager_init(void) { return ESP_OK; }
 void peer_ota_manager_background_check(void) {}
 esp_err_t peer_ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t peer_ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t peer_ota_manager_start_full_update(void) { return ESP_ERR_NOT_SUPPORTED; }
 PeerOtaStatus peer_ota_manager_get_status(void) { return (PeerOtaStatus){ .state = PEER_OTA_STATE_IDLE }; }
 void peer_ota_manager_handle_otarecv_cmd(int argc, char **argv) { (void)argc; (void)argv; }
 void peer_ota_manager_handle_otastatus_cmd(int argc, char **argv) { (void)argc; (void)argv; }
 void peer_ota_manager_handle_otaabort_cmd(int argc, char **argv) { (void)argc; (void)argv; }
+void peer_ota_manager_handle_otainfo_cmd(int argc, char **argv) { (void)argc; (void)argv; }
 
 #endif
