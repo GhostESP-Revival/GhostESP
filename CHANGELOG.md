@@ -16,7 +16,16 @@
 - Added offline SD card installs from `/ghostesp/firmware_update.bin`, with optional `.sha256` verification
 - Added the Banshee C5 updater flow with recovery if an update fails
 
+### Cloud Store
+- Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs
+- Added a progress bar view showing download status while installing from Cloud Store
+
 ### Other Changes
+- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
+- Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
+- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
+- Fixed Apps menu grid scrolling so the selection stays visible when scrolling down on Cardputer
+- Fixed Cardputer ADV keyboard spamming repeated select/input events when opening Apps menu
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards

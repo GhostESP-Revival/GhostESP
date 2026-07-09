@@ -14,6 +14,9 @@ typedef struct options_view_t options_view_t;
 // - title:  Text shown in the status bar via display_manager_add_status_bar()
 options_view_t *options_view_create(lv_obj_t *parent, const char *title);
 
+// Create an opaque options list that does not load or display an asset-pack background.
+options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title);
+
 // Destroy the options view and its internal objects.
 void options_view_destroy(options_view_t *ov);
 

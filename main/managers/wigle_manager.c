@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "managers/http_proxy.h"
 #include "mbedtls/base64.h"
 #include <cJSON.h>
 #include <stdlib.h>
@@ -387,13 +388,17 @@ static esp_err_t wigle_upload_file(const char *filepath, const char *api_key) {
         .url = WIGLE_UPLOAD_URL,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 90000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .transport_type = HTTP_TRANSPORT_OVER_SSL,
         .event_handler = wigle_http_event,
         .user_data = &resp,
         .buffer_size = 4096,
         .buffer_size_tx = 4096,
     };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&config, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) {
+        fclose(f);
+        return proxy_err;
+    }
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
@@ -548,13 +553,14 @@ static esp_err_t wigle_upload_file_jit(const char *filepath, long fsize,
         .url               = WIGLE_UPLOAD_URL,
         .method            = HTTP_METHOD_POST,
         .timeout_ms        = 90000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .transport_type    = HTTP_TRANSPORT_OVER_SSL,
         .event_handler     = wigle_http_event,
         .user_data         = &resp,
         .buffer_size       = 4096,
         .buffer_size_tx    = 4096,
     };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&cfg, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) return proxy_err;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return ESP_FAIL;
@@ -1334,12 +1340,16 @@ esp_err_t wigle_get_stats(char *message, size_t message_len) {
         .url = WIGLE_STATS_URL,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .transport_type = HTTP_TRANSPORT_OVER_SSL,
         .event_handler = wigle_http_event,
         .user_data = &resp,
         .buffer_size = 1024,
     };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&config, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) {
+        snprintf(message, message_len, "Proxy URL failed: %s", esp_err_to_name(proxy_err));
+        return proxy_err;
+    }
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
@@ -1534,12 +1544,17 @@ static void wigle_test_api_task(void *arg) {
         .url = WIGLE_PROFILE_URL,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .transport_type = HTTP_TRANSPORT_OVER_SSL,
         .event_handler = wigle_http_event,
         .user_data = &resp,
         .buffer_size = 1024,
     };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&config, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) {
+        strncpy(result->message, "Proxy URL failed", sizeof(result->message) - 1);
+        result->success = false;
+        goto done;
+    }
     
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {

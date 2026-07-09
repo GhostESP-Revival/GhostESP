@@ -85,29 +85,25 @@ scan_status_t *scan_status_create(const char *message) {
     
     display_manager_add_status_bar("Scanning");
 
-    int container_h = LV_VER_RES - GUI_STATUS_BAR_H;
-    int card_w = LV_MIN(LV_HOR_RES * 80 / 100, 240);
-    int card_h = LV_MIN(container_h * 70 / 100, 280);
-
     ss->card = lv_obj_create(ss->container);
-    lv_obj_set_size(ss->card, card_w, card_h);
-    lv_obj_align(ss->card, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(ss->card, bg, 0);
+    lv_obj_set_size(ss->card, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(ss->card, surface, 0);
     lv_obj_set_style_bg_opa(ss->card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ss->card, 0, 0);
-    lv_obj_set_style_radius(ss->card, GUI_RADIUS_LG, 0);
+    lv_obj_set_style_radius(ss->card, 0, 0);
     lv_obj_set_style_shadow_width(ss->card, 0, 0);
-    lv_obj_set_style_pad_left(ss->card, GUI_GRID * 3, 0);
-    lv_obj_set_style_pad_right(ss->card, GUI_GRID * 3, 0);
-    lv_obj_set_style_pad_top(ss->card, GUI_GRID * 4, 0);
-    lv_obj_set_style_pad_bottom(ss->card, GUI_GRID * 4, 0);
+    lv_obj_set_style_pad_left(ss->card, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(ss->card, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_top(ss->card, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(ss->card, GUI_SAFEAREA_VER, 0);
     lv_obj_set_flex_flow(ss->card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(ss->card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(ss->card, GUI_GRID * 2, 0);
     lv_obj_clear_flag(ss->card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_clip_corner(ss->card, false, 0);
 
-    int arc_size = LV_MIN(card_w, card_h) * 40 / 100;
+    int container_h = LV_VER_RES - GUI_STATUS_BAR_H;
+    int arc_size = LV_MIN(LV_HOR_RES, container_h) * 40 / 100;
     if (arc_size > 56) arc_size = 56;
     if (arc_size < 28) arc_size = 28;
 
@@ -130,7 +126,7 @@ scan_status_t *scan_status_create(const char *message) {
     ss->label = lv_label_create(ss->card);
     lv_obj_set_style_text_font(ss->label, font, 0);
     lv_obj_set_style_text_color(ss->label, text, 0);
-    lv_obj_set_width(ss->label, card_w - GUI_GRID * 6);
+    lv_obj_set_width(ss->label, LV_PCT(100));
     lv_label_set_long_mode(ss->label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(ss->label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(ss->label, msg);
@@ -138,7 +134,7 @@ scan_status_t *scan_status_create(const char *message) {
     ss->progress_label = lv_label_create(ss->card);
     lv_obj_set_style_text_font(ss->progress_label, get_small_font_for_screen(), 0);
     lv_obj_set_style_text_color(ss->progress_label, text, 0);
-    lv_obj_set_width(ss->progress_label, card_w - GUI_GRID * 6);
+    lv_obj_set_width(ss->progress_label, LV_PCT(100));
     lv_label_set_long_mode(ss->progress_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(ss->progress_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(ss->progress_label, "");

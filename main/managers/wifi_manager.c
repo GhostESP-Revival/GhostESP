@@ -721,6 +721,15 @@ static bool wait_for_peer_ota_check_result(uint32_t timeout_ms) {
 
 static void ota_auto_check_task(void *arg) {
     (void)arg;
+
+#ifndef CONFIG_SPIRAM
+    ESP_LOGI(TAG, "Skipping OTA auto-check on no-PSRAM build");
+    ota_auto_check_done = true;
+    ota_auto_check_running = false;
+    vTaskDelete(NULL);
+    return;
+#endif
+
     bool update_available = false;
 
     if (ota_manager_is_supported()) {

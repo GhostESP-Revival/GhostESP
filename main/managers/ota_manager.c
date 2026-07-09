@@ -2,6 +2,7 @@
 
 #if GHOSTESP_OTA_SUPPORTED
 
+#include "managers/ap_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/sd_card_manager.h"
 #include "core/glog.h"
@@ -10,13 +11,15 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
-#include "esp_https_ota.h"
+#include "managers/http_proxy.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_flash.h"
 #include "esp_system.h"
+#include "esp_sntp.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "nvs.h"
 #include "mbedtls/private/sha256.h"
 
 #include "freertos/FreeRTOS.h"
@@ -39,15 +42,21 @@ static const char *TAG = "OtaManager";
 #define GHOSTESP_OTA_MANIFEST_URL "https://gespota.fuckyourcdn.com/ota-manifest.json"
 #endif
 
+#define GHOSTESP_OTA_HOST "gespota.fuckyourcdn.com"
+
 #define OTA_MANIFEST_HTTP_BUFFER_SIZE 1024
-#define OTA_MANIFEST_RESPONSE_INITIAL_SIZE 2048
 #define OTA_BACKGROUND_CHECK_MIN_INTERVAL_SEC (24 * 60 * 60)
 #define OTA_DOWNLOAD_TASK_STACK_BYTES 12288
 #define OTA_READBACK_CHUNK_SIZE 1024
 #define OTA_SD_READ_CHUNK_SIZE 4096
+#define OTA_TIME_VALID_AFTER 1767225600LL /* 2026-01-01, avoids TLS cert-not-yet-valid at boot. */
+
+#define OTA_NVS_NS "ota_mgr"
+#define OTA_NVS_AP_RESTORE_KEY "ap_restore"
 
 #define OTA_SD_FIRMWARE_PATH "/mnt/ghostesp/firmware_update.bin"
 #define OTA_SD_SHA256_PATH "/mnt/ghostesp/firmware_update.sha256"
+#define OTA_SD_ROOT_PATH "/mnt/ghostesp"
 
 typedef struct {
     const char *template_key;
@@ -104,6 +113,8 @@ static size_t ota_manifest_keys_for_board(const char *board_key, const char **ke
     return count;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 static void ota_resolve_download_url(const char *raw_url, char *out, size_t out_len) {
     if (!raw_url || !out || out_len == 0) return;
     out[0] = '\0';
@@ -132,6 +143,32 @@ static void ota_resolve_download_url(const char *raw_url, char *out, size_t out_
     size_t base_len = last_slash ? (size_t)(last_slash + 1 - manifest) : (size_t)(path_start + 1 - manifest);
     snprintf(out, out_len, "%.*s%s", (int)base_len, manifest, raw_url);
 }
+#pragma GCC diagnostic pop
+
+static bool ota_system_time_valid(void) {
+    return time(NULL) >= OTA_TIME_VALID_AFTER;
+}
+
+static bool ota_wait_for_valid_time(uint32_t timeout_ms) {
+    if (ota_system_time_valid()) return true;
+
+    if (!esp_sntp_enabled()) {
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        esp_sntp_setservername(0, "pool.ntp.org");
+        esp_sntp_init();
+    }
+
+    uint32_t waited = 0;
+    while (!ota_system_time_valid() && waited < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        waited += 500;
+    }
+    if (!ota_system_time_valid()) {
+        ESP_LOGW(TAG, "OTA check skipped: system time is not valid for TLS verification");
+        return false;
+    }
+    return true;
+}
 
 static SemaphoreHandle_t s_status_mutex;
 static OtaStatus s_status;
@@ -139,6 +176,9 @@ static OtaStatus s_status;
 // Discovered by the manifest check, consumed by the download task.
 static char s_download_url[256];
 static char s_expected_sha256[65];
+static bool s_ap_disabled_for_download;
+static volatile bool s_download_cancel_requested;
+static volatile esp_http_client_handle_t s_download_client;
 
 // Raw-write session state (used both internally and by peer_ota_manager.c).
 static const esp_partition_t *s_raw_write_partition;
@@ -161,6 +201,14 @@ static void ota_set_error(const char *msg) {
     xSemaphoreGive(s_status_mutex);
 }
 
+void ota_manager_cancel_update(void) {
+    s_download_cancel_requested = true;
+    esp_http_client_handle_t client = (esp_http_client_handle_t)s_download_client;
+    if (client) {
+        esp_http_client_close(client);
+    }
+}
+
 static void ota_clear_available_state(void) {
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     memset(&s_status, 0, sizeof(s_status));
@@ -168,6 +216,71 @@ static void ota_clear_available_state(void) {
     xSemaphoreGive(s_status_mutex);
     s_download_url[0] = '\0';
     s_expected_sha256[0] = '\0';
+}
+
+static void ota_restore_ap_marker_clear(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &nvs) != ESP_OK) return;
+    nvs_erase_key(nvs, OTA_NVS_AP_RESTORE_KEY);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static void ota_restore_ap_enabled_setting(void) {
+    settings_set_ap_enabled(&G_Settings, true);
+    settings_persist_setting(SETTING_AP_ENABLED);
+}
+
+static void ota_restore_ap_after_download_failure(void) {
+#ifndef CONFIG_SPIRAM
+    if (!s_ap_disabled_for_download) return;
+    s_ap_disabled_for_download = false;
+    ota_restore_ap_marker_clear();
+    ota_restore_ap_enabled_setting();
+    ESP_LOGI(TAG, "Restored AP/Web UI setting after failed OTA download");
+    ap_manager_start_services();
+#endif
+}
+
+static void ota_restore_ap_after_successful_boot(void) {
+#ifndef CONFIG_SPIRAM
+    nvs_handle_t nvs;
+    if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &nvs) != ESP_OK) return;
+
+    uint8_t restore = 0;
+    esp_err_t err = nvs_get_u8(nvs, OTA_NVS_AP_RESTORE_KEY, &restore);
+    if (err == ESP_OK && restore) {
+        nvs_erase_key(nvs, OTA_NVS_AP_RESTORE_KEY);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ota_restore_ap_enabled_setting();
+        ESP_LOGI(TAG, "Restored AP/Web UI setting after OTA boot confirmation");
+        return;
+    }
+
+    nvs_close(nvs);
+#endif
+}
+
+static void ota_disable_ap_for_download_if_needed(void) {
+#ifndef CONFIG_SPIRAM
+    if (!settings_get_ap_enabled(&G_Settings)) return;
+
+    nvs_handle_t nvs;
+    if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &nvs) == ESP_OK) {
+        if (nvs_set_u8(nvs, OTA_NVS_AP_RESTORE_KEY, 1) == ESP_OK) {
+            nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+    }
+
+    settings_set_ap_enabled(&G_Settings, false);
+    settings_persist_setting(SETTING_AP_ENABLED);
+    s_ap_disabled_for_download = true;
+
+    ESP_LOGI(TAG, "Temporarily disabling AP/Web UI for OTA download on no-PSRAM build");
+    ap_manager_stop_services_keep_wifi();
+#endif
 }
 
 bool ota_manager_is_supported(void) {
@@ -208,8 +321,17 @@ esp_err_t ota_manager_init(void) {
     return ESP_OK;
 }
 
+bool ota_manager_has_update_ready(void) {
+    return s_download_url[0] != '\0';
+}
+
 OtaStatus ota_manager_get_status(void) {
     OtaStatus copy;
+    if (!s_status_mutex) {
+        memset(&copy, 0, sizeof(copy));
+        copy.state = OTA_STATE_IDLE;
+        return copy;
+    }
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     copy = s_status;
     xSemaphoreGive(s_status_mutex);
@@ -220,10 +342,8 @@ void ota_manager_confirm_boot_ok(void) {
 #if GHOSTESP_OTA_SUPPORTED
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(running, &ota_state) != ESP_OK) {
-        return;
-    }
-    if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+    if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+        ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
         esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "OTA image marked valid; rollback cancelled");
@@ -231,42 +351,170 @@ void ota_manager_confirm_boot_ok(void) {
             ESP_LOGW(TAG, "Failed to mark OTA image valid: %s", esp_err_to_name(err));
         }
     }
+    ota_restore_ap_after_successful_boot();
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Streaming JSON manifest parser (no full-buffer, no cJSON, no BSS)
+// ---------------------------------------------------------------------------
+
+#define MAN_KEY_MAX  32
+#define MAN_VAL_MAX  256
+
+typedef struct {
+    int  pos;
+    int  depth;
+    bool in_str;
+    bool esc;
+    bool in_value;
+    bool matched;
+    int  key_depth;
+    char key[MAN_KEY_MAX];
+    int  key_pos;
+    char val[MAN_VAL_MAX];
+    int  val_pos;
+    const char *board_key;
+    const char *board_alias;
+    uint8_t channel;
+    bool found;
+    OtaManifestEntry *out;
+} manifest_ctx_t;
+
+static void man_ctx_init(manifest_ctx_t *c, const char *bk, const char *ba,
+                          uint8_t ch, OtaManifestEntry *o) {
+    memset(c, 0, sizeof(*c));
+    c->pos = 0; c->depth = 0; c->in_str = false; c->esc = false;
+    c->in_value = false; c->matched = false; c->key_depth = 0;
+    c->key_pos = 0; c->val_pos = 0;
+    c->board_key = bk; c->board_alias = ba;
+    c->channel = ch; c->found = false; c->out = o;
+}
+
+static bool key_eq(const char *buf, int len, const char *t) {
+    return (int)strlen(t) == len && memcmp(buf, t, len) == 0;
+}
+
+static bool is_target_key(manifest_ctx_t *c) {
+    if (c->key_pos == 0) return false;
+    const char *k = c->key;
+    int len = c->key_pos;
+    char tmp[MAN_KEY_MAX];
+    if (c->channel == 1) {
+        if (c->board_key) {
+            int n = snprintf(tmp, sizeof(tmp), "%s-prerelease", c->board_key);
+            if (n > 0 && key_eq(k, len, tmp)) return true;
+        }
+        if (c->board_alias) {
+            int n = snprintf(tmp, sizeof(tmp), "%s-prerelease", c->board_alias);
+            if (n > 0 && key_eq(k, len, tmp)) return true;
+        }
+    }
+    if (c->board_key && key_eq(k, len, c->board_key)) return true;
+    if (c->board_alias && key_eq(k, len, c->board_alias)) return true;
+    return false;
+}
+
+static void handle_key(manifest_ctx_t *c) {
+    if (c->key_pos > 0 && is_target_key(c)) {
+        c->matched = true;
+        ESP_LOGI("ManParser", "MATCHED key='%.*s' depth=%d", c->key_pos, c->key, c->depth);
+    } else if (c->depth == 2) {
+        c->matched = false;
+    }
+}
+
+static void handle_value(manifest_ctx_t *c) {
+    if (!c->matched || !c->out) return;
+    const char *v = c->val;
+    ESP_LOGI("ManParser", "val key='%.*s' val='%s'", c->key_pos, c->key, v);
+    if (key_eq(c->key, c->key_pos, "download_url")) {
+        ota_resolve_download_url(v, c->out->download_url, sizeof(c->out->download_url));
+    } else if (key_eq(c->key, c->key_pos, "sha256")) {
+        strncpy(c->out->sha256, v, sizeof(c->out->sha256) - 1);
+    } else if (key_eq(c->key, c->key_pos, "version")) {
+        strncpy(c->out->version, v, sizeof(c->out->version) - 1);
+    } else if (key_eq(c->key, c->key_pos, "commit")) {
+        strncpy(c->out->commit, v, sizeof(c->out->commit) - 1);
+    } else if (key_eq(c->key, c->key_pos, "build_number")) {
+        c->out->build_number = atol(v);
+    } else if (key_eq(c->key, c->key_pos, "size")) {
+        c->out->size = (size_t)atol(v);
+    }
+    if (c->out->download_url[0] && c->out->sha256[0]) {
+        c->out->found = true;
+        c->found = true;
+    }
+}
+
+static esp_err_t manifest_stream_handler(esp_http_client_event_t *evt) {
+    manifest_ctx_t *c = evt->user_data;
+    if (evt->event_id != HTTP_EVENT_ON_DATA || !c || !evt->data || evt->data_len == 0)
+        return ESP_OK;
+
+    const char *p = (const char *)evt->data;
+    for (int i = 0; i < evt->data_len; i++) {
+        char ch = p[i];
+        c->pos++;
+
+        if (c->esc) { c->esc = false; goto collect; }
+        if (c->in_str && ch == '\\') { c->esc = true; continue; }
+
+        if (!c->in_str) {
+            if (ch == '"') { c->in_str = true; }
+            else if (ch == '{' || ch == '[') { c->depth++; c->in_value = false; c->key_pos = 0; }
+            else if (ch == '}' || ch == ']') {
+                if (c->in_value && c->depth == c->key_depth) handle_value(c);
+                c->depth--;
+                if (c->depth == 1) { c->matched = false; c->in_value = false; }
+            }
+            else if (ch == ':') { c->in_value = true; c->val_pos = 0; c->val[0] = '\0'; }
+            else if (ch == ',') {
+                if (c->in_value && c->depth == c->key_depth) handle_value(c);
+                c->in_value = false;
+                c->key_pos = 0;
+            }
+            else if (c->in_value && c->matched && c->depth == c->key_depth &&
+                     !isspace((unsigned char)ch)) {
+                if (c->val_pos < MAN_VAL_MAX - 1) {
+                    c->val[c->val_pos++] = ch;
+                    c->val[c->val_pos] = '\0';
+                }
+            }
+            continue;
+        }
+
+collect:
+        if (c->in_str) {
+            if (ch == '"') {
+                c->in_str = false;
+                if (c->in_value) {
+                    if (c->depth == c->key_depth) handle_value(c);
+                } else {
+                    handle_key(c);
+                }
+            } else {
+                if (!c->in_value) {
+                    if (c->key_pos < MAN_KEY_MAX - 1) {
+                        c->key[c->key_pos++] = ch;
+                        c->key[c->key_pos] = '\0';
+                    }
+                    c->key_depth = c->depth;
+                } else if (c->matched && c->depth == c->key_depth) {
+                    if (c->val_pos < MAN_VAL_MAX - 1) {
+                        c->val[c->val_pos++] = ch;
+                        c->val[c->val_pos] = '\0';
+                    }
+                }
+            }
+        }
+    }
+    return ESP_OK;
 }
 
 // ---------------------------------------------------------------------------
 // Manifest fetch + parse
 // ---------------------------------------------------------------------------
-
-typedef struct {
-    char *buffer;
-    size_t len;
-    size_t capacity;
-} ota_response_buf_t;
-
-static esp_err_t ota_http_event_handler(esp_http_client_event_t *evt) {
-    ota_response_buf_t *buf = evt->user_data;
-    if (evt->event_id != HTTP_EVENT_ON_DATA) {
-        return ESP_OK;
-    }
-    if (buf->len + evt->data_len + 1 > buf->capacity) {
-        size_t new_cap = buf->capacity ? buf->capacity * 2 : OTA_MANIFEST_RESPONSE_INITIAL_SIZE;
-        while (new_cap < buf->len + evt->data_len + 1) {
-            new_cap *= 2;
-        }
-        char *grown = realloc(buf->buffer, new_cap);
-        if (!grown) {
-            ESP_LOGE(TAG, "Failed to grow manifest buffer");
-            return ESP_FAIL;
-        }
-        buf->buffer = grown;
-        buf->capacity = new_cap;
-    }
-    memcpy(buf->buffer + buf->len, evt->data, evt->data_len);
-    buf->len += evt->data_len;
-    buf->buffer[buf->len] = '\0';
-    return ESP_OK;
-}
 
 esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channel, OtaManifestEntry *out_entry) {
     if (!board_key || !out_entry) {
@@ -274,24 +522,30 @@ esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channe
     }
     memset(out_entry, 0, sizeof(*out_entry));
 
-    ota_response_buf_t resp = {0};
-    resp.buffer = malloc(OTA_MANIFEST_RESPONSE_INITIAL_SIZE);
-    if (!resp.buffer) {
-        return ESP_ERR_NO_MEM;
-    }
-    resp.capacity = OTA_MANIFEST_RESPONSE_INITIAL_SIZE;
+    const char *lookup_keys[4] = {0};
+    size_t lookup_key_count = ota_manifest_keys_for_board(board_key, lookup_keys,
+                                                          sizeof(lookup_keys) / sizeof(lookup_keys[0]));
+    const char *primary = (lookup_key_count > 0) ? lookup_keys[0] : board_key;
+    const char *alias   = (lookup_key_count > 1) ? lookup_keys[1] : NULL;
+
+    manifest_ctx_t ctx;
+    man_ctx_init(&ctx, primary, alias, channel, out_entry);
 
     esp_http_client_config_t config = {
         .url = GHOSTESP_OTA_MANIFEST_URL,
         .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler = ota_http_event_handler,
-        .user_data = &resp,
+        .event_handler = manifest_stream_handler,
+        .user_data = &ctx,
         .buffer_size = OTA_MANIFEST_HTTP_BUFFER_SIZE,
     };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&config, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) {
+        glog("OTA manifest proxy URL failed: %s\n", esp_err_to_name(proxy_err));
+        return proxy_err;
+    }
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
-        free(resp.buffer);
         return ESP_FAIL;
     }
 
@@ -301,69 +555,15 @@ esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channe
 
     if (err != ESP_OK || status != 200) {
         glog("OTA manifest fetch failed (err=%s, http=%d)\n", esp_err_to_name(err), status);
-        free(resp.buffer);
         return ESP_FAIL;
     }
 
-    cJSON *root = cJSON_Parse(resp.buffer);
-    free(resp.buffer);
-    if (!root) {
-        return ESP_FAIL;
+    if (ctx.found) {
+        ESP_LOGI(TAG, "Manifest entry found for '%s'", board_key);
+    } else {
+        ESP_LOGW(TAG, "No manifest entry for '%s' (primary='%s', alias='%s')",
+                 board_key, primary, alias ? alias : "(none)");
     }
-
-    cJSON *boards = cJSON_GetObjectItem(root, "boards");
-    if (!boards) {
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-
-    const char *lookup_keys[4] = {0};
-    size_t lookup_key_count = ota_manifest_keys_for_board(board_key, lookup_keys,
-                                                          sizeof(lookup_keys) / sizeof(lookup_keys[0]));
-    char prerelease_key[96];
-    cJSON *entry = NULL;
-    if (channel == 1) {
-        for (size_t i = 0; i < lookup_key_count && !entry; i++) {
-            snprintf(prerelease_key, sizeof(prerelease_key), "%s-prerelease", lookup_keys[i]);
-            entry = cJSON_GetObjectItem(boards, prerelease_key);
-        }
-    }
-    if (!entry) {
-        // No prerelease published for this board -- fall back to stable aliases.
-        for (size_t i = 0; i < lookup_key_count && !entry; i++) {
-            entry = cJSON_GetObjectItem(boards, lookup_keys[i]);
-        }
-    }
-    if (!entry) {
-        cJSON_Delete(root);
-        glog("No OTA manifest entry for board '%s'\n", board_key);
-        return ESP_OK; // not an error -- out_entry->found stays false
-    }
-
-    cJSON *j_version = cJSON_GetObjectItem(entry, "version");
-    cJSON *j_commit = cJSON_GetObjectItem(entry, "commit");
-    cJSON *j_build_number = cJSON_GetObjectItem(entry, "build_number");
-    cJSON *j_sha256 = cJSON_GetObjectItem(entry, "sha256");
-    cJSON *j_size = cJSON_GetObjectItem(entry, "size");
-    cJSON *j_url = cJSON_GetObjectItem(entry, "download_url");
-
-    if (j_version && cJSON_IsString(j_version)) {
-        strncpy(out_entry->version, j_version->valuestring, sizeof(out_entry->version) - 1);
-    }
-    if (j_commit && cJSON_IsString(j_commit)) {
-        strncpy(out_entry->commit, j_commit->valuestring, sizeof(out_entry->commit) - 1);
-    }
-    out_entry->build_number = (j_build_number && cJSON_IsNumber(j_build_number)) ? (long)j_build_number->valuedouble : -1;
-    if (j_sha256 && cJSON_IsString(j_sha256)) {
-        strncpy(out_entry->sha256, j_sha256->valuestring, sizeof(out_entry->sha256) - 1);
-    }
-    out_entry->size = (j_size && cJSON_IsNumber(j_size)) ? (size_t)j_size->valuedouble : 0;
-    if (j_url && cJSON_IsString(j_url)) {
-        ota_resolve_download_url(j_url->valuestring, out_entry->download_url, sizeof(out_entry->download_url));
-    }
-    out_entry->found = true;
-
-    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -399,6 +599,21 @@ static esp_err_t ota_fetch_and_parse_manifest(bool *out_update_available) {
 
     strncpy(s_download_url, entry.download_url, sizeof(s_download_url) - 1);
     s_download_url[sizeof(s_download_url) - 1] = '\0';
+    {
+        char encoded[256];
+        size_t j = 0;
+        for (size_t i = 0; s_download_url[i] && j < sizeof(encoded) - 4; i++) {
+            if (s_download_url[i] == ' ') {
+                encoded[j++] = '%';
+                encoded[j++] = '2';
+                encoded[j++] = '0';
+            } else {
+                encoded[j++] = s_download_url[i];
+            }
+        }
+        encoded[j] = '\0';
+        memcpy(s_download_url, encoded, j + 1);
+    }
     strncpy(s_expected_sha256, entry.sha256, sizeof(s_expected_sha256) - 1);
     s_expected_sha256[sizeof(s_expected_sha256) - 1] = '\0';
 
@@ -409,7 +624,14 @@ static esp_err_t ota_fetch_and_parse_manifest(bool *out_update_available) {
 
 static void ota_check_task(void *pv) {
     (void)pv;
+    vTaskDelay(pdMS_TO_TICKS(5000));
     ota_set_state(OTA_STATE_CHECKING);
+
+    if (!ota_wait_for_valid_time(20000)) {
+        ota_set_state(OTA_STATE_IDLE);
+        vTaskDelete(NULL);
+        return;
+    }
 
     bool update_available = false;
     ota_fetch_and_parse_manifest(&update_available);
@@ -434,6 +656,10 @@ esp_err_t ota_manager_background_check(void) {
     if (!ota_manager_is_supported() || !ota_manager_board_has_network()) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+#ifndef CONFIG_SPIRAM
+    ESP_LOGI(TAG, "Skipping OTA background check on no-PSRAM build");
+    return ESP_OK;
+#endif
     uint32_t last_check = settings_get_ota_last_check_time(&G_Settings);
     uint32_t now = (uint32_t)time(NULL);
     if (last_check != 0 && now > last_check && (now - last_check) < OTA_BACKGROUND_CHECK_MIN_INTERVAL_SEC) {
@@ -547,6 +773,7 @@ static void ota_download_task(void *pv) {
     (void)pv;
     ota_set_state(OTA_STATE_DOWNLOADING);
     status_display_show_status("Downloading update...");
+    s_download_cancel_requested = false;
 
     // Safety cross-check: physical flash must match what this build assumes.
     uint32_t actual_flash_size = 0;
@@ -568,102 +795,119 @@ static void ota_download_task(void *pv) {
         }
     }
 
+    ota_disable_ap_for_download_if_needed();
+
     esp_http_client_config_t http_config = {
         .url = s_download_url,
         .timeout_ms = 60000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 1024,
+        .buffer_size = OTA_SD_READ_CHUNK_SIZE,
     };
-    esp_https_ota_config_t ota_config = {
-        .http_config = &http_config,
-    };
+    char proxy_url_buf[HTTP_PROXY_URL_MAX];
+    esp_err_t proxy_err = proxy_apply(&http_config, proxy_url_buf, sizeof(proxy_url_buf));
+    if (proxy_err != ESP_OK) {
+        ota_restore_ap_after_download_failure();
+        ota_set_error("OTA proxy URL too long");
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "Starting OTA download from %s", s_download_url);
+    esp_http_client_handle_t client = esp_http_client_init(&http_config);
+    if (!client) {
+        ota_restore_ap_after_download_failure();
+        ota_set_error("Failed to create HTTP client");
+        vTaskDelete(NULL);
+        return;
+    }
+    s_download_client = client;
 
-    esp_https_ota_handle_t handle = NULL;
-    esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
-    if (err != ESP_OK) {
-        glog("esp_https_ota_begin failed: %s\n", esp_err_to_name(err));
-        ota_set_error("Failed to start download");
+    uint8_t *download_buf = malloc(OTA_SD_READ_CHUNK_SIZE);
+    if (!download_buf) {
+        s_download_client = NULL;
+        esp_http_client_cleanup(client);
+        ota_restore_ap_after_download_failure();
+        ota_set_error("Out of memory downloading update");
         vTaskDelete(NULL);
         return;
     }
 
-    while (1) {
-        err = esp_https_ota_perform(handle);
-        if (err != ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-            break;
+    bool raw_write_started = false;
+    size_t total_received = 0;
+    esp_err_t err = s_download_cancel_requested ? ESP_ERR_INVALID_STATE : esp_http_client_open(client, 0);
+    if (err == ESP_OK) {
+        int64_t content_length = esp_http_client_fetch_headers(client);
+        int status = esp_http_client_get_status_code(client);
+        if (status != 200) {
+            glog("OTA download HTTP status %d\n", status);
+            err = ESP_FAIL;
+        } else if (content_length >= 0 && s_status.image_size != 0 &&
+                   (size_t)content_length != s_status.image_size) {
+            glog("OTA size mismatch: manifest=%lu, http=%lld\n",
+                 (unsigned long)s_status.image_size, (long long)content_length);
+            err = ESP_ERR_INVALID_SIZE;
         }
-        int read = esp_https_ota_get_image_len_read(handle);
-        xSemaphoreTake(s_status_mutex, portMAX_DELAY);
-        s_status.bytes_downloaded = (size_t)read;
-        xSemaphoreGive(s_status_mutex);
     }
 
-    if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
-        glog("OTA download incomplete: %s\n", esp_err_to_name(err));
-        esp_https_ota_abort(handle);
+    if (err == ESP_OK) {
+        err = ota_manager_raw_write_begin(s_status.image_size);
+        raw_write_started = (err == ESP_OK);
+    }
+
+    while (err == ESP_OK && !s_download_cancel_requested) {
+        int read_len = esp_http_client_read(client, (char *)download_buf, OTA_SD_READ_CHUNK_SIZE);
+        if (read_len < 0) {
+            err = ESP_FAIL;
+            break;
+        }
+        if (read_len == 0) {
+            break;
+        }
+        err = ota_manager_raw_write_chunk(download_buf, (size_t)read_len);
+        total_received += (size_t)read_len;
+    }
+
+    if (s_download_cancel_requested) {
+        err = ESP_ERR_INVALID_STATE;
+    }
+
+    bool complete = err == ESP_OK && esp_http_client_is_complete_data_received(client);
+    s_download_client = NULL;
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    free(download_buf);
+
+    if (s_download_cancel_requested) {
+        if (raw_write_started) {
+            ota_manager_raw_write_abort();
+        }
+        ota_restore_ap_after_download_failure();
+        ota_set_error("Update cancelled");
+        s_download_cancel_requested = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (err != ESP_OK || !complete ||
+        (s_status.image_size != 0 && total_received != s_status.image_size)) {
+        glog("OTA download incomplete: err=%s, complete=%d, got=%lu/%lu\n",
+             esp_err_to_name(err), complete, (unsigned long)total_received,
+             (unsigned long)s_status.image_size);
+        if (raw_write_started) {
+            ota_manager_raw_write_abort();
+        }
+        ota_restore_ap_after_download_failure();
         ota_set_error("Download incomplete");
         vTaskDelete(NULL);
         return;
     }
 
-    // Capture the total received length before esp_https_ota_finish(), which
-    // invalidates the handle on success.
-    size_t total_received = (size_t)esp_https_ota_get_image_len_read(handle);
-
     ota_set_state(OTA_STATE_VERIFYING);
     status_display_show_status("Verifying update...");
 
-    esp_err_t finish_err = esp_https_ota_finish(handle);
-    if (finish_err != ESP_OK) {
-        glog("esp_https_ota_finish failed: %s\n", esp_err_to_name(finish_err));
+    err = ota_manager_raw_write_finish(s_expected_sha256);
+    if (err != ESP_OK) {
+        glog("OTA image validation failed: %s\n", esp_err_to_name(err));
+        ota_restore_ap_after_download_failure();
         ota_set_error("Image validation failed");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    // Defense-in-depth: read back what actually landed in flash and compare
-    // its SHA-256 against the manifest's expected value. esp_https_ota_finish
-    // already set the new partition as the next-boot target on success --
-    // if our own check disagrees, revert the boot target back to the
-    // currently-running (still valid) partition instead of rebooting.
-    const esp_partition_t *written = esp_ota_get_boot_partition();
-
-    mbedtls_sha256_context verify_ctx;
-    mbedtls_sha256_init(&verify_ctx);
-    mbedtls_sha256_starts(&verify_ctx, 0);
-
-    size_t remaining = s_status.image_size ? s_status.image_size : total_received;
-    uint8_t *readback_buf = malloc(OTA_READBACK_CHUNK_SIZE);
-    bool read_ok = (readback_buf != NULL) && (written != NULL);
-    size_t offset = 0;
-    while (read_ok && offset < remaining) {
-        size_t chunk = remaining - offset;
-        if (chunk > OTA_READBACK_CHUNK_SIZE) chunk = OTA_READBACK_CHUNK_SIZE;
-        if (esp_partition_read(written, offset, readback_buf, chunk) != ESP_OK) {
-            read_ok = false;
-            break;
-        }
-        mbedtls_sha256_update(&verify_ctx, readback_buf, chunk);
-        offset += chunk;
-    }
-    free(readback_buf);
-
-    uint8_t digest[32];
-    mbedtls_sha256_finish(&verify_ctx, digest);
-    mbedtls_sha256_free(&verify_ctx);
-    char actual_hex[65];
-    ota_sha256_to_hex(digest, actual_hex);
-
-    bool verified = read_ok && s_expected_sha256[0] != '\0' &&
-                     strcasecmp(actual_hex, s_expected_sha256) == 0;
-
-    if (!verified) {
-        glog("OTA readback verification failed; reverting boot partition\n");
-        const esp_partition_t *running = esp_ota_get_running_partition();
-        if (running) {
-            esp_ota_set_boot_partition(running);
-        }
-        ota_set_error("Post-write verification failed");
         vTaskDelete(NULL);
         return;
     }
@@ -712,17 +956,101 @@ esp_err_t ota_manager_start_update(void) {
 // ---------------------------------------------------------------------------
 // SD card update: an offline alternative to the R2/HTTPS path above, reusing
 // the same raw-write API (and therefore the same dual-partition rollback
-// safety) that the GhostLink peer-relay path uses. User drops a renamed
-// firmware.bin (plus an optional .sha256 sidecar) onto the SD card; if the
-// sidecar is present its hash must match, otherwise the file is flashed
-// unverified (the user already has physical possession of the card).
+// safety) that the GhostLink peer-relay path uses. The app-only firmware.bin
+// from the GitHub zip is valid here; merged.bin is a full flash image and must
+// not be written into an OTA slot. If a .sha256 sidecar is present its hash must
+// match, otherwise the file is flashed unverified (the user already has
+// physical possession of the card).
 // ---------------------------------------------------------------------------
 
 // Reads the first 64 hex characters found in the sidecar file (tolerates the
 // standard "sha256sum" format of "<hash>  <filename>\n" as well as a bare
 // hash on its own line). Returns false if no sidecar file exists.
-static bool ota_sd_read_expected_sha256(char *out_hex /* >= 65 bytes */) {
-    FILE *f = fopen(OTA_SD_SHA256_PATH, "r");
+static bool ota_sd_file_exists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    fclose(f);
+    return true;
+}
+
+static bool ota_sd_try_firmware_path(const char *path, char *out_path, size_t out_len) {
+    if (!path || !out_path || out_len == 0 || !ota_sd_file_exists(path)) {
+        return false;
+    }
+    strncpy(out_path, path, out_len - 1);
+    out_path[out_len - 1] = '\0';
+    return true;
+}
+
+static const char *ota_sd_artifact_base_for_board(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    const char *board = CONFIG_BUILD_CONFIG_TEMPLATE;
+    if (strcmp(board, "marauderv4") == 0) return "MarauderV4_FlipperHub";
+    if (strcmp(board, "cardputer") == 0) return "ESP32-S3-Cardputer";
+    if (strcmp(board, "waveshare7inch") == 0) return "Waveshare_LCD";
+    if (strcmp(board, "sunton7inch") == 0) return "Sunton_LCD";
+    if (strcmp(board, "JC3248W535EN") == 0) return "JC3248W535EN_LCD";
+    if (strcmp(board, "LilyGo TEmbedC1101") == 0) return "LilyGo-TEmbedC1101";
+    if (strcmp(board, "LilyGo T-Dongle-S3") == 0) return "LilyGo-TDongleS3";
+    if (strcmp(board, "LilyGo T-Dongle-C5") == 0) return "LilyGo-TDongleC5";
+    if (strcmp(board, "S3TWatch") == 0) return "LilyGo-S3TWatch-2020";
+    if (strcmp(board, "Cardputer ADV") == 0) return "CardputerADV";
+    if (strcmp(board, "somethingsomething") == 0) return "Banshee_C5";
+    if (strcmp(board, "somethingsomething2") == 0) return "Banshee_S3";
+    if (strcmp(board, "NM-CYD-C5") == 0) return "NM-CYD-C5";
+    if (strcmp(board, "xiao_esp32s3_sense") == 0) return "XIAO_S3_Sense";
+    if (strcmp(board, "xiao_esp32s3") == 0) return "XIAO_S3";
+#endif
+    return NULL;
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+static bool ota_sd_find_firmware(char *out_path, size_t out_len) {
+    if (ota_sd_try_firmware_path(OTA_SD_FIRMWARE_PATH, out_path, out_len)) return true;
+    if (ota_sd_try_firmware_path(OTA_SD_ROOT_PATH "/firmware.bin", out_path, out_len)) return true;
+
+    const char *artifact_base = ota_sd_artifact_base_for_board();
+    if (artifact_base && artifact_base[0]) {
+        char candidate[256];
+        snprintf(candidate, sizeof(candidate), OTA_SD_ROOT_PATH "/%s/firmware.bin", artifact_base);
+        if (ota_sd_try_firmware_path(candidate, out_path, out_len)) return true;
+        snprintf(candidate, sizeof(candidate), OTA_SD_ROOT_PATH "/%s.bin", artifact_base);
+        if (ota_sd_try_firmware_path(candidate, out_path, out_len)) return true;
+    }
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    char candidate[256];
+    snprintf(candidate, sizeof(candidate), OTA_SD_ROOT_PATH "/%s/firmware.bin", CONFIG_BUILD_CONFIG_TEMPLATE);
+    if (ota_sd_try_firmware_path(candidate, out_path, out_len)) return true;
+    snprintf(candidate, sizeof(candidate), OTA_SD_ROOT_PATH "/%s.bin", CONFIG_BUILD_CONFIG_TEMPLATE);
+    if (ota_sd_try_firmware_path(candidate, out_path, out_len)) return true;
+#endif
+
+    return false;
+}
+#pragma GCC diagnostic pop
+
+static bool ota_sd_read_expected_sha256(const char *firmware_path, char *out_hex /* >= 65 bytes */) {
+    char sidecar_path[320];
+    const char *paths[3] = {NULL, NULL, NULL};
+
+    if (firmware_path && firmware_path[0]) {
+        snprintf(sidecar_path, sizeof(sidecar_path), "%s.sha256", firmware_path);
+        paths[0] = sidecar_path;
+        if (strcmp(firmware_path, OTA_SD_FIRMWARE_PATH) == 0) {
+            paths[1] = OTA_SD_SHA256_PATH;
+        }
+    }
+
+    FILE *f = NULL;
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        if (!paths[i]) continue;
+        f = fopen(paths[i], "r");
+        if (f) break;
+    }
     if (!f) {
         return false;
     }
@@ -749,9 +1077,20 @@ static void ota_sd_update_task(void *pv) {
     ota_set_state(OTA_STATE_DOWNLOADING);
     status_display_show_status("Reading SD firmware...");
 
-    FILE *f = fopen(OTA_SD_FIRMWARE_PATH, "rb");
+    char firmware_path[256];
+    if (!ota_sd_find_firmware(firmware_path, sizeof(firmware_path))) {
+        if (ota_sd_file_exists(OTA_SD_ROOT_PATH "/merged.bin")) {
+            ota_set_error("Use firmware.bin, not merged.bin");
+        } else {
+            ota_set_error("No firmware.bin on SD card");
+        }
+        vTaskDelete(NULL);
+        return;
+    }
+
+    FILE *f = fopen(firmware_path, "rb");
     if (!f) {
-        ota_set_error("No firmware_update.bin on SD card");
+        ota_set_error("SD firmware file unreadable");
         vTaskDelete(NULL);
         return;
     }
@@ -766,10 +1105,11 @@ static void ota_sd_update_task(void *pv) {
     }
 
     char expected_sha256[65] = {0};
-    bool have_hash = ota_sd_read_expected_sha256(expected_sha256);
+    bool have_hash = ota_sd_read_expected_sha256(firmware_path, expected_sha256);
     if (!have_hash) {
-        glog("No firmware_update.sha256 sidecar found -- flashing SD image unverified\n");
+        glog("No SD firmware sha256 sidecar found -- flashing SD image unverified\n");
     }
+    glog("Installing SD firmware from %s\n", firmware_path);
 
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     s_status.image_size = (size_t)file_size;
@@ -844,7 +1184,9 @@ bool ota_manager_is_supported(void) { return false; }
 esp_err_t ota_manager_init(void) { return ESP_OK; }
 esp_err_t ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t ota_manager_background_check(void) { return ESP_ERR_NOT_SUPPORTED; }
+bool ota_manager_has_update_ready(void) { return false; }
 esp_err_t ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
+void ota_manager_cancel_update(void) {}
 esp_err_t ota_manager_start_update_from_sd(void) { return ESP_ERR_NOT_SUPPORTED; }
 OtaStatus ota_manager_get_status(void) { return (OtaStatus){ .state = OTA_STATE_IDLE }; }
 esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channel, OtaManifestEntry *out_entry) {

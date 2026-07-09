@@ -66,6 +66,18 @@ esp_err_t ota_manager_background_check(void);
 // ota_manager_get_status().
 esp_err_t ota_manager_start_update(void);
 
+// Requests cancellation of an in-progress network firmware download. The
+// download task observes this asynchronously, aborts any partial OTA write,
+// and leaves the current boot partition unchanged.
+void ota_manager_cancel_update(void);
+
+// True once a check has resolved a concrete download target for this board,
+// regardless of the volatile status enum (which a later failed download or
+// re-check can knock out of OTA_STATE_UPDATE_AVAILABLE). The install action
+// gates on this so "checked, got an update, then install says none" can't
+// happen while a download URL is still staged.
+bool ota_manager_has_update_ready(void);
+
 OtaStatus ota_manager_get_status(void);
 
 // Offline alternative to the R2/HTTPS path: flashes /mnt/ghostesp/firmware_update.bin

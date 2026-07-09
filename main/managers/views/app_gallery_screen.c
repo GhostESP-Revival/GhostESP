@@ -15,6 +15,7 @@
 #include "managers/views/accelerometer_screen.h"
 #endif
 #include "managers/views/clock_screen.h"
+#include "managers/views/cloud_store_screen.h"
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 #include "managers/views/audio_player_screen.h"
 #endif
@@ -89,6 +90,7 @@ static inline void apply_app_card_selection_style(lv_obj_t *obj, lv_color_t acce
 
 static void select_app_item(int index, bool slide_left);
 static void apps_plugin_reload_done(void *arg);
+static void scroll_app_grid_card_to_view(int index);
 
 lv_obj_t *apps_container;
 static lv_obj_t *apps_root = NULL;
@@ -142,6 +144,13 @@ static const app_item_t builtin_app_items[] = {
         .view = &sd_browser_view,
     },
     {
+        .name = "Store",
+        .asset_key = NULL,
+        .symbol_icon = LV_SYMBOL_DOWNLOAD,
+        .palette_index = 3,
+        .view = &cloud_store_view,
+    },
+    {
         .name = "Ghostchi",
         .asset_key = "ghost",
         .icon = &ghost,
@@ -185,7 +194,9 @@ static const app_item_t builtin_app_items[] = {
 };
 
 #define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT * 2 + 12)
+#define BUILTIN_APP_GALLERY_ITEMS ((int)(sizeof(builtin_app_items) / sizeof(builtin_app_items[0])))
 static app_item_t *app_items = NULL;
+static int s_app_items_capacity = 0;
 static int num_apps = 0;
 lv_obj_t *back_button = NULL;
 
@@ -233,13 +244,23 @@ static StaticTask_t *apps_plugin_reload_tcb = NULL;
 
 #define PLUGIN_RELOAD_STACK_BYTES 32768
 
+static bool apps_native_plugins_enabled(void) {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
+}
+
+static int app_items_capacity_for_board(void) {
+    return apps_native_plugins_enabled() ? MAX_APP_GALLERY_ITEMS : (BUILTIN_APP_GALLERY_ITEMS + 1);
+}
+
 static bool ensure_app_items(void) {
+    int capacity = app_items_capacity_for_board();
     if (app_items) return true;
-    app_items = spiram_calloc(MAX_APP_GALLERY_ITEMS, sizeof(*app_items));
+    app_items = spiram_calloc((size_t)capacity, sizeof(*app_items));
     if (!app_items) {
         ESP_LOGE(TAG, "Failed to allocate app gallery items");
         return false;
     }
+    s_app_items_capacity = capacity;
     return true;
 }
 
@@ -324,7 +345,7 @@ static bool parse_accent_color(const char *text, lv_color_t *out) {
 }
 
 static void add_back_app_item(void) {
-    if (!app_items || num_apps >= MAX_APP_GALLERY_ITEMS) return;
+    if (!app_items || num_apps >= s_app_items_capacity) return;
     app_items[num_apps].name = "Back";
     app_items[num_apps].icon = NULL;
     app_items[num_apps].palette_index = 0;
@@ -371,7 +392,7 @@ static void add_plugin_category_folders(void) {
         }
     }
 
-    for (int j = 0; j < num_categories && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++j) {
+    for (int j = 0; j < num_categories && num_apps < s_app_items_capacity - 1; ++j) {
         app_items[num_apps].name = s_category_names[j];
         app_items[num_apps].asset_key = NULL;
         app_items[num_apps].symbol_icon = LV_SYMBOL_DIRECTORY;
@@ -390,7 +411,7 @@ static void add_plugin_app_items_flat(void) {
     int plugin_count = plugin_manager_count();
 
     if (in_submenu) {
-        for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+        for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
             const plugin_app_manifest_t *app = plugin_manager_get(i);
             if (!app) continue;
             if (app->requires_psram && !has_psram) continue;
@@ -400,7 +421,7 @@ static void add_plugin_app_items_flat(void) {
         return;
     }
 
-    for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+    for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
         if (!app) continue;
         if (app->requires_psram && !has_psram) continue;
@@ -412,7 +433,7 @@ static void add_plugin_app_items_flat(void) {
 static void rebuild_app_items(bool include_loaded_plugins) {
     num_apps = 0;
     if (!ensure_app_items()) return;
-    memset(app_items, 0, sizeof(*app_items) * MAX_APP_GALLERY_ITEMS);
+    memset(app_items, 0, sizeof(*app_items) * (size_t)s_app_items_capacity);
 
     if (in_submenu) {
         add_back_app_item();
@@ -422,7 +443,7 @@ static void rebuild_app_items(bool include_loaded_plugins) {
 
     if (include_loaded_plugins) add_plugin_category_folders();
 
-    for (int i = 0; i < (int)(sizeof(builtin_app_items) / sizeof(builtin_app_items[0])) && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+    for (int i = 0; i < BUILTIN_APP_GALLERY_ITEMS && num_apps < s_app_items_capacity - 1; ++i) {
         app_items[num_apps++] = builtin_app_items[i];
     }
 
@@ -676,6 +697,19 @@ static void apps_cleanup_layout(void) {
     grid_cards_container = NULL;
 }
 
+static void scroll_app_grid_card_to_view(int index) {
+    if (!grid_cards_container || !apps_grid_cards || index < 0 || index >= num_apps) return;
+
+    lv_obj_t *card = apps_grid_cards[index];
+    if (!card || !lv_obj_is_valid(card)) return;
+
+    lv_obj_t *row = lv_obj_get_parent(card);
+    if (!row || !lv_obj_is_valid(row)) return;
+
+    lv_obj_update_layout(grid_cards_container);
+    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+}
+
 static void update_app_item(bool slide_left) {
     if (!app_items || num_apps <= 0) return;
     apps_carousel_next_slide_left = slide_left;
@@ -823,6 +857,11 @@ static void create_apps_grid_menu(void) {
     bool show_borders = settings_get_menu_item_borders(&G_Settings);
     lv_obj_t *current_row = NULL;
 
+    /* Grid shows every app's icon simultaneously, which can exceed the
+     * no-PSRAM icon cache's slot count; reset pins so this pass's icons can
+     * evict anything left pinned by a previous, now-destroyed screen. */
+    asset_pack_reset_icon_pins();
+
     for (int i = 0; i < num_apps; ++i) {
         if (i % cols == 0) {
             current_row = lv_obj_create(grid_cards_container);
@@ -907,7 +946,7 @@ static void create_apps_grid_menu(void) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
         apply_app_card_selection_style(apps_grid_cards[selected_app_index], accent);
-        lv_obj_scroll_to_view(apps_grid_cards[selected_app_index], LV_ANIM_OFF);
+        scroll_app_grid_card_to_view(selected_app_index);
     }
 }
 
@@ -929,6 +968,9 @@ static void create_apps_list_menu(void) {
         ESP_LOGE(TAG, "failed to alloc apps list buttons");
         return;
     }
+
+    /* List shows every app's icon simultaneously; see create_apps_grid_menu. */
+    asset_pack_reset_icon_pins();
 
     for (int i = 0; i < num_apps; ++i) {
         lv_obj_t *btn = lv_btn_create(apps_container);
@@ -1033,15 +1075,16 @@ static void apps_plugin_reload_done(void *arg) {
                          !app_items[selected_app_index].is_category_folder);
     }
 
-    rebuild_app_items(true);
+    bool plugins_enabled = apps_native_plugins_enabled();
+    rebuild_app_items(plugins_enabled);
     init_app_colors();
-    apps_allow_plugin_icon_load = true;
+    apps_allow_plugin_icon_load = plugins_enabled;
     if (selected_back) selected_app_index = num_apps > 0 ? num_apps - 1 : 0;
     render_app_items();
     gui_screen_apply_background(apps_menu_view.root);
 
     int plugin_count = plugin_manager_count();
-    if (plugin_count > 0) {
+    if (plugins_enabled && plugin_count > 0) {
         char msg[48];
         snprintf(msg, sizeof(msg), "%d SD app%s ready", plugin_count, plugin_count == 1 ? "" : "s");
         toast_show_duration(msg, TOAST_SUCCESS, 1000);
@@ -1058,11 +1101,12 @@ static void apps_plugin_reload_done(void *arg) {
  void apps_menu_create(void) {
     plugin_manager_init();
     int boot_count = plugin_manager_count();
-    apps_allow_plugin_icon_load = (boot_count > 0);
+    bool plugins_enabled = apps_native_plugins_enabled();
+    apps_allow_plugin_icon_load = plugins_enabled && (boot_count > 0);
     in_submenu = false;
     current_category[0] = '\0';
-    rebuild_app_items(boot_count > 0);
-    if (boot_count > 0) {
+    rebuild_app_items(plugins_enabled && boot_count > 0);
+    if (plugins_enabled && boot_count > 0) {
         char msg[48];
         snprintf(msg, sizeof(msg), "%d SD app%s ready", boot_count, boot_count == 1 ? "" : "s");
         toast_show_duration(msg, TOAST_SUCCESS, 1000);
@@ -1265,7 +1309,7 @@ static void select_app_item(int index, bool slide_left) {
             uint8_t theme = settings_get_menu_theme(&G_Settings);
             lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
             apply_app_card_selection_style(card, accent);
-            lv_obj_scroll_to_view(card, LV_ANIM_OFF);
+            scroll_app_grid_card_to_view(selected_app_index);
         }
         return;
     }
@@ -1299,7 +1343,7 @@ static void apps_menu_go_back(void) {
         in_submenu = false;
         current_category[0] = '\0';
         selected_app_index = 0;
-        rebuild_app_items(true);
+        rebuild_app_items(apps_native_plugins_enabled());
         init_app_colors();
         render_app_items();
         gui_screen_apply_background(apps_menu_view.root);
@@ -1347,7 +1391,7 @@ static void handle_app_item_selection(int item_index) {
         strncpy(current_category, app_items[item_index].category, sizeof(current_category) - 1);
         current_category[sizeof(current_category) - 1] = '\0';
         in_submenu = true;
-        rebuild_app_items(true);
+        rebuild_app_items(apps_native_plugins_enabled());
         init_app_colors();
         selected_app_index = (num_apps > 1) ? 1 : 0;
         render_app_items();
@@ -1452,6 +1496,11 @@ static void handle_keyboard_interactions(int keyValue){
         ESP_LOGI(TAG, "Esc or '`' pressed (back)");
         apps_menu_go_back();
     }
+}
+
+static bool apps_keyboard_activation_key(int keyValue) {
+    return keyValue == LV_KEY_ENTER || keyValue == 13 ||
+           keyValue == LV_KEY_ESC || keyValue == 29 || keyValue == '`';
 }
 
 /**
@@ -1597,6 +1646,7 @@ void apps_menu_event_handler(InputEvent *event) {
         ESP_LOGI(TAG, "Joystick event");
         handle_apps_button_press(event->data.joystick_index);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
+        if (event->is_repeat && apps_keyboard_activation_key(event->data.key_value)) return;
         ESP_LOGW(TAG, "keyboard event");
         handle_keyboard_interactions(event->data.key_value);
     } else if (event->type == INPUT_TYPE_ENCODER) {

@@ -508,7 +508,8 @@ static void ota_background_check_task(void *arg) {
     (void)arg;
     // Let Wi-Fi connect (if configured) before hitting the network; this is
     // a low-priority, check-only pass -- it must never download or flash.
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    // Cardputer ADV and similar boards need extra time for DNS to be ready.
+    vTaskDelay(pdMS_TO_TICKS(20000));
     ota_manager_background_check();
     vTaskDelete(NULL);
 }

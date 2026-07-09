@@ -350,7 +350,7 @@ static esp_timer_handle_t s_kb_repeat_timer = NULL;
 static void kb_repeat_fire_cb(void *arg) {
     (void)arg;
     if (!s_kb_repeat_key) return;
-    InputEvent ev;
+    InputEvent ev = {0};
     ev.type = INPUT_TYPE_KEYBOARD;
     ev.data.key_value = s_kb_repeat_key;
     ev.is_touch_move = false;
@@ -2810,7 +2810,7 @@ void hardware_input_task(void *pvParameters) {
           }
 
           if (!skip_event) {
-            InputEvent event;
+            InputEvent event = {0};
             event.is_touch_move = false; // press event (release is emitted separately)
             // event.type will be set inside the switch for specific keys
 
@@ -2867,7 +2867,7 @@ void hardware_input_task(void *pvParameters) {
         if (still_down) continue;
         uint8_t rel_value = keyboard_get_key(&gkeyboard, last_pressed_keys[k]);
         if (rel_value == 0) continue;
-        InputEvent rel_event;
+        InputEvent rel_event = {0};
         rel_event.type = INPUT_TYPE_KEYBOARD;
         rel_event.data.key_value = rel_value;
         rel_event.is_touch_move = true; // release

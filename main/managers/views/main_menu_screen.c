@@ -1080,6 +1080,11 @@ static void create_grid_menu(void) {
     bool show_borders = settings_get_menu_item_borders(&G_Settings);
     lv_obj_t *current_row = NULL;
 
+    /* Grid shows every menu item's icon simultaneously, which can exceed the
+     * no-PSRAM icon cache's slot count; reset pins so this pass's icons can
+     * evict anything left pinned by a previous, now-destroyed screen. */
+    asset_pack_reset_icon_pins();
+
     for (int i = 0; i < num_items; i++) {
         int menu_index = visible_index_to_menu_index(i, connected);
 
@@ -1195,6 +1200,9 @@ static void create_list_menu(void) {
         ESP_LOGE(TAG, "failed to alloc list buttons");
         return;
     }
+
+    /* List shows every menu item's icon simultaneously; see create_grid_menu. */
+    asset_pack_reset_icon_pins();
 
     bool connected = esp_comm_manager_is_connected();
     for (int i = 0; i < num_items; i++) {

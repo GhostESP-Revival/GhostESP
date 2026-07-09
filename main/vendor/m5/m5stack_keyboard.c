@@ -49,7 +49,10 @@ static SemaphoreHandle_t s_tca_sem = NULL;
 static TaskHandle_t s_tca_task = NULL;
 // keyboard event push helper (avoid extra allocations)
 static void tca_push_key_event(uint8_t key_value, bool pressed){
-    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value; ev.is_touch_move = !pressed;
+    InputEvent ev = {0};
+    ev.type = INPUT_TYPE_KEYBOARD;
+    ev.data.key_value = key_value;
+    ev.is_touch_move = !pressed;
     xQueueSend((QueueHandle_t)input_queue, &ev, 0);
 }
 

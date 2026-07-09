@@ -97,6 +97,32 @@ To use SD-card OTA:
 
 If `firmware_update.sha256` exists, GhostESP verifies the SD firmware before booting it. If the sidecar is missing, GhostESP flashes the SD firmware without a sidecar hash check.
 
+## Temporary AP and Web UI Disable During Updates
+
+On boards without PSRAM, internal RAM is too tight to run the Web UI at the same time as the OTA download. To keep the download from stalling or out-of-memory killing itself, GhostESP automatically turns off the access point and Web UI for the duration of the update, then turns it back on when the new firmware boots.
+
+This only happens on no-PSRAM boards (for example, Cardputer ADV). Boards with PSRAM keep the AP and Web UI running through the whole update.
+
+What you should expect on a no-PSRAM board during a network update:
+
+- The `GhostNet` access point disappears as soon as the download starts.
+- The Web UI at `http://192.168.4.1` becomes unreachable.
+- When the new firmware boots successfully, the access point and Web UI come back automatically.
+- The setting **Wi-Fi AP > Enable Access Point** is restored to its previous value (on or off) after the reboot.
+
+What happens if the download is interrupted or fails:
+
+- The access point and Web UI are restored before you return to the menu, without needing a reboot.
+- A failed install does not leave the device in a no-AP state.
+
+What you can do if the access point does not come back:
+
+1. Reboot the device. The restore is persisted to NVS, so a normal boot reapplies it.
+2. If it is still off, open **Settings > Wi-Fi > Enable Access Point** and turn it back on.
+3. If a recent OTA install failed, reflash manually with USB using the [Installation Guide]({{< relref "latest/getting-started/installation-guide.md" >}}).
+
+> Manual update checks (from **Settings > Firmware Update > Check Device Update**) are still available on no-PSRAM boards. Only the automatic background check that runs at boot is skipped, so the device stays responsive on a memory-constrained board.
+
 ## Recovery Tips
 
 - If an update check says no firmware was found, confirm that **Update Channel** is set correctly.

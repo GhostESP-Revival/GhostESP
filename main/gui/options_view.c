@@ -25,6 +25,7 @@ typedef struct options_view_t {
     int capacity;
     int selected;
     int btn_h;
+    bool use_asset_pack_background;
 } options_view_t;
 
 static inline bool ensure_capacity(options_view_t *ov, int need) {
@@ -122,10 +123,12 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
     }
 }
 
-options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
+static options_view_t *options_view_create_internal(lv_obj_t *parent, const char *title,
+                                                     bool use_asset_pack_background) {
     if (!parent) parent = lv_scr_act();
     options_view_t *ov = (options_view_t *)calloc(1, sizeof(options_view_t));
     if (!ov) return NULL;
+    ov->use_asset_pack_background = use_asset_pack_background;
 
     int w = LV_HOR_RES;
     int h = LV_VER_RES;
@@ -140,7 +143,10 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_size(ov->list, w, h - status_bar_h);
     lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
     lv_obj_set_style_bg_color(ov->list, bg, 0);
-    lv_obj_set_style_bg_opa(ov->list, asset_pack_get_background_tile() ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(ov->list,
+                            ov->use_asset_pack_background && asset_pack_get_background_tile()
+                                ? LV_OPA_TRANSP : LV_OPA_COVER,
+                            0);
     lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
     lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
@@ -175,6 +181,14 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
     if (title && *title) display_manager_add_status_bar(title);
 
     return ov;
+}
+
+options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
+    return options_view_create_internal(parent, title, true);
+}
+
+options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
+    return options_view_create_internal(parent, title, false);
 }
 
 void options_view_destroy(options_view_t *ov) {
@@ -298,7 +312,10 @@ void options_view_refresh_styles(options_view_t *ov) {
 
     if (ov->list && lv_obj_is_valid(ov->list)) {
         lv_obj_set_style_bg_color(ov->list, bg, 0);
-        lv_obj_set_style_bg_opa(ov->list, asset_pack_get_background_tile() ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_opa(ov->list,
+                                ov->use_asset_pack_background && asset_pack_get_background_tile()
+                                    ? LV_OPA_TRANSP : LV_OPA_COVER,
+                                0);
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
         lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
         lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);

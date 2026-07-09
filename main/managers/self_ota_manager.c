@@ -113,6 +113,11 @@ esp_err_t self_ota_manager_init(void) {
 
 SelfOtaStatus self_ota_manager_get_status(void) {
     SelfOtaStatus copy;
+    if (!s_status_mutex) {
+        memset(&copy, 0, sizeof(copy));
+        copy.state = SELF_OTA_STATE_IDLE;
+        return copy;
+    }
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     copy = s_status;
     xSemaphoreGive(s_status_mutex);

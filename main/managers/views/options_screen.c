@@ -644,6 +644,7 @@ static void ota_result_dismiss_cb(void *user_data) {
 }
 
 static void ota_status_start_overlay(ota_ui_mode_t mode, const char *title, const char *subtext);
+static void ota_status_show_result(const char *title, const char *body);
 
 static bool ota_state_busy(OtaState state) {
     return state == OTA_STATE_CHECKING || state == OTA_STATE_DOWNLOADING ||
@@ -702,6 +703,24 @@ static void ota_status_close_overlay(void) {
     ota_status_watch_self = false;
 }
 
+static bool ota_status_handle_cancel_input(InputEvent *event) {
+    if (!event || !ota_status_overlay || ota_ui_mode != OTA_UI_MODE_INSTALL ||
+        !ota_status_watch_device) {
+        return false;
+    }
+
+    OtaStatus ota = ota_manager_get_status();
+    if (ota.state != OTA_STATE_DOWNLOADING) {
+        return false;
+    }
+
+    ota_manager_cancel_update();
+    scan_status_set_subtext(ota_status_overlay, "Cancelling update...");
+    ota_status_close_overlay();
+    ota_status_show_result("Update Cancelled", "Firmware download cancelled.");
+    return true;
+}
+
 static void ota_status_show_result(const char *title, const char *body) {
     popup_confirm_show(&ota_result_popup, lv_layer_top(), title, body, "Close", NULL,
                        ota_result_dismiss_cb, NULL);
@@ -716,7 +735,7 @@ static void ota_start_device_install(void) {
     esp_err_t err = ota_manager_is_supported() ? ota_manager_start_update()
                                                 : self_ota_manager_start_update();
     if (err != ESP_OK) {
-        ota_status_show_result("No Update Ready", "Run Check Device Update first, then install again.");
+        ota_status_show_result("No Update Ready", "Check for updates first.");
     } else if (self_ota_manager_is_supported()) {
         ota_status_start_overlay(OTA_UI_MODE_INSTALL, "Starting updater...",
                                  "Rebooting to updater. Keep powered on.");
@@ -763,8 +782,7 @@ static void ota_show_sd_install_confirm(void) {
     }
 
     popup_confirm_show(&settings_confirm_popup, lv_layer_top(), "Install from SD Card?",
-                       "This flashes /ghostesp/firmware_update.bin from the SD card.\n\n"
-                       "If firmware_update.sha256 exists, it will be verified first. Keep powered on.",
+                       "Put firmware.bin in /mnt/ghostesp.\nDo not use merged.bin.\nKeep powered on.",
                        "Install", "Cancel", ota_confirm_sd_install_cb, NULL);
 }
 
@@ -787,20 +805,24 @@ static void ota_format_device_install_body(char *body, size_t body_len) {
     }
 
     if (body[0] == '\0') {
-        snprintf(body, body_len, "Install this device's firmware update?");
+        snprintf(body, body_len, "Install firmware update?");
     }
 
     size_t used = strlen(body);
     if (used < body_len - 1) {
-        snprintf(body + used, body_len - used, "\n\nThe device may reboot immediately. Keep it powered on.");
+        snprintf(body + used, body_len - used, "\nKeep powered on.");
     }
 }
 
 static void ota_show_device_install_confirm(void) {
     if (ota_manager_is_supported()) {
-        OtaStatus ota = ota_manager_get_status();
-        if (ota.state != OTA_STATE_UPDATE_AVAILABLE) {
-            ota_status_show_result("No Update Ready", "Run Check Device Update first, then install again.");
+        // Gate on whether a download target is actually staged, not on the
+        // volatile status enum: a failed download or a background re-check can
+        // move the state out of OTA_STATE_UPDATE_AVAILABLE while the URL from a
+        // successful check is still valid, which otherwise produced the
+        // "checked, saw an update, install says none" mismatch.
+        if (!ota_manager_has_update_ready()) {
+            ota_status_show_result("No Update Ready", "Check for updates first.");
             return;
         }
     }
@@ -918,22 +940,22 @@ static void ota_status_poll_timer_cb(lv_timer_t *timer) {
         } else {
             title = "No Firmware Found";
             snprintf(body, sizeof(body), ota_ui_mode == OTA_UI_MODE_PEER_CHECK ?
-                     "No firmware image is available for the peer." :
-                     "No firmware image is available for this device.");
+                     "No update for peer." :
+                     "No update for this device.");
         }
     } else if (ota_status_watch_peer && peer.state == PEER_OTA_STATE_DONE) {
         title = "Peer Updated";
-        snprintf(body, sizeof(body), "Peer firmware update completed. The peer is rebooting.");
+        snprintf(body, sizeof(body), "Peer updated. Rebooting.");
     } else if (ota_status_watch_device && ota.state == OTA_STATE_READY_TO_REBOOT) {
         title = "Update Installed";
         snprintf(body, sizeof(body), "Firmware installed. Rebooting into the new image.");
     } else if (ota_ui_mode == OTA_UI_MODE_INSTALL || ota_ui_mode == OTA_UI_MODE_PEER_INSTALL ||
                ota_ui_mode == OTA_UI_MODE_SD_INSTALL) {
         title = "No Update Started";
-        snprintf(body, sizeof(body), "No update is currently running. Check for updates first.");
+        snprintf(body, sizeof(body), "No update running. Check first.");
     } else {
         title = "Update Started";
-        snprintf(body, sizeof(body), "Update task started. Watch the device status for progress.");
+        snprintf(body, sizeof(body), "Update started. Watch status.");
     }
 
     ota_status_close_overlay();
@@ -961,7 +983,7 @@ static void ota_status_start_overlay(ota_ui_mode_t mode, const char *title, cons
     ota_status_overlay = scan_status_create(title ? title : "Firmware Update");
     if (!ota_status_overlay) {
         ota_status_close_overlay();
-        ota_status_show_result("Firmware Update", "Update task started. Watch the device status for progress.");
+        ota_status_show_result("Firmware Update", "Update started. Watch status.");
         return;
     }
     if (subtext) scan_status_set_subtext(ota_status_overlay, subtext);
@@ -1824,6 +1846,14 @@ static const char *settings_item_value_text(SettingsItem *item) {
             const char *cur = settings_get_sta_password(&G_Settings);
             return (cur && cur[0]) ? "********" : "<empty>";
         }
+#if GHOSTESP_OTA_SUPPORTED
+        case SETTING_OTA_CHECK_NOW:
+        case SETTING_OTA_INSTALL_UPDATE:
+        case SETTING_OTA_CHECK_PEER:
+        case SETTING_OTA_UPDATE_PEER:
+        case SETTING_OTA_INSTALL_FROM_SD:
+            return "";
+#endif
         default:
             break;
     }
@@ -1835,6 +1865,14 @@ static bool settings_item_is_visible(const SettingsItem *item) {
     if (!item) return false;
 #if GHOSTESP_OTA_SUPPORTED
     if (item->setting_type == SETTING_OTA_INSTALL_FROM_SD && !ota_sd_install_available()) {
+        return false;
+    }
+    // Peer (GhostLink relay) update rows only make sense on boards that
+    // actually relay to a peer -- currently only the somethingsomething C5.
+    // Hide them everywhere else instead of showing rows that just error out.
+    if ((item->setting_type == SETTING_OTA_CHECK_PEER ||
+         item->setting_type == SETTING_OTA_UPDATE_PEER) &&
+        !peer_ota_manager_is_supported()) {
         return false;
     }
 #endif
@@ -4685,6 +4723,12 @@ void handle_hardware_button_press_options(InputEvent *event) {
     if (settings_confirm_handle_input(event)) {
         return;
     }
+
+#if GHOSTESP_OTA_SUPPORTED
+    if (ota_status_handle_cancel_input(event)) {
+        return;
+    }
+#endif
 
     // Close wigle help popup on exit button or joystick back
     if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {

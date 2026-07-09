@@ -4,6 +4,7 @@
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/gui_anim.h"
 #include "gui/lvgl_safe.h"
 #include <stdlib.h>
@@ -368,12 +369,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     lv_coord_t content_h = 0;
     popup_calc_fullscreen_area(parent, &root_x, &root_y, &screen_w, &content_h);
 
-    lv_coord_t card_w = screen_w - 20;
-    if (card_w > 320) card_w = 320;
-    if (card_w < 108) card_w = screen_w > 8 ? screen_w - 8 : screen_w;
-    lv_coord_t card_h = content_h - 16;
-    if (card_h > 170) card_h = 170;
-    if (card_h < 112) card_h = content_h > 4 ? content_h - 4 : content_h;
+    bool small = (screen_w <= 240);
 
     p->owner = handle;
     p->on_confirm = on_confirm;
@@ -390,63 +386,57 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     lv_obj_add_flag(p->root, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_size(p->root, screen_w, content_h);
     lv_obj_align(p->root, LV_ALIGN_TOP_LEFT, root_x, root_y);
-    lv_obj_set_style_bg_color(p->root, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(p->root, LV_OPA_60, 0);
+    lv_obj_set_style_bg_color(p->root, popup_get_surface_color(), 0);
+    lv_obj_set_style_bg_opa(p->root, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(p->root, 0, 0);
+    lv_obj_set_style_radius(p->root, 0, 0);
+    lv_obj_set_style_pad_left(p->root, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(p->root, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_top(p->root, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(p->root, GUI_SAFEAREA_VER, 0);
     lv_obj_add_flag(p->root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(p->root, LV_OBJ_FLAG_SCROLLABLE);
 
-    p->card = lv_obj_create(p->root);
-    if (!p->card) {
-        lvgl_obj_del_safe(&p->root);
-        free(p);
-        return NULL;
-    }
-    lv_obj_set_size(p->card, card_w, card_h);
-    lv_obj_center(p->card);
-    lv_obj_set_style_bg_color(p->card, popup_get_surface_color(), 0);
-    lv_obj_set_style_border_width(p->card, 0, 0);
-    lv_obj_set_style_radius(p->card, GUI_RADIUS_MD, 0);
-    lv_obj_set_style_shadow_width(p->card, 8, 0);
-    lv_obj_set_style_shadow_color(p->card, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(p->card, LV_OPA_20, 0);
-    lv_obj_clear_flag(p->card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_left(p->card, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_right(p->card, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_top(p->card, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(p->card, GUI_SAFEAREA_VER, 0);
+    p->card = p->root;
 
-    lv_coord_t title_y = (card_h <= 120) ? 8 : 12;
-    lv_coord_t body_y = title_y + ((card_h <= 120) ? 24 : 32);
-    lv_coord_t button_h = (card_h <= 120) ? 28 : 32;
-    lv_coord_t body_w = card_w - (GUI_SAFEAREA_HOR * 2) - 10;
-    if (body_w < 80) body_w = card_w - 10;
+    const lv_font_t *title_font = small ? accessibility_get_font_body() : gui_font_title();
+    const lv_font_t *body_font = small ? accessibility_get_font_small() : gui_font_body();
 
-    popup_create_title_label(p->card, title ? title : "Confirm", gui_font_title(), title_y);
-    lv_obj_t *body_label = popup_create_body_label(p->card, body ? body : "Are you sure?", body_w, true, gui_font_body(), body_y);
+    // On short screens (e.g. Cardputer, 240x135) the fixed 32px title->body
+    // gap pushed multi-line body text down into the bottom-anchored buttons.
+    // Pull the whole text block up and tighten the gap so it clears them.
+    lv_coord_t title_y = small ? 6 : 12;
+    lv_coord_t body_y = title_y + (small ? 18 : 32);
+    lv_coord_t button_h = small ? 30 : 32;
+    lv_coord_t body_w = screen_w - (GUI_SAFEAREA_HOR * 2) - 10;
+
+    popup_create_title_label(p->root, title ? title : "Confirm", title_font, title_y);
+    lv_obj_t *body_label = popup_create_body_label(p->root, body ? body : "Are you sure?", body_w, true, body_font, body_y);
     if (body_label) {
         lv_obj_set_style_text_align(body_label, LV_TEXT_ALIGN_CENTER, 0);
     }
 
+    lv_coord_t btn_w = small ? 80 : 84;
     if (has_cancel) {
-        p->cancel_btn = popup_add_styled_button(p->card, cancel_label, 84, button_h,
-                                               LV_ALIGN_BOTTOM_LEFT, 0, -10, gui_font_body(), popup_confirm_cancel_event_cb, p);
+        p->cancel_btn = popup_add_styled_button(p->root, cancel_label, btn_w, button_h,
+                                               LV_ALIGN_BOTTOM_LEFT, 0, -10, body_font, popup_confirm_cancel_event_cb, p);
     }
-    p->confirm_btn = popup_add_styled_button(p->card, confirm_label ? confirm_label : "Confirm", 84, button_h,
+    p->confirm_btn = popup_add_styled_button(p->root, confirm_label ? confirm_label : "Confirm", btn_w, button_h,
                                             has_cancel ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_MID,
-                                            0, -10, gui_font_body(), popup_confirm_confirm_event_cb, p);
+                                            0, -10, body_font, popup_confirm_confirm_event_cb, p);
     lv_obj_t *btns[2] = { p->cancel_btn, p->confirm_btn };
     PopupButtonLayoutConfig cfg = {
-        .min_w = (card_w <= 180) ? 58 : 76,
-        .max_w = (card_w <= 180) ? 96 : 132,
-        .min_threshold = (card_w <= 180) ? 48 : 62,
-        .gap = (card_w <= 180) ? 8 : 14,
+        .min_w = small ? 58 : 76,
+        .max_w = small ? 96 : 132,
+        .min_threshold = small ? 48 : 62,
+        .gap = small ? 8 : 14,
     };
-    popup_layout_buttons_responsive(p->card, has_cancel ? btns : &btns[1], has_cancel ? 2 : 1, -10, &cfg);
+    popup_layout_buttons_responsive(p->root, has_cancel ? btns : &btns[1], has_cancel ? 2 : 1, -10, &cfg);
     popup_confirm_update_selection(p);
 
     lv_obj_move_foreground(p->root);
-    lv_obj_set_style_transform_zoom(p->card, 256, 0);
-    lv_obj_set_style_opa(p->card, LV_OPA_COVER, 0);
+    lv_obj_set_style_transform_zoom(p->root, 256, 0);
+    lv_obj_set_style_opa(p->root, LV_OPA_COVER, 0);
     *handle = p;
     return p;
 }
