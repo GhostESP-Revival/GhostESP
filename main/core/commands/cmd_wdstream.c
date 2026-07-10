@@ -89,7 +89,6 @@ static void wdstream_emit(const char *fmt, ...) {
         (void)esp_comm_manager_send_response((const uint8_t *)buf, (size_t)written);
     }
     terminal_view_add_text(buf);
-    ap_manager_add_log(buf);
 }
 
 static void wdstream_format_uptime(char *out, size_t out_len) {

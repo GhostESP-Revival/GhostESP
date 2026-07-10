@@ -31,6 +31,7 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
                                 pcap_capture_type_t capture_type);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
+static void pcap_release_idle_resources(void);
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = "/mnt/ghostesp/pcaps";
@@ -1051,6 +1052,24 @@ bool pcap_auto_flush_enabled(void) {
   return enabled;
 }
 
+static void pcap_release_idle_resources(void) {
+  SemaphoreHandle_t mutex = pcap_mutex;
+  if (!mutex) return;
+
+  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return;
+  if (s_capture_active || pcap_file != NULL || s_pcap_mode == PCAP_MODE_WIRESHARK) {
+    xSemaphoreGive(mutex);
+    return;
+  }
+
+  free(pcap_buffer);
+  pcap_buffer = NULL;
+  buffer_offset = 0;
+  pcap_mutex = NULL;
+  xSemaphoreGive(mutex);
+  vSemaphoreDelete(mutex);
+}
+
 void pcap_file_close() {
   if (pcap_mutex == NULL) {
     return;
@@ -1076,6 +1095,7 @@ void pcap_file_close() {
     xSemaphoreGive(pcap_mutex);
   }
   cleanup_pcap_queue();
+  pcap_release_idle_resources();
 }
 
 void pcap_wireshark_stop(void) {
@@ -1094,4 +1114,5 @@ void pcap_wireshark_stop(void) {
     xSemaphoreGive(pcap_mutex);
   }
   cleanup_pcap_queue();
+  pcap_release_idle_resources();
 }

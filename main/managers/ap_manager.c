@@ -42,6 +42,8 @@ static const char *TAG = "ap_manager";
 #include "esp_heap_caps.h"
 #include "managers/status_display_manager.h"
 #include "managers/auth_digest.h"
+#include "managers/views/terminal_screen.h"
+#include "managers/wifi_manager.h"
 #ifdef CONFIG_HAS_CAMERA
 #include "managers/camera_stream_manager.h"
 #endif
@@ -91,8 +93,6 @@ static esp_err_t teardown_mdns(void);
 
 #define WEBUI_AP_SUBNET_BASE_ADDR PP_HTONL(LWIP_MAKEU32(192, 168, 4, 0))
 #define WEBUI_AP_SUBNET_MASK_ADDR PP_HTONL(LWIP_MAKEU32(255, 255, 255, 0))
-#define MAX_LOG_BUFFER_SIZE (8 * 1024)  // 8KB log buffer size
-#define LOG_CHUNK_SIZE (MAX_LOG_BUFFER_SIZE / 4)  // Size to remove when buffer is full
 #define MAX_FILE_SIZE (5 * 1024 * 1024) // 5 MB
 #define AP_MANAGER_BUFFER_SIZE (1024)   // 1 KB buffer size for reading chunks
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
@@ -239,9 +239,6 @@ static void parse_digest_param(const char *hdr, const char *key, char *out, size
     }
 }
 
-static char *log_buffer = NULL; // dynamically allocated at runtime
-static size_t log_buffer_index = 0;
-static SemaphoreHandle_t log_mutex = NULL;
 
 static httpd_handle_t server = NULL;
 static esp_netif_t *netif = NULL;
@@ -759,36 +756,6 @@ esp_err_t ap_manager_init(void) {
     // Check if AP is disabled in settings
     if (!settings_get_ap_enabled(&G_Settings)) {
         glog("Access Point disabled in settings, skipping AP initialization\n");
-        log_heap_status(TAG, "ap_init_disabled_pre_logbuf");
-        
-        // initialize log buffer and mutex even when ap is disabled
-        // use psram to save internal ram
-        ESP_LOGI(TAG, "Allocating log buffer: %d bytes (PSRAM)", MAX_LOG_BUFFER_SIZE);
-        log_buffer = heap_caps_malloc(MAX_LOG_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if(!log_buffer){
-            ESP_LOGE(TAG, "failed to alloc log buffer in psram, trying internal ram");
-            log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
-            if(!log_buffer) {
-                ESP_LOGE(TAG, "failed to alloc log buffer");
-                log_heap_status(TAG, "ap_logbuf_alloc_fail");
-                return ESP_ERR_NO_MEM;
-            }
-        }
-        log_heap_status(TAG, "ap_init_disabled_post_logbuf");
-
-        log_mutex = xSemaphoreCreateRecursiveMutex();
-        if (!log_mutex) {
-            ESP_LOGE(TAG, "Failed to create log mutex");
-            free(log_buffer);
-            log_buffer = NULL;
-            return ESP_FAIL;
-        }
-
-        if(log_buffer){
-            memset(log_buffer, 0, MAX_LOG_BUFFER_SIZE);
-        }
-        log_heap_status(TAG, "ap_init_disabled_complete");
-        
         return ESP_OK;
     }
 
@@ -936,35 +903,6 @@ esp_err_t ap_manager_init(void) {
         glog("Failed to get IP address\n");
     }
 
-    // initialize log buffer and mutex
-    // use psram to save internal ram
-    log_heap_status(TAG, "ap_init_enabled_pre_logbuf");
-    ESP_LOGI(TAG, "Allocating log buffer: %d bytes (PSRAM)", MAX_LOG_BUFFER_SIZE);
-    log_buffer = heap_caps_malloc(MAX_LOG_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if(!log_buffer){
-        ESP_LOGE(TAG, "failed to alloc log buffer in psram, trying internal ram");
-        log_buffer = malloc(MAX_LOG_BUFFER_SIZE);
-        if(!log_buffer) {
-            ESP_LOGE(TAG, "failed to alloc log buffer");
-            log_heap_status(TAG, "ap_logbuf_alloc_fail");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-    log_heap_status(TAG, "ap_init_enabled_post_logbuf");
-
-    log_mutex = xSemaphoreCreateRecursiveMutex();
-    if (!log_mutex) {
-        ESP_LOGE(TAG, "Failed to create log mutex");
-        free(log_buffer);
-        log_buffer = NULL;
-        return ESP_FAIL;
-    }
-
-    if(log_buffer){
-        memset(log_buffer, 0, MAX_LOG_BUFFER_SIZE);
-    }
-
-    log_heap_status(TAG, "ap_init_complete");
     return ESP_OK;
 }
 
@@ -1004,62 +942,11 @@ void ap_manager_deinit(void) {
     
     teardown_mdns();
     
-    if(log_buffer){
-        free(log_buffer);
-        log_buffer = NULL;
-    }
-
-    if (log_mutex) {
-        SemaphoreHandle_t mutex_to_delete = log_mutex;
-        log_mutex = NULL;
-        vSemaphoreDelete(mutex_to_delete);
-    }
-    
     ESP_LOGI(TAG, "AP Manager deinitialized successfully");
 }
 
 void ap_manager_add_log(const char *log_message) {
-    if (!log_message || !log_mutex) return;
-    
-    size_t message_length = strlen(log_message);
-    if (message_length == 0) return;
-    
-    // Take recursive mutex with timeout
-    if (xSemaphoreTakeRecursive(log_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGW(TAG, "Failed to take log mutex");
-        return;
-    }
-    
-    // Check if we need to make space
-    if (log_buffer_index + message_length >= MAX_LOG_BUFFER_SIZE) {
-        // Find the first newline after LOG_CHUNK_SIZE
-        size_t remove_index = LOG_CHUNK_SIZE;
-        while (remove_index < log_buffer_index && log_buffer[remove_index] != '\n') {
-            remove_index++;
-        }
-        if (remove_index >= log_buffer_index) {
-            remove_index = LOG_CHUNK_SIZE; // Fallback if no newline found
-        } else {
-            remove_index++; // Include the newline
-        }
-        
-        // Move remaining content to start of buffer
-        size_t remaining = log_buffer_index - remove_index;
-        if (remaining > 0) {
-            memmove(log_buffer, log_buffer + remove_index, remaining);
-            log_buffer_index = remaining;
-        } else {
-            log_buffer_index = 0;
-        }
-    }
-    
-    // Add new message
-    if (log_buffer_index + message_length < MAX_LOG_BUFFER_SIZE) {
-        memcpy(log_buffer + log_buffer_index, log_message, message_length);
-        log_buffer_index += message_length;
-    }
-    
-    xSemaphoreGiveRecursive(log_mutex);
+    terminal_view_add_text(log_message);
 }
 
 esp_err_t ap_manager_start_services() {
@@ -1443,57 +1330,33 @@ static esp_err_t api_command_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// handler for getting serial logs
-static esp_err_t api_logs_handler(httpd_req_t *req) {
-    WEBUI_GUARD_OR_RETURN(req);
-    if (!log_mutex) {
-        return httpd_resp_send(req, "", 0);
-    }
-    
-    // Take mutex with timeout
-    if (xSemaphoreTake(log_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGW(TAG, "Failed to take log mutex for reading");
-        return httpd_resp_send(req, "", 0);
-    }
-    
-    // set response type as text/plain
-    httpd_resp_set_type(req, "text/plain");
-    
-    // Check if we have any logs
-    if (log_buffer_index == 0) {
-        xSemaphoreGive(log_mutex);
-        return httpd_resp_sendstr(req, "");
-    }
-    
-    // send the buffer contents
-    esp_err_t err = httpd_resp_send(req, log_buffer, log_buffer_index);
-    
-    xSemaphoreGive(log_mutex);
-    
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send logs: %d", err);
-        return err;
-    }
-    
-    return ESP_OK;
+typedef struct {
+    httpd_req_t *req;
+    esp_err_t err;
+} api_log_stream_t;
+
+static bool api_logs_send_chunk(const char *data, size_t len, void *ctx) {
+    api_log_stream_t *stream = ctx;
+    stream->err = httpd_resp_send_chunk(stream->req, data, len);
+    return stream->err == ESP_OK;
 }
 
-// Handler for /api/clear_logs (clears the log buffer)
+// Handler for the shared terminal/WebUI history.
+static esp_err_t api_logs_handler(httpd_req_t *req) {
+    WEBUI_GUARD_OR_RETURN(req);
+    httpd_resp_set_type(req, "text/plain");
+    api_log_stream_t stream = {.req = req, .err = ESP_OK};
+    if (!terminal_view_visit_history(api_logs_send_chunk, &stream)) {
+        ESP_LOGE(TAG, "Failed to stream logs: %s", esp_err_to_name(stream.err));
+        return stream.err == ESP_OK ? ESP_FAIL : stream.err;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+// Handler for /api/clear_logs (clears the shared terminal/WebUI history)
 static esp_err_t api_clear_logs_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
-    if (!log_mutex) {
-        return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"Log system not initialized\"}", -1);
-    }
-    
-    if (xSemaphoreTake(log_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"Failed to acquire lock\"}", -1);
-    }
-    
-    log_buffer_index = 0;
-    memset(log_buffer, 0, MAX_LOG_BUFFER_SIZE);
-    
-    xSemaphoreGive(log_mutex);
-    
+    terminal_view_clear_history();
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"logs_cleared\"}");
 }
@@ -2102,6 +1965,7 @@ static esp_err_t stop_http_server(void) {
             return ret;
         }
         server = NULL;
+        wifi_manager_release_stream_buffer();
         ESP_LOGI(TAG, "HTTP server stopped");
     }
     return ESP_OK;

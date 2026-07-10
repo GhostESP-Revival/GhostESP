@@ -125,6 +125,7 @@ typedef void (*wifi_promiscuous_cb_t_t)(void *buf,
 
 // Initialize WiFiManager
 void wifi_manager_init(void);
+void wifi_manager_release_stream_buffer(void);
 
 // Start scanning for available networks
 void wifi_manager_start_scan();

@@ -21,6 +21,12 @@
 - Added a progress bar view showing download status while installing from Cloud Store
 
 ### Other Changes
+- Shared terminal and WebUI history to remove the duplicate AP log buffer
+- Freed the wardriving CSV line buffer when logging stops
+- Freed PCAP staging resources when capture stops
+- Freed the HTTP streaming buffer when the web server stops
+- Show the native SD-app PSRAM warning only once per boot
+- Coalesce duplicate toast notifications and their haptic feedback
 - Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
 - Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
 - Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
@@ -29,6 +35,7 @@
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
+- Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template
 
 

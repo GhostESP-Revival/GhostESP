@@ -1054,6 +1054,7 @@ void csv_file_close() {
     csv_header_pending_uart = false;
     if (csv_buffer) { free(csv_buffer); csv_buffer = NULL; }
     if (csv_pre_header) { free(csv_pre_header); csv_pre_header = NULL; }
+    if (csv_data_line) { free(csv_data_line); csv_data_line = NULL; }
     csv_pre_header_len = 0;
     if (csv_mutex != NULL) {
         vSemaphoreDelete(csv_mutex);
@@ -1281,6 +1282,7 @@ void csv_file_close_fast() {
     csv_header_pending_uart = false;
     if (csv_buffer) { free(csv_buffer); csv_buffer = NULL; }
     if (csv_pre_header) { free(csv_pre_header); csv_pre_header = NULL; }
+    if (csv_data_line) { free(csv_data_line); csv_data_line = NULL; }
     csv_pre_header_len = 0;
 
     if (csv_file != NULL) {

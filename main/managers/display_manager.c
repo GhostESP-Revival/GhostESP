@@ -1607,18 +1607,33 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   size_t buf1_pixels;
   size_t buf2_pixels = 0;
 
+  /* Determine display resolution before sizing the buffers so the allocation
+     and LVGL registration always use the same pixel count. */
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
-  buf1_pixels = CONFIG_TFT_WIDTH * 3;
+  int width = get_m5gfx_width();
+  int height = get_m5gfx_height();
+#elif defined(CONFIG_USE_TDISPLAY_S3)
+  int width = I80_LCD_H_RES;
+  int height = I80_LCD_V_RES;
+#else
+  int width = CONFIG_TFT_WIDTH;
+  int height = CONFIG_TFT_HEIGHT;
+#endif
+
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
+  buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
   /* Keep the C5 SPI flush buffer in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
      time, which is fragile once WiFi/LVGL have fragmented internal RAM. */
-  buf1_pixels = CONFIG_TFT_WIDTH * 5;
+  buf1_pixels = (size_t)width * 5;
+#elif defined(CONFIG_IDF_TARGET_ESP32S2)
+  buf1_pixels = (size_t)width * 5;
 #elif defined(CONFIG_IDF_TARGET_ESP32)
-  buf1_pixels = CONFIG_TFT_WIDTH * 10;
+  buf1_pixels = (size_t)width * 10;
 #else
-  buf1_pixels = CONFIG_TFT_WIDTH * 10;
-  buf2_pixels = CONFIG_TFT_WIDTH * 10;
+  buf1_pixels = (size_t)width * 10;
+  buf2_pixels = (size_t)width * 10;
 #endif
   size_t buf1_bytes = buf1_pixels * sizeof(*buf1);
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
@@ -1661,34 +1676,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   ESP_LOGI(TAG, "display_manager: draw buffers allocated, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
-  /* Determine display resolution */
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
-  int width = get_m5gfx_width();
-  int height = get_m5gfx_height();
-#elif defined(CONFIG_USE_TDISPLAY_S3)
-  int width = I80_LCD_H_RES;
-  int height = I80_LCD_V_RES;
-#else
-  int width = CONFIG_TFT_WIDTH;
-  int height = CONFIG_TFT_HEIGHT;
-#endif
-
   static lv_disp_draw_buf_t disp_buf;
-/* Initialize draw buffer: prefer single-buffer on cardputer, ESP32, and ESP32-C5 */
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
-  /* single buffer mode: small buffer for low-memory cardputer */
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 2);
-#elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* single small internal-DMA buffer avoids SPI bounce-buffer allocations */
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
-#elif defined(CONFIG_IDF_TARGET_ESP32S2)
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 5);
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-  lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
-#else
-  /* default: double buffer for smoother drawing */
   lv_disp_draw_buf_init(&disp_buf, buf1, buf2, buf1_pixels);
-#endif
 
   /* Initialize the display */
   static lv_disp_drv_t disp_drv;

@@ -24,17 +24,10 @@
 #include <esp_heap_caps.h>
 #include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
 #include <time.h>
-
-typedef struct {
-    StackType_t *stack;
-    StaticTask_t *tcb;
-    uint32_t stack_words;
-} gps_task_static_res_t;
-
-static gps_task_static_res_t g_gps_check_task_res = {0};
 
 static const char *GPS_TAG = "GPS";
 
@@ -620,7 +613,7 @@ void gps_manager_init(GPSManager *manager) {
 
     // If there's an existing check task, delete it
     if (gps_check_task_handle != NULL) {
-        vTaskDelete(gps_check_task_handle);
+        vTaskDeleteWithCaps(gps_check_task_handle);
         gps_check_task_handle = NULL;
     }
     if (gps_soft_watchdog_task_handle != NULL) {
@@ -870,48 +863,29 @@ void gps_manager_init(GPSManager *manager) {
     manager->isinitilized = true;
     status_display_show_status("GPS Initialized");
 
-    const uint32_t gps_check_stack_words = 4096;
-    if (g_gps_check_task_res.stack_words != gps_check_stack_words || g_gps_check_task_res.stack == NULL ||
-        g_gps_check_task_res.tcb == NULL) {
-        if (g_gps_check_task_res.stack) {
-            heap_caps_free(g_gps_check_task_res.stack);
-            g_gps_check_task_res.stack = NULL;
-        }
-        if (g_gps_check_task_res.tcb) {
-            heap_caps_free(g_gps_check_task_res.tcb);
-            g_gps_check_task_res.tcb = NULL;
-        }
-        g_gps_check_task_res.stack_words = gps_check_stack_words;
-
-        g_gps_check_task_res.stack = (StackType_t *)heap_caps_malloc(
-            gps_check_stack_words * sizeof(StackType_t),
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!g_gps_check_task_res.stack) {
-            g_gps_check_task_res.stack = (StackType_t *)heap_caps_malloc(
-                gps_check_stack_words * sizeof(StackType_t),
-                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        }
-        g_gps_check_task_res.tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-
-    if (g_gps_check_task_res.stack && g_gps_check_task_res.tcb) {
-        gps_check_task_handle = xTaskCreateStatic(check_gps_connection_task,
+    // This task only reports whether the parser receives a fix, then exits.
+    // Capability-aware dynamic task storage is returned at that exit rather
+    // than retaining a 16 KB static stack for the entire GPS session.
+    const uint32_t gps_check_stack_bytes = 4096 * sizeof(StackType_t);
+    UBaseType_t gps_check_caps = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0
+        ? MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        : MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    gps_check_task_handle = NULL;
+    BaseType_t gps_check_rc = xTaskCreateWithCaps(check_gps_connection_task,
                                                   "gps_check",
-                                                  gps_check_stack_words,
+                                                  gps_check_stack_bytes,
                                                   NULL,
                                                   1,
-                                                  g_gps_check_task_res.stack,
-                                                  g_gps_check_task_res.tcb);
-    } else {
-        gps_check_task_handle = NULL;
-    }
+                                                  &gps_check_task_handle,
+                                                  gps_check_caps);
 
-    if (gps_check_task_handle == NULL) {
+    if (gps_check_rc != pdPASS) {
         ESP_LOGW(GPS_TAG,
-                 "Failed to create gps_check task (stack_words=%u free_internal=%u free_heap=%u)",
-                 (unsigned)gps_check_stack_words,
+                 "Failed to create gps_check task (stack_bytes=%u free_internal=%u free_heap=%u)",
+                 (unsigned)gps_check_stack_bytes,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+        gps_check_task_handle = NULL;
         status_display_show_status("GPS Task Fail");
         // proceed without the connection-check task; parser remains initialized
     }
@@ -963,7 +937,7 @@ static void check_gps_connection_task(void *pvParameters) {
 
             gps_connection_logged = true;
             gps_check_task_handle = NULL;
-            vTaskDelete(NULL);
+            vTaskDeleteWithCaps(NULL);
             return;
         }
 
@@ -995,7 +969,7 @@ static void check_gps_connection_task(void *pvParameters) {
     glog("GPS Module Connection Timeout\nCheck your connections\n");
     gps_timeout_detected = true;
     gps_check_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static bool is_valid_time(const gps_time_t *tim) {
@@ -1091,29 +1065,18 @@ void gps_manager_deinit(GPSManager *manager) {
     }
 
     bool had_gps_resources = manager->isinitilized || nmea_hdl != NULL ||
-                             gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL ||
-                             g_gps_check_task_res.stack != NULL || g_gps_check_task_res.tcb != NULL;
+                             gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL;
 
     if (had_gps_resources) {
         // If there's an existing check task, delete it
         if (gps_check_task_handle != NULL) {
-            vTaskDelete(gps_check_task_handle);
+            vTaskDeleteWithCaps(gps_check_task_handle);
             gps_check_task_handle = NULL;
         }
         if (gps_soft_watchdog_task_handle != NULL) {
             vTaskDelete(gps_soft_watchdog_task_handle);
             gps_soft_watchdog_task_handle = NULL;
         }
-
-        if (g_gps_check_task_res.stack) {
-            heap_caps_free(g_gps_check_task_res.stack);
-            g_gps_check_task_res.stack = NULL;
-        }
-        if (g_gps_check_task_res.tcb) {
-            heap_caps_free(g_gps_check_task_res.tcb);
-            g_gps_check_task_res.tcb = NULL;
-        }
-        g_gps_check_task_res.stack_words = 0;
 
         if (nmea_hdl) {
             if (gps_soft_mode_active) {

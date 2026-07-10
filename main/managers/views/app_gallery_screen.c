@@ -96,6 +96,7 @@ lv_obj_t *apps_container;
 static lv_obj_t *apps_root = NULL;
 static lv_obj_t *current_app_obj = NULL;
 static int selected_app_index = 0;
+static bool s_native_apps_psram_warning_shown = false;
 
 typedef struct {
     const char *name;
@@ -1115,7 +1116,9 @@ static void apps_plugin_reload_done(void *arg) {
     display_manager_fill_screen(apps_bg_color);
 
 #if CONFIG_ENABLE_NATIVE_SD_APPS
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
+    if (!s_native_apps_psram_warning_shown &&
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
+        s_native_apps_psram_warning_shown = true;
         toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 1500);
     }
 #endif

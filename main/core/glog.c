@@ -43,7 +43,6 @@ static inline void glog_emit(const char *buf) {
     if (esp_comm_manager_should_forward_output()) {
         esp_comm_manager_send_response((const uint8_t *)buf, strlen(buf));
     }
-    terminal_view_add_text(buf);
     ap_manager_add_log(buf);
 }
 

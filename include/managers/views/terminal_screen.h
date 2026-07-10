@@ -5,11 +5,18 @@
 #include "managers/display_manager.h"
 #include "managers/ap_manager.h"
 #include "core/esp_comm_manager.h"
+#include <stddef.h>
 
 extern View terminal_view;
 extern lv_timer_t *terminal_update_timer;
 
 void terminal_view_add_text(const char *text);
+
+typedef bool (*terminal_history_visitor_t)(const char *data, size_t len, void *ctx);
+
+// Visits retained terminal output while keeping its storage stable for the visitor.
+bool terminal_view_visit_history(terminal_history_visitor_t visitor, void *ctx);
+void terminal_view_clear_history(void);
 
 void terminal_view_create(void);
 
@@ -27,7 +34,6 @@ void terminal_set_dualcomm_filter(bool enable);
         if (esp_comm_manager_is_remote_command()) {                                \
             esp_comm_manager_send_response((const uint8_t*)buffer, strlen(buffer));\
         }                                                                          \
-        terminal_view_add_text(buffer);                                            \
         ap_manager_add_log(buffer);                                                \
     } while (0)
 #else

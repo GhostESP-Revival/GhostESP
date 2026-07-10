@@ -213,7 +213,6 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
     size_t prefix_len = strlen(prefix);
 
     if (buffer_size <= prefix_len + 2) {
-        ap_manager_add_log(prefix);
         terminal_view_add_text(prefix);
         return;
     }
@@ -238,7 +237,6 @@ static void log_response_line(const char* line, size_t line_len, char* log_buffe
     log_buffer[pos++] = '\n';
     log_buffer[pos] = '\0';
 
-    ap_manager_add_log(log_buffer);
     terminal_view_add_text(log_buffer);
 }
 
@@ -812,12 +810,10 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->peer.chip_name[CHIP_NAME_MAX - 1] = '\0';
                     printf("Discovered peer: %s\n", comm->peer.chip_name);
                     snprintf(log_buffer, sizeof(log_buffer), "I: Discovered peer: %s\n", comm->peer.chip_name);
-                    ap_manager_add_log(log_buffer);
                     terminal_view_add_text(log_buffer);
 
                     if (strcmp(comm->chip_name, comm->peer.chip_name) > 0) {
                         printf("Peer has smaller name, I will initiate connection.\n");
-                        ap_manager_add_log("I: Peer has smaller name, I will initiate connection.\n");
                         terminal_view_add_text("I: Peer has smaller name, I will initiate connection.\n");
                         esp_comm_manager_connect_to_peer(comm->peer.chip_name);
                     }
@@ -898,7 +894,6 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     }
                     unlock_state(comm);
                     printf("Handshake complete!\n");
-                    ap_manager_add_log("Handshake completed!\n");
                     terminal_view_add_text("Handshake completed!\n");
                 }
             }
@@ -967,7 +962,6 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 }
                 unlock_state(comm);
                 printf("Handshake complete!\n");
-                ap_manager_add_log("Handshake completed!\n");
                 terminal_view_add_text("Handshake completed!\n");
             }
             break;
@@ -1674,7 +1668,6 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
     printf("Connecting to peer: %s\n", peer_name);
     char log_msg[64];
     snprintf(log_msg, sizeof(log_msg), "I: Connecting to peer: %s\n", peer_name);
-    ap_manager_add_log(log_msg);
     terminal_view_add_text(log_msg);
 
     unlock_state(s_comm_manager);
@@ -1722,7 +1715,6 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         printf("Sent command: %s %s\n", command, data ? data : "");
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "I: Sent command: %s %s\n", command, data ? data : "");
-        ap_manager_add_log(log_msg);
         terminal_view_add_text(log_msg);
     }
     return result;
@@ -1970,7 +1962,6 @@ static void handshake_timer_callback(TimerHandle_t xTimer) {
     lock_state(comm);
     if (comm->state == COMM_STATE_HANDSHAKE) {
         printf("Handshake timeout\n");
-        ap_manager_add_log("W: Handshake timeout\n");
         terminal_view_add_text("W: Handshake timeout\n");
         comm->state = COMM_STATE_SCANNING;
         if (comm->discovery_timer) {
@@ -1988,7 +1979,6 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         return;
     }
     printf("Connection lost (%s)\n", reason ? reason : "unknown");
-    ap_manager_add_log("W: Connection lost, restarting discovery\n");
     terminal_view_add_text("W: Connection lost, restarting discovery\n");
 
     comm->state = COMM_STATE_SCANNING;

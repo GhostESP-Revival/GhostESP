@@ -452,6 +452,18 @@ static inline void stream_buf_unlock(void) {
     }
 }
 
+void wifi_manager_release_stream_buffer(void) {
+    SemaphoreHandle_t mutex = g_stream_buf_mutex;
+    if (!mutex) return;
+
+    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return;
+    free(g_stream_buf);
+    g_stream_buf = NULL;
+    g_stream_buf_mutex = NULL;
+    xSemaphoreGive(mutex);
+    vSemaphoreDelete(mutex);
+}
+
 // Station scan channel hopping moved to station_scan.c module
 
 // Wireshark Capture Channel Hopping Globals
