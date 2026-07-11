@@ -50,19 +50,8 @@ list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 # Exclude camera managers until camera support is enabled.
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
-# Exclude OTA managers from the glob; only linked on 8MB/16MB flash where OTA is supported.
-set(ghostesp_ota_supported OFF)
-if(CONFIG_ESPTOOLPY_FLASHSIZE_8MB OR CONFIG_ESPTOOLPY_FLASHSIZE_16MB
-   OR CONFIG_ESPTOOLPY_FLASHSIZE STREQUAL "8MB"
-   OR CONFIG_ESPTOOLPY_FLASHSIZE STREQUAL "16MB")
-    set(ghostesp_ota_supported ON)
-endif()
-list(FILTER app_sources EXCLUDE REGEX "(^|[/\\\\])(ota_manager|peer_ota_manager|self_ota_manager)\\.c$")
-if(ghostesp_ota_supported)
-    list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/ota_manager.c")
-    list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/peer_ota_manager.c")
-    list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/self_ota_manager.c")
-endif()
+# OTA managers remain in every build. Their GHOSTESP_OTA_SUPPORTED guards
+# compile lightweight stubs on boards without an OTA-capable flash layout.
 # Add infrared view back when IR support is enabled
 if(CONFIG_HAS_INFRARED)
     list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
