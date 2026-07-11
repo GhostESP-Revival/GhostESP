@@ -4,6 +4,7 @@
 #include "core/ouis.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -28,6 +29,21 @@
 #define GS_LOAD_CHUNK 128
 #define GS_COMMAND_LOG_LINES 16
 #define GS_COMMAND_LOG_LINE_MAX 120
+#define GS_EVENT_QUEUE_DEPTH 24
+#define GS_EVENT_NAME_MAX 40
+#define GS_EVENT_VALUE_MAX 320
+
+typedef enum {
+    GS_QUEUED_EVENT,
+    GS_QUEUED_INPUT,
+} gs_queued_kind_t;
+
+typedef struct {
+    gs_queued_kind_t kind;
+    char name[GS_EVENT_NAME_MAX];
+    char value[GS_EVENT_VALUE_MAX];
+    InputEvent input;
+} gs_queued_event_t;
 
 static void *gs_heap_alloc(size_t size) {
     return heap_caps_malloc_prefer(size, 2,
@@ -59,6 +75,7 @@ struct ghostscript_runtime {
     int64_t slice_start_us;
     bool stop_requested;
     bool api_active;
+    bool waiting_for_event;
     uint32_t resume_after_ms;
     bool script_done;
     char error[GHOSTSCRIPT_ERROR_MAX];
@@ -77,6 +94,11 @@ struct ghostscript_runtime {
     /* Per-runtime task id, used by the task scheduler. */
     int task_id;
 };
+
+static ghostscript_runtime_t *s_active_runtime;
+static QueueHandle_t s_event_queue;
+static portMUX_TYPE s_active_runtime_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_event_senders;
 
 /* Linked list of background tasks spawned by the script. Each owns its own
  * Lua state but shares the active-runtime pointer for event delivery. */
@@ -215,9 +237,27 @@ static void events_table(lua_State *L) {
     lua_setfield(L, LUA_REGISTRYINDEX, EVENT_KEY);
 }
 
+static uint32_t event_required_permission(const char *name) {
+    if (!name) return 0;
+    if (strncmp(name, "wifi_", 5) == 0 || strncmp(name, "capture_", 8) == 0 ||
+        strcmp(name, "handshake_captured") == 0 || strcmp(name, "pmkid_exported") == 0) {
+        return PLUGIN_PERMISSION_WIFI;
+    }
+    if (strncmp(name, "ble_", 4) == 0) return PLUGIN_PERMISSION_BLE;
+    if (strncmp(name, "nfc_", 4) == 0) return PLUGIN_PERMISSION_NFC;
+    if (strncmp(name, "ir_", 3) == 0) return PLUGIN_PERMISSION_IR;
+    if (strncmp(name, "subghz_", 7) == 0) return PLUGIN_PERMISSION_SUBGHZ;
+    if (strncmp(name, "command.", 8) == 0 || strcmp(name, "comm_command") == 0) return PLUGIN_PERMISSION_COMMANDS;
+    if (strncmp(name, "input", 5) == 0) return PLUGIN_PERMISSION_INPUT;
+    return 0;
+}
+
 static int l_event_on(lua_State *L) {
-    events_table(L);
+    ghostscript_runtime_t *rt = check_rt(L);
     const char *name = luaL_checkstring(L, 1);
+    uint32_t required_permission = event_required_permission(name);
+    if (required_permission && !rt_has_perm(rt, required_permission)) return lua_perm_error(L, "event topic");
+    events_table(L);
     luaL_checktype(L, 2, LUA_TFUNCTION);
     if (lua_iscfunction(L, 2)) return luaL_error(L, "ghost.on requires a Lua function");
     bool has_filter = !lua_isnoneornil(L, 3);
@@ -303,37 +343,16 @@ static int l_event_off(lua_State *L) {
 
 static bool topic_passes_filter(lua_State *L, const char *topic, const char *value);
 static int l_event_emit(lua_State *L);
-static int l_tasks_spawn(lua_State *L);
-static int l_tasks_list(lua_State *L);
 static int runtime_hook_count(const ghostscript_runtime_t *rt);
 static void runtime_begin_slice(ghostscript_runtime_t *rt);
+static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *event);
+static bool queue_text_event(ghostscript_runtime_t *rt, const char *name, const char *value);
 static int l_event_emit(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt) return luaL_error(L, "runtime missing");
     const char *name = luaL_checkstring(L, 1);
     const char *value = luaL_optstring(L, 2, "");
-    events_table(L);
-    lua_getfield(L, -1, name);
-    if (lua_istable(L, -1)) {
-        int n = (int)lua_rawlen(L, -1);
-        for (int i = 1; i <= n; i += 2) {
-            lua_rawgeti(L, -1, i);
-            if (!lua_isfunction(L, -1)) { lua_pop(L, 1); continue; }
-            if (i + 1 <= n) {
-                lua_rawgeti(L, -1, i + 1);
-                if (lua_isnil(L, -1)) {
-                    lua_pop(L, 1);
-                } else {
-                    bool pass = topic_passes_filter(L, name, value);
-                    if (!pass) { lua_pop(L, 2); continue; }
-                }
-            }
-            lua_pushvalue(L, 2);
-            if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-                glog("event handler error: %s", lua_tostring(L, -1));
-                lua_pop(L, 1);
-            }
-        }
-    }
-    lua_pop(L, 2);
+    (void)queue_text_event(rt, name, value);
     return 0;
 }
 
@@ -342,19 +361,21 @@ static int l_event_wait(lua_State *L) {
     if (!rt || !rt->L) return luaL_error(L, "runtime missing");
     if (!lua_isyieldable(L)) return luaL_error(L, "ghost.wait must be called from a coroutine");
     const char *name = luaL_checkstring(L, 1);
-    int nargs = lua_gettop(L);
-    /* entry = { co = <thread>, name = "...", args = { ... } } */
+    uint32_t required_permission = event_required_permission(name);
+    if (required_permission && !rt_has_perm(rt, required_permission)) return lua_perm_error(L, "event topic");
+    lua_Integer timeout_ms = luaL_optinteger(L, 2, 0);
+    if (timeout_ms < 0) return luaL_error(L, "ghost.wait timeout must not be negative");
+
+    /* entry = { co = <thread>, name = "...", deadline_us = <optional> } */
     lua_createtable(L, 0, 3);
     lua_pushthread(L);
     lua_setfield(L, -2, "co");
     lua_pushstring(L, name);
     lua_setfield(L, -2, "name");
-    lua_createtable(L, nargs - 1, 0);
-    for (int i = 2; i <= nargs; ++i) {
-        lua_pushvalue(L, i);
-        lua_rawseti(L, -2, i - 1);
+    if (timeout_ms > 0) {
+        lua_pushinteger(L, (lua_Integer)esp_timer_get_time() + timeout_ms * 1000);
+        lua_setfield(L, -2, "deadline_us");
     }
-    lua_setfield(L, -2, "args");
     lua_getfield(L, LUA_REGISTRYINDEX, EVENT_KEY);
     if (!lua_istable(L, -1)) {
         lua_pop(L, 1);
@@ -369,10 +390,15 @@ static int l_event_wait(lua_State *L) {
         lua_pushvalue(L, -1);
         lua_setfield(L, -3, "_waits");
     }
-    int slot = (int)lua_rawlen(L, -1) + 1;
+    lua_getfield(L, -1, "_next_wait_id");
+    int slot = lua_isinteger(L, -1) ? (int)lua_tointeger(L, -1) + 1 : 1;
+    lua_pop(L, 1);
+    lua_pushinteger(L, slot);
+    lua_setfield(L, -2, "_next_wait_id");
     lua_pushvalue(L, -3);
     lua_rawseti(L, -2, slot);
     lua_pop(L, 2);
+    if (L == rt->thread) rt->waiting_for_event = true;
     return lua_yield(L, 0);
 }
 
@@ -380,8 +406,8 @@ static bool topic_passes_filter(lua_State *L, const char *topic, const char *val
     /* Apply C-side fast filters for known topics. If the table has a `match`
      * function, defer to Lua. */
     if (!lua_istable(L, -1)) return true;
-    /* Generic match() callback */
-    lua_getfield(L, -1, "match");
+    /* Generic match_fn() callback. */
+    lua_getfield(L, -1, "match_fn");
     if (lua_isfunction(L, -1)) {
         lua_pushstring(L, value ? value : "");
         if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
@@ -507,6 +533,7 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
                 } else {
                     bool pass = topic_passes_filter(rt->L, name, value);
                     if (!pass) { lua_pop(rt->L, 2); continue; }
+                    lua_pop(rt->L, 1);
                 }
             }
             lua_pushstring(rt->L, value ? value : "");
@@ -520,8 +547,9 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
     lua_pop(rt->L, 1);
     lua_getfield(rt->L, -1, "_waits");
     if (!lua_istable(rt->L, -1)) { lua_pop(rt->L, 2); return; }
-    int n = (int)lua_rawlen(rt->L, -1);
-    int write = 1;
+    lua_getfield(rt->L, -1, "_next_wait_id");
+    int n = lua_isinteger(rt->L, -1) ? (int)lua_tointeger(rt->L, -1) : 0;
+    lua_pop(rt->L, 1);
     for (int i = 1; i <= n; ++i) {
         lua_rawgeti(rt->L, -1, i);
         if (!lua_istable(rt->L, -1)) {
@@ -532,24 +560,22 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
         bool match = lua_isstring(rt->L, -1) && strcmp(lua_tostring(rt->L, -1), name) == 0;
         lua_pop(rt->L, 1);
         if (!match) {
-            lua_pushvalue(rt->L, -1);
             lua_pop(rt->L, 1);
-            lua_rawseti(rt->L, -3, write++);
             continue;
         }
+        lua_pushnil(rt->L);
+        lua_rawseti(rt->L, -3, i);
         lua_getfield(rt->L, -1, "co");
         lua_State *co = lua_tothread(rt->L, -1);
         lua_pop(rt->L, 1);
-        lua_getfield(rt->L, -1, "args");
-        int argc = (int)lua_rawlen(rt->L, -1);
-        for (int a = 1; a <= argc; ++a) {
-            lua_rawgeti(rt->L, -1, a);
-        }
-        lua_pop(rt->L, 1);
         if (co) {
+            if (co == rt->thread) rt->waiting_for_event = false;
+            lua_newtable(co);
+            lua_pushstring(co, value ? value : "");
+            lua_setfield(co, -2, "value");
             runtime_begin_slice(rt);
             int nres = 0;
-            int rc = lua_resume(co, NULL, argc, &nres);
+            int rc = lua_resume(co, NULL, 1, &nres);
             if (rc != LUA_OK && rc != LUA_YIELD) {
                 glog("wait resume error: %s", lua_tostring(co, -1));
                 lua_pop(co, 1);
@@ -559,9 +585,44 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
         }
         lua_pop(rt->L, 1);
     }
-    for (int i = write; i <= n; ++i) {
+    lua_pop(rt->L, 2);
+}
+
+static void runtime_expire_waits(ghostscript_runtime_t *rt) {
+    if (!rt || !rt->L) return;
+    lua_getfield(rt->L, LUA_REGISTRYINDEX, EVENT_KEY);
+    if (!lua_istable(rt->L, -1)) { lua_pop(rt->L, 1); return; }
+    lua_getfield(rt->L, -1, "_waits");
+    if (!lua_istable(rt->L, -1)) { lua_pop(rt->L, 2); return; }
+    lua_getfield(rt->L, -1, "_next_wait_id");
+    int n = lua_isinteger(rt->L, -1) ? (int)lua_tointeger(rt->L, -1) : 0;
+    lua_pop(rt->L, 1);
+    int64_t now = esp_timer_get_time();
+    for (int i = 1; i <= n; ++i) {
+        lua_rawgeti(rt->L, -1, i);
+        if (!lua_istable(rt->L, -1)) { lua_pop(rt->L, 1); continue; }
+        lua_getfield(rt->L, -1, "deadline_us");
+        bool expired = lua_isinteger(rt->L, -1) && (int64_t)lua_tointeger(rt->L, -1) <= now;
+        lua_pop(rt->L, 1);
+        if (!expired) { lua_pop(rt->L, 1); continue; }
         lua_pushnil(rt->L);
-        lua_rawseti(rt->L, -2, i);
+        lua_rawseti(rt->L, -3, i);
+        lua_getfield(rt->L, -1, "co");
+        lua_State *co = lua_tothread(rt->L, -1);
+        lua_pop(rt->L, 1);
+        if (co) {
+            if (co == rt->thread) rt->waiting_for_event = false;
+            lua_pushnil(co);
+            int nres = 0;
+            int rc = lua_resume(co, NULL, 1, &nres);
+            if (rc != LUA_OK && rc != LUA_YIELD) {
+                glog("wait timeout error: %s", lua_tostring(co, -1));
+                lua_pop(co, 1);
+            } else if (nres > 0) {
+                lua_pop(co, nres);
+            }
+        }
+        lua_pop(rt->L, 1);
     }
     lua_pop(rt->L, 2);
 }
@@ -907,7 +968,7 @@ static int l_wifi_set_channel(lua_State *L) {
 
 static int l_wifi_deauth(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
-    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI)) return lua_perm_error(L, "wifi");
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI_CONTROL)) return lua_perm_error(L, "wifi.control");
     size_t bssid_len = 0;
     const char *bssid = luaL_checklstring(L, 1, &bssid_len);
     uint8_t b[6] = {0};
@@ -1470,13 +1531,46 @@ static int l_parser_nfc_summary(lua_State *L) { ghostscript_runtime_t *rt = chec
 static int l_parser_ir_summary(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_parser_summary(L, rt && rt->api ? rt->api->parser_ir_summary : NULL, PLUGIN_PERMISSION_IR, "ir"); }
 static int l_parser_subghz_summary(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_parser_summary(L, rt && rt->api ? rt->api->parser_subghz_summary : NULL, PLUGIN_PERMISSION_SUBGHZ, "subghz"); }
 
-static ghostscript_runtime_t *s_active_runtime;
-void ghostscript_runtime_set_active(ghostscript_runtime_t *rt) { s_active_runtime = rt; }
-ghostscript_runtime_t *ghostscript_runtime_get_active(void) { return s_active_runtime; }
+void ghostscript_runtime_set_active(ghostscript_runtime_t *rt) {
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    s_active_runtime = rt;
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+}
+
+ghostscript_runtime_t *ghostscript_runtime_get_active(void) {
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    ghostscript_runtime_t *rt = s_active_runtime;
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+    return rt;
+}
+
+static bool queue_event(ghostscript_runtime_t *rt, const gs_queued_event_t *event) {
+    if (!rt || !event) return false;
+
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    QueueHandle_t queue = (rt == s_active_runtime) ? s_event_queue : NULL;
+    if (queue) s_event_senders++;
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+    if (!queue) return false;
+
+    bool queued = xQueueSend(queue, event, 0) == pdPASS;
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    s_event_senders--;
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+    return queued;
+}
+
+static bool queue_text_event(ghostscript_runtime_t *rt, const char *name, const char *value) {
+    if (!name) return false;
+    gs_queued_event_t event = { .kind = GS_QUEUED_EVENT };
+    snprintf(event.name, sizeof(event.name), "%s", name);
+    snprintf(event.value, sizeof(event.value), "%s", value ? value : "");
+    return queue_event(rt, &event);
+}
 
 static void runtime_capture_line(const char *line, void *user) {
     (void)user;
-    ghostscript_runtime_t *rt = s_active_runtime;
+    ghostscript_runtime_t *rt = ghostscript_runtime_get_active();
     if (!rt || !line) return;
     char buf[GS_COMMAND_LOG_LINE_MAX];
     size_t n = strnlen(line, sizeof(buf) - 1);
@@ -1484,7 +1578,7 @@ static void runtime_capture_line(const char *line, void *user) {
     buf[n] = '\0';
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) { buf[--n] = '\0'; }
     command_log_append(rt, buf);
-    dispatch_event(rt, "command.output", buf);
+    (void)queue_text_event(rt, "command.output", buf);
 }
 
 static int l_command_start(lua_State *L) {
@@ -1492,10 +1586,8 @@ static int l_command_start(lua_State *L) {
     if (!rt_has_perm(rt, PLUGIN_PERMISSION_COMMANDS)) return lua_perm_error(L, "commands");
     const char *cmd = luaL_checkstring(L, 1);
     command_log_clear(rt);
-    s_active_runtime = rt;
     glog_set_capture(runtime_capture_line, NULL);
     bool ok = rt->api && rt->api->command_exec ? rt->api->command_exec(cmd) : false;
-    s_active_runtime = NULL;
     glog_set_capture(NULL, NULL);
     lua_pushboolean(L, ok);
     return 1;
@@ -1574,44 +1666,22 @@ bool ghostscript_runtime_match_oui_prefix(const ghostscript_runtime_t *rt, const
 
 static int l_wifi_on_ap(lua_State *L) {
     luaL_checktype(L, 1, LUA_TFUNCTION);
-    lua_pushvalue(L, 1);
-    lua_setfield(L, LUA_REGISTRYINDEX, "ghostscript.wifi.on_ap");
-    /* Rewrite the topic so the rest of the bus treats this as the same event. */
-    lua_pushvalue(L, 1);
     lua_pushstring(L, "wifi_ap_found");
-    if (lua_isnoneornil(L, 3)) {
-        lua_pop(L, 1);
-    } else {
-        lua_insert(L, -2);
-    }
+    lua_insert(L, 1);
     return l_event_on(L);
 }
 
 static int l_ble_on_device(lua_State *L) {
     luaL_checktype(L, 1, LUA_TFUNCTION);
-    lua_pushvalue(L, 1);
-    lua_setfield(L, LUA_REGISTRYINDEX, "ghostscript.ble.on_device");
-    lua_pushvalue(L, 1);
     lua_pushstring(L, "ble_device");
-    if (lua_isnoneornil(L, 3)) {
-        lua_pop(L, 1);
-    } else {
-        lua_insert(L, -2);
-    }
+    lua_insert(L, 1);
     return l_event_on(L);
 }
 
 static int l_gps_on_fix(lua_State *L) {
     luaL_checktype(L, 1, LUA_TFUNCTION);
-    lua_pushvalue(L, 1);
-    lua_setfield(L, LUA_REGISTRYINDEX, "ghostscript.gps.on_fix");
-    lua_pushvalue(L, 1);
-    lua_pushstring(L, "gps_update");
-    if (lua_isnoneornil(L, 3)) {
-        lua_pop(L, 1);
-    } else {
-        lua_insert(L, -2);
-    }
+    lua_pushstring(L, "gps_fix");
+    lua_insert(L, 1);
     return l_event_on(L);
 }
 
@@ -1649,7 +1719,6 @@ static const gs_lazy_sub_t s_lazy_subs[] = {
     {"commands", (const luaL_Reg[]){{"exec", l_command_exec}, {"start", l_command_start}, {NULL, NULL}}},
     {"parser",   (const luaL_Reg[]){{"nfc_summary", l_parser_nfc_summary}, {"ir_summary", l_parser_ir_summary}, {"subghz_summary", l_parser_subghz_summary}, {NULL, NULL}}},
     {"results",  (const luaL_Reg[]){{"count", l_results_count}, {"field", l_results_field}, {"save_csv", l_results_save_csv}, {NULL, NULL}}},
-    {"tasks",    (const luaL_Reg[]){{"spawn", l_tasks_spawn}, {"list", l_tasks_list}, {NULL, NULL}}},
     {NULL, NULL},
 };
 
@@ -1761,6 +1830,7 @@ ghostscript_runtime_t *ghostscript_runtime_create(const ghostscript_manifest_t *
     return rt;
 }
 
+#if 0 /* FreeRTOS Lua tasks cannot safely share script closures or runtime state. */
 static int bg_task_thread_fn(void *arg) {
     bg_task_t *t = (bg_task_t *)arg;
     /* The bg runtime + Lua state were pre-created by l_tasks_spawn so the
@@ -1892,6 +1962,7 @@ static int l_tasks_list(lua_State *L) {
     }
     return 1;
 }
+#endif
 
 static int l_load_chunk(lua_State *L) {
     gs_reader_t *reader = (gs_reader_t *)lua_touserdata(L, 1);
@@ -1952,10 +2023,8 @@ static bool runtime_resume_script(ghostscript_runtime_t *rt) {
     if (!rt || !rt->thread || rt->script_done || rt->state != GHOSTSCRIPT_STATE_RUNNING) return true;
     rt->resume_after_ms = 0;
     int nres = 0;
-    ghostscript_runtime_set_active(rt);
     runtime_begin_slice(rt);
     int rc = lua_resume(rt->thread, NULL, 0, &nres);
-    ghostscript_runtime_set_active(NULL);
     if (nres > 0) lua_pop(rt->thread, nres);
     if (rc == LUA_OK) {
         rt->script_done = true;
@@ -2004,6 +2073,7 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     luaL_requiref(rt->L, "string", luaopen_string, 1); lua_pop(rt->L, 1);
     luaL_requiref(rt->L, "table", luaopen_table, 1); lua_pop(rt->L, 1);
     luaL_requiref(rt->L, "math", luaopen_math, 1); lua_pop(rt->L, 1);
+    luaL_requiref(rt->L, "coroutine", luaopen_coroutine, 1); lua_pop(rt->L, 1);
     register_api(rt->L, rt);
     runtime_begin_slice(rt);
     rt->state = GHOSTSCRIPT_STATE_RUNNING;
@@ -2011,12 +2081,10 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     /* Wrap load in a protected call so luaD_throw always finds an errorJmp.
      * Execution happens in a coroutine so ghost.delay() can yield top-level
      * scripts and keep the runner alive. */
-    ghostscript_runtime_set_active(rt);
     lua_pushcfunction(rt->L, l_load_chunk);
     lua_pushlightuserdata(rt->L, &reader);
     runtime_begin_slice(rt);
     int err = lua_pcall(rt->L, 1, 1, 0);
-    ghostscript_runtime_set_active(NULL);
     fclose(script);
     ghostscript_manager_sd_end(display_was_suspended);
     if (err) {
@@ -2029,12 +2097,47 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     lua_xmove(rt->L, rt->thread, 1);
     lua_sethook(rt->L, hook, LUA_MASKCOUNT, runtime_hook_count(rt));
     lua_sethook(rt->thread, hook, LUA_MASKCOUNT, runtime_hook_count(rt));
+    QueueHandle_t queue = xQueueCreate(GS_EVENT_QUEUE_DEPTH, sizeof(gs_queued_event_t));
+    if (!queue) {
+        snprintf(rt->error, sizeof(rt->error), "not enough memory for event queue");
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    if (!s_event_queue) s_event_queue = queue;
+    bool queue_ready = s_event_queue == queue;
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+    if (!queue_ready) vQueueDelete(queue);
+    if (!queue_ready) {
+        snprintf(rt->error, sizeof(rt->error), "not enough memory for event queue");
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    ghostscript_runtime_set_active(rt);
     return runtime_resume_script(rt);
+}
+
+static void runtime_drain_events(ghostscript_runtime_t *rt) {
+    if (!rt) return;
+    gs_queued_event_t event;
+    while (s_event_queue && xQueueReceive(s_event_queue, &event, 0) == pdPASS) {
+        if (event.kind == GS_QUEUED_EVENT) {
+            dispatch_event(rt, event.name, event.value);
+        } else {
+            runtime_process_input(rt, &event.input);
+        }
+        if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
+    }
 }
 
 void ghostscript_runtime_tick(ghostscript_runtime_t *rt, uint32_t elapsed_ms) {
     if (!rt || !rt->L || rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
+    runtime_drain_events(rt);
+    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
+    runtime_expire_waits(rt);
+    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
     if (!rt->script_done) {
+        if (rt->waiting_for_event) return;
         if (rt->resume_after_ms > elapsed_ms) {
             rt->resume_after_ms -= elapsed_ms;
             return;
@@ -2054,7 +2157,7 @@ void ghostscript_runtime_tick(ghostscript_runtime_t *rt, uint32_t elapsed_ms) {
     }
 }
 
-void ghostscript_runtime_input(ghostscript_runtime_t *rt, const InputEvent *event) {
+static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *event) {
     if (!rt || !rt->L || !event) return;
     lua_newtable(rt->L);
     const char *type = "unknown";
@@ -2107,6 +2210,13 @@ void ghostscript_runtime_input(ghostscript_runtime_t *rt, const InputEvent *even
     }
 }
 
+void ghostscript_runtime_input(ghostscript_runtime_t *rt, const InputEvent *event) {
+    if (!rt || !event) return;
+    gs_queued_event_t queued = { .kind = GS_QUEUED_INPUT };
+    queued.input = *event;
+    (void)queue_event(rt, &queued);
+}
+
 void ghostscript_runtime_stop(ghostscript_runtime_t *rt) {
     if (!rt) return;
     rt->stop_requested = true;
@@ -2115,6 +2225,23 @@ void ghostscript_runtime_stop(ghostscript_runtime_t *rt) {
 
 void ghostscript_runtime_destroy(ghostscript_runtime_t *rt) {
     if (!rt) return;
+    QueueHandle_t queue = NULL;
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    if (s_active_runtime == rt) {
+        s_active_runtime = NULL;
+        queue = s_event_queue;
+        s_event_queue = NULL;
+    }
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
+    while (queue) {
+        taskENTER_CRITICAL(&s_active_runtime_mux);
+        bool busy = s_event_senders != 0;
+        taskEXIT_CRITICAL(&s_active_runtime_mux);
+        if (!busy) break;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (queue) vQueueDelete(queue);
+    for (int i = 0; i < rt->oui_prefix_count; ++i) free(rt->oui_prefix[i]);
     if (rt->L) lua_close(rt->L);
     if (rt->api_active) plugin_api_release();
     free(rt);
@@ -2127,15 +2254,14 @@ size_t ghostscript_runtime_memory_limit(const ghostscript_runtime_t *rt) { retur
 const ghostscript_manifest_t *ghostscript_runtime_manifest(const ghostscript_runtime_t *rt) { return rt ? &rt->manifest : NULL; }
 
 void ghostscript_runtime_dispatch_event(ghostscript_runtime_t *rt, const char *name, const char *value) {
-    if (!rt || rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
-    dispatch_event(rt, name, value);
+    if (!rt) return;
+    (void)queue_text_event(rt, name, value);
 }
 
 void ghostscript_emit_event(const char *name, const char *value) {
-    ghostscript_runtime_t *rt = s_active_runtime;
+    ghostscript_runtime_t *rt = ghostscript_runtime_get_active();
     if (!rt) return;
-    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
-    dispatch_event(rt, name, value);
+    (void)queue_text_event(rt, name, value);
 }
 
 void ghostscript_emit_event_escaped(const char *name, const char *value) {
@@ -2171,13 +2297,18 @@ static uint8_t seen_hash(const uint8_t mac[6]) {
 }
 
 bool ghostscript_runtime_mark_ble_seen(const uint8_t mac[6]) {
-    ghostscript_runtime_t *rt = s_active_runtime;
-    if (!rt) return true; /* no active runtime: just pass through */
     if (!mac) return true;
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    ghostscript_runtime_t *rt = s_active_runtime;
+    if (!rt) {
+        taskEXIT_CRITICAL(&s_active_runtime_mux);
+        return true;
+    }
     uint8_t start = seen_hash(mac);
     for (int probe = 0; probe < 64; ++probe) {
         uint8_t idx = (start + probe) & 63;
         if (rt->ble_seen_used[idx] && memcmp(rt->ble_seen_keys[idx], mac, 6) == 0) {
+            taskEXIT_CRITICAL(&s_active_runtime_mux);
             return true; /* already seen */
         }
     }
@@ -2187,16 +2318,18 @@ bool ghostscript_runtime_mark_ble_seen(const uint8_t mac[6]) {
         if (!rt->ble_seen_used[idx]) {
             memcpy(rt->ble_seen_keys[idx], mac, 6);
             rt->ble_seen_used[idx] = 1;
+            taskEXIT_CRITICAL(&s_active_runtime_mux);
             return false; /* first time this scan */
         }
     }
     /* full; overwrite oldest by hashing again (rare) */
     memcpy(rt->ble_seen_keys[idx], mac, 6);
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
     return false;
 }
 
 void ghostscript_runtime_reset_ble_seen(void) {
-    ghostscript_runtime_t *rt = s_active_runtime;
-    if (!rt) return;
-    memset(rt->ble_seen_used, 0, sizeof(rt->ble_seen_used));
+    taskENTER_CRITICAL(&s_active_runtime_mux);
+    if (s_active_runtime) memset(s_active_runtime->ble_seen_used, 0, sizeof(s_active_runtime->ble_seen_used));
+    taskEXIT_CRITICAL(&s_active_runtime_mux);
 }

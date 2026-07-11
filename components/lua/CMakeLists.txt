@@ -1,6 +1,5 @@
 file(GLOB LUA_SOURCES "src/*.c")
 list(REMOVE_ITEM LUA_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/lcorolib.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ldblib.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/liolib.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/linit.c"

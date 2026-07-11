@@ -246,30 +246,11 @@ If you pass both a builtin filter and a `match_fn`, the builtin runs first and t
 
 To keep handlers from drowning the runner, the dispatcher throttles `command.output` to one event per 10 ms per topic. All other topics pass through; add your own throttle inside the handler if you need finer control.
 
-### Background tasks
+### Coroutines
 
-`ghost.tasks.spawn(name, fn, opts)` runs `fn` on a separate FreeRTOS task with its own Lua state, its own event bus, and its own `ghost.*` table. The new task has only a small API: `print`, `event`, `delay`, `system.{free_heap,free_internal_heap,uptime_ms,random}`. Background tasks share the C-side bridges (`wifi_ap_found`, `ble_device`, `gps_update`, `attack_started`, …) with the main script.
-
-```lua
-local id = ghost.tasks.spawn("watcher", function()
-    ghost.event.on("handshake_captured", function(v)
-        print("bg: " .. v)
-    end)
-    -- this function returns immediately; the task keeps running
-end)
-
-local running = ghost.tasks.list()
-for _, t in ipairs(running) do
-    print(t.id, t.name, t.done)
-end
-```
-
-`opts.stack` defaults to 8192 bytes, max 32768. Tasks are killed when the script ends. Call `ghost.exit()` from the main script to terminate everything.
-
-Use background tasks for:
-- long-running polls that should not block `on_tick` (e.g. waiting for a fix, polling BLE)
-- coroutines that need a long `ghost.delay` chain
-- scripts that want to react to events from the main script via `ghost.event.emit`
+GhostScript runs one Lua state per script. Use standard Lua coroutines with
+`ghost.event.wait()` or `ghost.delay()` for cooperative background work; do not
+create FreeRTOS tasks from a script.
 
 ## Input
 
@@ -289,17 +270,20 @@ Use background tasks for:
 
 ## Manifests
 
-Each script has an optional manifest stored at `/mnt/ghostesp/scripts/<name>.json`. If no manifest is present, the runner uses a default with `permissions: []` and a 16 KB Lua heap.
+Each script can be packaged in a directory containing `manifest.json` and its
+entry `.gsb` file. A standalone `.gsb` has no permissions by default and uses
+the target-clamped default Lua heap.
 
 ```json
 {
+  "id": "wifi-monitor",
   "name": "wifi-monitor",
   "entry": "wifi_monitor.gsb",
   "memory_limit": 32768,
   "instruction_budget": 50000,
   "timeout_ms": 60000,
   "permissions": ["wifi", "commands", "storage", "ui"],
-  "allow_absolute_storage": false
+  "storage_scope": "app"
 }
 ```
 

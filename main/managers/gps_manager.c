@@ -68,6 +68,10 @@ static volatile bool gps_peer_has_seen_update = false;
 static portMUX_TYPE gps_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static gps_t gps_local_snapshot = {0};
 static gps_t gps_peer_fix_snapshot = {0};
+static bool ghostscript_local_fix_known = false;
+static bool ghostscript_local_has_fix = false;
+static bool ghostscript_peer_fix_known = false;
+static bool ghostscript_peer_has_fix = false;
 static gpio_num_t gps_soft_rx_pin = GPIO_NUM_NC;
 static uint32_t gps_soft_baud_rate = 0;
 #ifdef CONFIG_PM_ENABLE
@@ -349,6 +353,7 @@ void gps_manager_clear_peer_fix(void) {
     taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_last_update_tick = 0;
     gps_peer_has_seen_update = false;
+    ghostscript_peer_fix_known = false;
     memset(&gps_peer_fix_snapshot, 0, sizeof(gps_peer_fix_snapshot));
     gps_peer_fix_snapshot.fix = GPS_FIX_INVALID;
     gps_peer_fix_snapshot.fix_mode = GPS_MODE_INVALID;
@@ -360,14 +365,18 @@ void gps_manager_update_local_snapshot(const gps_t *fix) {
         return;
     }
 
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     taskENTER_CRITICAL(&gps_state_lock);
     gps_local_snapshot = *fix;
+    bool fix_changed = !ghostscript_local_fix_known || ghostscript_local_has_fix != has_fix;
+    ghostscript_local_fix_known = true;
+    ghostscript_local_has_fix = has_fix;
     taskEXIT_CRITICAL(&gps_state_lock);
-    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     char gps_payload[64];
     snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
         has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
-    ghostscript_emit_event(has_fix ? "gps_update" : "gps_fix", gps_payload);
+    ghostscript_emit_event("gps_update", gps_payload);
+    if (fix_changed) ghostscript_emit_event("gps_fix", gps_payload);
 }
 
 void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
@@ -375,6 +384,7 @@ void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
         return;
     }
 
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_fix_snapshot.latitude = fix->latitude;
     gps_peer_fix_snapshot.longitude = fix->longitude;
@@ -401,12 +411,15 @@ void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
 
     gps_peer_last_update_tick = xTaskGetTickCount();
     gps_peer_has_seen_update = true;
+    bool fix_changed = !ghostscript_peer_fix_known || ghostscript_peer_has_fix != has_fix;
+    ghostscript_peer_fix_known = true;
+    ghostscript_peer_has_fix = has_fix;
     taskEXIT_CRITICAL(&gps_state_lock);
-    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     char gps_payload[64];
     snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
         has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
-    ghostscript_emit_event(has_fix ? "gps_update" : "gps_fix", gps_payload);
+    ghostscript_emit_event("gps_update", gps_payload);
+    if (fix_changed) ghostscript_emit_event("gps_fix", gps_payload);
 }
 
 bool gps_manager_get_local_gps_snapshot(gps_t *out_gps) {

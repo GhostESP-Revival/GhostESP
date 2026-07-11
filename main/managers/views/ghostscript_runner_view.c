@@ -398,6 +398,10 @@ static void event_handler(InputEvent *event) {
 }
 
 void ghostscript_runner_view_create(void) {
+    if (!s_script_task && s_rt) {
+        ghostscript_runtime_destroy(s_rt);
+        s_rt = NULL;
+    }
     if (!s_output_buf) {
         s_output_buf = heap_caps_malloc_prefer(GS_RUNNER_OUTPUT_BUF_SIZE, 2,
                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
@@ -544,12 +548,16 @@ void ghostscript_runner_view_destroy(void) {
     if (s_flush_timer) { lv_timer_del(s_flush_timer); s_flush_timer = NULL; }
     if (s_rt) { ghostscript_runtime_stop(s_rt); }
     if (s_script_task) {
-        /* Wait for the script task to notice stop_requested and exit.
-         * The task checks s_rt state every GS_RUNNER_TICK_MS (100ms). */
-        for (int i = 0; i < 30 && s_script_task; i++) {
-            vTaskDelay(pdMS_TO_TICKS(GS_RUNNER_TICK_MS + 10));
-        }
-        s_script_task = NULL;
+        /* The task may be blocked in a firmware API. Keep its runtime and
+         * output buffer alive until it exits rather than freeing shared data. */
+        lvgl_obj_del_safe(&s_root);
+        s_title = NULL;
+        s_status = NULL;
+        s_output_scroll = NULL;
+        s_output = NULL;
+        s_touch_bar = NULL;
+        ghostscript_runner_view.root = NULL;
+        return;
     }
     if (s_rt) { ghostscript_runtime_destroy(s_rt); s_rt = NULL; }
     lvgl_obj_del_safe(&s_root);

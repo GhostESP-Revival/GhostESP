@@ -107,7 +107,7 @@ bool ghostscript_manager_permission_from_string(const char *value, uint32_t *out
     else if (strcmp(value, "adc") == 0) perm = PLUGIN_PERMISSION_ADC;
     else if (strcmp(value, "pwm") == 0) perm = PLUGIN_PERMISSION_PWM;
     else if (strcmp(value, "network") == 0 || strcmp(value, "http") == 0) perm = PLUGIN_PERMISSION_NETWORK;
-    else if (strcmp(value, "wifi_control") == 0) perm = PLUGIN_PERMISSION_WIFI_CONTROL;
+    else if (strcmp(value, "wifi_control") == 0 || strcmp(value, "wifi.control") == 0) perm = PLUGIN_PERMISSION_WIFI_CONTROL;
     else if (strcmp(value, "power") == 0 || strcmp(value, "battery") == 0) perm = PLUGIN_PERMISSION_POWER;
     else if (strcmp(value, "input") == 0 || strcmp(value, "buttons") == 0) perm = PLUGIN_PERMISSION_INPUT;
     else if (strcmp(value, "display") == 0 || strcmp(value, "backlight") == 0) perm = PLUGIN_PERMISSION_DISPLAY;
@@ -153,13 +153,8 @@ static uint32_t clamp_memory_limit(uint32_t requested) {
 static void fill_common_defaults(ghostscript_manifest_t *out) {
     memset(out, 0, sizeof(*out));
     snprintf(out->version, sizeof(out->version), "1.0.0");
-    out->permissions = PLUGIN_PERMISSION_UI | PLUGIN_PERMISSION_STORAGE |
-                       PLUGIN_PERMISSION_SYSTEM | PLUGIN_PERMISSION_TIME |
-                       PLUGIN_PERMISSION_RANDOM | PLUGIN_PERMISSION_WIFI |
-                       PLUGIN_PERMISSION_BLE | PLUGIN_PERMISSION_COMMANDS |
-                       PLUGIN_PERMISSION_INPUT | PLUGIN_PERMISSION_POWER |
-                       PLUGIN_PERMISSION_NFC | PLUGIN_PERMISSION_IR |
-                       PLUGIN_PERMISSION_SUBGHZ;
+    /* Scripts must explicitly request every privileged capability. */
+    out->permissions = 0;
     out->memory_limit = GHOSTSCRIPT_DEFAULT_MEMORY_LIMIT;
     out->instruction_budget = 10000;
     out->timeout_ms = 30000;
