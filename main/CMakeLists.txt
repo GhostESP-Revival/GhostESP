@@ -139,6 +139,9 @@ else()
     list(FILTER app_sources EXCLUDE REGEX "managers/views/ghostscript_.*\\.c")
     list(FILTER sources EXCLUDE REGEX "managers/ghostscript_.*\\.c")
     list(FILTER sources EXCLUDE REGEX "managers/views/ghostscript_.*\\.c")
+    # Core subsystems emit optional GhostScript events on every target.
+    # Keep those calls linkable when the runtime is disabled for a board.
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/ghostscript_runtime_stub.c")
 endif()
 
 # Add IEEE 802.15.4 component for Zigbee capture on ESP32-C5/C6
