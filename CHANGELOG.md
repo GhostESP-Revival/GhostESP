@@ -35,6 +35,7 @@
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
+- Hardened Evil Portal request handling against malformed and high-rate client traffic
 
 
 ## Revival v2.0.0
