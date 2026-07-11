@@ -42,7 +42,8 @@ typedef struct {
 typedef enum {
     ROW_KIND_NONE = 0, // unused slot
     ROW_KIND_REFRESH,
-    ROW_KIND_FOLDER, // opens a category submenu (Apps / Asset Packs)
+    ROW_KIND_FOLDER, // opens a type submenu (Apps / Asset Packs)
+    ROW_KIND_CATEGORY, // picks (or clears) the manifest-category filter within a type
     ROW_KIND_ITEM,
     ROW_KIND_EMPTY,
     ROW_KIND_BACK,
@@ -51,12 +52,30 @@ typedef enum {
 typedef struct {
     row_kind_t kind;
     cloud_store_item_type_t item_type;
-    int original_index; // index into the manager's items of item_type
+    int original_index; // ROW_KIND_ITEM: index into the manager's items of item_type.
+                         // ROW_KIND_CATEGORY: index into s_categories[], or
+                         // CLOUD_CATEGORY_ALL_INDEX for the "clear filter" row.
 } row_meta_t;
 
 // -1 = top-level menu (Refresh, folders, Back); otherwise a
-// cloud_store_item_type_t selecting which category submenu is open.
+// cloud_store_item_type_t selecting which type submenu is open.
 #define CLOUD_SECTION_TOP (-1)
+
+// Within a type submenu, whether we're picking a category or browsing items.
+typedef enum {
+    SECTION_LEVEL_NONE = 0, // s_section == CLOUD_SECTION_TOP
+    SECTION_LEVEL_CATEGORIES,
+    SECTION_LEVEL_ITEMS,
+} section_level_t;
+
+#define CLOUD_STORE_MAX_CATEGORIES 12
+#define CLOUD_CATEGORY_ALL_INDEX (-1)
+#define CLOUD_CATEGORY_UNCATEGORIZED_LABEL "Uncategorized"
+
+typedef struct {
+    char name[CLOUD_STORE_CATEGORY_MAX];
+    int count;
+} category_bucket_t;
 
 static lv_obj_t *s_root;
 static options_view_t *s_options;
@@ -69,6 +88,11 @@ static popup_confirm_t *s_confirm_popup;
 static bool s_apps_available;
 static int s_selected_row;
 static int s_section = CLOUD_SECTION_TOP; // which submenu is open, or top level
+static section_level_t s_level = SECTION_LEVEL_NONE;
+static bool s_category_level_exists; // whether Back from items should return to a category list
+static char s_current_category[CLOUD_STORE_CATEGORY_MAX]; // "" = no filter (All)
+static category_bucket_t s_categories[CLOUD_STORE_MAX_CATEGORIES];
+static int s_categories_count;
 static uint32_t s_last_refresh_ms;
 static cloud_store_state_t s_last_status_state;
 static char s_pending_id[CLOUD_STORE_ID_MAX];
@@ -118,12 +142,21 @@ static int sort_items_compare(const void *a, const void *b) {
     return strcmp(sa->name, sb->name);
 }
 
-static void load_sorted_items(cloud_store_item_type_t type, sorted_cloud_item_t *out, int *out_count) {
+// Items with no manifest category bucket into "Uncategorized" rather than
+// being hidden from every category filter.
+static const char *item_category_name(const cloud_store_item_t *item) {
+    return item->category[0] ? item->category : CLOUD_CATEGORY_UNCATEGORIZED_LABEL;
+}
+
+// category_filter: NULL/"" = no filter (all items of this type).
+static void load_sorted_items(cloud_store_item_type_t type, const char *category_filter,
+                               sorted_cloud_item_t *out, int *out_count) {
     int item_count = cloud_store_get_count(type);
     int n = 0;
     for (int i = 0; i < item_count && n < CLOUD_STORE_MAX_ITEMS; ++i) {
         cloud_store_item_t item;
         if (!cloud_store_get_item(type, i, &item)) continue;
+        if (category_filter && category_filter[0] && strcmp(item_category_name(&item), category_filter) != 0) continue;
         out[n].original_index = i;
         strncpy(out[n].name, item.name, CLOUD_STORE_NAME_MAX - 1);
         out[n].name[CLOUD_STORE_NAME_MAX - 1] = '\0';
@@ -131,6 +164,40 @@ static void load_sorted_items(cloud_store_item_type_t type, sorted_cloud_item_t 
     }
     qsort(out, n, sizeof(sorted_cloud_item_t), sort_items_compare);
     *out_count = n;
+}
+
+// Keeps "Uncategorized" sorted last so real manifest categories lead the list.
+static int category_bucket_compare(const void *a, const void *b) {
+    const category_bucket_t *ba = (const category_bucket_t *)a;
+    const category_bucket_t *bb = (const category_bucket_t *)b;
+    bool a_unc = strcmp(ba->name, CLOUD_CATEGORY_UNCATEGORIZED_LABEL) == 0;
+    bool b_unc = strcmp(bb->name, CLOUD_CATEGORY_UNCATEGORIZED_LABEL) == 0;
+    if (a_unc != b_unc) return a_unc ? 1 : -1;
+    return strcmp(ba->name, bb->name);
+}
+
+// Distinct manifest categories among items of `type`, with per-bucket counts.
+static void load_categories(cloud_store_item_type_t type) {
+    s_categories_count = 0;
+    int item_count = cloud_store_get_count(type);
+    for (int i = 0; i < item_count; ++i) {
+        cloud_store_item_t item;
+        if (!cloud_store_get_item(type, i, &item)) continue;
+        const char *cat = item_category_name(&item);
+        int idx = -1;
+        for (int j = 0; j < s_categories_count; ++j) {
+            if (strcmp(s_categories[j].name, cat) == 0) { idx = j; break; }
+        }
+        if (idx < 0) {
+            if (s_categories_count >= CLOUD_STORE_MAX_CATEGORIES) continue;
+            idx = s_categories_count++;
+            strncpy(s_categories[idx].name, cat, sizeof(s_categories[idx].name) - 1);
+            s_categories[idx].name[sizeof(s_categories[idx].name) - 1] = '\0';
+            s_categories[idx].count = 0;
+        }
+        s_categories[idx].count++;
+    }
+    qsort(s_categories, s_categories_count, sizeof(category_bucket_t), category_bucket_compare);
 }
 
 // Best-effort "is this already on the device?" check so the list can flag
@@ -234,9 +301,9 @@ static void render_top_level(int *rendered, cloud_store_status_t status) {
     (*rendered)++;
 }
 
-// Category submenu: Back (to top level) followed by the sorted item rows.
-static void render_section(int *rendered, cloud_store_status_t status) {
-    cloud_store_item_type_t type = (cloud_store_item_type_t)s_section;
+// Category chooser for a type: Back, "All", then one row per manifest
+// category (only reached when a type has more than one distinct category).
+static void render_categories(int *rendered, cloud_store_item_type_t type) {
     bool is_app = (type == CLOUD_STORE_TYPE_APP);
     options_view_set_title(s_options, is_app ? "Apps" : "Asset Packs");
 
@@ -244,8 +311,46 @@ static void render_section(int *rendered, cloud_store_status_t status) {
     s_row_meta[*rendered].kind = ROW_KIND_BACK;
     (*rendered)++;
 
+    load_categories(type);
+
+    char all_line[48];
+    snprintf(all_line, sizeof(all_line), LV_SYMBOL_LIST "  All (%d)", cloud_store_get_count(type));
+    s_rows[*rendered] = options_view_add_item(s_options, all_line, row_event_cb, (void *)(intptr_t)*rendered);
+    s_row_meta[*rendered].kind = ROW_KIND_CATEGORY;
+    s_row_meta[*rendered].item_type = type;
+    s_row_meta[*rendered].original_index = CLOUD_CATEGORY_ALL_INDEX;
+    (*rendered)++;
+
+    for (int i = 0; i < s_categories_count && *rendered < CLOUD_STORE_MAX_ROWS; ++i) {
+        char line[64];
+        // Explicit precision gives GCC a provable bound on the %s (it loses
+        // track of the char[CLOUD_STORE_CATEGORY_MAX] array bound once this
+        // gets inlined into render_store, and otherwise flags a bogus
+        // format-truncation warning).
+        snprintf(line, sizeof(line), LV_SYMBOL_DIRECTORY "  %.*s (%d)",
+                 (int)sizeof(s_categories[i].name) - 1, s_categories[i].name, s_categories[i].count);
+        s_rows[*rendered] = options_view_add_item(s_options, line, row_event_cb, (void *)(intptr_t)*rendered);
+        s_row_meta[*rendered].kind = ROW_KIND_CATEGORY;
+        s_row_meta[*rendered].item_type = type;
+        s_row_meta[*rendered].original_index = i;
+        (*rendered)++;
+    }
+}
+
+// Item list for a type, optionally filtered by s_current_category: Back
+// followed by the sorted item rows.
+static void render_items(int *rendered, cloud_store_item_type_t type, cloud_store_status_t status) {
+    bool is_app = (type == CLOUD_STORE_TYPE_APP);
+    options_view_set_title(s_options, s_current_category[0] ? s_current_category : (is_app ? "Apps" : "Asset Packs"));
+
+    s_rows[*rendered] = options_view_add_back_row(s_options, row_event_cb, (void *)(intptr_t)*rendered);
+    s_row_meta[*rendered].kind = ROW_KIND_BACK;
+    (*rendered)++;
+
     sorted_cloud_item_t *items = is_app ? s_sorted_apps : s_sorted_packs;
-    int item_n = is_app ? s_sorted_apps_count : s_sorted_packs_count;
+    int *item_n_ptr = is_app ? &s_sorted_apps_count : &s_sorted_packs_count;
+    load_sorted_items(type, s_current_category[0] ? s_current_category : NULL, items, item_n_ptr);
+    int item_n = *item_n_ptr;
     for (int i = 0; i < item_n && *rendered < CLOUD_STORE_MAX_ROWS - 1; ++i) {
         add_item_row(rendered, type, items[i].original_index);
     }
@@ -268,13 +373,11 @@ static void render_store(void) {
 
     cloud_store_status_t status = cloud_store_get_status();
 
-    load_sorted_items(CLOUD_STORE_TYPE_APP, s_sorted_apps, &s_sorted_apps_count);
-    load_sorted_items(CLOUD_STORE_TYPE_ASSET_PACK, s_sorted_packs, &s_sorted_packs_count);
-
     // A submenu can outlive its category (e.g. app support lost); fall back to
     // the top level rather than showing a stale/invalid section.
     if (s_section == CLOUD_STORE_TYPE_APP && !s_apps_available) {
         s_section = CLOUD_SECTION_TOP;
+        s_level = SECTION_LEVEL_NONE;
     }
 
     // Manage the loading overlay first: it sets its own status-bar title, so the
@@ -284,8 +387,10 @@ static void render_store(void) {
     int rendered = 0;
     if (s_section == CLOUD_SECTION_TOP) {
         render_top_level(&rendered, status);
+    } else if (s_level == SECTION_LEVEL_CATEGORIES) {
+        render_categories(&rendered, (cloud_store_item_type_t)s_section);
     } else {
-        render_section(&rendered, status);
+        render_items(&rendered, (cloud_store_item_type_t)s_section, status);
     }
 
     (void)rendered;
@@ -310,8 +415,10 @@ static void start_refresh(bool user_initiated) {
     s_last_refresh_ms = now ? now : 1;
 
     esp_err_t err = cloud_store_refresh_async();
-    if (err == ESP_ERR_INVALID_STATE) {
-        toast_show_duration("Cloud task already running", TOAST_INFO, 1200);
+    if (err == ESP_ERR_NOT_FOUND) {
+        toast_show_duration("SD card required for Cloud Store", TOAST_WARN, 1800);
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        toast_show_duration("Cloud download already running", TOAST_INFO, 1200);
     } else if (err != ESP_OK) {
         toast_show_duration("Cloud refresh failed to start", TOAST_ERROR, 1800);
     } else {
@@ -323,6 +430,10 @@ static void start_refresh(bool user_initiated) {
 static void confirm_install_cb(void *user_data) {
     (void)user_data;
     esp_err_t err = cloud_store_install_async(s_pending_type, s_pending_id);
+    if (err == ESP_ERR_NOT_FOUND) {
+        toast_show_duration("SD card required for Cloud Store", TOAST_WARN, 1800);
+        return;
+    }
     if (err != ESP_OK) {
         toast_show_duration("Install task failed to start", TOAST_ERROR, 1800);
         return;
@@ -331,16 +442,45 @@ static void confirm_install_cb(void *user_data) {
     if (s_progress) progress_bar_view_set_subtext(s_progress, "Starting download");
 }
 
-// Leave the current screen level: a submenu returns to the top-level menu; the
-// top-level menu exits back to the app gallery.
+// Enter a type folder (Apps / Asset Packs) from the top level: skip straight
+// to the item list when there's nothing to categorize by (0 or 1 distinct
+// manifest categories), otherwise stop at the category chooser first.
+static void enter_folder(cloud_store_item_type_t type) {
+    s_section = type;
+    s_current_category[0] = '\0';
+    load_categories(type);
+    if (s_categories_count <= 1) {
+        s_level = SECTION_LEVEL_ITEMS;
+        s_category_level_exists = false;
+    } else {
+        s_level = SECTION_LEVEL_CATEGORIES;
+        s_category_level_exists = true;
+    }
+    s_selected_row = 1; // land on the first row past Back
+    render_store();
+}
+
+// Leave the current screen level: the item list returns to the category
+// chooser (if this type actually has one) or straight to the top level; the
+// category chooser and top level both exit outward from there.
 static void go_up_level(void) {
-    if (s_section != CLOUD_SECTION_TOP) {
-        s_section = CLOUD_SECTION_TOP;
+    if (s_section == CLOUD_SECTION_TOP) {
+        display_manager_switch_view(&apps_menu_view);
+        return;
+    }
+    if (s_level == SECTION_LEVEL_ITEMS && s_category_level_exists) {
+        s_level = SECTION_LEVEL_CATEGORIES;
+        s_current_category[0] = '\0';
         s_selected_row = 0;
         render_store();
-    } else {
-        display_manager_switch_view(&apps_menu_view);
+        return;
     }
+    s_section = CLOUD_SECTION_TOP;
+    s_level = SECTION_LEVEL_NONE;
+    s_category_level_exists = false;
+    s_current_category[0] = '\0';
+    s_selected_row = 0;
+    render_store();
 }
 
 static void select_current(void) {
@@ -350,7 +490,16 @@ static void select_current(void) {
         case ROW_KIND_REFRESH: start_refresh(true); return;
         case ROW_KIND_BACK:    go_up_level(); return;
         case ROW_KIND_FOLDER:
-            s_section = meta->item_type;
+            enter_folder(meta->item_type);
+            return;
+        case ROW_KIND_CATEGORY:
+            if (meta->original_index == CLOUD_CATEGORY_ALL_INDEX) {
+                s_current_category[0] = '\0';
+            } else if (meta->original_index >= 0 && meta->original_index < s_categories_count) {
+                strncpy(s_current_category, s_categories[meta->original_index].name, sizeof(s_current_category) - 1);
+                s_current_category[sizeof(s_current_category) - 1] = '\0';
+            }
+            s_level = SECTION_LEVEL_ITEMS;
             s_selected_row = 1; // land on the first item, past the Back row
             render_store();
             return;
@@ -461,10 +610,18 @@ static void cloud_store_create(void) {
     }
 
     s_section = CLOUD_SECTION_TOP;
+    s_level = SECTION_LEVEL_NONE;
+    s_category_level_exists = false;
+    s_current_category[0] = '\0';
     s_selected_row = 0;
     s_last_refresh_ms = 0;
     render_store();
-    s_status_timer = lv_timer_create(status_timer_cb, 300, NULL);
+    // 100ms rather than the previous 300ms: cloud_store_manager's status is a
+    // single polled struct, not a queue, and small app installs can finish
+    // their whole download in well under 300ms -- at that poll rate the UI
+    // could easily catch zero in-flight frames and jump straight from 0% to
+    // done regardless of how often the backend updates bytes_done.
+    s_status_timer = lv_timer_create(status_timer_cb, 100, NULL);
 
     cloud_store_status_t status = cloud_store_get_status();
     s_last_status_state = status.state;
@@ -496,6 +653,9 @@ static void cloud_store_destroy(void) {
     memset(s_row_meta, 0, sizeof(s_row_meta));
     s_apps_available = false;
     s_section = CLOUD_SECTION_TOP;
+    s_level = SECTION_LEVEL_NONE;
+    s_category_level_exists = false;
+    s_current_category[0] = '\0';
     cloud_store_manager_cleanup();
 }
 
@@ -523,17 +683,24 @@ static void cloud_store_input(InputEvent *event) {
     }
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
+        // Match the Left/Right-selects, Up/Down-toggles convention used by every
+        // other confirm popup (nfc/badusb/subghz/infrared views) instead of only
+        // handling Up/Down, which left Left/Right doing nothing to the highlight.
+        if (popup_confirm_is_open(s_confirm_popup)) {
+            if (button == 1) popup_confirm_select(&s_confirm_popup);
+            else if (button == 0) popup_confirm_set_selected(s_confirm_popup, 0);
+            else if (button == 3) popup_confirm_set_selected(s_confirm_popup, 1);
+            else if (button == 2 || button == 4) popup_confirm_move(s_confirm_popup, 1);
+            return;
+        }
         if (button == 0) {
             if (!try_cancel_download()) go_up_level();
         } else if (button == 1) {
-            if (popup_confirm_is_open(s_confirm_popup)) popup_confirm_select(&s_confirm_popup);
-            else select_current();
+            select_current();
         } else if (button == 2) {
-            if (popup_confirm_is_open(s_confirm_popup)) popup_confirm_move(s_confirm_popup, -1);
-            else move_selection(-1);
+            move_selection(-1);
         } else if (button == 4) {
-            if (popup_confirm_is_open(s_confirm_popup)) popup_confirm_move(s_confirm_popup, 1);
-            else move_selection(1);
+            move_selection(1);
         }
         return;
     }

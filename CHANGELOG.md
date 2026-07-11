@@ -11,10 +11,8 @@
 
 ### Firmware Updates (OTA)
 - Added Wi-Fi firmware updates from **Settings > Firmware Update**, with verification and rollback protection on supported boards
-- Added Stable / Prerelease update channels and clearer build comparisons for upgrades, reinstalls, and rollbacks
 - Added GhostLink peer updates, so a primary device can download firmware and safely flash its paired peer
 - Added offline SD card installs from `/ghostesp/firmware_update.bin`, with optional `.sha256` verification
-- Added the Banshee C5 updater flow with recovery if an update fails
 
 ### Cloud Store
 - Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs

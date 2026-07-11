@@ -61,17 +61,42 @@ typedef struct {
 } response_buf_t;
 
 typedef struct {
-    FILE *file;
+    FILE *file;              // direct mode: open output file; buffered mode: NULL
     size_t written;
-    size_t total;         // Content-Length if the server sent one, else 0
-    size_t last_reported; // bytes at last UI status push (throttling)
+    size_t total;            // Content-Length if the server sent one, else 0
+    size_t last_reported;    // bytes at last UI status push (byte throttle)
+    TickType_t last_report_tick; // tick at last UI status push (time throttle)
     const cloud_store_item_t *item;
     bool ok;
+    // Buffered mode (JIT-mount / shared display+SD SPI boards): received bytes
+    // accumulate here and flush to SD one slice at a time, so the shared SPI
+    // bus is only taken briefly per flush. That leaves the display live during
+    // the network receive (progress bar actually animates) instead of holding
+    // the bus -- and the display frozen -- for the whole download.
+    const char *path;        // SD destination the buffered slices append to
+    uint8_t *buf;            // NULL => direct mode (write straight to ->file)
+    size_t buf_len;
+    size_t buf_cap;
+    bool jit;                // flushes take the shared bus via sd_card_jit_begin/end
+    bool file_started;       // first flush of an attempt truncates ("wb"), rest append ("ab")
 } download_ctx_t;
 
-// Push a live download update to the UI at most every ~16KB so the progress
-// bar animates without hammering the status mutex on every TCP segment.
-#define CLOUD_DOWNLOAD_REPORT_STEP (16 * 1024)
+// Push a live download update to the UI at most every ~4KB so the progress
+// bar animates without hammering the status mutex on every TCP segment. On
+// slow links even 4KB can take a while to arrive, so also push on a time
+// floor comfortably under the UI's 100ms poll (cloud_store_screen.c) so the
+// bar keeps animating instead of sitting still between byte-threshold
+// updates -- small app installs can finish in well under a second, so both
+// floors need to be tight enough to land multiple frames in that window.
+#define CLOUD_DOWNLOAD_REPORT_STEP (4 * 1024)
+#define CLOUD_DOWNLOAD_REPORT_INTERVAL_MS 60
+
+// Buffered-download staging size for JIT-mount boards. Received data collects
+// in PSRAM and flushes to SD a slice at a time; the display bus is only taken
+// during each flush, not for the whole download. 256KB -> a ~500KB asset pack
+// flushes ~twice, so the bar animates smoothly with only a couple brief
+// flush hitches instead of freezing at 0% the entire time.
+#define CLOUD_DOWNLOAD_BUFFER_CAP (256 * 1024)
 
 typedef struct {
     cloud_store_item_type_t type;
@@ -316,6 +341,16 @@ static void copy_json_string(cJSON *root, const char *key, char *dst, size_t dst
     }
 }
 
+// Manifest-declared byte size, if the catalog publishes one. Used as the
+// progress-bar total when the download itself doesn't get a usable
+// Content-Length (e.g. through a proxy that strips it).
+static void copy_json_size(cJSON *root, const char *key, size_t *out) {
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNumber(item) && item->valuedouble > 0) {
+        *out = (size_t)item->valuedouble;
+    }
+}
+
 // authors[] array -> comma-joined string; falls back to a scalar "author" key.
 static void join_authors(cJSON *root, char *dst, size_t dst_len) {
     if (!dst || dst_len == 0) return;
@@ -369,6 +404,7 @@ static void parse_apps_array(cJSON *array, cloud_store_item_t *items, int *count
         copy_json_string(entry, "description", item.description, sizeof(item.description));
         copy_json_string(entry, "category", item.category, sizeof(item.category));
         join_authors(entry, item.author, sizeof(item.author));
+        copy_json_size(entry, "size", &item.size);
         if (item.name[0] == '\0') strncpy(item.name, item.id, sizeof(item.name) - 1);
 
         cJSON *downloads = cJSON_GetObjectItemCaseSensitive(entry, "downloads");
@@ -400,6 +436,7 @@ static void parse_assets_array(cJSON *array, cloud_store_item_t *items, int *cou
         copy_json_string(entry, "description", item.description, sizeof(item.description));
         copy_json_string(entry, "category", item.category, sizeof(item.category));
         join_authors(entry, item.author, sizeof(item.author));
+        copy_json_size(entry, "size", &item.size);
         if (item.name[0] == '\0') strncpy(item.name, item.id, sizeof(item.name) - 1);
 
         char raw_url[CLOUD_STORE_URL_MAX] = {0};
@@ -628,6 +665,30 @@ bool cloud_store_find_item(cloud_store_item_type_t type, const char *id, cloud_s
     return found;
 }
 
+// Append the staged slice to the SD file, briefly taking the shared SPI bus on
+// JIT boards (which suspends the display for the duration of just this flush).
+// The first flush of a download attempt truncates; later flushes append.
+static esp_err_t download_flush_buffer(download_ctx_t *ctx) {
+    if (!ctx->buf || ctx->buf_len == 0) return ESP_OK;
+    bool suspended = false;
+    if (ctx->jit && !sd_card_jit_begin(&suspended, false)) return ESP_FAIL;
+    esp_err_t err = ESP_OK;
+    FILE *f = fopen(ctx->path, ctx->file_started ? "ab" : "wb");
+    if (!f) {
+        err = ESP_FAIL;
+    } else {
+        size_t wrote = fwrite(ctx->buf, 1, ctx->buf_len, f);
+        fclose(f);
+        if (wrote != ctx->buf_len) err = ESP_FAIL;
+    }
+    if (ctx->jit) sd_card_jit_end(suspended);
+    if (err == ESP_OK) {
+        ctx->file_started = true;
+        ctx->buf_len = 0;
+    }
+    return err;
+}
+
 static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
     download_ctx_t *ctx = evt->user_data;
     if (!ctx) return ESP_OK;
@@ -643,16 +704,47 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
         return ESP_OK;
     }
     if (evt->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-    if (!ctx->file || fwrite(evt->data, 1, evt->data_len, ctx->file) != (size_t)evt->data_len) {
-        ctx->ok = false;
-        return ESP_FAIL;
+
+    if (ctx->buf) {
+        // Buffered mode: copy into the RAM staging buffer, flushing a slice to
+        // SD whenever it fills. The display keeps the bus between flushes.
+        const uint8_t *p = (const uint8_t *)evt->data;
+        size_t remaining = (size_t)evt->data_len;
+        while (remaining > 0) {
+            size_t space = ctx->buf_cap - ctx->buf_len;
+            size_t n = remaining < space ? remaining : space;
+            memcpy(ctx->buf + ctx->buf_len, p, n);
+            ctx->buf_len += n;
+            p += n;
+            remaining -= n;
+            if (ctx->buf_len == ctx->buf_cap && download_flush_buffer(ctx) != ESP_OK) {
+                ctx->ok = false;
+                return ESP_FAIL;
+            }
+        }
+    } else {
+        // Direct mode: SD is mounted for the whole download; write straight out.
+        if (!ctx->file || fwrite(evt->data, 1, evt->data_len, ctx->file) != (size_t)evt->data_len) {
+            ctx->ok = false;
+            return ESP_FAIL;
+        }
     }
+
+    bool first_chunk = (ctx->written == 0);
     ctx->written += evt->data_len;
-    // Live progress, throttled. Always report the final chunk so the bar lands
-    // on 100% before the state flips to INSTALLING.
-    if (ctx->written - ctx->last_reported >= CLOUD_DOWNLOAD_REPORT_STEP ||
+    TickType_t now = xTaskGetTickCount();
+    // Live progress, throttled by whichever floor is looser: a byte step (so
+    // fast links don't hammer the status mutex every TCP segment) or a time
+    // floor (so slow links, where 16KB can take seconds, still animate).
+    // Always report the first chunk (small/fast downloads would otherwise
+    // never cross either floor) and the final chunk (lands the bar on 100%
+    // before the state flips to INSTALLING).
+    if (first_chunk ||
+        ctx->written - ctx->last_reported >= CLOUD_DOWNLOAD_REPORT_STEP ||
+        (now - ctx->last_report_tick) >= pdMS_TO_TICKS(CLOUD_DOWNLOAD_REPORT_INTERVAL_MS) ||
         (ctx->total && ctx->written >= ctx->total)) {
         ctx->last_reported = ctx->written;
+        ctx->last_report_tick = now;
         set_status(CLOUD_STORE_STATE_DOWNLOADING, ctx->item ? ctx->item->name : NULL,
                    ctx->written, ctx->total, NULL);
     }
@@ -660,16 +752,50 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
 }
 
 static esp_err_t download_with_retries(const cloud_store_item_t *item, const char *path) {
-    download_ctx_t ctx = { .item = item, .ok = true };
+    bool jit = sd_card_needs_jit_mount();
+    download_ctx_t ctx = { .item = item, .ok = true, .jit = jit, .path = path };
 
+    // JIT boards stage the download in RAM so the display bus is only taken per
+    // flush; otherwise the SD (== display) bus is held for the whole download
+    // and the progress bar freezes. Non-JIT boards keep the simple direct path.
+    // If the PSRAM staging buffer can't be had, fall back to direct write.
+    if (jit) {
+        ctx.buf = heap_caps_malloc(CLOUD_DOWNLOAD_BUFFER_CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (ctx.buf) {
+            ctx.buf_cap = CLOUD_DOWNLOAD_BUFFER_CAP;
+        } else {
+            ESP_LOGW(TAG, "download staging buffer alloc failed; direct write (display will pause)");
+        }
+    }
+
+    esp_err_t result = ESP_FAIL;
     for (int attempt = 1; attempt <= CLOUD_DOWNLOAD_RANGE_ATTEMPTS; ++attempt) {
-        if (s_ctx && s_ctx->cancel_requested) return ESP_FAIL;
+        if (s_ctx && s_ctx->cancel_requested) { result = ESP_FAIL; break; }
         ctx.written = 0;
         ctx.last_reported = 0;
+        ctx.last_report_tick = xTaskGetTickCount();
         ctx.total = 0;
         ctx.ok = true;
-        ctx.file = fopen(path, "wb");
-        if (!ctx.file) return ESP_FAIL;
+        ctx.buf_len = 0;
+        ctx.file_started = false;
+        ctx.file = NULL;
+
+        // Direct mode holds the output file (and, on a JIT board that couldn't
+        // get a buffer, the SD mount) open for the whole transfer.
+        bool direct_suspended = false;
+        bool direct_mounted = false;
+        if (!ctx.buf) {
+            if (jit) {
+                if (!sd_card_jit_begin(&direct_suspended, false)) { result = ESP_FAIL; break; }
+                direct_mounted = true;
+            }
+            ctx.file = fopen(path, "wb");
+            if (!ctx.file) {
+                if (direct_mounted) sd_card_jit_end(direct_suspended);
+                result = ESP_FAIL;
+                break;
+            }
+        }
 
         esp_http_client_config_t config = {
             .url = item->download_url,
@@ -682,45 +808,55 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
         esp_err_t proxy_err = proxy_apply(&config, proxy_url_buf, sizeof(proxy_url_buf));
         if (proxy_err != ESP_OK) {
             ESP_LOGW(TAG, "download proxy URL failed url=%s err=%s", item->download_url, esp_err_to_name(proxy_err));
-            fclose(ctx.file);
-            return proxy_err;
+            if (ctx.file) fclose(ctx.file);
+            if (direct_mounted) sd_card_jit_end(direct_suspended);
+            result = proxy_err;
+            break;
         }
         esp_http_client_handle_t client = esp_http_client_init(&config);
         if (!client) {
-            fclose(ctx.file);
-            return ESP_FAIL;
+            if (ctx.file) fclose(ctx.file);
+            if (direct_mounted) sd_card_jit_end(direct_suspended);
+            result = ESP_FAIL;
+            break;
         }
 
         esp_err_t err = esp_http_client_perform(client);
         int status = esp_http_client_get_status_code(client);
         esp_http_client_cleanup(client);
-        fclose(ctx.file);
-        ctx.file = NULL;
+
+        // Flush whatever tail is still staged before judging completeness.
+        if (ctx.buf && ctx.ok && err == ESP_OK && !(s_ctx && s_ctx->cancel_requested)) {
+            if (download_flush_buffer(&ctx) != ESP_OK) ctx.ok = false;
+        }
+        if (ctx.file) { fclose(ctx.file); ctx.file = NULL; }
+        if (direct_mounted) sd_card_jit_end(direct_suspended);
 
         if (ctx.written > 0 || ctx.total > 0) {
             set_status(CLOUD_STORE_STATE_DOWNLOADING, item->name, ctx.written, ctx.total, NULL);
         }
 
-        if (s_ctx && s_ctx->cancel_requested) return ESP_FAIL;
+        if (s_ctx && s_ctx->cancel_requested) { result = ESP_FAIL; break; }
         if (err != ESP_OK || !ctx.ok || (status != 200 && status != 206)) {
             ESP_LOGW(TAG, "Download failed err=%s http=%d written=%u total=%u",
                      esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
             vTaskDelay(pdMS_TO_TICKS(400 * attempt));
             continue;
         }
-        if (ctx.total > 0 && ctx.written == ctx.total) return ESP_OK;
-        if (ctx.total == 0 && ctx.written > 0) return ESP_OK;
+        if ((ctx.total > 0 && ctx.written == ctx.total) || (ctx.total == 0 && ctx.written > 0)) {
+            result = ESP_OK;
+            break;
+        }
         ESP_LOGW("CloudStore", "Incomplete download: %d/%d bytes, retrying", (int)ctx.written, (int)ctx.total);
         vTaskDelay(pdMS_TO_TICKS(400 * attempt));
     }
-    return ESP_FAIL;
+
+    free(ctx.buf);
+    return result;
 }
 
 static esp_err_t install_item(const cloud_store_item_t *item) {
     if (!safe_id(item->id)) return ESP_ERR_INVALID_ARG;
-    if (!sd_card_manager.is_initialized) return ESP_ERR_INVALID_STATE;
-    mkdir_if_missing(CLOUD_DOWNLOAD_DIR);
-    mkdir_if_missing(CLOUD_THEMES_DIR);
 
     char filename[CLOUD_STORE_ID_MAX + 16];
     snprintf(filename, sizeof(filename), "%s.%s", item->id, item->type == CLOUD_STORE_TYPE_APP ? "gapp" : "gtheme.tmp");
@@ -728,25 +864,58 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
     const char *base_dir = item->type == CLOUD_STORE_TYPE_APP ? CLOUD_DOWNLOAD_DIR : CLOUD_THEMES_DIR;
     if (!join_path(download_path, sizeof(download_path), base_dir, filename)) return ESP_ERR_INVALID_SIZE;
 
+    // Phase 1 (dirs): brief SD access. On JIT boards this mounts + suspends the
+    // display just long enough to ensure the staging dirs exist; on other
+    // boards the SD is persistently mounted and the jit calls are no-ops.
+    {
+        bool suspended = false;
+        if (!sd_card_jit_begin(&suspended, true)) return ESP_ERR_INVALID_STATE;
+        mkdir_if_missing(CLOUD_DOWNLOAD_DIR);
+        mkdir_if_missing(CLOUD_THEMES_DIR);
+        sd_card_jit_end(suspended);
+    }
+
+    // Phase 2 (download): on JIT boards this runs with the display LIVE
+    // (buffered to RAM, flushed to SD in slices), so the progress bar animates
+    // instead of freezing while the SD holds the shared bus.
     set_status(CLOUD_STORE_STATE_DOWNLOADING, item->name, 0, 0, NULL);
     esp_err_t err = download_with_retries(item, download_path);
     if (err != ESP_OK) return err;
 
+    // s_ctx->status is a single polled struct, not a queue: without this,
+    // small/fast downloads finish and flip straight to INSTALLING inside one
+    // scheduler slice, so the UI's 300ms poll never observes the 100%
+    // download frame and the bar looks like it jumped from 0% to done.
+    vTaskDelay(pdMS_TO_TICKS(350));
+
+    // Phase 3 (extract/finalize): needs the SD held for the whole operation, so
+    // on JIT boards the display is suspended here (this phase can't animate).
+    // The reload/rescan below take their own nested SD mount, which is safe --
+    // sd_card_mount_for_flush is depth-counted under this outer mount.
+    bool suspended = false;
+    if (!sd_card_jit_begin(&suspended, false)) return ESP_ERR_INVALID_STATE;
     set_status(CLOUD_STORE_STATE_INSTALLING, item->name, 0, 0, NULL);
     if (item->type == CLOUD_STORE_TYPE_APP) {
         err = plugin_installer_install_gapp(download_path);
         if (err == ESP_OK) plugin_manager_reload();
-        return err;
+    } else {
+        char final_name[CLOUD_STORE_ID_MAX + 16];
+        snprintf(final_name, sizeof(final_name), "%s.gtheme", item->id);
+        char final_path[CLOUD_STORE_ID_MAX + 80];
+        if (!join_path(final_path, sizeof(final_path), CLOUD_THEMES_DIR, final_name)) {
+            err = ESP_ERR_INVALID_SIZE;
+        } else {
+            unlink(final_path);
+            if (rename(download_path, final_path) != 0) {
+                err = ESP_FAIL;
+            } else {
+                asset_pack_rescan_installed();
+                err = ESP_OK;
+            }
+        }
     }
-
-    char final_name[CLOUD_STORE_ID_MAX + 16];
-    snprintf(final_name, sizeof(final_name), "%s.gtheme", item->id);
-    char final_path[CLOUD_STORE_ID_MAX + 80];
-    if (!join_path(final_path, sizeof(final_path), CLOUD_THEMES_DIR, final_name)) return ESP_ERR_INVALID_SIZE;
-    unlink(final_path);
-    if (rename(download_path, final_path) != 0) return ESP_FAIL;
-    asset_pack_rescan_installed();
-    return ESP_OK;
+    sd_card_jit_end(suspended);
+    return err;
 }
 
 bool cloud_store_is_available(void) {
@@ -759,22 +928,26 @@ bool cloud_store_apps_available(void) {
 
 static void refresh_task(void *arg) {
     (void)arg;
-    set_status(CLOUD_STORE_STATE_FETCHING, "Cloud Store", 0, 0, NULL);
     cloud_store_pause_ap_if_needed();
     esp_err_t err = refresh_manifest();
-    if (err == ESP_OK) {
-        set_status(CLOUD_STORE_STATE_READY, "Cloud Store", 0, 0, NULL);
-    } else {
-        set_status(CLOUD_STORE_STATE_FAILED, "Cloud Store", 0, 0, "Could not load cloud manifest");
-    }
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
+    s_ctx->status.state = err == ESP_OK ? CLOUD_STORE_STATE_READY : CLOUD_STORE_STATE_FAILED;
+    strncpy(s_ctx->status.active_name, "Cloud Store", sizeof(s_ctx->status.active_name) - 1);
+    s_ctx->status.active_name[sizeof(s_ctx->status.active_name) - 1] = '\0';
+    s_ctx->status.bytes_done = 0;
+    s_ctx->status.bytes_total = 0;
+    if (err == ESP_OK) {
+        s_ctx->status.error[0] = '\0';
+    } else {
+        strncpy(s_ctx->status.error, "Could not load cloud manifest", sizeof(s_ctx->status.error) - 1);
+        s_ctx->status.error[sizeof(s_ctx->status.error) - 1] = '\0';
+    }
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
     vTaskDelete(NULL);
 }
 
 esp_err_t cloud_store_refresh_async(void) {
-    if (!sd_card_manager.is_initialized) return ESP_ERR_INVALID_STATE;
     if (!ensure_ctx()) return ESP_ERR_NO_MEM;
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     if (s_ctx->task_running) {
@@ -782,13 +955,21 @@ esp_err_t cloud_store_refresh_async(void) {
         return ESP_ERR_INVALID_STATE;
     }
     s_ctx->task_running = true;
+    s_ctx->status.state = CLOUD_STORE_STATE_FETCHING;
+    strncpy(s_ctx->status.active_name, "Cloud Store", sizeof(s_ctx->status.active_name) - 1);
+    s_ctx->status.active_name[sizeof(s_ctx->status.active_name) - 1] = '\0';
+    s_ctx->status.bytes_done = 0;
+    s_ctx->status.bytes_total = 0;
+    s_ctx->status.error[0] = '\0';
     xSemaphoreGive(s_ctx->mutex);
-    set_status(CLOUD_STORE_STATE_FETCHING, "Cloud Store", 0, 0, NULL);
     cloud_store_pause_ap_if_needed();
     BaseType_t rc = xTaskCreate(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
     if (rc != pdPASS) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
         s_ctx->task_running = false;
+        s_ctx->status.state = CLOUD_STORE_STATE_FAILED;
+        strncpy(s_ctx->status.error, "Could not start cloud refresh", sizeof(s_ctx->status.error) - 1);
+        s_ctx->status.error[sizeof(s_ctx->status.error) - 1] = '\0';
         xSemaphoreGive(s_ctx->mutex);
         cloud_store_restore_ap_if_needed();
         return ESP_ERR_NO_MEM;
@@ -805,6 +986,9 @@ static void install_task(void *arg) {
         ESP_LOGW(TAG, "install_task: id=%s not found in cached catalog", req.id);
         set_status(CLOUD_STORE_STATE_FAILED, "Cloud Store", 0, 0, "Selected item is no longer available");
     } else {
+        // install_item now owns SD access per phase (dirs / buffered download /
+        // extract), so the display isn't held down for the whole install on
+        // JIT boards -- that's what lets the download progress bar animate.
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
         s_ctx->status.active_type = item.type;
         xSemaphoreGive(s_ctx->mutex);
@@ -825,15 +1009,20 @@ static void install_task(void *arg) {
         // Drop the partial download on cancel/failure so we don't leave broken
         // files on the SD card (a half-written .gapp can also trip the plugin
         // scanner). Success paths keep/rename the file, so they're excluded.
+        // The SD isn't held here anymore, so take a brief mount for the unlink.
         if (cancelled || err != ESP_OK) {
-            char tmp_name[CLOUD_STORE_ID_MAX + 16];
-            char tmp_path[CLOUD_STORE_ID_MAX + 80];
-            if (item.type == CLOUD_STORE_TYPE_ASSET_PACK) {
-                snprintf(tmp_name, sizeof(tmp_name), "%s.gtheme.tmp", item.id);
-                if (join_path(tmp_path, sizeof(tmp_path), CLOUD_THEMES_DIR, tmp_name)) unlink(tmp_path);
-            } else {
-                snprintf(tmp_name, sizeof(tmp_name), "%s.gapp", item.id);
-                if (join_path(tmp_path, sizeof(tmp_path), CLOUD_DOWNLOAD_DIR, tmp_name)) unlink(tmp_path);
+            bool suspended = false;
+            if (sd_card_jit_begin(&suspended, false)) {
+                char tmp_name[CLOUD_STORE_ID_MAX + 16];
+                char tmp_path[CLOUD_STORE_ID_MAX + 80];
+                if (item.type == CLOUD_STORE_TYPE_ASSET_PACK) {
+                    snprintf(tmp_name, sizeof(tmp_name), "%s.gtheme.tmp", item.id);
+                    if (join_path(tmp_path, sizeof(tmp_path), CLOUD_THEMES_DIR, tmp_name)) unlink(tmp_path);
+                } else {
+                    snprintf(tmp_name, sizeof(tmp_name), "%s.gapp", item.id);
+                    if (join_path(tmp_path, sizeof(tmp_path), CLOUD_DOWNLOAD_DIR, tmp_name)) unlink(tmp_path);
+                }
+                sd_card_jit_end(suspended);
             }
         }
     }
@@ -844,7 +1033,7 @@ static void install_task(void *arg) {
 }
 
 esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id) {
-    if (!sd_card_manager.is_initialized) return ESP_ERR_INVALID_STATE;
+    if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) return ESP_ERR_NOT_FOUND;
     if (!safe_id(id)) return ESP_ERR_INVALID_ARG;
     if (!ensure_ctx()) return ESP_ERR_NO_MEM;
     install_request_t *req = calloc(1, sizeof(*req));

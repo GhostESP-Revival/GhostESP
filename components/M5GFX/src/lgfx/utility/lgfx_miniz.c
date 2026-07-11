@@ -1739,8 +1739,15 @@ void *lgfx_tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len
 
 size_t lgfx_tinfl_decompress_mem_to_mem(void *pOut_buf, size_t out_buf_len, const void *pSrc_buf, size_t src_buf_len, int flags)
 {
-  lgfx_tinfl_decompressor decomp; lgfx_tinfl_status status; lgfx_tinfl_init(&decomp);
-  status = lgfx_tinfl_decompress(&decomp, (const lgfx_mz_uint8*)pSrc_buf, &src_buf_len, (lgfx_mz_uint8*)pOut_buf, (lgfx_mz_uint8*)pOut_buf, &out_buf_len, (flags & ~TINFL_FLAG_HAS_MORE_INPUT) | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  // decomp (lgfx_tinfl_decompressor) holds 3 Huffman tables at ~3.5KB each
+  // (~11KB total) - too large to put on the stack of small-stack tasks
+  // (e.g. the cloud store installer's task overflowed here). Heap-allocate it
+  // like the sibling mem_to_callback variant does for its dictionary buffer.
+  lgfx_tinfl_decompressor *decomp = (lgfx_tinfl_decompressor*)MZ_MALLOC(sizeof(lgfx_tinfl_decompressor));
+  if (!decomp) return TINFL_DECOMPRESS_MEM_TO_MEM_FAILED;
+  lgfx_tinfl_status status; lgfx_tinfl_init(decomp);
+  status = lgfx_tinfl_decompress(decomp, (const lgfx_mz_uint8*)pSrc_buf, &src_buf_len, (lgfx_mz_uint8*)pOut_buf, (lgfx_mz_uint8*)pOut_buf, &out_buf_len, (flags & ~TINFL_FLAG_HAS_MORE_INPUT) | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  MZ_FREE(decomp);
   return (status != TINFL_STATUS_DONE) ? TINFL_DECOMPRESS_MEM_TO_MEM_FAILED : out_buf_len;
 }
 

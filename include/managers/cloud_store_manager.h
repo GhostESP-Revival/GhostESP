@@ -44,6 +44,7 @@ typedef struct {
     char category[CLOUD_STORE_CATEGORY_MAX];
     char description[CLOUD_STORE_DESC_MAX];
     char download_url[CLOUD_STORE_URL_MAX];
+    size_t size; // manifest-declared byte size, 0 if the catalog didn't publish one
 } cloud_store_item_t;
 
 typedef struct {
