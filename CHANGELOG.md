@@ -18,6 +18,9 @@
 - Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
 
+### Wi-Fi
+- Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
+
 ### Other Changes
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
 - Freed the wardriving CSV line buffer when logging stops
