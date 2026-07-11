@@ -21,6 +21,7 @@
 #include "core/glog.h"
 
 #include "core/dns_server.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
 #include "lwip/err.h"
 #include "lwip/netdb.h"
@@ -1136,6 +1137,26 @@ void dns_server_task(void *pvParameters) {
                         sendto(sock, reply, reply_len, 0,
                                (struct sockaddr *)&source_addr,
                                sizeof(source_addr));
+                    }
+                    /* Emit a structured event for the qname if we can extract it. */
+                    if (len >= 17) {
+                        char qname[128];
+                        int qpos = 0;
+                        int i = 12;
+                        while (i < len && rx_buffer[i] != 0 && qpos < (int)sizeof(qname) - 1) {
+                            uint8_t lbl = rx_buffer[i++];
+                            if (lbl > 63) break;
+                            for (int k = 0; k < lbl && i < len && qpos < (int)sizeof(qname) - 1; ++k)
+                                qname[qpos++] = rx_buffer[i++];
+                            if (qpos < (int)sizeof(qname) - 1) qname[qpos++] = '.';
+                        }
+                        if (qpos > 0) qname[qpos - 1] = '\0'; else qname[0] = '\0';
+                        if (qname[0]) {
+                            char dns_payload[300];
+                            snprintf(dns_payload, sizeof(dns_payload), "%s|%s",
+                                addr_str, qname);
+                            ghostscript_emit_event_escaped("dns_request", dns_payload);
+                        }
                     }
                 }
             }

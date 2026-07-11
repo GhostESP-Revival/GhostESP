@@ -1437,6 +1437,21 @@ menu "Ghost ESP Options"
 
     endmenu
 
+    menu "GhostScript"
+
+    config ENABLE_GHOSTSCRIPT
+        bool "Enable GhostScript Lua scripting"
+        default y if !ENABLE_NATIVE_SD_APPS
+        default n
+        depends on WITH_SCREEN
+        help
+            Enable the low-memory Lua scripting runtime loaded from
+            /mnt/ghostesp/scripts. GhostScript is intended for no-PSRAM and
+            script-focused builds; enabling it alongside native SD apps may
+            require a larger app partition.
+
+    endmenu
+
     menu "SPI and MMC Configuration"
     
     config USING_SPI

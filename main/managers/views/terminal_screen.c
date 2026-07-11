@@ -989,6 +989,19 @@ void terminal_view_clear_history(void) {
   }
 }
 
+size_t terminal_view_log_count(void) {
+  return term_line_count;
+}
+
+bool terminal_view_log_get(size_t index, char *out, size_t out_len) {
+  if (!out || out_len == 0 || index >= term_line_count) return false;
+  uint16_t idx = (term_line_head + (uint16_t)index) % MAX_TERMINAL_LINES;
+  const char *text = term_lines[idx].text;
+  if (!text) return false;
+  snprintf(out, out_len, "%s", text);
+  return true;
+}
+
 static bool terminal_is_near_bottom(void) {
   if (!terminal_scroller) return true;
   const lv_coord_t threshold = 20;

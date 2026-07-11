@@ -15,6 +15,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
@@ -388,6 +389,9 @@ void deauth_attack_start(void) {
         }
         deauth_task_running = true;
         rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
+        char da_payload[16];
+        snprintf(da_payload, sizeof(da_payload), "%d", selected_ap_count_local);
+        ghostscript_emit_event("attack_started", "deauth");
     } else {
         glog("Deauth already running.\n");
     }
@@ -420,6 +424,7 @@ void deauth_attack_stop(void) {
         esp_wifi_stop();
         ap_manager_start_services();
         status_display_show_status("Deauth Stopped");
+        ghostscript_emit_event("attack_stopped", "deauth");
     } else {
         status_display_show_status("No Deauth Active");
     }

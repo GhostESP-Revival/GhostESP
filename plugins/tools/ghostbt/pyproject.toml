@@ -41,4 +41,6 @@ Issues = "https://github.com/GhostESP-Revival/GhostESP/issues"
 ghostbt = [
     "data/sdk/*",
     "data/templates/**/*",
+    "data/luac/*",
+    "data/lua-src/*",
 ]
