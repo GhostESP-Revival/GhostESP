@@ -199,7 +199,7 @@ static const char *sd_spi_host_name(int host_id) {
   switch (host_id) {
     case SPI2_HOST:
       return "SPI2_HOST";
-#if defined(SPI3_HOST)
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
     case SPI3_HOST:
       return "SPI3_HOST";
 #endif
@@ -280,7 +280,7 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
  * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
  * shares the display's bus are unaffected (the shared-bus path handles them). */
 static bool sd_keep_spi_bus_for_board(void) {
-#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN) && defined(SPI3_HOST)
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN)
   return !is_shared_display_sd_spi();
 #else
   return false;
