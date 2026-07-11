@@ -34,7 +34,7 @@
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
-- SD display-freeze fix now covers all CYD (and other classic-ESP32) boards by gating the SPI3 bus-keepalive on hardware topology instead of the `CYD2USB2.4Inch` template
+- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 
 
 ## Revival v2.0.0
