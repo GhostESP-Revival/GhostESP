@@ -8,9 +8,12 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "managers/infrared_manager.h"
 #include "managers/plugin_api.h"
 #include "managers/sd_card_manager.h"
+#include "managers/subghz_remote_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "scans/wifi/station_scan.h"
 #include "gui/toast.h"
 #include "lua.h"
 #include "lauxlib.h"
@@ -81,6 +84,7 @@ struct ghostscript_runtime {
     char error[GHOSTSCRIPT_ERROR_MAX];
     char *oui_prefix[4];
     int oui_prefix_count;
+    char last_nfc_tag[96];
     /* Dedupe set for ble_device events: small open-addressing table keyed by
      * 6-byte MAC. Reset on each scan start. */
     uint8_t ble_seen_keys[64][6];
@@ -505,6 +509,9 @@ static void note_dispatch(ghostscript_runtime_t *rt, const char *name, int64_t n
 
 static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const char *value) {
     if (!rt || !rt->L || !name) return;
+    if (strcmp(name, "nfc_tag") == 0 && value) {
+        snprintf(rt->last_nfc_tag, sizeof(rt->last_nfc_tag), "%s", value);
+    }
     /* Rate limit: 10 ms minimum interval per topic. Handlers in _waits are
      * exempt because they need to wake up on first match. */
     int64_t now = esp_timer_get_time();
@@ -789,8 +796,128 @@ static int l_rgb_set(lua_State *L) {
 
 static int l_badusb_run(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); if (!rt_has_perm(rt, PLUGIN_PERMISSION_BADUSB)) return lua_perm_error(L, "badusb"); lua_pushboolean(L, rt->api && rt->api->badusb_run_script ? rt->api->badusb_run_script(luaL_checkstring(L, 1)) : false); return 1; }
 static int l_ir_send(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); if (!rt_has_perm(rt, PLUGIN_PERMISSION_IR)) return lua_perm_error(L, "ir"); lua_pushboolean(L, rt->api && rt->api->ir_send_file ? rt->api->ir_send_file(luaL_checkstring(L, 1)) : false); return 1; }
+
+static int l_ir_listen(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_IR)) return lua_perm_error(L, "ir");
+    int timeout_ms = (int)luaL_optinteger(L, 1, 5000);
+    if (timeout_ms < 0) timeout_ms = 0;
+    if (timeout_ms > 120000) timeout_ms = 120000;
+    if (!infrared_manager_rx_init()) {
+        lua_pushnil(L);
+        return 1;
+    }
+    infrared_signal_t sig;
+    memset(&sig, 0, sizeof(sig));
+    bool got = infrared_manager_rx_receive(&sig, timeout_ms);
+    if (!got) {
+        infrared_manager_rx_deinit();
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_newtable(L);
+    if (sig.is_raw) {
+        lua_pushboolean(L, true);
+        lua_setfield(L, -2, "raw");
+        lua_pushinteger(L, (lua_Integer)sig.payload.raw.timings_size);
+        lua_setfield(L, -2, "count");
+        lua_pushinteger(L, (lua_Integer)sig.payload.raw.frequency);
+        lua_setfield(L, -2, "frequency");
+        lua_createtable(L, (int)sig.payload.raw.timings_size, 0);
+        for (size_t i = 0; i < sig.payload.raw.timings_size; i++) {
+            lua_pushinteger(L, (lua_Integer)sig.payload.raw.timings[i]);
+            lua_rawseti(L, -2, (int)i + 1);
+        }
+        lua_setfield(L, -2, "timings");
+    } else {
+        lua_pushstring(L, sig.payload.message.protocol);
+        lua_setfield(L, -2, "protocol");
+        lua_pushinteger(L, (lua_Integer)sig.payload.message.address);
+        lua_setfield(L, -2, "address");
+        lua_pushinteger(L, (lua_Integer)sig.payload.message.command);
+        lua_setfield(L, -2, "command");
+    }
+    infrared_manager_free_signal(&sig);
+    infrared_manager_rx_deinit();
+    return 1;
+}
 static int l_subghz_load(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); if (!rt_has_perm(rt, PLUGIN_PERMISSION_SUBGHZ)) return lua_perm_error(L, "subghz"); lua_pushboolean(L, rt->api && rt->api->subghz_load_snapshot ? rt->api->subghz_load_snapshot(luaL_checkstring(L, 1)) : false); return 1; }
 static int l_subghz_tx(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_SUBGHZ, rt && rt->api ? rt->api->subghz_transmit_loaded : NULL, "subghz"); }
+
+static int l_subghz_receive(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_SUBGHZ)) return lua_perm_error(L, "subghz");
+    int timeout_ms = (int)luaL_optinteger(L, 1, 5000);
+    uint32_t freq = (uint32_t)luaL_optinteger(L, 2, 0);
+    if (timeout_ms < 0) timeout_ms = 0;
+    if (timeout_ms > 120000) timeout_ms = 120000;
+    if (freq == 0) freq = subghz_remote_manager_get_frequency_hz();
+    if (!subghz_remote_manager_begin_capture(true, freq, false, (uint32_t)timeout_ms)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    subghz_decoded_signal_t decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    if (subghz_remote_manager_take_decode_result(&decoded) && decoded.decoded) {
+        lua_newtable(L);
+        lua_pushstring(L, decoded.protocol);
+        lua_setfield(L, -2, "protocol");
+        lua_pushstring(L, decoded.info);
+        lua_setfield(L, -2, "info");
+        lua_pushinteger(L, (lua_Integer)decoded.code);
+        lua_setfield(L, -2, "code");
+        lua_pushinteger(L, decoded.bits);
+        lua_setfield(L, -2, "bits");
+        lua_pushinteger(L, decoded.frequency_hz);
+        lua_setfield(L, -2, "frequency");
+        lua_pushinteger(L, decoded.te);
+        lua_setfield(L, -2, "te");
+        return 1;
+    }
+    int32_t durations[256];
+    size_t count = 0;
+    if (subghz_remote_manager_take_raw_capture(durations, 256, &count) && count > 0) {
+        lua_newtable(L);
+        lua_pushboolean(L, true);
+        lua_setfield(L, -2, "raw");
+        lua_pushinteger(L, (lua_Integer)count);
+        lua_setfield(L, -2, "count");
+        lua_pushinteger(L, (lua_Integer)freq);
+        lua_setfield(L, -2, "frequency");
+        lua_createtable(L, (int)count, 0);
+        for (size_t i = 0; i < count; i++) {
+            lua_pushinteger(L, (lua_Integer)durations[i]);
+            lua_rawseti(L, -2, (int)i + 1);
+        }
+        lua_setfield(L, -2, "durations");
+        return 1;
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+static int l_subghz_read_raw(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_SUBGHZ)) return lua_perm_error(L, "subghz");
+    int32_t durations[256];
+    size_t count = 0;
+    if (!subghz_remote_manager_take_raw_capture(durations, 256, &count) || count == 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_newtable(L);
+    lua_pushinteger(L, (lua_Integer)count);
+    lua_setfield(L, -2, "count");
+    lua_pushinteger(L, (lua_Integer)subghz_remote_manager_get_frequency_hz());
+    lua_setfield(L, -2, "frequency");
+    lua_createtable(L, (int)count, 0);
+    for (size_t i = 0; i < count; i++) {
+        lua_pushinteger(L, (lua_Integer)durations[i]);
+        lua_rawseti(L, -2, (int)i + 1);
+    }
+    lua_setfield(L, -2, "durations");
+    return 1;
+}
 
 static int l_http_get(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
@@ -987,6 +1114,51 @@ static int l_wifi_deauth(lua_State *L) {
     }
     int reason = (int)luaL_optinteger(L, 2, 1);
     lua_pushboolean(L, rt->api && rt->api->wifi_deauth ? rt->api->wifi_deauth(b, NULL, (uint8_t)reason) : false);
+    return 1;
+}
+
+static int l_wifi_station_scan_start(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI)) return lua_perm_error(L, "wifi");
+    station_scan_start();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+static int l_wifi_station_scan_stop(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI)) return lua_perm_error(L, "wifi");
+    station_scan_stop();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+static int l_wifi_station_count(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI)) return lua_perm_error(L, "wifi");
+    lua_pushinteger(L, station_scan_get_count());
+    return 1;
+}
+
+static int l_wifi_station(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_WIFI)) return lua_perm_error(L, "wifi");
+    int idx = (int)luaL_checkinteger(L, 1);
+    if (idx < 0 || idx >= station_scan_get_count()) { lua_pushnil(L); return 1; }
+    station_ap_pair_t *p = &station_ap_list[idx];
+    lua_newtable(L);
+    char mac[18];
+    snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+        p->station_mac[0], p->station_mac[1], p->station_mac[2],
+        p->station_mac[3], p->station_mac[4], p->station_mac[5]);
+    lua_pushstring(L, mac);
+    lua_setfield(L, -2, "mac");
+    char bssid[18];
+    snprintf(bssid, sizeof(bssid), "%02x:%02x:%02x:%02x:%02x:%02x",
+        p->ap_bssid[0], p->ap_bssid[1], p->ap_bssid[2],
+        p->ap_bssid[3], p->ap_bssid[4], p->ap_bssid[5]);
+    lua_pushstring(L, bssid);
+    lua_setfield(L, -2, "bssid");
     return 1;
 }
 
@@ -1429,6 +1601,27 @@ static int l_nfc_is_available(lua_State *L) { ghostscript_runtime_t *rt = check_
 static int l_nfc_read_start(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_read_start : NULL, "nfc"); }
 static int l_nfc_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_stop : NULL, "nfc"); }
 
+static int l_nfc_last_tag(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_NFC)) return lua_perm_error(L, "nfc");
+    const char *last = rt ? rt->last_nfc_tag : NULL;
+    if (!last || !last[0]) { lua_pushnil(L); return 1; }
+    lua_newtable(L);
+    lua_pushstring(L, last);
+    lua_setfield(L, -2, "raw");
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s", last);
+    char *sep = strchr(buf, '|');
+    if (sep) {
+        *sep = '\0';
+        lua_pushstring(L, buf);
+        lua_setfield(L, -2, "type");
+        lua_pushstring(L, sep + 1);
+        lua_setfield(L, -2, "uid");
+    }
+    return 1;
+}
+
 static int l_ir_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_IR, rt && rt->api ? rt->api->ir_stop : NULL, "ir"); }
 static int l_subghz_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_SUBGHZ, rt && rt->api ? rt->api->subghz_stop : NULL, "subghz"); }
 static int l_badusb_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_BADUSB, rt && rt->api ? rt->api->badusb_stop : NULL, "badusb"); }
@@ -1703,17 +1896,17 @@ static const gs_lazy_sub_t s_lazy_subs[] = {
     {"input",    (const luaL_Reg[]){{"subscribe", l_event_on}, {"unsubscribe", l_event_off}, {NULL, NULL}}},
     {"system",   (const luaL_Reg[]){{"free_heap", l_free_heap}, {"free_internal_heap", l_free_internal_heap}, {"uptime_ms", l_uptime_ms}, {"memory_used", l_memory_used}, {"memory_limit", l_memory_limit}, {"firmware_version", l_firmware_version}, {"target", l_system_target}, {"reboot", l_system_reboot}, {"random", l_random_u32}, {NULL, NULL}}},
     {"storage",  (const luaL_Reg[]){{"read", l_storage_read}, {"write", l_storage_write}, {"exists", l_storage_exists}, {"append", l_storage_append}, {"delete", l_storage_delete}, {"mkdir", l_storage_mkdir}, {"list", l_storage_list}, {"stat", l_storage_stat}, {"rename", l_storage_rename}, {NULL, NULL}}},
-    {"wifi",     (const luaL_Reg[]){{"scan_start", l_wifi_scan_start}, {"scan_done", l_wifi_scan_done}, {"scan_finish", l_wifi_scan_finish}, {"scan_stop", l_wifi_stop_scan}, {"ap_count", l_wifi_count}, {"ap", l_wifi_ap}, {"connect", l_wifi_connect}, {"disconnect", l_wifi_disconnect}, {"is_connected", l_wifi_is_connected}, {"rssi", l_wifi_rssi}, {"ip", l_wifi_ip}, {"set_channel", l_wifi_set_channel}, {"get_channel", l_wifi_get_channel}, {"on_ap", l_wifi_on_ap}, {"deauth", l_wifi_deauth}, {NULL, NULL}}},
+    {"wifi",     (const luaL_Reg[]){{"scan_start", l_wifi_scan_start}, {"scan_done", l_wifi_scan_done}, {"scan_finish", l_wifi_scan_finish}, {"scan_stop", l_wifi_stop_scan}, {"ap_count", l_wifi_count}, {"ap", l_wifi_ap}, {"connect", l_wifi_connect}, {"disconnect", l_wifi_disconnect}, {"is_connected", l_wifi_is_connected}, {"rssi", l_wifi_rssi}, {"ip", l_wifi_ip}, {"set_channel", l_wifi_set_channel}, {"get_channel", l_wifi_get_channel}, {"on_ap", l_wifi_on_ap}, {"deauth", l_wifi_deauth}, {"station_scan_start", l_wifi_station_scan_start}, {"station_scan_stop", l_wifi_station_scan_stop}, {"station_count", l_wifi_station_count}, {"station", l_wifi_station}, {NULL, NULL}}},
     {"ble",      (const luaL_Reg[]){{"scan_start", l_ble_start}, {"scan_stop", l_ble_stop}, {"device_count", l_ble_device_count}, {"get_device", l_ble_get_device}, {"on_device", l_ble_on_device}, {NULL, NULL}}},
     {"gps",      (const luaL_Reg[]){{"is_available", l_gps_is_available}, {"has_fix", l_gps_has_fix}, {"latitude", l_gps_get_latitude}, {"longitude", l_gps_get_longitude}, {"altitude", l_gps_get_altitude}, {"satellites", l_gps_get_satellites}, {"on_fix", l_gps_on_fix}, {NULL, NULL}}},
     {"oui",      (const luaL_Reg[]){{"lookup", l_oui_lookup}, {"prefix_match", l_oui_prefix_match}, {"prefix_set", l_oui_prefix_set}, {NULL, NULL}}},
     {"power",    (const luaL_Reg[]){{"percent", l_battery_percent}, {"voltage_mv", l_battery_voltage}, {"is_charging", l_battery_is_charging}, {"get_brightness", l_brightness_get}, {"set_brightness", l_brightness_set}, {NULL, NULL}}},
-    {"nfc",      (const luaL_Reg[]){{"is_available", l_nfc_is_available}, {"read_start", l_nfc_read_start}, {"stop", l_nfc_stop}, {NULL, NULL}}},
+    {"nfc",      (const luaL_Reg[]){{"is_available", l_nfc_is_available}, {"read_start", l_nfc_read_start}, {"stop", l_nfc_stop}, {"last_tag", l_nfc_last_tag}, {NULL, NULL}}},
     {"time",     (const luaL_Reg[]){{"unix", l_time_unix}, {"set_unix", l_time_set}, {NULL, NULL}}},
     {"rgb",      (const luaL_Reg[]){{"set", l_rgb_set}, {NULL, NULL}}},
     {"badusb",   (const luaL_Reg[]){{"run", l_badusb_run}, {"stop", l_badusb_stop}, {NULL, NULL}}},
-    {"ir",       (const luaL_Reg[]){{"send_file", l_ir_send}, {"stop", l_ir_stop}, {NULL, NULL}}},
-    {"subghz",   (const luaL_Reg[]){{"load", l_subghz_load}, {"transmit", l_subghz_tx}, {"stop", l_subghz_stop}, {NULL, NULL}}},
+    {"ir",       (const luaL_Reg[]){{"send_file", l_ir_send}, {"listen", l_ir_listen}, {"stop", l_ir_stop}, {NULL, NULL}}},
+    {"subghz",   (const luaL_Reg[]){{"load", l_subghz_load}, {"transmit", l_subghz_tx}, {"receive", l_subghz_receive}, {"read_raw", l_subghz_read_raw}, {"stop", l_subghz_stop}, {NULL, NULL}}},
     {"net",      (const luaL_Reg[]){{"http_get", l_http_get}, {"http_post", l_http_post}, {NULL, NULL}}},
     {"settings", (const luaL_Reg[]){{"get_u8", l_settings_get_u8}, {"set_u8", l_settings_set_u8}, {"get_string", l_settings_get_string}, {"set_string", l_settings_set_string}, {"save", l_settings_save}, {"nvs_get_u32", l_nvs_get_u32}, {"nvs_set_u32", l_nvs_set_u32}, {"nvs_delete", l_nvs_delete}, {NULL, NULL}}},
     {"commands", (const luaL_Reg[]){{"exec", l_command_exec}, {"start", l_command_start}, {NULL, NULL}}},

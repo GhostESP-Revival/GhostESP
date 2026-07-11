@@ -66,13 +66,13 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `input`      | `subscribe`, `unsubscribe` — receive joystick/touch/encoder/keyboard.        |
 | `system`     | `free_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random`. |
 | `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`. |
-| `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`. |
+| `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
 | `ble`        | `scan_start`, `scan_stop`, `device_count`, `get_device(i)`, `on_device`.     |
 | `gps`        | `is_available`, `has_fix`, `latitude`, `longitude`, `altitude`, `satellites`, `on_fix`. |
 | `power`      | `percent`, `voltage_mv`, `is_charging`, `get_brightness`, `set_brightness`.  |
-| `nfc`        | `is_available`, `read_start`, `stop`.                                       |
-| `ir`         | `send_file`, `stop`.                                                         |
-| `subghz`     | `load`, `transmit`, `stop`.                                                  |
+| `nfc`        | `is_available`, `read_start`, `stop`, `last_tag`.                          |
+| `ir`         | `send_file`, `listen(timeout_ms)`, `stop`.                                 |
+| `subghz`     | `load`, `transmit`, `receive(timeout_ms, freq)`, `read_raw`, `stop`.       |
 | `badusb`     | `run`, `stop`.                                                               |
 | `rgb`        | `set(r, g, b)`.                                                             |
 | `net`        | `http_get`, `http_post`.                                                     |
@@ -80,8 +80,7 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `settings`   | `get_u8/set_u8`, `get_string/set_string`, `save`, NVS accessors.             |
 | `commands`   | `exec(line)` (one-shot), `start(line)` (streams output as `command.output` events). |
 | `parser`     | `nfc_summary(path)`, `ir_summary(path)`, `subghz_summary(path)`.          |
-| `results`    | Host-backed result access: `count`, `field`, `save_csv`.                    |
-| `tasks`      | `spawn(name, fn, opts)` / `list()` — background coroutines on a separate task. |
+| `results`    | Host-backed result access: `count`, `field`, `save_csv`. Providers: `wifi.ap`, `ble.device`, `ble.detect`, `command.log`, `log.serial`. |
 | `oui`        | `lookup(mac)`, `prefix_match(mac, prefix)`, `prefix_set(prefix1, ...)`.     |
 
 Permissions for each subtable are set in the script manifest. A script without the right permission gets a runtime error when it calls the API.
