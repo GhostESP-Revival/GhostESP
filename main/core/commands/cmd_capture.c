@@ -5,6 +5,7 @@
 #include "core/commands.h"
 #include "core/glog.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
@@ -109,6 +110,9 @@ static void handle_capture_export(const char *arg) {
     }
     glog("Exported %s\nPMKID: %d  M2/M3: %d\n", out_path, pmkid, handshakes);
     status_display_show_status("Export hc22000");
+    char pk_payload[48];
+    snprintf(pk_payload, sizeof(pk_payload), "%d|%d", pmkid, handshakes);
+    ghostscript_emit_event("pmkid_exported", pk_payload);
     if (jit_mounted) sd_card_unmount_after_flush(display_suspended);
 }
 
