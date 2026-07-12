@@ -429,6 +429,8 @@ static void start_refresh(bool user_initiated) {
     render_store();
 }
 
+static void progress_cancel_cb(void *user_data);
+
 static void confirm_install_cb(void *user_data) {
     (void)user_data;
     esp_err_t err = cloud_store_install_async(s_pending_type, s_pending_id);
@@ -674,8 +676,11 @@ static void cloud_store_destroy(void) {
 // instead of leaving the view. Returns true if it consumed the back action.
 static bool try_cancel_download(void) {
     if (!s_progress) return false;
-    if (cloud_store_get_status().state != CLOUD_STORE_STATE_DOWNLOADING) return false;
-    cloud_store_cancel_install();
+    cloud_store_status_t status = cloud_store_get_status();
+    if (status.state == CLOUD_STORE_STATE_DOWNLOADING ||
+        status.state == CLOUD_STORE_STATE_INSTALLING) {
+        cloud_store_cancel_install();
+    }
     close_progress();
     toast_show_duration("Download cancelled", TOAST_INFO, 1400);
     return true;

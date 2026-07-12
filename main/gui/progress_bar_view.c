@@ -188,7 +188,6 @@ progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, voi
             lv_obj_center(back_label);
         }
     }
-#endif
 
     return view;
 }
