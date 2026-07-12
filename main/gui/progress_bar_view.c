@@ -12,6 +12,7 @@
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
+uint32_t theme_palette_get_surface_alt(uint8_t theme);
 uint32_t theme_palette_get_text(uint8_t theme);
 uint32_t theme_palette_get_accent(uint8_t theme);
 
@@ -23,6 +24,9 @@ struct progress_bar_view_t {
     lv_obj_t *fill;
     lv_obj_t *percent;
     lv_obj_t *subtext;
+    lv_obj_t *touch_bar;
+    void (*on_cancel)(void *);
+    void *cancel_user_data;
     bool active;
     bool indeterminate; // true while total size is unknown (sliding segment instead of a fake 0%)
 };
@@ -35,7 +39,18 @@ static const lv_font_t *progress_body_font(void) {
     return LV_VER_RES <= 135 ? accessibility_get_font_small() : accessibility_get_font_body();
 }
 
+#define PROGRESS_TOUCH_BAR_H 34
+
+static void progress_cancel_btn_cb(lv_event_t *e) {
+    progress_bar_view_t *view = lv_event_get_user_data(e);
+    if (view && view->on_cancel) view->on_cancel(view->cancel_user_data);
+}
+
 progress_bar_view_t *progress_bar_view_create(const char *title) {
+    return progress_bar_view_create_with_cancel(title, NULL, NULL);
+}
+
+progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, void (*on_cancel)(void *), void *user_data) {
     progress_bar_view_t *view = calloc(1, sizeof(*view));
     if (!view) return NULL;
 
@@ -132,6 +147,48 @@ progress_bar_view_t *progress_bar_view_create(const char *title) {
     lv_obj_add_flag(view->subtext, LV_OBJ_FLAG_HIDDEN);
 
     view->active = true;
+    view->on_cancel = on_cancel;
+    view->cancel_user_data = user_data;
+    view->touch_bar = NULL;
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    {
+#else
+    if (0) {
+#endif
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
+        lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+        lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
+
+        // Shrink the card to leave room for the touch bar
+        lv_obj_set_height(view->card, card_h - PROGRESS_TOUCH_BAR_H);
+
+        view->touch_bar = lv_obj_create(view->container);
+        lv_obj_remove_style_all(view->touch_bar);
+        lv_obj_set_size(view->touch_bar, LV_HOR_RES, PROGRESS_TOUCH_BAR_H);
+        lv_obj_align(view->touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_bg_color(view->touch_bar, bg_color, 0);
+        lv_obj_set_style_bg_opa(view->touch_bar, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(view->touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+        if (on_cancel) {
+            lv_obj_t *back_btn = lv_btn_create(view->touch_bar);
+            lv_obj_set_size(back_btn, PROGRESS_TOUCH_BAR_H + 24, PROGRESS_TOUCH_BAR_H - 6);
+            lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_style_bg_color(back_btn, ctrl_color, LV_PART_MAIN);
+            lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
+            lv_obj_set_style_pad_hor(back_btn, 8, LV_PART_MAIN);
+            lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+            lv_obj_add_event_cb(back_btn, progress_cancel_btn_cb, LV_EVENT_CLICKED, view);
+            lv_obj_t *back_label = lv_label_create(back_btn);
+            lv_label_set_text(back_label, LV_SYMBOL_LEFT "  Back");
+            lv_obj_set_style_text_color(back_label, ctrl_text, 0);
+            lv_obj_center(back_label);
+        }
+    }
+
     return view;
 }
 

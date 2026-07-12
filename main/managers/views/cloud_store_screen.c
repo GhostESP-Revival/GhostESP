@@ -97,6 +97,8 @@ static uint32_t s_last_refresh_ms;
 static cloud_store_state_t s_last_status_state;
 static char s_pending_id[CLOUD_STORE_ID_MAX];
 static cloud_store_item_type_t s_pending_type;
+static touch_drag_t s_touch_drag;
+#define CLOUD_SWIPE_THRESHOLD_RATIO 4
 static sorted_cloud_item_t s_sorted_apps[CLOUD_STORE_MAX_ITEMS];
 static int s_sorted_apps_count;
 static sorted_cloud_item_t s_sorted_packs[CLOUD_STORE_MAX_ITEMS];
@@ -427,6 +429,8 @@ static void start_refresh(bool user_initiated) {
     render_store();
 }
 
+static void progress_cancel_cb(void *user_data);
+
 static void confirm_install_cb(void *user_data) {
     (void)user_data;
     esp_err_t err = cloud_store_install_async(s_pending_type, s_pending_id);
@@ -438,7 +442,7 @@ static void confirm_install_cb(void *user_data) {
         toast_show_duration("Install task failed to start", TOAST_ERROR, 1800);
         return;
     }
-    if (!s_progress) s_progress = progress_bar_view_create("Downloading");
+    if (!s_progress) s_progress = progress_bar_view_create_with_cancel("Downloading", progress_cancel_cb, NULL);
     if (s_progress) progress_bar_view_set_subtext(s_progress, "Starting download");
 }
 
@@ -557,6 +561,13 @@ static void close_progress(void) {
     }
 }
 
+static void progress_cancel_cb(void *user_data) {
+    (void)user_data;
+    cloud_store_cancel_install();
+    close_progress();
+    toast_show_duration("Download cancelled", TOAST_INFO, 1400);
+}
+
 static void status_timer_cb(lv_timer_t *timer) {
     (void)timer;
     cloud_store_status_t status = cloud_store_get_status();
@@ -576,19 +587,19 @@ static void status_timer_cb(lv_timer_t *timer) {
     }
 
     if (status.state != s_last_status_state) {
-        if (status.state == CLOUD_STORE_STATE_READY || status.state == CLOUD_STORE_STATE_FAILED) {
-            // READY here can also mean a cancelled install returned to the
-            // catalog; make sure any lingering progress bar is torn down.
-            close_progress();
-            render_store();
-        }
         if (status.state == CLOUD_STORE_STATE_DONE) {
             close_progress();
             toast_show_duration(status.active_type == CLOUD_STORE_TYPE_APP ? "App installed" : "Asset pack downloaded", TOAST_SUCCESS, 2200);
             render_store();
-        } else if (status.state == CLOUD_STORE_STATE_FAILED && s_progress) {
+        } else if (status.state == CLOUD_STORE_STATE_FAILED) {
             close_progress();
             toast_show_duration(status.error[0] ? status.error : "Cloud install failed", TOAST_ERROR, 2500);
+            render_store();
+        } else if (status.state == CLOUD_STORE_STATE_READY) {
+            // READY here can also mean a cancelled install returned to the
+            // catalog; make sure any lingering progress bar is torn down.
+            close_progress();
+            render_store();
         }
         s_last_status_state = status.state;
     }
@@ -615,6 +626,7 @@ static void cloud_store_create(void) {
     s_current_category[0] = '\0';
     s_selected_row = 0;
     s_last_refresh_ms = 0;
+    touch_drag_reset(&s_touch_drag);
     render_store();
     // 100ms rather than the previous 300ms: cloud_store_manager's status is a
     // single polled struct, not a queue, and small app installs can finish
@@ -633,6 +645,7 @@ static void cloud_store_create(void) {
 static void cloud_store_destroy(void) {
     popup_confirm_close(&s_confirm_popup);
     close_progress();
+    touch_drag_reset(&s_touch_drag);
     if (s_loading) {
         scan_status_close(s_loading); // lives on lv_layer_top, not under s_root
         s_loading = NULL;
@@ -663,8 +676,11 @@ static void cloud_store_destroy(void) {
 // instead of leaving the view. Returns true if it consumed the back action.
 static bool try_cancel_download(void) {
     if (!s_progress) return false;
-    if (cloud_store_get_status().state != CLOUD_STORE_STATE_DOWNLOADING) return false;
-    cloud_store_cancel_install();
+    cloud_store_status_t status = cloud_store_get_status();
+    if (status.state == CLOUD_STORE_STATE_DOWNLOADING ||
+        status.state == CLOUD_STORE_STATE_INSTALLING) {
+        cloud_store_cancel_install();
+    }
     close_progress();
     toast_show_duration("Download cancelled", TOAST_INFO, 1400);
     return true;
@@ -678,7 +694,73 @@ static bool cloud_store_keyboard_activation_key(int key) {
 static void cloud_store_input(InputEvent *event) {
     if (!event) return;
     if (event->type == INPUT_TYPE_TOUCH) {
-        if (popup_confirm_handle_touch(&s_confirm_popup, &event->data.touch_data)) return;
+        lv_indev_data_t *data = &event->data.touch_data;
+
+        if (data->state == LV_INDEV_STATE_PR) {
+            if (popup_confirm_handle_touch(&s_confirm_popup, data)) {
+                touch_drag_reset(&s_touch_drag);
+                return;
+            }
+            if (!s_touch_drag.started) {
+                touch_drag_begin(&s_touch_drag, data);
+            } else {
+                lv_obj_t *list = s_options ? options_view_get_list(s_options) : NULL;
+                if (list && lv_obj_is_valid(list)) {
+                    touch_drag_update(&s_touch_drag, data, list);
+                }
+            }
+            return;
+        }
+
+        if (data->state == LV_INDEV_STATE_REL) {
+            if (popup_confirm_is_open(s_confirm_popup)) {
+                popup_confirm_handle_touch(&s_confirm_popup, data);
+                touch_drag_reset(&s_touch_drag);
+                return;
+            }
+
+            if (!s_touch_drag.started) {
+                touch_drag_reset(&s_touch_drag);
+                return;
+            }
+
+            int saved_start_x = s_touch_drag.start_x;
+            int saved_start_y = s_touch_drag.start_y;
+            int dx = data->point.x - saved_start_x;
+            int dy = data->point.y - saved_start_y;
+            int thr_x = LV_HOR_RES / CLOUD_SWIPE_THRESHOLD_RATIO;
+
+            bool was_dragged = touch_drag_release(&s_touch_drag, data);
+            if (was_dragged) {
+                display_manager_flush_pending_scroll();
+                return;
+            }
+
+            // Swipe right = go back
+            if (dx > thr_x && abs(dx) > abs(dy)) {
+                go_up_level();
+                return;
+            }
+
+            // Tap: hit-test rows to find which one was touched
+            lv_obj_t *list = s_options ? options_view_get_list(s_options) : NULL;
+            if (!list || !lv_obj_is_valid(list)) return;
+
+            int count = row_count();
+            for (int i = 0; i < count && i < CLOUD_STORE_MAX_ROWS; i++) {
+                if (!s_rows[i] || !lv_obj_is_valid(s_rows[i])) continue;
+                lv_area_t area;
+                lv_obj_get_coords(s_rows[i], &area);
+                if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
+                    data->point.y >= area.y1 && data->point.y <= area.y2) {
+                    s_selected_row = i;
+                    update_selection();
+                    select_current();
+                    return;
+                }
+            }
+            return;
+        }
         return;
     }
     if (event->type == INPUT_TYPE_JOYSTICK) {
