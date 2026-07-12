@@ -10,6 +10,7 @@ extern "C" {
 typedef struct progress_bar_view_t progress_bar_view_t;
 
 progress_bar_view_t *progress_bar_view_create(const char *title);
+progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, void (*on_cancel)(void *), void *user_data);
 void progress_bar_view_update(progress_bar_view_t *view, const char *title);
 void progress_bar_view_set_subtext(progress_bar_view_t *view, const char *subtext);
 void progress_bar_view_set_progress(progress_bar_view_t *view, size_t current, size_t total);
