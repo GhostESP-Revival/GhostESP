@@ -584,7 +584,7 @@ jobs:
           Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG
           Changelog: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md
 
-          You can flash the bins with https://espressoflash.com/
+          You can flash the bins with https://ghostesp.net/flasher
           EOF
           if [ -z "$(ls -A release_assets/*.zip 2>/dev/null)" ]; then
             echo "No ZIP files found in release_assets. Creating pre-release without assets."
@@ -749,7 +749,7 @@ jobs:
           Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG
           Changelog: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md
 
-          You can flash the bins with https://espressoflash.com/
+          You can flash the bins with https://ghostesp.net/flasher
           EOF
           if [ -z "$(ls -A release_assets/*.zip 2>/dev/null)" ]; then
             echo "No ZIP files found in release_assets. Creating release without assets."
