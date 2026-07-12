@@ -6,6 +6,7 @@ import shutil
 
 REPO_MARKERS = ["plugins", "main", "components"]
 SDK_RELATIVE = pathlib.Path("plugins") / "sdk"
+HELPERS_FILENAME = "ghostesp_helpers.h"
 TEMPLATES_RELATIVE = pathlib.Path("plugins") / "templates"
 
 
@@ -74,6 +75,12 @@ def copy_bundled_sdk(dst_dir: pathlib.Path) -> pathlib.Path:
     src = resolve_sdk_path()
     if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
         shutil.copy2(src, dst)
+    # Also copy helpers header if present alongside the SDK header
+    helpers_src = src.parent / HELPERS_FILENAME
+    if helpers_src.is_file():
+        helpers_dst = dst_dir / "sdk" / HELPERS_FILENAME
+        if not helpers_dst.exists() or helpers_src.stat().st_mtime > helpers_dst.stat().st_mtime:
+            shutil.copy2(helpers_src, helpers_dst)
     return dst
 
 

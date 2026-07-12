@@ -916,6 +916,278 @@ void *(*display_get_current_view)(void);
 void *(*raw_symbol)(const char *name);
 ```
 
+## SDK Helpers (`ghostesp_helpers.h`)
+
+The SDK ships an optional `ghostesp_helpers.h` header alongside `ghostesp_plugin_api.h`. It provides inline functions and macros that eliminate the most common boilerplate patterns. All helpers are zero-cost for unused functions — just `#include "ghostesp_helpers.h"` alongside the API header.
+
+### Null-Safe API Calls
+
+Every API function pointer can be null if the firmware predates that feature. The `GH_CALL` and `GH_VOID` macros wrap the null check:
+
+```c
+// Before (repeated dozens of times):
+if (api->ui_obj_set_bg_color) api->ui_obj_set_bg_color(obj, 0x333333);
+
+// After:
+GH_VOID(api, ui_obj_set_bg_color, obj, 0x333333);
+GH_CALL(api, ui_screen_get_width);  // returns 0 if null
+```
+
+### Theme Snapshot
+
+Cache all theme colors once at startup instead of querying with null checks everywhere:
+
+```c
+ghostesp_theme_t theme;
+gh_theme_init(api, &theme);
+
+// Use theme.bg, theme.surface, theme.surface_alt, theme.text,
+// theme.text_muted, theme.accent, theme.bright
+```
+
+### Layout Snapshot
+
+Cache screen dimensions and device capabilities once:
+
+```c
+ghostesp_layout_t layout;
+gh_layout_init(api, &layout);
+
+// Use layout.w, layout.h, layout.content_w, layout.content_h,
+// layout.compact, layout.has_touch
+```
+
+### Widget Styling
+
+Batch-apply common style properties in one call:
+
+```c
+// Full style (pass -1 to skip any property):
+gh_style(api, obj, 0x333333, 0xFFFFFF, 14, 0, GHOSTESP_FONT_BODY);
+
+// Common combo (bg + text + radius, border always 0):
+gh_style_simple(api, btn, 0x333333, 0xFFFFFF, 14);
+```
+
+### Styled Widget Constructors
+
+Create fully styled widgets in a single call:
+
+```c
+ghostesp_ui_obj_t btn = gh_button(api, parent, "Click Me",
+    0xFF9F0A, 0xFFFFFF, 14, on_click, user);
+
+ghostesp_ui_obj_t lbl = gh_label(api, parent, "Hello",
+    theme.text, GHOSTESP_FONT_BODY);
+```
+
+### Container Helpers
+
+Quickly create flex containers (transparent background, no border, no padding):
+
+```c
+ghostesp_ui_obj_t row = gh_row(api, parent);      // flex row
+ghostesp_ui_obj_t col = gh_column(api, parent);    // flex column
+```
+
+### Touch Swipe Detection
+
+Track touch press/release and get the swipe direction. Replaces the ~30-line pattern copy-pasted across all examples:
+
+```c
+static ghostesp_touch_state_t ts;
+
+void on_input(const ghostesp_input_event_t *event) {
+    ghostesp_input_type_t swipe = gh_touch_update(&ts, event);
+    if (swipe == GHOSTESP_INPUT_RIGHT) app_exit();
+    else if (swipe == GHOSTESP_INPUT_DOWN) scroll(1);
+    else if (swipe == GHOSTESP_INPUT_UP) scroll(-1);
+}
+```
+
+Use `gh_touch_update_tap()` to also detect taps (press + release with no significant movement). Call `gh_touch_reset()` when changing pages/views.
+
+### Touch Bar
+
+Create a standard touch bar in one call:
+
+```c
+// Simple (back button only):
+ghostesp_ui_obj_t bar = gh_touch_bar(api, true, on_back, NULL);
+
+// Full (back + scroll up/down):
+ghostesp_ui_obj_t bar = gh_touch_bar_full(api,
+    on_back, NULL, on_up, NULL, on_down, NULL, true);
+```
+
+### D-Pad Grid Navigation
+
+Manage 2D button grid selection with d-pad input. Handles wrapping, sparse grids, and selection highlighting:
+
+```c
+static const uint8_t grid_cols[] = {4, 4, 4, 4, 3}; // 5 rows, last has 3 cols
+ghostesp_grid_t grid;
+gh_grid_init(&grid, 5, grid_cols);
+
+// In on_input:
+int btn = gh_grid_input(&grid, event);
+if (btn >= 0) {
+    if (event->type == GHOSTESP_INPUT_SELECT) handle_button(btn);
+    gh_grid_highlight(&grid, api, btn_objs, btn_count);
+}
+```
+
+### Standard Input Handler
+
+Combine d-pad, touch swipe, back button, and keyboard shortcuts into one dispatcher:
+
+```c
+static ghostesp_nav_t nav = {
+    .on_up = on_up, .on_down = on_down,
+    .on_select = on_select, .on_back = on_back,
+    .swipe_back = true, .swipe_vert = true,
+};
+
+// In on_input:
+gh_nav_input(api, &nav, event, NULL);
+```
+
+### Popup Helper
+
+Create and show a popup in one call:
+
+```c
+ghostesp_popup_t p = gh_popup(api, 260, 180,
+    "Error", "File not found", "OK", on_ok, NULL);
+```
+
+### Detail View Helpers
+
+```c
+gh_detail_section(dv, api, "Section Header");
+gh_detail_printf(dv, api, "Uptime", "%lu ms", uptime);
+```
+
+### Canvas Drawing Extras
+
+The canvas API lacks filled circles and single pixels. Helpers fill the gaps:
+
+```c
+gh_canvas_fill_circle(api, canvas, cx, cy, 20, theme.accent);
+gh_canvas_pixel(api, canvas, x, y, 0xFFFFFF);
+gh_canvas_rect_outline(api, canvas, x, y, w, h, color, 2);
+```
+
+### App Init Boilerplate
+
+Generate the `ghostesp_app_init()` and `app_main()` functions:
+
+```c
+// At bottom of your .c file (sets api pointer automatically):
+GHOSTESP_APP_INIT_WITH_API(app, api, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
+
+// Without setting api pointer:
+GHOSTESP_APP_INIT(app, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
+```
+
+### Color Utilities
+
+```c
+uint32_t c = GH_RGB(255, 159, 10);       // 0xFF9F0A
+uint32_t dim = gh_color_dim(c, 128);       // 50% brightness
+uint32_t blend = gh_color_blend(c1, c2, 128); // 50/50 blend
+```
+
+### Math Helpers
+
+```c
+int v = gh_clamp(value, 0, 100);   // clamp to range
+int lo = gh_min(a, b);              // minimum
+int hi = gh_max(a, b);              // maximum
+int mapped = gh_map(val, 0, 1023, 0, 240);  // map between ranges
+```
+
+### Formatted Label Update
+
+Eliminates the `snprintf` + `ui_label_set_text` two-liner:
+
+```c
+// Before:
+char buf[64];
+snprintf(buf, sizeof(buf), "%lu ms", (unsigned long)uptime);
+api->ui_label_set_text(label, buf);
+
+// After:
+gh_label_printf(api, label, "%lu ms", (unsigned long)uptime);
+```
+
+### Formatted Status Bar
+
+```c
+gh_status_printf(api, "Step %d: RGB(%d,%d,%d)", step, r, g, b);
+```
+
+### MAC Address Formatter
+
+Writes `"AA:BB:CC:DD:EE:FF"` into a buffer (requires >= 18 bytes):
+
+```c
+char mac[18];
+gh_mac_fmt(mac, device->mac);
+api->ui_detail_add_info(dv, "MAC", mac);
+```
+
+### Confirmation Popup
+
+Two-button Yes/No dialog:
+
+```c
+ghostesp_popup_t p = gh_confirm(api, 260, 160,
+    "Delete File?", "This cannot be undone.",
+    on_yes, on_no, user);
+```
+
+### Options Menu from String Array
+
+Populate an options menu from a simple string array:
+
+```c
+const char *colors[] = {"Red", "Green", "Blue"};
+gh_options_from_array(api, menu, colors, 3, on_select, NULL);
+```
+
+### Detail View from Arrays
+
+Populate a detail view from parallel label/value arrays:
+
+```c
+const char *labels[] = {"Name", "Type", "Size"};
+const char *values[] = {"file.txt", "Text", "1.2 KB"};
+gh_detail_from_arrays(dv, api, labels, values, 3);
+```
+
+### Responsive Layout
+
+Set up a screen with responsive row/column layout based on screen orientation:
+
+```c
+ghostesp_flex_flow_t flow = gh_responsive_setup(api, screen, &layout);
+// flow is ROW for landscape, COLUMN for portrait
+```
+
+### Page Stack
+
+Simple push/pop page stack for menu navigation:
+
+```c
+static int page_stack[8];
+static int page_depth = 0;
+
+gh_page_push(page_stack, &page_depth, 8, PAGE_SETTINGS);
+int current = gh_page_current(page_stack, page_depth);
+gh_page_pop(&page_depth);
+```
+
 ## Application Template
 
 The SDK includes a template project:
@@ -935,14 +1207,28 @@ plugins/templates/basic_app/
 
 ```c
 #include "ghostesp_plugin_api.h"
+#include "ghostesp_helpers.h"
 
-static const ghostesp_api_t *g_api;
+static const ghostesp_api_t *api;
+static ghostesp_theme_t theme;
+static ghostesp_layout_t layout;
 
 static void on_start(void) {
-    g_api->ui_print("Hello from SD app!\n");
+    gh_theme_init(api, &theme);
+    gh_layout_init(api, &layout);
+    api->ui_print("Hello from SD app!\n");
 }
 
-GHOSTESP_APP_DEFINE("my_app", "My App", on_start, NULL, NULL, NULL)
+static void on_input(const ghostesp_input_event_t *event) {
+    if (!event) return;
+    if (event->type == GHOSTESP_INPUT_BACK) GH_VOID(api, app_exit);
+}
+
+static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(
+    "my_app", "My App", on_start, NULL, on_input, NULL
+);
+
+GHOSTESP_APP_INIT_WITH_API(app, api, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
 ```
 
 ### CMake Project Structure
