@@ -58,6 +58,29 @@ static void runner_print(const char *text, void *user);
 static void launch_now(void);
 static void launch_when_ready(void *arg);
 
+bool ghostscript_runner_stop_script(void) {
+    if (!s_lifecycle_mutex) return false;
+    xSemaphoreTake(s_lifecycle_mutex, portMAX_DELAY);
+    if (!s_runtime_mutex) {
+        xSemaphoreGive(s_lifecycle_mutex);
+        return false;
+    }
+    xSemaphoreTake(s_runtime_mutex, portMAX_DELAY);
+    bool active = s_rt && ghostscript_runtime_state(s_rt) == GHOSTSCRIPT_STATE_RUNNING;
+    if (active) ghostscript_runtime_stop(s_rt);
+    xSemaphoreGive(s_runtime_mutex);
+    xSemaphoreGive(s_lifecycle_mutex);
+    return active;
+}
+
+bool ghostscript_runner_is_script_active(void) {
+    if (!s_lifecycle_mutex) return false;
+    xSemaphoreTake(s_lifecycle_mutex, portMAX_DELAY);
+    bool active = s_script_task != NULL;
+    xSemaphoreGive(s_lifecycle_mutex);
+    return active;
+}
+
 static void script_task_fn(void *arg) {
     script_task_args_t *task_args = (script_task_args_t *)arg;
     ghostscript_manifest_t manifest;
@@ -100,15 +123,15 @@ static void script_task_fn(void *arg) {
         runner_set_status("Failed");
         runner_print("Error: ", NULL);
         runner_print(ghostscript_runtime_error(s_rt), NULL);
-        snprintf(msg, sizeof(msg), "\nLua heap: %lu/%lu bytes\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt));
+        snprintf(msg, sizeof(msg), "\nLua heap: %lu/%lu bytes (peak %lu)\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
         runner_print(msg, NULL);
         ghostscript_manager_record_failure(ghostscript_runtime_manifest(s_rt), ghostscript_runtime_error(s_rt));
         toast_show_duration("GhostScript failed", TOAST_ERROR, 2200);
         final_handled = true;
     } else if (state == GHOSTSCRIPT_STATE_DONE) {
-        snprintf(msg, sizeof(msg), "Done | heap %lu/%lu", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt));
+        snprintf(msg, sizeof(msg), "Done | heap %lu/%lu peak %lu", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
         runner_set_status(msg);
-        snprintf(msg, sizeof(msg), "\nDone. Lua heap used: %lu bytes\n", (unsigned long)ghostscript_runtime_memory_used(s_rt));
+        snprintf(msg, sizeof(msg), "\nDone. Lua heap used: %lu bytes (peak %lu)\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
         runner_print(msg, NULL);
         ghostscript_manager_record_clean_exit(ghostscript_runtime_manifest(s_rt));
         final_handled = true;
@@ -133,14 +156,14 @@ static void script_task_fn(void *arg) {
             runner_set_status("Failed");
             runner_print("Error: ", NULL);
             runner_print(ghostscript_runtime_error(s_rt), NULL);
-            snprintf(msg, sizeof(msg), "\nLua heap: %lu/%lu bytes\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt));
+            snprintf(msg, sizeof(msg), "\nLua heap: %lu/%lu bytes (peak %lu)\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
             runner_print(msg, NULL);
             ghostscript_manager_record_failure(ghostscript_runtime_manifest(s_rt), ghostscript_runtime_error(s_rt));
             toast_show_duration("GhostScript failed", TOAST_ERROR, 2200);
         } else if (state == GHOSTSCRIPT_STATE_DONE) {
-            snprintf(msg, sizeof(msg), "Done | heap %lu/%lu", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt));
+            snprintf(msg, sizeof(msg), "Done | heap %lu/%lu peak %lu", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_limit(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
             runner_set_status(msg);
-            snprintf(msg, sizeof(msg), "\nDone. Lua heap used: %lu bytes\n", (unsigned long)ghostscript_runtime_memory_used(s_rt));
+            snprintf(msg, sizeof(msg), "\nDone. Lua heap used: %lu bytes (peak %lu)\n", (unsigned long)ghostscript_runtime_memory_used(s_rt), (unsigned long)ghostscript_runtime_memory_peak(s_rt));
             runner_print(msg, NULL);
             ghostscript_manager_record_clean_exit(ghostscript_runtime_manifest(s_rt));
         }
@@ -289,15 +312,7 @@ static void back_to_browser(void) {
 }
 
 static void stop_script(void) {
-    bool stopped = false;
-    if (s_runtime_mutex && xSemaphoreTake(s_runtime_mutex, portMAX_DELAY) == pdTRUE) {
-        if (s_rt) {
-            ghostscript_runtime_stop(s_rt);
-            stopped = true;
-        }
-        xSemaphoreGive(s_runtime_mutex);
-    }
-    if (stopped) {
+    if (ghostscript_runner_stop_script()) {
         runner_set_status("Stopped");
         runner_print("\nStopped by user.\n", NULL);
         toast_show_duration("GhostScript stopped", TOAST_INFO, 1200);

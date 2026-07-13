@@ -34,7 +34,7 @@ const char *ghostscript_manager_last_error(void) {
 
 bool ghostscript_manager_sd_begin(bool *display_was_suspended) {
     if (display_was_suspended) *display_was_suspended = false;
-    if (!sd_card_jit_begin(display_was_suspended, true)) {
+    if (!sd_card_jit_begin(display_was_suspended, false)) {
         set_error("SD mount failed");
         ESP_LOGW(TAG, "SD JIT mount failed");
         return false;
@@ -265,8 +265,8 @@ bool ghostscript_manager_load_manifest(const char *path, ghostscript_manifest_t 
     snprintf(out->data_path, sizeof(out->data_path), "%s/%s", GHOSTSCRIPT_DATA_DIR, out->id);
     out->memory_limit = clamp_memory_limit(out->memory_limit);
     out->valid = true;
-    read_state(out);
     cJSON_Delete(root);
+    read_state(out);
     return true;
 }
 

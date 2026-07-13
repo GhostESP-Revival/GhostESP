@@ -376,6 +376,9 @@ void register_commands() {
     register_command("nrf24", handle_nrf24_cmd);
     register_command("audio", handle_audio_cmd);
     register_command("badusb", handle_badusb_cmd);
+#if CONFIG_ENABLE_GHOSTSCRIPT
+    register_command("script", handle_script_cmd);
+#endif
 #ifdef CONFIG_WITH_ETHERNET
     register_command("ethup", handle_eth_up_cmd);
     register_command("ethdown", handle_eth_down_cmd);
@@ -427,6 +430,5 @@ void register_commands() {
 
     glog("Registered Commands\n");
 }
-
 
 

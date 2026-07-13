@@ -27,7 +27,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define GS_ALLOC_MAGIC 0x4753u  /* "GS" */
 #define GS_READ_BUF_MAX 1024
 #define GS_LOAD_CHUNK 128
 #define GS_COMMAND_LOG_LINES 16
@@ -43,10 +42,17 @@ typedef enum {
 
 typedef struct {
     gs_queued_kind_t kind;
-    char name[GS_EVENT_NAME_MAX];
-    char value[GS_EVENT_VALUE_MAX];
-    InputEvent input;
 } gs_queued_event_t;
+
+typedef struct {
+    gs_queued_kind_t kind;
+    InputEvent input;
+} gs_queued_input_t;
+
+typedef struct {
+    gs_queued_kind_t kind;
+    char text[];
+} gs_queued_text_event_t;
 
 static void *gs_heap_alloc(size_t size) {
     return heap_caps_malloc_prefer(size, 2,
@@ -61,8 +67,7 @@ static void *gs_heap_realloc(void *ptr, size_t size) {
 }
 
 typedef struct {
-    uint16_t magic;
-    uint16_t size;
+    size_t size;
 } gs_alloc_header_t;
 
 struct ghostscript_runtime {
@@ -74,6 +79,7 @@ struct ghostscript_runtime {
     const ghostesp_api_t *api;
     ghostscript_state_t state;
     size_t memory_used;
+    size_t memory_peak;
     size_t memory_limit;
     int64_t slice_start_us;
     bool stop_requested;
@@ -131,30 +137,28 @@ static void *gs_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     if (nsize == 0) {
         if (ptr) {
             gs_alloc_header_t *h = ((gs_alloc_header_t *)ptr) - 1;
-            if (h->magic == GS_ALLOC_MAGIC && rt->memory_used >= h->size) rt->memory_used -= h->size;
+            if (rt->memory_used >= h->size) rt->memory_used -= h->size;
             heap_caps_free(h);
         }
         return NULL;
     }
-    if (nsize > UINT16_MAX) return NULL;
     if (!ptr) {
         if (rt->memory_used + nsize > rt->memory_limit) return NULL;
         gs_alloc_header_t *h = gs_heap_alloc(sizeof(*h) + nsize);
         if (!h) return NULL;
-        h->magic = GS_ALLOC_MAGIC;
-        h->size = (uint16_t)nsize;
+        h->size = nsize;
         rt->memory_used += nsize;
+        if (rt->memory_used > rt->memory_peak) rt->memory_peak = rt->memory_used;
         return h + 1;
     }
     gs_alloc_header_t *old = ((gs_alloc_header_t *)ptr) - 1;
-    if (old->magic != GS_ALLOC_MAGIC) return NULL;
     size_t old_size = old->size;
     if (nsize > old_size && rt->memory_used + (nsize - old_size) > rt->memory_limit) return NULL;
     gs_alloc_header_t *h = gs_heap_realloc(old, sizeof(*h) + nsize);
     if (!h) return NULL;
-    h->magic = GS_ALLOC_MAGIC;
-    h->size = (uint16_t)nsize;
+    h->size = nsize;
     rt->memory_used = rt->memory_used - old_size + nsize;
+    if (rt->memory_used > rt->memory_peak) rt->memory_peak = rt->memory_used;
     return h + 1;
 }
 
@@ -504,6 +508,16 @@ static void note_dispatch(ghostscript_runtime_t *rt, const char *name, int64_t n
     rt->last_dispatch_us[h % 16] = now;
 }
 
+/* ghost.exit() raises a Lua error to unwind the current callback immediately.
+ * Convert that private control flow into a normal completed script state. */
+static bool runtime_finish_requested_exit(ghostscript_runtime_t *rt, lua_State *L) {
+    if (!rt || !rt->stop_requested) return false;
+    if (L && lua_gettop(L) > 0) lua_pop(L, 1);
+    rt->script_done = true;
+    rt->state = GHOSTSCRIPT_STATE_DONE;
+    return true;
+}
+
 static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const char *value) {
     if (!rt || !rt->L || !name) return;
     if (strcmp(name, "nfc_tag") == 0 && value) {
@@ -543,10 +557,15 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
             lua_pushstring(rt->L, value ? value : "");
             runtime_begin_slice(rt);
             if (lua_pcall(rt->L, 1, 0, 0) != LUA_OK) {
+                if (runtime_finish_requested_exit(rt, rt->L)) break;
                 glog("event handler error: %s", lua_tostring(rt->L, -1));
                 lua_pop(rt->L, 1);
             }
         }
+    }
+    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) {
+        lua_pop(rt->L, 2);
+        return;
     }
     lua_pop(rt->L, 1);
     lua_getfield(rt->L, -1, "_waits");
@@ -581,6 +600,10 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
             int nres = 0;
             int rc = lua_resume(co, NULL, 1, &nres);
             if (rc != LUA_OK && rc != LUA_YIELD) {
+                if (runtime_finish_requested_exit(rt, co)) {
+                    lua_pop(rt->L, 1);
+                    break;
+                }
                 glog("wait resume error: %s", lua_tostring(co, -1));
                 lua_pop(co, 1);
             } else if (nres > 0) {
@@ -620,6 +643,10 @@ static void runtime_expire_waits(ghostscript_runtime_t *rt) {
             int nres = 0;
             int rc = lua_resume(co, NULL, 1, &nres);
             if (rc != LUA_OK && rc != LUA_YIELD) {
+                if (runtime_finish_requested_exit(rt, co)) {
+                    lua_pop(rt->L, 1);
+                    break;
+                }
                 glog("wait timeout error: %s", lua_tostring(co, -1));
                 lua_pop(co, 1);
             } else if (nres > 0) {
@@ -627,6 +654,7 @@ static void runtime_expire_waits(ghostscript_runtime_t *rt) {
             }
         }
         lua_pop(rt->L, 1);
+        if (rt->state != GHOSTSCRIPT_STATE_RUNNING) break;
     }
     lua_pop(rt->L, 2);
 }
@@ -1742,21 +1770,20 @@ ghostscript_runtime_t *ghostscript_runtime_get_active(void) {
     return rt;
 }
 
-static bool queue_event(ghostscript_runtime_t *rt, const gs_queued_event_t *event) {
+static bool queue_event(ghostscript_runtime_t *rt, gs_queued_event_t *event) {
     if (!rt || !event) return false;
 
     taskENTER_CRITICAL(&s_active_runtime_mux);
     QueueHandle_t queue = (rt == s_active_runtime) ? s_event_queue : NULL;
     if (queue) s_event_senders++;
     taskEXIT_CRITICAL(&s_active_runtime_mux);
-    if (!queue) return false;
+    if (!queue) {
+        heap_caps_free(event);
+        return false;
+    }
 
-    /* Keep only pointers in the FreeRTOS queue: a full inline event queue is
-     * about 9 KB of scarce internal RAM on display-heavy boards. */
-    gs_queued_event_t *queued_event = gs_heap_alloc(sizeof(*queued_event));
-    if (queued_event) *queued_event = *event;
-    bool queued = queued_event && xQueueSend(queue, &queued_event, 0) == pdPASS;
-    if (!queued) heap_caps_free(queued_event);
+    bool queued = event && xQueueSend(queue, &event, 0) == pdPASS;
+    if (!queued) heap_caps_free(event);
     taskENTER_CRITICAL(&s_active_runtime_mux);
     s_event_senders--;
     taskEXIT_CRITICAL(&s_active_runtime_mux);
@@ -1765,10 +1792,16 @@ static bool queue_event(ghostscript_runtime_t *rt, const gs_queued_event_t *even
 
 static bool queue_text_event(ghostscript_runtime_t *rt, const char *name, const char *value) {
     if (!name) return false;
-    gs_queued_event_t event = { .kind = GS_QUEUED_EVENT };
-    snprintf(event.name, sizeof(event.name), "%s", name);
-    snprintf(event.value, sizeof(event.value), "%s", value ? value : "");
-    return queue_event(rt, &event);
+    size_t name_len = strnlen(name, GS_EVENT_NAME_MAX - 1);
+    size_t value_len = strnlen(value ? value : "", GS_EVENT_VALUE_MAX - 1);
+    gs_queued_text_event_t *event = gs_heap_alloc(sizeof(*event) + name_len + value_len + 2);
+    if (!event) return false;
+    event->kind = GS_QUEUED_EVENT;
+    memcpy(event->text, name, name_len);
+    event->text[name_len] = '\0';
+    memcpy(event->text + name_len + 1, value ? value : "", value_len);
+    event->text[name_len + value_len + 1] = '\0';
+    return queue_event(rt, (gs_queued_event_t *)event);
 }
 
 static void runtime_capture_line(const char *line, void *user) {
@@ -2021,7 +2054,9 @@ static FILE *open_script_for_streaming(const char *path) {
 
 ghostscript_runtime_t *ghostscript_runtime_create(const ghostscript_manifest_t *manifest, const ghostscript_runtime_hooks_t *hooks) {
     if (!manifest || !manifest->valid) return NULL;
-    ghostscript_runtime_t *rt = calloc(1, sizeof(*rt));
+    ghostscript_runtime_t *rt = heap_caps_calloc_prefer(1, sizeof(*rt), 2,
+                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!rt) return NULL;
     rt->manifest = *manifest;
     if (hooks) rt->hooks = *hooks;
@@ -2246,8 +2281,9 @@ static bool runtime_resume_script(ghostscript_runtime_t *rt) {
         return true;
     }
     if (rc == LUA_YIELD) return true;
+    if (runtime_finish_requested_exit(rt, rt->thread)) return true;
     runtime_set_lua_error(rt, rt->thread, rc);
-    rt->state = rt->stop_requested ? GHOSTSCRIPT_STATE_STOPPED : GHOSTSCRIPT_STATE_FAILED;
+    rt->state = GHOSTSCRIPT_STATE_FAILED;
     return false;
 }
 
@@ -2347,9 +2383,11 @@ static void runtime_drain_events(ghostscript_runtime_t *rt) {
     gs_queued_event_t *event = NULL;
     while (s_event_queue && xQueueReceive(s_event_queue, &event, 0) == pdPASS) {
         if (event->kind == GS_QUEUED_EVENT) {
-            dispatch_event(rt, event->name, event->value);
+            gs_queued_text_event_t *text_event = (gs_queued_text_event_t *)event;
+            const char *value = text_event->text + strlen(text_event->text) + 1;
+            dispatch_event(rt, text_event->text, value);
         } else {
-            runtime_process_input(rt, &event->input);
+            runtime_process_input(rt, &((gs_queued_input_t *)event)->input);
         }
         heap_caps_free(event);
         if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
@@ -2378,6 +2416,7 @@ void ghostscript_runtime_tick(ghostscript_runtime_t *rt, uint32_t elapsed_ms) {
     runtime_begin_slice(rt);
     int rc = lua_pcall(rt->L, 1, 0, 0);
     if (rc != LUA_OK) {
+        if (runtime_finish_requested_exit(rt, rt->L)) return;
         runtime_set_lua_error(rt, rt->L, rc);
         rt->state = GHOSTSCRIPT_STATE_FAILED;
     }
@@ -2422,8 +2461,16 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
     lua_pushvalue(rt->L, -1);
     lua_setfield(rt->L, LUA_REGISTRYINDEX, "ghostscript.last_input");
     dispatch_event(rt, topic, serialized);
+    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) {
+        lua_pop(rt->L, 1);
+        return;
+    }
     lua_pushvalue(rt->L, -1);
     dispatch_event(rt, "input", serialized);
+    if (rt->state != GHOSTSCRIPT_STATE_RUNNING) {
+        lua_pop(rt->L, 1);
+        return;
+    }
     lua_pop(rt->L, 1);
     lua_getglobal(rt->L, "on_input");
     if (!lua_isfunction(rt->L, -1)) { lua_pop(rt->L, 1); return; }
@@ -2431,6 +2478,7 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
     runtime_begin_slice(rt);
     int rc = lua_pcall(rt->L, 1, 0, 0);
     if (rc != LUA_OK) {
+        if (runtime_finish_requested_exit(rt, rt->L)) return;
         runtime_set_lua_error(rt, rt->L, rc);
         rt->state = GHOSTSCRIPT_STATE_FAILED;
     }
@@ -2438,9 +2486,11 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
 
 void ghostscript_runtime_input(ghostscript_runtime_t *rt, const InputEvent *event) {
     if (!rt || !event) return;
-    gs_queued_event_t queued = { .kind = GS_QUEUED_INPUT };
-    queued.input = *event;
-    (void)queue_event(rt, &queued);
+    gs_queued_input_t *queued = gs_heap_alloc(sizeof(*queued));
+    if (!queued) return;
+    queued->kind = GS_QUEUED_INPUT;
+    queued->input = *event;
+    (void)queue_event(rt, (gs_queued_event_t *)queued);
 }
 
 void ghostscript_runtime_stop(ghostscript_runtime_t *rt) {
@@ -2474,12 +2524,13 @@ void ghostscript_runtime_destroy(ghostscript_runtime_t *rt) {
     for (int i = 0; i < rt->oui_prefix_count; ++i) free(rt->oui_prefix[i]);
     if (rt->L) lua_close(rt->L);
     if (rt->api_active) plugin_api_release();
-    free(rt);
+    heap_caps_free(rt);
 }
 
 ghostscript_state_t ghostscript_runtime_state(const ghostscript_runtime_t *rt) { return rt ? rt->state : GHOSTSCRIPT_STATE_EMPTY; }
 const char *ghostscript_runtime_error(const ghostscript_runtime_t *rt) { return rt ? rt->error : ""; }
 size_t ghostscript_runtime_memory_used(const ghostscript_runtime_t *rt) { return rt ? rt->memory_used : 0; }
+size_t ghostscript_runtime_memory_peak(const ghostscript_runtime_t *rt) { return rt ? rt->memory_peak : 0; }
 size_t ghostscript_runtime_memory_limit(const ghostscript_runtime_t *rt) { return rt ? rt->memory_limit : 0; }
 const ghostscript_manifest_t *ghostscript_runtime_manifest(const ghostscript_runtime_t *rt) { return rt ? &rt->manifest : NULL; }
 

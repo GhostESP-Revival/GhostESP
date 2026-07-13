@@ -18,6 +18,12 @@
 - Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
 
+### GhostScript
+- Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM
+- Added the GhostScript browser and `script list`, `script run <index>`, `script status`, and `script stop` CLI commands
+- Added manifest permissions, scoped script storage, cooperative long-running scripts, failure-state recording, and a PSRAM-preferred runtime event queue
+- Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
+
 ### Wi-Fi
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 

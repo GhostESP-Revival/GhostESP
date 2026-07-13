@@ -7,7 +7,7 @@ toc: true
 
 ## What is GhostScript?
 
-GhostScript is a tiny Lua 5.4 runtime that runs `.gsb` precompiled Lua chunks from the SD card. Scripts can call existing APIs and CLI commands, read output, subscribe to events, and react to input — letting you chain commands and automate multi-step workflows without flashing new firmware.
+GhostScript is a tiny Lua 5.4 runtime that runs `.gsb` precompiled Lua chunks from the SD card. Scripts can call existing APIs and CLI commands, read output, subscribe to events, and react to input, letting you chain commands and automate multi-step workflows without flashing new firmware.
 
 You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, then launch the `.gsb` from the **Apps** menu or the CLI. The device intentionally does not load text `.gs` scripts to keep runtime RAM and firmware size lower.
 
@@ -46,17 +46,32 @@ You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, t
 
 5. Copy the complete `hello/` directory to `/mnt/ghostesp/scripts/`.
 
-6. Launch it from **Main menu → Apps → GhostScript**, then select `hello`.
+6. Launch it from **Main menu → Apps → GhostScript**, then select `hello`, or use the CLI commands below.
 
 > The device accepts `.gsb` bytecode only. Keep `.gs` files as source in your repo or tooling workspace, not as deployable scripts on the device.
+
+## Device CLI
+
+Use the terminal or serial CLI to discover and control scripts without opening the browser:
+
+```text
+script list
+script run <index>
+script status
+script stop
+```
+
+`script list` recursively finds standalone `.gsb` files and directories containing a `manifest.json`, then prints stable indexes. Use an index from that output with `script run <index>`. Only one script can run at a time.
+
+On devices with a screen, `script run` opens the GhostScript runner view. On headless devices, it starts a background task and writes script output to the terminal/serial log. `script stop` requests that active script stop; use `script status` to confirm it has become idle.
 
 ## Lifecycle of a script
 
 A script has three phases:
 
-1. **Top-level chunk** — runs once when you launch the script. Use it for setup, `ghost.event.on(...)` subscriptions, and starting coroutines.
-2. **`on_tick(ms)`** — called every ~100 ms by the runner while the script is alive. Use it for polling, time-based logic, and event-driven state machines. If `on_tick` is defined, the runtime stays alive after the top-level chunk finishes.
-3. **Teardown** — when you call `ghost.exit()` or the script task is destroyed, all coroutines die, all event listeners are cleared, and any open SD files are closed.
+1. **Top-level chunk:** runs once when you launch the script. Use it for setup, `ghost.event.on(...)` subscriptions, and starting coroutines.
+2. **`on_tick(ms)`:** called every ~100 ms by the runner while the script is alive. Use it for polling, time-based logic, and event-driven state machines. If `on_tick` is defined, the runtime stays alive after the top-level chunk finishes.
+3. **Teardown:** when you call `ghost.exit()` or the script task is destroyed, all coroutines die, all event listeners are cleared, and any open SD files are closed.
 
 `ghost.delay(ms)` blocks the script (not the UI) for up to 60 seconds and yields the current chunk if you are in a coroutine.
 
@@ -70,8 +85,8 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `delay`      | Sleep up to 60 s. Yields coroutines.                                        |
 | `exit`       | Request script stop.                                                         |
 | `ui`         | `toast`, `set_title`, `screen_width`, `screen_height`.                       |
-| `event`      | `on`, `off`, `emit`, `wait` — pub/sub between scripts and firmware.          |
-| `input`      | `subscribe`, `unsubscribe` — receive joystick/touch/encoder/keyboard.        |
+| `event`      | `on`, `off`, `emit`, `wait`: pub/sub between scripts and firmware.           |
+| `input`      | `subscribe`, `unsubscribe`: receive joystick/touch/encoder/keyboard.         |
 | `system`     | `free_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random`. |
 | `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`. |
 | `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
@@ -130,7 +145,7 @@ Things to know:
 - `ghost.commands.exec(line)` runs the command but discards output (use it for fire-and-forget commands like `reboot`).
 - Commands run synchronously on the same script task; while a command is running, your script does not get ticks. Use `ghost.delay` if you need to give a long-running command time to emit.
 - Prefer `ghost.results` for large scan outputs. It keeps full result sets in firmware-owned memory instead of materializing Lua tables for every row.
-- The full CLI surface is available — see the [CLI reference]({{< relref "getting-started/command-line-reference.md" >}}).
+- The full CLI surface is available. See the [CLI reference]({{< relref "getting-started/command-line-reference.md" >}}).
 
 ## Host-Backed Results
 
@@ -220,11 +235,11 @@ Built-in event topics:
 | `printer_job`      | `ok` / `failed`                                             | a printer send finished                     |
 | `comm_command`     | `command\|data`                                             | a remote command was received over comm     |
 
-Auto-subscribe helpers are exposed for the common cases — they are thin wrappers around `event.on`:
+Auto-subscribe helpers are exposed for the common cases. They are thin wrappers around `event.on`:
 
-- `ghost.wifi.on_ap(fn, filter)` — `fn(value)` per scanned AP
-- `ghost.ble.on_device(fn, filter)` — `fn(value)` per BLE device
-- `ghost.gps.on_fix(fn, filter)` — `fn(value)` on fix change
+- `ghost.wifi.on_ap(fn, filter)`: `fn(value)` per scanned AP
+- `ghost.ble.on_device(fn, filter)`: `fn(value)` per BLE device
+- `ghost.gps.on_fix(fn, filter)`: `fn(value)` on fix change
 
 All three accept an optional `filter` table. Filters reject events at the source so the handler is never called. Common keys:
 
@@ -427,5 +442,5 @@ python -m ghostbt script deploy hello.gs --deploy-dir E:\ghostesp\scripts
 - Scripts share one task per runner. Long-running CLI commands block the script task; use short `ghost.delay` calls if you need to interleave.
 - Output buffer is 4 KB; older text is trimmed.
 - The Lua heap is capped by `memory_limit` (default 16 KB on no-PSRAM, up to 192 KB on PSRAM). The allocator prefers PSRAM, falls back to internal RAM.
-- BLE and Wi-Fi cannot run at the same time on most ESP32 variants. The runner does not start Wi-Fi or BLE itself — you call `scan_start` / `scan_stop` like you would from the CLI.
+- BLE and Wi-Fi cannot run at the same time on most ESP32 variants. The runner does not start Wi-Fi or BLE itself. You call `scan_start` / `scan_stop` like you would from the CLI.
 - `ghost.deauth(bssid)` and other destructive commands require the `wifi` permission. A script without the permission gets a clear runtime error, not a silent failure.

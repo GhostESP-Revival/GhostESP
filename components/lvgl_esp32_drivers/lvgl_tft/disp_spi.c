@@ -125,8 +125,8 @@ esp_err_t disp_spi_add_device(spi_host_device_t host)
 esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 {
     int spi_mode = disp_spi_get_mode();
-    ESP_LOGI(TAG, "Adding SPI device");
-    ESP_LOGI(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
+    ESP_LOGD(TAG, "Adding SPI device");
+    ESP_LOGD(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
         clock_speed_hz, spi_mode, DISP_SPI_CS);
 
     spi_device_interface_config_t devcfg={

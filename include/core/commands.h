@@ -53,6 +53,11 @@ void handle_webuiap_cmd(int argc, char **argv);
 void handle_badusb_cmd(int argc, char **argv);
 void handle_usb_kbd_cmd(int argc, char **argv);
 
+#if CONFIG_ENABLE_GHOSTSCRIPT
+// GhostScript
+void handle_script_cmd(int argc, char **argv);
+#endif
+
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 // BLE, AirTag, Flipper, GATT, Chameleon, and BLE spam
 void handle_ble_scan_cmd(int argc, char **argv);

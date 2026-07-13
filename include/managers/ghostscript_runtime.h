@@ -39,6 +39,7 @@ void ghostscript_runtime_input(ghostscript_runtime_t *rt, const InputEvent *even
 ghostscript_state_t ghostscript_runtime_state(const ghostscript_runtime_t *rt);
 const char *ghostscript_runtime_error(const ghostscript_runtime_t *rt);
 size_t ghostscript_runtime_memory_used(const ghostscript_runtime_t *rt);
+size_t ghostscript_runtime_memory_peak(const ghostscript_runtime_t *rt);
 size_t ghostscript_runtime_memory_limit(const ghostscript_runtime_t *rt);
 const ghostscript_manifest_t *ghostscript_runtime_manifest(const ghostscript_runtime_t *rt);
 void ghostscript_runtime_dispatch_event(ghostscript_runtime_t *rt, const char *name, const char *value);
