@@ -806,8 +806,7 @@ static bool plugin_api_ble_start_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     ghostscript_runtime_reset_ble_seen();
-    gatt_scan_start();
-    return true;
+    return gatt_scan_start();
 #else
     return false;
 #endif

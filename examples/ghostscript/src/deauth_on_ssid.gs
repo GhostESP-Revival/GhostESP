@@ -1,5 +1,5 @@
 -- Scan for APs and deauth those whose SSID contains TARGET_PATTERN.
--- Requires wifi permission. Use only on networks you own or are authorized to test.
+-- Requires wifi and wifi_control permissions. Use only on networks you own or are authorized to test.
 
 local TARGET_PATTERN = "CorpWifi"
 local DEAUTH_BURSTS = 5

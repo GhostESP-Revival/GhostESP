@@ -119,11 +119,12 @@ def compile_one(src: pathlib.Path, dst: pathlib.Path = None, luac: str = None) -
 def compile_dir(d: pathlib.Path, out: pathlib.Path = None, luac: str = None) -> tuple:
     files = sorted(d.glob("*.gs"))
     if not files:
-        return 0, 0
+        return 0, 0, []
     luac = luac or _find_luac()
     if out:
         out.mkdir(parents=True, exist_ok=True)
     ok = 0
+    compiled = []
     for src in files:
         dst = (out / src.with_suffix(".gsb").name) if out else src.with_suffix(".gsb")
         src_size = src.stat().st_size
@@ -132,13 +133,15 @@ def compile_dir(d: pathlib.Path, out: pathlib.Path = None, luac: str = None) -> 
             pct = 100 * dst_size / src_size if src_size else 0
             print(f"  {src.name:<30s} {src_size:>6d} -> {dst_size:>6d} bytes ({pct:.0f}%)")
             ok += 1
-    return ok, len(files)
+            compiled.append(dst)
+    return ok, len(files), compiled
 
 
 def compile_scripts(
     path: str = ".",
     out: str = None,
     deploy: bool = False,
+    deploy_dir: str = None,
 ) -> int:
     target = pathlib.Path(path).resolve()
     luac = _find_luac()
@@ -152,7 +155,7 @@ def compile_scripts(
         pct = 100 * dst_size / src_size if src_size else 0
         print(f"{target.name}: {src_size} -> {dst_size} bytes ({pct:.0f}%)")
         if deploy:
-            _deploy(dst)
+            return 0 if _deploy(dst, deploy_dir) else 1
         return 0
 
     if target.is_dir():
@@ -162,21 +165,27 @@ def compile_scripts(
             return 1
         print(f"Compiling {len(files)} script(s)...\n")
         out_dir = pathlib.Path(out).resolve() if out else None
-        ok, total = compile_dir(target, out_dir, luac)
+        ok, total, compiled = compile_dir(target, out_dir, luac)
         print(f"\n{ok}/{total} compiled successfully.")
         if deploy:
-            for src in files:
-                _deploy(((out_dir / src.with_suffix(".gsb").name) if out_dir else src.with_suffix(".gsb")))
+            deployed = True
+            for dst in compiled:
+                if not _deploy(dst, deploy_dir):
+                    deployed = False
+            if not deployed:
+                return 1
         return 0 if ok == total else 1
 
     print(f"Not found: {target}", file=sys.stderr)
     return 1
 
 
-def _deploy(src: pathlib.Path):
-    sd_path = pathlib.Path("/mnt/ghostesp/scripts") / src.name
+def _deploy(src: pathlib.Path, deploy_dir: str = None) -> bool:
+    sd_path = pathlib.Path(deploy_dir or "/mnt/ghostesp/scripts") / src.name
     try:
         shutil.copy2(str(src), str(sd_path))
         print(f"  -> {sd_path}")
+        return True
     except OSError as e:
         print(f"  deploy failed: {e}", file=sys.stderr)
+        return False

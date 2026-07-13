@@ -1,0 +1,6 @@
+{
+  "id": "input-events-smoke",
+  "name": "Input events smoke",
+  "entry": "main.gsb",
+  "permissions": ["ui", "input"]
+}

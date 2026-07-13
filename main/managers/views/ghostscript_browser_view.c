@@ -149,6 +149,9 @@ static void refresh(void) {
     options_view_set_title(s_opts, title);
     s_count = ghostscript_manager_list(s_dir, s_offset, s_entries, GHOSTSCRIPT_BROWSER_PAGE_SIZE, &s_has_more);
     if (!is_root()) add_row(ROW_UP, -1, LV_SYMBOL_UP " ..");
+    if (s_count == 0 && ghostscript_manager_last_error()[0]) {
+        add_row(ROW_REFRESH, -1, ghostscript_manager_last_error());
+    }
     for (int i = 0; i < s_count; ++i) {
         char label[160];
         const char *prefix = s_entries[i].is_dir ? (s_entries[i].has_manifest ? LV_SYMBOL_PLAY " " : LV_SYMBOL_DIRECTORY " ") : LV_SYMBOL_FILE " ";

@@ -76,9 +76,11 @@ def main(argv=None) -> int:
     p_script_compile.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
     p_script_compile.add_argument("--out", default=None, help="Output file or directory")
     p_script_compile.add_argument("--deploy", action="store_true", help="Also copy to SD card")
+    p_script_compile.add_argument("--deploy-dir", default=None, help="Destination scripts directory for --deploy")
 
     p_script_deploy = script_sub.add_parser("deploy", help="Compile and copy to SD card")
     p_script_deploy.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
+    p_script_deploy.add_argument("--deploy-dir", default=None, help="Destination scripts directory")
 
     p_asset_image = asset_sub.add_parser("image", help="Convert a PNG into a GhostESP .gimg image")
     p_asset_image.add_argument("png", help="Source PNG")
@@ -219,9 +221,10 @@ def main(argv=None) -> int:
             return 0
         from .script import compile_scripts
         if args.script_command == "compile":
-            compile_scripts(path=args.path, out=args.out, deploy=args.deploy)
+            return compile_scripts(path=args.path, out=args.out, deploy=args.deploy,
+                                   deploy_dir=args.deploy_dir)
         elif args.script_command == "deploy":
-            compile_scripts(path=args.path, deploy=True)
+            return compile_scripts(path=args.path, deploy=True, deploy_dir=args.deploy_dir)
 
     return 0
 

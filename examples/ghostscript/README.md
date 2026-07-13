@@ -1,6 +1,6 @@
 ﻿# GhostScript Examples
 
-GhostScript on-device execution is `.gsb` bytecode only. Keep `.gs` files as source, compile them with `ghostbt`, then copy generated `.gsb` files to `/mnt/ghostesp/scripts/` on the SD card.
+GhostScript on-device execution is `.gsb` bytecode only. Keep `.gs` files as source, compile them with `ghostbt`, then copy a script directory containing both `manifest.json` and its generated `.gsb` entry to `/mnt/ghostesp/scripts/` on the SD card. Standalone `.gsb` files intentionally receive no permissions.
 
 Recommended workflow:
 
@@ -8,11 +8,18 @@ Recommended workflow:
 python -m ghostbt script compile examples/ghostscript/src/hello.gs --out examples/ghostscript/dist/hello.gsb
 ```
 
-Deploy the compiled file:
+Place it in a directory with a manifest. For `hello.gs`, use:
 
-```text
-/mnt/ghostesp/scripts/hello.gsb
+```json
+{
+  "id": "hello",
+  "name": "Hello",
+  "entry": "hello.gsb",
+  "permissions": ["ui", "storage"]
+}
 ```
+
+Deploy `/mnt/ghostesp/scripts/hello/manifest.json` and `/mnt/ghostesp/scripts/hello/hello.gsb` together.
 
 `src/` contains source examples. `dist/` is intentionally empty in the repo and is the suggested output folder for compiled bytecode.
 
@@ -30,6 +37,6 @@ Core examples:
 | `parser_summary.gs` | Parser helper examples for NFC, IR, and SubGHz. |
 | `gps_tracker.gs` | Long-running GPS/power logger with storage. |
 
-Hardware-dependent examples should fail cleanly on devices without the required peripheral or permission.
+Hardware-dependent examples should fail cleanly on devices without the required peripheral. Their manifests must request their API permissions, including `wifi_control` for `deauth_on_ssid.gs`.
 
 Use `ghost.results` for scan/capture/log result sets. Providers such as `wifi.ap`, `ble.device`, `ble.detect`, `command.log`, and `log.serial` keep cached data outside the Lua heap and expose one field at a time.

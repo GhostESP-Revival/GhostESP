@@ -19,7 +19,18 @@ You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, t
    pip install ghostbt
    ```
 
-2. Author a script. Create `hello.gs`:
+2. Create a script directory with a manifest. Create `hello/manifest.json`:
+
+   ```json
+   {
+     "id": "hello",
+     "name": "Hello",
+     "entry": "hello.gsb",
+     "permissions": ["ui"]
+   }
+   ```
+
+3. Author `hello.gs`:
 
    ```lua
    print("firmware " .. ghost.system.firmware_version())
@@ -27,18 +38,15 @@ You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, t
    ghost.delay(1000)
    ```
 
-3. Compile it:
+4. Compile it into the script directory:
 
    ```bash
-   python -m ghostbt script compile hello.gs
-   # writes hello.gsb next to hello.gs
+   python -m ghostbt script compile hello.gs --out hello/hello.gsb
    ```
 
-4. Copy `hello.gsb` to the SD card under `/mnt/ghostesp/scripts/`.
+5. Copy the complete `hello/` directory to `/mnt/ghostesp/scripts/`.
 
-5. Launch it:
-   - **UI:** Main menu → Apps → GhostScript → select the file.
-   - **CLI:** `ghostscript run /mnt/ghostesp/scripts/hello.gsb`
+6. Launch it from **Main menu → Apps → GhostScript**, then select `hello`.
 
 > The device accepts `.gsb` bytecode only. Keep `.gs` files as source in your repo or tooling workspace, not as deployable scripts on the device.
 
@@ -70,7 +78,7 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `ble`        | `scan_start`, `scan_stop`, `device_count`, `get_device(i)`, `on_device`.     |
 | `gps`        | `is_available`, `has_fix`, `latitude`, `longitude`, `altitude`, `satellites`, `on_fix`. |
 | `power`      | `percent`, `voltage_mv`, `is_charging`, `get_brightness`, `set_brightness`.  |
-| `nfc`        | `is_available`, `read_start`, `stop`, `last_tag`.                          |
+| `nfc`        | `is_available`, `last_tag`.                                                  |
 | `ir`         | `send_file`, `listen(timeout_ms)`, `stop`.                                 |
 | `subghz`     | `load`, `transmit`, `receive(timeout_ms, freq)`, `read_raw`, `stop`.       |
 | `badusb`     | `run`, `stop`.                                                               |
@@ -286,11 +294,11 @@ the target-clamped default Lua heap.
 }
 ```
 
-Available permissions: `wifi`, `wifi.control`, `ble`, `gps`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `lvgl`, `commands`, `settings`, `http`.
+Available permissions include `wifi`, `wifi_control`, `ble`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `commands`, `settings`, `network`, `power`, `display`, `time`, `random`, and `system` (required for GPS access).
 
 ## Examples
 
-The repo ships source examples in `examples/ghostscript/src/`. Compile these to `.gsb` and place the output in `examples/ghostscript/dist/` or directly on the SD card.
+The repo ships source examples in `examples/ghostscript/src/`. Each needs a folder manifest that declares its required permissions; standalone `.gsb` files intentionally have no permissions. Compile the source to the folder named in the manifest, then copy the complete folder to the SD card.
 
 | File                       | What it shows                                                    |
 |----------------------------|------------------------------------------------------------------|
@@ -381,18 +389,18 @@ If you want to filter by AP, set `TARGET_BSSID` to the BSSID string. To capture 
 - **No `require()` of other `.gsb` files.** Each script is a single chunk. Copy helpers between scripts for now.
 - **Event rate is unbounded.** Bridges like `command.output` and `ble_device` can fire thousands of times per second. If your handler is slow, the runner buffer grows and you may run out of Lua heap. Keep handlers short; defer work to a coroutine via `coroutine.create`.
 - **`ble_device` is deduped per scan.** You get one event per MAC per `ghost.wifi.ble_scan_start`. Use a set in your handler if you need to track across scans.
-- **Event values can contain `|`.** Topics that include user-controlled strings (DNS qname, NFC card label, IR protocol name) are escaped as `\|`, `\n`, `\r`, `\\`, or `\xNN`. Split on raw `|` and call `unescape()` on each field if you write a parser:
+- **Event values can contain `|`.** Topics that include user-controlled strings (DNS qname, NFC card label, IR protocol name) are escaped as `\p`, `\n`, `\r`, `\b`, or `\xNN`. Split on raw `|` and call `unescape()` on each field if you write a parser:
 
   ```lua
   local function unescape(s)
-      return (s:gsub("|p", "|"):gsub("|b", "\\"):gsub("|n", "\n"):gsub("|r", "\r"))
+       return (s:gsub("\\p", "|"):gsub("\\b", "\\"):gsub("\\n", "\n"):gsub("\\r", "\r"))
   end
   local fields = {}
   for f in (value .. "|"):gmatch("(.-)|") do
       table.insert(fields, unescape(f))
   end
   ```
-- **Output buffer is 512 bytes**; older text is trimmed. If you need a full log, `commands.start` to a CLI command that already writes to a file (e.g. `capture -handshake`) instead of capturing in Lua.
+- **Output buffer is 4 KB**; older text is trimmed. If you need a full log, `commands.start` to a CLI command that already writes to a file (e.g. `capture -handshake`) instead of capturing in Lua.
 - **No permission prompt at runtime.** If a script doesn't have a permission, the API call errors with `permission denied`. Check the manifest before shipping.
 - **Wi-Fi and BLE share one radio on most ESP32s.** Starting a BLE scan mid-Wi-Fi-scan will tear down Wi-Fi. Drive them sequentially from the same script.
 
@@ -402,11 +410,14 @@ If you want to filter by AP, set `TARGET_BSSID` to the BSSID string. To capture 
 # compile a single file
 python -m ghostbt script compile hello.gs
 
-# compile an entire folder
-python -m ghostbt script compile examples/ghostscript
+# compile all bundled source examples
+python -m ghostbt script compile examples/ghostscript/src --out examples/ghostscript/dist
 
-# compile and copy to the SD card (mounted at /mnt/ghostesp)
+# compile and copy an unprivileged standalone script to the default mount
 python -m ghostbt script compile hello.gs --deploy
+
+# choose the scripts directory when the SD card has another mount point
+python -m ghostbt script deploy hello.gs --deploy-dir E:\ghostesp\scripts
 ```
 
 `ghostbt` bundles Lua 5.4.7 plus a `luac` that matches the firmware ABI. On Windows, macOS, and Linux the binary is included; if it is missing on macOS/Linux, `ghostbt` builds `luac` from the bundled Lua 5.4.7 source using the system C compiler.
@@ -414,7 +425,7 @@ python -m ghostbt script compile hello.gs --deploy
 ## Limits and gotchas
 
 - Scripts share one task per runner. Long-running CLI commands block the script task; use short `ghost.delay` calls if you need to interleave.
-- Output buffer is 512 bytes; older text is trimmed.
+- Output buffer is 4 KB; older text is trimmed.
 - The Lua heap is capped by `memory_limit` (default 16 KB on no-PSRAM, up to 192 KB on PSRAM). The allocator prefers PSRAM, falls back to internal RAM.
 - BLE and Wi-Fi cannot run at the same time on most ESP32 variants. The runner does not start Wi-Fi or BLE itself — you call `scan_start` / `scan_stop` like you would from the CLI.
 - `ghost.deauth(bssid)` and other destructive commands require the `wifi` permission. A script without the permission gets a clear runtime error, not a silent failure.

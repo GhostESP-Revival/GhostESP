@@ -22,23 +22,28 @@ static void set_error(const char *msg) {
     snprintf(s_last_error, sizeof(s_last_error), "%s", msg ? msg : "GhostScript error");
 }
 
+static void set_path_error(const char *operation, const char *path) {
+    snprintf(s_last_error, sizeof(s_last_error), "%s %.72s: %s",
+             operation ? operation : "SD operation failed", path ? path : "",
+             strerror(errno));
+}
+
 const char *ghostscript_manager_last_error(void) {
     return s_last_error;
 }
 
 bool ghostscript_manager_sd_begin(bool *display_was_suspended) {
     if (display_was_suspended) *display_was_suspended = false;
-    esp_err_t err = sd_card_mount_for_flush(display_was_suspended);
-    if (err != ESP_OK) {
+    if (!sd_card_jit_begin(display_was_suspended, true)) {
         set_error("SD mount failed");
-        ESP_LOGW(TAG, "SD JIT mount failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "SD JIT mount failed");
         return false;
     }
     return true;
 }
 
 void ghostscript_manager_sd_end(bool display_was_suspended) {
-    sd_card_unmount_after_flush(display_was_suspended);
+    sd_card_jit_end(display_was_suspended);
 }
 
 static bool join_path(char *out, size_t out_len, const char *base, const char *name) {
@@ -272,9 +277,12 @@ int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_en
     if (!ghostscript_manager_sd_begin(&display_was_suspended)) return 0;
     DIR *d = opendir(dir);
     if (!d) {
+        set_path_error("Cannot open scripts directory", dir);
+        ESP_LOGW(TAG, "%s", s_last_error);
         ghostscript_manager_sd_end(display_was_suspended);
         return 0;
     }
+    s_last_error[0] = '\0';
     int seen = 0;
     int count = 0;
     struct dirent *ent;

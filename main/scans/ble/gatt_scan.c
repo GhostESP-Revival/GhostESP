@@ -907,7 +907,7 @@ static void gatt_track_scan_callback(struct ble_gap_event *event, size_t len) {
 /**
  * @brief Start scanning for connectable BLE devices
  */
-void gatt_scan_start(void) {
+bool gatt_scan_start(void) {
     if (!ble_is_initialized()) {
         ble_init();
     }
@@ -933,8 +933,16 @@ void gatt_scan_start(void) {
     glog("Please wait for scan to complete...\n");
     status_display_show_status("GATT Scanning");
     
-    ble_register_handler(gatt_scan_callback);
-    ble_start_scanning();
+    if (ble_register_handler(gatt_scan_callback) != ESP_OK) {
+        g_enum_state.scan_active = false;
+        return false;
+    }
+    if (!ble_start_scanning()) {
+        g_enum_state.scan_active = false;
+        ble_unregister_handler(gatt_scan_callback);
+        return false;
+    }
+    return true;
 }
 
 /**

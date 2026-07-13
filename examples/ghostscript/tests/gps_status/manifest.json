@@ -1,0 +1,6 @@
+{
+  "id": "gps-status-smoke",
+  "name": "GPS status smoke",
+  "entry": "main.gsb",
+  "permissions": ["ui", "system", "power"]
+}

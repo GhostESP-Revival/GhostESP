@@ -103,6 +103,8 @@ static ghostscript_runtime_t *s_active_runtime;
 static QueueHandle_t s_event_queue;
 static portMUX_TYPE s_active_runtime_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_event_senders;
+static char s_storage_list_names[32][GHOSTSCRIPT_NAME_MAX];
+static bool s_storage_list_is_dir[32];
 
 /* Linked list of background tasks spawned by the script. Each owns its own
  * Lua state but shares the active-runtime pointer for event delivery. */
@@ -251,6 +253,7 @@ static uint32_t event_required_permission(const char *name) {
     if (strncmp(name, "nfc_", 4) == 0) return PLUGIN_PERMISSION_NFC;
     if (strncmp(name, "ir_", 3) == 0) return PLUGIN_PERMISSION_IR;
     if (strncmp(name, "subghz_", 7) == 0) return PLUGIN_PERMISSION_SUBGHZ;
+    if (strncmp(name, "gps_", 4) == 0) return PLUGIN_PERMISSION_SYSTEM;
     if (strncmp(name, "command.", 8) == 0 || strcmp(name, "comm_command") == 0) return PLUGIN_PERMISSION_COMMANDS;
     if (strncmp(name, "input", 5) == 0) return PLUGIN_PERMISSION_INPUT;
     return 0;
@@ -281,7 +284,8 @@ static int l_event_on(lua_State *L) {
     if (has_filter) {
         lua_pushvalue(L, 3);
     } else {
-        lua_pushnil(L);
+        /* Keep listener pairs contiguous; Lua arrays do not retain nil slots. */
+        lua_pushboolean(L, false);
     }
     lua_rawseti(L, -2, ++n);
     lua_pop(L, 2);
@@ -302,45 +306,38 @@ static int l_event_off(lua_State *L) {
     }
     luaL_checktype(L, 2, LUA_TFUNCTION);
     if (lua_iscfunction(L, 2)) return luaL_error(L, "ghost.off requires a Lua function");
-    int target_ref = 0;
-    lua_pushvalue(L, 2);
-    target_ref = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_getfield(L, -1, name);
     int removed = 0;
     if (lua_istable(L, -1)) {
-        int n = (int)lua_rawlen(L, -1);
-        /* Listener pairs are stored as [fn, filter, fn, filter, ...]. Remove
-         * both the matching function and the slot immediately after it. */
+        int old_listeners = lua_absindex(L, -1);
+        int events = lua_absindex(L, -2);
+        int n = (int)lua_rawlen(L, old_listeners);
+        int next = 1;
+        lua_newtable(L);
+        int new_listeners = lua_absindex(L, -1);
         for (int i = 1; i <= n; i += 2) {
-            lua_rawgeti(L, -1, i);
-            int r = luaL_ref(L, LUA_REGISTRYINDEX);
-            if (r == target_ref) {
-                luaL_unref(L, LUA_REGISTRYINDEX, r);
-                lua_pushnil(L); lua_rawseti(L, -2, i);
-                lua_pushnil(L); lua_rawseti(L, -2, i + 1);
-                removed++;
+            lua_rawgeti(L, old_listeners, i);
+            bool is_function = lua_isfunction(L, -1);
+            bool remove = is_function && lua_rawequal(L, -1, 2);
+            if (!is_function || remove) {
+                lua_pop(L, 1);
+                if (remove) removed++;
             } else {
-                lua_rawseti(L, -2, i);
-            }
-        }
-        if (removed) {
-            /* Compact: drop trailing nils at the end. */
-            int total = (int)lua_rawlen(L, -1);
-            while (total > 0) {
-                lua_rawgeti(L, -1, total);
+                lua_rawgeti(L, old_listeners, i + 1);
                 if (lua_isnil(L, -1)) {
                     lua_pop(L, 1);
-                    lua_pushnil(L); lua_rawseti(L, -2, total);
-                    total -= 2;
-                } else {
-                    lua_pop(L, 1);
-                    break;
+                    lua_pushboolean(L, false);
                 }
+                lua_rawseti(L, new_listeners, next + 1);
+                lua_rawseti(L, new_listeners, next);
+                next += 2;
             }
         }
+        lua_pushvalue(L, new_listeners);
+        lua_setfield(L, events, name);
+        lua_pop(L, 1);
     }
     lua_pop(L, 2);
-    luaL_unref(L, LUA_REGISTRYINDEX, target_ref);
     lua_pushinteger(L, removed);
     return 1;
 }
@@ -535,7 +532,7 @@ static void dispatch_event(ghostscript_runtime_t *rt, const char *name, const ch
             /* Filter is at i+1. */
             if (i + 1 <= n) {
                 lua_rawgeti(rt->L, -1, i + 1);
-                if (lua_isnil(rt->L, -1)) {
+                if (lua_isnil(rt->L, -1) || lua_isboolean(rt->L, -1)) {
                     lua_pop(rt->L, 1);
                 } else {
                     bool pass = topic_passes_filter(rt->L, name, value);
@@ -815,6 +812,8 @@ static int l_ir_listen(lua_State *L) {
         lua_pushnil(L);
         return 1;
     }
+    /* No Lua allocation should leave the receiver running after an OOM error. */
+    infrared_manager_rx_deinit();
     lua_newtable(L);
     if (sig.is_raw) {
         lua_pushboolean(L, true);
@@ -838,7 +837,6 @@ static int l_ir_listen(lua_State *L) {
         lua_setfield(L, -2, "command");
     }
     infrared_manager_free_signal(&sig);
-    infrared_manager_rx_deinit();
     return 1;
 }
 static int l_subghz_load(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); if (!rt_has_perm(rt, PLUGIN_PERMISSION_SUBGHZ)) return lua_perm_error(L, "subghz"); lua_pushboolean(L, rt->api && rt->api->subghz_load_snapshot ? rt->api->subghz_load_snapshot(luaL_checkstring(L, 1)) : false); return 1; }
@@ -1002,22 +1000,29 @@ static int l_storage_list(lua_State *L) {
     if (!scoped_storage_path(rt, rel, path, sizeof(path))) { lua_newtable(L); return 1; }
     bool display_was_suspended = false;
     if (!ghostscript_manager_sd_begin(&display_was_suspended)) { lua_newtable(L); return 1; }
-    lua_newtable(L);
     DIR *dir = opendir(path);
     int count = 0;
     struct dirent *entry;
     while (dir && (entry = readdir(dir)) != NULL && count < 32) {
         if (entry->d_name[0] == '.') continue;
+        size_t name_len = strnlen(entry->d_name, sizeof(s_storage_list_names[0]));
+        if (name_len >= sizeof(s_storage_list_names[0])) continue;
         char child[GHOSTSCRIPT_PATH_MAX];
         if (!safe_join(path, entry->d_name, child, sizeof(child))) continue;
         struct stat st;
-        lua_newtable(L);
-        lua_pushstring(L, entry->d_name); lua_setfield(L, -2, "name");
-        lua_pushboolean(L, stat(child, &st) == 0 && S_ISDIR(st.st_mode)); lua_setfield(L, -2, "is_dir");
-        lua_rawseti(L, -2, ++count);
+        memcpy(s_storage_list_names[count], entry->d_name, name_len + 1);
+        s_storage_list_is_dir[count] = stat(child, &st) == 0 && S_ISDIR(st.st_mode);
+        count++;
     }
     if (dir) closedir(dir);
     ghostscript_manager_sd_end(display_was_suspended);
+    lua_newtable(L);
+    for (int i = 0; i < count; ++i) {
+        lua_newtable(L);
+        lua_pushstring(L, s_storage_list_names[i]); lua_setfield(L, -2, "name");
+        lua_pushboolean(L, s_storage_list_is_dir[i]); lua_setfield(L, -2, "is_dir");
+        lua_rawseti(L, -2, i + 1);
+    }
     return 1;
 }
 
@@ -1746,7 +1751,12 @@ static bool queue_event(ghostscript_runtime_t *rt, const gs_queued_event_t *even
     taskEXIT_CRITICAL(&s_active_runtime_mux);
     if (!queue) return false;
 
-    bool queued = xQueueSend(queue, event, 0) == pdPASS;
+    /* Keep only pointers in the FreeRTOS queue: a full inline event queue is
+     * about 9 KB of scarce internal RAM on display-heavy boards. */
+    gs_queued_event_t *queued_event = gs_heap_alloc(sizeof(*queued_event));
+    if (queued_event) *queued_event = *event;
+    bool queued = queued_event && xQueueSend(queue, &queued_event, 0) == pdPASS;
+    if (!queued) heap_caps_free(queued_event);
     taskENTER_CRITICAL(&s_active_runtime_mux);
     s_event_senders--;
     taskEXIT_CRITICAL(&s_active_runtime_mux);
@@ -1800,13 +1810,13 @@ static int l_oui_lookup(lua_State *L) {
 static bool mac_starts_with_prefix(const char *mac, const char *prefix) {
     if (!mac || !prefix) return false;
     int mac_i = 0, pre_i = 0;
-    int mac_nibbles = 0, pre_nibbles = 0;
     int pre_target = 0;
     while (prefix[pre_i]) {
         char c = prefix[pre_i++];
         if (c == ':' || c == '-' || c == ' ') continue;
         pre_target++;
     }
+    pre_i = 0;
     int pre_consumed = 0;
     while (mac[mac_i] && pre_consumed < pre_target) {
         char c = mac[mac_i++];
@@ -1816,8 +1826,6 @@ static bool mac_starts_with_prefix(const char *mac, const char *prefix) {
         if (tolower((unsigned char)c) != tolower((unsigned char)p)) return false;
         pre_consumed++;
     }
-    (void)mac_nibbles;
-    (void)pre_nibbles;
     return pre_consumed == pre_target;
 }
 
@@ -2166,6 +2174,19 @@ static int l_load_chunk(lua_State *L) {
     return 1;
 }
 
+static int l_initialize_runtime(lua_State *L) {
+    ghostscript_runtime_t *rt = (ghostscript_runtime_t *)lua_touserdata(L, 1);
+    if (!rt) return luaL_error(L, "runtime missing");
+    luaL_requiref(L, LUA_GNAME, luaopen_base, 1); lua_pop(L, 1);
+    luaL_requiref(L, "string", luaopen_string, 1); lua_pop(L, 1);
+    luaL_requiref(L, "table", luaopen_table, 1); lua_pop(L, 1);
+    luaL_requiref(L, "math", luaopen_math, 1); lua_pop(L, 1);
+    luaL_requiref(L, "coroutine", luaopen_coroutine, 1); lua_pop(L, 1);
+    register_api(L, rt);
+    lua_newthread(L);
+    return 1;
+}
+
 static bool runtime_finish_script_if_needed(ghostscript_runtime_t *rt) {
     lua_getglobal(rt->L, "on_tick");
     bool has_tick = lua_isfunction(rt->L, -1);
@@ -2262,12 +2283,25 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
         rt->state = GHOSTSCRIPT_STATE_FAILED;
         return false;
     }
-    luaL_requiref(rt->L, LUA_GNAME, luaopen_base, 1); lua_pop(rt->L, 1);
-    luaL_requiref(rt->L, "string", luaopen_string, 1); lua_pop(rt->L, 1);
-    luaL_requiref(rt->L, "table", luaopen_table, 1); lua_pop(rt->L, 1);
-    luaL_requiref(rt->L, "math", luaopen_math, 1); lua_pop(rt->L, 1);
-    luaL_requiref(rt->L, "coroutine", luaopen_coroutine, 1); lua_pop(rt->L, 1);
-    register_api(rt->L, rt);
+    lua_pushcfunction(rt->L, l_initialize_runtime);
+    lua_pushlightuserdata(rt->L, rt);
+    int init_err = lua_pcall(rt->L, 1, 1, 0);
+    if (init_err != LUA_OK) {
+        runtime_set_lua_error(rt, rt->L, init_err);
+        fclose(script);
+        ghostscript_manager_sd_end(display_was_suspended);
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    rt->thread = lua_tothread(rt->L, -1);
+    rt->thread_ref = luaL_ref(rt->L, LUA_REGISTRYINDEX);
+    if (!rt->thread) {
+        snprintf(rt->error, sizeof(rt->error), "failed to create Lua coroutine");
+        fclose(script);
+        ghostscript_manager_sd_end(display_was_suspended);
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
     runtime_begin_slice(rt);
     rt->state = GHOSTSCRIPT_STATE_RUNNING;
     gs_reader_t reader = { .file = script };
@@ -2285,12 +2319,10 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
         rt->state = rt->stop_requested ? GHOSTSCRIPT_STATE_STOPPED : GHOSTSCRIPT_STATE_FAILED;
         return false;
     }
-    rt->thread = lua_newthread(rt->L);
-    rt->thread_ref = luaL_ref(rt->L, LUA_REGISTRYINDEX);
     lua_xmove(rt->L, rt->thread, 1);
     lua_sethook(rt->L, hook, LUA_MASKCOUNT, runtime_hook_count(rt));
     lua_sethook(rt->thread, hook, LUA_MASKCOUNT, runtime_hook_count(rt));
-    QueueHandle_t queue = xQueueCreate(GS_EVENT_QUEUE_DEPTH, sizeof(gs_queued_event_t));
+    QueueHandle_t queue = xQueueCreate(GS_EVENT_QUEUE_DEPTH, sizeof(gs_queued_event_t *));
     if (!queue) {
         snprintf(rt->error, sizeof(rt->error), "not enough memory for event queue");
         rt->state = GHOSTSCRIPT_STATE_FAILED;
@@ -2312,13 +2344,14 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
 
 static void runtime_drain_events(ghostscript_runtime_t *rt) {
     if (!rt) return;
-    gs_queued_event_t event;
+    gs_queued_event_t *event = NULL;
     while (s_event_queue && xQueueReceive(s_event_queue, &event, 0) == pdPASS) {
-        if (event.kind == GS_QUEUED_EVENT) {
-            dispatch_event(rt, event.name, event.value);
+        if (event->kind == GS_QUEUED_EVENT) {
+            dispatch_event(rt, event->name, event->value);
         } else {
-            runtime_process_input(rt, &event.input);
+            runtime_process_input(rt, &event->input);
         }
+        heap_caps_free(event);
         if (rt->state != GHOSTSCRIPT_STATE_RUNNING) return;
     }
 }
@@ -2433,7 +2466,11 @@ void ghostscript_runtime_destroy(ghostscript_runtime_t *rt) {
         if (!busy) break;
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    if (queue) vQueueDelete(queue);
+    if (queue) {
+        gs_queued_event_t *event = NULL;
+        while (xQueueReceive(queue, &event, 0) == pdPASS) heap_caps_free(event);
+        vQueueDelete(queue);
+    }
     for (int i = 0; i < rt->oui_prefix_count; ++i) free(rt->oui_prefix[i]);
     if (rt->L) lua_close(rt->L);
     if (rt->api_active) plugin_api_release();
