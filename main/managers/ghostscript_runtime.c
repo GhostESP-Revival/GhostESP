@@ -34,6 +34,7 @@
 #define GS_EVENT_QUEUE_DEPTH 24
 #define GS_EVENT_NAME_MAX 40
 #define GS_EVENT_VALUE_MAX 320
+#define GS_STORAGE_LIST_MAX 32
 
 typedef enum {
     GS_QUEUED_EVENT,
@@ -109,8 +110,11 @@ static ghostscript_runtime_t *s_active_runtime;
 static QueueHandle_t s_event_queue;
 static portMUX_TYPE s_active_runtime_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_event_senders;
-static char s_storage_list_names[32][GHOSTSCRIPT_NAME_MAX];
-static bool s_storage_list_is_dir[32];
+
+typedef struct {
+    char path[GHOSTSCRIPT_PATH_MAX];
+    DIR *dir;
+} gs_storage_list_ctx_t;
 
 /* Linked list of background tasks spawned by the script. Each owns its own
  * Lua state but shares the active-runtime pointer for event delivery. */
@@ -1020,36 +1024,47 @@ static int l_storage_mkdir(lua_State *L) {
     return 1;
 }
 
+static int l_storage_list_build(lua_State *L) {
+    gs_storage_list_ctx_t *ctx = (gs_storage_list_ctx_t *)lua_touserdata(L, lua_upvalueindex(1));
+    if (!ctx) { lua_newtable(L); return 1; }
+    ctx->dir = opendir(ctx->path);
+    int count = 0;
+    struct dirent *entry;
+    lua_newtable(L);
+    while (ctx->dir && (entry = readdir(ctx->dir)) != NULL && count < GS_STORAGE_LIST_MAX) {
+        if (entry->d_name[0] == '.') continue;
+        char child[GHOSTSCRIPT_PATH_MAX];
+        if (!safe_join(ctx->path, entry->d_name, child, sizeof(child))) continue;
+        struct stat st;
+        bool is_dir = stat(child, &st) == 0 && S_ISDIR(st.st_mode);
+        lua_newtable(L);
+        lua_pushstring(L, entry->d_name); lua_setfield(L, -2, "name");
+        lua_pushboolean(L, is_dir); lua_setfield(L, -2, "is_dir");
+        lua_rawseti(L, -2, ++count);
+    }
+    if (ctx->dir) {
+        closedir(ctx->dir);
+        ctx->dir = NULL;
+    }
+    return 1;
+}
+
 static int l_storage_list(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
     if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
     const char *rel = luaL_checkstring(L, 1);
-    char path[GHOSTSCRIPT_PATH_MAX];
-    if (!scoped_storage_path(rt, rel, path, sizeof(path))) { lua_newtable(L); return 1; }
+    gs_storage_list_ctx_t ctx = { 0 };
+    if (!scoped_storage_path(rt, rel, ctx.path, sizeof(ctx.path))) { lua_newtable(L); return 1; }
     bool display_was_suspended = false;
     if (!ghostscript_manager_sd_begin(&display_was_suspended)) { lua_newtable(L); return 1; }
-    DIR *dir = opendir(path);
-    int count = 0;
-    struct dirent *entry;
-    while (dir && (entry = readdir(dir)) != NULL && count < 32) {
-        if (entry->d_name[0] == '.') continue;
-        size_t name_len = strnlen(entry->d_name, sizeof(s_storage_list_names[0]));
-        if (name_len >= sizeof(s_storage_list_names[0])) continue;
-        char child[GHOSTSCRIPT_PATH_MAX];
-        if (!safe_join(path, entry->d_name, child, sizeof(child))) continue;
-        struct stat st;
-        memcpy(s_storage_list_names[count], entry->d_name, name_len + 1);
-        s_storage_list_is_dir[count] = stat(child, &st) == 0 && S_ISDIR(st.st_mode);
-        count++;
-    }
-    if (dir) closedir(dir);
+    lua_pushlightuserdata(L, &ctx);
+    lua_pushcclosure(L, l_storage_list_build, 1);
+    int rc = lua_pcall(L, 0, 1, 0);
+    if (ctx.dir) closedir(ctx.dir);
     ghostscript_manager_sd_end(display_was_suspended);
-    lua_newtable(L);
-    for (int i = 0; i < count; ++i) {
+    if (rc != LUA_OK) {
+        lua_pop(L, 1);
         lua_newtable(L);
-        lua_pushstring(L, s_storage_list_names[i]); lua_setfield(L, -2, "name");
-        lua_pushboolean(L, s_storage_list_is_dir[i]); lua_setfield(L, -2, "is_dir");
-        lua_rawseti(L, -2, i + 1);
     }
     return 1;
 }
