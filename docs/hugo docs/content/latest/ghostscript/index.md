@@ -194,14 +194,11 @@ ghost.event.off("wifi_scan_done", my_handler)  -- pass the same function
 -- emit a custom event
 ghost.event.emit("my_event", "payload")
 
--- wait in a coroutine
-local co = coroutine.create(function()
-    local result = ghost.event.wait("ble_device", 5000)  -- 5s timeout
-    if result then
-        print("got ble device: " .. tostring(result.value))
-    end
-end)
-coroutine.resume(co)
+-- wait for an event in the current coroutine (must be inside ghost.delay or on_tick)
+local result = ghost.event.wait("ble_device", 5000)  -- 5s timeout
+if result then
+    print("got ble device: " .. tostring(result.value))
+end
 ```
 
 Built-in event topics:
@@ -270,9 +267,11 @@ To keep handlers from drowning the runner, the dispatcher throttles `command.out
 
 ### Coroutines
 
-GhostScript runs one Lua state per script. Use standard Lua coroutines with
-`ghost.event.wait()` or `ghost.delay()` for cooperative background work; do not
-create FreeRTOS tasks from a script.
+GhostScript runs one Lua state per script. Use `ghost.event.wait()` or
+`ghost.delay()` for cooperative background work; both yield the current
+execution context without blocking the UI. The `coroutine` standard library
+is not available, but `ghost.delay` and `ghost.event.wait` use Lua's yield
+mechanism internally. Do not create FreeRTOS tasks from a script.
 
 ## Input
 
@@ -398,11 +397,26 @@ ghost.exit()
 
 If you want to filter by AP, set `TARGET_BSSID` to the BSSID string. To capture every handshake on the channel, leave it nil and `ghost.exit()` on the first event.
 
+## Runtime environment
+
+GhostScript uses Lua 5.4 in 32-bit mode (`LUA_32BITS=1`): integers are 32-bit and floats are 32-bit. This halves memory usage per Lua value compared to 64-bit mode. For hardware scripting (GPIO, radio channels, RSSI, timestamps) this is fully adequate. GPS coordinates retain ~7 digits of precision.
+
+Available standard libraries:
+
+| Library | Status |
+|---------|--------|
+| `base` | Loaded (`print`, `tostring`, `type`, `pcall`, etc.) |
+| `string` | Loaded (`string.format`, `string.sub`, `string.byte`, `string.rep`, `string.find`, `string.match`, `string.gsub`, etc.) |
+| `table` | Loaded (`table.insert`, `table.remove`, `table.sort`, `table.concat`, etc.) |
+| `math` | Lite subset: `math.abs`, `math.floor`, `math.ceil`, `math.max`, `math.min`, `math.random`, `math.randomseed` |
+| `coroutine` | **Not available.** Use `ghost.delay()` and `ghost.event.wait()` for cooperative yielding. |
+| `io`, `os`, `debug`, `package`, `utf8` | **Not available.** Use `ghost.storage` for file I/O. |
+
 ## Limits and gotchas
 
-- **Single task, multiple coroutines.** The script runs on one FreeRTOS task. `coroutine.create` works and `ghost.delay` / `ghost.event.wait` yield, but long-running commands still block the script task while they execute. A few coroutines is fine; thousands is not.
+- **Single task, cooperative yielding.** The script runs on one FreeRTOS task. `ghost.delay` and `ghost.event.wait` yield execution without blocking the UI, but long-running CLI commands still block the script task while they execute. The `coroutine` standard library is not loaded; use `ghost.delay` / `ghost.event.wait` for cooperative work.
 - **No `require()` of other `.gsb` files.** Each script is a single chunk. Copy helpers between scripts for now.
-- **Event rate is unbounded.** Bridges like `command.output` and `ble_device` can fire thousands of times per second. If your handler is slow, the runner buffer grows and you may run out of Lua heap. Keep handlers short; defer work to a coroutine via `coroutine.create`.
+- **Event rate is unbounded.** Bridges like `command.output` and `ble_device` can fire thousands of times per second. If your handler is slow, the runner buffer grows and you may run out of Lua heap. Keep handlers short; defer work with `ghost.delay`.
 - **`ble_device` is deduped per scan.** You get one event per MAC per `ghost.wifi.ble_scan_start`. Use a set in your handler if you need to track across scans.
 - **Event values can contain `|`.** Topics that include user-controlled strings (DNS qname, NFC card label, IR protocol name) are escaped as `\p`, `\n`, `\r`, `\b`, or `\xNN`. Split on raw `|` and call `unescape()` on each field if you write a parser:
 

@@ -372,7 +372,7 @@ static esp_err_t mount_virtual_storage(void) {
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = true,
-        .max_files = 5,
+        .max_files = 3,
         .allocation_unit_size = 4 * 1024
     };
 
@@ -534,7 +534,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -590,7 +590,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -760,7 +760,7 @@ esp_err_t sd_card_init(void) {
     .sclk_io_num = sd_card_manager.spi_clk_pin,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    .max_transfer_sz = 4096,
+    .max_transfer_sz = 512,
   };
   /* The SD SPI device configures CS when it attaches. Preconfiguring it here
    * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
@@ -880,7 +880,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 4 * 1024};
 
   sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
@@ -1000,7 +1000,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
     .miso_io_num = sd_card_manager.spi_miso_pin,
     .sclk_io_num = sd_card_manager.spi_clk_pin,
-    .max_transfer_sz = 4096,
+    .max_transfer_sz = 512,
   };
 
   /* The SD SPI device configures CS when it attaches. Preconfiguring it here

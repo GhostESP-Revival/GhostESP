@@ -28,9 +28,9 @@
 #include <unistd.h>
 
 #define GS_READ_BUF_MAX 1024
-#define GS_LOAD_CHUNK 128
-#define GS_COMMAND_LOG_LINES 16
-#define GS_COMMAND_LOG_LINE_MAX 120
+#define GS_LOAD_CHUNK 512
+#define GS_COMMAND_LOG_LINES 8
+#define GS_COMMAND_LOG_LINE_MAX 80
 #define GS_EVENT_QUEUE_DEPTH 24
 #define GS_EVENT_NAME_MAX 40
 #define GS_EVENT_VALUE_MAX 320
@@ -68,7 +68,7 @@ static void *gs_heap_realloc(void *ptr, size_t size) {
 }
 
 typedef struct {
-    size_t size;
+    uint16_t size;
 } gs_alloc_header_t;
 
 struct ghostscript_runtime {
@@ -86,6 +86,7 @@ struct ghostscript_runtime {
     bool stop_requested;
     bool api_active;
     bool waiting_for_event;
+    bool destroying;
     uint32_t resume_after_ms;
     bool script_done;
     char error[GHOSTSCRIPT_ERROR_MAX];
@@ -147,7 +148,7 @@ static void *gs_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
         return NULL;
     }
     if (!ptr) {
-        if (rt->memory_used + nsize > rt->memory_limit) return NULL;
+        if (rt->memory_used + nsize > rt->memory_limit && !rt->destroying) return NULL;
         gs_alloc_header_t *h = gs_heap_alloc(sizeof(*h) + nsize);
         if (!h) return NULL;
         h->size = nsize;
@@ -157,7 +158,7 @@ static void *gs_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     }
     gs_alloc_header_t *old = ((gs_alloc_header_t *)ptr) - 1;
     size_t old_size = old->size;
-    if (nsize > old_size && rt->memory_used + (nsize - old_size) > rt->memory_limit) return NULL;
+    if (nsize > old_size && rt->memory_used + (nsize - old_size) > rt->memory_limit && !rt->destroying) return NULL;
     gs_alloc_header_t *h = gs_heap_realloc(old, sizeof(*h) + nsize);
     if (!h) return NULL;
     h->size = nsize;
@@ -2042,17 +2043,20 @@ static void runtime_begin_slice(ghostscript_runtime_t *rt) {
 
 typedef struct {
     FILE *file;
-    char buf[GS_LOAD_CHUNK];
+    char *buf; /* sector-sized, DMA-capable, word-aligned read buffer */
 } gs_reader_t;
 
 static const char *script_reader(lua_State *L, void *data, size_t *size) {
     (void)L;
     gs_reader_t *reader = (gs_reader_t *)data;
-    if (!reader || !reader->file) {
+    if (!reader || !reader->file || !reader->buf) {
         *size = 0;
         return NULL;
     }
-    size_t n = fread(reader->buf, 1, sizeof(reader->buf), reader->file);
+    /* Reading GS_LOAD_CHUNK (one sector) at sector-aligned offsets makes FatFs
+     * read whole sectors directly into this aligned DMA buffer, so the SD-SPI
+     * driver never allocates a DMA bounce buffer. */
+    size_t n = fread(reader->buf, 1, GS_LOAD_CHUNK, reader->file);
     *size = n;
     return n > 0 ? reader->buf : NULL;
 }
@@ -2151,7 +2155,6 @@ static int l_tasks_spawn(lua_State *L) {
     luaL_requiref(bg_rt->L, LUA_GNAME, luaopen_base, 1); lua_pop(bg_rt->L, 1);
     luaL_requiref(bg_rt->L, "string", luaopen_string, 1); lua_pop(bg_rt->L, 1);
     luaL_requiref(bg_rt->L, "table", luaopen_table, 1); lua_pop(bg_rt->L, 1);
-    luaL_requiref(bg_rt->L, "math", luaopen_math, 1); lua_pop(bg_rt->L, 1);
     /* coroutine library is not linked; lua_yield/lua_resume still work. */
     /* Minimal ghost.* for the bg task. */
     lua_pushcfunction(bg_rt->L, l_print); lua_setglobal(bg_rt->L, "print");
@@ -2224,22 +2227,143 @@ static int l_load_chunk(lua_State *L) {
     return 1;
 }
 
+static int l_math_abs(lua_State *L) {
+    if (lua_isinteger(L, 1)) {
+        lua_Integer n = lua_tointeger(L, 1);
+        if (n < 0) n = (lua_Integer)(0u - (lua_Unsigned)n);
+        lua_pushinteger(L, n);
+    } else {
+        lua_Number v = luaL_checknumber(L, 1);
+        lua_pushnumber(L, v < 0 ? -v : v);
+    }
+    return 1;
+}
+
+static int l_math_floor(lua_State *L) {
+    if (lua_isinteger(L, 1)) { lua_settop(L, 1); return 1; }
+    lua_Number d = luaL_checknumber(L, 1);
+    lua_pushinteger(L, (lua_Integer)d);
+    return 1;
+}
+
+static int l_math_ceil(lua_State *L) {
+    if (lua_isinteger(L, 1)) { lua_settop(L, 1); return 1; }
+    lua_Number d = luaL_checknumber(L, 1);
+    lua_Integer i = (lua_Integer)d;
+    if (d > i) i++;
+    lua_pushinteger(L, i);
+    return 1;
+}
+
+static int l_math_max(lua_State *L) {
+    int n = lua_gettop(L);
+    luaL_argcheck(L, n >= 1, 1, "value expected");
+    int imax = 1;
+    for (int i = 2; i <= n; i++)
+        if (lua_compare(L, imax, i, LUA_OPLT)) imax = i;
+    lua_pushvalue(L, imax);
+    return 1;
+}
+
+static int l_math_min(lua_State *L) {
+    int n = lua_gettop(L);
+    luaL_argcheck(L, n >= 1, 1, "value expected");
+    int imin = 1;
+    for (int i = 2; i <= n; i++)
+        if (lua_compare(L, i, imin, LUA_OPLT)) imin = i;
+    lua_pushvalue(L, imin);
+    return 1;
+}
+
+static uint32_t xorshift32(uint32_t *state) {
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+static int l_math_random(lua_State *L) {
+    uint32_t *state = (uint32_t *)lua_touserdata(L, lua_upvalueindex(1));
+    switch (lua_gettop(L)) {
+        case 0:
+            lua_pushnumber(L, (lua_Number)xorshift32(state) / (lua_Number)0xFFFFFFFFu);
+            return 1;
+        case 1: {
+            lua_Integer up = luaL_checkinteger(L, 1);
+            if (up == 0) { lua_pushinteger(L, (lua_Integer)xorshift32(state)); return 1; }
+            luaL_argcheck(L, up >= 1, 1, "interval is empty");
+            lua_pushinteger(L, (lua_Integer)(xorshift32(state) % (lua_Unsigned)up) + 1);
+            return 1;
+        }
+        case 2: {
+            lua_Integer low = luaL_checkinteger(L, 1);
+            lua_Integer up = luaL_checkinteger(L, 2);
+            luaL_argcheck(L, low <= up, 1, "interval is empty");
+            lua_Unsigned range = (lua_Unsigned)up - (lua_Unsigned)low;
+            lua_pushinteger(L, (lua_Integer)(xorshift32(state) % (range + 1)) + low);
+            return 1;
+        }
+        default: return luaL_error(L, "wrong number of arguments");
+    }
+}
+
+static int l_math_randomseed(lua_State *L) {
+    uint32_t *state = (uint32_t *)lua_touserdata(L, lua_upvalueindex(1));
+    if (lua_isnone(L, 1)) {
+        *state = (uint32_t)esp_timer_get_time();
+    } else {
+        *state = (uint32_t)luaL_checkinteger(L, 1);
+    }
+    xorshift32(state);
+    return 0;
+}
+
+static void open_math_lite(lua_State *L) {
+    static const luaL_Reg math_funcs[] = {
+        {"abs", l_math_abs}, {"floor", l_math_floor}, {"ceil", l_math_ceil},
+        {"max", l_math_max}, {"min", l_math_min}, {NULL, NULL}
+    };
+    luaL_newlib(L, math_funcs);
+    lua_newuserdatauv(L, sizeof(uint32_t), 0);
+    *(uint32_t *)lua_touserdata(L, -1) = (uint32_t)esp_timer_get_time();
+    xorshift32((uint32_t *)lua_touserdata(L, -1));
+    lua_pushvalue(L, -1);
+    lua_pushcclosure(L, l_math_random, 1); lua_setfield(L, -3, "random");
+    lua_pushcclosure(L, l_math_randomseed, 1); lua_setfield(L, -2, "randomseed");
+    lua_setglobal(L, "math");
+}
+
 static int l_initialize_runtime(lua_State *L) {
     ghostscript_runtime_t *rt = (ghostscript_runtime_t *)lua_touserdata(L, 1);
     if (!rt) return luaL_error(L, "runtime missing");
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1); lua_pop(L, 1);
     luaL_requiref(L, "string", luaopen_string, 1); lua_pop(L, 1);
     luaL_requiref(L, "table", luaopen_table, 1); lua_pop(L, 1);
-    luaL_requiref(L, "math", luaopen_math, 1); lua_pop(L, 1);
-    luaL_requiref(L, "coroutine", luaopen_coroutine, 1); lua_pop(L, 1);
+    open_math_lite(L);
     register_api(L, rt);
     lua_newthread(L);
     return 1;
 }
 
+static int l_probe_on_tick(lua_State *L) {
+    lua_getglobal(L, "on_tick");
+    lua_pushboolean(L, lua_isfunction(L, -1));
+    return 1;
+}
+
 static bool runtime_finish_script_if_needed(ghostscript_runtime_t *rt) {
-    lua_getglobal(rt->L, "on_tick");
-    bool has_tick = lua_isfunction(rt->L, -1);
+    /* Probe for on_tick inside a protected call: lua_getglobal interns the
+     * string and allocates, and a script that finishes with its heap at the
+     * memory_limit would otherwise luaD_throw with no error handler on the C
+     * stack -> abort() -> reboot. lua_pushcfunction pushes a light C function
+     * (no allocation), so this stays safe even when the heap is full. */
+    bool has_tick = false;
+    lua_pushcfunction(rt->L, l_probe_on_tick);
+    if (lua_pcall(rt->L, 0, 1, 0) == LUA_OK) {
+        has_tick = lua_toboolean(rt->L, -1);
+    }
     lua_pop(rt->L, 1);
     if (!has_tick && !rt->stop_requested) rt->state = GHOSTSCRIPT_STATE_DONE;
     return has_tick;
@@ -2355,7 +2479,19 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     }
     runtime_begin_slice(rt);
     rt->state = GHOSTSCRIPT_STATE_RUNNING;
-    gs_reader_t reader = { .file = script };
+    gs_reader_t reader = { .file = script, .buf = NULL };
+    /* Sector-sized, DMA-capable, word-aligned buffer. Full-sector reads land
+     * directly in it, so the SD-SPI driver never needs to allocate a DMA bounce
+     * buffer -- that alloc fails under memory pressure on no-PSRAM targets and
+     * the IDF driver NULL-derefs in memcpy (Cardputer crash). */
+    reader.buf = heap_caps_malloc(GS_LOAD_CHUNK, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if (!reader.buf) {
+        snprintf(rt->error, sizeof(rt->error), "not enough DMA memory for script load buffer");
+        fclose(script);
+        ghostscript_manager_sd_end(display_was_suspended);
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
     /* Wrap load in a protected call so luaD_throw always finds an errorJmp.
      * Execution happens in a coroutine so ghost.delay() can yield top-level
      * scripts and keep the runner alive. */
@@ -2363,6 +2499,8 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     lua_pushlightuserdata(rt->L, &reader);
     runtime_begin_slice(rt);
     int err = lua_pcall(rt->L, 1, 1, 0);
+    heap_caps_free(reader.buf);
+    reader.buf = NULL;
     fclose(script);
     ghostscript_manager_sd_end(display_was_suspended);
     if (err) {
@@ -2537,6 +2675,7 @@ void ghostscript_runtime_destroy(ghostscript_runtime_t *rt) {
         vQueueDelete(queue);
     }
     for (int i = 0; i < rt->oui_prefix_count; ++i) free(rt->oui_prefix[i]);
+    rt->destroying = true;
     if (rt->L) lua_close(rt->L);
     if (rt->api_active) plugin_api_release();
     heap_caps_free(rt);

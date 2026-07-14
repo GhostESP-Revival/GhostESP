@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GS_RUNNER_OUTPUT_BUF_SIZE 4096
+#define GS_RUNNER_OUTPUT_BUF_SIZE 2048
 #define GS_RUNNER_TICK_MS 100
 #define GS_RUNNER_TASK_STACK 8192
 #define GS_RUNNER_SCROLL_THRESHOLD 12
@@ -412,9 +412,8 @@ static void launch_cb(lv_timer_t *timer) {
 
 static bool is_back_event(InputEvent *event) {
     if (event->type == INPUT_TYPE_EXIT_BUTTON) return true;
-    if (event->type == INPUT_TYPE_KEYBOARD && (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`')) return true;
+    if (event->type == INPUT_TYPE_KEYBOARD && (event->data.key_value == LV_KEY_ESC || event->data.key_value == 29 || event->data.key_value == '`')) return true;
     if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_pressed && event->data.joystick_index == 0) return true;
-    if (event->type == INPUT_TYPE_ENCODER && event->data.encoder.button && event->data.encoder.direction == 0) return true;
     return false;
 }
 
@@ -476,6 +475,16 @@ static bool handle_output_scroll(InputEvent *event) {
             return true;
         }
         if (event->data.joystick_index == 4) {
+            scroll_output_page(1);
+            return true;
+        }
+    } else if (event->type == INPUT_TYPE_KEYBOARD) {
+        int kv = event->data.key_value;
+        if (kv == LV_KEY_UP || kv == 'k' || kv == ';') {
+            scroll_output_page(-1);
+            return true;
+        }
+        if (kv == LV_KEY_DOWN || kv == 'j' || kv == '.') {
             scroll_output_page(1);
             return true;
         }

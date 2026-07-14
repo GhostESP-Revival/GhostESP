@@ -168,9 +168,8 @@ static void refresh(void) {
 
 static bool is_back(InputEvent *event) {
     if (event->type == INPUT_TYPE_EXIT_BUTTON) return true;
-    if (event->type == INPUT_TYPE_KEYBOARD && (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`')) return true;
+    if (event->type == INPUT_TYPE_KEYBOARD && (event->data.key_value == LV_KEY_ESC || event->data.key_value == 29 || event->data.key_value == '`')) return true;
     if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_pressed && event->data.joystick_index == 0) return true;
-    if (event->type == INPUT_TYPE_ENCODER && event->data.encoder.button && event->data.encoder.direction == 0) return true;
     return false;
 }
 
@@ -189,9 +188,10 @@ static void event_handler(InputEvent *event) {
         if (event->data.encoder.button) activate_row(options_view_get_selected(s_opts));
         else options_view_move_selection(s_opts, event->data.encoder.direction > 0 ? 1 : -1);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
-        if (event->data.key_value == LV_KEY_UP) options_view_move_selection(s_opts, -1);
-        else if (event->data.key_value == LV_KEY_DOWN) options_view_move_selection(s_opts, 1);
-        else if (event->data.key_value == LV_KEY_ENTER) activate_row(options_view_get_selected(s_opts));
+        int kv = event->data.key_value;
+        if (kv == LV_KEY_UP || kv == 'k' || kv == ';') options_view_move_selection(s_opts, -1);
+        else if (kv == LV_KEY_DOWN || kv == 'j' || kv == '.') options_view_move_selection(s_opts, 1);
+        else if (kv == LV_KEY_ENTER || kv == 13) activate_row(options_view_get_selected(s_opts));
     }
 }
 

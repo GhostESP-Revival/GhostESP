@@ -53,7 +53,7 @@ Folder scripts use `manifest.json`:
 
 ## Sandbox
 
-GhostScript uses real Lua with a stripped standard library and a strict allocator. `io`, `os`, `debug`, and dynamic module loading are not opened. GhostESP APIs are exposed through the `ghost` table and are permission checked.
+GhostScript uses real Lua 5.4 in 32-bit mode with a stripped standard library and a strict allocator. `io`, `os`, `debug`, `package`, `utf8`, and `coroutine` are not opened. The available standard libraries are `base`, `string`, `table`, and a lite `math` subset (`abs`, `floor`, `ceil`, `max`, `min`, `random`, `randomseed`). GhostESP APIs are exposed through the `ghost` table and are permission checked.
 
 Available modules include `ghost.ui`, `ghost.event`, `ghost.input`, `ghost.system`, `ghost.storage`, `ghost.wifi`, `ghost.ble`, `ghost.gps`, `ghost.oui`, `ghost.power`, `ghost.nfc`, `ghost.time`, `ghost.rgb`, `ghost.badusb`, `ghost.ir`, `ghost.subghz`, `ghost.net`, `ghost.settings`, `ghost.commands`, `ghost.parser`, `ghost.results`, and `ghost.tasks`.
 

@@ -27,7 +27,7 @@ _LUAC_NAMES = {
 
 
 def _find_luac() -> str:
-    """Find bundled luac, or build from source if no binary exists for this platform."""
+    """Find bundled luac, build from source, or download a prebuilt binary."""
     key = (platform.system(), platform.machine())
     name = _LUAC_NAMES.get(key)
     if name:
@@ -42,12 +42,51 @@ def _find_luac() -> str:
     if built:
         return built
 
+    # No local compiler — fetch a prebuilt binary matching this ghostbt release
+    if name:
+        downloaded = _download_luac(name)
+        if downloaded:
+            return downloaded
+
     raise FileNotFoundError(
         f"No luac for {key[0]} {key[1]}.\n"
+        "Tried: bundled binary, building from a local C compiler, downloading a prebuilt release.\n"
         "Either:\n"
-        "  1. Build and add a binary to ghostbt/data/luac/\n"
-        "  2. Install Lua 5.4: brew install lua / apt install lua5.4"
+        "  1. Check your network connection and try again\n"
+        "  2. Install a C compiler (cc/gcc/clang) so ghostbt can build one\n"
+        "  3. Build and add a binary to ghostbt/data/luac/"
     )
+
+
+def _download_luac(name: str) -> str:
+    """Download the prebuilt luac binary published for this ghostbt release."""
+    import urllib.error
+    import urllib.request
+
+    from . import __version__
+
+    url = f"https://github.com/GhostESP-Revival/GhostESP/releases/download/ghostbt-v{__version__}/{name}"
+    _LUAC_DIR.mkdir(parents=True, exist_ok=True)
+    out = _LUAC_DIR / name
+    tmp = _LUAC_DIR / f"{name}.part"
+
+    print(f"No local luac or compiler found — downloading prebuilt binary from {url}")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp, open(tmp, "wb") as f:
+            shutil.copyfileobj(resp, f)
+    except (urllib.error.URLError, OSError) as e:
+        tmp.unlink(missing_ok=True)
+        print(f"Download failed: {e}")
+        return None
+
+    if tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        return None
+
+    tmp.replace(out)
+    if platform.system() != "Windows":
+        out.chmod(out.stat().st_mode | stat.S_IEXEC)
+    return str(out)
 
 
 def _build_from_source() -> str:
