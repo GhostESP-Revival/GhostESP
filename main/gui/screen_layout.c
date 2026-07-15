@@ -27,7 +27,7 @@ static lv_color_t indexed_px(const lv_img_dsc_t *src, uint32_t x, uint32_t y) {
     uint8_t index;
     if (src->header.cf == LV_IMG_CF_INDEXED_1BIT) {
         const uint8_t *pixels = src->data + 8;
-        index = (pixels[i / 8] >> (i & 7)) & 1;
+        index = (pixels[i / 8] >> (7 - (i & 7))) & 1;
     } else {
         const uint8_t *pixels = src->data + 64;
         uint8_t packed = pixels[i / 2];

@@ -172,7 +172,7 @@ def png_to_indexed_1bpp(src: pathlib.Path, width: int, height: int) -> bytes:
         r, g, b, a = rgba[i * 4:i * 4 + 4]
         luminance = ((r * 77 + g * 150 + b * 29) >> 8) * a // 255
         if luminance >= 128:
-            pixel_bytes[i >> 3] |= 1 << (i & 7)
+            pixel_bytes[i >> 3] |= 1 << (7 - (i & 7))
 
     palette = struct.pack("<BBBBBBBB", 0, 0, 0, 255, 255, 255, 255, 255)
     return palette + bytes(pixel_bytes)
