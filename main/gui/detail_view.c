@@ -279,15 +279,15 @@ static inline bool detail_view_scroll_info(detail_view_t *dv, int dir) {
 
     if (dir > 0) {
         if (before_bottom <= step) {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, -before_bottom, LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(dv->info_panel, 0, -before_bottom, LV_ANIM_ON);
         } else {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, -step, LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(dv->info_panel, 0, -step, LV_ANIM_ON);
         }
     } else {
         if (before_top <= step) {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, before_top, LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(dv->info_panel, 0, before_top, LV_ANIM_ON);
         } else {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, step, LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(dv->info_panel, 0, step, LV_ANIM_ON);
         }
     }
 
@@ -885,7 +885,7 @@ void detail_view_set_selected(detail_view_t *dv, int index) {
     dv->selected = index;
     dv->nav_region = DETAIL_NAV_REGION_ACTIONS;
     apply_selected_style(dv, dv->rows[dv->selected].obj, true);
-    lv_obj_scroll_to_view(dv->rows[dv->selected].obj, LV_ANIM_OFF);
+    lv_obj_scroll_to_view(dv->rows[dv->selected].obj, LV_ANIM_ON);
 }
 
 void detail_view_move_selection(detail_view_t *dv, int delta) {

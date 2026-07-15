@@ -259,7 +259,7 @@ void options_view_set_selected(options_view_t *ov, int index) {
     }
     ov->selected = index;
     apply_selected_style(ov, ov->items[ov->selected], true);
-    lv_obj_scroll_to_view(ov->items[ov->selected], LV_ANIM_OFF);
+    lv_obj_scroll_to_view(ov->items[ov->selected], LV_ANIM_ON);
 }
 
 void options_view_move_selection(options_view_t *ov, int delta) {

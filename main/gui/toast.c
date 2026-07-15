@@ -267,7 +267,7 @@ static void toast_slide_out(void) {
     lv_anim_set_values(&anim, cur_y, end_y);
     lv_anim_set_time(&anim, TOAST_SLIDE_OUT_MS);
     lv_anim_set_exec_cb(&anim, toast_set_y_anim_cb);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
     lv_anim_set_ready_cb(&anim, slide_out_ready_cb);
     lv_anim_start(&anim);
 }

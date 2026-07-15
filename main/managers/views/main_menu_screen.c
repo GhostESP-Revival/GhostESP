@@ -243,7 +243,7 @@ static void scroll_grid_card_to_view(int item_index) {
     if (!row || !lv_obj_is_valid(row)) return;
 
     lv_obj_update_layout(grid_cards_container);
-    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+    lv_obj_scroll_to_view(row, LV_ANIM_ON);
 }
 
 static bool is_menu_index_visible(int menu_index, bool dual_comm_connected) {
@@ -919,12 +919,13 @@ void select_menu_item(int index, bool slide_left) {
             if (list_buttons[selected_item_index]) {
                 lv_obj_t *btn = list_buttons[selected_item_index];
                 if (card_bg_enabled()) {
-                    lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+                    uint8_t theme = settings_get_menu_theme(&G_Settings);
+                    lv_obj_set_style_border_color(btn, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
                     lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
                 } else {
                     lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
                 }
-                lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
+                lv_obj_scroll_to_view(btn, LV_ANIM_ON);
             }
         }
     }

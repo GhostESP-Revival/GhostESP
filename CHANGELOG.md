@@ -53,6 +53,12 @@
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
+- Added pressed-state visual feedback (darken + scale) on interactive buttons across the UI
+- Smooth scroll on selection changes in options lists, detail views, and main menu grid/list
+- Lockscreen wrong-PIN shake animation on the PIN dots
+- Lockscreen ghost companion bob uses a sine wave instead of a triangle wave for a more organic feel
+- Toast notifications decelerate as they exit instead of accelerating off screen
+- Main menu list selection border now uses theme accent color instead of hardcoded white
 
 ### Docs
 - Restructured getting-started docs with dedicated pages for installation, first scan, manual flashing, Flipper flashing, and control methods
