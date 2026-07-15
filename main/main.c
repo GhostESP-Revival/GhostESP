@@ -1,4 +1,5 @@
 #include "boot_banner_text.h"
+#include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
 #include "core/serial_manager.h"
@@ -202,6 +203,7 @@ static const char *TAG = "Main.c";
 
 
 static void print_boot_banner(void) {
+    if (!shell_get_banner_enabled()) return;
     static const char *const banners[] = {
         BOOT_BANNER_BLOCK,
         BOOT_BANNER_GHOSTS,
@@ -1055,5 +1057,5 @@ void app_main(void) {
     ESP_LOGI(TAG, "Ghost ESP INIT complete.");
     print_boot_banner();
     printf("\n");
-    printf("ghostcli> Type 'help' for available commands\n");
+    printf("Type 'help' for available commands\n");
 }

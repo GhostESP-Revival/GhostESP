@@ -7,6 +7,7 @@
 #include "sdkconfig.h"
 #include <stdbool.h>
 #include "core/commandline.h"
+#include "core/shell.h"
 
 #ifdef __cplusplus
 extern "C" {

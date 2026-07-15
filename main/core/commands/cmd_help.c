@@ -25,7 +25,7 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
@@ -402,6 +402,33 @@ void handle_help(int argc, char **argv) {
         glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n\n");
         return;
     }
+    if (strcmp(category, "shell") == 0) {
+        glog("\nHeadless Shell Commands:\n\n");
+        glog("echo <text>                 Print text; supports \\n and \\t escapes.\n");
+        glog("ifconfig                    Show STA, AP, and Ethernet interfaces.\n");
+        glog("ping <host> [count]         Send ICMP echo requests.\n");
+        glog("version                     Show firmware, build, git, and IDF versions.\n");
+        glog("uuid | macaddr              Show stable device identifiers.\n");
+        glog("uptime | date               Show uptime or current time.\n");
+        glog("whoami | status             Show device identity or a system summary.\n");
+        glog("hostname [name]             View or set the prompt hostname.\n");
+        glog("color [name|0-255|off]      Set ANSI prompt color (also cli_color).\n");
+        glog("banner [on|off|status]      Control the boot banner.\n");
+        glog("clear                       Clear an ANSI terminal.\n");
+        glog("alias [name command]        Create a persistent command shortcut.\n");
+        glog("unalias <name|all>          Remove shortcuts.\n");
+        glog("history [-c]                Show or clear command history.\n");
+        glog("ps | top                   Show FreeRTOS task information.\n");
+        glog("df                         Show /mnt filesystem usage.\n");
+        glog("tail <file> [lines]         Print the end of an SD file.\n");
+        glog("grep <pattern> <file>       Filter an SD file.\n");
+        glog("source <file>               Run CLI commands from an SD file.\n");
+        glog("tee <file> <text>           Append text to an SD file and echo it.\n");
+        glog("env | export NAME=value     View or persist simple shell variables.\n");
+        glog("watch <seconds> <command>  Repeat a command; use watch stop to end it.\n");
+        glog("Unknown commands get a 'Did you mean?' suggestion automatically.\n\n");
+        return;
+    }
     if (strcmp(category, "wigle") == 0) {
         glog("\nWiGLE Commands:\n\n");
         glog("wigle API <encoded|name:token>\n    Set WiGLE API credentials (encoded token or legacy format).\n\n");
@@ -746,6 +773,7 @@ void handle_help(int argc, char **argv) {
     glog("  help sd        - SD card commands\n");
     glog("  help led       - LED/RGB commands\n");
     glog("  help gps       - GPS commands\n");
+    glog("  help shell     - Headless shell commands\n");
     glog("  help wigle     - WiGLE commands\n");
     glog("  help misc      - Miscellaneous commands\n");
     glog("  help portal    - Evil Portal commands\n");

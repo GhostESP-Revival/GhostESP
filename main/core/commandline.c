@@ -233,6 +233,15 @@ CommandFunction find_command(const char *name) {
     return NULL;
 }
 
+const char *command_name_at(size_t index) {
+    Command *current = command_list_head;
+    while (current != NULL && index > 0) {
+        current = current->next;
+        index--;
+    }
+    return current ? current->name : NULL;
+}
+
 
 
 
@@ -241,6 +250,35 @@ CommandFunction find_command(const char *name) {
 
 void register_commands() {
     command_init();
+    register_command("echo", handle_echo_cmd);
+    register_command("ifconfig", handle_ifconfig_cmd);
+    register_command("ping", handle_ping_cmd);
+    register_command("version", handle_version_cmd);
+    register_command("uuid", handle_uuid_cmd);
+    register_command("macaddr", handle_macaddr_cmd);
+    register_command("uptime", handle_uptime_cmd);
+    register_command("date", handle_time_cmd);
+    register_command("whoami", handle_whoami_cmd);
+    register_command("status", handle_status_cmd);
+    register_command("clear", handle_clear_cmd);
+    register_command("hostname", handle_hostname_cmd);
+    register_command("color", handle_color_cmd);
+    register_command("cli_color", handle_color_cmd);
+    register_command("banner", handle_banner_cmd);
+    register_command("alias", handle_alias_cmd);
+    register_command("unalias", handle_unalias_cmd);
+    register_command("history", handle_history_cmd);
+    register_command("didyoumean", handle_didyoumean_cmd);
+    register_command("ps", handle_ps_cmd);
+    register_command("top", handle_ps_cmd);
+    register_command("df", handle_df_cmd);
+    register_command("tail", handle_tail_cmd);
+    register_command("grep", handle_grep_cmd);
+    register_command("source", handle_source_cmd);
+    register_command("tee", handle_tee_cmd);
+    register_command("env", handle_env_cmd);
+    register_command("export", handle_export_cmd);
+    register_command("watch", handle_watch_cmd);
     register_command("help", handle_help);
     register_command("mem", handle_mem_cmd);
 #if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)

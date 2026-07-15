@@ -27,6 +27,10 @@
 ### Wi-Fi
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 
+### Headless CLI
+- Added OS-style CLI commands for `echo`, `ifconfig`, `ping`, `version`, `uuid`, `macaddr`, `uptime`, `status`, and filesystem helpers
+- Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions
+
 ### Other Changes
 - Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
 - Shared terminal and WebUI history to remove the duplicate AP log buffer

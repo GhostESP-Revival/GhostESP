@@ -3,6 +3,7 @@
 
 #include "core/callbacks.h"
 #include "core/commands.h"
+#include "core/shell.h"
 #include "core/commandline.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
@@ -85,6 +86,11 @@ void wifi_manager_stop_visualizer(void);
 
 void handle_stop_flipper(int argc, char **argv) {
     bool stopped_any = false;
+
+    if (shell_stop_watch()) {
+        glog("Stopped CLI watch.\n");
+        stopped_any = true;
+    }
 
 #ifdef CONFIG_ENABLE_MIC_RGB_VISUALIZER
     rgb_manager_set_mic_stream_suspended(true);
@@ -662,4 +668,5 @@ void handle_status_idle_cmd(int argc, char **argv) {
 
 void handle_unknown_command(const char *cmd) {
     glog("Unsupported command: %s\n", cmd);
+    shell_suggest_command(cmd);
 }
