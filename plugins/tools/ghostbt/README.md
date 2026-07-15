@@ -116,6 +116,7 @@ When loading a `.gtheme`, firmware streams entries into `/mnt/ghostesp/themes/ac
 | `rgb565` | 1 | 2,048 B | No alpha. Best for opaque backgrounds. |
 | `rgb565a8` | 2 | 3,072 B | RGB565 + separate alpha plane. Default for icons. |
 | `indexed_4bpp` | 3 | 576 B | 16-color palette, packed 4-bit pixels. Ideal for internal-RAM devices; the `gbt` tool quantizes the source PNG at build time. |
+| `indexed_1bpp` | 4 | 136 B | Two-color palette, packed 1-bit pixels. Intended for monochrome low-RAM backgrounds. |
 
 Set the pack-wide icon format with `icon_format` in the source manifest, or override per-background via the `format` field on each `background_sources` entry. Indexed payloads are always stored uncompressed.
 

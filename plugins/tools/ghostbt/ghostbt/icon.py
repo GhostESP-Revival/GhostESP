@@ -162,6 +162,22 @@ def png_to_rgb565(src: pathlib.Path, width: int, height: int) -> bytes:
     return bytes(out)
 
 
+def png_to_indexed_1bpp(src: pathlib.Path, width: int, height: int) -> bytes:
+    """Convert a monochrome background to a two-color palette plus packed pixels."""
+    in_w, in_h, rgba = _read_png_rgba(src)
+    rgba = _resize_nearest(in_w, in_h, rgba, width, height)
+    pixel_count = width * height
+    pixel_bytes = bytearray((pixel_count + 7) // 8)
+    for i in range(pixel_count):
+        r, g, b, a = rgba[i * 4:i * 4 + 4]
+        luminance = ((r * 77 + g * 150 + b * 29) >> 8) * a // 255
+        if luminance >= 128:
+            pixel_bytes[i >> 3] |= 1 << (i & 7)
+
+    palette = struct.pack("<BBBBBBBB", 0, 0, 0, 255, 255, 255, 255, 255)
+    return palette + bytes(pixel_bytes)
+
+
 def png_to_indexed_4bpp(src: pathlib.Path, width: int, height: int) -> bytes:
     """Quantize an RGBA PNG to a 16-color palette and emit [palette][pixels].
 

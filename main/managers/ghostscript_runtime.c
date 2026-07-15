@@ -29,6 +29,7 @@
 
 #define GS_READ_BUF_MAX 1024
 #define GS_LOAD_CHUNK 512
+#define GS_SD_DMA_RESERVE 1024
 #define GS_COMMAND_LOG_LINES 8
 #define GS_COMMAND_LOG_LINE_MAX 80
 #define GS_EVENT_QUEUE_DEPTH 24
@@ -2043,20 +2044,33 @@ static void runtime_begin_slice(ghostscript_runtime_t *rt) {
 
 typedef struct {
     FILE *file;
-    char *buf; /* sector-sized, DMA-capable, word-aligned read buffer */
+    char *buf; /* sector-sized, DMA-capable, cache-aligned read buffer */
+    void *dma_reserve;
+    bool io_failed;
 } gs_reader_t;
+
+static bool script_reader_reserve_dma(gs_reader_t *reader) {
+    reader->dma_reserve = heap_caps_aligned_alloc(32, GS_SD_DMA_RESERVE,
+                                                  MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return reader->dma_reserve != NULL;
+}
 
 static const char *script_reader(lua_State *L, void *data, size_t *size) {
     (void)L;
     gs_reader_t *reader = (gs_reader_t *)data;
-    if (!reader || !reader->file || !reader->buf) {
+    if (!reader || !reader->file || !reader->buf || reader->io_failed) {
         *size = 0;
         return NULL;
     }
-    /* Reading GS_LOAD_CHUNK (one sector) at sector-aligned offsets makes FatFs
-     * read whole sectors directly into this aligned DMA buffer, so the SD-SPI
-     * driver never allocates a DMA bounce buffer. */
+    /* Full-sector script data reads land directly in this DMA buffer. FatFs
+     * metadata is not DMA-aligned, though, so ESP-IDF needs a temporary DMA
+     * buffer for those reads. Release our reservation immediately before the
+     * read, then recreate it to keep the next transaction fragmentation-safe. */
+    heap_caps_free(reader->dma_reserve);
+    reader->dma_reserve = NULL;
     size_t n = fread(reader->buf, 1, GS_LOAD_CHUNK, reader->file);
+    if (!script_reader_reserve_dma(reader)) reader->io_failed = true;
+    if (ferror(reader->file)) reader->io_failed = true;
     *size = n;
     return n > 0 ? reader->buf : NULL;
 }
@@ -2223,6 +2237,7 @@ static int l_load_chunk(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
     const char *path = rt ? rt->manifest.entry_path : "script";
     int err = lua_load(L, script_reader, reader, path, "b");
+    if (reader && reader->io_failed) return luaL_error(L, "SD read could not reserve DMA memory");
     if (err) return lua_error(L);
     return 1;
 }
@@ -2458,35 +2473,22 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
         rt->state = GHOSTSCRIPT_STATE_FAILED;
         return false;
     }
-    lua_pushcfunction(rt->L, l_initialize_runtime);
-    lua_pushlightuserdata(rt->L, rt);
-    int init_err = lua_pcall(rt->L, 1, 1, 0);
-    if (init_err != LUA_OK) {
-        runtime_set_lua_error(rt, rt->L, init_err);
-        fclose(script);
-        ghostscript_manager_sd_end(display_was_suspended);
-        rt->state = GHOSTSCRIPT_STATE_FAILED;
-        return false;
-    }
-    rt->thread = lua_tothread(rt->L, -1);
-    rt->thread_ref = luaL_ref(rt->L, LUA_REGISTRYINDEX);
-    if (!rt->thread) {
-        snprintf(rt->error, sizeof(rt->error), "failed to create Lua coroutine");
-        fclose(script);
-        ghostscript_manager_sd_end(display_was_suspended);
-        rt->state = GHOSTSCRIPT_STATE_FAILED;
-        return false;
-    }
-    runtime_begin_slice(rt);
-    rt->state = GHOSTSCRIPT_STATE_RUNNING;
     gs_reader_t reader = { .file = script, .buf = NULL };
     /* Sector-sized, DMA-capable, word-aligned buffer. Full-sector reads land
      * directly in it, so the SD-SPI driver never needs to allocate a DMA bounce
      * buffer -- that alloc fails under memory pressure on no-PSRAM targets and
      * the IDF driver NULL-derefs in memcpy (Cardputer crash). */
-    reader.buf = heap_caps_malloc(GS_LOAD_CHUNK, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    reader.buf = heap_caps_aligned_alloc(32, GS_LOAD_CHUNK, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (!reader.buf) {
         snprintf(rt->error, sizeof(rt->error), "not enough DMA memory for script load buffer");
+        fclose(script);
+        ghostscript_manager_sd_end(display_was_suspended);
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    if (!script_reader_reserve_dma(&reader)) {
+        snprintf(rt->error, sizeof(rt->error), "not enough DMA memory reserved for SD reads");
+        heap_caps_free(reader.buf);
         fclose(script);
         ghostscript_manager_sd_end(display_was_suspended);
         rt->state = GHOSTSCRIPT_STATE_FAILED;
@@ -2499,6 +2501,7 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
     lua_pushlightuserdata(rt->L, &reader);
     runtime_begin_slice(rt);
     int err = lua_pcall(rt->L, 1, 1, 0);
+    heap_caps_free(reader.dma_reserve);
     heap_caps_free(reader.buf);
     reader.buf = NULL;
     fclose(script);
@@ -2508,6 +2511,25 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
         rt->state = rt->stop_requested ? GHOSTSCRIPT_STATE_STOPPED : GHOSTSCRIPT_STATE_FAILED;
         return false;
     }
+    /* Compile while SD is mounted before opening the libraries and creating a
+     * coroutine. This keeps the internal DMA heap available to the SD driver. */
+    lua_pushcfunction(rt->L, l_initialize_runtime);
+    lua_pushlightuserdata(rt->L, rt);
+    int init_err = lua_pcall(rt->L, 1, 1, 0);
+    if (init_err != LUA_OK) {
+        runtime_set_lua_error(rt, rt->L, init_err);
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    rt->thread = lua_tothread(rt->L, -1);
+    rt->thread_ref = luaL_ref(rt->L, LUA_REGISTRYINDEX);
+    if (!rt->thread) {
+        snprintf(rt->error, sizeof(rt->error), "failed to create Lua coroutine");
+        rt->state = GHOSTSCRIPT_STATE_FAILED;
+        return false;
+    }
+    runtime_begin_slice(rt);
+    rt->state = GHOSTSCRIPT_STATE_RUNNING;
     lua_xmove(rt->L, rt->thread, 1);
     lua_sethook(rt->L, hook, LUA_MASKCOUNT, runtime_hook_count(rt));
     lua_sethook(rt->thread, hook, LUA_MASKCOUNT, runtime_hook_count(rt));

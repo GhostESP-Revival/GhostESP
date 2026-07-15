@@ -87,7 +87,7 @@ def main(argv=None) -> int:
     p_asset_image.add_argument("--out", required=True, help="Output .gimg path")
     p_asset_image.add_argument("--width", type=int, required=True, help="Output width in pixels")
     p_asset_image.add_argument("--height", type=int, required=True, help="Output height in pixels")
-    p_asset_image.add_argument("--format", choices=["rgb565", "rgb565a8", "indexed_4bpp"], default="rgb565a8",
+    p_asset_image.add_argument("--format", choices=["rgb565", "rgb565a8", "indexed_4bpp", "indexed_1bpp"], default="rgb565a8",
                                help="Pixel format (default: rgb565a8)")
     p_asset_image.add_argument("--no-compress", action="store_true", help="Store raw payload without deflate compression")
 
