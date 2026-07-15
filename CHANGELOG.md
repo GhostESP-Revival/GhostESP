@@ -49,6 +49,11 @@
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
 
+### Docs
+- Restructured getting-started docs with dedicated pages for installation, first scan, manual flashing, Flipper flashing, and control methods
+- Added new WiFi docs pages for connecting, LAN discovery, port scanning, and environment sweep
+- Moved GhostScript docs to its own top-level section and updated GBT and native SD app docs
+
 
 ## Revival v2.0.0
 
