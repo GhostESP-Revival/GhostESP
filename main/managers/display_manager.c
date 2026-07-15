@@ -1365,6 +1365,20 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   }
 }
 
+void display_manager_raise_status_bar(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  lv_obj_set_parent(status_bar, lv_layer_top());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+}
+
+void display_manager_restore_status_bar(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  lv_obj_set_parent(status_bar, lv_scr_act());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+}
+
 void apply_power_management_config(bool power_save_enabled) {
   esp_pm_config_t pm_cfg = {
       .max_freq_mhz = power_save_enabled ? 160 : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,

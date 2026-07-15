@@ -11,6 +11,7 @@
 #include "managers/plugin_installer.h"
 #include "managers/plugin_manager.h"
 #include "managers/sd_card_manager.h"
+#include "managers/ghostscript_manager.h"
 #include "managers/settings_manager.h"
 #include <ctype.h>
 #include <errno.h>
@@ -36,6 +37,9 @@
 #ifndef GHOSTESP_ASSET_PACKS_CATALOG_URL
 #define GHOSTESP_ASSET_PACKS_CATALOG_URL "https://raw.githubusercontent.com/GhostESP-Revival/GhostESP-AssetPacks/main/catalog.json"
 #endif
+#ifndef GHOSTESP_SCRIPTS_CATALOG_URL
+#define GHOSTESP_SCRIPTS_CATALOG_URL "https://raw.githubusercontent.com/GhostESP-Revival/GhostESP-Scripts/main/catalog.json"
+#endif
 
 #define CLOUD_HTTP_BUFFER_SIZE 1024
 #define CLOUD_RESPONSE_INITIAL_SIZE 1024
@@ -51,6 +55,7 @@
 #define CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES 6144
 #define CLOUD_DOWNLOAD_DIR "/mnt/ghostesp/downloads"
 #define CLOUD_THEMES_DIR "/mnt/ghostesp/themes"
+#define CLOUD_SCRIPTS_DIR GHOSTSCRIPT_ROOT_DIR
 
 static const char *TAG = "CloudStore";
 
@@ -449,6 +454,33 @@ static void parse_assets_array(cJSON *array, cloud_store_item_t *items, int *cou
     }
 }
 
+// Scripts catalog: each entry has a single download URL string.
+static void parse_scripts_array(cJSON *array, cloud_store_item_t *items, int *count) {
+    if (!cJSON_IsArray(array)) return;
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, array) {
+        if (*count >= CLOUD_STORE_MAX_ITEMS || !cJSON_IsObject(entry)) continue;
+        cloud_store_item_t item = { .type = CLOUD_STORE_TYPE_SCRIPT };
+        copy_json_string(entry, "id", item.id, sizeof(item.id));
+        if (!safe_id(item.id)) continue;
+        copy_json_string(entry, "name", item.name, sizeof(item.name));
+        copy_json_string(entry, "version", item.version, sizeof(item.version));
+        copy_json_string(entry, "description", item.description, sizeof(item.description));
+        copy_json_string(entry, "category", item.category, sizeof(item.category));
+        join_authors(entry, item.author, sizeof(item.author));
+        copy_json_size(entry, "size", &item.size);
+        if (item.name[0] == '\0') strncpy(item.name, item.id, sizeof(item.name) - 1);
+
+        char raw_url[CLOUD_STORE_URL_MAX] = {0};
+        copy_json_string(entry, "download", raw_url, sizeof(raw_url));
+        resolve_url(GHOSTESP_SCRIPTS_CATALOG_URL, raw_url, item.download_url, sizeof(item.download_url));
+        if (item.download_url[0] == '\0') continue;
+
+        items[*count] = item;
+        (*count)++;
+    }
+}
+
 static bool json_copy_string_span(const char *start, const char *end, const char *key, char *dst, size_t dst_len) {
     if (!start || !end || !key || !dst || dst_len == 0) return false;
     dst[0] = '\0';
@@ -603,6 +635,19 @@ static esp_err_t refresh_manifest(void) {
             parse_assets_text_fallback(text, parsed, &count);
         }
         ESP_LOGI(TAG, "asset catalog parsed, added=%d total=%d", count - before_assets, count);
+        free(text);
+    }
+    text = NULL;
+    if (fetch_url_text(GHOSTESP_SCRIPTS_CATALOG_URL, &text) == ESP_OK && text) {
+        int before_scripts = count;
+        cJSON *root = cJSON_Parse(text);
+        if (root) {
+            parse_scripts_array(cJSON_GetObjectItemCaseSensitive(root, "scripts"), parsed, &count);
+            cJSON_Delete(root);
+        } else {
+            ESP_LOGW(TAG, "scripts catalog JSON parse failed");
+        }
+        ESP_LOGI(TAG, "scripts catalog parsed, added=%d total=%d", count - before_scripts, count);
         free(text);
     }
 
@@ -825,6 +870,9 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
         int status = esp_http_client_get_status_code(client);
         esp_http_client_cleanup(client);
 
+        ESP_LOGI(TAG, "download attempt %d: err=%s http=%d written=%u total=%u",
+                 attempt, esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
+
         // Flush whatever tail is still staged before judging completeness.
         if (ctx.buf && ctx.ok && err == ESP_OK && !(s_ctx && s_ctx->cancel_requested)) {
             if (download_flush_buffer(&ctx) != ESP_OK) ctx.ok = false;
@@ -857,11 +905,19 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
 
 static esp_err_t install_item(const cloud_store_item_t *item) {
     if (!safe_id(item->id)) return ESP_ERR_INVALID_ARG;
+    if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
+        return ESP_ERR_NOT_FOUND;
+    }
 
+    const char *ext = (item->type == CLOUD_STORE_TYPE_APP) ? "gapp"
+                    : (item->type == CLOUD_STORE_TYPE_SCRIPT) ? "gsb.tmp"
+                    : "gtheme.tmp";
     char filename[CLOUD_STORE_ID_MAX + 16];
-    snprintf(filename, sizeof(filename), "%s.%s", item->id, item->type == CLOUD_STORE_TYPE_APP ? "gapp" : "gtheme.tmp");
+    snprintf(filename, sizeof(filename), "%s.%s", item->id, ext);
     char download_path[CLOUD_STORE_ID_MAX + 80];
-    const char *base_dir = item->type == CLOUD_STORE_TYPE_APP ? CLOUD_DOWNLOAD_DIR : CLOUD_THEMES_DIR;
+    const char *base_dir = (item->type == CLOUD_STORE_TYPE_APP) ? CLOUD_DOWNLOAD_DIR
+                         : (item->type == CLOUD_STORE_TYPE_SCRIPT) ? CLOUD_DOWNLOAD_DIR
+                         : CLOUD_THEMES_DIR;
     if (!join_path(download_path, sizeof(download_path), base_dir, filename)) return ESP_ERR_INVALID_SIZE;
 
     // Phase 1 (dirs): brief SD access. On JIT boards this mounts + suspends the
@@ -872,6 +928,7 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
         if (!sd_card_jit_begin(&suspended, true)) return ESP_ERR_INVALID_STATE;
         mkdir_if_missing(CLOUD_DOWNLOAD_DIR);
         mkdir_if_missing(CLOUD_THEMES_DIR);
+        mkdir_if_missing(CLOUD_SCRIPTS_DIR);
         sd_card_jit_end(suspended);
     }
 
@@ -895,9 +952,50 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
     bool suspended = false;
     if (!sd_card_jit_begin(&suspended, false)) return ESP_ERR_INVALID_STATE;
     set_status(CLOUD_STORE_STATE_INSTALLING, item->name, 0, 0, NULL);
+
+    // Verify the download actually wrote data — a CDN 404 or empty response
+    // can report HTTP 200 with zero body bytes. Check while SD is mounted.
+    {
+        struct stat dl_st;
+        if (stat(download_path, &dl_st) != 0 || dl_st.st_size == 0) {
+            ESP_LOGW(TAG, "downloaded file missing or empty for %s", item->id);
+            unlink(download_path);
+            sd_card_jit_end(suspended);
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "downloaded %s: %ld bytes", item->id, (long)dl_st.st_size);
+    }
+
     if (item->type == CLOUD_STORE_TYPE_APP) {
         err = plugin_installer_install_gapp(download_path);
         if (err == ESP_OK) plugin_manager_reload();
+    } else if (item->type == CLOUD_STORE_TYPE_SCRIPT) {
+        char script_dir[128];
+        int n = snprintf(script_dir, sizeof(script_dir), "%s/%s", CLOUD_SCRIPTS_DIR, item->id);
+        if (n <= 0 || (size_t)n >= sizeof(script_dir)) {
+            err = ESP_ERR_INVALID_SIZE;
+            ESP_LOGW(TAG, "script dir path too long for %s", item->id);
+        } else {
+            mkdir_if_missing(script_dir);
+            char final_gsb[160];
+            snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
+            unlink(final_gsb);
+            if (rename(download_path, final_gsb) != 0) {
+                err = ESP_FAIL;
+                ESP_LOGW(TAG, "rename failed for script %s: errno=%d", item->id, errno);
+            } else {
+                char manifest_path[160];
+                snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
+                FILE *mf = fopen(manifest_path, "w");
+                if (mf) {
+                    fprintf(mf, "{\"id\":\"%s\",\"name\":\"%s\",\"entry\":\"%s.gsb\"}",
+                            item->id, item->name, item->id);
+                    fclose(mf);
+                }
+                ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
+                err = ESP_OK;
+            }
+        }
     } else {
         char final_name[CLOUD_STORE_ID_MAX + 16];
         snprintf(final_name, sizeof(final_name), "%s.gtheme", item->id);
@@ -992,6 +1090,7 @@ static void install_task(void *arg) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
         s_ctx->status.active_type = item.type;
         xSemaphoreGive(s_ctx->mutex);
+        ESP_LOGI(TAG, "installing %s from %s", item.id, item.download_url);
         cloud_store_pause_ap_if_needed();
         esp_err_t err = install_item(&item);
         bool cancelled = s_ctx->cancel_requested;
@@ -1001,10 +1100,13 @@ static void install_task(void *arg) {
             // shows its own "cancelled" toast when it requests the cancel.
             set_status(CLOUD_STORE_STATE_READY, "Cloud Store", 0, 0, NULL);
         } else if (err == ESP_OK) {
+            ESP_LOGI(TAG, "install succeeded for %s", item.id);
             set_status(CLOUD_STORE_STATE_DONE, item.name, 0, 0, NULL);
         } else {
             ESP_LOGW(TAG, "install failed for %s: %s", item.id, esp_err_to_name(err));
-            set_status(CLOUD_STORE_STATE_FAILED, item.name, 0, 0, esp_err_to_name(err));
+            const char *msg = (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_STATE)
+                ? "SD card required" : esp_err_to_name(err);
+            set_status(CLOUD_STORE_STATE_FAILED, item.name, 0, 0, msg);
         }
         // Drop the partial download on cancel/failure so we don't leave broken
         // files on the SD card (a half-written .gapp can also trip the plugin
@@ -1018,6 +1120,9 @@ static void install_task(void *arg) {
                 if (item.type == CLOUD_STORE_TYPE_ASSET_PACK) {
                     snprintf(tmp_name, sizeof(tmp_name), "%s.gtheme.tmp", item.id);
                     if (join_path(tmp_path, sizeof(tmp_path), CLOUD_THEMES_DIR, tmp_name)) unlink(tmp_path);
+                } else if (item.type == CLOUD_STORE_TYPE_SCRIPT) {
+                    snprintf(tmp_name, sizeof(tmp_name), "%s.gsb.tmp", item.id);
+                    if (join_path(tmp_path, sizeof(tmp_path), CLOUD_DOWNLOAD_DIR, tmp_name)) unlink(tmp_path);
                 } else {
                     snprintf(tmp_name, sizeof(tmp_name), "%s.gapp", item.id);
                     if (join_path(tmp_path, sizeof(tmp_path), CLOUD_DOWNLOAD_DIR, tmp_name)) unlink(tmp_path);

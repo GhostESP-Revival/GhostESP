@@ -66,11 +66,13 @@ progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, voi
     lv_obj_set_style_bg_color(view->container, bg, 0);
     lv_obj_set_style_bg_opa(view->container, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(view->container, 0, 0);
+    lv_obj_set_style_radius(view->container, 0, 0);
     lv_obj_set_style_pad_all(view->container, 0, 0);
     lv_obj_clear_flag(view->container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(view->container, LV_OBJ_FLAG_CLICKABLE);
 
     display_manager_add_status_bar("Progress");
+    display_manager_raise_status_bar();
 
     // Fill the screen edge-to-edge like the shared confirm/NFC popups instead
     // of a floating centered card.
@@ -79,7 +81,7 @@ progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, voi
 
     view->card = lv_obj_create(view->container);
     lv_obj_set_size(view->card, card_w, card_h);
-    lv_obj_align(view->card, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(view->card, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(view->card, surface, 0);
     lv_obj_set_style_bg_opa(view->card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(view->card, 0, 0);
@@ -301,6 +303,7 @@ void progress_bar_view_close(progress_bar_view_t *view) {
     if (view->container && lv_obj_is_valid(view->container)) {
         lv_obj_del(view->container);
     }
+    display_manager_restore_status_bar();
     free(view);
 }
 

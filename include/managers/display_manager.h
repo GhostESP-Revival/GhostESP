@@ -188,6 +188,8 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+void display_manager_raise_status_bar(void);
+void display_manager_restore_status_bar(void);
 
 // Reduce I2C activity (e.g., pause battery polling/logging) while other subsystems
 // such as PN532 scanning/bruteforcing are active to avoid bus contention.

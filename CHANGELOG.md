@@ -28,6 +28,7 @@
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 
 ### Other Changes
+- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
 - Freed the wardriving CSV line buffer when logging stops
 - Freed PCAP staging resources when capture stops

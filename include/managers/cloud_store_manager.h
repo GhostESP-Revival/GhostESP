@@ -23,6 +23,7 @@ extern "C" {
 typedef enum {
     CLOUD_STORE_TYPE_APP = 0,
     CLOUD_STORE_TYPE_ASSET_PACK = 1,
+    CLOUD_STORE_TYPE_SCRIPT = 2,
 } cloud_store_item_type_t;
 
 typedef enum {

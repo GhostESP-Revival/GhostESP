@@ -11,6 +11,7 @@
 #include "gui/toast.h"
 #include "managers/cloud_store_manager.h"
 #include "managers/display_manager.h"
+#include "managers/ghostscript_manager.h"
 #include "managers/plugin_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/views/app_gallery_screen.h"
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 uint32_t theme_palette_get_accent(uint8_t theme);
 
@@ -103,6 +105,8 @@ static sorted_cloud_item_t s_sorted_apps[CLOUD_STORE_MAX_ITEMS];
 static int s_sorted_apps_count;
 static sorted_cloud_item_t s_sorted_packs[CLOUD_STORE_MAX_ITEMS];
 static int s_sorted_packs_count;
+static sorted_cloud_item_t s_sorted_scripts[CLOUD_STORE_MAX_ITEMS];
+static int s_sorted_scripts_count;
 
 static int row_count(void) {
     return options_view_get_item_count(s_options);
@@ -215,6 +219,13 @@ static cloud_item_install_status_t item_install_status(const cloud_store_item_t 
         }
         return CLOUD_ITEM_INSTALLED;
     }
+    if (item->type == CLOUD_STORE_TYPE_SCRIPT) {
+        char path[128];
+        snprintf(path, sizeof(path), "%s/%s/%s.gsb", GHOSTSCRIPT_ROOT_DIR, item->id, item->id);
+        struct stat st;
+        if (stat(path, &st) == 0) return CLOUD_ITEM_INSTALLED;
+        return CLOUD_ITEM_NEW;
+    }
     int n = asset_pack_get_installed_count();
     for (int i = 0; i < n; ++i) {
         const char *name = asset_pack_get_installed_name(i);
@@ -283,7 +294,8 @@ static void render_top_level(int *rendered, cloud_store_status_t status) {
         refresh_label = LV_SYMBOL_REFRESH "  Loading cloud manifest...";
     } else if (status.state == CLOUD_STORE_STATE_FAILED &&
                cloud_store_get_count(CLOUD_STORE_TYPE_APP) == 0 &&
-               cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0) {
+               cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0 &&
+               cloud_store_get_count(CLOUD_STORE_TYPE_SCRIPT) == 0) {
         // Make it obvious this row is a tappable retry, not just an error label.
         snprintf(refresh_buf, sizeof(refresh_buf), "#ff5555 " LV_SYMBOL_WARNING "#  %s  (tap to retry)",
                  status.error[0] ? status.error : "Cloud manifest unavailable");
@@ -297,6 +309,7 @@ static void render_top_level(int *rendered, cloud_store_status_t status) {
         add_folder_row(rendered, CLOUD_STORE_TYPE_APP, "Apps");
     }
     add_folder_row(rendered, CLOUD_STORE_TYPE_ASSET_PACK, "Asset Packs");
+    add_folder_row(rendered, CLOUD_STORE_TYPE_SCRIPT, "Scripts");
 
     s_rows[*rendered] = options_view_add_back_row(s_options, row_event_cb, (void *)(intptr_t)*rendered);
     s_row_meta[*rendered].kind = ROW_KIND_BACK;
@@ -306,8 +319,10 @@ static void render_top_level(int *rendered, cloud_store_status_t status) {
 // Category chooser for a type: Back, "All", then one row per manifest
 // category (only reached when a type has more than one distinct category).
 static void render_categories(int *rendered, cloud_store_item_type_t type) {
-    bool is_app = (type == CLOUD_STORE_TYPE_APP);
-    options_view_set_title(s_options, is_app ? "Apps" : "Asset Packs");
+    const char *title = (type == CLOUD_STORE_TYPE_APP) ? "Apps"
+                      : (type == CLOUD_STORE_TYPE_SCRIPT) ? "Scripts"
+                      : "Asset Packs";
+    options_view_set_title(s_options, title);
 
     s_rows[*rendered] = options_view_add_back_row(s_options, row_event_cb, (void *)(intptr_t)*rendered);
     s_row_meta[*rendered].kind = ROW_KIND_BACK;
@@ -342,15 +357,21 @@ static void render_categories(int *rendered, cloud_store_item_type_t type) {
 // Item list for a type, optionally filtered by s_current_category: Back
 // followed by the sorted item rows.
 static void render_items(int *rendered, cloud_store_item_type_t type, cloud_store_status_t status) {
-    bool is_app = (type == CLOUD_STORE_TYPE_APP);
-    options_view_set_title(s_options, s_current_category[0] ? s_current_category : (is_app ? "Apps" : "Asset Packs"));
+    const char *title = (type == CLOUD_STORE_TYPE_APP) ? "Apps"
+                      : (type == CLOUD_STORE_TYPE_SCRIPT) ? "Scripts"
+                      : "Asset Packs";
+    options_view_set_title(s_options, s_current_category[0] ? s_current_category : title);
 
     s_rows[*rendered] = options_view_add_back_row(s_options, row_event_cb, (void *)(intptr_t)*rendered);
     s_row_meta[*rendered].kind = ROW_KIND_BACK;
     (*rendered)++;
 
-    sorted_cloud_item_t *items = is_app ? s_sorted_apps : s_sorted_packs;
-    int *item_n_ptr = is_app ? &s_sorted_apps_count : &s_sorted_packs_count;
+    sorted_cloud_item_t *items = (type == CLOUD_STORE_TYPE_APP) ? s_sorted_apps
+                               : (type == CLOUD_STORE_TYPE_SCRIPT) ? s_sorted_scripts
+                               : s_sorted_packs;
+    int *item_n_ptr = (type == CLOUD_STORE_TYPE_APP) ? &s_sorted_apps_count
+                    : (type == CLOUD_STORE_TYPE_SCRIPT) ? &s_sorted_scripts_count
+                    : &s_sorted_packs_count;
     load_sorted_items(type, s_current_category[0] ? s_current_category : NULL, items, item_n_ptr);
     int item_n = *item_n_ptr;
     for (int i = 0; i < item_n && *rendered < CLOUD_STORE_MAX_ROWS - 1; ++i) {
@@ -360,7 +381,9 @@ static void render_items(int *rendered, cloud_store_item_type_t type, cloud_stor
     if (item_n == 0) {
         const char *msg = (status.state == CLOUD_STORE_STATE_FETCHING)
             ? "Loading..."
-            : (is_app ? "No apps available" : "No asset packs available");
+            : (type == CLOUD_STORE_TYPE_APP) ? "No apps available"
+            : (type == CLOUD_STORE_TYPE_SCRIPT) ? "No scripts available"
+            : "No asset packs available";
         s_rows[*rendered] = options_view_add_item(s_options, msg, row_event_cb, (void *)(intptr_t)*rendered);
         s_row_meta[*rendered].kind = ROW_KIND_EMPTY;
         (*rendered)++;
@@ -519,17 +542,18 @@ static void select_current(void) {
 
     cloud_item_install_status_t st = item_install_status(&item);
     bool is_app = (meta->item_type == CLOUD_STORE_TYPE_APP);
+    bool is_script = (meta->item_type == CLOUD_STORE_TYPE_SCRIPT);
     const char *title;
     const char *action;
     if (st == CLOUD_ITEM_UPDATE) {
-        title = is_app ? "Update App?" : "Update Asset Pack?";
+        title = is_app ? "Update App?" : is_script ? "Update Script?" : "Update Asset Pack?";
         action = "Update";
     } else if (st == CLOUD_ITEM_INSTALLED) {
-        title = is_app ? "Reinstall App?" : "Reinstall Asset Pack?";
+        title = is_app ? "Reinstall App?" : is_script ? "Reinstall Script?" : "Reinstall Asset Pack?";
         action = "Reinstall";
     } else {
-        title = is_app ? "Install App?" : "Download Asset Pack?";
-        action = is_app ? "Install" : "Download";
+        title = is_app ? "Install App?" : is_script ? "Install Script?" : "Download Asset Pack?";
+        action = is_app ? "Install" : is_script ? "Install" : "Download";
     }
 
     // Keep the popup terse: item name, a short blurb (first line only), and the
@@ -589,7 +613,9 @@ static void status_timer_cb(lv_timer_t *timer) {
     if (status.state != s_last_status_state) {
         if (status.state == CLOUD_STORE_STATE_DONE) {
             close_progress();
-            toast_show_duration(status.active_type == CLOUD_STORE_TYPE_APP ? "App installed" : "Asset pack downloaded", TOAST_SUCCESS, 2200);
+            toast_show_duration(status.active_type == CLOUD_STORE_TYPE_APP ? "App installed"
+                             : status.active_type == CLOUD_STORE_TYPE_SCRIPT ? "Script installed"
+                             : "Asset pack downloaded", TOAST_SUCCESS, 2200);
             render_store();
         } else if (status.state == CLOUD_STORE_STATE_FAILED) {
             close_progress();
@@ -637,7 +663,7 @@ static void cloud_store_create(void) {
 
     cloud_store_status_t status = cloud_store_get_status();
     s_last_status_state = status.state;
-    if (status.state == CLOUD_STORE_STATE_IDLE || (status.state == CLOUD_STORE_STATE_FAILED && cloud_store_get_count(CLOUD_STORE_TYPE_APP) == 0 && cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0)) {
+    if (status.state == CLOUD_STORE_STATE_IDLE || (status.state == CLOUD_STORE_STATE_FAILED && cloud_store_get_count(CLOUD_STORE_TYPE_APP) == 0 && cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0 && cloud_store_get_count(CLOUD_STORE_TYPE_SCRIPT) == 0)) {
         start_refresh(false);
     }
 }

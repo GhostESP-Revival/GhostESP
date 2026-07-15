@@ -189,17 +189,20 @@ void disp_spi_change_device_speed(int clock_speed_hz)
     disp_spi_add_device_with_speed(spi_host, clock_speed_hz);
 }
 
-void disp_spi_remove_device()
+esp_err_t disp_spi_remove_device()
 {
     if (spi == NULL) {
-        return;
+        return ESP_OK;
     }
 
     /* Wait for previous pending transaction results */
     disp_wait_for_pending_transactions();
 
     esp_err_t ret=spi_bus_remove_device(spi);
-    assert(ret==ESP_OK);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remove display SPI device: %s", esp_err_to_name(ret));
+        return ret;
+    }
     spi = NULL;  // clear handle so it can be reinitialized during resume
     /* Free DMA transaction pool to release internal DMA memory.
      * This is critical when the SPI bus is shared with SD card —
@@ -213,6 +216,7 @@ void disp_spi_remove_device()
         vQueueDelete(TransactionPool);
         TransactionPool = NULL;
     }
+    return ESP_OK;
 }
 
 void disp_spi_transaction(const uint8_t *data, size_t length,

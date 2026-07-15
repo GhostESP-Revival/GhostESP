@@ -114,6 +114,8 @@ static bool display_spi_requires_rebind_for_sd(void) {
   return is_shared_display_sd_spi() && !display_sd_spi_pins_match();
 }
 
+static bool display_spi_resume_after_sd(void);
+
 static bool display_spi_suspend_for_sd(void) {
   if (!is_shared_display_sd_spi()) {
     return false;
@@ -133,9 +135,25 @@ static bool display_spi_suspend_for_sd(void) {
    * or "stuck" pixel row until the next resume cycle. */
   disp_wait_for_pending_transactions();
   display_manager_suspend_lvgl_task();
-  disp_spi_remove_device();
+  esp_err_t remove_ret = disp_spi_remove_device();
+  if (remove_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release display SPI device for SD: %s", esp_err_to_name(remove_ret));
+    lv_disp_t *disp = lv_disp_get_default();
+    if (disp) {
+      lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
+      if (refr) lv_timer_resume(refr);
+    }
+    display_manager_resume_lvgl_task();
+    return false;
+  }
   s_display_panel_attached = false;
-  spi_bus_free(TFT_SPI_HOST);
+  esp_err_t free_ret = spi_bus_free(TFT_SPI_HOST);
+  if (free_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release display SPI bus for SD: %s", esp_err_to_name(free_ret));
+    s_display_spi_suspended_flag = true;
+    display_spi_resume_after_sd();
+    return false;
+  }
   /* assert CS high so that panel stays quiet */
   #ifdef CONFIG_LV_DISP_SPI_CS
   gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
@@ -143,12 +161,12 @@ static bool display_spi_suspend_for_sd(void) {
   s_display_spi_suspended_flag = true;
   return true;
 }
-static void display_spi_resume_after_sd(void) {
+static bool display_spi_resume_after_sd(void) {
   if (!is_shared_display_sd_spi()) {
-    return;
+    return true;
   }
   if (!s_display_spi_suspended_flag) {
-    return;
+    return true;
   }
   if (s_display_panel_attached) {
     /* Already attached: nothing to do (shouldn't normally hit this, but
@@ -177,7 +195,13 @@ static void display_spi_resume_after_sd(void) {
       ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
     }
   }
-  /* resume lvgl refresh */
+  if (!s_display_panel_attached) {
+    /* Keep LVGL parked: a live render task without a panel device can use a
+     * stale SPI handle and turn one failed handoff into a watchdog reset. */
+    ESP_LOGE(TAG, "Display SPI rebind failed; LVGL remains suspended");
+    return false;
+  }
+  /* Resume LVGL only after its panel device is attached to the display bus. */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
@@ -185,13 +209,14 @@ static void display_spi_resume_after_sd(void) {
   }
   display_manager_resume_lvgl_task();
   s_display_spi_suspended_flag = false;
+  return true;
 }
 #else
 static bool display_sd_spi_pins_match(void) { return false; }
 static bool is_shared_display_sd_spi(void) { return false; }
 static bool display_spi_requires_rebind_for_sd(void) { return false; }
 static bool display_spi_suspend_for_sd(void) { return false; }
-static void display_spi_resume_after_sd(void) {}
+static bool display_spi_resume_after_sd(void) { return true; }
 #endif
 
 static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
