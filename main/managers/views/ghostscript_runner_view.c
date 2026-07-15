@@ -515,6 +515,11 @@ static void event_handler(InputEvent *event) {
 }
 
 void ghostscript_runner_view_create(void) {
+    /* The previous view has already been destroyed. Drop decoded backgrounds
+     * and icons before allocating the runner and Lua runtime; they reload on
+     * demand when the user returns to the browser or app menu. */
+    gui_screen_invalidate_bg_cache();
+    asset_pack_release_cached_images();
     if (!s_lifecycle_mutex) {
         s_lifecycle_mutex = xSemaphoreCreateMutex();
         if (!s_lifecycle_mutex) return;
@@ -554,8 +559,7 @@ void ghostscript_runner_view_create(void) {
     s_touch_started = false;
     s_touch_scrolling = false;
     s_follow_output = true;
-    bool asset_bg = asset_pack_get_background_tile() != NULL;
-    s_root = gui_screen_create_root(NULL, "GhostScript", lv_color_hex(0x101014), asset_bg ? LV_OPA_TRANSP : LV_OPA_COVER);
+    s_root = gui_screen_create_root_no_bg(NULL, "GhostScript", lv_color_hex(0x101014), LV_OPA_COVER);
     ghostscript_runner_view.root = s_root;
     display_manager_add_status_bar("GhostScript");
     lv_obj_t *content = gui_screen_create_content(s_root, GUI_STATUS_BAR_HEIGHT);
@@ -571,39 +575,19 @@ void ghostscript_runner_view_create(void) {
     lv_label_set_text(s_title, s_title_buf);
     lv_obj_set_style_text_color(s_title, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_16, 0);
-    if (asset_bg) {
-        lv_obj_set_style_bg_color(s_title, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(s_title, LV_OPA_60, 0);
-        lv_obj_set_style_radius(s_title, 3, 0);
-        lv_obj_set_style_pad_hor(s_title, 6, 0);
-        lv_obj_set_style_pad_ver(s_title, 1, 0);
-    }
     s_status = lv_label_create(content);
     snprintf(s_status_buf, sizeof(s_status_buf), "Loading | autoscroll on");
     lv_label_set_text(s_status, s_status_buf);
     lv_obj_set_style_text_color(s_status, lv_color_hex(0xAAB0C0), 0);
     lv_obj_set_style_text_font(s_status, &lv_font_montserrat_12, 0);
-    if (asset_bg) {
-        lv_obj_set_style_bg_color(s_status, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(s_status, LV_OPA_50, 0);
-        lv_obj_set_style_radius(s_status, 3, 0);
-        lv_obj_set_style_pad_hor(s_status, 6, 0);
-        lv_obj_set_style_pad_ver(s_status, 1, 0);
-    }
     s_output_scroll = lv_obj_create(content);
     lv_obj_set_width(s_output_scroll, LV_PCT(100));
     lv_obj_set_flex_grow(s_output_scroll, 1);
-    lv_obj_set_style_pad_all(s_output_scroll, asset_bg ? 6 : 0, 0);
+    lv_obj_set_style_pad_all(s_output_scroll, 0, 0);
     lv_obj_set_scroll_dir(s_output_scroll, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_output_scroll, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_border_width(s_output_scroll, 0, 0);
-    if (asset_bg) {
-        lv_obj_set_style_bg_color(s_output_scroll, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(s_output_scroll, LV_OPA_60, 0);
-        lv_obj_set_style_radius(s_output_scroll, 3, 0);
-    } else {
-        lv_obj_set_style_bg_opa(s_output_scroll, LV_OPA_TRANSP, 0);
-    }
+    lv_obj_set_style_bg_opa(s_output_scroll, LV_OPA_TRANSP, 0);
 
     s_output = lv_label_create(s_output_scroll);
     lv_label_set_text(s_output, "");
