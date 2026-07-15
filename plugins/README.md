@@ -28,7 +28,6 @@ plugins/
   apps/<app_id>/            Extracted app folders
     manifest.json
     <entry>.so
-  packages/                 .gapp archive discovery
   app_cache/                Auto-extracted .gapp content
   appdata/<app_id>/         Per-app persistent storage
     .state.json             Quarantine / failure state
@@ -190,7 +189,7 @@ Xtensa and RISC-V app binaries are not interchangeable. Build one `.so` per targ
 
 Custom streaming archive (not ZIP). Header: 4-byte magic `GAPP`, version, flags, file count. Each file entry: `FILE` magic, compression method (0=store, 1=raw-deflate), path, sizes, FNV-1a 64-bit checksum, then payload. Firmware extracts `.gapp` files into `/mnt/ghostesp/app_cache/` because `elf_loader` needs a real `.so` file path for `dlopen()`.
 
-Drop `.gapp` files into `/mnt/ghostesp/packages/` or `/mnt/ghostesp/apps/` for automatic discovery. The gallery reload path detects new/changed packages, extracts them to cache, and registers the app. Removing the source `.gapp` unregisters it on the next reload.
+Drop `.gapp` files into `/mnt/ghostesp/apps/`, then reboot the device. GhostESP discovers new packages during startup, extracts them into cache, and registers the app.
 
 ## Quick Start
 
@@ -208,7 +207,7 @@ python plugins/tools/package_app.py plugins/examples/my_tool
 python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 ```
 
-Copy `manifest.json` and the `.so` to `/mnt/ghostesp/apps/<id>/` on the SD card, or drop the `.gapp` into `/mnt/ghostesp/packages/`.
+Copy `manifest.json` and the `.so` to `/mnt/ghostesp/apps/<id>/` on the SD card, or drop the `.gapp` into `/mnt/ghostesp/apps/` and reboot.
 
 ## GBT (Ghost Build Tool)
 

@@ -1,7 +1,7 @@
 ---
 title: "BLE Bridge"
 description: "Use a second ESP32 as a Bluetooth bridge between a main GhostESP device and the Android companion app."
-weight: 100
+weight: 110
 ---
 
 The **BLE Bridge** turns one of your GhostESP devices into a wireless proxy that exposes a Bluetooth Low Energy (BLE) GATT service to the Android companion app. Commands you send from the phone are forwarded over the existing GhostLink UART link to a second, "main" ESP32, and the response is shipped back over BLE notifications.

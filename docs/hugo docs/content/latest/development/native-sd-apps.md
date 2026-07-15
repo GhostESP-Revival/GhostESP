@@ -21,7 +21,7 @@ python plugins/tools/build_app.py plugins/examples/my_tool --target esp32s3
 python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 ```
 
-Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` or `/mnt/ghostesp/packages/` on your SD card. The app gallery will pick it up on the next reload.
+Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. GhostESP discovers and extracts the app during startup.
 
 A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "gbt" >}}).
 
@@ -32,7 +32,6 @@ A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "
   apps/<app_id>/           Extracted app folders
     manifest.json
     <entry>.so
-  packages/                .gapp archive discovery
   app_cache/               Auto-extracted .gapp content
   appdata/<app_id>/        Per-app storage + .state.json
 ```
@@ -1260,6 +1259,20 @@ Build one `.so` per supported native SD app target. Xtensa (esp32/s2/s3) and RIS
 
 `esp32c3` is not listed because the current ELF loader configuration does not enable native SD `.gapp` shared-object loading for C3.
 
+### Target-specific release workflow
+
+Use `gbt dist` once per target. Do not build for one target and then run `gbt package`: packaging otherwise falls back to the target in `manifest.json` and can label the archive incorrectly.
+
+```powershell
+# Build and package an ESP32-S3 release.
+gbt dist plugins/examples/my_tool --target esp32s3 --gapp
+
+# Build and package a separate ESP32-C5 release.
+gbt dist plugins/examples/my_tool --target esp32c5 --gapp
+```
+
+After each build, test the `.gapp` on a device with the matching target before publishing it.
+
 ## .gapp Archive Format
 
 The `.gapp` format is a custom streaming archive (not ZIP):
@@ -1334,7 +1347,7 @@ If your app fails to load with an exec-memory error, check this value. Disabling
 | Command | Description |
 |---------|-------------|
 | `apps list` | List all discovered SD apps |
-| `apps reload` | Rescan `/mnt/ghostesp/apps/` and `/mnt/ghostesp/packages/` |
+| `apps reload` | Rescan `/mnt/ghostesp/apps/` |
 | `apps info <id>` | Show manifest details and failure count |
 | `apps run <id>` | Launch app (UI mode if screen available, headless otherwise) |
 | `apps stop` | Stop the currently running app |

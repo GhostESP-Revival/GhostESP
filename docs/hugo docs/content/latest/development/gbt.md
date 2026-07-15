@@ -1,11 +1,13 @@
 ---
 title: "GBT (Ghost Build Tool)"
-description: "Build, package, and flash native SD apps and GhostESP firmware with the Ghost Build Tool."
+description: "Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware."
 weight: 35
 toc: true
 ---
 
-`gbt` is the CLI toolchain for GhostESP native SD app development. It can scaffold projects, build app `.so` files with ESP-IDF, package `.gapp` archives, build & flash firmware, and manage serial devices.
+`gbt` is the GhostESP CLI toolchain. It builds Native SD App `.so` files with ESP-IDF, packages `.gapp` archives, compiles GhostScript `.gs` files into `.gsb` bytecode, builds and flashes firmware, and manages serial devices.
+
+Use [GhostScript]({{< relref "../ghostscript" >}}) or [Native SD Apps]({{< relref "native-sd-apps" >}}) for the extension model and end-to-end workflow. This page describes the commands that currently exist.
 
 ## Installation
 
@@ -20,7 +22,7 @@ This installs `gbt` (and `ghostbt`) as a command on your PATH. Both names invoke
 
 ### Requirements
 
-- Python 3.8+
+- Python 3.10+ (the current package uses syntax unavailable in Python 3.8 and 3.9)
 - Git (for `gbt setup`)
 - ESP-IDF or `gbt setup` to install it automatically
 
@@ -39,10 +41,12 @@ This installs `gbt` (and `ghostbt`) as a command on your PATH. Both names invoke
 | `gbt flash` | Flash firmware or app to device |
 | `gbt monitor` | Open serial monitor |
 | `gbt ports` | List available serial ports |
+| `gbt script compile` | Compile GhostScript `.gs` source to `.gsb` bytecode |
+| `gbt script deploy` | Compile and copy standalone `.gsb` bytecode to an SD scripts directory |
 
 ## Environment
 
-Run from inside the GhostESP repo (auto-detected via `plugins/`, `main/`, `components/` markers). GBT resolves the SDK header, templates, and board configs relative to the repo root.
+Run Native SD App and firmware commands from inside the GhostESP repository (auto-detected via `plugins/`, `main/`, `components/` markers). GBT resolves the SDK header, templates, and board configs relative to the repo root. GhostScript compilation can run outside the repository after `ghostbt` is installed.
 
 Set these environment variables for custom paths:
 
@@ -64,17 +68,14 @@ GBT stores discovered ESP-IDF paths in `~/.ghostbt/config.json`. This file is ma
 gbt create <app_id> [--name "Display Name"] [--template basic_app] [--out .]
 ```
 
-Creates a new app project from `plugins/templates/basic_app/`. Placeholders `{{APP_ID}}`, `{{APP_NAME}}`, and `{{APP_SYMBOL}}` are substituted in all source files.
+Creates a new app project from a basic app template. Placeholders `{{APP_ID}}`, `{{APP_NAME}}`, and `{{APP_SYMBOL}}` are substituted in all source files.
 
 The `app_id` may only contain letters, numbers, `_` and `-`.
 
-```powershell
-gbt create my_scanner --name "WiFi Scanner"
-# Creates: ./my_scanner/ with CMakeLists.txt, manifest.json, main/*.c
-```
+> **Current limitation:** `gbt create` is not yet a location-independent scaffold. For a reliable first project, run `python plugins/tools/new_app.py my_scanner --name "WiFi Scanner"` from the repository root; it creates `plugins/examples/my_scanner/` with the SDK layout expected by the standalone build scripts. Use `gbt create` only when you have verified the generated CMake SDK paths for your project location.
 
 The template includes:
-- `CMakeLists.txt` — references the repo's `elf_loader` component
+- `CMakeLists.txt` — references the GhostESP `elf_loader` component
 - `main/{{APP_SYMBOL}}.c` — minimal app with `GHOSTESP_APP_DEFINE`
 - `manifest.json` — filled with placeholder values
 - `sdkconfig.defaults` — enables ELF loader support
@@ -115,7 +116,7 @@ gbt package ./my_scanner --gapp
 # Output: ./my_scanner/dist/my_scanner-1.0.0-esp32s3.gapp
 ```
 
-Copy the `.gapp` to `/mnt/ghostesp/apps/` or `/mnt/ghostesp/packages/` on your SD card.
+Copy the `.gapp` to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. When using an explicit target, prefer `gbt dist`; `gbt package` uses the target from `manifest.json`.
 
 ---
 
@@ -125,11 +126,10 @@ Copy the `.gapp` to `/mnt/ghostesp/apps/` or `/mnt/ghostesp/packages/` on your S
 gbt dist [app_dir] [--target esp32s3] [--out dist] [--gapp]
 ```
 
-Runs `build` then `package` in sequence. Equivalent to:
+Runs `build` then `package` in sequence and forwards the selected target into the packaged manifest. This is the recommended release command:
 
 ```powershell
-gbt build ./my_scanner --target esp32s3
-gbt package ./my_scanner --gapp
+gbt dist ./my_scanner --target esp32s3 --gapp
 ```
 
 ---
@@ -153,12 +153,12 @@ For backgrounds, a source named `background` with `"variants": true` generates t
 gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.0] [--install-dir ~/esp-idf]
 ```
 
-If `idf.py` or `$IDF_PATH` is already available, GBT saves the path and exits. Otherwise, clones ESP-IDF from GitHub and runs the installer:
+If `idf.py` or `$IDF_PATH` is already available, GBT saves the path and exits. Confirm that the existing ESP-IDF installation includes tools for the target you need. Otherwise, GBT clones ESP-IDF from GitHub and runs the installer:
 
 ```powershell
-gbt setup
-# Detects existing ESP-IDF, or clones v6.0 to ~/.ghostbt/esp-idf
-# Runs install.bat/install.sh with requested targets
+gbt setup --target esp32s3
+# Detects existing ESP-IDF, or clones the configured release to ~/.ghostbt/esp-idf
+# Runs install.bat/install.sh with the requested targets
 ```
 
 Supported setup targets include firmware targets such as `esp32c3`. Native SD `.gapp` app builds currently support `esp32`, `esp32s2`, `esp32s3`, `esp32c5`, `esp32c6`, `esp32c61`, and `esp32p4`; `esp32c3` is not supported for `.gapp` shared-object apps.
@@ -220,13 +220,13 @@ gbt flash firmware --board cardputer -m
 # Builds (if needed), flashes, then opens monitor
 ```
 
-### Flash app (SD card instructions)
+### Install app (SD card instructions)
 
 ```
 gbt flash app --app-dir ./my_scanner [--port COM3]
 ```
 
-Prints instructions for loading the app via SD card. Apps are not flashed directly — they're loaded from SD at runtime.
+This command does not flash or copy an app. It only prints SD-card instructions and currently still expects a serial port. Apps are loaded from SD at runtime; package with `gbt dist ... --gapp`, copy the archive to `/mnt/ghostesp/apps/`, and reboot instead.
 
 ---
 
@@ -258,6 +258,27 @@ Uses `pyserial` if available, falling back to ESP-IDF's `serial.tools.list_ports
 
 ---
 
+## `gbt script` — Compile GhostScript
+
+```
+gbt script compile <file-or-directory> [--out <path>] [--deploy] [--deploy-dir <scripts-dir>]
+gbt script deploy <file-or-directory> [--deploy-dir <scripts-dir>]
+```
+
+Use this command to compile `.gs` source to firmware-compatible `.gsb` bytecode. It does not require ESP-IDF.
+
+```powershell
+# Compile a source file into an existing package directory.
+gbt script compile hello.gs --out hello/hello.gsb
+
+# Copy only a standalone, unprivileged bytecode file.
+gbt script deploy hello.gs --deploy-dir E:\ghostesp\scripts
+```
+
+`--deploy` and `script deploy` copy only `.gsb` files. For a script that needs permissions, compile into a directory containing `manifest.json`, then copy the complete directory to `/mnt/ghostesp/scripts/`. See [GhostScript]({{< relref "../ghostscript" >}}) for the package layout.
+
+---
+
 ## Standalone Scripts
 
 The repo also includes standalone Python scripts for simple workflows (no GBT install required):
@@ -280,17 +301,18 @@ python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 ## Full Workflow Example
 
 ```powershell
-# 1. One-time setup
-gbt setup
+# 1. One-time setup for the target you will build
+gbt setup --target esp32s3
 
-# 2. Create app
-gbt create wifi_scanner --name "WiFi Scanner"
+# 2. Create an app from the repository root
+python plugins/tools/new_app.py wifi_scanner --name "WiFi Scanner"
 
 # 3. Build, package, and create .gapp
-gbt dist ./wifi_scanner --gapp
+gbt dist plugins/examples/wifi_scanner --target esp32s3 --gapp
 
 # 4. Copy .gapp to SD card
-#    wifi_scanner/dist/wifi_scanner-1.0.0-esp32s3.gapp → /mnt/ghostesp/apps/
+#    plugins/examples/wifi_scanner/dist/wifi_scanner-1.0.0-esp32s3.gapp → /mnt/ghostesp/apps/
+#    Then reboot the device.
 
 # 5. Optional: build and flash firmware for your board
 gbt firmware cardputer

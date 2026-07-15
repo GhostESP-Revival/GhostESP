@@ -7,8 +7,8 @@ aliases:
   - "/apps/"
 ---
 
-GhostESP includes app-style views that are meant to run interactively from the on-device menu. This section covers setup and usage for those apps.
+GhostESP includes built-in apps, compiled GhostScript packages, and target-specific Native SD Apps that run from the on-device menu.
 
-> **Native SD apps require PSRAM.** Boards without PSRAM can still use built-in apps (Rave Mode, GhostCHI, etc.) but cannot load third-party `.so` apps from the SD card. Native SD apps are hidden from the Apps menu on no-PSRAM boards; a warning toast is shown on entry.
+> **Current Native SD App support:** The Apps gallery exposes third-party native apps only on boards with PSRAM. Boards without PSRAM can still use built-in apps and GhostScript. Treat native app execution on no-PSRAM boards as unsupported even when an individual manifest sets `requires_psram` to `false`.
 
-For building your own native SD apps, see [Native SD Apps]({{< relref "../development/native-sd-apps" >}}) and [GBT]({{< relref "../development/gbt" >}}) in the Development section.
+To build an extension, first [compare GhostScript and Native SD Apps]({{< relref "../development" >}}). Continue with [GhostScript]({{< relref "../ghostscript" >}}), [Native SD Apps]({{< relref "../development/native-sd-apps" >}}), or the [GBT reference]({{< relref "../development/gbt" >}}).

@@ -1,8 +1,10 @@
 ---
 title: "GhostScript"
 description: "Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP."
-weight: 100
+weight: 620
 toc: true
+aliases:
+  - "/latest/development/ghostscript/"
 ---
 
 ## What is GhostScript?
@@ -10,6 +12,8 @@ toc: true
 GhostScript is a tiny Lua 5.4 runtime that runs `.gsb` precompiled Lua chunks from the SD card. Scripts can call existing APIs and CLI commands, read output, subscribe to events, and react to input, letting you chain commands and automate multi-step workflows without flashing new firmware.
 
 You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, then launch the `.gsb` from the **Apps** menu or the CLI. The device intentionally does not load text `.gs` scripts to keep runtime RAM and firmware size lower.
+
+Choose GhostScript for portable automation and event-driven workflows. If you need custom native widgets, lower-level hardware APIs, or C performance, compare it with [Native SD Apps]({{< relref "development/native-sd-apps" >}}).
 
 ## Quickstart
 
@@ -41,7 +45,7 @@ You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, t
 4. Compile it into the script directory:
 
    ```bash
-   python -m ghostbt script compile hello.gs --out hello/hello.gsb
+   gbt script compile hello.gs --out hello/hello.gsb
    ```
 
 5. Copy the complete `hello/` directory to `/mnt/ghostesp/scripts/`.
@@ -49,6 +53,8 @@ You author `.gs` source on your computer, compile it to `.gsb` with `ghostbt`, t
 6. Launch it from **Main menu → Apps → GhostScript**, then select `hello`, or use the CLI commands below.
 
 > The device accepts `.gsb` bytecode only. Keep `.gs` files as source in your repo or tooling workspace, not as deployable scripts on the device.
+
+> Copy the complete folder, including `manifest.json`. A standalone `.gsb` receives no permissions and cannot call permission-gated APIs.
 
 ## Device CLI
 
@@ -86,7 +92,7 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `exit`       | Request script stop.                                                         |
 | `ui`         | `toast`, `set_title`, `screen_width`, `screen_height`.                       |
 | `event`      | `on`, `off`, `emit`, `wait`: pub/sub between scripts and firmware.           |
-| `input`      | `subscribe`, `unsubscribe`: receive joystick/touch/encoder/keyboard.         |
+| `input`      | `subscribe(topic, fn)`, `unsubscribe(topic, fn)`: aliases for event subscription; use topic `"input"` for all input. |
 | `system`     | `free_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random`. |
 | `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`. |
 | `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
@@ -106,7 +112,7 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `results`    | Host-backed result access: `count`, `field`, `save_csv`. Providers: `wifi.ap`, `ble.device`, `ble.detect`, `command.log`, `log.serial`. |
 | `oui`        | `lookup(mac)`, `prefix_match(mac, prefix)`, `prefix_set(prefix1, ...)`.     |
 
-Permissions for each subtable are set in the script manifest. A script without the right permission gets a runtime error when it calls the API.
+Permissions for each subtable are set in the script manifest. A script without the right permission gets a runtime error when it calls the API. Use `wifi` for scanning and results; operations that change radio state or transmit frames, including `ghost.wifi.deauth`, require `wifi_control` as well.
 
 ## Chaining CLI commands
 
@@ -275,7 +281,7 @@ mechanism internally. Do not create FreeRTOS tasks from a script.
 
 ## Input
 
-`ghost.input.subscribe(fn)` is the same as `ghost.event.on("input", fn)`. The event table includes:
+`ghost.input.subscribe("input", fn)` is the same as `ghost.event.on("input", fn)`. Pass the same topic and function to `ghost.input.unsubscribe("input", fn)`. The event table includes:
 
 ```lua
 {
@@ -308,11 +314,11 @@ the target-clamped default Lua heap.
 }
 ```
 
-Available permissions include `wifi`, `wifi_control`, `ble`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `commands`, `settings`, `network`, `power`, `display`, `time`, `random`, and `system` (required for GPS access).
+Available permissions include `wifi`, `wifi_control`, `ble`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `commands`, `settings`, `network`, `power`, `display`, `time`, `random`, and `system` (currently required for GPS access). Unknown permission names grant nothing, so a typo normally appears later as `permission denied`.
 
 ## Examples
 
-The repo ships source examples in `examples/ghostscript/src/`. Each needs a folder manifest that declares its required permissions; standalone `.gsb` files intentionally have no permissions. Compile the source to the folder named in the manifest, then copy the complete folder to the SD card.
+The repo ships source examples in `examples/ghostscript/src/`. Each needs a folder manifest that declares its required permissions; standalone `.gsb` files intentionally have no permissions. The packages under `examples/ghostscript/tests/` are complete, deployable examples with manifests. Compile the source in place, then copy the complete folder to the SD card.
 
 | File                       | What it shows                                                    |
 |----------------------------|------------------------------------------------------------------|
@@ -414,10 +420,11 @@ Available standard libraries:
 
 ## Limits and gotchas
 
+- **Bytecode is limited to 8 KiB per `.gsb` file.** Split the workflow or reduce generated code if the compiled chunk exceeds the limit.
 - **Single task, cooperative yielding.** The script runs on one FreeRTOS task. `ghost.delay` and `ghost.event.wait` yield execution without blocking the UI, but long-running CLI commands still block the script task while they execute. The `coroutine` standard library is not loaded; use `ghost.delay` / `ghost.event.wait` for cooperative work.
 - **No `require()` of other `.gsb` files.** Each script is a single chunk. Copy helpers between scripts for now.
-- **Event rate is unbounded.** Bridges like `command.output` and `ble_device` can fire thousands of times per second. If your handler is slow, the runner buffer grows and you may run out of Lua heap. Keep handlers short; defer work with `ghost.delay`.
-- **`ble_device` is deduped per scan.** You get one event per MAC per `ghost.wifi.ble_scan_start`. Use a set in your handler if you need to track across scans.
+- **Most event rates are unbounded.** `command.output` is throttled to one event per 10 ms, but topics such as `ble_device` can still arrive quickly. Keep handlers short and add filtering or throttling where needed.
+- **`ble_device` is deduped per scan.** You get one event per MAC per `ghost.ble.scan_start()`. Use a set in your handler if you need to track across scans.
 - **Event values can contain `|`.** Topics that include user-controlled strings (DNS qname, NFC card label, IR protocol name) are escaped as `\p`, `\n`, `\r`, `\b`, or `\xNN`. Split on raw `|` and call `unescape()` on each field if you write a parser:
 
   ```lua
@@ -433,28 +440,22 @@ Available standard libraries:
 - **No permission prompt at runtime.** If a script doesn't have a permission, the API call errors with `permission denied`. Check the manifest before shipping.
 - **Wi-Fi and BLE share one radio on most ESP32s.** Starting a BLE scan mid-Wi-Fi-scan will tear down Wi-Fi. Drive them sequentially from the same script.
 
-## Building and deploying with `ghostbt`
+## Compiling and copying with `ghostbt`
 
 ```bash
 # compile a single file
-python -m ghostbt script compile hello.gs
+gbt script compile hello.gs
 
 # compile all bundled source examples
-python -m ghostbt script compile examples/ghostscript/src --out examples/ghostscript/dist
+gbt script compile examples/ghostscript/src --out examples/ghostscript/dist
 
 # compile and copy an unprivileged standalone script to the default mount
-python -m ghostbt script compile hello.gs --deploy
+gbt script compile hello.gs --deploy
 
 # choose the scripts directory when the SD card has another mount point
-python -m ghostbt script deploy hello.gs --deploy-dir E:\ghostesp\scripts
+gbt script deploy hello.gs --deploy-dir E:\ghostesp\scripts
 ```
 
 `ghostbt` bundles Lua 5.4.7 plus a `luac` that matches the firmware ABI. On Windows, macOS, and Linux the binary is included; if it is missing on macOS/Linux, `ghostbt` builds `luac` from the bundled Lua 5.4.7 source using the system C compiler.
 
-## Limits and gotchas
-
-- Scripts share one task per runner. Long-running CLI commands block the script task; use short `ghost.delay` calls if you need to interleave.
-- Output buffer is 4 KB; older text is trimmed.
-- The Lua heap is capped by `memory_limit` (default 16 KB on no-PSRAM, up to 192 KB on PSRAM). The allocator prefers PSRAM, falls back to internal RAM.
-- BLE and Wi-Fi cannot run at the same time on most ESP32 variants. The runner does not start Wi-Fi or BLE itself. You call `scan_start` / `scan_stop` like you would from the CLI.
-- `ghost.deauth(bssid)` and other destructive commands require the `wifi` permission. A script without the permission gets a clear runtime error, not a silent failure.
+The current `--deploy` and `script deploy` commands copy compiled `.gsb` files only. They do not copy a package manifest. Use them only for unprivileged standalone scripts. For a script that needs permissions, compile with `--out <package>/<entry>.gsb`, then copy the complete package directory containing both the manifest and bytecode.

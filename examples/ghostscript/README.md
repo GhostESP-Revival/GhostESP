@@ -5,7 +5,7 @@ GhostScript on-device execution is `.gsb` bytecode only. Keep `.gs` files as sou
 Recommended workflow:
 
 ```bash
-python -m ghostbt script compile examples/ghostscript/src/hello.gs --out examples/ghostscript/dist/hello.gsb
+gbt script compile examples/ghostscript/src/hello.gs --out /path/to/hello/hello.gsb
 ```
 
 Place it in a directory with a manifest. For `hello.gs`, use:
@@ -19,9 +19,9 @@ Place it in a directory with a manifest. For `hello.gs`, use:
 }
 ```
 
-Deploy `/mnt/ghostesp/scripts/hello/manifest.json` and `/mnt/ghostesp/scripts/hello/hello.gsb` together.
+Deploy `/mnt/ghostesp/scripts/hello/manifest.json` and `/mnt/ghostesp/scripts/hello/hello.gsb` together. The `gbt script deploy` command copies only a `.gsb`, so use it only for unprivileged standalone scripts; copy a complete package directory yourself when it needs permissions.
 
-`src/` contains source examples. `dist/` is intentionally empty in the repo and is the suggested output folder for compiled bytecode.
+`src/` contains source examples. `dist/` contains compiled reference bytecode and may be regenerated. The complete packages in `tests/` are the best starting point for a deployable script because each already includes a matching manifest.
 
 Core examples:
 
@@ -37,6 +37,6 @@ Core examples:
 | `parser_summary.gs` | Parser helper examples for NFC, IR, and SubGHz. |
 | `gps_tracker.gs` | Long-running GPS/power logger with storage. |
 
-Hardware-dependent examples should fail cleanly on devices without the required peripheral. Their manifests must request their API permissions, including `wifi_control` for `deauth_on_ssid.gs`.
+Hardware-dependent examples should fail cleanly on devices without the required peripheral. Their manifests must request their API permissions, including `wifi_control` in addition to `wifi` for `deauth_on_ssid.gs`.
 
 Use `ghost.results` for scan/capture/log result sets. Providers such as `wifi.ap`, `ble.device`, `ble.detect`, `command.log`, and `log.serial` keep cached data outside the Lua heap and expose one field at a time.

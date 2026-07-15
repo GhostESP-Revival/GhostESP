@@ -1,7 +1,7 @@
 ---
 title: "SD Card"
 description: "Using SD card storage with GhostESP for file management, captures, and configuration."
-weight: 70
+weight: 90
 ---
 
 GhostESP uses SD cards to store captures, logs, and files. Learn how to manage files and configure pins.

@@ -2,7 +2,7 @@
 title: "Firmware Updates"
 description: "How GhostESP firmware update checks, installs, peer updates, SD card updates, and Banshee C5 updater recovery work."
 keywords: ["firmware", "ota", "updates", "sd card", "banshee", "ghostlink"]
-weight: 110
+weight: 120
 toc: true
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "WebUI"
 description: "Access and control GhostESP through the web interface."
-weight: 30
+weight: 70
 ---
 
 The WebUI allows you to configure GhostESP and manage files from your browser.
