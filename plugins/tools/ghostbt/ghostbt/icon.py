@@ -140,10 +140,10 @@ def png_to_rgb565a8(src: pathlib.Path, width: int, height: int) -> bytes:
     for i in range(pixel_count):
         r, g, b, a = rgba[i * 4:i * 4 + 4]
         rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-        off = i * 3
+        off = i * 2
         out[off] = rgb565 & 0xFF
         out[off + 1] = (rgb565 >> 8) & 0xFF
-        out[off + 2] = a
+        out[pixel_count * 2 + i] = a
     return bytes(out)
 
 

@@ -29,7 +29,7 @@ DEFAULT_ICON_VARIANTS = (32, 64)
 DEFAULT_BACKGROUND_VARIANTS = {
     "full": {"width": 240, "height": 320, "format": "rgb565", "output": "bg/bg_full.gimg"},
     "half": {"width": 120, "height": 160, "format": "indexed_4bpp", "output": "bg/bg_half.gimg"},
-    "tiny": {"width": 80, "height": 107, "format": "indexed_1bpp", "output": "bg/bg_tiny.gimg"},
+    "tiny": {"width": 80, "height": 107, "format": "indexed_4bpp", "output": "bg/bg_tiny.gimg"},
     "tile": {"width": 32, "height": 32, "format": "indexed_4bpp", "output": "bg/bg_tile.gimg"},
 }
 VARIANT_LABELS = {
