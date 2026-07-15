@@ -14,22 +14,36 @@
 #include <sys/stat.h>
 
 static const char *TAG = "GhostScriptMgr";
-static char s_last_error[GHOSTSCRIPT_ERROR_MAX];
+static char *s_last_error;
 
 static void read_state(ghostscript_manifest_t *manifest);
 
+static void clear_error(void) {
+    free(s_last_error);
+    s_last_error = NULL;
+}
+
+static char *error_buffer(void) {
+    clear_error();
+    return s_last_error = malloc(GHOSTSCRIPT_ERROR_MAX);
+}
+
 static void set_error(const char *msg) {
-    snprintf(s_last_error, sizeof(s_last_error), "%s", msg ? msg : "GhostScript error");
+    char *buffer = error_buffer();
+    if (buffer) snprintf(buffer, GHOSTSCRIPT_ERROR_MAX, "%s", msg ? msg : "GhostScript error");
 }
 
 static void set_path_error(const char *operation, const char *path) {
-    snprintf(s_last_error, sizeof(s_last_error), "%s %.72s: %s",
-             operation ? operation : "SD operation failed", path ? path : "",
-             strerror(errno));
+    char *buffer = error_buffer();
+    if (buffer) {
+        snprintf(buffer, GHOSTSCRIPT_ERROR_MAX, "%s %.72s: %s",
+                 operation ? operation : "SD operation failed", path ? path : "",
+                 strerror(errno));
+    }
 }
 
 const char *ghostscript_manager_last_error(void) {
-    return s_last_error;
+    return s_last_error ? s_last_error : "";
 }
 
 bool ghostscript_manager_sd_begin(bool *display_was_suspended) {
@@ -278,11 +292,11 @@ int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_en
     DIR *d = opendir(dir);
     if (!d) {
         set_path_error("Cannot open scripts directory", dir);
-        ESP_LOGW(TAG, "%s", s_last_error);
+        ESP_LOGW(TAG, "%s", ghostscript_manager_last_error());
         ghostscript_manager_sd_end(display_was_suspended);
         return 0;
     }
-    s_last_error[0] = '\0';
+    clear_error();
     int seen = 0;
     int count = 0;
     struct dirent *ent;
@@ -317,7 +331,7 @@ int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_en
 }
 
 void ghostscript_manager_init(void) {
-    s_last_error[0] = '\0';
+    clear_error();
     bool display_was_suspended = false;
     if (!ghostscript_manager_sd_begin(&display_was_suspended)) return;
     sd_card_create_directory("/mnt/ghostesp");
