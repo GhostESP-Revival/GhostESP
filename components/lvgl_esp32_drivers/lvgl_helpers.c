@@ -187,11 +187,11 @@ esp_err_t lvgl_spi_driver_init(int host,
         "SPI1_HOST", "SPI2_HOST", "SPI3_HOST"
     };
 
-    ESP_LOGI(TAG, "Configuring SPI host %s", spi_names[host]);
-    ESP_LOGI(TAG, "MISO pin: %d, MOSI pin: %d, SCLK pin: %d, IO2/WP pin: %d, IO3/HD pin: %d",
+    ESP_LOGD(TAG, "Configuring SPI host %s", spi_names[host]);
+    ESP_LOGD(TAG, "MISO pin: %d, MOSI pin: %d, SCLK pin: %d, IO2/WP pin: %d, IO3/HD pin: %d",
         miso_pin, mosi_pin, sclk_pin, quadwp_pin, quadhd_pin);
 
-    ESP_LOGI(TAG, "Max transfer size: %d (bytes)", max_transfer_sz);
+    ESP_LOGD(TAG, "Max transfer size: %d (bytes)", max_transfer_sz);
 
     spi_bus_config_t buscfg = {
         .miso_io_num = miso_pin,
@@ -202,7 +202,7 @@ esp_err_t lvgl_spi_driver_init(int host,
         .max_transfer_sz = max_transfer_sz
     };
 
-    ESP_LOGI(TAG, "Initializing SPI bus...");
+    ESP_LOGD(TAG, "Initializing SPI bus...");
     #if defined (CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
     dma_channel = SPI_DMA_CH_AUTO;
     #endif

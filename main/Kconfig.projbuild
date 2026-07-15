@@ -1437,6 +1437,18 @@ menu "Ghost ESP Options"
 
     endmenu
 
+    menu "GhostScript"
+
+    config ENABLE_GHOSTSCRIPT
+        bool "Enable GhostScript Lua scripting"
+        default y
+        help
+            Enable the low-memory Lua scripting runtime loaded from
+            /mnt/ghostesp/scripts. It is available through the browser on
+            screen builds and through the script CLI on headless builds.
+
+    endmenu
+
     menu "SPI and MMC Configuration"
     
     config USING_SPI

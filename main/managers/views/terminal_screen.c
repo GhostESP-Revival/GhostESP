@@ -989,6 +989,30 @@ void terminal_view_clear_history(void) {
   }
 }
 
+size_t terminal_view_log_count(void) {
+  return term_line_count;
+}
+
+bool terminal_view_log_get(size_t index, char *out, size_t out_len) {
+  if (!out || out_len == 0 || !terminal_store_lock()) return false;
+  if (!term_lines || !term_text_arena || index >= term_line_count) {
+    terminal_store_unlock();
+    return false;
+  }
+  uint16_t idx = (term_line_head + (uint16_t)index) % MAX_TERMINAL_LINES;
+  const TermLine *line = &term_lines[idx];
+  size_t len = line->len;
+  if (line->offset >= term_text_used || len > term_text_used - line->offset) {
+    terminal_store_unlock();
+    return false;
+  }
+  if (len >= out_len) len = out_len - 1;
+  memcpy(out, term_text_arena + line->offset, len);
+  out[len] = '\0';
+  terminal_store_unlock();
+  return true;
+}
+
 static bool terminal_is_near_bottom(void) {
   if (!terminal_scroller) return true;
   const lv_coord_t threshold = 20;

@@ -301,6 +301,11 @@ void handle_help(int argc, char **argv) {
         glog("help\n");
         glog("    Description: Display this help message.\n");
         glog("    Usage: help [category]\n\n");
+#if CONFIG_ENABLE_GHOSTSCRIPT
+        glog("script\n");
+        glog("    Description: List, launch, monitor, or stop GhostScripts from the SD card.\n");
+        glog("    Usage: script list | script run <index> | script status | script stop\n\n");
+#endif
         glog("chipinfo\n");
         glog("    Description: Display chip information including model, revision, and features\n");
         glog("    Usage: chipinfo\n");

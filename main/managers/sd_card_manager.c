@@ -6,6 +6,7 @@
 #include "driver/sdmmc_types.h"
 #include "esp_heap_trace.h"
 #include "esp_log.h"
+#include "esp_private/esp_gpio_reserve.h"
 #include "esp_vfs_fat.h"
 #include "vendor/drivers/CH422G.h"
 #include "vendor/pcap.h"
@@ -46,6 +47,13 @@ static sd_mount_type_t s_mount_type = MOUNT_NONE;
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
+
+static void sd_spi_release_cs_pin(void) {
+#if defined(CONFIG_USING_SPI)
+  int cs_pin = sd_card_manager.spi_cs_pin;
+  if (cs_pin >= 0 && cs_pin < 64) esp_gpio_revoke(1ULL << cs_pin);
+#endif
+}
 
 static void sd_spi_bus_track(int host_id, bool owned_by_sd) {
   s_spi_bus_initialized = owned_by_sd;
@@ -288,16 +296,16 @@ static bool sd_keep_spi_bus_for_board(void) {
 }
 
 static void sd_spi_bus_release_if_tracked(void) {
-  ESP_LOGI(TAG, "sd_spi_bus_release_if_tracked: initialized=%d owned=%d host=%d",
-           s_spi_bus_initialized, s_spi_bus_owned_by_sd, s_spi_host_id);
+  ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: initialized=%d owned=%d host=%d",
+            s_spi_bus_initialized, s_spi_bus_owned_by_sd, s_spi_host_id);
   if (s_spi_host_id >= 0) {
     if (!s_spi_bus_owned_by_sd || sd_keep_spi_bus_for_board()) {
-      ESP_LOGI(TAG, "Skipping spi_bus_free for reused SPI host %d", s_spi_host_id);
+      ESP_LOGD(TAG, "Skipping spi_bus_free for reused SPI host %d", s_spi_host_id);
       sd_spi_bus_clear_tracking();
       return;
     }
 
-    ESP_LOGI(TAG, "Freeing SPI bus host %d", s_spi_host_id);
+    ESP_LOGD(TAG, "Freeing SPI bus host %d", s_spi_host_id);
     spi_bus_free(s_spi_host_id);
     sd_spi_bus_clear_tracking();
   }
@@ -364,7 +372,7 @@ static esp_err_t mount_virtual_storage(void) {
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = true,
-        .max_files = 5,
+        .max_files = 3,
         .allocation_unit_size = 4 * 1024
     };
 
@@ -526,7 +534,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -582,7 +590,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -752,11 +760,10 @@ esp_err_t sd_card_init(void) {
     .sclk_io_num = sd_card_manager.spi_clk_pin,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    .max_transfer_sz = 4096,
+    .max_transfer_sz = 512,
   };
-  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
-  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
-  vTaskDelay(pdMS_TO_TICKS(2));
+  /* The SD SPI device configures CS when it attaches. Preconfiguring it here
+   * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
 
 #ifdef CONFIG_IDF_TARGET_ESP32
   int dmabus = SPI_DMA_CH_AUTO;
@@ -873,7 +880,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 4 * 1024};
 
   sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
@@ -897,17 +904,17 @@ esp_err_t sd_card_init(void) {
     ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
                                   &sd_card_manager.card);
   }
-  ESP_LOGI(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d", 
+  ESP_LOGD(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d",
            esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
   shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
   if (ret != ESP_OK) {
-    ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
+    ESP_LOGD(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
     (void)bus_init_success;
     (void)keep_bus_on_failure;
     sd_spi_bus_release_if_tracked();
     if (display_was_suspended) {
-      ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
+      ESP_LOGD(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
     sd_card_manager.card = NULL;
@@ -926,7 +933,7 @@ esp_err_t sd_card_init(void) {
     sd_card_update_cached_stats();
     sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
     if (display_was_suspended) {
-      ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
+      ESP_LOGD(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
     return ESP_OK;
@@ -993,12 +1000,11 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
     .miso_io_num = sd_card_manager.spi_miso_pin,
     .sclk_io_num = sd_card_manager.spi_clk_pin,
-    .max_transfer_sz = 4096,
+    .max_transfer_sz = 512,
   };
 
-  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
-  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
-  vTaskDelay(pdMS_TO_TICKS(2));
+  /* The SD SPI device configures CS when it attaches. Preconfiguring it here
+   * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
   int dmabus = SPI_DMA_CH_AUTO;
@@ -1171,6 +1177,7 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #if SOC_SDMMC_HOST_SUPPORTED && SOC_SDMMC_USE_GPIO_MATRIX
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
+    sd_spi_release_cs_pin();
     if (s_mount_type == MOUNT_SPI && !sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
     }
@@ -1205,6 +1212,7 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #else
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
+    sd_spi_release_cs_pin();
     if (!sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
     }
@@ -1329,8 +1337,6 @@ esp_err_t sd_card_create_directory(const char *path) {
   }
 
   if (sd_card_exists(path)) {
-    printf("Directory already exists: %s\n", path);
-
     if (!has_full_permissions(path)) {
       printf("Directory %s does not have full permissions. Deleting and "
              "recreating.\n",
@@ -1347,10 +1353,7 @@ esp_err_t sd_card_create_directory(const char *path) {
         return ESP_FAIL;
       }
 
-      printf("Directory created: %s\n", path);
-
     } else {
-      printf("Directory %s has correct permissions.\n", path);
       return ESP_OK;
     }
     return ESP_OK;
@@ -1362,7 +1365,6 @@ esp_err_t sd_card_create_directory(const char *path) {
     return ESP_FAIL;
   }
 
-  printf("Directory created: %s\n", path);
   return ESP_OK;
 }
 
@@ -1377,14 +1379,11 @@ bool sd_card_exists(const char *path) {
 
 static esp_err_t ensure_sd_dir_exists(const char *path) {
   if (!sd_card_exists(path)) {
-    printf("Creating directory: %s\n", path);
     esp_err_t ret = sd_card_create_directory(path);
     if (ret != ESP_OK) {
       printf("Failed to create directory %s: %s\n", path, esp_err_to_name(ret));
       return ret;
     }
-  } else {
-    printf("Directory %s already exists\n", path);
   }
   return ESP_OK;
 }
@@ -1491,7 +1490,6 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 #endif
 
-  printf("Directory structure successfully set up.\n");
   return ESP_OK;
 }
 

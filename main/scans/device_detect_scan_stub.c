@@ -103,7 +103,7 @@ bool advertiser_scan_save_to_sd(int index) {
     return false;
 }
 
-void gatt_scan_start(void) {}
+bool gatt_scan_start(void) { return false; }
 
 void gatt_scan_stop(void) {}
 

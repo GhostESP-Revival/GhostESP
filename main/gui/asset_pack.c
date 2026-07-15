@@ -39,8 +39,8 @@
 /* Internal-RAM-only icon cap: 32x32 RGB565A8 = 3 KB. Keeps the worst-case
  * icon cache footprint to 2 * 3 KB = 6 KB on devices without PSRAM. */
 #define ASSET_PACK_ICON_MAX_RAW_INTERNAL (32 * 32 * 3)
-/* Internal-RAM-only bg tile cap: 32x32 RGB565A8 = 3 KB (matches icon cap). */
-#define ASSET_PACK_BG_MAX_RAW_INTERNAL (32 * 32 * 3)
+/* Allows the 80x107 low-RAM variant while rejecting the 120x160 half image. */
+#define ASSET_PACK_BG_MAX_RAW_INTERNAL (5 * 1024)
 #define ASSET_PACK_BG_FULLSCREEN_MAX_RAW (320 * 240 * 2)
 #define ASSET_PACK_GTHEME_MAX_FILE (256 * 1024)
 #define ASSET_PACK_EXTRACT_BUF_SIZE 4096
@@ -55,6 +55,7 @@
  * followed by packed 4-bit pixel indices (low nibble = even pixel).
  * LVGL renders natively via LV_IMG_CF_INDEXED_4BIT. */
 #define GIMG_FORMAT_INDEXED_4BPP 3
+#define GIMG_FORMAT_INDEXED_1BPP 4
 #define GIMG_COMP_NONE 0
 #define GIMG_COMP_DEFLATE_RAW 1
 
@@ -701,14 +702,18 @@ static bool select_next_bg_candidate(void) {
 static lv_img_cf_t gimg_cf(uint8_t fmt) {
     if (fmt == GIMG_FORMAT_RGB565A8) return LV_IMG_CF_RGB565A8;
     if (fmt == GIMG_FORMAT_INDEXED_4BPP) return LV_IMG_CF_INDEXED_4BIT;
+    if (fmt == GIMG_FORMAT_INDEXED_1BPP) return LV_IMG_CF_INDEXED_1BIT;
     return LV_IMG_CF_TRUE_COLOR;
 }
 
-static void premultiply_indexed4_palette(lv_img_dsc_t *dsc) {
-    if (!dsc || dsc->header.cf != LV_IMG_CF_INDEXED_4BIT || !dsc->data || dsc->data_size < 64) return;
+static void premultiply_indexed_palette(lv_img_dsc_t *dsc) {
+    if (!dsc || !dsc->data) return;
+    int color_count = dsc->header.cf == LV_IMG_CF_INDEXED_4BIT ? 16
+                    : dsc->header.cf == LV_IMG_CF_INDEXED_1BIT ? 2 : 0;
+    if (color_count == 0 || dsc->data_size < (uint32_t)color_count * sizeof(lv_color32_t)) return;
 
     lv_color32_t *palette = (lv_color32_t *)dsc->data;
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < color_count; ++i) {
         uint8_t alpha = palette[i].ch.alpha;
         if (alpha == 255) continue;
         palette[i].ch.red = (uint8_t)(((uint16_t)palette[i].ch.red * alpha + 127) / 255);
@@ -780,7 +785,8 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         fclose(f);
         return ESP_ERR_INVALID_SIZE;
     }
-    if (fmt != GIMG_FORMAT_RGB565 && fmt != GIMG_FORMAT_RGB565A8 && fmt != GIMG_FORMAT_INDEXED_4BPP) {
+    if (fmt != GIMG_FORMAT_RGB565 && fmt != GIMG_FORMAT_RGB565A8 &&
+        fmt != GIMG_FORMAT_INDEXED_4BPP && fmt != GIMG_FORMAT_INDEXED_1BPP) {
         fclose(f);
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -795,7 +801,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
     }
     /* Indexed 4bpp deflate isn't supported — 4bpp data doesn't compress well
      * and keeping the codec simple means one consistent uncompressed path. */
-    if (fmt == GIMG_FORMAT_INDEXED_4BPP && comp != GIMG_COMP_NONE) {
+    if ((fmt == GIMG_FORMAT_INDEXED_4BPP || fmt == GIMG_FORMAT_INDEXED_1BPP) && comp != GIMG_COMP_NONE) {
         fclose(f);
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -804,6 +810,13 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
     if (fmt == GIMG_FORMAT_INDEXED_4BPP) {
         indexed_pixel_bytes = ((size_t)width * (size_t)height + 1) / 2;
         size_t expected_raw = 64 + indexed_pixel_bytes;
+        if (raw_size != expected_raw || payload_size != expected_raw) {
+            fclose(f);
+            return ESP_ERR_INVALID_SIZE;
+        }
+    } else if (fmt == GIMG_FORMAT_INDEXED_1BPP) {
+        indexed_pixel_bytes = ((size_t)width * (size_t)height + 7) / 8;
+        size_t expected_raw = 8 + indexed_pixel_bytes;
         if (raw_size != expected_raw || payload_size != expected_raw) {
             fclose(f);
             return ESP_ERR_INVALID_SIZE;
@@ -863,10 +876,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         return ESP_ERR_INVALID_CRC;
     }
 
-    if (fmt == GIMG_FORMAT_INDEXED_4BPP) {
-        /* Layout: [16 * lv_color32_t palette (64 B)][W*H/2 packed pixels].
-         * The cache's data pointer owns the single combined buffer; palette
-         * and pixel data both live inside it. */
+    if (fmt == GIMG_FORMAT_INDEXED_4BPP || fmt == GIMG_FORMAT_INDEXED_1BPP) {
         out_dsc->header.cf = gimg_cf(fmt);
         out_dsc->header.always_zero = 0;
         out_dsc->header.reserved = 0;
@@ -875,8 +885,8 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         out_dsc->data_size = raw_size;
         out_dsc->data = raw;
         *out_data = raw;
-        ESP_LOGD(TAG, "load_gimg OK: %s %ux%u fmt=indexed4 raw=%lu data=%p",
-                 path, width, height, (unsigned long)raw_size,
+        ESP_LOGD(TAG, "load_gimg OK: %s %ux%u fmt=indexed%u raw=%lu data=%p",
+                 path, width, height, fmt == GIMG_FORMAT_INDEXED_1BPP ? 1U : 4U, (unsigned long)raw_size,
                  (void *)out_dsc->data);
         return ESP_OK;
     }
@@ -1640,7 +1650,7 @@ const lv_img_dsc_t *asset_pack_get_app_icon(const lv_img_dsc_t *fallback) {
 const lv_img_dsc_t *asset_pack_get_background_tile(void) {
     if (!s_loaded || !s_bg_tile[0]) return NULL;
     if (s_bg_tile_data) {
-        premultiply_indexed4_palette(&s_bg_tile_dsc);
+        premultiply_indexed_palette(&s_bg_tile_dsc);
         return &s_bg_tile_dsc;
     }
 
@@ -1656,8 +1666,7 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
          * Internal: cap is the selected low-RAM variant, psram_only=false so
          * the loader falls back to internal heap. */
         uint32_t bg_max = s_has_psram ? ASSET_PACK_BG_FULLSCREEN_MAX_RAW
-                                      : ASSET_PACK_BG_MAX_RAW_INTERNAL;
-        if (!s_has_psram && s_bg_scale_to_fill) bg_max = ASSET_PACK_BG_FULLSCREEN_MAX_RAW;
+                                       : ASSET_PACK_BG_MAX_RAW_INTERNAL;
         bool psram_only = s_has_psram;
 
         bool mounted_here = false;
@@ -1680,10 +1689,11 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
             if (select_next_bg_candidate()) continue;
             return NULL;
         }
-        premultiply_indexed4_palette(&s_bg_tile_dsc);
-        ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u scale=%d",
-                 path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
-                 (unsigned)s_bg_tile_dsc.header.cf, s_bg_scale_to_fill ? 1 : 0);
+        premultiply_indexed_palette(&s_bg_tile_dsc);
+        ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u bytes=%lu scale=%d",
+                  path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
+                  (unsigned)s_bg_tile_dsc.header.cf, (unsigned long)s_bg_tile_dsc.data_size,
+                  s_bg_scale_to_fill ? 1 : 0);
         return &s_bg_tile_dsc;
     }
     return NULL;

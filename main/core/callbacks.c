@@ -6,6 +6,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -862,6 +863,10 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
             if (log_handshake) {
                 glog("Handshake found!\nAP=%s\nPair=%s/%s\n",
                      log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
+                char hs_payload[40];
+                snprintf(hs_payload, sizeof(hs_payload), "%s|%s/%s",
+                         log_ap_str, msg_name(log_ap_msg), msg_name(log_sta_msg));
+                ghostscript_emit_event("handshake_captured", hs_payload);
             }
             return;
         }
@@ -1642,9 +1647,7 @@ static void start_wardrive_heartbeat(void) {
     memset(wardrive_helper_dedupe, 0, sizeof(wardrive_helper_dedupe));
     wardrive_helper_dedupe_idx = 0;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    memset(ble_wd_seen_hashes, 0, sizeof(ble_wd_seen_hashes));
-    ble_wd_seen_idx = 0;
-    ble_wd_unique_count = 0;
+    ble_wardriving_reset_unique_device_count();
 #endif
 
     if (!wardrive_heartbeat_timer) {

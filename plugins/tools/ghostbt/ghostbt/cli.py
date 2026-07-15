@@ -69,12 +69,25 @@ def main(argv=None) -> int:
     p_asset = sub.add_parser("asset", help="Create GhostESP asset pack images and bundles")
     asset_sub = p_asset.add_subparsers(dest="asset_command")
 
+    p_script = sub.add_parser("script", help="Compile GhostScript .gs to .gsb bytecode")
+    script_sub = p_script.add_subparsers(dest="script_command")
+
+    p_script_compile = script_sub.add_parser("compile", help="Compile .gs files to .gsb")
+    p_script_compile.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
+    p_script_compile.add_argument("--out", default=None, help="Output file or directory")
+    p_script_compile.add_argument("--deploy", action="store_true", help="Also copy to SD card")
+    p_script_compile.add_argument("--deploy-dir", default=None, help="Destination scripts directory for --deploy")
+
+    p_script_deploy = script_sub.add_parser("deploy", help="Compile and copy to SD card")
+    p_script_deploy.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
+    p_script_deploy.add_argument("--deploy-dir", default=None, help="Destination scripts directory")
+
     p_asset_image = asset_sub.add_parser("image", help="Convert a PNG into a GhostESP .gimg image")
     p_asset_image.add_argument("png", help="Source PNG")
     p_asset_image.add_argument("--out", required=True, help="Output .gimg path")
     p_asset_image.add_argument("--width", type=int, required=True, help="Output width in pixels")
     p_asset_image.add_argument("--height", type=int, required=True, help="Output height in pixels")
-    p_asset_image.add_argument("--format", choices=["rgb565", "rgb565a8", "indexed_4bpp"], default="rgb565a8",
+    p_asset_image.add_argument("--format", choices=["rgb565", "rgb565a8", "indexed_4bpp", "indexed_1bpp"], default="rgb565a8",
                                help="Pixel format (default: rgb565a8)")
     p_asset_image.add_argument("--no-compress", action="store_true", help="Store raw payload without deflate compression")
 
@@ -202,6 +215,16 @@ def main(argv=None) -> int:
                 archive=args.archive,
                 compress=args.compress,
             )
+    elif args.command == "script":
+        if not args.script_command:
+            p_script.print_help()
+            return 0
+        from .script import compile_scripts
+        if args.script_command == "compile":
+            return compile_scripts(path=args.path, out=args.out, deploy=args.deploy,
+                                   deploy_dir=args.deploy_dir)
+        elif args.script_command == "deploy":
+            return compile_scripts(path=args.path, deploy=True, deploy_dir=args.deploy_dir)
 
     return 0
 

@@ -4,6 +4,7 @@
 #include "core/commands.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "sdkconfig.h"
@@ -172,6 +173,11 @@ void handle_comm_setpins(int argc, char **argv) {
 }
 
 static void comm_command_callback(const char* command, const char* data, void* user_data) {
+    char comm_payload[160];
+    snprintf(comm_payload, sizeof(comm_payload), "%s|%s",
+             command ? command : "", data ? data : "");
+    ghostscript_emit_event_escaped("comm_command", comm_payload);
+
 #ifdef CONFIG_WITH_ETHERNET
     if (eth_comm_handler_handle_command(command, data)) {
         return;

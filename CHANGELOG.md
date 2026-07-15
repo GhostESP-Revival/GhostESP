@@ -18,6 +18,12 @@
 - Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
 
+### GhostScript
+- Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM
+- Added the GhostScript browser and `script list`, `script run <index>`, `script status`, and `script stop` CLI commands
+- Added manifest permissions, scoped script storage, cooperative long-running scripts, failure-state recording, and a PSRAM-preferred runtime event queue
+- Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
+
 ### Wi-Fi
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 
@@ -37,6 +43,7 @@
 - ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
+- Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
 - Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 

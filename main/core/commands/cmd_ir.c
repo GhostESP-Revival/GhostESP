@@ -8,6 +8,7 @@
 #include "managers/settings_manager.h"
 #include "managers/views/error_popup.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -260,11 +261,20 @@ static void ir_rx_learn_task(void *arg) {
         if (infrared_manager_rx_receive(&sig, timeout_sec * 1000)) {
             if (sig.is_raw) {
                 glog("Captured RAW signal (%zu samples)\n", sig.payload.raw.timings_size);
+                char ir_payload[48];
+                snprintf(ir_payload, sizeof(ir_payload), "raw|%zu", sig.payload.raw.timings_size);
+                ghostscript_emit_event("ir_signal", ir_payload);
             } else {
-                glog("Captured: %s A:0x%lX C:0x%lX\n", 
+                glog("Captured: %s A:0x%lX C:0x%lX\n",
                      sig.payload.message.protocol,
                      (unsigned long)sig.payload.message.address,
                      (unsigned long)sig.payload.message.command);
+                char ir_payload[96];
+                snprintf(ir_payload, sizeof(ir_payload), "%s|%lu|%lu",
+                         sig.payload.message.protocol,
+                         (unsigned long)sig.payload.message.address,
+                         (unsigned long)sig.payload.message.command);
+                ghostscript_emit_event_escaped("ir_signal", ir_payload);
             }
 
             if (path[0] == '\0') {

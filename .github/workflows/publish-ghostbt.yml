@@ -7,7 +7,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -38,3 +38,64 @@ jobs:
           packages-dir: plugins/tools/ghostbt/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+
+  build-luac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: luac-windows-amd64.exe
+          - os: macos-13
+            name: luac-macos-x86_64
+          - os: macos-14
+            name: luac-macos-arm64
+          - os: ubuntu-latest
+            name: luac-linux-x86_64
+          - os: ubuntu-24.04-arm
+            name: luac-linux-aarch64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: plugins/tools/ghostbt/ghostbt/data/lua-src
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW (Windows)
+        if: runner.os == 'Windows'
+        run: choco install mingw -y
+
+      - name: Build luac
+        run: |
+          set -e
+          SRCS="lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio lauxlib luac"
+          for s in $SRCS; do cc -O2 -c -o "$s.o" "$s.c"; done
+          cc -O2 -o "${{ matrix.name }}" *.o -lm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: plugins/tools/ghostbt/ghostbt/data/lua-src/${{ matrix.name }}
+
+  release-luac:
+    needs: build-luac
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p out
+          find artifacts -type f -exec cp {} out/ \;
+
+      - name: Publish release with luac binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: out/*
+          fail_on_unmatched_files: true

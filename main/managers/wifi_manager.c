@@ -1,6 +1,7 @@
 // wifi_manager.c
 
 #include "managers/wifi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/arp_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -3436,6 +3437,11 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             uint16_t cap = (uint16_t)payload[34] | ((uint16_t)payload[35] << 8);
             if (cap & 0x0010) rec->authmode = WIFI_AUTH_WEP; else rec->authmode = WIFI_AUTH_OPEN;
         }
+        char ap_payload[96];
+        snprintf(ap_payload, sizeof(ap_payload), "%02x:%02x:%02x:%02x:%02x:%02x|%d|%d",
+            bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+            rec->primary, rec->rssi);
+        ghostscript_emit_event("wifi_ap_found", ap_payload);
     }
 
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);

@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "managers/sd_card_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "gui/toast.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
@@ -544,6 +545,9 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
 
   s_capture_active = true;
   xSemaphoreGive(pcap_mutex);
+  char cap_payload[64];
+  snprintf(cap_payload, sizeof(cap_payload), "%s|%d", pcap_base_name, (int)capture_type);
+  ghostscript_emit_event_escaped("capture_started", cap_payload);
   return ESP_OK;
 }
 
@@ -1096,6 +1100,7 @@ void pcap_file_close() {
   }
   cleanup_pcap_queue();
   pcap_release_idle_resources();
+  ghostscript_emit_event("capture_stopped", pcap_file_path);
 }
 
 void pcap_wireshark_stop(void) {

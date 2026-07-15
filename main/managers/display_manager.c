@@ -65,10 +65,10 @@ uint32_t theme_palette_get_text_muted(uint8_t theme);
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE_SOMETHINGSOMETHING) || defined(CONFIG_BUILD_CONFIG_TEMPLATE_SOMETHINGSOMETHING2)
 #define LVGL_TICK_TASK_STACK_SIZE 8192
 #else
-#define LVGL_TICK_TASK_STACK_SIZE 5120
+#define LVGL_TICK_TASK_STACK_SIZE 8192
 #endif
 #else
-#define LVGL_TICK_TASK_STACK_SIZE 5120
+#define LVGL_TICK_TASK_STACK_SIZE 8192
 #endif
 #else
 #define LVGL_TICK_TASK_STACK_SIZE 8192
@@ -2158,6 +2158,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
+          strcmp(view_name, "GhostScript Runner") == 0 ||
           strcmp(view_name, "BadUSB") == 0 ||
           strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0 ||
@@ -2235,15 +2236,15 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
-        ESP_LOGI(TAG, "BL PWM: scaled_pct=%d, raw_duty=%lu", percentage, (unsigned long)duty);
+        ESP_LOGD(TAG, "BL PWM: scaled_pct=%d, raw_duty=%lu", percentage, (unsigned long)duty);
 #if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
         duty = ((1 << LEDC_TIMER_10_BIT) - 1) - duty;
         if (duty == 0) duty = 1;
-        ESP_LOGI(TAG, "BL PWM: active-low inverted, final_duty=%lu", (unsigned long)duty);
+        ESP_LOGD(TAG, "BL PWM: active-low inverted, final_duty=%lu", (unsigned long)duty);
 #endif
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         esp_err_t err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-        ESP_LOGI(TAG, "BL PWM: ledc_update_duty returned %s", esp_err_to_name(err));
+        ESP_LOGD(TAG, "BL PWM: ledc_update_duty returned %s", esp_err_to_name(err));
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping PWM backlight");
     }
@@ -2254,7 +2255,7 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 #ifdef CONFIG_Waveshare_LCD
     // Waveshare 7-inch backlight is controlled by CH422G EXIO2, not GPIO
     // It's already set HIGH in waveshare_ch422g_init()
-    ESP_LOGI(TAG, "set_backlight_brightness: %d%% (CH422G EXIO2, already on)", percentage);
+    ESP_LOGD(TAG, "set_backlight_brightness: %d%% (CH422G EXIO2, already on)", percentage);
 #else
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
@@ -2268,7 +2269,7 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 # error "Either CONFIG_LV_DISP_BACKLIGHT_PWM or CONFIG_LV_DISP_BACKLIGHT_SWITCH must be set"
 #endif
 
-    ESP_LOGI(TAG, "set_backlight_brightness: %d%% (max allowed: %d%%)", percentage, max_brightness);
+    ESP_LOGD(TAG, "set_backlight_brightness: %d%% (max allowed: %d%%)", percentage, max_brightness);
 
 #ifdef CONFIG_USE_TDECK
     // Synchronize keyboard backlight with screen backlight
@@ -2279,7 +2280,7 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 
 void set_backlight_brightness(uint8_t percentage) {
     uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
-    ESP_LOGI(TAG, "set_backlight_brightness: input=%d%%, max_brightness_setting=%d%%", percentage, max_brightness);
+    ESP_LOGD(TAG, "set_backlight_brightness: input=%d%%, max_brightness_setting=%d%%", percentage, max_brightness);
     display_manager_set_backlight_raw(percentage);
 
     percentage = (percentage * max_brightness) / 100;
@@ -3291,7 +3292,7 @@ void hardware_input_task(void *pvParameters) {
       // Stage 1: Dim after timeout
       if (!is_backlight_dimmed && !is_backlight_off &&
           (now - last_touch_time > pdMS_TO_TICKS(current_timeout))) {
-        ESP_LOGI(TAG, "Display timeout reached, dimming backlight (intermediate)");
+        ESP_LOGD(TAG, "Display timeout reached, dimming backlight (intermediate)");
         set_backlight_brightness(INTERMEDIATE_DIM_PERCENT);
         is_backlight_dimmed = true;
         last_dim_time = now;
@@ -3299,7 +3300,7 @@ void hardware_input_task(void *pvParameters) {
       // Stage 2: Turn off after dim duration
       else if (is_backlight_dimmed && !is_backlight_off &&
                (now - last_dim_time > pdMS_TO_TICKS(INTERMEDIATE_DIM_DURATION_MS))) {
-        ESP_LOGI(TAG, "Intermediate dim duration elapsed, turning backlight off");
+        ESP_LOGD(TAG, "Intermediate dim duration elapsed, turning backlight off");
         /* Build the wake-lock overlay now, while the screen is still dark, so
          * it is already the top frame when the backlight comes back — avoids a
          * visible flash of the underlying view on wake. */
@@ -3315,13 +3316,13 @@ void hardware_input_task(void *pvParameters) {
       // Wake up on input
       else if ((is_backlight_dimmed || is_backlight_off) &&
                (now - last_touch_time < pdMS_TO_TICKS(current_timeout))) {
-        ESP_LOGI(TAG, "Input detected, restoring backlight");
+        ESP_LOGD(TAG, "Input detected, restoring backlight");
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;
       }
     } else if (is_backlight_dimmed || is_backlight_off) { // If timeout is 'Never' and backlight is dimmed/off, set to full brightness
-        ESP_LOGI(TAG, "Display timeout set to Never, waking backlight from dimmed/off state.");
+        ESP_LOGD(TAG, "Display timeout set to Never, waking backlight from dimmed/off state.");
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;

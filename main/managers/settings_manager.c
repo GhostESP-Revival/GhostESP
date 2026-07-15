@@ -1282,7 +1282,7 @@ void settings_persist_setting(SettingsType setting) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to commit NVS for %s: %s", key, esp_err_to_name(err));
         } else {
-            ESP_LOGI(TAG, "Persisted setting %s", key);
+            ESP_LOGD(TAG, "Persisted setting %s", key);
         }
     }
 }
