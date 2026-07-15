@@ -16,31 +16,23 @@
 
 ## What's New in 2.0
 
-v2.0 is the largest update in the project's history, building on v1.9.10 with a rebuilt user experience, a first-class app ecosystem, expanded radio and device workflows, and broad platform hardening.
+The biggest update yet: a rebuilt UI, a native app ecosystem, and expanded radio workflows.
 
-- **Redesigned UI experience**: 60 FPS rendering, toast notifications, a cleaner status bar, custom **asset packs** (icons, themes, backgrounds) loaded from SD, touch-drag scrolling, polished setup wizard styling with Home WiFi setup, and a comprehensive **accessibility suite** (font size, high contrast, reduced motion, input repeat, epilepsy-safe mode).
-- **Native SD Apps & App Gallery**: A new app system for loading tools from SD with permissions, scoped storage, custom icons, accent colors, and a central launcher. ESP32-C5 builds can also run supported app code directly from flash (XIP), avoiding the small internal-RAM ceiling for app code. Build your own apps with the **Ghost Build Tool (`gbt`)**, the native app SDK, and example apps.
+<img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" /> <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
 
-  <img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" />
+- **Redesigned UI**: 60 FPS rendering, toasts, SD-loaded asset packs (icons/themes/backgrounds), touch-drag scrolling, and a full accessibility suite.
+- **Native SD Apps**: Load, build, and package apps with the new App Gallery, scoped permissions, and the Ghost Build Tool (`gbt`). C5 builds can run app code from flash (XIP).
+- **WiFi Airspace Monitor**: Real-time threat insights with adaptive channel dwell, a learned baseline, and a packets/sec sparkline.
+- **Expanded Ghostchi**: 50 levels, 27 XP sources, mood system, and a status-bar badge.
+- **PIN lockscreen**: Auto-lock overlay — captures keep running while locked.
+- **Expanded BadUSB**: Trackpad/mouse jiggler, USB HID output mode, `type_char` CLI, dedicated WebUI page.
+- **Redesigned WebUI**: Refreshed interface with better remote control.
+- **New network recon**: SSH, NetBIOS, HTTP banner, and SNMP scanners, plus a WPA3 compliance checker.
+- **GhostLink BLE bridge**: Bridge a chip to the Android companion app, with `wdstream` wardriving.
+- **More boards**: Marauder V8, Pancake C5, LilyGo T-Dongle-S3/C5, S3TWatch haptics, Cardputer ENV-III, and NM-CYD-C5 fixes.
+- **Under the hood**: Modularized commandline, shared SD mount helpers, checked allocations, and stability fixes across WiFi/BLE/audio/GPS/NFC.
 
-- **WiFi Airspace Monitor**: Real-time packet/threat insights with adaptive channel dwell, a learned EWMA baseline that adapts to the local environment, a unified threat/insight engine, and an on-screen packets/sec sparkline.
-
-  <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
-
-- **Expanded Ghostchi**: The companion system now has 50 levels, 27 XP sources, passive/aggressive modes, a global mood system, level-up toasts, and a persistent status-bar badge.
-- **PIN lockscreen**: A new overlay lockscreen with auto-lock support, so active captures (wardriving, sniffing) keep running while the device is locked.
-
-  <img width="320" height="170" alt="ghost_mirror_1782715595937" src="https://github.com/user-attachments/assets/e7a691ed-24db-4a06-b9e6-f204518c6fe6" />
-  
-- **Expanded BadUSB**: Trackpad/cursor control, full touch support, USB HID keyboard output mode, mouse jiggler, `type_char` CLI, and a dedicated WebUI page.
-- **Redesigned WebUI**: A completely refreshed browser interface with a dedicated BadUSB page and improved remote control flow.
-- **More on-device workflows**: SD Browser, text previews, copy/move staging, on-device PCAP browser with hc22000 export, runtime GPS baud settings, on-device AP/STA credential editing, timezone quick-edit, and live RSSI meter views.
-- **New network recon**: SSH, NetBIOS, HTTP banner, and SNMP scanners (with per-host and per-subnet variants) plus a WPA3 compliance checker.
-- **GhostLink BLE bridge**: Assign a connected chip to bridge a main chip and the Android companion app, plus `wdstream` CLI streaming for companion wardriving.
-- **More board support**: Added Marauder V8, Pancake C5, and LilyGo T-Dongle-S3/C5 builds, plus S3TWatch DRV2605 haptics, Cardputer ENV-III support, and fixes for NM-CYD-C5 SD app loading.
-- **Under the hood**: v2.0 brings a major internal cleanup over v1.9.10: the commandline has been split into focused modules, repeated SD mount/unmount logic now goes through shared on-demand helpers, and the core is safer under memory pressure. The release also hardens the platform with checked allocations, bounded string handling, safer cleanup paths, concurrency fixes, lower memory use on non-PSRAM builds, and stability fixes across WiFi, BLE, audio, GPS, LVGL async calls, shared SPI/UART buses, NFC, DIAL, SD mounting, and app loading.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full v2.0 development history.
+Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
