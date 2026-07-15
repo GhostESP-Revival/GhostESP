@@ -46,6 +46,8 @@
 - Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
 - Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
+- Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
+- Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
 
 
 ## Revival v2.0.0
