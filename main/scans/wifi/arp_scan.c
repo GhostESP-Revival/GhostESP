@@ -549,7 +549,7 @@ typedef struct {
     uint8_t mac[6];
 } passive_arp_host_t;
 
-static passive_arp_host_t g_passive_hosts[PASSIVE_ARP_MAX_HOSTS];
+static passive_arp_host_t *g_passive_hosts = NULL;
 static int g_passive_host_count = 0;
 
 // Simple OUI vendor lookup table (top vendors)
@@ -838,6 +838,7 @@ static void format_compact_packet(const wifi_promiscuous_pkt_t *pkt,
 }
 
 static bool passive_neighbor_is_new(uint32_t ip_addr, const uint8_t *mac) {
+    if (!g_passive_hosts) return false;
     for (int i = 0; i < g_passive_host_count; i++) {
         if (g_passive_hosts[i].ip_addr != ip_addr) continue;
         if (memcmp(g_passive_hosts[i].mac, mac, 6) == 0) return false;
@@ -878,11 +879,12 @@ static void poll_passive_arp_table(void) {
 // Lock-free ring buffer for packet lines (observer writes, main loop reads)
 #define MONITOR_RING_SIZE 64
 #define MONITOR_LINE_MAX 48
-static char g_monitor_ring[MONITOR_RING_SIZE][MONITOR_LINE_MAX];
+static char (*g_monitor_ring)[MONITOR_LINE_MAX] = NULL;
 static volatile uint32_t g_monitor_ring_head = 0;
 static volatile uint32_t g_monitor_ring_tail = 0;
 
 static void monitor_ring_push(const char *line) {
+    if (!g_monitor_ring) return;
     uint32_t next = (g_monitor_ring_head + 1) % MONITOR_RING_SIZE;
     if (next == g_monitor_ring_tail) return; // full, drop
     memcpy(g_monitor_ring[g_monitor_ring_head], line, MONITOR_LINE_MAX);
@@ -930,6 +932,17 @@ void arp_scan_start_passive(int duration_sec) {
     glog("Packet Monitor: CH RSSI TYP SRC>DST LEN FLAGS\n");
     glog("Packet Monitor: Press Back to stop\n\n");
 
+    g_passive_hosts = calloc(PASSIVE_ARP_MAX_HOSTS, sizeof(*g_passive_hosts));
+    g_monitor_ring = calloc(MONITOR_RING_SIZE, sizeof(*g_monitor_ring));
+    if (!g_passive_hosts || !g_monitor_ring) {
+        free(g_passive_hosts);
+        free(g_monitor_ring);
+        g_passive_hosts = NULL;
+        g_monitor_ring = NULL;
+        glog("Packet Monitor: insufficient memory\n");
+        return;
+    }
+
     g_passive_running = true;
     g_passive_count = 0;
     g_passive_data_frames = 0;
@@ -938,7 +951,6 @@ void arp_scan_start_passive(int duration_sec) {
     g_passive_host_count = 0;
     g_monitor_ring_head = 0;
     g_monitor_ring_tail = 0;
-    memset(g_passive_hosts, 0, sizeof(g_passive_hosts));
 
     /* The raw callback normally also feeds the binary PCAP writer. This local
      * text monitor only needs its observer tap. */
@@ -973,6 +985,10 @@ void arp_scan_start_passive(int duration_sec) {
     wifi_manager_stop_monitor_mode();
     wifi_callbacks_set_pcap_enabled(true);
     g_passive_running = false;
+    free(g_passive_hosts);
+    free(g_monitor_ring);
+    g_passive_hosts = NULL;
+    g_monitor_ring = NULL;
 
     glog("\nPacket Monitor: Stopped (%lup %da %luP)\n",
          (unsigned long)g_passive_data_frames,

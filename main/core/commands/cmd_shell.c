@@ -55,24 +55,40 @@
 #define CLI_ENV_NAME_LEN 24
 #define CLI_ENV_VALUE_LEN 96
 
+typedef struct {
+    char hostname[CLI_ALIAS_NAME_LEN];
+    char color[8];
+    bool banner;
+    char alias_names[CLI_ALIAS_COUNT][CLI_ALIAS_NAME_LEN];
+    char alias_values[CLI_ALIAS_COUNT][CLI_ALIAS_VALUE_LEN];
+    char env_names[CLI_ENV_COUNT][CLI_ENV_NAME_LEN];
+    char env_values[CLI_ENV_COUNT][CLI_ENV_VALUE_LEN];
+} shell_state_t;
+
+static shell_state_t *s_shell;
 static bool s_shell_loaded;
-static char s_hostname[CLI_ALIAS_NAME_LEN] = "ghost";
-static char s_color[8] = "36";
-static bool s_banner = true;
-static char s_alias_names[CLI_ALIAS_COUNT][CLI_ALIAS_NAME_LEN];
-static char s_alias_values[CLI_ALIAS_COUNT][CLI_ALIAS_VALUE_LEN];
-static char s_env_names[CLI_ENV_COUNT][CLI_ENV_NAME_LEN];
-static char s_env_values[CLI_ENV_COUNT][CLI_ENV_VALUE_LEN];
+#define s_hostname     (s_shell->hostname)
+#define s_color        (s_shell->color)
+#define s_banner       (s_shell->banner)
+#define s_alias_names  (s_shell->alias_names)
+#define s_alias_values (s_shell->alias_values)
+#define s_env_names    (s_shell->env_names)
+#define s_env_values   (s_shell->env_values)
 static TaskHandle_t s_watch_task;
 static volatile bool s_watch_stop;
 static int s_watch_interval;
 
-static void shell_load(void) {
-    if (s_shell_loaded) return;
+static bool shell_load(void) {
+    if (s_shell_loaded) return true;
+    s_shell = calloc(1, sizeof(*s_shell));
+    if (!s_shell) return false;
+    strcpy(s_hostname, "ghost");
+    strcpy(s_color, "36");
+    s_banner = true;
     s_shell_loaded = true;
 
     nvs_handle_t nvs;
-    if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return;
+    if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return true;
 
     size_t len = sizeof(s_hostname);
     (void)nvs_get_str(nvs, "hostname", s_hostname, &len);
@@ -107,6 +123,7 @@ static void shell_load(void) {
         strncpy(s_env_values[i], separator, sizeof(s_env_values[i]) - 1);
     }
     nvs_close(nvs);
+    return true;
 }
 
 static bool shell_save_string(const char *key, const char *value) {
@@ -129,7 +146,10 @@ static bool shell_save_u8(const char *key, uint8_t value) {
 
 void shell_get_prompt(char *output, size_t output_len) {
     if (!output || output_len == 0) return;
-    shell_load();
+    if (!shell_load()) {
+        snprintf(output, output_len, "ghost> ");
+        return;
+    }
     if (strcmp(s_color, "off") == 0) {
         snprintf(output, output_len, "%s> ", s_hostname);
     } else {
@@ -138,33 +158,31 @@ void shell_get_prompt(char *output, size_t output_len) {
 }
 
 void shell_set_hostname(const char *hostname) {
-    shell_load();
+    if (!shell_load()) return;
     strncpy(s_hostname, hostname, sizeof(s_hostname) - 1);
     s_hostname[sizeof(s_hostname) - 1] = '\0';
     shell_save_string("hostname", s_hostname);
 }
 
 bool shell_get_banner_enabled(void) {
-    shell_load();
-    return s_banner;
+    return shell_load() && s_banner;
 }
 
 void shell_set_banner_enabled(bool enabled) {
-    shell_load();
+    if (!shell_load()) return;
     s_banner = enabled;
     shell_save_u8("banner", enabled ? 1 : 0);
 }
 
 void shell_set_color(const char *color) {
-    shell_load();
+    if (!shell_load()) return;
     strncpy(s_color, color, sizeof(s_color) - 1);
     s_color[sizeof(s_color) - 1] = '\0';
     shell_save_string("color", s_color);
 }
 
 const char *shell_get_color(void) {
-    shell_load();
-    return s_color;
+    return shell_load() ? s_color : "36";
 }
 
 bool shell_stop_watch(void) {
@@ -174,7 +192,7 @@ bool shell_stop_watch(void) {
 }
 
 static int alias_index(const char *name) {
-    shell_load();
+    if (!shell_load()) return -1;
     for (int i = 0; i < CLI_ALIAS_COUNT; ++i) {
         if (s_alias_names[i][0] && strcasecmp(s_alias_names[i], name) == 0) return i;
     }
@@ -203,7 +221,7 @@ static bool alias_save(int index) {
 }
 
 static void alias_remove(int index) {
-    if (index < 0 || index >= CLI_ALIAS_COUNT) return;
+    if (index < 0 || index >= CLI_ALIAS_COUNT || !shell_load()) return;
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
         char key[8];
@@ -217,7 +235,7 @@ static void alias_remove(int index) {
 }
 
 static const char *env_value(const char *name) {
-    shell_load();
+    if (!shell_load()) return NULL;
     if (strcasecmp(name, "HOSTNAME") == 0) return s_hostname;
     if (strcasecmp(name, "CLI_COLOR") == 0) return s_color;
     if (strcasecmp(name, "CLI_BANNER") == 0) return s_banner ? "on" : "off";
@@ -229,7 +247,7 @@ static const char *env_value(const char *name) {
 
 bool shell_expand_command(const char *input, char *output, size_t output_len) {
     if (!input || !output || output_len == 0) return false;
-    shell_load();
+    if (!shell_load()) return false;
     char expanded[512];
     const char *start = input;
     while (isspace((unsigned char)*start)) start++;
@@ -514,7 +532,7 @@ void handle_uptime_cmd(int argc, char **argv) {
 
 void handle_whoami_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
-    shell_load();
+    if (!shell_load()) return;
     glog("hostname: %s\n", s_hostname);
     handle_uuid_cmd(0, NULL);
     handle_version_cmd(0, NULL);
@@ -544,7 +562,7 @@ void handle_clear_cmd(int argc, char **argv) {
 }
 
 void handle_hostname_cmd(int argc, char **argv) {
-    shell_load();
+    if (!shell_load()) { glog("hostname: unavailable\n"); return; }
     if (argc == 1) { glog("%s\n", s_hostname); return; }
     if (argc != 2 || !valid_name(argv[1], sizeof(s_hostname))) {
         glog("Usage: hostname [name]\n");
@@ -599,7 +617,7 @@ void handle_banner_cmd(int argc, char **argv) {
 }
 
 void handle_alias_cmd(int argc, char **argv) {
-    shell_load();
+    if (!shell_load()) { glog("alias: unavailable\n"); return; }
     if (argc == 1) {
         for (int i = 0; i < CLI_ALIAS_COUNT; ++i) if (s_alias_names[i][0]) glog("alias %s='%s'\n", s_alias_names[i], s_alias_values[i]);
         return;
@@ -636,6 +654,7 @@ void handle_alias_cmd(int argc, char **argv) {
 
 void handle_unalias_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: unalias <name|all>\n"); return; }
+    if (!shell_load()) { glog("unalias: unavailable\n"); return; }
     if (strcmp(argv[1], "all") == 0) {
         for (int i = 0; i < CLI_ALIAS_COUNT; ++i) alias_remove(i);
         glog("aliases cleared\n");
@@ -763,7 +782,7 @@ static bool env_save(int index) {
 void handle_env_cmd(int argc, char **argv) {
     (void)argv;
     if (argc != 1) { glog("Usage: env\n"); return; }
-    shell_load();
+    if (!shell_load()) { glog("env: unavailable\n"); return; }
     glog("HOSTNAME=%s\nCLI_COLOR=%s\nCLI_BANNER=%s\n", s_hostname, s_color, s_banner ? "on" : "off");
     for (int i = 0; i < CLI_ENV_COUNT; ++i) if (s_env_names[i][0]) glog("%s=%s\n", s_env_names[i], s_env_values[i]);
 }
@@ -776,7 +795,7 @@ void handle_export_cmd(int argc, char **argv) {
     if (!valid_name(argv[1], CLI_ENV_NAME_LEN)) { glog("export: invalid variable name\n"); return; }
     if (strcasecmp(argv[1], "HOSTNAME") == 0) { handle_hostname_cmd(2, (char *[]){"hostname", equals + 1}); return; }
     if (strcasecmp(argv[1], "CLI_COLOR") == 0) { handle_color_cmd(2, (char *[]){"color", equals + 1}); return; }
-    shell_load();
+    if (!shell_load()) { glog("export: unavailable\n"); return; }
     int index = -1;
     for (int i = 0; i < CLI_ENV_COUNT; ++i) if (strcasecmp(s_env_names[i], argv[1]) == 0) { index = i; break; }
     if (index < 0) for (int i = 0; i < CLI_ENV_COUNT; ++i) if (!s_env_names[i][0]) { index = i; break; }
