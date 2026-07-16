@@ -196,7 +196,6 @@ lv_obj_t *back_button = NULL;
 
 static bool in_submenu = false;
 static char current_category[PLUGIN_APP_CATEGORY_MAX] = "";
-static char s_category_names[PLUGIN_APP_MAX_COUNT][PLUGIN_APP_CATEGORY_MAX];
 
 // Add navigation button objects
 static lv_obj_t *left_nav_btn = NULL;
@@ -429,6 +428,9 @@ static void add_plugin_app_item(const plugin_app_manifest_t *app) {
 
 static void add_plugin_category_folders(void) {
     if (in_submenu) return;
+    char (*category_names)[PLUGIN_APP_CATEGORY_MAX] =
+        calloc(PLUGIN_APP_MAX_COUNT, sizeof(*category_names));
+    if (!category_names) return;
     bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
     int plugin_count = plugin_manager_count();
 
@@ -441,20 +443,21 @@ static void add_plugin_category_folders(void) {
 
         bool already_seen = false;
         for (int j = 0; j < num_categories; ++j) {
-            if (strcmp(s_category_names[j], app->category) == 0) {
+            if (strcmp(category_names[j], app->category) == 0) {
                 already_seen = true;
                 break;
             }
         }
         if (!already_seen && num_categories < PLUGIN_APP_MAX_COUNT) {
-            strncpy(s_category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
-            s_category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
+            strncpy(category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
+            category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
             num_categories++;
         }
     }
 
     for (int j = 0; j < num_categories && num_apps < s_app_items_capacity - 1; ++j) {
-        app_items[num_apps].name = s_category_names[j];
+        strncpy(app_items[num_apps].category, category_names[j], sizeof(app_items[num_apps].category) - 1);
+        app_items[num_apps].name = app_items[num_apps].category;
         app_items[num_apps].asset_key = NULL;
         app_items[num_apps].symbol_icon = LV_SYMBOL_DIRECTORY;
         app_items[num_apps].icon = NULL;
@@ -462,9 +465,9 @@ static void add_plugin_category_folders(void) {
         app_items[num_apps].view = NULL;
         app_items[num_apps].disabled = false;
         app_items[num_apps].is_category_folder = true;
-        strncpy(app_items[num_apps].category, s_category_names[j], sizeof(app_items[num_apps].category) - 1);
         num_apps++;
     }
+    free(category_names);
 }
 
 static void add_plugin_app_items_flat(void) {

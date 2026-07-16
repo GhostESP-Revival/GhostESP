@@ -41,13 +41,10 @@ static options_view_t *s_mode_options;
 static live_chart_t *s_chart;
 static lv_obj_t *s_summary;
 static lv_obj_t *s_legend;
-static lv_obj_t *s_legend_items[PACKET_SERIES_MAX];
-static lv_obj_t *s_legend_labels[PACKET_SERIES_MAX];
 static lv_timer_t *s_update_timer;
 static packet_start_mode_t s_start_mode = PACKET_START_SELECT;
-static uint8_t s_custom_channels[WIFI_CHANNELS_MAX];
+static uint8_t *s_custom_channels;
 static size_t s_custom_channel_count;
-static char s_mode_label[64];
 static bool s_monitor_active;
 static bool s_touch_started;
 static lv_point_t s_touch_start;
@@ -57,17 +54,35 @@ static volatile uint32_t s_management_packets;
 static volatile uint32_t s_control_packets;
 static volatile uint32_t s_data_packets;
 static volatile uint32_t s_total_bytes;
-static volatile uint32_t s_channel_packets[PACKET_MONITOR_MAX_CHANNEL + 1];
 static volatile uint8_t s_current_channel;
 static volatile int8_t s_last_rssi;
-static uint32_t s_channel_snapshots[PACKET_MONITOR_MAX_CHANNEL + 1];
-static float s_channel_activity[PACKET_MONITOR_MAX_CHANNEL + 1];
-static uint8_t s_series_channels[PACKET_SERIES_MAX];
-static float s_target_rates[PACKET_SERIES_MAX];
-static float s_smoothed_rates[PACKET_SERIES_MAX];
-static uint16_t s_idle_samples[PACKET_SERIES_MAX];
 static uint16_t s_hold_samples;
 static int s_series_count;
+
+typedef struct {
+    lv_obj_t *legend_items[PACKET_SERIES_MAX];
+    lv_obj_t *legend_labels[PACKET_SERIES_MAX];
+    char mode_label[64];
+    volatile uint32_t channel_packets[PACKET_MONITOR_MAX_CHANNEL + 1];
+    uint32_t channel_snapshots[PACKET_MONITOR_MAX_CHANNEL + 1];
+    float channel_activity[PACKET_MONITOR_MAX_CHANNEL + 1];
+    uint8_t series_channels[PACKET_SERIES_MAX];
+    float target_rates[PACKET_SERIES_MAX];
+    float smoothed_rates[PACKET_SERIES_MAX];
+    uint16_t idle_samples[PACKET_SERIES_MAX];
+} packet_monitor_buffers_t;
+
+static packet_monitor_buffers_t *s_buffers;
+#define s_legend_items       (s_buffers->legend_items)
+#define s_legend_labels      (s_buffers->legend_labels)
+#define s_mode_label         (s_buffers->mode_label)
+#define s_channel_packets    (s_buffers->channel_packets)
+#define s_channel_snapshots  (s_buffers->channel_snapshots)
+#define s_channel_activity   (s_buffers->channel_activity)
+#define s_series_channels    (s_buffers->series_channels)
+#define s_target_rates       (s_buffers->target_rates)
+#define s_smoothed_rates     (s_buffers->smoothed_rates)
+#define s_idle_samples       (s_buffers->idle_samples)
 
 static const uint32_t s_series_colors[PACKET_SERIES_MAX] = {
     0x00E5FF, 0xFF4D8D, 0xFFD166, 0x62E676, 0xA78BFA, 0xFF8A3D,
@@ -105,6 +120,9 @@ static void packet_monitor_stop(void) {
 static void packet_monitor_return(void) {
     s_start_mode = PACKET_START_SELECT;
     packet_monitor_stop();
+    free(s_custom_channels);
+    s_custom_channels = NULL;
+    s_custom_channel_count = 0;
     display_manager_switch_view(&options_menu_view);
 }
 
@@ -152,7 +170,14 @@ static void packet_channels_submit(const char *text) {
         return;
     }
 
-    memcpy(s_custom_channels, channels, count);
+    uint8_t *custom_channels = malloc(count);
+    if (!custom_channels) {
+        error_popup_create("Unable to store selected channels");
+        return;
+    }
+    memcpy(custom_channels, channels, count);
+    free(s_custom_channels);
+    s_custom_channels = custom_channels;
     s_custom_channel_count = count;
     s_start_mode = PACKET_START_CUSTOM;
     keyboard_view_set_submit_callback(NULL);
@@ -313,6 +338,12 @@ static void packet_monitor_create_visualizer(void) {
     lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
     s_root = gui_screen_create_root_no_bg(NULL, "Packet Visualizer", surface, LV_OPA_COVER);
     packet_monitor_view.root = s_root;
+
+    s_buffers = calloc(1, sizeof(*s_buffers));
+    if (!s_buffers) {
+        error_popup_create("Unable to allocate packet graph");
+        return;
+    }
 
     lv_obj_t *content = gui_screen_create_content(s_root, GUI_STATUS_BAR_H);
     lv_obj_set_style_pad_all(content, 0, 0);
@@ -534,7 +565,12 @@ static void packet_monitor_input(InputEvent *event) {
 
 static void packet_monitor_create(void) {
     s_touch_started = false;
-    if (s_start_mode == PACKET_START_SELECT) packet_monitor_create_selector();
+    if (s_start_mode == PACKET_START_SELECT) {
+        free(s_custom_channels);
+        s_custom_channels = NULL;
+        s_custom_channel_count = 0;
+        packet_monitor_create_selector();
+    }
     else packet_monitor_create_visualizer();
 }
 
@@ -548,6 +584,8 @@ static void packet_monitor_destroy(void) {
         live_chart_destroy(s_chart);
         s_chart = NULL;
     }
+    free(s_buffers);
+    s_buffers = NULL;
     if (s_root && lv_obj_is_valid(s_root)) lv_obj_del(s_root);
     s_root = NULL;
     s_summary = NULL;
