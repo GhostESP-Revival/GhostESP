@@ -50,6 +50,7 @@ static bool wardriving_initialized_gps = false;
 static bool wardriving_scan_mode = false;
 static bool wardriving_ble_mode = false;
 static bool wardriving_peer_helper_active = false;
+static bool wardriving_owns_csv_session = false;
 static bool touch_press_active = false;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
@@ -753,6 +754,7 @@ void wardriving_view_create(void) {
 
     touch_press_active = false;
     wardriving_peer_helper_active = false;
+    wardriving_owns_csv_session = false;
     
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     accent_color = theme_palette_get_accent(theme);
@@ -764,8 +766,11 @@ void wardriving_view_create(void) {
     bool peer_connected = esp_comm_manager_is_connected();
     bool peer_only_mode = !wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
     bool defer_local_for_peer_helper = wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
+    bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode) && csv_file_is_open();
 
-    if (peer_only_mode) {
+    if (observing_existing_session) {
+        glog("Wardriving is already active; this view will not change its session.\n");
+    } else if (peer_only_mode) {
         gps_manager_set_peer_gps_preferred(true);
         gps_manager_clear_peer_fix();
         if (g_gpsManager.isinitilized) {
@@ -793,21 +798,25 @@ void wardriving_view_create(void) {
         }
     }
 
-    bool csv_ok = true;
-    if (wardriving_ble_mode) {
+    bool csv_ok = !observing_existing_session;
+    if (!observing_existing_session && wardriving_ble_mode) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
         ble_wardriving_reset_unique_device_count();
         csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
-        ble_start_scanning();
-        ble_register_handler(ble_wardriving_callback);
+        if (csv_ok) {
+            ble_start_scanning();
+            ble_register_handler(ble_wardriving_callback);
+        }
 #endif
-    } else if (wardriving_scan_mode) {
+    } else if (!observing_existing_session && wardriving_scan_mode) {
         csv_ok = (csv_file_open("wardriving") == ESP_OK);
-        wifi_manager_start_monitor_mode(wardriving_scan_callback);
-        start_wardriving();
+        if (csv_ok) {
+            wifi_manager_start_monitor_mode(wardriving_scan_callback);
+            start_wardriving();
+        }
 
         bool peer_helper_ok = false;
-        if (esp_comm_manager_is_connected()) {
+        if (csv_ok && esp_comm_manager_is_connected()) {
             char helper_args[256] = "--helper";
             char helper_plan_csv[192] = {0};
             uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
@@ -840,8 +849,10 @@ void wardriving_view_create(void) {
             glog("Wardrive: peer helper unavailable, local GPS enabled.\n");
         }
     }
+    wardriving_owns_csv_session = csv_ok && !observing_existing_session &&
+                                    (wardriving_scan_mode || wardriving_ble_mode);
 
-    if (!wardriving_scan_mode) {
+    if (!observing_existing_session && !wardriving_scan_mode) {
         gps_manager_set_peer_gps_preferred(peer_connected);
         if (!peer_connected) {
             gps_manager_clear_peer_fix();
@@ -1019,6 +1030,7 @@ void wardriving_view_create(void) {
 
 void wardriving_view_destroy(void) {
     bool had_capture_mode = (wardriving_scan_mode || wardriving_ble_mode);
+    bool owned_csv_session = wardriving_owns_csv_session;
     bool force_deinit_for_template = should_force_gps_deinit_on_exit();
 
     if (update_timer) {
@@ -1026,7 +1038,7 @@ void wardriving_view_destroy(void) {
         update_timer = NULL;
     }
 
-    if (wardriving_ble_mode) {
+    if (owned_csv_session && wardriving_ble_mode) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
         ble_stop();
         if (csv_buffer_has_pending_data()) {
@@ -1035,7 +1047,7 @@ void wardriving_view_destroy(void) {
         csv_file_close();
 #endif
         wardriving_ble_mode = false;
-    } else if (wardriving_scan_mode) {
+    } else if (owned_csv_session && wardriving_scan_mode) {
         stop_wardriving();
         if (esp_comm_manager_is_connected()) {
             bool peer_stop_ok = esp_comm_manager_send_command("startwd", "-s --helper");
@@ -1052,6 +1064,11 @@ void wardriving_view_destroy(void) {
         csv_file_close();
         wardriving_scan_mode = false;
     }
+    if (!owned_csv_session) {
+        wardriving_ble_mode = false;
+        wardriving_scan_mode = false;
+    }
+    wardriving_owns_csv_session = false;
 
     /* For somethingsomething template, always fully release GPS+UART on exit. */
     if (wardriving_initialized_gps && (had_capture_mode || force_deinit_for_template)) {
@@ -1090,8 +1107,10 @@ void wardriving_view_destroy(void) {
     compass_needle = NULL;
     wardriving_peer_helper_active = false;
     wardriving_view_ready_us = 0;
-    gps_manager_set_peer_gps_preferred(false);
-    gps_manager_clear_peer_fix();
+    if (owned_csv_session) {
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_clear_peer_fix();
+    }
 }
 
 void wardriving_view_set_scan_mode(bool enabled) {

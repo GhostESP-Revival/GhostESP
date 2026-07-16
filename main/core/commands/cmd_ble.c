@@ -143,6 +143,10 @@ void handle_ble_wardriving(int argc, char **argv) {
         TERMINAL_VIEW_ADD_TEXT("BLE wardriving stopped.\n");
         status_display_show_status("BLE Drive Off");
     } else {
+        if (csv_file_is_open()) {
+            printf("A wardriving CSV session is already active.\n");
+            return;
+        }
         bool peer_connected = esp_comm_manager_is_connected();
         gps_manager_set_peer_gps_preferred(peer_connected);
         if (!peer_connected) {

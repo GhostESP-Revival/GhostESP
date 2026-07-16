@@ -15,7 +15,8 @@
 
 // wardriving data structure
 typedef struct {
-  char ssid[32];
+  // IEEE 802.11 permits a 32-octet SSID plus a local terminator.
+  char ssid[33];
   char bssid[18];
   int rssi;
   int channel;
@@ -63,6 +64,7 @@ esp_err_t csv_write_header(FILE *f);
 void get_next_csv_file_name(char *file_name_buffer, const char *base_name);
 int get_next_csv_file_index(const char *base_name);
 esp_err_t csv_file_open(const char *base_file_name);
+bool csv_file_is_open(void);
 esp_err_t csv_write_data_to_buffer(wardriving_data_t *data);
 esp_err_t csv_flush_buffer_to_file();
 bool csv_buffer_has_pending_data(void);

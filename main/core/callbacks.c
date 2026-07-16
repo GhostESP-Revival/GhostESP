@@ -66,7 +66,7 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define GPS_STREAM_FLAG_DATE_VALID 0x04
 #define GPS_STREAM_FLAG_TIME_VALID 0x08
 #define WARDRIVE_HELPER_DEDUPE_SIZE 128
-#define WARDRIVE_HELPER_REFRESH_MS 25000
+#define WARDRIVE_HELPER_REFRESH_MS 2000
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
 #define RECENT_SSID_COUNT 5
@@ -1818,6 +1818,11 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     if (ssid_len > 0) {
         memcpy(ssid, data + pos, ssid_len);
         ssid[ssid_len] = '\0';
+        for (uint8_t i = 0; i < ssid_len; i++) {
+            if (ssid[i] == '\0' || (uint8_t)ssid[i] < 0x20 || (uint8_t)ssid[i] == 0x7f) {
+                ssid[i] = '?';
+            }
+        }
     }
     pos += ssid_len;
 
@@ -1898,9 +1903,7 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
 
     wardriving_data_t wardriving_data = {0};
     wardriving_data.ble_data.is_ble_device = false;
-    if (ssid_len == 0) {
-        strncpy(wardriving_data.ssid, "<hidden>", sizeof(wardriving_data.ssid) - 1);
-    } else {
+    if (ssid_len > 0) {
         strncpy(wardriving_data.ssid, ssid, sizeof(wardriving_data.ssid) - 1);
     }
     snprintf(wardriving_data.bssid,
@@ -2592,7 +2595,6 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     int rssi = pkt->rx_ctrl.rssi;
     int channel = pkt->rx_ctrl.channel;
-    bool ssid_malformed = false;
 
     char encryption_type[8] = "OPEN";
     bool found_wpa = false;
@@ -2618,12 +2620,11 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             ssid_ie_seen = true;
             memcpy(ssid, &payload[index + 2], ie_len);
             ssid[ie_len] = '\0';
-            trim_trailing(ssid);
-            // Sanitize: detect and mark malformed SSIDs
-            for (char *p = ssid; *p; p++) {
-                if ((uint8_t)*p < 0x20 || (uint8_t)*p > 0x7E) {
-                    *p = '?';
-                    ssid_malformed = true;
+            // SSIDs are octet strings. Preserve whitespace and UTF-8; replace
+            // only control bytes that cannot survive this C-string pipeline.
+            for (uint8_t i = 0; i < ie_len; i++) {
+                if (ssid[i] == '\0' || (uint8_t)ssid[i] < 0x20 || (uint8_t)ssid[i] == 0x7f) {
+                    ssid[i] = '?';
                 }
             }
         }
@@ -2707,10 +2708,6 @@ rsn_done:
         encryption_type[copy_len] = '\0';
     }
 
-    if (ssid_malformed) {
-        return;
-    }
-
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
         const char *tx_ssid = (ssid[0] == '\0') ? "" : ssid;
         if (wardrive_helper_should_send(bssid, (int8_t)rssi, tx_ssid)) {
@@ -2739,12 +2736,6 @@ rsn_done:
     strncpy(wardriving_data.encryption_type, encryption_type,
             sizeof(wardriving_data.encryption_type) - 1);
     wardriving_data.encryption_type[sizeof(wardriving_data.encryption_type) - 1] = '\0';
-
-    // Log hidden networks with placeholder for WiGLE compatibility
-    if (ssid[0] == '\0') {
-        strncpy(wardriving_data.ssid, "<hidden>", sizeof(wardriving_data.ssid) - 1);
-        wardriving_data.ssid[sizeof(wardriving_data.ssid) - 1] = '\0';
-    }
 
     wardrive_log_attempts++;
     esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);

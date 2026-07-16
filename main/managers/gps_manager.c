@@ -35,9 +35,6 @@ static const char *GPS_TAG = "GPS";
 /* Workaround for stale LSP indexers that miss minmea_soft.h prototype. */
 extern esp_err_t minmea_soft_get_last_error(void);
 extern void minmea_soft_get_stats(minmea_soft_stats_t *out_stats);
-/* Keep explicit wardriving dedupe prototypes for toolchains/indexers that miss transitive headers. */
-extern bool csv_wifi_ap_should_log_peek(const char *bssid, int rssi, const char *ssid);
-extern void csv_wifi_ap_log_commit(const char *bssid, int rssi, const char *ssid);
 bool has_valid_cached_date = false;
 gps_date_t cacheddate = {0};
 static bool gps_connection_logged = false;
@@ -1156,12 +1153,6 @@ void gps_manager_deinit(GPSManager *manager) {
 #define MIN_SPEED_THRESHOLD 0.1   // Minimum 0.1 m/s (~0.36 km/h)
 #define MAX_SPEED_THRESHOLD 340.0 // Maximum 340 m/s (~1224 km/h)
 
-// GPS validity cache - avoid repeated validation on every beacon
-static TickType_t last_gps_valid_tick = 0;
-static bool last_gps_valid_state = false;
-static bool gps_cache_initialized = false;
-#define GPS_VALID_CACHE_MS 200  // Cache validity for 200ms
-
 void gps_manager_note_update(void) {
     gps_last_update_tick = xTaskGetTickCount();
     gps_has_seen_update = true;
@@ -1193,30 +1184,13 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool should_commit_wifi_dedupe = false;
-    if (!data->ble_data.is_ble_device) {
-        if (!csv_wifi_ap_should_log_peek(data->bssid, data->rssi, data->ssid)) {
-            return ESP_OK;
-        }
-        should_commit_wifi_dedupe = true;
-    }
-    
     if (!gps_manager_has_recent_update()) {
         return ESP_ERR_INVALID_STATE;
     }
     
     TickType_t now = xTaskGetTickCount();
-    bool gps_is_valid;
-    
-    if (!gps_cache_initialized || (now - last_gps_valid_tick) > pdMS_TO_TICKS(GPS_VALID_CACHE_MS)) {
-        gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS && 
-                       gps.fix_mode >= GPS_MODE_2D && gps.sats_in_use >= 3;
-        last_gps_valid_state = gps_is_valid;
-        last_gps_valid_tick = now;
-        gps_cache_initialized = true;
-    } else {
-        gps_is_valid = last_gps_valid_state;
-    }
+    bool gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS &&
+                        gps.fix_mode >= GPS_MODE_2D && gps.sats_in_use >= 3;
     
     if (!gps_is_valid) {
         return ESP_ERR_INVALID_STATE;
@@ -1339,15 +1313,13 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
 
     esp_err_t ret = csv_write_data_to_buffer(data);
     if (ret != ESP_OK) {
-        ESP_LOGE(GPS_TAG, "Failed to write wardriving data to CSV buffer");
+        if (ret != ESP_ERR_TIMEOUT && ret != ESP_ERR_NO_MEM) {
+            ESP_LOGE(GPS_TAG, "Failed to write wardriving data to CSV buffer");
+        }
         return ret;
     }
 
     ghostchi_manager_add_xp(data->ble_data.is_ble_device ? 3 : 4);
-
-    if (should_commit_wifi_dedupe) {
-        csv_wifi_ap_log_commit(data->bssid, data->rssi, data->ssid);
-    }
 
     static TickType_t last_status_tick = 0;
     if (last_status_tick == 0 || (now - last_status_tick) >= pdMS_TO_TICKS(GPS_STATUS_PERIOD_MS)) {

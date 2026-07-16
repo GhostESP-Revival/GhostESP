@@ -134,6 +134,11 @@ void handle_startwd(int argc, char **argv) {
             return;
         }
 
+        if (csv_file_is_open()) {
+            glog("Wardriving is already running.\n");
+            return;
+        }
+
         bool prefer_peer_only = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
         prefer_peer_only = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) &&
@@ -156,6 +161,10 @@ void handle_startwd(int argc, char **argv) {
         if (err != ESP_OK) {
             glog("Failed to open CSV for wardriving\n");
             status_display_show_status("CSV Open Fail");
+            if (!prefer_peer_only) {
+                gps_manager_deinit(&g_gpsManager);
+            }
+            return;
         }
         wifi_manager_start_monitor_mode(wardriving_scan_callback);
         start_wardriving();
