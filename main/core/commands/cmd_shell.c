@@ -6,6 +6,7 @@
 #include "core/serial_manager.h"
 #include "core/shell.h"
 #include "core/ghostesp_version.h"
+#include "core/utils.h"
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
 #include "esp_heap_caps.h"
@@ -660,7 +661,7 @@ void handle_didyoumean_cmd(int argc, char **argv) {
 void handle_ps_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     glog("Tasks: %u, free heap: %u bytes\n", (unsigned)uxTaskGetNumberOfTasks(), (unsigned)esp_get_free_heap_size());
-#if configUSE_TRACE_FACILITY
+#if configUSE_TRACE_FACILITY && configUSE_STATS_FORMATTING_FUNCTIONS
     char tasks[1024] = {0};
     vTaskList(tasks);
     glog("Name            State  Prio Stack\n%s", tasks);

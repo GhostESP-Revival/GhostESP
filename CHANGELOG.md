@@ -15,7 +15,7 @@
 - Added offline SD card installs from `/ghostesp/firmware_update.bin`, with optional `.sha256` verification
 
 ### Cloud Store
-- Added Cloud Store in the Apps gallery for browsing and installing apps and asset packs from the GhostESP-Apps and GhostESP-AssetPacks catalogs
+- Added Cloud Store in the Apps gallery for browsing and installing apps, scripts and asset packs from the GitHub catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
 
 ### GhostScript
@@ -59,6 +59,9 @@
 - Lockscreen ghost companion bob uses a sine wave instead of a triangle wave for a more organic feel
 - Toast notifications decelerate as they exit instead of accelerating off screen
 - Main menu list selection border now uses theme accent color instead of hardcoded white
+- Reworked Main Menu and Apps layouts with responsive Carousel, Grid, and List views across compact and large displays
+- Added paginated Grid navigation with page dots, swipe/controller support, top-left page alignment, and subtle selected tiles
+- Improved Carousel navigation with previous/next previews, consistent directions, and faster transitions
 
 ### Docs
 - Restructured getting-started docs with dedicated pages for installation, first scan, manual flashing, Flipper flashing, and control methods

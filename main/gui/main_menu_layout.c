@@ -10,7 +10,7 @@ static int clamp_int(int value, int min, int max) {
 main_menu_layout_kind_t main_menu_layout_from_setting(uint8_t setting) {
     switch (setting) {
         case 1:
-            return MAIN_MENU_LAYOUT_CARD_GRID;
+            return MAIN_MENU_LAYOUT_LAUNCHER;
         case 2:
             return MAIN_MENU_LAYOUT_LIST;
         default:
@@ -18,20 +18,40 @@ main_menu_layout_kind_t main_menu_layout_from_setting(uint8_t setting) {
     }
 }
 
-void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, main_menu_layout_metrics_t *metrics) {
+main_menu_layout_kind_t main_menu_layout_resolve_for_size(main_menu_layout_kind_t kind,
+                                                          int screen_width,
+                                                          int screen_height) {
+    if (kind == MAIN_MENU_LAYOUT_LAUNCHER && (screen_width < 120 || screen_height <= 80)) {
+        return MAIN_MENU_LAYOUT_CAROUSEL;
+    }
+    return kind;
+}
+
+void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int item_count,
+                                           int screen_width, int screen_height,
+                                           int status_bar_height,
+                                           main_menu_layout_metrics_t *metrics) {
     if (!metrics) return;
 
-    int screen_width = LV_HOR_RES;
-    int screen_height = LV_VER_RES;
-    int status_bar_height = GUI_STATUS_BAR_H;
+    if (screen_width < 1) screen_width = 1;
+    if (screen_height < 1) screen_height = 1;
+    status_bar_height = clamp_int(status_bar_height, 0, screen_height);
     int content_height = screen_height - status_bar_height;
     if (content_height < 60) content_height = screen_height;
+
+    main_menu_density_t density = MAIN_MENU_DENSITY_REGULAR;
+    if (screen_width <= 160 || content_height <= 96) {
+        density = MAIN_MENU_DENSITY_COMPACT;
+    } else if (screen_width >= 320 && content_height >= 216) {
+        density = MAIN_MENU_DENSITY_COMFORTABLE;
+    }
 
     *metrics = (main_menu_layout_metrics_t){
         .screen_width = screen_width,
         .screen_height = screen_height,
         .status_bar_height = status_bar_height,
         .content_height = content_height,
+        .density = density,
         .container_align = LV_ALIGN_CENTER,
         .container_x = 0,
         .container_y = status_bar_height / 2,
@@ -48,7 +68,15 @@ void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, 
     }
     metrics->carousel_button_size = clamp_int(carousel_size, 64, 160);
     metrics->carousel_icon_target = clamp_int((int)(metrics->carousel_button_size * 0.38f), 20, 56);
+    metrics->carousel_icon_y_offset = metrics->carousel_button_size <= 80 ? -6 : -10;
     metrics->carousel_show_label = screen_width > 150;
+    int carousel_side_space = (screen_width - metrics->carousel_button_size) / 2;
+    metrics->carousel_preview_size = clamp_int(carousel_side_space - 16, 32, 72);
+    metrics->carousel_preview_icon_target = clamp_int((int)(metrics->carousel_preview_size * 0.55f), 18, 40);
+    metrics->carousel_preview_offset = metrics->carousel_button_size / 2 +
+                                       metrics->carousel_preview_size / 2 + GUI_GRID * 2;
+    metrics->carousel_show_previews = screen_width >= 200 && carousel_side_space >= 48;
+    metrics->carousel_transition_distance = clamp_int(screen_width / 4, 48, 96);
 
     metrics->nav_button_size = 52;
     metrics->nav_button_margin = 15;
@@ -62,6 +90,7 @@ void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, 
 
     metrics->list_button_height = (screen_height <= 160 || screen_width <= 160) ? 32 : 44;
     metrics->list_icon_target = metrics->list_button_height <= 38 ? 20 : 26;
+    metrics->list_button_pad = density == MAIN_MENU_DENSITY_COMPACT ? 6 : 8;
     metrics->list_pad = screen_width > 200 ? 16 : 10;
     metrics->list_row_gap = 6;
     metrics->list_column_gap = 12;
@@ -79,13 +108,31 @@ void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, 
     if (portrait && screen_width >= 200) {
         metrics->margin = 6;
     }
+    metrics->page_indicator_height = 0;
+    if (kind == MAIN_MENU_LAYOUT_LAUNCHER) {
+        metrics->page_indicator_height = density == MAIN_MENU_DENSITY_COMPACT ? 10 : 14;
+        int page_content_height = content_height - metrics->page_indicator_height;
+        metrics->visible_rows = page_content_height >= 360 ? 4 :
+                                page_content_height >= 240 ? 3 :
+                                page_content_height >= 120 ? 2 : 1;
+    }
+
+    int card_area_height = content_height - metrics->page_indicator_height;
+    metrics->page_capacity = columns * metrics->visible_rows;
+    metrics->page_count = item_count > 0 ?
+                          (item_count + metrics->page_capacity - 1) / metrics->page_capacity : 1;
     metrics->card_width = (screen_width - (columns + 1) * metrics->margin) / columns;
-    metrics->card_height = (content_height - (metrics->visible_rows + 1) * metrics->margin) / metrics->visible_rows;
+    metrics->card_height = (card_area_height - (metrics->visible_rows + 1) * metrics->margin) / metrics->visible_rows;
     if (metrics->card_width < 1) metrics->card_width = 1;
     if (metrics->card_height < 1) metrics->card_height = 1;
 
-    if (kind == MAIN_MENU_LAYOUT_CARD_GRID) {
+    if (kind == MAIN_MENU_LAYOUT_LAUNCHER) {
         metrics->container_align = LV_ALIGN_TOP_MID;
         metrics->container_y = status_bar_height;
     }
+}
+
+void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, main_menu_layout_metrics_t *metrics) {
+    main_menu_layout_get_metrics_for_size(kind, item_count, LV_HOR_RES, LV_VER_RES,
+                                          GUI_STATUS_BAR_H, metrics);
 }

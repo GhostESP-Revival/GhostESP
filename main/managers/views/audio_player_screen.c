@@ -364,7 +364,7 @@ static void update_file_list_selection(void)
     /* Scroll selected into view */
     if (s_selected_index >= 0 && s_selected_index < (int)child_cnt) {
         lv_obj_t *btn = lv_obj_get_child(s_file_list, s_selected_index);
-        if (btn) lv_obj_scroll_to_view(btn, LV_ANIM_ON);
+        if (btn) lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
     }
     update_list_hint();
 }

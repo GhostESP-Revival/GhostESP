@@ -233,7 +233,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
   settings->nav_buttons_enabled = true; // Default to enabled
-  settings->menu_layout = 0; // Default to carousel layout
+  settings->menu_layout = 1; // Default to adaptive paginated grid
   settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
@@ -685,7 +685,7 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_layout = value_u8;
   } else {
-    settings->menu_layout = 0; // Default to carousel layout if not found
+    settings->menu_layout = 1; // Default to adaptive paginated grid if not found
   }
 
   // Load carousel slide direction inversion
@@ -1900,12 +1900,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 2) layout = 0;
+    if (layout > 2) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 2 ? settings->menu_layout : 0;
+    return settings->menu_layout <= 2 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
