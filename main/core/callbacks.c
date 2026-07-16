@@ -1131,6 +1131,12 @@ static inline void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
     enqueue_pcap_write_typed(payload, len, PCAP_CAPTURE_WIFI);
 }
 
+static wifi_raw_observer_t s_wifi_raw_observer = NULL;
+
+void wifi_raw_set_observer(wifi_raw_observer_t observer) {
+    s_wifi_raw_observer = observer;
+}
+
 // cleanup function to free pcap queue and task when not capturing
 void cleanup_pcap_queue(void) {
     if (s_pcap_writer_task != NULL) {
@@ -2537,6 +2543,9 @@ void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type == WIFI_PKT_MISC || pkt->rx_ctrl.sig_len < MIN_PACKET_LENGTH) {
         return;
     }
+
+    wifi_raw_observer_t observer = s_wifi_raw_observer;
+    if (observer) observer(pkt, type);
     
     if (pkt->rx_ctrl.sig_len > 0) {
         enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);

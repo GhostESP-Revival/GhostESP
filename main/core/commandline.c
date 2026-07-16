@@ -323,6 +323,7 @@ void register_commands() {
     register_command("netbiosscan", handle_netbios_scan);
     register_command("httpbannerscan", handle_http_banner_scan);
     register_command("snmpprobe", handle_snmp_probe);
+    register_command("enumscan", handle_enum_scan);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("settings", handle_settings_cmd);

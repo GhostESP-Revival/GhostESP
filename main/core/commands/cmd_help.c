@@ -356,7 +356,8 @@ void handle_help(int argc, char **argv) {
         glog("        (no range) : Scan common ports (default)\n\n");
         glog("scanarp\n");
         glog("    Description: Perform ARP scan on local network to discover active hosts\n");
-        glog("    Usage: scanarp\n\n");
+        glog("    Usage: scanarp\n");
+        glog("           scanarp monitor [duration-seconds]\n\n");
         glog("scanssh\n");
         glog("    Description: Scan a host or local subnet for SSH services and grab banners\n");
         glog("    Usage: scanssh\n");

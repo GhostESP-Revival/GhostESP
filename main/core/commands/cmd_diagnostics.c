@@ -30,6 +30,7 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/zigbee_manager.h"
+#include "scans/wifi/arp_scan.h"
 #include "sdkconfig.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -208,6 +209,7 @@ void handle_stop_flipper(int argc, char **argv) {
     netbios_scan_cancel();
     http_banner_scan_cancel();
     snmp_scan_cancel();
+    arp_scan_stop_passive();
     port_scan_cancel();
     glog("Stopped network scans.\n");
     stopped_any = true;

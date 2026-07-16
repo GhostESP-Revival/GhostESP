@@ -14,6 +14,8 @@
 #include "scans/wifi/netbios_scan.h"
 #include "scans/wifi/http_banner_scan.h"
 #include "scans/wifi/snmp_scan.h"
+#include "scans/wifi/enum4linux_scan.h"
+#include "scans/wifi/arp_scan.h"
 #include "vendor/pcap.h"
 #include "esp_wifi.h"
 #include "sdkconfig.h"
@@ -142,6 +144,17 @@ void handle_scan_ports(int argc, char **argv) {
 }
 
 void handle_scan_arp(int argc, char **argv) {
+    if (argc >= 2 && (strcmp(argv[1], "monitor") == 0 ||
+                      strcmp(argv[1], "passive") == 0)) {
+        int duration = 0; // 0 = run until stopped
+        if (argc >= 3) {
+            duration = atoi(argv[2]);
+        }
+        arp_scan_start_passive(duration);
+        status_display_show_status("Packet Monitor");
+        return;
+    }
+
     glog("Starting ARP scan on local network...\n");
     wifi_manager_arp_scan_subnet();
     status_display_show_status("ARP Scan");
@@ -212,6 +225,38 @@ void handle_http_banner_scan(int argc, char **argv) {
 }
 
 void handle_snmp_probe(int argc, char **argv) {
+    // SNMP Walk mode: snmpprobe walk [host|subnet] [OID]
+    if (argc >= 2 && strcmp(argv[1], "walk") == 0) {
+        if (argc >= 4 && strcmp(argv[2], "subnet") == 0) {
+            char subnet_prefix[16];
+            if (!normalize_subnet_prefix_arg(argv[3], subnet_prefix, sizeof(subnet_prefix))) {
+                glog("Usage: snmpprobe walk subnet <a.b.c[.0|.]> [OID]\n");
+                return;
+            }
+            const char *oid = (argc >= 5) ? argv[4] : NULL;
+            glog("Starting SNMP walk on subnet %s*...\n", subnet_prefix);
+            snmp_walk_subnet_prefix(subnet_prefix, oid);
+            status_display_show_status("SNMP Walk Done");
+            return;
+        }
+
+        if (argc >= 3 && strcmp(argv[2], "subnet") != 0) {
+            // Walk specific host
+            const char *oid = (argc >= 4) ? argv[3] : NULL;
+            glog("Starting SNMP walk on %s...\n", argv[2]);
+            snmp_walk_host(argv[2], oid);
+            status_display_show_status("SNMP Walk Done");
+            return;
+        }
+
+        // Walk local subnet
+        const char *oid = (argc >= 3) ? argv[2] : NULL;
+        glog("Starting SNMP walk on local subnet...\n");
+        snmp_walk_subnet(oid);
+        status_display_show_status("SNMP Walk Done");
+        return;
+    }
+
     if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
         char subnet_prefix[16];
         if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
@@ -234,6 +279,31 @@ void handle_snmp_probe(int argc, char **argv) {
     glog("Starting SNMP probe on %s...\n", argv[1]);
     snmp_scan_host(argv[1]);
     status_display_show_status("SNMP Done");
+}
+
+void handle_enum_scan(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[1], "subnet") == 0) {
+        char subnet_prefix[16];
+        if (!normalize_subnet_prefix_arg(argv[2], subnet_prefix, sizeof(subnet_prefix))) {
+            glog("Usage: enumscan subnet <a.b.c[.0|.]>\n");
+            return;
+        }
+        glog("Starting Enum scan on subnet %s*...\n", subnet_prefix);
+        enum_scan_subnet_prefix(subnet_prefix);
+        status_display_show_status("Enum Done");
+        return;
+    }
+
+    if (argc < 2 || strcmp(argv[1], "subnet") == 0) {
+        glog("Starting Enum scan on local subnet...\n");
+        enum_scan_subnet();
+        status_display_show_status("Enum Done");
+        return;
+    }
+
+    glog("Starting Enum scan on %s...\n", argv[1]);
+    enum_scan_host(argv[1]);
+    status_display_show_status("Enum Done");
 }
 
 void handle_congestion_cmd(int argc, char **argv) {

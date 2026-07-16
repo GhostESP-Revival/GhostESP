@@ -58,4 +58,8 @@ int arp_scan_get_count(void);
 const arp_host_t* arp_scan_get_host(int index);
 void arp_scan_clear_results(void);
 
+// Compact Wi-Fi packet monitor (legacy API names retained for CLI compatibility)
+void arp_scan_start_passive(int duration_sec);
+void arp_scan_stop_passive(void);
+
 #endif // ARP_SCAN_H

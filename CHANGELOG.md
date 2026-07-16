@@ -25,6 +25,9 @@
 - Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
 
 ### Wi-Fi
+- Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445
+- Added SNMP MIB walk (`snmpprobe walk`) using GetNextRequest to traverse OID subtrees with support for custom root OIDs
+- Added a compact live Wi-Fi packet monitor (`scanarp monitor`) using the Wireshark raw-capture path
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 
 ### Headless CLI
@@ -33,6 +36,7 @@
 
 ### Other Changes
 - Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
+- Fixed display resume crashes after shared SPI SD mounts on C5 boards
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
 - Freed the wardriving CSV line buffer when logging stops
 - Freed PCAP staging resources when capture stops

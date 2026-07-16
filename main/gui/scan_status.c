@@ -25,6 +25,7 @@ struct scan_status_t {
     lv_obj_t *label;
     lv_obj_t *progress_label;
     lv_timer_t *anim_timer;
+    void (*cancel_cb)(void);
     uint16_t arc_angle;
     bool active;
 };
@@ -44,6 +45,16 @@ static lv_coord_t get_screen_height(void) {
 
 static bool scan_status_use_pop_in(void) {
     return false;
+}
+
+static void scan_status_click_cb(lv_event_t *e) {
+    scan_status_t *ss = (scan_status_t *)lv_event_get_user_data(e);
+    if (!ss || !ss->active) return;
+    lv_event_stop_bubbling(e);
+    lv_event_stop_processing(e);
+    if (ss->cancel_cb) {
+        ss->cancel_cb();
+    }
 }
 
 static const lv_font_t *get_font_for_screen(void) {
@@ -82,6 +93,7 @@ scan_status_t *scan_status_create(const char *message) {
     lv_obj_set_scrollbar_mode(ss->container, LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(ss->container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(ss->container, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ss->container, scan_status_click_cb, LV_EVENT_CLICKED, ss);
     
     display_manager_add_status_bar("Scanning");
 
@@ -182,6 +194,11 @@ void scan_status_set_progress(scan_status_t *ss, int current, int total) {
         snprintf(buf, sizeof(buf), "%d / %d", current, total);
         scan_status_set_subtext(ss, buf);
     }
+}
+
+void scan_status_set_cancel_cb(scan_status_t *ss, void (*cb)(void)) {
+    if (!ss) return;
+    ss->cancel_cb = cb;
 }
 
 void scan_status_close(scan_status_t *ss) {

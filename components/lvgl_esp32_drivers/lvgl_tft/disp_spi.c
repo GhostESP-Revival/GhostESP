@@ -204,18 +204,8 @@ esp_err_t disp_spi_remove_device()
         return ret;
     }
     spi = NULL;  // clear handle so it can be reinitialized during resume
-    /* Free DMA transaction pool to release internal DMA memory.
-     * This is critical when the SPI bus is shared with SD card —
-     * the bus will be freed and re-initialized for SD, and without
-     * unusable, causing out-of-memory errors on re-init. */
-    if (TransactionPool != NULL) {
-        spi_transaction_ext_t *pTransaction;
-        while (xQueueReceive(TransactionPool, &pTransaction, 0) == pdTRUE) {
-            heap_caps_free(pTransaction);
-        }
-        vQueueDelete(TransactionPool);
-        TransactionPool = NULL;
-    }
+    /* Transaction descriptors contain no bus state; retain them so display
+     * reattachment after an SD mount does not need more DMA-capable RAM. */
     return ESP_OK;
 }
 

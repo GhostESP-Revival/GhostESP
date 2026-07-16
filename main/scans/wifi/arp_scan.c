@@ -9,6 +9,7 @@
  */
 
 #include "scans/wifi/arp_scan.h"
+#include "core/callbacks.h"
 #include "core/glog.h"
 #include "core/scan_saver.h"
 #include "core/utils.h"
@@ -17,6 +18,7 @@
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "managers/wifi_manager.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
@@ -65,7 +67,7 @@ static void log_host_entry(scan_file_t *sf, size_t index, const char *ip, const 
     char entry[80];
     format_host_entry(entry, sizeof(entry), index, ip, mac);
     glog("%s\n", entry);
-    if (sf && sf->fp) {
+    if (scan_file_is_open(sf)) {
         scan_file_printf(sf, "%s\n", entry);
     }
 }
@@ -273,7 +275,7 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
 /**
  * @brief Get subnet prefix from current WiFi connection
  */
-static bool get_subnet_prefix(char *subnet_prefix, size_t prefix_size) {
+static bool arp_get_subnet_prefix(char *subnet_prefix, size_t prefix_size) {
     esp_netif_t *netif = get_wifi_sta_netif();
     if (!netif) {
         glog("Failed to get WiFi interface\n");
@@ -377,7 +379,7 @@ bool arp_scan_subnet(void) {
     }
 
     // Get subnet information
-    if (!get_subnet_prefix(ctx->subnet_prefix, sizeof(ctx->subnet_prefix))) {
+    if (!arp_get_subnet_prefix(ctx->subnet_prefix, sizeof(ctx->subnet_prefix))) {
         glog("Failed to get network information. Make sure WiFi is connected.\n");
         arp_scanner_cleanup(ctx);
         return false;
@@ -529,4 +531,458 @@ void arp_scan_clear_results(void) {
 void arp_scan_print_results(void) {
     // Results are printed during scan in the current implementation
     // This function is provided for API consistency
+}
+
+// ============================================================================
+// Compact Wi-Fi Packet Monitor
+// ============================================================================
+
+static volatile bool g_passive_running = false;
+static volatile int g_passive_count = 0;
+static volatile uint32_t g_passive_data_frames = 0;
+static volatile uint32_t g_passive_protected_frames = 0;
+static volatile uint32_t g_packet_feed_emitted = 0;
+
+#define PASSIVE_ARP_MAX_HOSTS 64
+typedef struct {
+    uint32_t ip_addr;
+    uint8_t mac[6];
+} passive_arp_host_t;
+
+static passive_arp_host_t g_passive_hosts[PASSIVE_ARP_MAX_HOSTS];
+static int g_passive_host_count = 0;
+
+// Simple OUI vendor lookup table (top vendors)
+typedef struct {
+    uint8_t prefix[3];
+    const char *vendor;
+} oui_entry_t;
+
+static const oui_entry_t oui_table[] = {
+    {{0x00, 0x50, 0x56}, "VMware"},
+    {{0x00, 0x0C, 0x29}, "VMware"},
+    {{0x08, 0x00, 0x27}, "VirtualBox"},
+    {{0x0A, 0x00, 0x27}, "VirtualBox"},
+    {{0xB8, 0x27, 0xEB}, "Raspberry Pi"},
+    {{0xDC, 0xA6, 0x32}, "Raspberry Pi"},
+    {{0xE4, 0x5F, 0x01}, "Raspberry Pi"},
+    {{0x28, 0xCD, 0xC1}, "Raspberry Pi"},
+    {{0x00, 0x1A, 0x79}, "Dell"},
+    {{0x00, 0x14, 0x22}, "Dell"},
+    {{0xF8, 0xBC, 0x12}, "Dell"},
+    {{0x00, 0x25, 0xB5}, "Dell"},
+    {{0x00, 0x1E, 0x67}, "Intel"},
+    {{0x00, 0x1B, 0x21}, "Intel"},
+    {{0x68, 0x05, 0xCA}, "Intel"},
+    {{0xA4, 0x34, 0xD9}, "Intel"},
+    {{0x3C, 0x22, 0xFB}, "Apple"},
+    {{0x00, 0x1C, 0xB3}, "Apple"},
+    {{0xF0, 0x18, 0x98}, "Apple"},
+    {{0xAC, 0xDE, 0x48}, "Apple"},
+    {{0x00, 0x26, 0xBB}, "Apple"},
+    {{0x78, 0x7B, 0x8A}, "Apple"},
+    {{0x00, 0x03, 0x93}, "Apple"},
+    {{0x94, 0xE9, 0x79}, "Apple"},
+    {{0x00, 0x17, 0x88}, "Philips Hue"},
+    {{0x00, 0x12, 0x47}, "TP-Link"},
+    {{0x50, 0xC7, 0xBF}, "TP-Link"},
+    {{0xE8, 0xDE, 0x27}, "TP-Link"},
+    {{0x30, 0xB5, 0xC2}, "TP-Link"},
+    {{0x00, 0x0E, 0x8F}, "Netgear"},
+    {{0x20, 0xE5, 0x2A}, "Netgear"},
+    {{0x44, 0x94, 0xFC}, "Netgear"},
+    {{0x00, 0x1F, 0x33}, "Netgear"},
+    {{0x00, 0x24, 0xD4}, "ASUS"},
+    {{0xF4, 0x6D, 0x04}, "ASUS"},
+    {{0x2C, 0x56, 0xDC}, "ASUS"},
+    {{0x00, 0x13, 0x02}, "Samsung"},
+    {{0x00, 0x1A, 0x8A}, "Samsung"},
+    {{0x5C, 0x3C, 0x27}, "Samsung"},
+    {{0x00, 0x21, 0xD1}, "Samsung"},
+    {{0x00, 0x16, 0x32}, "Samsung"},
+    {{0x00, 0x0D, 0xB9}, "Samsung"},
+    {{0x00, 0x07, 0xAB}, "Samsung"},
+    {{0x00, 0x02, 0x78}, "Samsung"},
+    {{0x34, 0x23, 0xBA}, "Samsung"},
+    {{0xF0, 0x5B, 0x7B}, "Samsung"},
+    {{0xFC, 0xF1, 0x36}, "Samsung"},
+    {{0x00, 0x0E, 0x6D}, "D-Link"},
+    {{0x00, 0x1B, 0x11}, "D-Link"},
+    {{0x1C, 0x7E, 0xE5}, "D-Link"},
+    {{0x00, 0x15, 0xE9}, "D-Link"},
+    {{0x00, 0x1C, 0xF0}, "D-Link"},
+    {{0x30, 0x23, 0x03}, "Belkin"},
+    {{0x00, 0x11, 0x50}, "Belkin"},
+    {{0x00, 0x1D, 0xD8}, "HP"},
+    {{0x00, 0x0D, 0x9D}, "HP"},
+    {{0x00, 0x08, 0x02}, "HP"},
+    {{0x00, 0x1A, 0x4B}, "HP"},
+    {{0x00, 0x0B, 0xCD}, "HP"},
+    {{0x00, 0x13, 0x21}, "HP"},
+    {{0x00, 0x08, 0x22}, "Xiaomi"},
+    {{0x28, 0x6C, 0x07}, "Xiaomi"},
+    {{0x7C, 0x1D, 0xD9}, "Xiaomi"},
+    {{0x64, 0x09, 0x80}, "Xiaomi"},
+    {{0x78, 0x11, 0xDC}, "Xiaomi"},
+    {{0xF8, 0xA4, 0x5F}, "Xiaomi"},
+    {{0x00, 0x0E, 0x58}, "Sony"},
+    {{0x00, 0x04, 0x1B}, "Sony"},
+    {{0x00, 0x1A, 0x80}, "Sony"},
+    {{0x00, 0x1E, 0x45}, "Sony"},
+    {{0x00, 0x0A, 0x95}, "Cisco"},
+    {{0x00, 0x01, 0x42}, "Cisco"},
+    {{0x00, 0x01, 0x63}, "Cisco"},
+    {{0x00, 0x01, 0x96}, "Cisco"},
+    {{0x00, 0x01, 0xC7}, "Cisco"},
+    {{0x00, 0x02, 0x16}, "Cisco"},
+    {{0x00, 0x02, 0x4A}, "Cisco"},
+    {{0x00, 0x02, 0xB9}, "Cisco"},
+    {{0x00, 0x03, 0x6B}, "Cisco"},
+    {{0x00, 0x03, 0xE3}, "Cisco"},
+    {{0x00, 0x04, 0x9D}, "Cisco"},
+    {{0x00, 0x04, 0xC1}, "Cisco"},
+    {{0x00, 0x05, 0x9B}, "Cisco"},
+    {{0x00, 0x06, 0x28}, "Cisco"},
+    {{0x00, 0x07, 0x0D}, "Cisco"},
+    {{0x00, 0x07, 0x85}, "Cisco"},
+    {{0x00, 0x08, 0x20}, "Cisco"},
+    {{0x00, 0x08, 0x7C}, "Cisco"},
+    {{0x00, 0x09, 0x43}, "Cisco"},
+    {{0x00, 0x09, 0x44}, "Cisco"},
+    {{0x00, 0x09, 0x7C}, "Cisco"},
+    {{0x00, 0x09, 0xB6}, "Cisco"},
+    {{0x00, 0x0A, 0x41}, "Cisco"},
+    {{0x00, 0x0A, 0x8A}, "Cisco"},
+    {{0x00, 0x0A, 0xB8}, "Cisco"},
+    {{0x00, 0x0A, 0xB6}, "Cisco"},
+    {{0x00, 0x0B, 0x46}, "Cisco"},
+    {{0x00, 0x0B, 0x5F}, "Cisco"},
+    {{0x00, 0x0B, 0x85}, "Cisco"},
+    {{0x00, 0x0B, 0xBE}, "Cisco"},
+    {{0x00, 0x0B, 0xFC}, "Cisco"},
+    {{0x00, 0x0C, 0x30}, "Cisco"},
+    {{0x00, 0x0C, 0x85}, "Cisco"},
+    {{0x00, 0x0C, 0x86}, "Cisco"},
+    {{0x00, 0x0C, 0xDB}, "Cisco"},
+    {{0x00, 0x0D, 0x29}, "Cisco"},
+    {{0x00, 0x0D, 0x65}, "Cisco"},
+    {{0x00, 0x0D, 0xBC}, "Cisco"},
+    {{0x00, 0x0D, 0xEC}, "Cisco"},
+    {{0x00, 0x0E, 0x38}, "Cisco"},
+    {{0x00, 0x0E, 0xD7}, "Cisco"},
+    {{0x00, 0x0F, 0x24}, "Cisco"},
+    {{0x00, 0x0F, 0x34}, "Cisco"},
+    {{0x00, 0x0F, 0x8F}, "Cisco"},
+    {{0x00, 0x12, 0x00}, "Cisco"},
+    {{0x00, 0x12, 0x43}, "Cisco"},
+    {{0x00, 0x12, 0x7F}, "Cisco"},
+    {{0x00, 0x12, 0xD9}, "Cisco"},
+    {{0x00, 0x13, 0x19}, "Cisco"},
+    {{0x00, 0x13, 0x7F}, "Cisco"},
+    {{0x00, 0x13, 0x80}, "Cisco"},
+    {{0x00, 0x14, 0x6A}, "Cisco"},
+    {{0x00, 0x14, 0xA8}, "Cisco"},
+    {{0x00, 0x16, 0x46}, "Cisco"},
+    {{0x00, 0x16, 0x47}, "Cisco"},
+    {{0x00, 0x17, 0x0E}, "Cisco"},
+    {{0x00, 0x17, 0x3B}, "Cisco"},
+    {{0x00, 0x17, 0x94}, "Cisco"},
+    {{0x00, 0x17, 0x95}, "Cisco"},
+    {{0x00, 0x18, 0x73}, "Cisco"},
+    {{0x00, 0x19, 0x2F}, "Cisco"},
+    {{0x00, 0x19, 0xAA}, "Cisco"},
+    {{0x00, 0x19, 0xE7}, "Cisco"},
+    {{0x00, 0x1A, 0x2F}, "Cisco"},
+    {{0x00, 0x1A, 0x6D}, "Cisco"},
+    {{0x00, 0x1A, 0xA1}, "Cisco"},
+    {{0x00, 0x1A, 0xA2}, "Cisco"},
+    {{0x00, 0x1B, 0x0C}, "Cisco"},
+    {{0x00, 0x1B, 0x53}, "Cisco"},
+    {{0x00, 0x1B, 0x54}, "Cisco"},
+    {{0x00, 0x1B, 0xD4}, "Cisco"},
+    {{0x00, 0x1C, 0x0E}, "Cisco"},
+    {{0x00, 0x1C, 0x0F}, "Cisco"},
+    {{0x00, 0x1C, 0x10}, "Cisco"},
+    {{0x00, 0x1C, 0x11}, "Cisco"},
+    {{0x00, 0x1E, 0x13}, "Cisco"},
+    {{0x00, 0x1E, 0x14}, "Cisco"},
+    {{0x00, 0x1E, 0x49}, "Cisco"},
+    {{0x00, 0x1E, 0x4A}, "Cisco"},
+    {{0x00, 0x1E, 0xBE}, "Cisco"},
+    {{0x00, 0x1E, 0xF7}, "Cisco"},
+    {{0x00, 0x20, 0x3F}, "Cisco"},
+    {{0x00, 0x21, 0x55}, "Cisco"},
+    {{0x00, 0x21, 0x56}, "Cisco"},
+    {{0x00, 0x22, 0x55}, "Cisco"},
+    {{0x00, 0x22, 0x56}, "Cisco"},
+    {{0x00, 0x23, 0x04}, "Cisco"},
+    {{0x00, 0x23, 0x33}, "Cisco"},
+    {{0x00, 0x23, 0x5D}, "Cisco"},
+    {{0x00, 0x24, 0x13}, "Cisco"},
+    {{0x00, 0x24, 0x14}, "Cisco"},
+    {{0x00, 0x24, 0x50}, "Cisco"},
+    {{0x00, 0x24, 0xC3}, "Cisco"},
+    {{0x00, 0x25, 0x45}, "Cisco"},
+    {{0x00, 0x25, 0x83}, "Cisco"},
+    {{0x00, 0x25, 0x84}, "Cisco"},
+    {{0x00, 0x26, 0x0A}, "Cisco"},
+    {{0x00, 0x26, 0x51}, "Cisco"},
+    {{0x00, 0x26, 0x98}, "Cisco"},
+    {{0x00, 0x26, 0x99}, "Cisco"},
+    {{0x00, 0x26, 0x9A}, "Cisco"},
+    {{0x00, 0x26, 0xB0}, "Cisco"},
+    {{0x00, 0x26, 0xB1}, "Cisco"},
+    {{0x00, 0x26, 0xF2}, "Cisco"},
+    {{0x00, 0x27, 0x0C}, "Cisco"},
+    {{0x00, 0x50, 0x56}, "VMware"},
+    {{0x00, 0x50, 0x57}, "VMware"},
+    {{0x00, 0x50, 0x58}, "VMware"},
+    {{0x00, 0x0C, 0x29}, "VMware"},
+    {{0x00, 0x05, 0x69}, "VMware"},
+};
+
+static const int oui_table_size = sizeof(oui_table) / sizeof(oui_table[0]);
+
+static const char *lookup_oui_vendor(const uint8_t *mac) {
+    for (int i = 0; i < oui_table_size; i++) {
+        if (mac[0] == oui_table[i].prefix[0] &&
+            mac[1] == oui_table[i].prefix[1] &&
+            mac[2] == oui_table[i].prefix[2]) {
+            return oui_table[i].vendor;
+        }
+    }
+    return NULL;
+}
+
+static void format_short_mac(const uint8_t *mac, char out[7]) {
+    snprintf(out, 7, "%02X%02X%02X", mac[3], mac[4], mac[5]);
+}
+
+static const char *packet_type_name(uint8_t type, uint8_t subtype) {
+    if (type == 0) {
+        switch (subtype) {
+            case 0: return "ASQ";
+            case 1: return "ASR";
+            case 4: return "PRQ";
+            case 5: return "PRS";
+            case 8: return "BCN";
+            case 10: return "DIS";
+            case 11: return "AUT";
+            case 12: return "DEA";
+            default: return "MGT";
+        }
+    }
+    if (type == 1) {
+        switch (subtype) {
+            case 11: return "RTS";
+            case 12: return "CTS";
+            case 13: return "ACK";
+            default: return "CTL";
+        }
+    }
+    if (type == 2) return (subtype & 0x08) ? "QOS" : "DAT";
+    return "UNK";
+}
+
+static void format_compact_packet(const wifi_promiscuous_pkt_t *pkt,
+                                  wifi_promiscuous_pkt_type_t packet_type,
+                                  char *out, size_t out_size) {
+    const uint8_t *frame = pkt->payload;
+    size_t len = pkt->rx_ctrl.sig_len;
+    uint16_t fc = (uint16_t)frame[0] | ((uint16_t)frame[1] << 8);
+    uint8_t type = (uint8_t)((fc >> 2) & 0x03);
+    uint8_t subtype = (uint8_t)((fc >> 4) & 0x0F);
+    char flags[3] = {0};
+    int flag_pos = 0;
+    if (fc & 0x4000) flags[flag_pos++] = 'P';
+    if (fc & 0x0800) flags[flag_pos++] = 'R';
+
+    char dst[7] = "------";
+    char src[7] = "------";
+    if (len >= 10) format_short_mac(&frame[4], dst);
+    if (len >= 16 && !(type == 1 && (subtype == 12 || subtype == 13))) {
+        format_short_mac(&frame[10], src);
+    }
+
+    const char *name = packet_type_name(type, subtype);
+    if (packet_type == WIFI_PKT_DATA && len >= 24) {
+        bool to_ds = (fc & 0x0100) != 0;
+        bool from_ds = (fc & 0x0200) != 0;
+        size_t header_len = (to_ds && from_ds) ? 30 : 24;
+        if (subtype & 0x08) {
+            header_len += 2;
+            if (fc & 0x8000) header_len += 4;
+        }
+        if (len >= header_len + 8) {
+            const uint8_t *llc = frame + header_len;
+            if (llc[0] == 0xAA && llc[1] == 0xAA && llc[2] == 0x03) {
+                uint16_t ether_type = ((uint16_t)llc[6] << 8) | llc[7];
+                if (ether_type == 0x0806 && len >= header_len + 8 + 28) {
+                    const uint8_t *arp = llc + 8;
+                    snprintf(out, out_size, "%02u %4d ARP %u.%u>%u.%u %s",
+                             (unsigned int)pkt->rx_ctrl.channel, pkt->rx_ctrl.rssi,
+                             (unsigned int)arp[16], (unsigned int)arp[17],
+                             (unsigned int)arp[26], (unsigned int)arp[27], src);
+                    return;
+                }
+                if (ether_type == 0x888E) name = "EAP";
+                else if (ether_type == 0x0800) name = "IP4";
+                else if (ether_type == 0x86DD) name = "IP6";
+            }
+        }
+    }
+
+    snprintf(out, out_size, "%02u %4d %s %s>%s %u%s",
+             (unsigned int)pkt->rx_ctrl.channel, pkt->rx_ctrl.rssi, name, src, dst,
+             (unsigned int)len, flags);
+}
+
+static bool passive_neighbor_is_new(uint32_t ip_addr, const uint8_t *mac) {
+    for (int i = 0; i < g_passive_host_count; i++) {
+        if (g_passive_hosts[i].ip_addr != ip_addr) continue;
+        if (memcmp(g_passive_hosts[i].mac, mac, 6) == 0) return false;
+        memcpy(g_passive_hosts[i].mac, mac, 6);
+        return true;
+    }
+
+    if (g_passive_host_count >= PASSIVE_ARP_MAX_HOSTS) return false;
+    g_passive_hosts[g_passive_host_count].ip_addr = ip_addr;
+    memcpy(g_passive_hosts[g_passive_host_count].mac, mac, 6);
+    g_passive_host_count++;
+    return true;
+}
+
+static void poll_passive_arp_table(void) {
+    for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
+        ip4_addr_t *ip = NULL;
+        struct netif *entry_netif = NULL;
+        struct eth_addr *eth = NULL;
+        if (!etharp_get_entry(i, &ip, &entry_netif, &eth) || !ip || !eth) continue;
+        if (!passive_neighbor_is_new(ip->addr, eth->addr)) continue;
+
+        const uint8_t *ip_bytes = (const uint8_t *)&ip->addr;
+        char short_mac[7];
+        format_short_mac(eth->addr, short_mac);
+        const char *vendor = lookup_oui_vendor(eth->addr);
+        if (vendor) {
+            glog("NBR %u.%u %s %.16s\n",
+                 (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3],
+                 short_mac, vendor);
+        } else {
+            glog("NBR %u.%u %s\n",
+                 (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3], short_mac);
+        }
+    }
+}
+
+// Lock-free ring buffer for packet lines (observer writes, main loop reads)
+#define MONITOR_RING_SIZE 64
+#define MONITOR_LINE_MAX 48
+static char g_monitor_ring[MONITOR_RING_SIZE][MONITOR_LINE_MAX];
+static volatile uint32_t g_monitor_ring_head = 0;
+static volatile uint32_t g_monitor_ring_tail = 0;
+
+static void monitor_ring_push(const char *line) {
+    uint32_t next = (g_monitor_ring_head + 1) % MONITOR_RING_SIZE;
+    if (next == g_monitor_ring_tail) return; // full, drop
+    memcpy(g_monitor_ring[g_monitor_ring_head], line, MONITOR_LINE_MAX);
+    g_monitor_ring[g_monitor_ring_head][MONITOR_LINE_MAX - 1] = '\0';
+    __sync_synchronize();
+    g_monitor_ring_head = next;
+}
+
+/**
+ * @brief Lightweight observer attached to the Wireshark raw capture callback.
+ *
+ * Only pushes formatted lines into a lock-free ring buffer. No FreeRTOS
+ * or glog calls from this context.
+ */
+static void packet_feed_observer(const wifi_promiscuous_pkt_t *pkt,
+                                 wifi_promiscuous_pkt_type_t type) {
+    if (!g_passive_running || !pkt || pkt->rx_ctrl.sig_len < 24) return;
+
+    g_passive_data_frames++;
+    uint16_t fc = (uint16_t)pkt->payload[0] | ((uint16_t)pkt->payload[1] << 8);
+    if (fc & 0x4000) g_passive_protected_frames++;
+
+    // Rate limit: emit every 4th packet
+    if ((g_passive_data_frames & 3) != 0) return;
+
+    char line[MONITOR_LINE_MAX];
+    format_compact_packet(pkt, type, line, sizeof(line));
+    if (strstr(line, " ARP ")) g_passive_count++;
+    monitor_ring_push(line);
+    g_packet_feed_emitted++;
+}
+
+/**
+ * @brief Start a compact local Wi-Fi packet feed.
+ *
+ * Uses the same raw callback as Wireshark streaming, but emits bounded text
+ * summaries to the local terminal instead of binary PCAP records.
+ */
+void arp_scan_start_passive(int duration_sec) {
+    if (g_passive_running) {
+        glog("Packet Monitor: Already running\n");
+        return;
+    }
+
+    glog("Packet Monitor: CH RSSI TYP SRC>DST LEN FLAGS\n");
+    glog("Packet Monitor: Press Back to stop\n\n");
+
+    g_passive_running = true;
+    g_passive_count = 0;
+    g_passive_data_frames = 0;
+    g_passive_protected_frames = 0;
+    g_packet_feed_emitted = 0;
+    g_passive_host_count = 0;
+    g_monitor_ring_head = 0;
+    g_monitor_ring_tail = 0;
+    memset(g_passive_hosts, 0, sizeof(g_passive_hosts));
+
+    /* The raw callback normally also feeds the binary PCAP writer. This local
+     * text monitor only needs its observer tap. */
+    wifi_callbacks_set_pcap_enabled(false);
+    wifi_raw_set_observer(packet_feed_observer);
+    wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
+    wifi_manager_start_wireshark_channel_hop();
+
+    int elapsed_ticks = 0;
+    while (g_passive_running &&
+           (duration_sec <= 0 || elapsed_ticks < duration_sec * 20)) {
+        // Drain ring buffer (safe: main loop is the only reader)
+        while (g_monitor_ring_tail != g_monitor_ring_head) {
+            __sync_synchronize();
+            glog("%s\n", g_monitor_ring[g_monitor_ring_tail]);
+            g_monitor_ring_tail = (g_monitor_ring_tail + 1) % MONITOR_RING_SIZE;
+        }
+        elapsed_ticks++;
+        if (elapsed_ticks % 10 == 0) poll_passive_arp_table();
+        if (elapsed_ticks % 200 == 0) {
+            glog("MON %lup %da %lue %dn\n",
+                 (unsigned long)g_passive_data_frames,
+                 g_passive_count,
+                 (unsigned long)g_packet_feed_emitted,
+                 g_passive_host_count);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    wifi_raw_set_observer(NULL);
+    wifi_manager_stop_wireshark_channel_hop();
+    wifi_manager_stop_monitor_mode();
+    wifi_callbacks_set_pcap_enabled(true);
+    g_passive_running = false;
+
+    glog("\nPacket Monitor: Stopped (%lup %da %luP)\n",
+         (unsigned long)g_passive_data_frames,
+         g_passive_count,
+         (unsigned long)g_passive_protected_frames);
+}
+
+/**
+ * @brief Stop the compact Wi-Fi packet monitor
+ */
+void arp_scan_stop_passive(void) {
+    g_passive_running = false;
 }

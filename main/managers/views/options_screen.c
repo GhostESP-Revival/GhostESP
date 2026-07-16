@@ -49,6 +49,7 @@
 #include "scans/ble/gatt_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/arp_scan.h"
+#include "scans/wifi/enum4linux_scan.h"
 #include "core/commands.h"
 #include "esp_timer.h"
 #include <stdint.h>
@@ -216,6 +217,7 @@ static scan_status_t *arp_scan_status = NULL;
 static detail_view_t *arp_detail_view = NULL;
 static lv_timer_t *arp_scan_poll_timer = NULL;
 static int selected_arp_index = -1;
+static bool arp_scan_cancel_requested = false;
 
 // mDNS discovery flow
 #define MDNS_LIST_PAGE_SIZE 8
@@ -224,6 +226,16 @@ static scan_status_t *mdns_scan_status = NULL;
 static detail_view_t *mdns_detail_view = NULL;
 static lv_timer_t *mdns_scan_poll_timer = NULL;
 static int selected_mdns_index = -1;
+static bool mdns_scan_cancel_requested = false;
+
+// Enum4linux scan flow
+#define ENUM_LIST_PAGE_SIZE 10
+static paged_menu_t *enum_list_menu = NULL;
+static scan_status_t *enum_scan_status = NULL;
+static detail_view_t *enum_detail_view = NULL;
+static lv_timer_t *enum_scan_poll_timer = NULL;
+static int selected_enum_index = -1;
+static bool enum_scan_cancel_requested = false;
 
 // Sweep flow
 static scan_status_t *sweep_scan_status = NULL;
@@ -257,6 +269,13 @@ static void mdns_scan_complete_callback(void);
 static void mdns_list_cleanup(void);
 static const char **mdns_list_get_options(void);
 static void show_mdns_detail(int index);
+
+static bool start_enum_scan_flow(void);
+static void enum_scan_poll_timer_cb(lv_timer_t *timer);
+static void enum_scan_complete_callback(void);
+static void enum_list_cleanup(void);
+static const char **enum_list_get_options(void);
+static void show_enum_detail(int index);
 
 static bool start_sweep_flow(void);
 static void sweep_poll_timer_cb(lv_timer_t *timer);
@@ -1315,7 +1334,9 @@ typedef enum {
     WIFI_MENU_ARP_LIST,
     WIFI_MENU_ARP_DETAILS,
     WIFI_MENU_MDNS_LIST,
-    WIFI_MENU_MDNS_DETAILS
+    WIFI_MENU_MDNS_DETAILS,
+    WIFI_MENU_ENUM_LIST,
+    WIFI_MENU_ENUM_DETAILS
 } WifiMenuState;
 
 static WifiMenuState current_wifi_menu_state = WIFI_MENU_MAIN;
@@ -1383,14 +1404,16 @@ static const char * const wifi_scan_select_options[] = {
 };
 
 static const char * const wifi_environment_options[] = {
-    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion", NULL
+    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion", "Packet Monitor", NULL
 };
 
 static const char * const wifi_network_options[] = {
     "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
-    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...",
-    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...",
+    "Enum Scan", "SNMP Walk",
+    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...", "Enum Scan Host...",
+    "SNMP Walk Host...",
+    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...", "SNMP Walk Subnet...",
     NULL
 };
 
@@ -2017,6 +2040,7 @@ static const int OPT_SWIPE_THRESHOLD_RATIO = 10;
 #endif
 static bool option_fired = false;
 static bool option_invoked = false;
+static int64_t option_input_blocked_until_us = 0;
 static options_view_t *g_options_view = NULL;
 static gui_select_overlay_t *settings_select_overlay = NULL;
 static int settings_select_setting_index = -1;
@@ -2213,8 +2237,11 @@ static int arp_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_N
         const arp_host_t *host = arp_scan_get_host(i);
         if (host) {
             char mac_str[18];
+            char vendor[64] = {0};
             format_mac_address(host->mac, mac_str, sizeof(mac_str), true);
-            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s", host->ip, mac_str);
+            ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s",
+                     host->ip, vendor[0] ? vendor : mac_str);
             loaded++;
         }
     }
@@ -2294,15 +2321,41 @@ static void arp_scan_poll_timer_cb(lv_timer_t *timer) {
         lv_timer_del(arp_scan_poll_timer);
         arp_scan_poll_timer = NULL;
         arp_scan_finish_async();
+        if (arp_scan_cancel_requested) {
+            arp_scan_cancel_requested = false;
+            arp_scan_clear_results();
+            return;
+        }
         arp_scan_complete_callback();
     }
 }
 
+static void arp_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (arp_scan_status) {
+        scan_status_close(arp_scan_status);
+        arp_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void arp_scan_cancel_cb(void) {
+    if (arp_scan_cancel_requested) return;
+    arp_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    arp_scan_cancel();
+    lv_async_call(arp_scan_cancel_cleanup, NULL);
+}
+
 static bool start_arp_scan_flow(void) {
     arp_list_cleanup();
+    arp_scan_cancel_requested = false;
     arp_scan_status = scan_status_create("ARP Scanning");
     if (arp_scan_status) {
-        scan_status_set_subtext(arp_scan_status, "Scanning subnet...");
+        scan_status_set_subtext(arp_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(arp_scan_status, arp_scan_cancel_cb);
     }
     esp_err_t err = arp_scan_start_async();
     if (err != ESP_OK) {
@@ -2433,15 +2486,40 @@ static void mdns_scan_poll_timer_cb(lv_timer_t *timer) {
         lv_timer_del(mdns_scan_poll_timer);
         mdns_scan_poll_timer = NULL;
         wifi_manager_ip_lookup_finish_async();
+        if (mdns_scan_cancel_requested) {
+            mdns_scan_cancel_requested = false;
+            wifi_manager_ip_lookup_clear();
+            return;
+        }
         mdns_scan_complete_callback();
     }
 }
 
+static void mdns_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (mdns_scan_status) {
+        scan_status_close(mdns_scan_status);
+        mdns_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void mdns_scan_cancel_cb(void) {
+    if (mdns_scan_cancel_requested) return;
+    mdns_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    lv_async_call(mdns_scan_cancel_cleanup, NULL);
+}
+
 static bool start_mdns_scan_flow(void) {
     mdns_list_cleanup();
+    mdns_scan_cancel_requested = false;
     mdns_scan_status = scan_status_create("mDNS Discovery");
     if (mdns_scan_status) {
-        scan_status_set_subtext(mdns_scan_status, "Querying services...");
+        scan_status_set_subtext(mdns_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(mdns_scan_status, mdns_scan_cancel_cb);
     }
     esp_err_t err = wifi_manager_start_ip_lookup_async();
     if (err != ESP_OK) {
@@ -2452,6 +2530,184 @@ static bool start_mdns_scan_flow(void) {
         return false;
     }
     mdns_scan_poll_timer = lv_timer_create(mdns_scan_poll_timer_cb, 100, NULL);
+    return true;
+}
+
+// ============================================================================
+// Enum4linux Scan Flow
+// ============================================================================
+
+static void enum_list_cleanup(void) {
+    if (enum_scan_poll_timer) {
+        lv_timer_del(enum_scan_poll_timer);
+        enum_scan_poll_timer = NULL;
+    }
+    if (enum_list_menu) {
+        paged_menu_destroy(enum_list_menu);
+        enum_list_menu = NULL;
+    }
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+        enum_detail_view = NULL;
+    }
+    enum_scan_clear_results();
+}
+
+static int enum_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX],
+                              bool *has_more, void *user_data) {
+    (void)user_data;
+    int count = enum_scan_get_count();
+    if (count <= 0) { *has_more = false; return 0; }
+    int loaded = 0;
+    for (int i = offset; i < count && loaded < page_size; i++) {
+        const enum_host_t *host = enum_scan_get_host(i);
+        if (host) {
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s",
+                     host->ip, host->hostname[0] ? host->hostname : "SMB");
+            loaded++;
+        }
+    }
+    *has_more = (offset + loaded) < count;
+    return loaded;
+}
+
+static const char **enum_list_get_options(void) {
+    if (!enum_list_menu) {
+        enum_list_menu = paged_menu_create(ENUM_LIST_PAGE_SIZE, enum_list_load_fn, NULL);
+    }
+    return paged_menu_get_options(enum_list_menu);
+}
+
+static void enum_detail_back_cb(lv_event_t *e) {
+    (void)e;
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+        enum_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_ENUM_LIST;
+    rebuild_current_menu();
+}
+
+static void show_enum_detail(int index) {
+    const enum_host_t *host = enum_scan_get_host(index);
+    if (!host) {
+        error_popup_create("Host not found");
+        return;
+    }
+    selected_enum_index = index;
+
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+    }
+    enum_detail_view = detail_view_create(lv_scr_act(), "Enum Results");
+    reserve_detail_touch_bar_space(enum_detail_view);
+
+    detail_view_add_info(enum_detail_view, "IP", host->ip);
+    if (host->hostname[0])
+        detail_view_add_info(enum_detail_view, "Hostname", host->hostname);
+    if (host->os_version[0])
+        detail_view_add_info(enum_detail_view, "OS", host->os_version);
+    if (host->domain[0])
+        detail_view_add_info(enum_detail_view, "Domain", host->domain);
+
+    if (host->share_count > 0) {
+        detail_view_add_header(enum_detail_view, "Shares");
+        for (int i = 0; i < host->share_count; i++) {
+            detail_view_add_info(enum_detail_view, host->shares[i].name,
+                                 host->shares[i].type);
+        }
+    }
+
+    if (host->user_count > 0) {
+        detail_view_add_header(enum_detail_view, "Users");
+        char user_list[256] = {0};
+        size_t pos = 0;
+        for (int i = 0; i < host->user_count && pos < sizeof(user_list) - 1; i++) {
+            int w = snprintf(&user_list[pos], sizeof(user_list) - pos,
+                             "%s%s", i > 0 ? ", " : "", host->users[i]);
+            if (w > 0) pos += (size_t)w;
+        }
+        detail_view_add_info(enum_detail_view, "Users", user_list);
+    }
+
+    detail_view_add_back(enum_detail_view, enum_detail_back_cb, NULL);
+    current_wifi_menu_state = WIFI_MENU_ENUM_DETAILS;
+}
+
+static void enum_scan_complete_callback(void) {
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    int count = enum_scan_get_count();
+    if (count == 0) {
+        error_popup_create("No SMB hosts found");
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
+        rebuild_current_menu();
+        return;
+    }
+    if (enum_list_menu) {
+        paged_menu_reset(enum_list_menu);
+    }
+    current_wifi_menu_state = WIFI_MENU_ENUM_LIST;
+    rebuild_current_menu();
+}
+
+static void enum_scan_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (enum_scan_check_done()) {
+        lv_timer_del(enum_scan_poll_timer);
+        enum_scan_poll_timer = NULL;
+        enum_scan_finish_async();
+        if (enum_scan_cancel_requested) {
+            enum_scan_cancel_requested = false;
+            enum_scan_clear_results();
+            return;
+        }
+        enum_scan_complete_callback();
+    }
+}
+
+static void enum_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void enum_scan_cancel_cb(void) {
+    if (enum_scan_cancel_requested) return;
+    enum_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    enum_scan_cancel();
+    lv_async_call(enum_scan_cancel_cleanup, NULL);
+}
+
+static bool start_enum_scan_flow(void) {
+    enum_list_cleanup();
+    enum_scan_cancel_requested = false;
+    enum_scan_status = scan_status_create("Enum Scanning");
+    if (enum_scan_status) {
+        scan_status_set_subtext(enum_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(enum_scan_status, enum_scan_cancel_cb);
+    }
+    esp_err_t err = enum_scan_start_async();
+    if (err != ESP_OK) {
+        if (enum_scan_status) {
+            scan_status_close(enum_scan_status);
+            enum_scan_status = NULL;
+        }
+        return false;
+    }
+    enum_scan_poll_timer = lv_timer_create(enum_scan_poll_timer_cb, 100, NULL);
     return true;
 }
 
@@ -2784,6 +3040,9 @@ static void snmp_probe_kb_cb(const char *text);
 static void netbios_subnet_kb_cb(const char *text);
 static void http_banner_subnet_kb_cb(const char *text);
 static void snmp_probe_subnet_kb_cb(const char *text);
+static void enum_scan_kb_cb(const char *text);
+static void snmp_walk_kb_cb(const char *text);
+static void snmp_walk_subnet_kb_cb(const char *text);
 static void dual_comm_netbios_subnet_kb_cb(const char *text);
 static void dual_comm_http_banner_subnet_kb_cb(const char *text);
 static void dual_comm_snmp_probe_subnet_kb_cb(const char *text);
@@ -3301,6 +3560,12 @@ void options_menu_create() {
                 break;
             case WIFI_MENU_MDNS_DETAILS:
                 options = mdns_list_get_options();
+                break;
+            case WIFI_MENU_ENUM_LIST:
+                options = enum_list_get_options();
+                break;
+            case WIFI_MENU_ENUM_DETAILS:
+                options = enum_list_get_options();
                 break;
         }
         break;
@@ -4720,6 +4985,11 @@ static void select_option_item(int index) {
 }
 
 void handle_hardware_button_press_options(InputEvent *event) {
+    if (esp_timer_get_time() < option_input_blocked_until_us) {
+        if (event && event->type == INPUT_TYPE_TOUCH) opt_touch_reset();
+        return;
+    }
+
     if (settings_confirm_handle_input(event)) {
         return;
     }
@@ -4729,6 +4999,37 @@ void handle_hardware_button_press_options(InputEvent *event) {
         return;
     }
 #endif
+
+    bool arp_overlay_active = arp_scan_status && scan_status_is_active(arp_scan_status);
+    bool mdns_overlay_active = mdns_scan_status && scan_status_is_active(mdns_scan_status);
+    bool enum_overlay_active = enum_scan_status && scan_status_is_active(enum_scan_status);
+    if (arp_overlay_active || mdns_overlay_active || enum_overlay_active) {
+        if (event && event->type == INPUT_TYPE_TOUCH) {
+            /* This display's raw touch path is authoritative. Cancel on press,
+             * then swallow the release so it cannot activate the menu below. */
+            if (event->data.touch_data.state == LV_INDEV_STATE_PR) {
+                if (arp_overlay_active) {
+                    arp_scan_cancel_cb();
+                } else if (mdns_overlay_active) {
+                    mdns_scan_cancel_cb();
+                } else {
+                    enum_scan_cancel_cb();
+                }
+            }
+            opt_touch_reset();
+            return;
+        }
+        if (should_stop_station_scan_on_input(event)) {
+            if (arp_overlay_active) {
+                arp_scan_cancel_cb();
+            } else if (mdns_overlay_active) {
+                mdns_scan_cancel_cb();
+            } else {
+                enum_scan_cancel_cb();
+            }
+        }
+        return;
+    }
 
     // Close wigle help popup on exit button or joystick back
     if (wigle_help_popup && lv_obj_is_valid(wigle_help_popup)) {
@@ -6212,6 +6513,7 @@ static void karma_portal_ssids_cb(const char *input) {
 }
 
 void option_event_cb(lv_event_t *e) {
+    if (esp_timer_get_time() < option_input_blocked_until_us) return;
     if (option_invoked) return;
     option_invoked = true;
     bool view_switched = false;
@@ -7625,6 +7927,38 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
+    else if (current_wifi_menu_state == WIFI_MENU_ENUM_LIST) {
+        if (strcmp(Selected_Option, "No items found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            paged_menu_page_prev(enum_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            paged_menu_page_next(enum_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        int offset = paged_menu_get_page_offset(enum_list_menu);
+        const char **opts = paged_menu_get_options(enum_list_menu);
+        int skip = paged_menu_has_prev(enum_list_menu) ? 1 : 0;
+
+        for (int i = 0; opts[i]; i++) {
+            if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
+                show_enum_detail(offset + (i - skip));
+                break;
+            }
+        }
+        option_invoked = false;
+        return;
+    }
+
     else if (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
         if (strcmp(Selected_Option, "No items found") == 0) {
             option_invoked = false;
@@ -8498,6 +8832,28 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "Enum Scan") == 0) {
+        if (!start_enum_scan_flow()) {
+            error_popup_create("Enum scan failed to start");
+        }
+        option_invoked = false;
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Walk") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("snmpprobe walk");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Packet Monitor") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("scanarp monitor");
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(ssh_scan_kb_cb);
@@ -8534,6 +8890,24 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "Enum Scan Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(enum_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Walk Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_walk_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(netbios_subnet_kb_cb);
@@ -8555,6 +8929,15 @@ void option_event_cb(lv_event_t *e) {
     else if (strcmp(Selected_Option, "SNMP Probe Subnet...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(snmp_probe_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Walk Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_walk_subnet_kb_cb);
         keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
         keyboard_view_set_initial_text("");
         display_manager_switch_view(&keyboard_view);
@@ -12113,6 +12496,13 @@ static void rebuild_current_menu(void) {
                 case WIFI_MENU_MDNS_DETAILS:
                     options = NULL;
                     break;
+                case WIFI_MENU_ENUM_LIST:
+                    options = enum_list_get_options();
+                    timer_period = 25;
+                    break;
+                case WIFI_MENU_ENUM_DETAILS:
+                    options = NULL;
+                    break;
             }
             break;
         case OT_Bluetooth:
@@ -12516,6 +12906,51 @@ static void snmp_probe_subnet_kb_cb(const char *text) {
 
     char cmd[96];
     snprintf(cmd, sizeof(cmd), "snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void enum_scan_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "enumscan %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_walk_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "snmpprobe walk %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_walk_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "snmpprobe walk subnet %s", text);
 
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);

@@ -58,6 +58,9 @@ void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_airspace_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
+typedef void (*wifi_raw_observer_t)(const wifi_promiscuous_pkt_t *pkt,
+                                    wifi_promiscuous_pkt_type_t type);
+void wifi_raw_set_observer(wifi_raw_observer_t observer);
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 #ifndef CONFIG_IDF_TARGET_ESP32S2

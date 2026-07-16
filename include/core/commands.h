@@ -87,6 +87,7 @@ void handle_scan_ssh(int argc, char **argv);
 void handle_netbios_scan(int argc, char **argv);
 void handle_http_banner_scan(int argc, char **argv);
 void handle_snmp_probe(int argc, char **argv);
+void handle_enum_scan(int argc, char **argv);
 void handle_congestion_cmd(int argc, char **argv);
 void handle_listen_probes_cmd(int argc, char **argv);
 void handle_dhcpstarve_cmd(int argc, char **argv);
