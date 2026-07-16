@@ -193,8 +193,9 @@ static void congestion_input_callback(InputEvent *event) {
         if (button == 0 || button == 1) congestion_return_to_options();
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         int key = event->data.key_value;
-        if (key == LV_KEY_ESC || key == LV_KEY_ENTER || key == 13 || key == 29 ||
-            key == '`' || key == 'q' || key == 'Q') {
+        /* Enter opens this view from keyboard-driven menus, so never treat a
+         * queued or repeated activation key as a request to close it. */
+        if (key == LV_KEY_ESC || key == 29 || key == '`' || key == 'q' || key == 'Q') {
             congestion_return_to_options();
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {

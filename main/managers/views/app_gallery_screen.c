@@ -817,6 +817,7 @@ static void create_apps_launcher_menu(void) {
     lv_obj_set_style_border_width(grid_cards_container, 0, 0);
     lv_obj_set_style_radius(grid_cards_container, 0, 0);
     lv_obj_set_style_pad_all(grid_cards_container, 0, 0);
+    lv_obj_set_style_pad_column(grid_cards_container, 0, 0);
     lv_obj_align(grid_cards_container, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_add_flag(grid_cards_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_ELASTIC);

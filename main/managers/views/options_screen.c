@@ -111,6 +111,7 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 #endif
 #define STA_SCAN_MAX_DURATION_MS 45000
 #define NAV_SCOPE_WIFI_DETAIL_RETURN 0x5744464Cu
+#define NAV_SCOPE_OPTIONS_MENU       0x4F50544Eu
 static paged_menu_t *ap_list_menu = NULL;
 static scan_status_t *ap_scan_status = NULL;
 static detail_view_t *ap_detail_view = NULL;
@@ -1357,17 +1358,14 @@ static void nav_push_wifi_detail_return(WifiMenuState return_state) {
 
 static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
     gui_nav_state_t nav;
-    while (gui_nav_history_pop(&nav)) {
-        if (nav.scope != NAV_SCOPE_WIFI_DETAIL_RETURN) {
-            continue;
-        }
-
-        if (return_state_out) {
-            *return_state_out = (WifiMenuState)nav.value;
-        }
-        return true;
+    if (!gui_nav_history_peek(&nav) || nav.scope != NAV_SCOPE_WIFI_DETAIL_RETURN) {
+        return false;
     }
-    return false;
+    gui_nav_history_pop(&nav);
+    if (return_state_out) {
+        *return_state_out = (WifiMenuState)nav.value;
+    }
+    return true;
 }
 
 static const char * const wifi_attacks_options[] = {
@@ -2118,6 +2116,116 @@ typedef enum {
 } BluetoothMenuState;
 
 static BluetoothMenuState current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
+
+typedef struct {
+    bool valid;
+    EOptionsMenuType menu_type;
+    int selected;
+    lv_coord_t scroll_y;
+    WifiMenuState wifi_state;
+    BluetoothMenuState bluetooth_state;
+    DualCommMenuState dualcomm_state;
+    int settings_root;
+    int settings_category;
+} options_menu_nav_state_t;
+
+static options_menu_nav_state_t s_rendered_menu_state = {0};
+static options_menu_nav_state_t s_resume_menu_state = {0};
+static options_menu_nav_state_t s_pending_restore_state = {0};
+static bool s_skip_history_capture_once = false;
+static bool s_discard_resume_on_destroy = false;
+
+static void rebuild_current_menu(void);
+
+static options_menu_nav_state_t options_menu_capture_nav_state(void) {
+    options_menu_nav_state_t state = {
+        .valid = true,
+        .menu_type = SelectedMenuType,
+        .selected = selected_item_index,
+        .wifi_state = current_wifi_menu_state,
+        .bluetooth_state = current_bluetooth_menu_state,
+        .dualcomm_state = current_dualcomm_menu_state,
+        .settings_root = current_settings_root,
+        .settings_category = current_settings_category,
+    };
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        state.scroll_y = lv_obj_get_scroll_y(menu_container);
+    }
+    return state;
+}
+
+static bool options_menu_nav_states_match(const options_menu_nav_state_t *a,
+                                          const options_menu_nav_state_t *b) {
+    return a && b && a->valid && b->valid &&
+           a->menu_type == b->menu_type &&
+           a->wifi_state == b->wifi_state &&
+           a->bluetooth_state == b->bluetooth_state &&
+           a->dualcomm_state == b->dualcomm_state &&
+           a->settings_root == b->settings_root &&
+           a->settings_category == b->settings_category;
+}
+
+static void options_menu_push_rendered_state(void) {
+    if (!s_rendered_menu_state.valid || s_skip_history_capture_once) {
+        s_skip_history_capture_once = false;
+        return;
+    }
+
+    options_menu_nav_state_t target = options_menu_capture_nav_state();
+    if (options_menu_nav_states_match(&s_rendered_menu_state, &target)) {
+        return;
+    }
+
+    options_menu_nav_state_t source = s_rendered_menu_state;
+    source.selected = selected_item_index;
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        source.scroll_y = lv_obj_get_scroll_y(menu_container);
+    }
+    gui_nav_state_t nav = {
+        .scope = NAV_SCOPE_OPTIONS_MENU,
+        .value = source.menu_type,
+        .selection = source.selected,
+        .scroll_y = source.scroll_y,
+        .wifi_state = source.wifi_state,
+        .bluetooth_state = source.bluetooth_state,
+        .dualcomm_state = source.dualcomm_state,
+        .settings_root = source.settings_root,
+        .settings_category = source.settings_category,
+    };
+    gui_nav_history_push(&nav);
+}
+
+static bool options_menu_restore_previous_state(void) {
+    gui_nav_state_t nav;
+    if (!gui_nav_history_peek(&nav) || nav.scope != NAV_SCOPE_OPTIONS_MENU) {
+        return false;
+    }
+    gui_nav_history_pop(&nav);
+
+    SelectedMenuType = (EOptionsMenuType)nav.value;
+    current_wifi_menu_state = (WifiMenuState)nav.wifi_state;
+    current_bluetooth_menu_state = (BluetoothMenuState)nav.bluetooth_state;
+    current_dualcomm_menu_state = (DualCommMenuState)nav.dualcomm_state;
+    current_settings_root = nav.settings_root;
+    current_settings_category = nav.settings_category;
+    settings_submenu_depth = current_settings_category >= 0 ? 2 :
+                             (current_settings_root >= 0 ? 1 : 0);
+    is_settings_mode = SelectedMenuType == OT_Settings;
+    s_pending_restore_state = (options_menu_nav_state_t){
+        .valid = true,
+        .menu_type = SelectedMenuType,
+        .selected = nav.selection,
+        .scroll_y = nav.scroll_y,
+        .wifi_state = current_wifi_menu_state,
+        .bluetooth_state = current_bluetooth_menu_state,
+        .dualcomm_state = current_dualcomm_menu_state,
+        .settings_root = current_settings_root,
+        .settings_category = current_settings_category,
+    };
+    s_skip_history_capture_once = true;
+    rebuild_current_menu();
+    return true;
+}
 
 #define OPT_DRAG_AXIS_THRESHOLD 10
 #define OPT_DRAG_AXIS_BIAS 4
@@ -3451,6 +3559,23 @@ void options_menu_create() {
      * destroy/create to avoid expensive LVGL operations and watchdog starvation.
      */
     ESP_LOGI(TAG, "options_menu_create: SelectedMenuType=%d (%s)", SelectedMenuType, options_menu_type_to_string(SelectedMenuType));
+    bool restoring_view = s_resume_menu_state.valid &&
+                          s_resume_menu_state.menu_type == SelectedMenuType &&
+                          display_manager_previous_view != &main_menu_view;
+    if (!restoring_view) {
+        s_resume_menu_state.valid = false;
+    }
+    if (restoring_view) {
+        current_wifi_menu_state = s_resume_menu_state.wifi_state;
+        current_bluetooth_menu_state = s_resume_menu_state.bluetooth_state;
+        current_dualcomm_menu_state = s_resume_menu_state.dualcomm_state;
+        current_settings_root = s_resume_menu_state.settings_root;
+        current_settings_category = s_resume_menu_state.settings_category;
+        settings_submenu_depth = current_settings_category >= 0 ? 2 :
+                                 (current_settings_root >= 0 ? 1 : 0);
+        s_pending_restore_state = s_resume_menu_state;
+        s_resume_menu_state.valid = false;
+    }
     settings_select_close();
     s_info_detail_active = false;
     
@@ -3458,7 +3583,7 @@ void options_menu_create() {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
         // Only reset if we're coming from main menu (not from terminal return)
         // This is detected by checking if the options view root is NULL
-        if (!options_menu_view.root && !suppress_wifi_state_reset_once) {
+        if (!restoring_view && !options_menu_view.root && !suppress_wifi_state_reset_once) {
             ESP_LOGI(TAG, "Resetting WiFi menu state to MAIN on fresh entry");
             current_wifi_menu_state = WIFI_MENU_MAIN;
         }
@@ -3648,9 +3773,11 @@ void options_menu_create() {
         break;
     case OT_Settings: 
         is_settings_mode = true;
-        current_settings_root = -1;
-        current_settings_category = -1;
-        settings_submenu_depth = 0;
+        if (!restoring_view) {
+            current_settings_root = -1;
+            current_settings_category = -1;
+            settings_submenu_depth = 0;
+        }
         {
             int count = asset_pack_get_installed_count();
             if (count <= 0) {
@@ -9092,6 +9219,11 @@ void handle_option_directly(const char *Selected_Option) {
 }
 
 void options_menu_destroy() {
+    if (!s_discard_resume_on_destroy && options_menu_view.root && lv_obj_is_valid(options_menu_view.root)) {
+        s_resume_menu_state = options_menu_capture_nav_state();
+    }
+    s_discard_resume_on_destroy = false;
+    s_rendered_menu_state.valid = false;
     opt_touch_started = false;
     popup_confirm_close(&settings_confirm_popup);
 #if GHOSTESP_OTA_SUPPORTED
@@ -9401,6 +9533,9 @@ static void back_event_cb(lv_event_t *e) {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
         portal_page_offset = 0;
         portal_free_cache();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;
         rebuild_current_menu();
         return;
@@ -9410,6 +9545,9 @@ static void back_event_cb(lv_event_t *e) {
         portal_page_offset = 0;
         portal_free_cache();
         selected_karma_portal[0] = '\0';
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_ATTACKS;
         rebuild_current_menu();
         return;
@@ -9432,6 +9570,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in AP list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_LIST) {
         ap_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -9439,6 +9580,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in station list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_LIST) {
         station_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -9446,6 +9590,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in scan-all list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
         scanall_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -9454,6 +9601,9 @@ static void back_event_cb(lv_event_t *e) {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_CAPTURE_BROWSER) {
         pcap_capture_page_offset = 0;
         pcap_capture_free_cache();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_CAPTURE;
         rebuild_current_menu();
         return;
@@ -9461,6 +9611,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in AP multi-select view, confirm selection and go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_MULTI_SELECT) {
         ap_multi_select_confirm();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -9468,6 +9621,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in station multi-select view, confirm selection and go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_MULTI_SELECT) {
         sta_multi_select_confirm();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -9475,18 +9631,27 @@ static void back_event_cb(lv_event_t *e) {
     // If in a Wi-Fi submenu (but not main), go back to main Wi-Fi menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DOWNLOAD) {
+            if (options_menu_restore_previous_state()) {
+                return;
+            }
             current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
             rebuild_current_menu();
             return;
         }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_FILE_PICK) {
             blocklist_free_cache();
+            if (options_menu_restore_previous_state()) {
+                return;
+            }
             current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
             rebuild_current_menu();
             return;
         }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
             sinkhole_detail_back_cb(NULL);
+            return;
+        }
+        if (options_menu_restore_previous_state()) {
             return;
         }
         current_wifi_menu_state = WIFI_MENU_MAIN;
@@ -9510,18 +9675,27 @@ static void back_event_cb(lv_event_t *e) {
         if (current_bluetooth_menu_state == BLUETOOTH_MENU_OUI_VENDOR_LIST) {
             ble_oui_vendor_clear();
         }
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
         rebuild_current_menu();
         return;
     }
     // If in a Dual Comm submenu (but not main), go back to main Dual Comm menu
     if (SelectedMenuType == OT_DualComm && current_dualcomm_menu_state != DUALCOMM_MENU_MAIN) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_dualcomm_menu_state = DUALCOMM_MENU_MAIN;
         rebuild_current_menu();
         return;
     }
     // If in a settings submenu, go back to category selection
     if (is_settings_mode && current_settings_category >= 0) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_settings_category = -1;
         settings_submenu_depth = 1;
         rebuild_current_menu();
@@ -9529,6 +9703,9 @@ static void back_event_cb(lv_event_t *e) {
     }
     // If in a settings root section, go back to the settings root list
     if (is_settings_mode && current_settings_root >= 0) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_settings_root = -1;
         current_settings_category = -1;
         settings_submenu_depth = 0;
@@ -9536,6 +9713,10 @@ static void back_event_cb(lv_event_t *e) {
         return;
     }
     // Otherwise, go back to main menu
+    s_resume_menu_state.valid = false;
+    s_pending_restore_state.valid = false;
+    s_rendered_menu_state.valid = false;
+    s_discard_resume_on_destroy = true;
     display_manager_switch_view(&main_menu_view);
 }
 
@@ -12380,6 +12561,7 @@ static const char **blocklist_load_page(void) {
 }
 
 static void rebuild_current_menu(void) {
+    options_menu_push_rendered_state();
     settings_select_close();
     lvgl_timer_del_safe(&menu_build_timer);
     
@@ -13446,6 +13628,21 @@ static void menu_builder_cb(lv_timer_t *t)
                 update_settings_arrows_visibility();
             }
             menu_build_timer = NULL;
+            if (s_pending_restore_state.valid) {
+                int restore_index = s_pending_restore_state.selected;
+                if (num_items > 0) {
+                    if (restore_index < 0) restore_index = 0;
+                    if (restore_index >= num_items) restore_index = num_items - 1;
+                    select_option_item(restore_index);
+                }
+                if (menu_container && lv_obj_is_valid(menu_container)) {
+                    lv_obj_update_layout(menu_container);
+                    lv_obj_scroll_to_y(menu_container, s_pending_restore_state.scroll_y, LV_ANIM_OFF);
+                    update_scroll_buttons_visibility();
+                }
+                s_pending_restore_state.valid = false;
+            }
+            s_rendered_menu_state = options_menu_capture_nav_state();
             options_menu_apply_pending_detail_resume();
         }
     }

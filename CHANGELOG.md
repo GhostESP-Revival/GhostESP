@@ -41,6 +41,7 @@
 - Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions
 
 ### Other Changes
+- Restored submenu, selection, and scroll state when backing out of options and returning from tool views
 - Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
 - Fixed display resume crashes after shared SPI SD mounts on C5 boards
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
