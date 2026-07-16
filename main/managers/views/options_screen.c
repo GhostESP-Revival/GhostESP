@@ -18,6 +18,8 @@
 #include "gui/ios_toggle.h"
 #include "io_manager.h"
 #include "managers/views/airspace_monitor_screen.h"
+#include "managers/views/channel_congestion_screen.h"
+#include "managers/views/packet_monitor_screen.h"
 #include "managers/views/wardriving_screen.h"
 #include "managers/views/ethernet_screen.h"
 #include "managers/wigle_manager.h"
@@ -1404,7 +1406,8 @@ static const char * const wifi_scan_select_options[] = {
 };
 
 static const char * const wifi_environment_options[] = {
-    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion", "Packet Monitor", NULL
+    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion",
+    "Packet Monitor", "Packet Visualizer", NULL
 };
 
 static const char * const wifi_network_options[] = {
@@ -8854,6 +8857,11 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "Packet Visualizer") == 0) {
+        display_manager_switch_view(&packet_monitor_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(ssh_scan_kb_cb);
@@ -8952,9 +8960,7 @@ void option_event_cb(lv_event_t *e) {
     }
 
     else if (strcmp(Selected_Option, "Channel Congestion") == 0) {
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("congestion");
+        display_manager_switch_view(&channel_congestion_view);
         view_switched = true;
     }
 

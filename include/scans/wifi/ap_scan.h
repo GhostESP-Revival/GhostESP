@@ -63,6 +63,9 @@ bool ap_scan_check_done(void);
  */
 void ap_scan_finish_async(void);
 
+/** Cancel an active async scan and restore Wi-Fi services. */
+void ap_scan_cancel_async(void);
+
 /**
  * @brief Stop an active AP scan
  * 
@@ -146,6 +149,9 @@ bool ap_scan_get_selection(wifi_ap_record_t *ap);
  * @return Number of APs in the scan results
  */
 uint16_t ap_scan_get_count(void);
+
+/** True when the last result set was limited to AP_SCAN_MAX_RESULTS. */
+bool ap_scan_results_truncated(void);
 
 /**
  * @brief Check if an AP is currently selected

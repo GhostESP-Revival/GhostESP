@@ -4024,44 +4024,72 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     printf("\n");
 }
 
-void wifi_manager_start_wireshark_channel_hop(void) {
+esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, size_t count) {
+    if (!channels || count == 0 || count > sizeof(wireshark_channels)) return ESP_ERR_INVALID_ARG;
+
+    uint8_t unique[sizeof(wireshark_channels)] = {0};
+    size_t unique_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (channels[i] < 1 || channels[i] > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+        bool seen = false;
+        for (size_t j = 0; j < unique_count; j++) {
+            if (unique[j] == channels[i]) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) unique[unique_count++] = channels[i];
+    }
+    if (unique_count == 1) return wifi_manager_set_wireshark_fixed_channel(unique[0]);
+
     if (wireshark_channel_hop_timer != NULL) {
         esp_timer_stop(wireshark_channel_hop_timer);
         esp_timer_delete(wireshark_channel_hop_timer);
         wireshark_channel_hop_timer = NULL;
     }
+    wireshark_hopping_active = false;
 
-    // build country-appropriate channel list
-    wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
-    if (wireshark_channels_count == 0) {
-        ESP_LOGE(TAG, "No channels available for Wireshark hopping");
-        return;
-    }
-
+    memcpy(wireshark_channels, unique, unique_count);
+    wireshark_channels_count = unique_count;
     wireshark_channel_index = 0;
-    esp_wifi_set_channel(wireshark_channels[wireshark_channel_index], WIFI_SECOND_CHAN_NONE);
+
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (wireshark_channels[0] > 14) second = WIFI_SECOND_CHAN_ABOVE;
+#endif
+    esp_err_t err = esp_wifi_set_channel(wireshark_channels[0], second);
+    if (err != ESP_OK) return err;
 
     esp_timer_create_args_t timer_args = {
         .callback = wireshark_channel_hop_timer_callback,
         .name = "wireshark_hop"
     };
-
-    esp_err_t err = esp_timer_create(&timer_args, &wireshark_channel_hop_timer);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create Wireshark channel hop timer");
-        return;
-    }
+    err = esp_timer_create(&timer_args, &wireshark_channel_hop_timer);
+    if (err != ESP_OK) return err;
 
     err = esp_timer_start_periodic(wireshark_channel_hop_timer, WIRESHARK_CHANNEL_HOP_INTERVAL_MS * 1000);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start Wireshark channel hop timer");
         esp_timer_delete(wireshark_channel_hop_timer);
         wireshark_channel_hop_timer = NULL;
-        return;
+        return err;
     }
 
     wireshark_hopping_active = true;
-    ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", wireshark_channels_count);
+    return ESP_OK;
+}
+
+void wifi_manager_start_wireshark_channel_hop(void) {
+    uint8_t channels[sizeof(wireshark_channels)] = {0};
+
+    // build country-appropriate channel list
+    size_t count = wifi_channels_build_country_list(channels, sizeof(channels));
+    if (count == 0) {
+        ESP_LOGE(TAG, "No channels available for Wireshark hopping");
+        return;
+    }
+    esp_err_t err = wifi_manager_start_wireshark_channel_list(channels, count);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to start Wireshark channel hopping: %s", esp_err_to_name(err));
+    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", count);
 }
 
 void wifi_manager_stop_wireshark_channel_hop(void) {

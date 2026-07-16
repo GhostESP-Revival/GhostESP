@@ -59,12 +59,14 @@ static void scan_status_click_cb(lv_event_t *e) {
 
 static const lv_font_t *get_font_for_screen(void) {
     lv_coord_t h = get_screen_height();
+    if (h <= 80) return &lv_font_montserrat_8;
     if (h <= 135) return accessibility_get_font_body();
     return accessibility_get_font_title();
 }
 
 static const lv_font_t *get_small_font_for_screen(void) {
     lv_coord_t h = get_screen_height();
+    if (h <= 80) return &lv_font_montserrat_8;
     if (h <= 135) return accessibility_get_font_small();
     if (h <= 200) return accessibility_get_font_body();
     return accessibility_get_font_body();
@@ -104,20 +106,26 @@ scan_status_t *scan_status_create(const char *message) {
     lv_obj_set_style_border_width(ss->card, 0, 0);
     lv_obj_set_style_radius(ss->card, 0, 0);
     lv_obj_set_style_shadow_width(ss->card, 0, 0);
-    lv_obj_set_style_pad_left(ss->card, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_right(ss->card, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_top(ss->card, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ss->card, GUI_SAFEAREA_VER, 0);
+    bool tiny = LV_VER_RES <= 80;
+    lv_obj_set_style_pad_left(ss->card, tiny ? 2 : GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_right(ss->card, tiny ? 2 : GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_top(ss->card, tiny ? 1 : GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(ss->card, tiny ? 1 : GUI_SAFEAREA_VER, 0);
     lv_obj_set_flex_flow(ss->card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(ss->card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(ss->card, GUI_GRID * 2, 0);
+    lv_obj_set_style_pad_row(ss->card, tiny ? 1 : GUI_GRID * 2, 0);
     lv_obj_clear_flag(ss->card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_clip_corner(ss->card, false, 0);
 
     int container_h = LV_VER_RES - GUI_STATUS_BAR_H;
     int arc_size = LV_MIN(LV_HOR_RES, container_h) * 40 / 100;
-    if (arc_size > 56) arc_size = 56;
-    if (arc_size < 28) arc_size = 28;
+    if (tiny) {
+        if (arc_size > 16) arc_size = 16;
+        if (arc_size < 12) arc_size = 12;
+    } else {
+        if (arc_size > 56) arc_size = 56;
+        if (arc_size < 28) arc_size = 28;
+    }
 
     ss->arc = lv_arc_create(ss->card);
     lv_obj_set_size(ss->arc, arc_size, arc_size);

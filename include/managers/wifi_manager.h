@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include <stddef.h>
 
 #ifndef DNS_SERVER_HANDLE_T_DEFINED
 typedef struct dns_server_handle *dns_server_handle_t;
@@ -215,6 +216,7 @@ void wifi_manager_start_station_scan();
 // Wireshark capture channel hopping
 void wifi_manager_start_wireshark_channel_hop(void);
 void wifi_manager_stop_wireshark_channel_hop(void);
+esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, size_t count);
 
 // Set fixed channel for Wireshark capture
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel);

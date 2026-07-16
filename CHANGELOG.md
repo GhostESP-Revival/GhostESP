@@ -28,6 +28,8 @@
 - Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445
 - Added SNMP MIB walk (`snmpprobe walk`) using GetNextRequest to traverse OID subtrees with support for custom root OIDs
 - Added a compact live Wi-Fi packet monitor (`scanarp monitor`) using the Wireshark raw-capture path
+- Added a graphical Packet Visualizer with smooth color-filled per-channel activity, channel hopping, and custom channel selection
+- Added a responsive Channel Congestion chart with active-channel labels and scan summaries
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
 
 ### Wardriving
@@ -50,6 +52,7 @@
 - Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
 - Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
 - Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
+- Converted eight built-in menu icons to compact A4 masks and added scaled A4 rendering support
 - Fixed Apps menu grid scrolling so the selection stays visible when scrolling down on Cardputer
 - Fixed Cardputer ADV keyboard spamming repeated select/input events when opening Apps menu
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
