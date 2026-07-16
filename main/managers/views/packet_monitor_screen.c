@@ -61,6 +61,7 @@ static volatile uint32_t s_channel_packets[PACKET_MONITOR_MAX_CHANNEL + 1];
 static volatile uint8_t s_current_channel;
 static volatile int8_t s_last_rssi;
 static uint32_t s_channel_snapshots[PACKET_MONITOR_MAX_CHANNEL + 1];
+static float s_channel_activity[PACKET_MONITOR_MAX_CHANNEL + 1];
 static uint8_t s_series_channels[PACKET_SERIES_MAX];
 static float s_target_rates[PACKET_SERIES_MAX];
 static float s_smoothed_rates[PACKET_SERIES_MAX];
@@ -189,6 +190,62 @@ static void packet_refresh_legend(void) {
     }
 }
 
+static bool packet_rebind_busiest_channels(void) {
+    uint8_t busiest[PACKET_SERIES_MAX] = {0};
+    float busiest_activity[PACKET_SERIES_MAX] = {0};
+
+    for (int channel = 1; channel <= PACKET_MONITOR_MAX_CHANNEL; channel++) {
+        float activity = s_channel_activity[channel];
+        if (activity <= 0.0f) continue;
+        for (int slot = 0; slot < PACKET_SERIES_MAX; slot++) {
+            if (activity <= busiest_activity[slot]) continue;
+            for (int move = PACKET_SERIES_MAX - 1; move > slot; move--) {
+                busiest[move] = busiest[move - 1];
+                busiest_activity[move] = busiest_activity[move - 1];
+            }
+            busiest[slot] = (uint8_t)channel;
+            busiest_activity[slot] = activity;
+            break;
+        }
+    }
+
+    uint8_t next_channels[PACKET_SERIES_MAX] = {0};
+    bool selected[PACKET_SERIES_MAX] = {0};
+
+    /* Keep a channel's color stable while it remains among the busiest. */
+    for (int series = 0; series < s_series_count; series++) {
+        for (int slot = 0; slot < PACKET_SERIES_MAX; slot++) {
+            if (!selected[slot] && s_series_channels[series] == busiest[slot]) {
+                next_channels[series] = busiest[slot];
+                selected[slot] = true;
+                break;
+            }
+        }
+    }
+
+    for (int slot = 0; slot < PACKET_SERIES_MAX; slot++) {
+        if (selected[slot]) continue;
+        for (int series = 0; series < s_series_count; series++) {
+            if (next_channels[series] == 0) {
+                next_channels[series] = busiest[slot];
+                selected[slot] = true;
+                break;
+            }
+        }
+    }
+
+    bool changed = false;
+    for (int series = 0; series < s_series_count; series++) {
+        if (s_series_channels[series] == next_channels[series]) continue;
+        s_series_channels[series] = next_channels[series];
+        s_target_rates[series] = 0.0f;
+        s_smoothed_rates[series] = 0.0f;
+        s_idle_samples[series] = 0;
+        changed = true;
+    }
+    return changed;
+}
+
 static void packet_update_cb(lv_timer_t *timer) {
     (void)timer;
 
@@ -197,27 +254,16 @@ static void packet_update_cb(lv_timer_t *timer) {
         uint32_t channel_total = s_channel_packets[channel];
         channel_deltas[channel] = channel_total - s_channel_snapshots[channel];
         s_channel_snapshots[channel] = channel_total;
+        s_channel_activity[channel] *= 0.985f;
+        if (channel_deltas[channel] > 0) {
+            s_channel_activity[channel] +=
+                (float)channel_deltas[channel] * (1000.0f / PACKET_UPDATE_MS);
+        }
     }
 
     bool legend_changed = false;
     if (s_start_mode == PACKET_START_HOP) {
-        for (int channel = 1; channel <= PACKET_MONITOR_MAX_CHANNEL; channel++) {
-            if (channel_deltas[channel] == 0) continue;
-            bool assigned = false;
-            for (int series = 0; series < s_series_count; series++) {
-                if (s_series_channels[series] == channel) {
-                    assigned = true;
-                    break;
-                }
-            }
-            if (assigned) continue;
-            for (int series = 0; series < s_series_count; series++) {
-                if (s_series_channels[series] != 0) continue;
-                s_series_channels[series] = (uint8_t)channel;
-                legend_changed = true;
-                break;
-            }
-        }
+        legend_changed = packet_rebind_busiest_channels();
     }
 
     bool hopping = s_start_mode == PACKET_START_HOP || s_custom_channel_count > 1;
@@ -381,6 +427,7 @@ static void packet_monitor_create_visualizer(void) {
     s_total_bytes = 0;
     memset((void *)s_channel_packets, 0, sizeof(s_channel_packets));
     memset(s_channel_snapshots, 0, sizeof(s_channel_snapshots));
+    memset(s_channel_activity, 0, sizeof(s_channel_activity));
     s_current_channel = 0;
     s_last_rssi = 0;
     s_monitor_active = true;
