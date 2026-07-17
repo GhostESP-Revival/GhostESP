@@ -36,6 +36,10 @@
 - Refactored CSV logging to drain bounded batches asynchronously, keeping Wi-Fi, BLE, and GhostLink capture paths responsive during storage writes
 - Fixed WiGLE headers for UART/JIT SD output, reliable JIT SD finalization, and hidden/32-byte/UTF-8 SSID handling
 
+### Infrared
+- Added transmit support for the NEC42, NEC42ext, and RC5X protocols, so all of Flipper's IR protocols can now be sent as well as learned
+- Fixed the RC5 transmit encoder laying out bits in reverse order, so RC5 signals now transmit and re-decode correctly
+
 ### Headless CLI
 - Added OS-style CLI commands for `echo`, `ifconfig`, `ping`, `version`, `uuid`, `macaddr`, `uptime`, `status`, and filesystem helpers
 - Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions

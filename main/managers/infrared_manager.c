@@ -515,6 +515,8 @@ void infrared_manager_free_list(infrared_signal_t *signals, size_t count) {
 static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(const char* name) {
     if (strcasecmp(name, "nec") == 0) return &infrared_protocol_nec;
     if (strcasecmp(name, "necext") == 0) return &infrared_protocol_necext;
+    if (strcasecmp(name, "nec42") == 0) return &infrared_protocol_nec42;
+    if (strcasecmp(name, "nec42ext") == 0) return &infrared_protocol_nec42ext;
     if (strcasecmp(name, "kaseikyo") == 0) return &infrared_protocol_kaseikyo;
     if (strcasecmp(name, "pioneer") == 0) return &infrared_protocol_pioneer;
     if (strcasecmp(name, "rca") == 0) return &infrared_protocol_rca;
@@ -524,6 +526,7 @@ static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(cons
     if (strcasecmp(name, "sirc15") == 0) return &infrared_protocol_sirc15;
     if (strcasecmp(name, "sirc20") == 0) return &infrared_protocol_sirc20;
     if (strcasecmp(name, "rc5") == 0) return &infrared_protocol_rc5;
+    if (strcasecmp(name, "rc5x") == 0) return &infrared_protocol_rc5x;
     if (strcasecmp(name, "rc6") == 0) return &infrared_protocol_rc6;
     return NULL;
 }

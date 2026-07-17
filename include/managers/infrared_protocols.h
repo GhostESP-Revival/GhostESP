@@ -4,6 +4,9 @@
 #include "infrared_common.h"
 
 extern const InfraredCommonProtocolSpec infrared_protocol_nec;
+extern const InfraredCommonProtocolSpec infrared_protocol_nec42;
+extern const InfraredCommonProtocolSpec infrared_protocol_nec42ext;
+extern const InfraredCommonProtocolSpec infrared_protocol_rc5x;
 extern const InfraredCommonProtocolSpec infrared_protocol_kaseikyo;
 extern const InfraredCommonProtocolSpec infrared_protocol_pioneer;
 extern const InfraredCommonProtocolSpec infrared_protocol_rca;
