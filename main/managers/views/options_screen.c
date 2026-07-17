@@ -185,6 +185,7 @@ static int sta_scan_last_count = 0;
 static bool sta_scan_stopped_by_user = false;
 static bool scan_all_flow_active = false;
 static bool scan_all_started_station_phase = false;
+static bool station_scan_waiting_for_ap_scan = false;
 
 static bool *g_ap_multi_selected = NULL;
 static int g_ap_multi_count = 0;
@@ -291,6 +292,7 @@ static void ap_list_cleanup(void);
 static bool start_scan_all_flow(void);
 static void scanall_list_cleanup(void);
 static bool start_station_scan_flow(void);
+static bool start_station_scan_with_ap_scan(void);
 static void station_scan_poll_timer_cb(lv_timer_t *timer);
 static void station_scan_complete_callback(void);
 static void stop_station_scan_flow(void);
@@ -520,6 +522,22 @@ static bool start_station_scan_flow(void) {
     sta_scan_stopped_by_user = false;
     sta_scan_poll_timer = lv_timer_create(station_scan_poll_timer_cb, 100, NULL);
     return true;
+}
+
+static bool start_station_scan_with_ap_scan(void) {
+    if (ap_scan_get_count() > 0) {
+        return start_station_scan_flow();
+    }
+
+    station_list_cleanup();
+    station_scan_clear_results();
+    station_scan_waiting_for_ap_scan = true;
+    if (start_ap_scan_flow()) {
+        return true;
+    }
+
+    station_scan_waiting_for_ap_scan = false;
+    return false;
 }
 
 static void station_scan_poll_timer_cb(lv_timer_t *timer) {
@@ -8187,7 +8205,7 @@ void option_event_cb(lv_event_t *e) {
     }
 
     else if (strcmp(Selected_Option, "Scan Stations") == 0) {
-        if (!start_station_scan_flow()) {
+        if (!start_station_scan_with_ap_scan()) {
             error_popup_create("Scan failed to start");
         }
         option_invoked = false;
@@ -8206,7 +8224,7 @@ void option_event_cb(lv_event_t *e) {
             return;
         }
 
-        if (!start_station_scan_flow()) {
+        if (!start_station_scan_with_ap_scan()) {
             error_popup_create("Scan failed to start");
         }
         option_invoked = false;
@@ -9234,6 +9252,7 @@ void options_menu_destroy() {
     gui_nav_history_clear();
     scan_all_flow_active = false;
     scan_all_started_station_phase = false;
+    station_scan_waiting_for_ap_scan = false;
     ap_list_cleanup();
     scanall_list_cleanup();
     station_list_cleanup();
@@ -11959,6 +11978,23 @@ static void ap_scan_complete_callback(void) {
     }
     
     uint16_t count = ap_scan_get_count();
+
+    if (station_scan_waiting_for_ap_scan) {
+        station_scan_waiting_for_ap_scan = false;
+        if (count == 0) {
+            error_popup_create("No APs found");
+            current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+            rebuild_current_menu();
+            return;
+        }
+
+        if (!start_station_scan_flow()) {
+            error_popup_create("Station scan failed to start");
+            current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+            rebuild_current_menu();
+        }
+        return;
+    }
 
     if (scan_all_flow_active && !scan_all_started_station_phase) {
         if (count == 0) {

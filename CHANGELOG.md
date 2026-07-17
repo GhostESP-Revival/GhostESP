@@ -25,6 +25,7 @@
 - Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
 
 ### Wi-Fi
+- Fixed standalone station scans to run the AP scan spinner first when no APs are cached
 - Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445
 - Added SNMP MIB walk (`snmpprobe walk`) using GetNextRequest to traverse OID subtrees with support for custom root OIDs
 - Added a compact live Wi-Fi packet monitor (`scanarp monitor`) using the Wireshark raw-capture path
