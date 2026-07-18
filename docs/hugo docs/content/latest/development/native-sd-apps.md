@@ -64,7 +64,8 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
   "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "nrf24", "badusb", "camera", "usb", "audio", "zigbee"],
   "memory_limit": 65536,
   "stack_size": 8192,
-  "requires_psram": false
+  "requires_psram": false,
+  "requires_features": ["touchscreen"]
 }
 ```
 
@@ -89,6 +90,7 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `memory_limit` | No | Advisory limit in bytes for `app_malloc`/`app_calloc` tracked allocations. |
 | `stack_size` | No | Advisory stack size hint in bytes. |
 | `requires_psram` | No | If `true`, loader additionally checks that PSRAM is available (all native SD apps already require PSRAM at a baseline). Apps with this flag are hidden from the gallery on no-PSRAM boards. |
+| `requires_features` | No | Array of required physical inputs: `touchscreen`, `dpad` (or `joystick`), `encoder`, and `keyboard`. The app remains visible on unsupported hardware; selecting it shows a requirement toast and does not launch it. Unknown feature names make the manifest invalid. |
 | `icon` | No | Path relative to app folder (raw RGB565 binary). |
 | `icon_width` | No | Icon pixel width. |
 | `icon_height` | No | Icon pixel height. |
@@ -232,7 +234,7 @@ bool        (*has_permission)(const char *permission);
 bool        (*has_feature)(const char *feature);
 ```
 
-`has_permission` checks the current app manifest permissions by name, for example `"wifi"` or `"nrf24"`. `has_feature` checks host capabilities such as `"touchscreen"`, `"compact_screen"`, `"absolute_storage"`, `"subghz"`, `"nrf24"`, `"camera"`, `"usb"`, `"badusb"`, `"ir"`, or `"ble"`.
+`has_permission` checks the current app manifest permissions by name, for example `"wifi"` or `"nrf24"`. `has_feature` checks host capabilities such as `"touchscreen"`, `"dpad"`, `"encoder"`, `"keyboard"`, `"compact_screen"`, `"absolute_storage"`, `"subghz"`, `"nrf24"`, `"camera"`, `"usb"`, `"badusb"`, `"ir"`, or `"ble"`.
 
 ### Memory (Tracked)
 
@@ -434,7 +436,10 @@ void (*ui_line_set_width)(ghostesp_ui_obj_t line, int32_t width);
 ```c
 ghostesp_ui_obj_t (*ui_image_create)(ghostesp_ui_obj_t parent);
 bool (*ui_image_set_src)(ghostesp_ui_obj_t img, const char *app_relative_path);
+bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
 ```
+
+`ui_image_set_builtin` assigns a firmware-bundled image without requiring the app to ship a copy. Available names are `ghostchi/angry`, `ghostchi/banshee`, `ghostchi/cake`, `ghostchi/evil`, `ghostchi/happy`, `ghostchi/love`, `ghostchi/sleep`, `ghostchi/speech`, `ghostchi/subghz`, `ghostchi/surprised`, `ghostchi/tired`, and `ghostchi/what`.
 
 ### Paged Menu
 

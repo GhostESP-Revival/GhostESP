@@ -197,6 +197,7 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
         case INPUT_TYPE_KEYBOARD:
             out.type = GHOSTESP_INPUT_KEY;
             out.value = event->data.key_value;
+            out.pressed = true;
             switch (event->data.key_value) {
                 case LV_KEY_LEFT: out.type = GHOSTESP_INPUT_LEFT; break;
                 case LV_KEY_RIGHT: out.type = GHOSTESP_INPUT_RIGHT; break;
@@ -216,6 +217,7 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
         case INPUT_TYPE_ENCODER:
             out.type = event->data.encoder.button ? GHOSTESP_INPUT_SELECT : (event->data.encoder.direction > 0 ? GHOSTESP_INPUT_RIGHT : GHOSTESP_INPUT_LEFT);
             out.value = event->data.encoder.direction;
+            out.pressed = true;
             break;
         case INPUT_TYPE_EXIT_BUTTON:
             out.type = GHOSTESP_INPUT_BACK;

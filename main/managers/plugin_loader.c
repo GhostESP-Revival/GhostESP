@@ -162,6 +162,12 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     if (!manifest) return fail_err(ESP_ERR_NOT_FOUND, "app not found");
     if (!plugin_manager_target_supported()) return fail_err(ESP_ERR_NOT_SUPPORTED, "native SD apps disabled or unsupported target");
     if (!plugin_manager_target_matches(manifest)) return fail_err(ESP_ERR_NOT_SUPPORTED, "app target does not match firmware target");
+    char missing_feature[24];
+    if (!plugin_manager_required_features_supported(manifest, missing_feature, sizeof(missing_feature))) {
+        char error[sizeof(s_last_error)];
+        snprintf(error, sizeof(error), "app requires %s", missing_feature[0] ? missing_feature : "unsupported hardware");
+        return fail_err(ESP_ERR_NOT_SUPPORTED, error);
+    }
     if (manifest->memory_limit > 0 && heap_caps_get_free_size(MALLOC_CAP_8BIT) < manifest->memory_limit) {
         return fail_err(ESP_ERR_NO_MEM, "not enough free heap for app memory limit");
     }

@@ -72,6 +72,45 @@ typedef struct {
     bool result;
 } image_src_ctx_t;
 
+typedef struct {
+    ghostesp_ui_obj_t obj;
+    const lv_img_dsc_t *source;
+    bool result;
+} builtin_image_src_ctx_t;
+
+typedef struct {
+    const char *name;
+    const lv_img_dsc_t *source;
+} builtin_image_t;
+
+LV_IMG_DECLARE(angry_50x50);
+LV_IMG_DECLARE(banshee_50x50);
+LV_IMG_DECLARE(cake_50x50);
+LV_IMG_DECLARE(evil_50x50);
+LV_IMG_DECLARE(happy_50x50);
+LV_IMG_DECLARE(love_50x50);
+LV_IMG_DECLARE(sleep_50x50);
+LV_IMG_DECLARE(speech);
+LV_IMG_DECLARE(subghz_50x50);
+LV_IMG_DECLARE(surpised_50x50);
+LV_IMG_DECLARE(tired_50x50);
+LV_IMG_DECLARE(what2_50x50);
+
+static const builtin_image_t s_builtin_images[] = {
+    { "ghostchi/angry", &angry_50x50 },
+    { "ghostchi/banshee", &banshee_50x50 },
+    { "ghostchi/cake", &cake_50x50 },
+    { "ghostchi/evil", &evil_50x50 },
+    { "ghostchi/happy", &happy_50x50 },
+    { "ghostchi/love", &love_50x50 },
+    { "ghostchi/sleep", &sleep_50x50 },
+    { "ghostchi/speech", &speech },
+    { "ghostchi/subghz", &subghz_50x50 },
+    { "ghostchi/surprised", &surpised_50x50 },
+    { "ghostchi/tired", &tired_50x50 },
+    { "ghostchi/what", &what2_50x50 },
+};
+
 typedef struct timer_bridge_s {
     ghostesp_ui_timer_cb_t cb;
     void *user;
@@ -440,6 +479,25 @@ bool plugin_api_ui_image_set_src(ghostesp_ui_obj_t img, const char *app_relative
     image_src_ctx_t ctx = { .obj = img, .path = full_path, .result = false };
     plugin_api_internal_run_sync(plugin_api_ui_image_set_src_now, &ctx);
     return ctx.result;
+}
+
+static void plugin_api_ui_image_set_builtin_now(void *arg) {
+    builtin_image_src_ctx_t *ctx = (builtin_image_src_ctx_t *)arg;
+    lv_obj_t *img = (lv_obj_t *)ctx->obj;
+    if (!img || !lv_obj_is_valid(img) || !ctx->source) return;
+    lv_img_set_src(img, ctx->source);
+    ctx->result = true;
+}
+
+bool plugin_api_ui_image_set_builtin(ghostesp_ui_obj_t img, const char *image_name) {
+    if (!plugin_api_internal_has_ui_permission() || !img || !image_name) return false;
+    for (size_t i = 0; i < sizeof(s_builtin_images) / sizeof(s_builtin_images[0]); ++i) {
+        if (strcmp(image_name, s_builtin_images[i].name) != 0) continue;
+        builtin_image_src_ctx_t ctx = { .obj = img, .source = s_builtin_images[i].source, .result = false };
+        plugin_api_internal_run_sync(plugin_api_ui_image_set_builtin_now, &ctx);
+        return ctx.result;
+    }
+    return false;
 }
 
 static void plugin_api_ui_timer_create_now(void *arg) {

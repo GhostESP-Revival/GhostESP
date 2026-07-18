@@ -228,10 +228,30 @@ static bool plugin_api_has_permission_name(const char *permission) {
 extern bool plugin_api_ui_screen_is_compact(void);
 extern bool plugin_api_ui_has_touchscreen(void);
 
-static bool plugin_api_has_feature(const char *feature) {
+bool plugin_api_feature_supported(const char *feature) {
     if (!feature || feature[0] == '\0') return false;
-    if (strcmp(feature, "absolute_storage") == 0) return s_allow_absolute_storage;
     if (strcmp(feature, "touchscreen") == 0) return plugin_api_ui_has_touchscreen();
+    if (strcmp(feature, "dpad") == 0 || strcmp(feature, "joystick") == 0) {
+#ifdef CONFIG_USE_JOYSTICK
+        return true;
+#else
+        return false;
+#endif
+    }
+    if (strcmp(feature, "encoder") == 0) {
+#ifdef CONFIG_USE_ENCODER
+        return true;
+#else
+        return false;
+#endif
+    }
+    if (strcmp(feature, "keyboard") == 0 || strcmp(feature, "physical_keyboard") == 0) {
+#if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_USE_TDECK) || defined(CONFIG_USE_USB_KEYBOARD)
+        return true;
+#else
+        return false;
+#endif
+    }
     if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
     if (strcmp(feature, "wifi") == 0) return true;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -256,6 +276,11 @@ static bool plugin_api_has_feature(const char *feature) {
     if (strcmp(feature, "zigbee") == 0) return true;
 #endif
     return false;
+}
+
+static bool plugin_api_has_feature(const char *feature) {
+    if (feature && strcmp(feature, "absolute_storage") == 0) return s_allow_absolute_storage;
+    return plugin_api_feature_supported(feature);
 }
 
 static bool plugin_api_has_ui_permission(void) {
@@ -1529,6 +1554,7 @@ extern void plugin_api_ui_line_set_width(ghostesp_ui_obj_t line, int32_t width);
 
 extern ghostesp_ui_obj_t plugin_api_ui_image_create(ghostesp_ui_obj_t parent);
 extern bool plugin_api_ui_image_set_src(ghostesp_ui_obj_t img, const char *app_relative_path);
+extern bool plugin_api_ui_image_set_builtin(ghostesp_ui_obj_t img, const char *image_name);
 
 extern ghostesp_ui_timer_t plugin_api_ui_timer_create(ghostesp_ui_timer_cb_t cb, uint32_t interval_ms, void *user);
 extern void plugin_api_ui_timer_delete(ghostesp_ui_timer_t timer);
@@ -2019,6 +2045,7 @@ static ghostesp_api_t s_api = {
     .nfc_t2_scan_active = plugin_api_nfc_t2_scan_active,
     .nfc_t2_read = plugin_api_nfc_t2_read,
     .nfc_t2_write_ndef = plugin_api_nfc_t2_write_ndef,
+    .ui_image_set_builtin = plugin_api_ui_image_set_builtin,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,

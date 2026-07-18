@@ -1393,6 +1393,14 @@ static void handle_app_item_selection(int item_index) {
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
 
     if (app_items[item_index].plugin_id[0] != '\0') {
+        const plugin_app_manifest_t *manifest = plugin_manager_find(app_items[item_index].plugin_id);
+        char missing_feature[24];
+        if (!manifest || !plugin_manager_required_features_supported(manifest, missing_feature, sizeof(missing_feature))) {
+            char message[TOAST_MAX_TEXT_LEN + 1];
+            snprintf(message, sizeof(message), "Requires %s", missing_feature[0] ? missing_feature : "unsupported hardware");
+            toast_show(message, TOAST_WARN);
+            return;
+        }
         plugin_runner_set_app(app_items[item_index].plugin_id);
         display_manager_switch_view(&plugin_runner_view);
         return;

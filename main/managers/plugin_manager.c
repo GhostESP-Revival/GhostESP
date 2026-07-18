@@ -150,6 +150,35 @@ static plugin_permission_t permission_from_string(const char *value) {
     return 0;
 }
 
+static plugin_feature_t feature_from_string(const char *value) {
+    if (!value) return 0;
+    if (strcmp(value, "touchscreen") == 0 || strcmp(value, "touch") == 0) return PLUGIN_FEATURE_TOUCHSCREEN;
+    if (strcmp(value, "dpad") == 0 || strcmp(value, "joystick") == 0) return PLUGIN_FEATURE_DPAD;
+    if (strcmp(value, "encoder") == 0) return PLUGIN_FEATURE_ENCODER;
+    if (strcmp(value, "keyboard") == 0 || strcmp(value, "physical_keyboard") == 0) return PLUGIN_FEATURE_KEYBOARD;
+    return 0;
+}
+
+static const char *feature_name(plugin_feature_t feature) {
+    switch (feature) {
+        case PLUGIN_FEATURE_TOUCHSCREEN: return "touchscreen";
+        case PLUGIN_FEATURE_DPAD: return "D-pad";
+        case PLUGIN_FEATURE_ENCODER: return "encoder";
+        case PLUGIN_FEATURE_KEYBOARD: return "keyboard";
+        default: return "required input";
+    }
+}
+
+static const char *feature_id(plugin_feature_t feature) {
+    switch (feature) {
+        case PLUGIN_FEATURE_TOUCHSCREEN: return "touchscreen";
+        case PLUGIN_FEATURE_DPAD: return "dpad";
+        case PLUGIN_FEATURE_ENCODER: return "encoder";
+        case PLUGIN_FEATURE_KEYBOARD: return "keyboard";
+        default: return "";
+    }
+}
+
 static bool has_gapp_extension(const char *name) {
     if (!name) return false;
     const char *dot = strrchr(name, '.');
@@ -432,6 +461,30 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
         }
     }
 
+    cJSON *required_features = cJSON_GetObjectItemCaseSensitive(root, "requires_features");
+    if (required_features && !cJSON_IsArray(required_features)) {
+        snprintf(out->error, sizeof(out->error), "requires_features must be an array");
+        cJSON_Delete(root);
+        return false;
+    }
+    if (cJSON_IsArray(required_features)) {
+        cJSON *feature = NULL;
+        cJSON_ArrayForEach(feature, required_features) {
+            if (!cJSON_IsString(feature) || !feature->valuestring) {
+                snprintf(out->error, sizeof(out->error), "invalid required feature");
+                cJSON_Delete(root);
+                return false;
+            }
+            plugin_feature_t bit = feature_from_string(feature->valuestring);
+            if (!bit) {
+                snprintf(out->error, sizeof(out->error), "unknown required feature: %.48s", feature->valuestring);
+                cJSON_Delete(root);
+                return false;
+            }
+            out->required_features |= bit;
+        }
+    }
+
     cJSON_Delete(root);
 
     strncpy(out->base_path, base_path, sizeof(out->base_path) - 1);
@@ -510,6 +563,27 @@ bool plugin_manager_target_matches(const plugin_app_manifest_t *app) {
     if (!app) return false;
     if (app->target[0] == '\0') return true;
     return strcmp(app->target, plugin_api_current_target()) == 0;
+}
+
+bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app, char *missing_feature, size_t missing_feature_len) {
+    if (missing_feature && missing_feature_len > 0) missing_feature[0] = '\0';
+    if (!app) return false;
+
+    const plugin_feature_t features[] = {
+        PLUGIN_FEATURE_TOUCHSCREEN,
+        PLUGIN_FEATURE_DPAD,
+        PLUGIN_FEATURE_ENCODER,
+        PLUGIN_FEATURE_KEYBOARD,
+    };
+    for (size_t i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
+        if (!(app->required_features & features[i])) continue;
+        if (plugin_api_feature_supported(feature_id(features[i]))) continue;
+        if (missing_feature && missing_feature_len > 0) {
+            snprintf(missing_feature, missing_feature_len, "%s", feature_name(features[i]));
+        }
+        return false;
+    }
+    return true;
 }
 
 int plugin_manager_reload(void) {

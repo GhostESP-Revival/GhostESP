@@ -601,6 +601,7 @@ typedef struct ghostesp_api {
     bool (*nfc_t2_read)(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
                         size_t max_ndef_bytes, size_t *ndef_bytes_out);
     bool (*nfc_t2_write_ndef)(const uint8_t *ndef, size_t ndef_len);
+    bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)
@@ -628,6 +629,7 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
                                      bool allow_absolute_storage);
 const char *plugin_api_current_target(void);
 bool plugin_api_is_active(void);
+bool plugin_api_feature_supported(const char *feature);
 void plugin_api_release(void);
 void plugin_api_set_ui_hooks(void (*set_title)(const char *title),
                              void (*print)(const char *text),

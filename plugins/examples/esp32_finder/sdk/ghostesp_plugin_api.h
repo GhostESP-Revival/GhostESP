@@ -561,6 +561,7 @@ typedef struct ghostesp_api {
     bool (*nfc_t2_read)(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
                         size_t max_ndef_bytes, size_t *ndef_bytes_out);
     bool (*nfc_t2_write_ndef)(const uint8_t *ndef, size_t ndef_len);
+    bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

@@ -22,6 +22,8 @@
 - Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
 - Fixed native app keyboard dialogs preserving the loaded app across the keyboard view, preventing callbacks into unloaded apps after submission
 - Normalized physical keyboard arrow keys for native SD app navigation
+- Added manifest input requirements that keep incompatible apps visible and prevent unsupported launches with a toast
+- Added stable `ui_image_set_builtin` SDK access to bundled Ghostchi images
 
 ### GhostScript
 - Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM
