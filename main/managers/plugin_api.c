@@ -47,6 +47,13 @@
 
 static const char *TAG = "PluginAPI";
 
+extern bool plugin_api_nfc_t2_scan_start(void);
+extern bool plugin_api_nfc_t2_scan_stop(void);
+extern bool plugin_api_nfc_t2_scan_active(void);
+extern bool plugin_api_nfc_t2_read(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
+                                   size_t max_ndef_bytes, size_t *ndef_bytes_out);
+extern bool plugin_api_nfc_t2_write_ndef(const uint8_t *ndef, size_t ndef_len);
+
 static void (*s_ui_set_title)(const char *title) = NULL;
 static void (*s_ui_print)(const char *text) = NULL;
 static void (*s_ui_clear)(void) = NULL;
@@ -785,7 +792,7 @@ static bool plugin_api_ir_stop(void) {
 }
 
 static bool plugin_api_nfc_is_available(void) {
-#ifdef CONFIG_HAS_NFC
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
     return true;
 #else
     return false;
@@ -793,13 +800,11 @@ static bool plugin_api_nfc_is_available(void) {
 }
 
 static bool plugin_api_nfc_read_start(void) {
-    if (!plugin_api_has_permission(PLUGIN_PERMISSION_NFC)) return false;
-    return false;
+    return plugin_api_nfc_t2_scan_start();
 }
 
 static bool plugin_api_nfc_stop(void) {
-    if (!plugin_api_has_permission(PLUGIN_PERMISSION_NFC)) return false;
-    return false;
+    return plugin_api_nfc_t2_scan_stop();
 }
 
 static bool plugin_api_ble_start_scan(void) {
@@ -2009,6 +2014,11 @@ static ghostesp_api_t s_api = {
     .ble_adv_scan_track = plugin_api_ble_adv_scan_track,
     .ble_adv_scan_stop_tracking = plugin_api_ble_adv_scan_stop_tracking,
     .ble_adv_scan_save_to_sd = plugin_api_ble_adv_scan_save_to_sd,
+    .nfc_t2_scan_start = plugin_api_nfc_t2_scan_start,
+    .nfc_t2_scan_stop = plugin_api_nfc_t2_scan_stop,
+    .nfc_t2_scan_active = plugin_api_nfc_t2_scan_active,
+    .nfc_t2_read = plugin_api_nfc_t2_read,
+    .nfc_t2_write_ndef = plugin_api_nfc_t2_write_ndef,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,

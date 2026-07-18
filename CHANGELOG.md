@@ -18,6 +18,11 @@
 - Added Cloud Store in the Apps gallery for browsing and installing apps, scripts and asset packs from the GitHub catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
 
+### Native SD Apps & SDK
+- Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
+- Fixed native app keyboard dialogs preserving the loaded app across the keyboard view, preventing callbacks into unloaded apps after submission
+- Normalized physical keyboard arrow keys for native SD app navigation
+
 ### GhostScript
 - Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM
 - Added the GhostScript browser and `script list`, `script run <index>`, `script status`, and `script stop` CLI commands

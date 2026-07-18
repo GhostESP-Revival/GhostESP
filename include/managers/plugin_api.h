@@ -175,6 +175,21 @@ typedef struct {
     bool is_directory;
 } ghostesp_storage_stat_t;
 
+#define GHOSTESP_NFC_T2_NDEF_MAX 1024
+
+typedef struct {
+    uint8_t uid[10];
+    uint8_t uid_len;
+    char model[24];
+    uint16_t user_bytes;
+    uint16_t ndef_length;
+    bool ndef_present;
+    bool read_only;
+    bool password_protected;
+    bool static_locked;
+    bool dynamic_locked;
+} ghostesp_nfc_t2_info_t;
+
 typedef struct ghostesp_api {
     uint32_t api_version;
     size_t struct_size;
@@ -579,6 +594,13 @@ typedef struct ghostesp_api {
     bool (*ble_adv_scan_track)(int index);
     void (*ble_adv_scan_stop_tracking)(void);
     bool (*ble_adv_scan_save_to_sd)(int index);
+
+    bool (*nfc_t2_scan_start)(void);
+    bool (*nfc_t2_scan_stop)(void);
+    bool (*nfc_t2_scan_active)(void);
+    bool (*nfc_t2_read)(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
+                        size_t max_ndef_bytes, size_t *ndef_bytes_out);
+    bool (*nfc_t2_write_ndef)(const uint8_t *ndef, size_t ndef_len);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

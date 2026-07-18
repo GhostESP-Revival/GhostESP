@@ -36,6 +36,8 @@
 #define GS_EVENT_NAME_MAX 40
 #define GS_EVENT_VALUE_MAX 320
 #define GS_STORAGE_LIST_MAX 32
+#define GS_STORAGE_STREAM_CHUNK_MAX 1024
+#define GS_STORAGE_STREAM_MT "ghostscript.storage_stream"
 
 typedef enum {
     GS_QUEUED_EVENT,
@@ -118,6 +120,16 @@ typedef struct {
     DIR *dir;
 } gs_storage_list_ctx_t;
 
+/* A logical stream never keeps an SD file open between Lua calls. This is
+ * required on JIT-SD targets, where the card can be unmounted after each call. */
+typedef struct {
+    ghostscript_runtime_t *runtime;
+    char path[GHOSTSCRIPT_PATH_MAX];
+    size_t cursor;
+    char mode;
+    bool closed;
+} gs_storage_stream_t;
+
 /* Linked list of background tasks spawned by the script. Each owns its own
  * Lua state but shares the active-runtime pointer for event delivery. */
 typedef struct bg_task_s {
@@ -183,10 +195,19 @@ static bool safe_join(const char *base, const char *rel, char *out, size_t out_l
 }
 
 static bool scoped_storage_path(ghostscript_runtime_t *rt, const char *rel, char *out, size_t out_len) {
-    if (!rt || !out || !rel || rel[0] == '/' || strstr(rel, "..")) return false;
+    if (!rt || !out || !rel || rel[0] == '/' || strchr(rel, '\\')) return false;
     if (rel[0] == '\0' || strcmp(rel, ".") == 0) {
         int n = snprintf(out, out_len, "%s", rt->manifest.data_path);
         return n > 0 && (size_t)n < out_len;
+    }
+    for (const char *segment = rel; *segment;) {
+        const char *end = strchr(segment, '/');
+        size_t len = end ? (size_t)(end - segment) : strlen(segment);
+        if (len == 0 || (len == 1 && segment[0] == '.') ||
+            (len == 2 && segment[0] == '.' && segment[1] == '.') || segment[0] == '.') {
+            return false;
+        }
+        segment = end ? end + 1 : segment + len;
     }
     return safe_join(rt->manifest.data_path, rel, out, out_len);
 }
@@ -1000,6 +1021,127 @@ static int l_storage_append(lua_State *L) {
     return 1;
 }
 
+static gs_storage_stream_t *check_storage_stream(lua_State *L, ghostscript_runtime_t *rt) {
+    gs_storage_stream_t *stream = (gs_storage_stream_t *)luaL_checkudata(L, 1, GS_STORAGE_STREAM_MT);
+    if (!stream || stream->runtime != rt || stream->closed) {
+        luaL_error(L, "storage stream is closed or belongs to another runtime");
+    }
+    return stream;
+}
+
+static int l_storage_stream_gc(lua_State *L) {
+    gs_storage_stream_t *stream = (gs_storage_stream_t *)luaL_testudata(L, 1, GS_STORAGE_STREAM_MT);
+    if (stream) stream->closed = true;
+    return 0;
+}
+
+static int storage_stream_error(lua_State *L, const char *message) {
+    lua_pushnil(L);
+    lua_pushstring(L, message);
+    return 2;
+}
+
+static int l_storage_open(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
+    const char *rel = luaL_checkstring(L, 1);
+    const char *mode = luaL_checkstring(L, 2);
+    if (mode[0] == '\0' || mode[1] != '\0' || (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a')) {
+        return luaL_error(L, "storage mode must be r, w, or a");
+    }
+
+    char path[GHOSTSCRIPT_PATH_MAX];
+    if (!scoped_storage_path(rt, rel, path, sizeof(path))) return storage_stream_error(L, "invalid scoped path");
+    bool display_was_suspended = false;
+    if (!ghostscript_manager_sd_begin(&display_was_suspended)) return storage_stream_error(L, "SD card unavailable");
+    if (mode[0] != 'r') {
+        sd_card_create_directory(GHOSTSCRIPT_DATA_DIR);
+        sd_card_create_directory(rt->manifest.data_path);
+    }
+    FILE *file = fopen(path, mode[0] == 'r' ? "rb" : (mode[0] == 'w' ? "wb" : "ab"));
+    size_t cursor = 0;
+    bool ok = file != NULL;
+    if (file && mode[0] == 'a') {
+        if (fseek(file, 0, SEEK_END) != 0) ok = false;
+        long offset = ok ? ftell(file) : -1;
+        if (offset < 0) ok = false;
+        else cursor = (size_t)offset;
+    }
+    if (file) fclose(file);
+    ghostscript_manager_sd_end(display_was_suspended);
+    if (!ok) return storage_stream_error(L, "unable to open storage stream");
+
+    gs_storage_stream_t *stream = (gs_storage_stream_t *)lua_newuserdatauv(L, sizeof(*stream), 0);
+    memset(stream, 0, sizeof(*stream));
+    stream->runtime = rt;
+    stream->cursor = cursor;
+    stream->mode = mode[0];
+    snprintf(stream->path, sizeof(stream->path), "%s", path);
+    luaL_getmetatable(L, GS_STORAGE_STREAM_MT);
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+static int l_storage_stream_read(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
+    gs_storage_stream_t *stream = check_storage_stream(L, rt);
+    if (stream->mode != 'r') return storage_stream_error(L, "storage stream is not readable");
+    lua_Integer requested = luaL_optinteger(L, 2, GS_STORAGE_STREAM_CHUNK_MAX);
+    if (requested <= 0 || requested > GS_STORAGE_STREAM_CHUNK_MAX) return luaL_error(L, "read size must be between 1 and %d", GS_STORAGE_STREAM_CHUNK_MAX);
+
+    char buffer[GS_STORAGE_STREAM_CHUNK_MAX];
+    bool display_was_suspended = false;
+    if (!ghostscript_manager_sd_begin(&display_was_suspended)) return storage_stream_error(L, "SD card unavailable");
+    FILE *file = fopen(stream->path, "rb");
+    size_t count = 0;
+    bool ok = file != NULL && fseek(file, (long)stream->cursor, SEEK_SET) == 0;
+    if (ok) {
+        count = fread(buffer, 1, (size_t)requested, file);
+        ok = !ferror(file);
+    }
+    if (file) fclose(file);
+    ghostscript_manager_sd_end(display_was_suspended);
+    if (!ok) return storage_stream_error(L, "storage stream read failed");
+    if (count == 0) { lua_pushnil(L); return 1; }
+    stream->cursor += count;
+    lua_pushlstring(L, buffer, count);
+    return 1;
+}
+
+static int l_storage_stream_write(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
+    gs_storage_stream_t *stream = check_storage_stream(L, rt);
+    if (stream->mode == 'r') return storage_stream_error(L, "storage stream is not writable");
+    size_t len = 0;
+    const char *data = luaL_checklstring(L, 2, &len);
+    if (len > GS_STORAGE_STREAM_CHUNK_MAX) return luaL_error(L, "write size exceeds %d bytes", GS_STORAGE_STREAM_CHUNK_MAX);
+    if (len == 0) { lua_pushinteger(L, 0); return 1; }
+
+    bool display_was_suspended = false;
+    if (!ghostscript_manager_sd_begin(&display_was_suspended)) return storage_stream_error(L, "SD card unavailable");
+    FILE *file = fopen(stream->path, "r+b");
+    bool ok = file != NULL && fseek(file, (long)stream->cursor, SEEK_SET) == 0;
+    if (ok) ok = fwrite(data, 1, len, file) == len && fflush(file) == 0;
+    if (file) fclose(file);
+    ghostscript_manager_sd_end(display_was_suspended);
+    if (!ok) return storage_stream_error(L, "storage stream write failed");
+    stream->cursor += len;
+    lua_pushinteger(L, (lua_Integer)len);
+    return 1;
+}
+
+static int l_storage_close(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
+    gs_storage_stream_t *stream = (gs_storage_stream_t *)luaL_checkudata(L, 1, GS_STORAGE_STREAM_MT);
+    if (stream->runtime != rt) return luaL_error(L, "storage stream belongs to another runtime");
+    stream->closed = true;
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 static int l_storage_delete(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
     if (!rt_has_perm(rt, PLUGIN_PERMISSION_STORAGE)) return lua_perm_error(L, "storage");
@@ -1649,7 +1791,67 @@ static int l_screen_height(lua_State *L) {
 
 static int l_nfc_is_available(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_is_available : NULL, "nfc"); }
 static int l_nfc_read_start(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_read_start : NULL, "nfc"); }
-static int l_nfc_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_stop : NULL, "nfc"); }
+static int l_nfc_stop(lua_State *L) { ghostscript_runtime_t *rt = check_rt(L); return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_t2_scan_stop : NULL, "nfc"); }
+
+static int l_nfc_scan_start(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_t2_scan_start : NULL, "nfc");
+}
+
+static int l_nfc_scan_active(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    return l_bool0(L, PLUGIN_PERMISSION_NFC, rt && rt->api ? rt->api->nfc_t2_scan_active : NULL, "nfc");
+}
+
+static int l_nfc_read(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_NFC)) return lua_perm_error(L, "nfc");
+    lua_Integer requested = luaL_optinteger(L, 1, GHOSTESP_NFC_T2_NDEF_MAX);
+    if (requested < 0) return luaL_error(L, "max_bytes must be non-negative");
+    size_t max_bytes = (size_t)requested;
+    if (max_bytes > GHOSTESP_NFC_T2_NDEF_MAX) max_bytes = GHOSTESP_NFC_T2_NDEF_MAX;
+
+    ghostesp_nfc_t2_info_t info = {0};
+    uint8_t ndef[GHOSTESP_NFC_T2_NDEF_MAX];
+    size_t ndef_len = 0;
+    if (!rt || !rt->api || !rt->api->nfc_t2_read ||
+        !rt->api->nfc_t2_read(&info, ndef, max_bytes, &ndef_len)) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    char uid_hex[sizeof(info.uid) * 2 + 1];
+    size_t uid_pos = 0;
+    for (uint8_t i = 0; i < info.uid_len && i < sizeof(info.uid); i++) {
+        uid_pos += (size_t)snprintf(uid_hex + uid_pos, sizeof(uid_hex) - uid_pos, "%02X", info.uid[i]);
+    }
+    lua_newtable(L);
+    lua_pushstring(L, uid_hex); lua_setfield(L, -2, "uid");
+    lua_pushstring(L, info.model); lua_setfield(L, -2, "model");
+    lua_pushinteger(L, info.user_bytes); lua_setfield(L, -2, "user_bytes");
+    lua_pushinteger(L, info.ndef_length); lua_setfield(L, -2, "ndef_length");
+    lua_pushboolean(L, info.ndef_present); lua_setfield(L, -2, "ndef_present");
+    lua_pushboolean(L, info.read_only); lua_setfield(L, -2, "read_only");
+    lua_pushboolean(L, info.password_protected); lua_setfield(L, -2, "password_protected");
+    lua_pushboolean(L, info.static_locked); lua_setfield(L, -2, "static_locked");
+    lua_pushboolean(L, info.dynamic_locked); lua_setfield(L, -2, "dynamic_locked");
+    if (info.ndef_present) {
+        lua_pushlstring(L, (const char *)ndef, ndef_len);
+        lua_setfield(L, -2, "ndef");
+    }
+    return 1;
+}
+
+static int l_nfc_write_ndef(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    if (!rt_has_perm(rt, PLUGIN_PERMISSION_NFC)) return lua_perm_error(L, "nfc");
+    size_t len = 0;
+    const char *message = luaL_checklstring(L, 1, &len);
+    bool ok = rt && rt->api && rt->api->nfc_t2_write_ndef &&
+              rt->api->nfc_t2_write_ndef((const uint8_t *)message, len);
+    lua_pushboolean(L, ok);
+    return 1;
+}
 
 static int l_nfc_last_tag(lua_State *L) {
     ghostscript_runtime_t *rt = check_rt(L);
@@ -1936,6 +2138,23 @@ static int l_gps_on_fix(lua_State *L) {
     return l_event_on(L);
 }
 
+static int l_capabilities_has_permission(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    const char *name = luaL_checkstring(L, 1);
+    bool allowed = rt && rt->api && rt->api->has_permission && rt->api->has_permission(name);
+    lua_pushboolean(L, allowed);
+    return 1;
+}
+
+static int l_capabilities_has_feature(lua_State *L) {
+    ghostscript_runtime_t *rt = check_rt(L);
+    const char *name = luaL_checkstring(L, 1);
+    bool available = strcmp(name, "storage_stream") == 0 ||
+                     (rt && rt->api && rt->api->has_feature && rt->api->has_feature(name));
+    lua_pushboolean(L, available);
+    return 1;
+}
+
 static void add_funcs(lua_State *L, const luaL_Reg *funcs) {
     for (const luaL_Reg *r = funcs; r && r->name; ++r) {
         lua_pushcfunction(L, r->func);
@@ -1953,13 +2172,14 @@ static const gs_lazy_sub_t s_lazy_subs[] = {
     {"event",    (const luaL_Reg[]){{"on", l_event_on}, {"off", l_event_off}, {"emit", l_event_emit}, {"wait", l_event_wait}, {NULL, NULL}}},
     {"input",    (const luaL_Reg[]){{"subscribe", l_event_on}, {"unsubscribe", l_event_off}, {NULL, NULL}}},
     {"system",   (const luaL_Reg[]){{"free_heap", l_free_heap}, {"free_internal_heap", l_free_internal_heap}, {"uptime_ms", l_uptime_ms}, {"memory_used", l_memory_used}, {"memory_limit", l_memory_limit}, {"firmware_version", l_firmware_version}, {"target", l_system_target}, {"reboot", l_system_reboot}, {"random", l_random_u32}, {NULL, NULL}}},
-    {"storage",  (const luaL_Reg[]){{"read", l_storage_read}, {"write", l_storage_write}, {"exists", l_storage_exists}, {"append", l_storage_append}, {"delete", l_storage_delete}, {"mkdir", l_storage_mkdir}, {"list", l_storage_list}, {"stat", l_storage_stat}, {"rename", l_storage_rename}, {NULL, NULL}}},
+    {"storage",  (const luaL_Reg[]){{"read", l_storage_read}, {"write", l_storage_write}, {"exists", l_storage_exists}, {"append", l_storage_append}, {"delete", l_storage_delete}, {"mkdir", l_storage_mkdir}, {"list", l_storage_list}, {"stat", l_storage_stat}, {"rename", l_storage_rename}, {"open", l_storage_open}, {"stream_read", l_storage_stream_read}, {"stream_write", l_storage_stream_write}, {"close", l_storage_close}, {NULL, NULL}}},
+    {"capabilities", (const luaL_Reg[]){{"has_permission", l_capabilities_has_permission}, {"has_feature", l_capabilities_has_feature}, {NULL, NULL}}},
     {"wifi",     (const luaL_Reg[]){{"scan_start", l_wifi_scan_start}, {"scan_done", l_wifi_scan_done}, {"scan_finish", l_wifi_scan_finish}, {"scan_stop", l_wifi_stop_scan}, {"ap_count", l_wifi_count}, {"ap", l_wifi_ap}, {"connect", l_wifi_connect}, {"disconnect", l_wifi_disconnect}, {"is_connected", l_wifi_is_connected}, {"rssi", l_wifi_rssi}, {"ip", l_wifi_ip}, {"set_channel", l_wifi_set_channel}, {"get_channel", l_wifi_get_channel}, {"on_ap", l_wifi_on_ap}, {"deauth", l_wifi_deauth}, {"station_scan_start", l_wifi_station_scan_start}, {"station_scan_stop", l_wifi_station_scan_stop}, {"station_count", l_wifi_station_count}, {"station", l_wifi_station}, {NULL, NULL}}},
     {"ble",      (const luaL_Reg[]){{"scan_start", l_ble_start}, {"scan_stop", l_ble_stop}, {"device_count", l_ble_device_count}, {"get_device", l_ble_get_device}, {"on_device", l_ble_on_device}, {NULL, NULL}}},
     {"gps",      (const luaL_Reg[]){{"is_available", l_gps_is_available}, {"has_fix", l_gps_has_fix}, {"latitude", l_gps_get_latitude}, {"longitude", l_gps_get_longitude}, {"altitude", l_gps_get_altitude}, {"satellites", l_gps_get_satellites}, {"on_fix", l_gps_on_fix}, {NULL, NULL}}},
     {"oui",      (const luaL_Reg[]){{"lookup", l_oui_lookup}, {"prefix_match", l_oui_prefix_match}, {"prefix_set", l_oui_prefix_set}, {NULL, NULL}}},
     {"power",    (const luaL_Reg[]){{"percent", l_battery_percent}, {"voltage_mv", l_battery_voltage}, {"is_charging", l_battery_is_charging}, {"get_brightness", l_brightness_get}, {"set_brightness", l_brightness_set}, {NULL, NULL}}},
-    {"nfc",      (const luaL_Reg[]){{"is_available", l_nfc_is_available}, {"read_start", l_nfc_read_start}, {"stop", l_nfc_stop}, {"last_tag", l_nfc_last_tag}, {NULL, NULL}}},
+    {"nfc",      (const luaL_Reg[]){{"is_available", l_nfc_is_available}, {"read_start", l_nfc_read_start}, {"scan_start", l_nfc_scan_start}, {"stop", l_nfc_stop}, {"scan_active", l_nfc_scan_active}, {"read", l_nfc_read}, {"write_ndef", l_nfc_write_ndef}, {"last_tag", l_nfc_last_tag}, {NULL, NULL}}},
     {"time",     (const luaL_Reg[]){{"unix", l_time_unix}, {"set_unix", l_time_set}, {NULL, NULL}}},
     {"rgb",      (const luaL_Reg[]){{"set", l_rgb_set}, {NULL, NULL}}},
     {"badusb",   (const luaL_Reg[]){{"run", l_badusb_run}, {"stop", l_badusb_stop}, {NULL, NULL}}},
@@ -2020,6 +2240,11 @@ static void register_api(lua_State *L, ghostscript_runtime_t *rt) {
     lua_setglobal(L, "ghost");
     lua_pushcfunction(L, l_print);
     lua_setglobal(L, "print");
+
+    luaL_newmetatable(L, GS_STORAGE_STREAM_MT);
+    lua_pushcfunction(L, l_storage_stream_gc);
+    lua_setfield(L, -2, "__gc");
+    lua_pop(L, 1);
 }
 
 static void hook(lua_State *L, lua_Debug *ar) {

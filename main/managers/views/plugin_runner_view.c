@@ -33,6 +33,8 @@ static bool s_touch_scrolling = false;
 static lv_point_t s_touch_start = {0};
 static lv_point_t s_touch_last = {0};
 static lv_obj_t *s_touch_scroll_target = NULL;
+static bool s_preserve_for_keyboard_input = false;
+static bool s_resume_from_keyboard_input = false;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
@@ -195,7 +197,15 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
         case INPUT_TYPE_KEYBOARD:
             out.type = GHOSTESP_INPUT_KEY;
             out.value = event->data.key_value;
-            if (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`') out.type = GHOSTESP_INPUT_BACK;
+            switch (event->data.key_value) {
+                case LV_KEY_LEFT: out.type = GHOSTESP_INPUT_LEFT; break;
+                case LV_KEY_RIGHT: out.type = GHOSTESP_INPUT_RIGHT; break;
+                case LV_KEY_UP: out.type = GHOSTESP_INPUT_UP; break;
+                case LV_KEY_DOWN: out.type = GHOSTESP_INPUT_DOWN; break;
+                case LV_KEY_ESC:
+                case '`': out.type = GHOSTESP_INPUT_BACK; break;
+                default: break;
+            }
             break;
         case INPUT_TYPE_TOUCH:
             out.type = GHOSTESP_INPUT_TOUCH;
@@ -427,6 +437,22 @@ void plugin_runner_view_create(void) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
     }
+    plugin_loaded_app_t *loaded = plugin_loader_current();
+    if (s_resume_from_keyboard_input && s_root && lv_obj_is_valid(s_root) &&
+        loaded && loaded->running && loaded->state == PLUGIN_APP_STATE_RUNNING) {
+        s_resume_from_keyboard_input = false;
+        s_touch_started = false;
+        s_touch_scrolling = false;
+        s_touch_scroll_target = NULL;
+        plugin_runner_view.root = s_root;
+        display_manager_add_status_bar("SD App");
+        if (loaded->app && loaded->app->on_resume) loaded->app->on_resume();
+        if (loaded->app && loaded->app->on_tick) {
+            s_tick_timer = lv_timer_create(plugin_runner_tick_cb, PLUGIN_RUNNER_TICK_MS, NULL);
+        }
+        return;
+    }
+    s_resume_from_keyboard_input = false;
     if (!s_output_buf) {
         s_output_buf = malloc(PLUGIN_RUNNER_OUTPUT_BUF_SIZE);
         if (!s_output_buf) return;
@@ -484,12 +510,25 @@ void plugin_runner_stop_tick(void) {
     }
 }
 
+void plugin_runner_preserve_for_keyboard_input(void) {
+    s_preserve_for_keyboard_input = true;
+}
+
 void plugin_runner_view_destroy(void) {
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
     }
     plugin_runner_stop_tick();
+    if (s_preserve_for_keyboard_input) {
+        s_preserve_for_keyboard_input = false;
+        s_resume_from_keyboard_input = true;
+        plugin_loaded_app_t *loaded = plugin_loader_current();
+        if (loaded && loaded->running && loaded->app && loaded->app->on_pause) {
+            loaded->app->on_pause();
+        }
+        return;
+    }
     plugin_loader_unload(plugin_loader_current());
     plugin_api_set_ui_hooks(NULL, NULL, NULL, NULL);
     lvgl_obj_del_safe(&s_root);

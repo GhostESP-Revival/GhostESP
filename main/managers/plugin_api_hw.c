@@ -2,6 +2,7 @@
 #include "managers/gps_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/views/keyboard_screen.h"
+#include "managers/views/plugin_runner_view.h"
 #include "managers/display_manager.h"
 #include "vendor/GPS/MicroNMEA.h"
 #include <stdlib.h>
@@ -110,8 +111,12 @@ void plugin_api_ui_input_dialog(const char *title, const char *default_text,
     s_plugin_input_ctx = ctx;
 
     keyboard_view_set_submit_callback(plugin_api_keyboard_bridge);
+    View *return_view = display_manager_get_current_view();
+    keyboard_view_set_return_view(return_view);
     if (default_text)
         keyboard_view_set_initial_text(default_text);
 
+    if (return_view == &plugin_runner_view)
+        plugin_runner_preserve_for_keyboard_input();
     display_manager_switch_view(&keyboard_view);
 }

@@ -226,6 +226,7 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     const ghostesp_app_t *app = init_fn(api);
     esp_err_t validate_err = validate_app_descriptor(manifest, app);
     if (validate_err != ESP_OK) {
+        plugin_api_release();
         dlclose(handle);
         record_app_failure(manifest, s_last_error);
         plugin_loader_sd_end(mounted_here, display_was_suspended);
@@ -322,9 +323,11 @@ esp_err_t plugin_loader_unload(plugin_loaded_app_t *loaded) {
     plugin_runner_stop_tick();
     plugin_loader_stop(loaded);
 #if CONFIG_ENABLE_NATIVE_SD_APPS
-    if (loaded->handle) dlclose(loaded->handle);
-#endif
     plugin_api_release();
+    if (loaded->handle) dlclose(loaded->handle);
+#else
+    plugin_api_release();
+#endif
     memset(loaded, 0, sizeof(*loaded));
     return ESP_OK;
 }

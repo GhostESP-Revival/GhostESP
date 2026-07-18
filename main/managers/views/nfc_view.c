@@ -1,5 +1,6 @@
  #include "gui/screen_layout.h"
 #include "managers/display_manager.h"
+#include "managers/views/nfc_view.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/keyboard_screen.h"
 #include "managers/settings_manager.h"
@@ -58,6 +59,7 @@ lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coor
 #endif
 #include "managers/chameleon_manager.h"
 #include "managers/nfc/ndef.h"
+#include "managers/ghostscript_runtime.h"
 
 // Forward declaration for nfc_get_detected_title
 static const char* nfc_get_detected_title(void);
@@ -697,6 +699,14 @@ bool nfc_is_scan_cancelled(void) { return nfc_scan_cancel; }
 #ifdef NFC_HAS_LOCAL_READER
 static pn532_io_handle_t g_pn532 = NULL;
 static pn532_io_t g_pn532_instance;
+/* Kept separate from the UI reader so this facade never enters UI scan paths. */
+static pn532_io_handle_t nfc_t2_extension_reader = NULL;
+static TaskHandle_t nfc_t2_extension_task = NULL;
+static volatile bool nfc_t2_extension_cancel = false;
+static bool nfc_t2_extension_session = false;
+static nfc_view_t2_tag_info_t nfc_t2_extension_info;
+static uint8_t nfc_t2_extension_ndef[NFC_VIEW_T2_NDEF_MAX];
+static size_t nfc_t2_extension_ndef_len = 0;
 #endif
 static TaskHandle_t nfc_scan_task_handle = NULL;
 static char *nfc_details_text = NULL;
@@ -1439,8 +1449,221 @@ static bool nfc_init_local_reader(const char *tag) {
     return nfc_init_local_reader_st25r(tag);
 }
 
+static void nfc_t2_extension_release_reader(void) {
+    if (nfc_t2_extension_reader) {
+        pn532_release(nfc_t2_extension_reader);
+        pn532_delete_driver(nfc_t2_extension_reader);
+        nfc_t2_extension_reader = NULL;
+    }
+}
+
+static bool nfc_t2_extension_poll_uid(uint8_t uid[10], uint8_t *uid_len) {
+    if (!nfc_t2_extension_reader || !uid || !uid_len) return false;
+    uint16_t atqa = 0;
+    uint8_t sak = 0;
+    uint8_t len = 0;
+    if (pn532_read_passive_target_id_ex(nfc_t2_extension_reader, 0x00, uid, &len,
+                                        &atqa, &sak, 300) != ESP_OK ||
+        len == 0 || len > 10) {
+        return false;
+    }
+    *uid_len = len;
+    return true;
+}
+
+static void nfc_t2_extension_emit_tag(void) {
+    char event[64];
+    int pos = snprintf(event, sizeof(event), "%s|", nfc_t2_extension_info.model);
+    for (uint8_t i = 0; i < nfc_t2_extension_info.uid_len && pos >= 0 &&
+                        pos < (int)sizeof(event) - 3; i++) {
+        pos += snprintf(event + pos, sizeof(event) - (size_t)pos, "%02X",
+                        nfc_t2_extension_info.uid[i]);
+    }
+    if (pos >= 0) ghostscript_emit_event_escaped("nfc_tag", event);
+}
+
+static void nfc_t2_extension_scan_task(void *arg) {
+    (void)arg;
+    if (!nfc_init_local_reader("NFCT2Extension")) goto done;
+
+    /* nfc_init_local_reader owns the UI handle; transfer it before polling. */
+    nfc_t2_extension_reader = g_pn532;
+    g_pn532 = NULL;
+    while (!nfc_t2_extension_cancel) {
+        uint8_t uid[10] = {0};
+        uint8_t uid_len = 0;
+        if (!nfc_t2_extension_poll_uid(uid, &uid_len)) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        uint8_t *memory = NULL;
+        size_t memory_len = 0;
+        ntag_t2_info_t tag_info = {0};
+        if (!ntag_t2_read_user_memory_fast(nfc_t2_extension_reader, &memory,
+                                           &memory_len, &tag_info)) {
+            free(memory);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        /* A Type-2 NDEF tag must advertise a valid capability container. */
+        if (!tag_info.cc_valid || tag_info.user_bytes == 0) {
+            free(memory);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        /* Fast reads provide the payload; the full info read supplies lock/auth state. */
+        if (!ntag_t2_read_info(nfc_t2_extension_reader, &tag_info)) {
+            free(memory);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        if (nfc_t2_extension_cancel) {
+            free(memory);
+            break;
+        }
+
+        size_t ndef_offset = 0;
+        size_t ndef_len = 0;
+        bool ndef_present = ntag_t2_find_ndef(memory, memory_len, &ndef_offset, &ndef_len);
+        if (ndef_present && (ndef_len > NFC_VIEW_T2_NDEF_MAX ||
+                             ndef_offset > memory_len || ndef_len > memory_len - ndef_offset)) {
+            free(memory);
+            continue;
+        }
+
+        memset(&nfc_t2_extension_info, 0, sizeof(nfc_t2_extension_info));
+        memcpy(nfc_t2_extension_info.uid, uid, uid_len);
+        nfc_t2_extension_info.uid_len = uid_len;
+        snprintf(nfc_t2_extension_info.model, sizeof(nfc_t2_extension_info.model), "%s",
+                 ntag_t2_model_str(tag_info.model));
+        nfc_t2_extension_info.user_bytes = tag_info.user_bytes;
+        nfc_t2_extension_info.ndef_present = ndef_present;
+        nfc_t2_extension_info.ndef_length = ndef_present ? (uint16_t)ndef_len : 0;
+        nfc_t2_extension_info.read_only = tag_info.cc_read_only;
+        nfc_t2_extension_info.password_protected = tag_info.password_protected;
+        nfc_t2_extension_info.static_locked = tag_info.static_locked;
+        nfc_t2_extension_info.dynamic_locked = tag_info.dynamic_locked;
+        nfc_t2_extension_ndef_len = ndef_present ? ndef_len : 0;
+        if (ndef_present) memcpy(nfc_t2_extension_ndef, memory + ndef_offset, ndef_len);
+        free(memory);
+
+        nfc_t2_extension_session = true;
+        nfc_t2_extension_emit_tag();
+        break;
+    }
+
+done:
+    if (!nfc_t2_extension_session) nfc_t2_extension_release_reader();
+    nfc_t2_extension_task = NULL;
+    vTaskDelete(NULL);
+}
+
+bool nfc_view_t2_scan_start(void) {
+    /* Never contend with the UI scanner or a reader it retains for UI writes. */
+    if (nfc_scan_task_handle || g_pn532 || nfc_t2_extension_task ||
+        nfc_t2_extension_reader || nfc_t2_extension_session) {
+        return false;
+    }
+    nfc_t2_extension_cancel = false;
+    nfc_t2_extension_ndef_len = 0;
+    memset(&nfc_t2_extension_info, 0, sizeof(nfc_t2_extension_info));
+    if (xTaskCreate(nfc_t2_extension_scan_task, "nfc_t2_scan", 4096, NULL, 5,
+                    &nfc_t2_extension_task) != pdPASS) {
+        nfc_t2_extension_task = NULL;
+        return false;
+    }
+    return true;
+}
+
+bool nfc_view_t2_scan_stop(void) {
+    bool had_session = nfc_t2_extension_task || nfc_t2_extension_reader || nfc_t2_extension_session;
+    nfc_t2_extension_cancel = true;
+    uint32_t waited_ms = 0;
+    while (nfc_t2_extension_task && waited_ms < 2000) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        waited_ms += 20;
+    }
+    if (nfc_t2_extension_task) return false;
+    nfc_t2_extension_release_reader();
+    nfc_t2_extension_session = false;
+    nfc_t2_extension_ndef_len = 0;
+    memset(&nfc_t2_extension_info, 0, sizeof(nfc_t2_extension_info));
+    return had_session;
+}
+
+bool nfc_view_t2_scan_active(void) {
+    return nfc_t2_extension_task != NULL;
+}
+
+bool nfc_view_t2_read(nfc_view_t2_tag_info_t *out_info, uint8_t *ndef_out,
+                      size_t max_ndef_bytes, size_t *ndef_bytes_out) {
+    if (!nfc_t2_extension_session || !nfc_t2_extension_reader || !out_info) return false;
+    *out_info = nfc_t2_extension_info;
+    size_t copied = nfc_t2_extension_ndef_len;
+    if (copied > max_ndef_bytes) copied = max_ndef_bytes;
+    if (copied > 0 && !ndef_out) return false;
+    if (copied > 0) memcpy(ndef_out, nfc_t2_extension_ndef, copied);
+    if (ndef_bytes_out) *ndef_bytes_out = copied;
+    return true;
+}
+
+bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
+    if (!nfc_t2_extension_session || !nfc_t2_extension_reader ||
+        (!ndef && ndef_len != 0) || ndef_len > NFC_VIEW_T2_NDEF_MAX ||
+        nfc_t2_extension_info.read_only || nfc_t2_extension_info.password_protected ||
+        nfc_t2_extension_info.static_locked || nfc_t2_extension_info.dynamic_locked) {
+        return false;
+    }
+
+    size_t tlv_len = ndef_len <= 254 ? ndef_len + 3 : ndef_len + 5;
+    if (tlv_len > nfc_t2_extension_info.user_bytes) return false;
+
+    uint8_t uid[10] = {0};
+    uint8_t uid_len = 0;
+    if (!nfc_t2_extension_poll_uid(uid, &uid_len) ||
+        uid_len != nfc_t2_extension_info.uid_len ||
+        memcmp(uid, nfc_t2_extension_info.uid, uid_len) != 0) {
+        return false;
+    }
+
+    uint8_t last_page = nfc_t2_extension_info.user_bytes >= 4
+                            ? (uint8_t)(3 + nfc_t2_extension_info.user_bytes / 4) : 0;
+    if (last_page < 4) return false;
+    ntag_file_image_t image = {0};
+    image.model = NTAG2XX_UNKNOWN;
+    image.uid_len = uid_len;
+    memcpy(image.uid, uid, uid_len);
+    image.first_user_page = 4;
+    image.pages_total = 4 + (int)((tlv_len + 3) / 4);
+    image.full_pages = calloc((size_t)image.pages_total, 4);
+    if (!image.full_pages) return false;
+
+    uint8_t *tlv = &image.full_pages[16]; /* Page 4 is the first writable page. */
+    size_t pos = 0;
+    tlv[pos++] = 0x03;
+    if (ndef_len <= 254) {
+        tlv[pos++] = (uint8_t)ndef_len;
+    } else {
+        tlv[pos++] = 0xFF;
+        tlv[pos++] = (uint8_t)(ndef_len >> 8);
+        tlv[pos++] = (uint8_t)ndef_len;
+    }
+    if (ndef_len) memcpy(tlv + pos, ndef, ndef_len);
+    tlv[pos + ndef_len] = 0xFE;
+    bool ok = ntag_write_to_tag(nfc_t2_extension_reader, &image, NULL, NULL);
+    ntag_file_free(&image);
+    return ok;
+}
+
 static void nfc_scan_task(void *arg) {
     const char *TAGT = "NFCScan";
+    if (nfc_t2_extension_task || nfc_t2_extension_reader || nfc_t2_extension_session) {
+        ESP_LOGW(TAGT, "Type-2 extension session owns the local NFC reader");
+        nfc_scan_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
     ESP_LOGI(TAGT, "scan_task: start (cancel=%d)", nfc_scan_cancel);
     mfc_set_attack_hooks(&nfc_ui_attack_hooks);
     if (!nfc_init_local_reader(TAGT)) {
@@ -1552,6 +1775,40 @@ scan_task_done:
     nfc_scan_task_handle = NULL;
     ESP_LOGI(TAGT, "scan_task: exit");
     vTaskDelete(NULL);
+}
+#endif
+
+#ifndef NFC_HAS_LOCAL_READER
+bool nfc_view_t2_scan_start(void) { return false; }
+bool nfc_view_t2_scan_stop(void) { return false; }
+bool nfc_view_t2_scan_active(void) { return false; }
+bool nfc_view_t2_read(nfc_view_t2_tag_info_t *out_info, uint8_t *ndef_out,
+                      size_t max_ndef_bytes, size_t *ndef_bytes_out) {
+    (void)out_info; (void)ndef_out; (void)max_ndef_bytes; (void)ndef_bytes_out;
+    return false;
+}
+bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
+    (void)ndef; (void)ndef_len;
+    return false;
+}
+#endif
+
+#ifndef NFC_HAS_LOCAL_READER
+bool nfc_view_t2_scan_start(void) { return false; }
+bool nfc_view_t2_scan_stop(void) { return false; }
+bool nfc_view_t2_scan_active(void) { return false; }
+bool nfc_view_t2_read(nfc_view_t2_tag_info_t *out_info, uint8_t *ndef_out,
+                      size_t max_ndef_bytes, size_t *ndef_bytes_out) {
+    (void)out_info;
+    (void)ndef_out;
+    (void)max_ndef_bytes;
+    (void)ndef_bytes_out;
+    return false;
+}
+bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
+    (void)ndef;
+    (void)ndef_len;
+    return false;
 }
 #endif
 

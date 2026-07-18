@@ -94,12 +94,13 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `event`      | `on`, `off`, `emit`, `wait`: pub/sub between scripts and firmware.           |
 | `input`      | `subscribe(topic, fn)`, `unsubscribe(topic, fn)`: aliases for event subscription; use topic `"input"` for all input. |
 | `system`     | `free_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random`. |
-| `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`. |
+| `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`, bounded logical streams. |
+| `capabilities` | `has_permission(name)`, `has_feature(name)`: inspect manifest authorization and host support. |
 | `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
 | `ble`        | `scan_start`, `scan_stop`, `device_count`, `get_device(i)`, `on_device`.     |
 | `gps`        | `is_available`, `has_fix`, `latitude`, `longitude`, `altitude`, `satellites`, `on_fix`. |
 | `power`      | `percent`, `voltage_mv`, `is_charging`, `get_brightness`, `set_brightness`.  |
-| `nfc`        | `is_available`, `last_tag`.                                                  |
+| `nfc`        | `is_available`, `scan_start`, `stop`, `scan_active`, `read(max_bytes)`, `write_ndef(message)`, `last_tag`. Type-2 NDEF only. |
 | `ir`         | `send_file`, `listen(timeout_ms)`, `stop`.                                 |
 | `subghz`     | `load`, `transmit`, `receive(timeout_ms, freq)`, `read_raw`, `stop`.       |
 | `badusb`     | `run`, `stop`.                                                               |
@@ -113,6 +114,34 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `oui`        | `lookup(mac)`, `prefix_match(mac, prefix)`, `prefix_set(prefix1, ...)`.     |
 
 Permissions for each subtable are set in the script manifest. A script without the right permission gets a runtime error when it calls the API. Use `wifi` for scanning and results; operations that change radio state or transmit frames, including `ghost.wifi.deauth`, require `wifi_control` as well.
+
+### Storage Streams
+
+Scripts with `storage` permission can use bounded logical streams for files that do not fit in the normal `storage.read` buffer. A stream never keeps the SD card mounted or a file descriptor open between calls, so it is safe on JIT-SD targets.
+
+```lua
+local out = assert(ghost.storage.open("capture.bin", "w"))
+assert(ghost.storage.stream_write(out, chunk_a) == #chunk_a)
+assert(ghost.storage.stream_write(out, chunk_b) == #chunk_b)
+ghost.storage.close(out)
+
+local input = assert(ghost.storage.open("capture.bin", "r"))
+while true do
+    local chunk, err = ghost.storage.stream_read(input, 1024)
+    assert(not err, err)
+    if not chunk then break end
+    -- Process chunk.
+end
+ghost.storage.close(input)
+```
+
+`open` accepts `"r"`, `"w"`, or `"a"`; `"w"` truncates and `"a"` starts at the existing end. Reads and writes are limited to 1024 bytes per call and writes are flushed before they return. Paths remain app-scoped, reject absolute paths, backslashes, traversal, and hidden files. `close` is idempotent, and runtime teardown invalidates every stream handle. Use `ghost.capabilities.has_feature("storage_stream")` to feature-detect the API and `has_permission("storage")` to check authorization.
+
+### Type-2 NFC
+
+With the `nfc` permission and a local PN532 or ST25R3916 reader, `ghost.nfc.scan_start()` begins an isolated Type-2 NDEF scan. Poll `scan_active()` and use `read(max_bytes)` after it finishes; the result includes the UID, model, user capacity, NDEF bytes, and read-only, password, and lock state. `write_ndef(message)` writes a bounded NDEF message only to the same tag that was scanned, rechecks its UID immediately before writing, and refuses read-only, password-protected, or locked tags.
+
+This facade intentionally excludes MIFARE authentication, key recovery, nonce collection, raw page access, emulation, and non-Type-2 protocols. Call `stop()` when finished to release the reader. A successful scan emits the compact `nfc_tag` event (`model|uid`); read the tag object for complete metadata and NDEF bytes.
 
 ## Chaining CLI commands
 

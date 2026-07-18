@@ -11,6 +11,7 @@ void plugin_runner_set_app(const char *app_id);
 void plugin_runner_view_create(void);
 void plugin_runner_view_destroy(void);
 void plugin_runner_stop_tick(void);
+void plugin_runner_preserve_for_keyboard_input(void);
 void plugin_runner_get_callback(void **callback);
 
 extern View plugin_runner_view;

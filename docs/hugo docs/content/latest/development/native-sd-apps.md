@@ -172,6 +172,8 @@ Load → on_start() → [on_tick() / on_input()] → on_pause() / on_resume() �
 
 Call `api->app_exit()` from your app to request a clean shutdown.
 
+The host then releases app-owned API resources before unloading the app binary. This includes managed tasks, sockets, event subscriptions, GPIO interrupts, PWM channels, SPI devices, and active radio capture state. Apps must still stop work in `on_stop()` so their own state is consistent before that cleanup runs.
+
 ## Input Events
 
 `on_input` receives a `ghostesp_input_event_t`:

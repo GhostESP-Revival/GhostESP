@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.16)
+
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../../components/espressif__elf_loader")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(qr_generator)
+
+include(elf_loader)
+set(ELF_LIBS "${CMAKE_CURRENT_LIST_DIR}/../../../components/M5GFX/src/lgfx/utility/lgfx_qrcode.c")
+project_so(qr_generator)

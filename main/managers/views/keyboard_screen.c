@@ -335,10 +335,15 @@ static lv_obj_t* create_key_button(lv_obj_t *parent, int x, int y, int w, int h,
 
 static void submit_text() {
     if (submit_callback) {
-        submit_callback(input_buffer);
+        char submitted_text[sizeof(input_buffer)];
+        KeyboardSubmitCallback callback = submit_callback;
+        memcpy(submitted_text, input_buffer, sizeof(submitted_text));
         memset(input_buffer, 0, sizeof(input_buffer));
         input_len = 0;
         update_input_label();
+        if (keyboard_return_view)
+            display_manager_switch_view_and_wait_for_refresh(keyboard_return_view);
+        callback(submitted_text);
     } else if (input_len > 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
