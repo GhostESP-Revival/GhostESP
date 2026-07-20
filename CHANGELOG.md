@@ -17,6 +17,7 @@
 ### Cloud Store
 - Added Cloud Store in the Apps gallery for browsing and installing apps, scripts and asset packs from the GitHub catalogs
 - Added a progress bar view showing download status while installing from Cloud Store
+- Bounded catalog response buffering to protect heap availability during refreshes
 
 ### Native SD Apps & SDK
 - Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
@@ -36,6 +37,7 @@
 - Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445
 - Added SNMP MIB walk (`snmpprobe walk`) using GetNextRequest to traverse OID subtrees with support for custom root OIDs
 - Added a compact live Wi-Fi packet monitor (`scanarp monitor`) using the Wireshark raw-capture path
+- Improved ARP scan with multi-pass scanning (4 passes with inter-pass delays), thread-safe lwIP access via TCP/IP core locking, lwIP `etharp_request` replacing raw 802.11 TX, and netmask-aware subnet scanning (respects /20-/31 instead of hardcoded /24) — techniques adapted from [DecentLabs/officeAir](https://github.com/DecentLabs/officeAir) (MIT-licensed)
 - Added a graphical Packet Visualizer with smooth color-filled per-channel activity, channel hopping, and custom channel selection
 - Added a responsive Channel Congestion chart with active-channel labels and scan summaries
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
@@ -53,6 +55,7 @@
 - Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions
 
 ### Other Changes
+- Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
 - Restored submenu, selection, and scroll state when backing out of options and returning from tool views
 - Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
 - Fixed display resume crashes after shared SPI SD mounts on C5 boards

@@ -36,6 +36,9 @@ typedef struct {
  */
 typedef struct {
     char subnet_prefix[16];   ///< Subnet prefix (e.g., "192.168.1.")
+    uint32_t scan_first;      ///< First host IP (network + 1)
+    uint32_t scan_last;       ///< Last host IP (broadcast - 1)
+    int total_hosts;          ///< Number of IPs in the scan range
     arp_host_t *hosts;        ///< Array of discovered hosts
     size_t max_hosts;         ///< Maximum number of hosts
     size_t num_active_hosts;  ///< Number of active hosts found
@@ -57,6 +60,7 @@ void arp_scan_cancel(void);
 int arp_scan_get_count(void);
 const arp_host_t* arp_scan_get_host(int index);
 void arp_scan_clear_results(void);
+void arp_scan_get_progress(int *pass, int *total_passes, int *scanned, int *total_hosts, int *found);
 
 // Compact Wi-Fi packet monitor (legacy API names retained for CLI compatibility)
 void arp_scan_start_passive(int duration_sec);

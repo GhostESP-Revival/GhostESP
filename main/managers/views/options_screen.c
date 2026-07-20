@@ -2456,6 +2456,16 @@ static void arp_scan_poll_timer_cb(lv_timer_t *timer) {
             return;
         }
         arp_scan_complete_callback();
+        return;
+    }
+    // Update spinner with live progress
+    int pass = 0, total_passes = 0, scanned = 0, total_hosts = 0, found = 0;
+    arp_scan_get_progress(&pass, &total_passes, &scanned, &total_hosts, &found);
+    if (total_hosts > 0 && arp_scan_status) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Pass %d/%d  %d/%d  %d found",
+                 pass, total_passes, scanned, total_hosts, found);
+        scan_status_set_subtext(arp_scan_status, buf);
     }
 }
 

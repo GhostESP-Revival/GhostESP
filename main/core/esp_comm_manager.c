@@ -195,6 +195,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
 static bool queue_received_command(esp_comm_manager_t* comm, const char* command, const char* data);
 static void drain_command_queue(QueueHandle_t queue);
 static void reset_command_stream(esp_comm_manager_t* comm);
+static void release_command_stream(esp_comm_manager_t* comm);
 
 static inline void lock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
@@ -367,13 +368,16 @@ static void reset_command_stream(esp_comm_manager_t* comm) {
     if (!comm) {
         return;
     }
-    if (comm->command_stream_buf) {
-        free(comm->command_stream_buf);
-        comm->command_stream_buf = NULL;
-    }
     comm->command_stream_len = 0;
-    comm->command_stream_cap = 0;
     comm->command_stream_discarding = false;
+}
+
+static void release_command_stream(esp_comm_manager_t* comm) {
+    if (!comm) return;
+    free(comm->command_stream_buf);
+    comm->command_stream_buf = NULL;
+    comm->command_stream_cap = 0;
+    reset_command_stream(comm);
 }
 
 static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t needed) {
@@ -384,21 +388,13 @@ static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t need
         return true;
     }
 
-    size_t new_cap = comm->command_stream_cap ? comm->command_stream_cap : 64;
-    while (new_cap < needed && new_cap < COMM_STREAM_COMMAND_MAX + 1) {
-        new_cap *= 2;
-    }
-    if (new_cap > COMM_STREAM_COMMAND_MAX + 1) {
-        new_cap = COMM_STREAM_COMMAND_MAX + 1;
-    }
-
-    char* new_buf = (char*)realloc(comm->command_stream_buf, new_cap);
+    char* new_buf = (char*)malloc(COMM_STREAM_COMMAND_MAX + 1);
     if (!new_buf) {
         reset_command_stream(comm);
         return false;
     }
     comm->command_stream_buf = new_buf;
-    comm->command_stream_cap = new_cap;
+    comm->command_stream_cap = COMM_STREAM_COMMAND_MAX + 1;
     return true;
 }
 
@@ -1618,7 +1614,7 @@ bool esp_comm_manager_start_discovery(void) {
         vQueueDelete(s_comm_manager->command_queue);
         s_comm_manager->command_queue = NULL;
     }
-    reset_command_stream(s_comm_manager);
+    release_command_stream(s_comm_manager);
     if (s_comm_manager->tx_task_handle) {
         vTaskDelete(s_comm_manager->tx_task_handle);
         s_comm_manager->tx_task_handle = NULL;
@@ -1938,7 +1934,7 @@ void esp_comm_manager_deinit(void) {
         drain_command_queue(s_comm_manager->command_queue);
         vQueueDelete(s_comm_manager->command_queue);
     }
-    reset_command_stream(s_comm_manager);
+    release_command_stream(s_comm_manager);
     if (s_comm_manager->state_mutex) {
         vSemaphoreDelete(s_comm_manager->state_mutex);
     }

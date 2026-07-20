@@ -22,6 +22,16 @@
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/tcpip.h"
+
+// Thread-safe lwIP access: LOCK_TCPIP_CORE is only available when
+// CONFIG_LWIP_TCPIP_CORE_LOCKING is enabled. Provide a no-op fallback
+// so the code compiles either way (the ethernet scan already calls
+// etharp_request without locking, matching the unconfigured behaviour).
+#ifndef LOCK_TCPIP_CORE
+#define LOCK_TCPIP_CORE()
+#define UNLOCK_TCPIP_CORE()
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,18 +44,32 @@
 static const char *TAG = "ARPScan";
 
 // Scan configuration
-#define START_HOST 1
-#define END_HOST 254
-#define BATCH_SIZE 10
-#define ARP_REQUEST_DELAY_MS 10
-#define ARP_RESPONSE_WAIT_MS 250
+#define BATCH_SIZE 20
+#define ARP_REQUEST_DELAY_MS 5
+#define ARP_RESPONSE_WAIT_MS 80
 #define MAX_RETRIES 3
+#define ARP_SCAN_MAX_PREFIX_LEN 20  // cap at /20 (4094 hosts) to keep scan time sane
+
+// Multi-pass scan configuration (technique inspired by DecentLabs/officeAir).
+// Multiple passes with inter-pass delays catch power-saving mobile clients
+// that miss single-pass probes. Results are unioned across passes.
+#define ARP_SCAN_PASSES_SMALL  3     // for /24 and smaller
+#define ARP_SCAN_PASSES_LARGE  2     // for larger subnets
+#define ARP_SMALL_THRESHOLD  256     // <= this many hosts = "small"
+#define ARP_INTER_PASS_DELAY_MS 800
 
 // Persistent result storage (heap-allocated)
 static arp_host_t *g_arp_results = NULL;
 static int g_arp_result_count = 0;
 static volatile bool g_arp_scan_running = false;
 static volatile bool g_arp_scan_done = false;
+
+// Live progress tracking (read from UI poll timer)
+static volatile int g_arp_progress_pass = 0;
+static volatile int g_arp_progress_total_passes = 0;
+static volatile int g_arp_progress_scanned = 0;
+static volatile int g_arp_progress_total_hosts = 0;
+static volatile int g_arp_progress_found = 0;
 
 // ============================================================================
 // Internal Helpers (Module-specific)
@@ -93,7 +117,8 @@ arp_scanner_ctx_t *arp_scanner_init(void) {
         return NULL;
     }
 
-    ctx->max_hosts = END_HOST - START_HOST + 1;
+    // Allocate up to ARP_SCAN_MAX_RESULTS (the persistent storage cap)
+    ctx->max_hosts = ARP_SCAN_MAX_RESULTS;
     ctx->hosts = malloc(sizeof(arp_host_t) * ctx->max_hosts);
     if (!ctx->hosts) {
         free(ctx);
@@ -101,6 +126,9 @@ arp_scanner_ctx_t *arp_scanner_init(void) {
     }
 
     ctx->num_active_hosts = 0;
+    ctx->scan_first = 0;
+    ctx->scan_last = 0;
+    ctx->total_hosts = 0;
     memset(ctx->subnet_prefix, 0, sizeof(ctx->subnet_prefix));
     return ctx;
 }
@@ -122,7 +150,12 @@ void arp_scanner_cleanup(arp_scanner_ctx_t *ctx) {
 // ============================================================================
 
 /**
- * @brief Send ARP request to target IP using raw WiFi transmission
+ * @brief Send ARP request to target IP via the lwIP stack
+ *
+ * Uses the thread-safe etharp_request() call through the lwIP TCP/IP core
+ * instead of crafting raw 802.11 frames. This is more reliable (no WiFi
+ * buffer exhaustion) and lets the stack handle retransmits.
+ * Technique inspired by DecentLabs/officeAir (MIT-licensed).
  */
 bool send_arp_request(const char *target_ip) {
     if (!target_ip) {
@@ -130,93 +163,26 @@ bool send_arp_request(const char *target_ip) {
         return false;
     }
 
-    ESP_LOGD(TAG, "Sending ARP request to %s", target_ip);
-    
-    esp_netif_t *netif = get_wifi_sta_netif();
-    if (!netif) {
-        ESP_LOGW(TAG, "send_arp_request: Failed to get WiFi STA interface");
+    ip4_addr_t target_addr;
+    if (!ip4addr_aton(target_ip, &target_addr)) {
+        ESP_LOGW(TAG, "send_arp_request: invalid IP '%s'", target_ip);
         return false;
     }
 
-    // Get our own IP and MAC
-    esp_netif_ip_info_t ip_info;
-    uint8_t our_mac[6];
-    if (!get_own_ip_and_mac(netif, &ip_info, our_mac)) {
+    struct netif *nif = netif_default;
+    if (!nif) {
+        ESP_LOGW(TAG, "send_arp_request: netif_default is NULL");
         return false;
     }
 
-    // Parse target IP
-    esp_ip4_addr_t target_addr;
-    if (inet_pton(AF_INET, target_ip, &target_addr) != 1) {
-        return false;
-    }
-    
-    // Create ARP request packet
-    uint8_t arp_packet[42] = {
-        // Ethernet header
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Destination MAC (broadcast)
-        our_mac[0], our_mac[1], our_mac[2], our_mac[3], our_mac[4], our_mac[5], // Source MAC
-        0x08, 0x06, // EtherType (ARP)
-        
-        // ARP header
-        0x00, 0x01, // Hardware type (Ethernet)
-        0x08, 0x00, // Protocol type (IPv4)
-        0x06,       // Hardware address length
-        0x04,       // Protocol address length
-        0x00, 0x01, // Operation (ARP request)
-        
-        // Sender hardware address (our MAC)
-        our_mac[0], our_mac[1], our_mac[2], our_mac[3], our_mac[4], our_mac[5],
-        
-        // Sender protocol address (our IP)
-        (ip_info.ip.addr >> 0) & 0xFF,
-        (ip_info.ip.addr >> 8) & 0xFF,
-        (ip_info.ip.addr >> 16) & 0xFF,
-        (ip_info.ip.addr >> 24) & 0xFF,
-        
-        // Target hardware address (unknown, all zeros)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        
-        // Target protocol address (target IP)
-        (target_addr.addr >> 0) & 0xFF,
-        (target_addr.addr >> 8) & 0xFF,
-        (target_addr.addr >> 16) & 0xFF,
-        (target_addr.addr >> 24) & 0xFF
-    };
-
-    // Send raw ARP packet using esp_wifi_80211_tx with retry logic
-    ESP_LOGD(TAG, "Sending ARP packet to %s via esp_wifi_80211_tx", target_ip);
-    
-    esp_err_t err = ESP_FAIL;
-    int retry_count = 0;
-    
-    while (retry_count < MAX_RETRIES) {
-        err = esp_wifi_80211_tx(WIFI_IF_STA, arp_packet, sizeof(arp_packet), false);
-        
-        if (err == ESP_OK) {
-            ESP_LOGD(TAG, "ARP packet sent successfully to %s", target_ip);
-            return true;
-        } else if (err == ESP_ERR_NO_MEM) {
-            // WiFi buffer exhaustion - wait and retry
-            retry_count++;
-            ESP_LOGD(TAG, "WiFi buffer full for %s, retry %d/%d", target_ip, retry_count, MAX_RETRIES);
-            vTaskDelay(pdMS_TO_TICKS(10));
-        } else {
-            // Other error - don't retry
-            ESP_LOGW(TAG, "Failed to send ARP packet to %s: %s", target_ip, esp_err_to_name(err));
-            break;
-        }
-    }
-    
-    if (err == ESP_ERR_NO_MEM) {
-        ESP_LOGW(TAG, "Failed to send ARP packet to %s after %d retries: WiFi buffers exhausted", target_ip, MAX_RETRIES);
-    }
-    
-    return false;
+    LOCK_TCPIP_CORE();
+    err_t result = etharp_request(nif, &target_addr);
+    UNLOCK_TCPIP_CORE();
+    return (result == ERR_OK);
 }
 
 /**
- * @brief Send ARP request using lwIP stack
+ * @brief Send ARP request using lwIP stack (thread-safe)
  */
 static bool send_arp_request_lwip(const char *target_ip) {
     if (!target_ip) {
@@ -236,13 +202,15 @@ static bool send_arp_request_lwip(const char *target_ip) {
         return false;
     }
 
-    // Send ARP request using lwIP
+    // Send ARP request using lwIP (thread-safe via TCP/IP core lock)
+    LOCK_TCPIP_CORE();
     err_t result = etharp_request(netif, &target_addr);
+    UNLOCK_TCPIP_CORE();
     return (result == ERR_OK);
 }
 
 /**
- * @brief Get ARP table entry for IP address
+ * @brief Get ARP table entry for IP address (thread-safe)
  */
 bool get_arp_table_entry(const char *ip, uint8_t *mac) {
     if (!ip || !mac) {
@@ -259,13 +227,14 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
     struct eth_addr *eth_ret = NULL;
     const ip4_addr_t *ip_ret = NULL;
     
+    LOCK_TCPIP_CORE();
     s8_t arp_idx = etharp_find_addr(NULL, &target_addr, &eth_ret, &ip_ret);
     if (arp_idx >= 0 && eth_ret) {
         memcpy(mac, eth_ret->addr, 6);
-        return true;
     }
+    UNLOCK_TCPIP_CORE();
 
-    return false;
+    return (arp_idx >= 0 && eth_ret != NULL);
 }
 
 // ============================================================================
@@ -273,9 +242,23 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
 // ============================================================================
 
 /**
- * @brief Get subnet prefix from current WiFi connection
+ * @brief Build an IP string from a uint32_t address
  */
-static bool arp_get_subnet_prefix(char *subnet_prefix, size_t prefix_size) {
+static void ip_to_string(uint32_t addr, char *buf, size_t size) {
+    struct in_addr a;
+    // addr is in host byte order; inet_ntoa expects network byte order
+    a.s_addr = htonl(addr);
+    strncpy(buf, inet_ntoa(a), size - 1);
+    buf[size - 1] = '\0';
+}
+
+/**
+ * @brief Determine the scan range from the actual netmask
+ *
+ * Fills ctx->scan_first, ctx->scan_last, ctx->total_hosts and builds
+ * a human-readable subnet_prefix.  Caps at /20 to keep scan time sane.
+ */
+static bool arp_get_subnet_range(arp_scanner_ctx_t *ctx) {
     esp_netif_t *netif = get_wifi_sta_netif();
     if (!netif) {
         glog("Failed to get WiFi interface\n");
@@ -287,32 +270,54 @@ static bool arp_get_subnet_prefix(char *subnet_prefix, size_t prefix_size) {
         return false;
     }
 
-    // Get IP info
     esp_netif_ip_info_t ip_info;
     if (esp_netif_get_ip_info(netif, &ip_info) != ESP_OK) {
         glog("Failed to get IP info\n");
         return false;
     }
 
-    uint32_t network = ip_info.ip.addr & ip_info.netmask.addr;
-    struct in_addr network_addr;
-    network_addr.s_addr = network;
+    uint32_t netmask = ntohl(ip_info.netmask.addr);
+    uint32_t my_ip   = ntohl(ip_info.ip.addr);
 
-    char *network_str = inet_ntoa(network_addr);
-    char *last_dot = strrchr(network_str, '.');
-    if (last_dot == NULL) {
-        glog("Invalid network address format\n");
+    // Count host bits: trailing ones in ~netmask
+    int host_bits = 0;
+    uint32_t host_mask = ~netmask;
+    for (uint32_t bit = 1; bit && (host_mask & bit); bit <<= 1) {
+        host_bits++;
+    }
+
+    // Cap at /20 (12 host bits = 4094 hosts) to keep scan time sane.
+    // When capping, shrink the effective host_mask so the scan range
+    // stays within the first /20 block that contains our IP.
+    if (host_bits > (32 - ARP_SCAN_MAX_PREFIX_LEN)) {
+        host_bits = 32 - ARP_SCAN_MAX_PREFIX_LEN;
+        host_mask = (1u << host_bits) - 1;
+    }
+
+    uint32_t network  = my_ip & ~host_mask;
+    uint32_t broadcast = network | host_mask;
+    uint32_t first_ip = network + 1;
+    uint32_t last_ip  = broadcast - 1;
+
+    if (first_ip >= last_ip) {
+        glog("Subnet too small to scan\n");
         return false;
     }
 
-    size_t len = last_dot - network_str + 1;
-    if (len >= prefix_size) {
-        return false;
-    }
-    memcpy(subnet_prefix, network_str, len);
-    subnet_prefix[len] = '\0';
+    ctx->scan_first  = htonl(first_ip);
+    ctx->scan_last   = htonl(last_ip);
+    ctx->total_hosts = (int)(last_ip - first_ip + 1);
 
-    ESP_LOGI(TAG, "Determined subnet prefix: %s", subnet_prefix);
+    // Build a display prefix (e.g. "192.168.1." for /24)
+    // For larger subnets this is just the network address
+    ip_to_string(network, ctx->subnet_prefix, sizeof(ctx->subnet_prefix));
+
+    int cidr = 32 - host_bits;
+    char first_str[16], last_str[16];
+    ip_to_string(first_ip, first_str, sizeof(first_str));
+    ip_to_string(last_ip, last_str, sizeof(last_str));
+    ESP_LOGI(TAG, "Subnet: %s/%d (%d hosts, scan range %s-%s)",
+             ctx->subnet_prefix, cidr, ctx->total_hosts, first_str, last_str);
     return true;
 }
 
@@ -338,30 +343,60 @@ static bool add_discovered_host(arp_scanner_ctx_t *ctx, const char *ip, const ui
 }
 
 /**
+ * @brief Check if a host IP is already in the discovered list
+ */
+static bool is_host_known(const arp_scanner_ctx_t *ctx, const char *ip) {
+    for (size_t i = 0; i < ctx->num_active_hosts; i++) {
+        if (strcmp(ctx->hosts[i].ip, ip) == 0) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Harvest all entries currently in the lwIP ARP table
+ *
+ * Called between sub-batches and between passes to pick up early responses.
+ * Thread-safe: holds the TCP/IP core lock while iterating the table.
+ */
+static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
+    LOCK_TCPIP_CORE();
+    for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
+        ip4_addr_t *ip = NULL;
+        struct netif *entry_netif = NULL;
+        struct eth_addr *eth = NULL;
+        if (!etharp_get_entry(i, &ip, &entry_netif, &eth) || !ip || !eth) continue;
+
+        char ip_str[16];
+        ip4addr_ntoa_r(ip, ip_str, sizeof(ip_str));
+
+        if (!is_host_known(ctx, ip_str)) {
+            add_discovered_host(ctx, ip_str, eth->addr);
+        }
+    }
+    UNLOCK_TCPIP_CORE();
+}
+
+/**
  * @brief Process a batch of hosts - send ARP requests and collect responses
  */
-static void process_batch(arp_scanner_ctx_t *ctx, int batch_start, int batch_end) {
-    char current_ip[26];
+static void process_batch(arp_scanner_ctx_t *ctx, uint32_t batch_start, uint32_t batch_end) {
+    char current_ip[16];
     
     // Send batch of ARP requests using lwIP
-    for (int host = batch_start; host <= batch_end; host++) {
-        build_ip_string(current_ip, sizeof(current_ip), ctx->subnet_prefix, host);
-        send_arp_request_lwip(current_ip);
+    for (uint32_t ip = batch_start; ip <= batch_end; ip++) {
+        ip_to_string(ip, current_ip, sizeof(current_ip));
+        if (!is_host_known(ctx, current_ip)) {
+            send_arp_request_lwip(current_ip);
+        }
         vTaskDelay(pdMS_TO_TICKS(ARP_REQUEST_DELAY_MS));
     }
     
     // Wait for responses to arrive
     vTaskDelay(pdMS_TO_TICKS(ARP_RESPONSE_WAIT_MS));
     
-    // Check ARP table for this batch
-    for (int host = batch_start; host <= batch_end; host++) {
-        build_ip_string(current_ip, sizeof(current_ip), ctx->subnet_prefix, host);
-        
-        uint8_t mac[6];
-        if (get_arp_table_entry(current_ip, mac)) {
-            add_discovered_host(ctx, current_ip, mac);
-        }
-    }
+    // Harvest the ARP table (picks up responses from this batch and any
+    // late arrivals from previous batches)
+    harvest_arp_table(ctx);
 }
 
 // ============================================================================
@@ -369,7 +404,12 @@ static void process_batch(arp_scanner_ctx_t *ctx, int batch_start, int batch_end
 // ============================================================================
 
 /**
- * @brief Scan subnet for active hosts using ARP
+ * @brief Scan subnet for active hosts using multi-pass ARP sweeps
+ *
+ * Respects the actual netmask — scans the full network range (up to /20).
+ * Runs multiple passes, unioning results across passes. Inter-pass delays
+ * give power-saving mobile clients a chance to wake up and respond.
+ * Technique inspired by DecentLabs/officeAir (MIT-licensed).
  */
 bool arp_scan_subnet(void) {
     arp_scanner_ctx_t *ctx = arp_scanner_init();
@@ -378,42 +418,88 @@ bool arp_scan_subnet(void) {
         return false;
     }
 
-    // Get subnet information
-    if (!arp_get_subnet_prefix(ctx->subnet_prefix, sizeof(ctx->subnet_prefix))) {
+    // Get actual subnet range from netmask
+    if (!arp_get_subnet_range(ctx)) {
         glog("Failed to get network information. Make sure WiFi is connected.\n");
         arp_scanner_cleanup(ctx);
         return false;
     }
 
-    glog("Starting ARP scan on %s0/24\n", ctx->subnet_prefix);
-    glog("Scanning network using ARP requests...\n");
-    ESP_LOGI(TAG, "Starting ARP scan, scanning %s1-%d", ctx->subnet_prefix, END_HOST);
+    // Scale passes based on network size
+    int num_passes = (ctx->total_hosts <= ARP_SMALL_THRESHOLD)
+                     ? ARP_SCAN_PASSES_SMALL : ARP_SCAN_PASSES_LARGE;
+    // Derive CIDR from the host bit count (before capping)
+    esp_netif_ip_info_t _ip_info;
+    esp_netif_get_ip_info(get_wifi_sta_netif(), &_ip_info);
+    uint32_t _hm = ~ntohl(_ip_info.netmask.addr);
+    int host_bits = 0;
+    for (uint32_t bit = 1; bit && (_hm & bit); bit <<= 1) host_bits++;
+    int cidr = 32 - host_bits;
+
+    glog("Starting %d-pass ARP scan on %s/%d (%d hosts)\n",
+         num_passes, ctx->subnet_prefix, cidr, ctx->total_hosts);
+    ESP_LOGI(TAG, "Starting %d-pass ARP scan, %d hosts in range",
+             num_passes, ctx->total_hosts);
     
     ctx->num_active_hosts = 0;
-    const int total_hosts = END_HOST - START_HOST + 1;
-    
-    for (int batch_start = START_HOST; batch_start <= END_HOST; batch_start += BATCH_SIZE) {
+    // Work in host byte order for the loop — comparing network-byte-order
+    // uint32_t values on little-endian gives wrong IP ordering.
+    uint32_t first = ntohl(ctx->scan_first);
+    uint32_t last  = ntohl(ctx->scan_last);
+
+    g_arp_progress_total_passes = num_passes;
+    g_arp_progress_total_hosts  = ctx->total_hosts;
+
+    for (int pass = 0; pass < num_passes; pass++) {
         if (!g_arp_scan_running) {
             glog("ARP scan cancelled\n");
             arp_scanner_cleanup(ctx);
             return false;
         }
 
-        int batch_end = (batch_start + BATCH_SIZE - 1 > END_HOST) ? END_HOST : batch_start + BATCH_SIZE - 1;
-        
-        // Progress update
-        glog("Scanning %s%d-%d...\n", ctx->subnet_prefix, batch_start, batch_end);
-        ESP_LOGI(TAG, "Sending ARP batch %d-%d", batch_start, batch_end);
-        
-        // Process this batch
-        process_batch(ctx, batch_start, batch_end);
-        
-        // Progress update every 5 batches or at end
-        int scanned = batch_end - START_HOST + 1;
-        if (scanned % 50 == 0 || batch_end == END_HOST) {
-            report_progress(scanned, total_hosts, ctx->num_active_hosts);
+        g_arp_progress_pass = pass + 1;
+        g_arp_progress_scanned = 0;
+
+        glog("Pass %d/%d: scanning %s/%d...\n", pass + 1, num_passes, ctx->subnet_prefix, cidr);
+        ESP_LOGI(TAG, "Pass %d/%d: subnet sweep", pass + 1, num_passes);
+
+        int scanned_count = 0;
+        for (uint32_t batch_start = first; batch_start <= last; batch_start += BATCH_SIZE) {
+            if (!g_arp_scan_running) {
+                glog("ARP scan cancelled\n");
+                arp_scanner_cleanup(ctx);
+                return false;
+            }
+
+            uint32_t batch_end = batch_start + BATCH_SIZE - 1;
+            if (batch_end > last) batch_end = last;
+            
+            process_batch(ctx, batch_start, batch_end);
+            
+            scanned_count += (int)(batch_end - batch_start + 1);
+            g_arp_progress_scanned = scanned_count;
+            g_arp_progress_found = (int)ctx->num_active_hosts;
+            if (scanned_count % 500 == 0 || batch_end == last) {
+                glog("Pass %d/%d: %d/%d scanned, %d hosts found\n",
+                     pass + 1, num_passes, scanned_count, ctx->total_hosts, (int)ctx->num_active_hosts);
+                ESP_LOGI(TAG, "Pass %d/%d: %d/%d scanned, %zu hosts",
+                         pass + 1, num_passes, scanned_count, ctx->total_hosts, ctx->num_active_hosts);
+            }
+        }
+
+        // Inter-pass delay: lets power-saving mobile clients wake up
+        if (pass < num_passes - 1) {
+            glog("Pass %d/%d done (%zu hosts). Waiting %d ms for mobile clients...\n",
+                 pass + 1, num_passes, ctx->num_active_hosts, ARP_INTER_PASS_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(ARP_INTER_PASS_DELAY_MS));
         }
     }
+
+    // Final harvest after last pass
+    harvest_arp_table(ctx);
+
+    glog("%d-pass scan complete. %zu unique hosts found.\n",
+         num_passes, ctx->num_active_hosts);
 
     // Copy results to persistent storage
     g_arp_result_count = 0;
@@ -430,11 +516,13 @@ bool arp_scan_subnet(void) {
 
     // Final summary
     glog("\n=== ARP Scan Results ===\n");
-    glog("Found %zu active hosts on %s0/24:\n", ctx->num_active_hosts, ctx->subnet_prefix);
+    glog("Found %zu active hosts on %s/%d (%d passes):\n",
+         ctx->num_active_hosts, ctx->subnet_prefix, cidr, num_passes);
     
     if (saving) {
-        scan_file_printf(&sf, "--- ARP Scan Results (%zu hosts) ---\n", ctx->num_active_hosts);
-        scan_file_printf(&sf, "Subnet: %s0/24\n\n", ctx->subnet_prefix);
+        scan_file_printf(&sf, "--- ARP Scan Results (%zu hosts, %d passes) ---\n",
+                         ctx->num_active_hosts, num_passes);
+        scan_file_printf(&sf, "Subnet: %s/%d\n\n", ctx->subnet_prefix, cidr);
     }
     
     if (ctx->num_active_hosts > 0) {
@@ -480,6 +568,11 @@ esp_err_t arp_scan_start_async(void) {
     memset(g_arp_results, 0, sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
     g_arp_scan_running = true;
     g_arp_scan_done = false;
+    g_arp_progress_pass = 0;
+    g_arp_progress_total_passes = 0;
+    g_arp_progress_scanned = 0;
+    g_arp_progress_total_hosts = 0;
+    g_arp_progress_found = 0;
     BaseType_t ret = xTaskCreate(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
     if (ret != pdPASS) {
         g_arp_scan_running = false;
@@ -504,6 +597,14 @@ bool arp_scan_is_running(void) {
 
 void arp_scan_cancel(void) {
     g_arp_scan_running = false;
+}
+
+void arp_scan_get_progress(int *pass, int *total_passes, int *scanned, int *total_hosts, int *found) {
+    if (pass)        *pass        = g_arp_progress_pass;
+    if (total_passes)*total_passes= g_arp_progress_total_passes;
+    if (scanned)     *scanned     = g_arp_progress_scanned;
+    if (total_hosts) *total_hosts = g_arp_progress_total_hosts;
+    if (found)       *found       = g_arp_progress_found;
 }
 
 int arp_scan_get_count(void) {
@@ -549,7 +650,12 @@ typedef struct {
     uint8_t mac[6];
 } passive_arp_host_t;
 
+typedef struct {
+    char line[48];
+} passive_arp_line_t;
+
 static passive_arp_host_t *g_passive_hosts = NULL;
+static passive_arp_line_t *g_passive_new_lines = NULL;
 static int g_passive_host_count = 0;
 
 // Simple OUI vendor lookup table (top vendors)
@@ -854,7 +960,14 @@ static bool passive_neighbor_is_new(uint32_t ip_addr, const uint8_t *mac) {
 }
 
 static void poll_passive_arp_table(void) {
-    for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
+    // Collect new neighbors under the lock, log after releasing it
+    // to avoid blocking the lwIP thread with UART/file I/O.
+    passive_arp_line_t *new_lines = g_passive_new_lines;
+    int new_count = 0;
+    if (!new_lines) return;
+
+    LOCK_TCPIP_CORE();
+    for (size_t i = 0; i < ARP_TABLE_SIZE && new_count < PASSIVE_ARP_MAX_HOSTS; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;
         struct eth_addr *eth = NULL;
@@ -866,13 +979,21 @@ static void poll_passive_arp_table(void) {
         format_short_mac(eth->addr, short_mac);
         const char *vendor = lookup_oui_vendor(eth->addr);
         if (vendor) {
-            glog("NBR %u.%u %s %.16s\n",
-                 (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3],
-                 short_mac, vendor);
+            snprintf(new_lines[new_count].line, sizeof(new_lines[0].line),
+                     "NBR %u.%u %s %.16s",
+                     (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3],
+                     short_mac, vendor);
         } else {
-            glog("NBR %u.%u %s\n",
-                 (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3], short_mac);
+            snprintf(new_lines[new_count].line, sizeof(new_lines[0].line),
+                     "NBR %u.%u %s",
+                     (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3], short_mac);
         }
+        new_count++;
+    }
+    UNLOCK_TCPIP_CORE();
+
+    for (int i = 0; i < new_count; i++) {
+        glog("%s\n", new_lines[i].line);
     }
 }
 
@@ -933,11 +1054,14 @@ void arp_scan_start_passive(int duration_sec) {
     glog("Packet Monitor: Press Back to stop\n\n");
 
     g_passive_hosts = calloc(PASSIVE_ARP_MAX_HOSTS, sizeof(*g_passive_hosts));
+    g_passive_new_lines = calloc(PASSIVE_ARP_MAX_HOSTS, sizeof(*g_passive_new_lines));
     g_monitor_ring = calloc(MONITOR_RING_SIZE, sizeof(*g_monitor_ring));
-    if (!g_passive_hosts || !g_monitor_ring) {
+    if (!g_passive_hosts || !g_passive_new_lines || !g_monitor_ring) {
         free(g_passive_hosts);
+        free(g_passive_new_lines);
         free(g_monitor_ring);
         g_passive_hosts = NULL;
+        g_passive_new_lines = NULL;
         g_monitor_ring = NULL;
         glog("Packet Monitor: insufficient memory\n");
         return;
@@ -986,8 +1110,10 @@ void arp_scan_start_passive(int duration_sec) {
     wifi_callbacks_set_pcap_enabled(true);
     g_passive_running = false;
     free(g_passive_hosts);
+    free(g_passive_new_lines);
     free(g_monitor_ring);
     g_passive_hosts = NULL;
+    g_passive_new_lines = NULL;
     g_monitor_ring = NULL;
 
     glog("\nPacket Monitor: Stopped (%lup %da %luP)\n",

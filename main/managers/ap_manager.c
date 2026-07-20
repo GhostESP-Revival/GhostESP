@@ -95,6 +95,8 @@ static esp_err_t teardown_mdns(void);
 #define WEBUI_AP_SUBNET_MASK_ADDR PP_HTONL(LWIP_MAKEU32(255, 255, 255, 0))
 #define MAX_FILE_SIZE (5 * 1024 * 1024) // 5 MB
 #define AP_MANAGER_BUFFER_SIZE (1024)   // 1 KB buffer size for reading chunks
+#define SD_DIRECTORY_PATH_MAX 512
+#define SD_DIRECTORY_MAX_ENTRIES 64
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
 #define SERIAL_BUFFER_SIZE 528          // Size of serial buffer
 #define AUTH_MAX_HDR_LEN 512            // max size for Authorization header (increased for Digest)
@@ -260,37 +262,44 @@ static bool settings_ap_enabled_key_exists(void) {
     return (err == ESP_OK);
 }
 
-static esp_err_t scan_directory_non_recursive(const char *base_path, cJSON *json_array) {
+static esp_err_t scan_directory_non_recursive(const char *base_path, cJSON *json_array, bool *truncated) {
     DIR *dir = opendir(base_path);
     if (!dir) {
         ESP_LOGE(TAG, "Failed to open directory: %s", base_path);
         return ESP_FAIL;
     }
 
+    size_t entry_count = 0;
+    if (truncated) *truncated = false;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') {
             continue;
         }
 
-        size_t full_path_len = strlen(base_path) + strlen(entry->d_name) + 2;
-        char *full_path = malloc(full_path_len);
-        if (!full_path) {
-            ESP_LOGE(TAG, "Failed to allocate memory for full path.");
-            closedir(dir);
-            return ESP_ERR_NO_MEM;
+        if (entry_count >= SD_DIRECTORY_MAX_ENTRIES) {
+            if (truncated) *truncated = true;
+            break;
         }
 
-        snprintf(full_path, full_path_len, "%s/%s", base_path, entry->d_name);
+        char full_path[SD_DIRECTORY_PATH_MAX];
+        int path_len = snprintf(full_path, sizeof(full_path), "%s/%s", base_path, entry->d_name);
+        if (path_len < 0 || path_len >= (int)sizeof(full_path)) {
+            ESP_LOGW(TAG, "Skipping overlong SD path: %s/%s", base_path, entry->d_name);
+            continue;
+        }
 
         struct stat entry_stat;
         if (stat(full_path, &entry_stat) != 0) {
             ESP_LOGW(TAG, "Failed to stat file: %s", full_path);
-            free(full_path);
             continue;
         }
 
         cJSON *item = cJSON_CreateObject();
+        if (!item) {
+            closedir(dir);
+            return ESP_ERR_NO_MEM;
+        }
         cJSON_AddStringToObject(item, "name", entry->d_name);
         cJSON_AddStringToObject(item, "path", full_path);
 
@@ -302,7 +311,7 @@ static esp_err_t scan_directory_non_recursive(const char *base_path, cJSON *json
         }
 
         cJSON_AddItemToArray(json_array, item);
-        free(full_path);
+        entry_count++;
     }
 
     closedir(dir);
@@ -313,7 +322,7 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
 
     char query[512] = {0};
-    char path_param[512] = "/mnt";
+    char path_param[SD_DIRECTORY_PATH_MAX] = "/mnt";
     
     esp_err_t query_ret = httpd_req_get_url_query_str(req, query, sizeof(query));
     if (query_ret == ESP_OK && strlen(query) > 0) {
@@ -374,15 +383,18 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
     }
 
     cJSON *files_array = cJSON_CreateArray();
-    if (scan_directory_non_recursive(path_param, files_array) != ESP_OK) {
+    bool truncated = false;
+    if (!files_array || scan_directory_non_recursive(path_param, files_array, &truncated) != ESP_OK) {
+        if (files_array) cJSON_Delete(files_array);
         cJSON_Delete(response_json);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Failed to scan directory.\"}");
         return ESP_FAIL;
     }
     cJSON_AddItemToObject(response_json, "files", files_array);
+    cJSON_AddBoolToObject(response_json, "truncated", truncated);
 
-    char *response_string = cJSON_Print(response_json);
+    char *response_string = cJSON_PrintUnformatted(response_json);
     if (!response_string) {
         ESP_LOGE(TAG, "Failed to serialize JSON.");
         cJSON_Delete(response_json);

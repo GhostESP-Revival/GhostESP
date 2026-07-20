@@ -57,6 +57,15 @@ struct pbuf  {
 #define s6_addr32 un.u32_addr
 #endif // CONFIG_IDF_TARGET_LINUX
 
+// Socket receive packets are passed to the mDNS task asynchronously. Keep the
+// packet metadata and maximum payload in one allocation so packet traffic does
+// not create three independently-sized heap blocks per datagram.
+typedef struct {
+    mdns_rx_packet_t packet;
+    struct pbuf pbuf;
+    uint8_t payload[MDNS_MAX_PACKET_SIZE];
+} socket_rx_packet_t;
+
 static void __attribute__((constructor)) ctor_networking_socket(void)
 {
     for (int i = 0; i < sizeof(s_interfaces) / sizeof(s_interfaces[0]); ++i) {
@@ -87,9 +96,7 @@ size_t _mdns_get_packet_len(mdns_rx_packet_t *packet)
 
 void _mdns_packet_free(mdns_rx_packet_t *packet)
 {
-    free(packet->pb->payload);
-    free(packet->pb);
-    free(packet);
+    free((socket_rx_packet_t *)packet);
 }
 
 esp_err_t _mdns_pcb_deinit(mdns_if_t tcpip_if, mdns_ip_protocol_t ip_protocol)
@@ -296,18 +303,16 @@ void sock_recv_task(void *arg)
                     ESP_LOG_BUFFER_HEXDUMP(TAG, recvbuf, len, ESP_LOG_VERBOSE);
                     inet_to_espaddr(&raddr, &addr, &port);
 
-                    // Allocate the packet structure and pass it to the mdns main engine
-                    mdns_rx_packet_t *packet = (mdns_rx_packet_t *) calloc(1, sizeof(mdns_rx_packet_t));
-                    struct pbuf *packet_pbuf = calloc(1, sizeof(struct pbuf));
-                    uint8_t *buf = malloc(len);
-                    if (packet == NULL || packet_pbuf == NULL || buf == NULL ) {
-                        free(buf);
-                        free(packet_pbuf);
-                        free(packet);
+                    // Allocate one fixed-size packet record for asynchronous parsing.
+                    socket_rx_packet_t *rx_packet = calloc(1, sizeof(*rx_packet));
+                    if (rx_packet == NULL) {
                         HOOK_MALLOC_FAILED;
                         ESP_LOGE(TAG, "Failed to allocate the mdns packet");
                         continue;
                     }
+                    mdns_rx_packet_t *packet = &rx_packet->packet;
+                    struct pbuf *packet_pbuf = &rx_packet->pbuf;
+                    uint8_t *buf = rx_packet->payload;
                     memcpy(buf, recvbuf, len);
                     packet_pbuf->next = NULL;
                     packet_pbuf->payload = buf;
@@ -326,9 +331,7 @@ void sock_recv_task(void *arg)
                         packet->src.type == ESP_IPADDR_TYPE_V4 ? MDNS_IP_PROTOCOL_V4 : MDNS_IP_PROTOCOL_V6;
                     if (_mdns_send_rx_action(packet) != ESP_OK) {
                         ESP_LOGE(TAG, "_mdns_send_rx_action failed!");
-                        free(packet->pb->payload);
-                        free(packet->pb);
-                        free(packet);
+                        _mdns_packet_free(packet);
                     }
                 }
             }

@@ -43,6 +43,7 @@
 
 #define CLOUD_HTTP_BUFFER_SIZE 1024
 #define CLOUD_RESPONSE_INITIAL_SIZE 1024
+#define CLOUD_CATALOG_MAX_SIZE (256 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_ATTEMPTS 5
 #ifdef CONFIG_SPIRAM
@@ -284,17 +285,26 @@ static const char *current_target(void) {
 static esp_err_t response_event_handler(esp_http_client_event_t *evt) {
     response_buf_t *buf = evt->user_data;
     if (evt->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-    if (buf->len + evt->data_len + 1 > buf->capacity) {
+    if (evt->data_len <= 0) return ESP_OK;
+
+    size_t data_len = (size_t)evt->data_len;
+    if (buf->len >= CLOUD_CATALOG_MAX_SIZE - 1 ||
+        data_len > CLOUD_CATALOG_MAX_SIZE - 1 - buf->len) {
+        ESP_LOGW(TAG, "catalog response exceeds %u byte limit", (unsigned)CLOUD_CATALOG_MAX_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (buf->len + data_len + 1 > buf->capacity) {
         size_t new_cap = buf->capacity ? buf->capacity * 2 : CLOUD_RESPONSE_INITIAL_SIZE;
-        while (new_cap < buf->len + evt->data_len + 1) new_cap *= 2;
+        while (new_cap < buf->len + data_len + 1) new_cap *= 2;
+        if (new_cap > CLOUD_CATALOG_MAX_SIZE) new_cap = CLOUD_CATALOG_MAX_SIZE;
         char *grown = heap_caps_realloc(buf->buffer, new_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!grown) grown = realloc(buf->buffer, new_cap);
         if (!grown) return ESP_ERR_NO_MEM;
         buf->buffer = grown;
         buf->capacity = new_cap;
     }
-    memcpy(buf->buffer + buf->len, evt->data, evt->data_len);
-    buf->len += evt->data_len;
+    memcpy(buf->buffer + buf->len, evt->data, data_len);
+    buf->len += data_len;
     buf->buffer[buf->len] = '\0';
     return ESP_OK;
 }
