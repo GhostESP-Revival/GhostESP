@@ -52,6 +52,7 @@ static const char *NVS_DISPLAY_TIMEOUT_KEY = "disp_timeout";
 static const char *NVS_ENABLE_RTS_KEY = "rts_enable";
 static const char *NVS_STA_SSID_KEY = "sta_ssid";
 static const char *NVS_STA_PASSWORD_KEY = "sta_password";
+static const char *NVS_WIFI_AUTO_RECONNECT_KEY = "sta_auto_rec";
 static const char *NVS_RGB_DATA_PIN_KEY = "rgb_data_pin";
 static const char *NVS_RGB_RED_PIN_KEY = "rgb_red_pin";
 static const char *NVS_RGB_GREEN_PIN_KEY = "rgb_green_pin";
@@ -205,6 +206,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->rts_enabled = false;
   strcpy(settings->sta_ssid, ""); // Default empty station SSID
   strcpy(settings->sta_password, ""); // Default empty station password
+  settings->wifi_auto_reconnect = true; // Auto-reconnect on involuntary disconnect
   settings->rgb_data_pin = -1;
   settings->rgb_red_pin = -1;
   settings->rgb_green_pin = -1;
@@ -491,6 +493,14 @@ void settings_load(FSettings *settings) {
   } else if (err == ESP_ERR_NVS_NOT_FOUND) {
     strcpy(settings->sta_password, ""); // Ensure it's empty if not found
   }
+
+  // Load WiFi auto-reconnect setting
+  uint8_t wifi_auto_reconnect_val = 1;
+  err = nvs_get_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, &wifi_auto_reconnect_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load WiFi auto-reconnect setting: %s\n", esp_err_to_name(err));
+  }
+  settings->wifi_auto_reconnect = (wifi_auto_reconnect_val != 0);
 
   // Load Wigle API key (format: APIName:APIToken)
   str_size = sizeof(settings->wigle_api_key);
@@ -1266,6 +1276,10 @@ void settings_persist_setting(SettingsType setting) {
             }
             key = NVS_STA_SSID_KEY;
             break;
+        case SETTING_WIFI_AUTO_RECONNECT:
+            err = nvs_set_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, G_Settings.wifi_auto_reconnect ? 1 : 0);
+            key = NVS_WIFI_AUTO_RECONNECT_KEY;
+            break;
         case SETTING_TIMEZONE:
             err = nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, G_Settings.selected_timezone);
             key = NVS_TIMEZONE_NAME;
@@ -1387,6 +1401,7 @@ esp_err_t settings_save(const FSettings *settings) {
 
     NVS_SET(nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid));
     NVS_SET(nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, settings->wifi_auto_reconnect ? 1 : 0));
 
     NVS_SET(nvs_set_i32(nvsHandle, NVS_RGB_DATA_PIN_KEY, settings->rgb_data_pin));
     NVS_SET(nvs_set_i32(nvsHandle, NVS_RGB_RED_PIN_KEY, settings->rgb_red_pin));
@@ -2327,4 +2342,11 @@ void settings_set_wd_weighted_5g(FSettings *settings, bool enabled) {
 }
 bool settings_get_wd_weighted_5g(const FSettings *settings) {
   return settings ? settings->wd_weighted_5g : true;
+}
+
+void settings_set_wifi_auto_reconnect(FSettings *settings, bool enabled) {
+  if (settings) settings->wifi_auto_reconnect = enabled;
+}
+bool settings_get_wifi_auto_reconnect(const FSettings *settings) {
+  return settings ? settings->wifi_auto_reconnect : true;
 }

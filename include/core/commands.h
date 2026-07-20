@@ -23,6 +23,7 @@ void handle_select_cmd(int argc, char **argv);
 void handle_wifi_connection(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
 void handle_wifi_status(int argc, char **argv);
+void handle_wifi_autoreconnect_cmd(int argc, char **argv);
 void handle_ip_lookup(int argc, char **argv);
 void handle_track_ap_cmd(int argc, char **argv);
 void handle_track_sta_cmd(int argc, char **argv);

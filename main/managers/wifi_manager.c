@@ -686,6 +686,10 @@ static void wifi_reconnect_timer_cb(void *arg) {
 static void wifi_reconnect_schedule(void) {
     wifi_reconnect_timer_stop();
 
+    if (!settings_get_wifi_auto_reconnect(&G_Settings)) {
+        return;
+    }
+
     if (wifi_reconnect_count > 0 && wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
         static const int backoff_ms[] = {3000, 5000, 10000, 20000, 30000};
         int delay_ms = backoff_ms[wifi_reconnect_count - 1];
@@ -971,13 +975,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             status_display_show_status("WiFi Lost");
             toast_show("WiFi lost", TOAST_WARN);
 
-            wifi_reconnect_count++;
-            if (wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
-                glog("Scheduling reconnect %d/%d\n", wifi_reconnect_count, WIFI_MAX_RECONNECT_ATTEMPTS);
-                wifi_reconnect_schedule();
+            if (!settings_get_wifi_auto_reconnect(&G_Settings)) {
+                glog("Auto-reconnect disabled; not retrying\n");
+                wifi_reconnect_reset();
             } else {
-                glog("Max reconnect attempts (%d) reached\n", WIFI_MAX_RECONNECT_ATTEMPTS);
-                wifi_reconnect_timer_stop();
+                wifi_reconnect_count++;
+                if (wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
+                    glog("Scheduling reconnect %d/%d\n", wifi_reconnect_count, WIFI_MAX_RECONNECT_ATTEMPTS);
+                    wifi_reconnect_schedule();
+                } else {
+                    glog("Max reconnect attempts (%d) reached\n", WIFI_MAX_RECONNECT_ATTEMPTS);
+                    wifi_reconnect_timer_stop();
+                }
             }
         }
         

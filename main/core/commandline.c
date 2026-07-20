@@ -304,6 +304,7 @@ void register_commands() {
     register_command("startportal", handle_start_portal);
     register_command("disconnect", handle_wifi_disconnect);
     register_command("wifistatus", handle_wifi_status);
+    register_command("autoreconnect", handle_wifi_autoreconnect_cmd);
     register_command("stopportal", stop_portal);
     register_command("sinkhole", handle_sinkhole_cmd);
     register_command("connect", handle_wifi_connection);

@@ -126,6 +126,12 @@ void handle_help(int argc, char **argv) {
         glog("connect\n");
         glog("    Description: Connects to Specific WiFi Network and saves credentials.\n");
         glog("    Usage: connect <SSID> [Password]\n\n");
+        glog("autoreconnect\n");
+        glog("    Description: Toggle WiFi station auto-reconnect after involuntary disconnects.\n");
+        glog("    Usage: autoreconnect <on|off>\n");
+        glog("    Arguments:\n");
+        glog("        on  : Reconnect automatically (default)\n");
+        glog("        off : Stay disconnected until manually reconnected\n\n");
         glog("apcred\n");
         glog("    Description: Change or reset the GhostNet AP credentials\n");
         glog("    Usage: apcred <ssid> <password>\n");

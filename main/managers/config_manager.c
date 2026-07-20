@@ -88,6 +88,12 @@ static bool process_config_line(const char *key, const char *value) {
         glog("Config: Wigle Donate set to %s\n", enabled ? "on" : "off");
         return true;
     }
+    else if (strcasecmp(key, "AutoReconnect") == 0) {
+        bool enabled = parse_bool(value);
+        settings_set_wifi_auto_reconnect(&G_Settings, enabled);
+        glog("Config: WiFi AutoReconnect set to %s\n", enabled ? "on" : "off");
+        return true;
+    }
 
     return false;
 }

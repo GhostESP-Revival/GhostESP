@@ -579,3 +579,31 @@ void handle_ip_lookup(int argc, char **argv) {
     wifi_manager_start_ip_lookup();
     status_display_show_status("IP Lookup");
 }
+
+void handle_wifi_autoreconnect_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        glog("WiFi auto-reconnect: %s\n",
+             settings_get_wifi_auto_reconnect(&G_Settings) ? "on" : "off");
+        glog("Usage: autoreconnect <on|off>\n");
+        return;
+    }
+
+    bool enable;
+    if (strcmp(argv[1], "on") == 0) {
+        enable = true;
+    } else if (strcmp(argv[1], "off") == 0) {
+        enable = false;
+    } else {
+        glog("Invalid argument. Use 'on' or 'off'\n");
+        return;
+    }
+
+    settings_set_wifi_auto_reconnect(&G_Settings, enable);
+    settings_persist_setting(SETTING_WIFI_AUTO_RECONNECT);
+
+    if (!enable) {
+        wifi_manager_stop_reconnect();
+    }
+
+    glog("WiFi auto-reconnect %s\n", enable ? "enabled" : "disabled");
+}

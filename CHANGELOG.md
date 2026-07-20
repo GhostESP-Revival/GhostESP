@@ -33,6 +33,7 @@
 - Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
 
 ### Wi-Fi
+- Added a WiFi auto-reconnect toggle (Settings > Connectivity, `autoreconnect <on|off>` CLI, and `AutoReconnect=` in `config.cfg`) persisted to NVS
 - Fixed standalone station scans to run the AP scan spinner first when no APs are cached
 - Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445
 - Added SNMP MIB walk (`snmpprobe walk`) using GetNextRequest to traverse OID subtrees with support for custom root OIDs

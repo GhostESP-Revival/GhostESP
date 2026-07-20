@@ -161,6 +161,7 @@ typedef enum {
     SETTING_AP_PASSWORD,
     SETTING_STA_SSID,
     SETTING_STA_PASSWORD,
+    SETTING_WIFI_AUTO_RECONNECT,
     // Timezone quick-edit
     SETTING_TIMEZONE,
     // OTA firmware update
@@ -243,6 +244,7 @@ typedef struct {
   bool rts_enabled;
   char sta_ssid[65];     // New field for Station SSID (Max 64 + null)
   char sta_password[65]; // New field for Station Password (Max 64 + null)
+  bool wifi_auto_reconnect; // Auto-reconnect to saved STA after involuntary disconnect
 
   // Add RGB pin configuration fields
   int32_t rgb_data_pin; // Single-pin LED data pin, -1 if not used
@@ -430,6 +432,10 @@ void settings_set_sta_ssid(FSettings *settings, const char *ssid);
 const char *settings_get_sta_ssid(const FSettings *settings);
 void settings_set_sta_password(FSettings *settings, const char *password);
 const char *settings_get_sta_password(const FSettings *settings);
+
+// WiFi auto-reconnect on involuntary disconnect
+void settings_set_wifi_auto_reconnect(FSettings *settings, bool enabled);
+bool settings_get_wifi_auto_reconnect(const FSettings *settings);
 
 // Functions to get/set RGB pin configuration
 void settings_set_rgb_data_pin(FSettings *settings, int32_t pin);

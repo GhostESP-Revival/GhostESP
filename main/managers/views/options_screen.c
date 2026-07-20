@@ -1801,6 +1801,7 @@ static SettingsItem settings_items[] = {
     {"AP Password", SETTING_AP_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"STA SSID", SETTING_STA_SSID, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"STA Password", SETTING_STA_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"WiFi Auto-Reconnect", SETTING_WIFI_AUTO_RECONNECT, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Timezone", SETTING_TIMEZONE, timezone_options, 13, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -4183,6 +4184,9 @@ case SETTING_GPS_BAUD_RATE: {
                 // action items; current_value index unused
                 settings_items[i].current_value = 0;
                 break;
+            case SETTING_WIFI_AUTO_RECONNECT:
+                settings_items[i].current_value = settings_get_wifi_auto_reconnect(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_TIMEZONE: {
                 const char *cur_tz = settings_get_timezone_str(&G_Settings);
                 int idx = 0;
@@ -4770,6 +4774,9 @@ case SETTING_GPS_BAUD_RATE:
             display_manager_switch_view(&keyboard_view);
             return;
         }
+        case SETTING_WIFI_AUTO_RECONNECT:
+            settings_set_wifi_auto_reconnect(&G_Settings, new_value == 1);
+            break;
         case SETTING_TIMEZONE:
             if (new_value >= 0 && new_value < timezone_count) {
                 settings_set_timezone_str(&G_Settings, timezone_values[new_value]);
