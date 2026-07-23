@@ -43,7 +43,7 @@ static bool is_root(void) { return s_dir && strcmp(s_dir, GHOSTSCRIPT_ROOT_DIR) 
 static void parent_dir(void) {
     if (is_root()) return;
     char *slash = strrchr(s_dir, '/');
-    if (!slash || slash <= s_dir + strlen(GHOSTSCRIPT_ROOT_DIR)) snprintf(s_dir, GHOSTSCRIPT_PATH_MAX, "%s", GHOSTSCRIPT_ROOT_DIR);
+    if (!slash || slash <= s_dir + strlen(GHOSTSCRIPT_ROOT_DIR)) strlcpy(s_dir, GHOSTSCRIPT_ROOT_DIR, GHOSTSCRIPT_PATH_MAX);
     else *slash = '\0';
 }
 
@@ -66,12 +66,12 @@ static void activate_row(int selected) {
     if (row.type == ROW_ENTRY && row.index >= 0 && row.index < s_count) {
         ghostscript_browser_entry_t *entry = &s_entries[row.index];
         if (entry->is_dir && !entry->has_manifest) {
-            snprintf(s_dir, GHOSTSCRIPT_PATH_MAX, "%s", entry->path);
+            strlcpy(s_dir, entry->path, GHOSTSCRIPT_PATH_MAX);
             s_offset = 0;
             refresh();
         } else {
-            snprintf(s_resume_dir, sizeof(s_resume_dir), "%s", s_dir);
-            snprintf(s_resume_path, sizeof(s_resume_path), "%s", entry->path);
+            strlcpy(s_resume_dir, s_dir, sizeof(s_resume_dir));
+            strlcpy(s_resume_path, entry->path, sizeof(s_resume_path));
             s_resume_offset = s_offset;
             s_switch_pending = true;
             ghostscript_runner_set_script(entry->path);
@@ -234,8 +234,9 @@ void ghostscript_browser_view_create(void) {
         free(s_rows); s_rows = NULL;
         return;
     }
-    snprintf(s_dir, GHOSTSCRIPT_PATH_MAX, "%s",
-             s_resume_dir[0] ? s_resume_dir : GHOSTSCRIPT_ROOT_DIR);
+    strlcpy(s_dir,
+             s_resume_dir[0] ? s_resume_dir : GHOSTSCRIPT_ROOT_DIR,
+             GHOSTSCRIPT_PATH_MAX);
     s_root = gui_screen_create_root(NULL, "GhostScript", lv_color_black(), LV_OPA_COVER);
     ghostscript_browser_view.root = s_root;
     s_opts = options_view_create(s_root, "GhostScript");
