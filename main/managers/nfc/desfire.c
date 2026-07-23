@@ -555,6 +555,212 @@ bool desfire_read_tree(pn532_io_handle_t io, MfDesfireData* out) {
 
     return true;
 }
+
+/* ---------------------------------------------------------------------------
+ * Saved-file loader: reconstruct the MfDesfire tree from a Flipper .nfc written
+ * by desfire_build_flipper_text(). Inverse of the writer; lets the saved-tag
+ * details path run the same supported-card parsers (Opal/myki/ITSO) as a live
+ * scan. Reads no reader hardware, but lives inside the backend guard because it
+ * reuses the static SimpleArray helpers above.
+ * ------------------------------------------------------------------------- */
+
+/* Parse a run of space-separated hex byte tokens into out[]; returns the count. */
+static size_t desfire_hex_stream(const char *s, uint8_t *out, size_t max) {
+    size_t n = 0;
+    while (s && *s && n < max) {
+        while (*s == ' ' || *s == '\t') s++;
+        unsigned b = 0;
+        int consumed = 0;
+        if (sscanf(s, "%2x%n", &b, &consumed) == 1 && consumed > 0) {
+            out[n++] = (uint8_t)b;
+            s += consumed;
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+static int desfire_find_app_idx(const MfDesfireData *t, const uint8_t aid[MF_DESFIRE_APP_ID_SIZE]) {
+    if (!t || !t->application_ids) return -1;
+    const MfDesfireApplicationId *a = (const MfDesfireApplicationId *)t->application_ids->data;
+    for (size_t i = 0; i < t->application_ids->count; ++i)
+        if (memcmp(a[i].data, aid, MF_DESFIRE_APP_ID_SIZE) == 0) return (int)i;
+    return -1;
+}
+
+static int desfire_find_file_idx(const MfDesfireApplication *app, uint8_t fid) {
+    if (!app || !app->file_ids) return -1;
+    const MfDesfireFileId *ids = (const MfDesfireFileId *)app->file_ids->data;
+    for (size_t i = 0; i < app->file_ids->count; ++i)
+        if (ids[i] == fid) return (int)i;
+    return -1;
+}
+
+MfDesfireData *desfire_load_flipper_file(const char *path,
+                                         desfire_version_t *ver_out,
+                                         bool *have_ver_out) {
+    if (ver_out) memset(ver_out, 0, sizeof(*ver_out));
+    if (have_ver_out) *have_ver_out = false;
+    if (!path) return NULL;
+
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+
+    /* Data lines can hold a whole file (writer caps reads at 4096 bytes -> up to
+     * ~12 KB of "XX " text), so the line buffer must be large. */
+    const size_t LINE_CAP = 16384;
+    char *line = (char *)malloc(LINE_CAP);
+    uint8_t *hexbuf = (uint8_t *)malloc(4096);
+    MfDesfireData *tree = desfire_tree_alloc();
+    if (!line || !hexbuf || !tree) {
+        free(line);
+        free(hexbuf);
+        if (tree) desfire_tree_free(tree);
+        fclose(f);
+        return NULL;
+    }
+
+    while (fgets(line, (int)LINE_CAP, f)) {
+        size_t ll = strlen(line);
+        while (ll && (line[ll - 1] == '\n' || line[ll - 1] == '\r')) line[--ll] = '\0';
+
+        /* PICC Version bytes -> reconstruct desfire_version_t. */
+        if (strncmp(line, "PICC Version:", 13) == 0) {
+            uint8_t vb[DESFIRE_PICC_VERSION_MAX];
+            size_t n = desfire_hex_stream(line + 13, vb, sizeof(vb));
+            if (n > 0 && ver_out) {
+                memcpy(ver_out->picc_version, vb, n);
+                ver_out->picc_version_len = (uint8_t)n;
+                if (n >= 6) {
+                    ver_out->size_byte = vb[5];
+                    ver_out->model = desfire_model_from_size_byte(vb[5], &ver_out->storage_bytes);
+                }
+                if (have_ver_out) *have_ver_out = true;
+            }
+            continue;
+        }
+
+        /* "Application IDs: aa aa aa bb bb bb" -> allocate app slots. */
+        if (strncmp(line, "Application IDs:", 16) == 0) {
+            size_t n = desfire_hex_stream(line + 16, hexbuf, 4096);
+            for (size_t i = 0; i + MF_DESFIRE_APP_ID_SIZE <= n; i += MF_DESFIRE_APP_ID_SIZE) {
+                MfDesfireApplicationId *aid_slot = simple_array_push(tree->application_ids);
+                MfDesfireApplication *app_slot = simple_array_push(tree->applications);
+                if (!aid_slot || !app_slot) break;
+                memcpy(aid_slot->data, &hexbuf[i], MF_DESFIRE_APP_ID_SIZE);
+                app_slot->file_ids = simple_array_alloc(sizeof(MfDesfireFileId), 0);
+                app_slot->file_settings = simple_array_alloc(sizeof(MfDesfireFileSettings), 0);
+                app_slot->file_data = simple_array_alloc(sizeof(MfDesfireFileData), 0);
+            }
+            continue;
+        }
+
+        /* Per-application lines: "Application aabbcc <key>" (6 lowercase hex AID). */
+        if (strncmp(line, "Application ", 12) == 0 && ll >= 19 && line[18] == ' ') {
+            uint8_t aid[MF_DESFIRE_APP_ID_SIZE];
+            char aidhex[7];
+            memcpy(aidhex, line + 12, 6);
+            aidhex[6] = '\0';
+            if (desfire_hex_stream(aidhex, aid, MF_DESFIRE_APP_ID_SIZE) != MF_DESFIRE_APP_ID_SIZE)
+                continue; /* not an AID block (e.g. "Application Count:") */
+            int ai = desfire_find_app_idx(tree, aid);
+            if (ai < 0) continue;
+            MfDesfireApplication *app =
+                &((MfDesfireApplication *)tree->applications->data)[ai];
+            const char *key = line + 19; /* past "Application aabbcc " */
+
+            if (strncmp(key, "File IDs:", 9) == 0) {
+                size_t n = desfire_hex_stream(key + 9, hexbuf, 256);
+                for (size_t i = 0; i < n; ++i) {
+                    MfDesfireFileId *id = (MfDesfireFileId *)simple_array_push(app->file_ids);
+                    simple_array_push(app->file_settings);
+                    simple_array_push(app->file_data);
+                    if (id) *id = hexbuf[i];
+                }
+                continue;
+            }
+
+            if (strncmp(key, "File ", 5) != 0) continue;
+            const char *fk = key + 5; /* "1 Type: ..", "1: AA BB", "12 Size: N" */
+            char *endp = NULL;
+            unsigned long fid = strtoul(fk, &endp, 10);
+            if (endp == fk || fid > 0xFF) continue;
+            int fx = desfire_find_file_idx(app, (uint8_t)fid);
+            if (fx < 0) continue;
+            /* file_ids/file_settings/file_data are pushed in lockstep; guard in
+             * case an OOM left them unequal so we never index out of bounds. */
+            if ((size_t)fx >= app->file_settings->count ||
+                (size_t)fx >= app->file_data->count)
+                continue;
+            MfDesfireFileSettings *fs =
+                &((MfDesfireFileSettings *)app->file_settings->data)[fx];
+            MfDesfireFileData *fd = &((MfDesfireFileData *)app->file_data->data)[fx];
+
+            if (*endp == ':') {
+                /* File data line: "File N: AA BB ..". */
+                size_t n = desfire_hex_stream(endp + 1, hexbuf, 4096);
+                if (n > 0) {
+                    SimpleArray *blob = simple_array_alloc(1, n);
+                    if (blob) {
+                        memcpy(blob->data, hexbuf, n);
+                        if (fd->data) simple_array_free(fd->data);
+                        fd->data = blob;
+                    }
+                }
+                continue;
+            }
+            if (*endp != ' ') continue;
+            const char *sub = endp + 1; /* "Type: 00", etc. */
+            uint8_t one;
+            if (strncmp(sub, "Type:", 5) == 0) {
+                if (desfire_hex_stream(sub + 5, &one, 1) == 1) fs->type = (MfDesfireFileType)one;
+            } else if (strncmp(sub, "Communication Settings:", 23) == 0) {
+                if (desfire_hex_stream(sub + 23, &one, 1) == 1)
+                    fs->comm = (MfDesfireFileCommunicationSettings)one;
+            } else if (strncmp(sub, "Access Rights:", 14) == 0) {
+                uint8_t ar[MF_DESFIRE_MAX_KEYS * 2];
+                size_t n = desfire_hex_stream(sub + 14, ar, sizeof(ar));
+                uint8_t r = 0;
+                for (size_t i = 0; i + 1 < n && r < MF_DESFIRE_MAX_KEYS; i += 2)
+                    fs->access_rights[r++] = (uint16_t)(ar[i] | (ar[i + 1] << 8));
+                fs->access_rights_len = r;
+            } else if (strncmp(sub, "Size:", 5) == 0) {
+                unsigned long sz = strtoul(sub + 5, NULL, 10);
+                if (fs->type == MfDesfireFileTypeLinearRecord ||
+                    fs->type == MfDesfireFileTypeCyclicRecord)
+                    fs->record.size = (uint32_t)sz;
+                else
+                    fs->data.size = (uint32_t)sz;
+            } else if (strncmp(sub, "Max:", 4) == 0) {
+                fs->record.max = (uint32_t)strtoul(sub + 4, NULL, 10);
+            } else if (strncmp(sub, "Cur:", 4) == 0) {
+                fs->record.cur = (uint32_t)strtoul(sub + 4, NULL, 10);
+            } else if (strncmp(sub, "Hi Limit:", 9) == 0) {
+                fs->value.hi_limit = (uint32_t)strtoul(sub + 9, NULL, 10);
+            } else if (strncmp(sub, "Lo Limit:", 9) == 0) {
+                fs->value.lo_limit = (uint32_t)strtoul(sub + 9, NULL, 10);
+            } else if (strncmp(sub, "Limited Credit Value:", 21) == 0) {
+                fs->value.limited_credit_value = (int32_t)strtol(sub + 21, NULL, 10);
+            } else if (strncmp(sub, "Limited Credit Enabled:", 23) == 0) {
+                const char *p = sub + 23;
+                while (*p == ' ') p++;
+                fs->value.limited_credit_enabled = (strncmp(p, "true", 4) == 0);
+            }
+            continue;
+        }
+    }
+
+    free(line);
+    free(hexbuf);
+    fclose(f);
+
+    if (tree->application_ids->count == 0) {
+        desfire_tree_free(tree);
+        return NULL;
+    }
+    return tree;
+}
 #endif
 
 // ---------------------------------------------------------------------------

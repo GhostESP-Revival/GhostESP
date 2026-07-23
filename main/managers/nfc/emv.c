@@ -758,3 +758,138 @@ bool emv_save_flipper_file(const EmvData *data, const char *dir,
     ESP_LOGI(TAG, "EMV file saved (%u bytes): %s", (unsigned)len, path);
     return true;
 }
+
+/* ---- Saved-file loader (inverse of emv_build_flipper_text) ---------------- */
+
+/* Return the tail of `line` past `prefix`, or NULL when it doesn't match. */
+static const char *emv_after_prefix(const char *line, const char *prefix) {
+    size_t n = strlen(prefix);
+    return strncmp(line, prefix, n) == 0 ? line + n : NULL;
+}
+
+/* Parse a run of space-separated hex byte tokens into out[]; returns the count. */
+static uint8_t emv_read_hex_bytes(const char *s, uint8_t *out, uint8_t max) {
+    uint8_t n = 0;
+    while (s && *s && n < max) {
+        while (*s == ' ' || *s == '\t') s++;
+        unsigned b = 0;
+        int consumed = 0;
+        if (sscanf(s, "%2x%n", &b, &consumed) == 1 && consumed > 0) {
+            out[n++] = (uint8_t)b;
+            s += consumed;
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+static void emv_copy_str_field(char *dst, size_t dst_sz, const char *v) {
+    while (*v == ' ') v++;
+    strncpy(dst, v, dst_sz - 1);
+    dst[dst_sz - 1] = '\0';
+}
+
+bool emv_load_flipper_file(const char *path, EmvData *out,
+                           uint8_t *uid, uint8_t *uid_len,
+                           uint16_t *atqa, uint8_t *sak) {
+    if (!path || !out) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+
+    memset(out, 0, sizeof(*out));
+    if (uid_len) *uid_len = 0;
+    if (atqa) *atqa = 0;
+    if (sak) *sak = 0;
+    EmvApplication *app = &out->emv_application;
+    bool is_emv = false;
+    char line[256];
+
+    while (fgets(line, sizeof(line), f)) {
+        size_t ll = strlen(line);
+        while (ll && (line[ll - 1] == '\n' || line[ll - 1] == '\r')) line[--ll] = '\0';
+
+        const char *v;
+        uint8_t tmp[2];
+        if ((v = emv_after_prefix(line, "Device type:"))) {
+            if (strstr(v, "EMV")) is_emv = true;
+        } else if ((v = emv_after_prefix(line, "UID:"))) {
+            uint8_t u[10];
+            uint8_t n = emv_read_hex_bytes(v, u, sizeof(u));
+            if (uid && uid_len) { memcpy(uid, u, n); *uid_len = n; }
+        } else if ((v = emv_after_prefix(line, "ATQA:"))) {
+            if (emv_read_hex_bytes(v, tmp, 2) == 2 && atqa)
+                *atqa = (uint16_t)((tmp[0] << 8) | tmp[1]);
+        } else if ((v = emv_after_prefix(line, "SAK:"))) {
+            uint8_t s1;
+            if (emv_read_hex_bytes(v, &s1, 1) == 1 && sak) *sak = s1;
+        } else if ((v = emv_after_prefix(line, "Cardholder name:"))) {
+            emv_copy_str_field(app->cardholder_name, sizeof(app->cardholder_name), v);
+        } else if ((v = emv_after_prefix(line, "Application label:"))) {
+            emv_copy_str_field(app->application_label, sizeof(app->application_label), v);
+        } else if ((v = emv_after_prefix(line, "Application name:"))) {
+            emv_copy_str_field(app->application_name, sizeof(app->application_name), v);
+        } else if ((v = emv_after_prefix(line, "Application interchange profile:"))) {
+            if (emv_read_hex_bytes(v, tmp, 2) == 2) {
+                app->application_interchange_profile[0] = tmp[0];
+                app->application_interchange_profile[1] = tmp[1];
+            }
+        } else if ((v = emv_after_prefix(line, "Application transaction counter:"))) {
+            app->transaction_counter = (uint16_t)strtoul(v, NULL, 10);
+        } else if ((v = emv_after_prefix(line, "PAN length:"))) {
+            /* Authoritative length comes from the PAN hex line below; ignore. */
+        } else if ((v = emv_after_prefix(line, "PAN:"))) {
+            app->pan_len = emv_read_hex_bytes(v, app->pan, EMV_PAN_LEN);
+        } else if ((v = emv_after_prefix(line, "AID length:"))) {
+            /* aid_len set from the AID hex line below. */
+        } else if ((v = emv_after_prefix(line, "AID:"))) {
+            app->aid_len = emv_read_hex_bytes(v, app->aid, EMV_AID_LEN);
+        } else if ((v = emv_after_prefix(line, "Country code:"))) {
+            if (emv_read_hex_bytes(v, tmp, 2) == 2)
+                app->country_code = (uint16_t)((tmp[0] << 8) | tmp[1]);
+        } else if ((v = emv_after_prefix(line, "Currency code:"))) {
+            if (emv_read_hex_bytes(v, tmp, 2) == 2)
+                app->currency_code = (uint16_t)((tmp[0] << 8) | tmp[1]);
+        } else if ((v = emv_after_prefix(line, "Expiration year:"))) {
+            emv_read_hex_bytes(v, &app->exp_year, 1);
+        } else if ((v = emv_after_prefix(line, "Expiration month:"))) {
+            emv_read_hex_bytes(v, &app->exp_month, 1);
+        } else if ((v = emv_after_prefix(line, "Expiration day:"))) {
+            emv_read_hex_bytes(v, &app->exp_day, 1);
+        } else if ((v = emv_after_prefix(line, "Effective year:"))) {
+            emv_read_hex_bytes(v, &app->effective_year, 1);
+        } else if ((v = emv_after_prefix(line, "Effective month:"))) {
+            emv_read_hex_bytes(v, &app->effective_month, 1);
+        } else if ((v = emv_after_prefix(line, "Effective day:"))) {
+            emv_read_hex_bytes(v, &app->effective_day, 1);
+        } else if ((v = emv_after_prefix(line, "PIN try counter:"))) {
+            app->pin_try_counter = (uint8_t)strtoul(v, NULL, 10);
+        } else if ((v = emv_after_prefix(line, "Last online ATC:"))) {
+            app->last_online_atc = (uint16_t)strtoul(v, NULL, 10);
+        } else if ((v = emv_after_prefix(line, "Transaction count:"))) {
+            unsigned n = (unsigned)strtoul(v, NULL, 10);
+            app->trans_count = (uint8_t)(n > EMV_TRANS_MAX ? EMV_TRANS_MAX : n);
+        } else if (strncmp(line, "Transaction ", 12) == 0) {
+            unsigned idx = 0, atc = 0, country = 0, currency = 0;
+            unsigned long long amount = 0;
+            unsigned d0 = 0, d1 = 0, d2 = 0, t0 = 0, t1 = 0, t2 = 0;
+            int got = sscanf(line,
+                             "Transaction %u: ATC=%u amount=%llu country=%4x currency=%4x "
+                             "date=%2x%2x%2x time=%2x%2x%2x",
+                             &idx, &atc, &amount, &country, &currency,
+                             &d0, &d1, &d2, &t0, &t1, &t2);
+            if (got >= 2 && idx >= 1 && idx <= EMV_TRANS_MAX) {
+                EmvTransaction *t = &app->trans[idx - 1];
+                t->atc = (uint16_t)atc;
+                t->amount = amount;
+                t->country = (uint16_t)country;
+                t->currency = (uint16_t)currency;
+                t->date[0] = (uint8_t)d0; t->date[1] = (uint8_t)d1; t->date[2] = (uint8_t)d2;
+                t->time[0] = (uint8_t)t0; t->time[1] = (uint8_t)t1; t->time[2] = (uint8_t)t2;
+                if (idx > app->trans_count) app->trans_count = (uint8_t)idx;
+            }
+        }
+    }
+    fclose(f);
+    return is_emv;
+}

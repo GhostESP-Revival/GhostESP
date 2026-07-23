@@ -157,6 +157,7 @@ static size_t saved_file_count = 0;
 #ifdef CONFIG_USE_TOUCHSCREEN
 static touch_drag_t nfc_touch_drag = {0};
 static touch_drag_t nfc_credits_drag = {0};
+static touch_drag_t saved_details_drag = {0};
 #if CONFIG_LV_TOUCH_CONTROLLER_XPT2046
 static const int NFC_SWIPE_THRESHOLD_RATIO = 1;
 #else
@@ -452,6 +453,7 @@ static void update_saved_buttons_layout(void);
 static void update_saved_buttons_layout(void);
 static char* build_mfc_details_from_file(const char *path, char **out_title);
 static char* build_desfire_details_from_file(const char *path, char **out_title);
+static char* build_emv_details_from_file(const char *path, char **out_title);
 static void saved_rename_cb(lv_event_t *e);
 static void saved_delete_cb(lv_event_t *e);
 static void saved_rename_keyboard_callback(const char *name);
@@ -2153,7 +2155,38 @@ void nfc_view_input_cb(InputEvent *event) {
     if (saved_popup && lv_obj_is_valid(saved_popup)) {
         if (event->type == INPUT_TYPE_TOUCH) {
             lv_indev_data_t *d = &event->data.touch_data;
-            if (d->state == LV_INDEV_STATE_PR) return;
+            if (d->state == LV_INDEV_STATE_PR) {
+                /* Dragging over the body scrolls it; a press that starts on a
+                 * button is a tap, never a drag. */
+                bool on_btn = false;
+                lv_area_t ab;
+                if (saved_close_btn && lv_obj_is_valid(saved_close_btn)) {
+                    lv_obj_get_coords(saved_close_btn, &ab);
+                    if (d->point.x >= ab.x1 && d->point.x <= ab.x2 && d->point.y >= ab.y1 && d->point.y <= ab.y2) on_btn = true;
+                }
+                if (!on_btn && saved_rename_btn && lv_obj_is_valid(saved_rename_btn)) {
+                    lv_obj_get_coords(saved_rename_btn, &ab);
+                    if (d->point.x >= ab.x1 && d->point.x <= ab.x2 && d->point.y >= ab.y1 && d->point.y <= ab.y2) on_btn = true;
+                }
+                if (!on_btn && saved_delete_btn && lv_obj_is_valid(saved_delete_btn)) {
+                    lv_obj_get_coords(saved_delete_btn, &ab);
+                    if (d->point.x >= ab.x1 && d->point.x <= ab.x2 && d->point.y >= ab.y1 && d->point.y <= ab.y2) on_btn = true;
+                }
+#ifdef CONFIG_USE_TOUCHSCREEN
+                if (!on_btn && saved_scroll && lv_obj_is_valid(saved_scroll)) {
+                    if (!saved_details_drag.started) touch_drag_begin(&saved_details_drag, d);
+                    else touch_drag_update(&saved_details_drag, d, saved_scroll);
+                } else {
+                    touch_drag_reset(&saved_details_drag);
+                }
+#endif
+                return;
+            }
+            /* Release */
+#ifdef CONFIG_USE_TOUCHSCREEN
+            bool was_dragged = saved_details_drag.started ? touch_drag_release(&saved_details_drag, d) : false;
+            if (was_dragged) { display_manager_flush_pending_scroll(); return; }
+#endif
             if (saved_close_btn && lv_obj_is_valid(saved_close_btn)) {
                 lv_area_t a; lv_obj_get_coords(saved_close_btn, &a);
                 if (d->point.x >= a.x1 && d->point.x <= a.x2 && d->point.y >= a.y1 && d->point.y <= a.y2) { saved_more_cb(NULL); return; }
@@ -2188,6 +2221,10 @@ void nfc_view_input_cb(InputEvent *event) {
                 else if (saved_popup_selected == 1) saved_rename_cb(NULL);
                 else saved_delete_cb(NULL);
                 return;
+            } else if (ji == 2 && saved_scroll && lv_obj_is_valid(saved_scroll)) { // down
+                lv_obj_scroll_by_bounded(saved_scroll, 0, 40, LV_ANIM_OFF);
+            } else if (ji == 4 && saved_scroll && lv_obj_is_valid(saved_scroll)) { // up
+                lv_obj_scroll_by_bounded(saved_scroll, 0, -40, LV_ANIM_OFF);
             }
         } else if (event->type == INPUT_TYPE_ENCODER) {
             if (event->data.encoder.button) {
@@ -5360,15 +5397,45 @@ static char* build_desfire_details_from_file(const char *path, char **out_title)
     if (!is_desfire) return NULL;
 
     uint16_t atqa = (uint16_t)(((atqa_hi & 0xFFu) << 8) | (atqa_lo & 0xFFu));
-    char *text = desfire_build_details_summary(NULL,
+
+    /* Reconstruct the DESFire tree (and PICC version) from the file so the saved
+     * view matches a live scan: the same supported-card parsers (Opal/myki/ITSO)
+     * annotate the summary. Falls back to a plain summary if reconstruction or
+     * parsing yields nothing. */
+    desfire_version_t ver;
+    bool have_ver = false;
+    MfDesfireData *tree = desfire_load_flipper_file(path, &ver, &have_ver);
+
+    char *text = desfire_build_details_summary(have_ver ? &ver : NULL,
                                                (uid_len > 0) ? uid : NULL,
                                                (uint8_t)uid_len,
                                                atqa,
                                                (uint8_t)sak);
-    if (!text) return NULL;
+    if (!text) {
+        if (tree) desfire_tree_free(tree);
+        return NULL;
+    }
+
+    if (tree) {
+        char *plugin_text = flipper_nfc_try_parse_mfdesfire(tree);
+        if (plugin_text) {
+            size_t h_len = strlen(text);
+            size_t p_len = strlen(plugin_text);
+            char *combined = (char *)malloc(h_len + 1 + p_len + 1);
+            if (combined) {
+                memcpy(combined, text, h_len);
+                combined[h_len] = '\n';
+                memcpy(combined + h_len + 1, plugin_text, p_len + 1);
+                free(text);
+                text = combined;
+            }
+            free(plugin_text);
+        }
+        desfire_tree_free(tree);
+    }
 
     if (out_title) {
-        const char *label = desfire_model_str(DESFIRE_MODEL_UNKNOWN);
+        const char *label = desfire_model_str(have_ver ? ver.model : DESFIRE_MODEL_UNKNOWN);
         *out_title = strdup(label);
         if (!*out_title) {
             free(text);
@@ -5376,6 +5443,45 @@ static char* build_desfire_details_from_file(const char *path, char **out_title)
         }
     }
 
+    return text;
+}
+
+/* Reconstruct a saved EMV card and render the same details a live scan shows. */
+static char* build_emv_details_from_file(const char *path, char **out_title) {
+    if (out_title) *out_title = NULL;
+
+    EmvData emv;
+    uint8_t uid[10];
+    uint8_t uid_len = 0;
+    uint16_t atqa = 0;
+    uint8_t sak = 0;
+    if (!emv_load_flipper_file(path, &emv, uid, &uid_len, &atqa, &sak)) return NULL;
+
+    char *plugin_text = flipper_nfc_try_parse_emv(&emv);
+    if (!plugin_text) return NULL;
+
+    size_t cap = 512;
+    char *text = (char *)malloc(cap);
+    if (!text) { free(plugin_text); return NULL; }
+    int pos = snprintf(text, cap, "Type: EMV Payment Card\nUID:");
+    for (uint8_t i = 0; i < uid_len && pos < (int)cap - 4; ++i)
+        pos += snprintf(text + pos, cap - pos, " %02X", uid[i]);
+    pos += snprintf(text + pos, cap - pos, "\nATQA: %02X %02X  SAK: %02X\n",
+                    (atqa >> 8) & 0xFF, atqa & 0xFF, sak);
+
+    size_t h_len = strlen(text);
+    size_t p_len = strlen(plugin_text);
+    char *combined = (char *)malloc(h_len + 1 + p_len + 1);
+    if (combined) {
+        memcpy(combined, text, h_len);
+        combined[h_len] = '\n';
+        memcpy(combined + h_len + 1, plugin_text, p_len + 1);
+        free(text);
+        text = combined;
+    }
+    free(plugin_text);
+
+    if (out_title) *out_title = strdup("EMV Payment Card");
     return text;
 }
 
@@ -5626,6 +5732,7 @@ static void create_saved_details_popup(const char *path) {
     // reset stored details text
     if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
     saved_details_parsed_view = false;
+    touch_drag_reset(&saved_details_drag);
 
     // parse file and show details (supports MIFARE Classic, DESFire, NTAG, and PicoPass)
     bool susp_load = false; bool did_load = nfc_sd_begin(&susp_load);
@@ -5716,24 +5823,35 @@ static void create_saved_details_popup(const char *path) {
             }
             free(df_det);
         } else {
-            // Always allow NTAG file parsing, even without PN532
-            ntag_file_image_t img; memset(&img, 0, sizeof(img));
-            bool ok = ntag_file_load(path, &img);
-            if (ok) {
-                const char *label = ntag_t2_model_str(img.model);
-                lv_label_set_text(saved_title_label, label);
-                char *det = build_compact_write_details(&img);
-                if (det) {
-                    if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
-                    saved_details_text = det;
-                } else {
-                    if (saved_details_text) { free(saved_details_text); }
-                    saved_details_text = strdup("File parsed");
-                }
-                ntag_file_free(&img);
-            } else {
+            char *emv_det = build_emv_details_from_file(path, &title);
+            if (emv_det) {
+                if (title) { lv_label_set_text(saved_title_label, title); free(title); title = NULL; }
                 if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
-                saved_details_text = strdup("Failed to parse .nfc file");
+                saved_details_text = strdup(emv_det);
+                if (!saved_details_text) {
+                    lv_label_set_text(saved_details_label, emv_det);
+                }
+                free(emv_det);
+            } else {
+                // Always allow NTAG file parsing, even without PN532
+                ntag_file_image_t img; memset(&img, 0, sizeof(img));
+                bool ok = ntag_file_load(path, &img);
+                if (ok) {
+                    const char *label = ntag_t2_model_str(img.model);
+                    lv_label_set_text(saved_title_label, label);
+                    char *det = build_compact_write_details(&img);
+                    if (det) {
+                        if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                        saved_details_text = det;
+                    } else {
+                        if (saved_details_text) { free(saved_details_text); }
+                        saved_details_text = strdup("File parsed");
+                    }
+                    ntag_file_free(&img);
+                } else {
+                    if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
+                    saved_details_text = strdup("Failed to parse .nfc file");
+                }
             }
         }
     }

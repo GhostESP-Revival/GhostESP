@@ -90,6 +90,16 @@ char *desfire_build_flipper_text(const MfDesfireData *tree,
                                  uint16_t atqa, uint8_t sak,
                                  const desfire_version_t *ver);
 
+// Reconstruct a DESFire tree from a saved Flipper .nfc (inverse of
+// desfire_build_flipper_text): application IDs, file IDs, file settings, and
+// plaintext file data. When non-NULL, ver_out/have_ver_out are filled from the
+// "PICC Version:" line. Returns a heap tree (free with desfire_tree_free) or
+// NULL. Needs no reader hardware; lets saved tags run the same supported-card
+// parsers as a live scan.
+MfDesfireData *desfire_load_flipper_file(const char *path,
+                                         desfire_version_t *ver_out,
+                                         bool *have_ver_out);
+
 #ifdef __cplusplus
 }
 #endif

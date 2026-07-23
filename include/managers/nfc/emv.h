@@ -93,6 +93,14 @@ bool emv_save_flipper_file(const EmvData *data, const char *dir,
                            char *out_path, size_t out_path_len);
 #endif
 
+// Load an EMV card previously saved via emv_save_flipper_file back into EmvData
+// (and, when non-NULL, uid/uid_len/atqa/sak). Inverse of emv_build_flipper_text;
+// needs no reader hardware. Returns true when the file is a "Device type: EMV"
+// Flipper .nfc and was parsed.
+bool emv_load_flipper_file(const char *path, EmvData *out,
+                           uint8_t *uid, uint8_t *uid_len,
+                           uint16_t *atqa, uint8_t *sak);
+
 #ifdef __cplusplus
 }
 #endif
