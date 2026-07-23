@@ -170,6 +170,7 @@ static bool emv_tlv_find(uint16_t tag, const uint8_t *buf, size_t len,
     return false;
 }
 
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 // APDU exchange helper. Builds a correct short-APDU depending on payload:
 //  - data present  -> case-3/4: CLA INS P1 P2 Lc Data Le
 //  - no data       -> case-2   : CLA INS P1 P2 Le   (no Lc field!)
@@ -758,6 +759,7 @@ bool emv_save_flipper_file(const EmvData *data, const char *dir,
     ESP_LOGI(TAG, "EMV file saved (%u bytes): %s", (unsigned)len, path);
     return true;
 }
+#endif // CONFIG_NFC_PN532 || CONFIG_NFC_ST25R3916
 
 /* ---- Saved-file loader (inverse of emv_build_flipper_text) ---------------- */
 
