@@ -98,6 +98,15 @@
 - Added new WiFi docs pages for connecting, LAN discovery, port scanning, and environment sweep
 - Moved GhostScript docs to its own top-level section and updated GBT and native SD app docs
 
+## Revival v2.1-pre4
+- Made Cloud Store catalogs grow on demand with paged browsing, supporting up to 32 apps, asset packs, and scripts per type on PSRAM boards
+- Preserved script permissions and memory limits in Cloud Store-installed GhostScript manifests
+- Stopped allocating the native app registry on no-PSRAM boards
+- Reduced standalone `.gsb` launch peak by up to 8 KiB and freed 384-byte task arguments before execution
+- Removed about 0.3 KiB of typical Lua allocator overhead and fixed allocator alignment/accounting
+- Fixed input and event-wait bookkeeping that could consume the full 16-24 KiB Lua quota over time
+- Fixed the GhostScript browser selecting a different script after returning from a run
+- Freed about 1 KiB of Apps gallery storage before launching apps and fixed accumulating options-view style allocations
 
 ## Revival v2.0.0
 

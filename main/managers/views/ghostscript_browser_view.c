@@ -26,7 +26,11 @@ static int s_row_count;
 static int s_offset;
 static bool s_has_more;
 static bool s_touch_started;
+static bool s_switch_pending;
 static lv_point_t s_touch_start;
+static char s_resume_dir[GHOSTSCRIPT_PATH_MAX];
+static char s_resume_path[GHOSTSCRIPT_PATH_MAX];
+static int s_resume_offset;
 
 #define BROWSER_TAP_THRESHOLD 12
 #define BROWSER_SCROLL_THRESHOLD 16
@@ -43,9 +47,17 @@ static void parent_dir(void) {
 }
 
 static void activate_row(int selected) {
+    if (s_switch_pending) return;
     if (selected < 0 || selected >= s_row_count) return;
     row_t row = s_rows[selected];
-    if (row.type == ROW_BACK) { display_manager_switch_view(&apps_menu_view); return; }
+    if (row.type == ROW_BACK) {
+        s_resume_dir[0] = '\0';
+        s_resume_path[0] = '\0';
+        s_resume_offset = 0;
+        s_switch_pending = true;
+        display_manager_switch_view(&apps_menu_view);
+        return;
+    }
     if (row.type == ROW_UP) { parent_dir(); s_offset = 0; refresh(); return; }
     if (row.type == ROW_PREV) { s_offset -= GHOSTSCRIPT_BROWSER_PAGE_SIZE; if (s_offset < 0) s_offset = 0; refresh(); return; }
     if (row.type == ROW_NEXT) { s_offset += GHOSTSCRIPT_BROWSER_PAGE_SIZE; refresh(); return; }
@@ -57,6 +69,10 @@ static void activate_row(int selected) {
             s_offset = 0;
             refresh();
         } else {
+            snprintf(s_resume_dir, sizeof(s_resume_dir), "%s", s_dir);
+            snprintf(s_resume_path, sizeof(s_resume_path), "%s", entry->path);
+            s_resume_offset = s_offset;
+            s_switch_pending = true;
             ghostscript_runner_set_script(entry->path);
             display_manager_switch_view(&ghostscript_runner_view);
         }
@@ -136,7 +152,7 @@ static void add_row(row_type_t type, int index, const char *label) {
     if (s_row_count >= GHOSTSCRIPT_BROWSER_PAGE_SIZE + 5) return;
     s_rows[s_row_count].type = type;
     s_rows[s_row_count].index = index;
-    options_view_add_item(s_opts, label, row_click, NULL);
+    if (!options_view_add_item(s_opts, label, row_click, NULL)) return;
     s_row_count++;
 }
 
@@ -152,17 +168,23 @@ static void refresh(void) {
     if (s_count == 0 && ghostscript_manager_last_error()[0]) {
         add_row(ROW_REFRESH, -1, ghostscript_manager_last_error());
     }
+    int resume_row = -1;
     for (int i = 0; i < s_count; ++i) {
         char label[160];
         const char *prefix = s_entries[i].is_dir ? (s_entries[i].has_manifest ? LV_SYMBOL_PLAY " " : LV_SYMBOL_DIRECTORY " ") : LV_SYMBOL_FILE " ";
         snprintf(label, sizeof(label), "%s%s", prefix, s_entries[i].name);
+        int row_before = s_row_count;
         add_row(ROW_ENTRY, i, label);
+        if (s_row_count > row_before && s_resume_path[0] &&
+            strcmp(s_entries[i].path, s_resume_path) == 0) {
+            resume_row = s_row_count - 1;
+        }
     }
     if (s_offset > 0) add_row(ROW_PREV, -1, LV_SYMBOL_LEFT " Previous Page");
     if (s_has_more) add_row(ROW_NEXT, -1, "Next Page " LV_SYMBOL_RIGHT);
     add_row(ROW_REFRESH, -1, LV_SYMBOL_REFRESH " Refresh");
     add_row(ROW_BACK, -1, LV_SYMBOL_LEFT " Back");
-    options_view_set_selected(s_opts, 0);
+    options_view_set_selected(s_opts, resume_row >= 0 ? resume_row : 0);
     options_view_trigger_wipe(s_opts);
 }
 
@@ -175,7 +197,12 @@ static bool is_back(InputEvent *event) {
 
 static void event_handler(InputEvent *event) {
     if (!event || !s_opts) return;
+    if (s_switch_pending) return;
     if (is_back(event)) {
+        s_resume_dir[0] = '\0';
+        s_resume_path[0] = '\0';
+        s_resume_offset = 0;
+        s_switch_pending = true;
         display_manager_switch_view(&apps_menu_view);
         return;
     }
@@ -200,13 +227,20 @@ void ghostscript_browser_view_create(void) {
     s_dir = malloc(GHOSTSCRIPT_PATH_MAX);
     s_entries = calloc(GHOSTSCRIPT_BROWSER_PAGE_SIZE, sizeof(*s_entries));
     s_rows = calloc(GHOSTSCRIPT_BROWSER_PAGE_SIZE + 5, sizeof(*s_rows));
-    if (!s_dir || !s_entries || !s_rows) return;
-    snprintf(s_dir, GHOSTSCRIPT_PATH_MAX, "%s", GHOSTSCRIPT_ROOT_DIR);
+    if (!s_dir || !s_entries || !s_rows) {
+        free(s_dir); s_dir = NULL;
+        free(s_entries); s_entries = NULL;
+        free(s_rows); s_rows = NULL;
+        return;
+    }
+    snprintf(s_dir, GHOSTSCRIPT_PATH_MAX, "%s",
+             s_resume_dir[0] ? s_resume_dir : GHOSTSCRIPT_ROOT_DIR);
     s_root = gui_screen_create_root(NULL, "GhostScript", lv_color_black(), LV_OPA_COVER);
     ghostscript_browser_view.root = s_root;
     s_opts = options_view_create(s_root, "GhostScript");
-    s_offset = 0;
+    s_offset = s_resume_dir[0] ? s_resume_offset : 0;
     s_touch_started = false;
+    s_switch_pending = false;
     refresh();
 }
 

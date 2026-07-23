@@ -574,9 +574,13 @@ static void deferred_sd_init_task(void *arg) {
     // Hand off app discovery to its own PSRAM-backed static task so the GAPP
     // inflate can use the same fat stack the Apps menu allocates. The SD Init
     // task stays at 6K; the splash holds until both boot steps are signalled.
+#if CONFIG_ENABLE_NATIVE_SD_APPS
     if (!start_boot_app_discovery_task()) {
         splash_boot_step_done(BOOT_DONE_PLUGIN);
     }
+#else
+    splash_boot_step_done(BOOT_DONE_PLUGIN);
+#endif
     splash_boot_step_done(BOOT_DONE_SD_ASSET);
 #endif
     vTaskDelete(NULL);

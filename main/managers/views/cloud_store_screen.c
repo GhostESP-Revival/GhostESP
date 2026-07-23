@@ -47,6 +47,10 @@ typedef enum {
     ROW_KIND_FOLDER, // opens a type submenu (Apps / Asset Packs)
     ROW_KIND_CATEGORY, // picks (or clears) the manifest-category filter within a type
     ROW_KIND_ITEM,
+    ROW_KIND_PREVIOUS_PAGE,
+    ROW_KIND_NEXT_PAGE,
+    ROW_KIND_PREVIOUS_CATEGORY_PAGE,
+    ROW_KIND_NEXT_CATEGORY_PAGE,
     ROW_KIND_EMPTY,
     ROW_KIND_BACK,
 } row_kind_t;
@@ -70,7 +74,7 @@ typedef enum {
     SECTION_LEVEL_ITEMS,
 } section_level_t;
 
-#define CLOUD_STORE_MAX_CATEGORIES 12
+#define CLOUD_STORE_MAX_CATEGORIES 32
 #define CLOUD_CATEGORY_ALL_INDEX (-1)
 #define CLOUD_CATEGORY_UNCATEGORIZED_LABEL "Uncategorized"
 
@@ -93,6 +97,8 @@ static int s_section = CLOUD_SECTION_TOP; // which submenu is open, or top level
 static section_level_t s_level = SECTION_LEVEL_NONE;
 static bool s_category_level_exists; // whether Back from items should return to a category list
 static char s_current_category[CLOUD_STORE_CATEGORY_MAX]; // "" = no filter (All)
+static int s_item_offset;
+static int s_category_offset;
 static category_bucket_t s_categories[CLOUD_STORE_MAX_CATEGORIES];
 static int s_categories_count;
 static uint32_t s_last_refresh_ms;
@@ -102,11 +108,8 @@ static cloud_store_item_type_t s_pending_type;
 static touch_drag_t s_touch_drag;
 #define CLOUD_SWIPE_THRESHOLD_RATIO 4
 static sorted_cloud_item_t s_sorted_apps[CLOUD_STORE_MAX_ITEMS];
-static int s_sorted_apps_count;
 static sorted_cloud_item_t s_sorted_packs[CLOUD_STORE_MAX_ITEMS];
-static int s_sorted_packs_count;
 static sorted_cloud_item_t s_sorted_scripts[CLOUD_STORE_MAX_ITEMS];
-static int s_sorted_scripts_count;
 
 static int row_count(void) {
     return options_view_get_item_count(s_options);
@@ -142,12 +145,6 @@ static void row_event_cb(lv_event_t *e) {
     if (cloud_store_view.input_callback) cloud_store_view.input_callback(&ev);
 }
 
-static int sort_items_compare(const void *a, const void *b) {
-    const sorted_cloud_item_t *sa = (const sorted_cloud_item_t *)a;
-    const sorted_cloud_item_t *sb = (const sorted_cloud_item_t *)b;
-    return strcmp(sa->name, sb->name);
-}
-
 // Items with no manifest category bucket into "Uncategorized" rather than
 // being hidden from every category filter.
 static const char *item_category_name(const cloud_store_item_t *item) {
@@ -155,21 +152,53 @@ static const char *item_category_name(const cloud_store_item_t *item) {
 }
 
 // category_filter: NULL/"" = no filter (all items of this type).
-static void load_sorted_items(cloud_store_item_type_t type, const char *category_filter,
-                               sorted_cloud_item_t *out, int *out_count) {
+static int filtered_item_count(cloud_store_item_type_t type, const char *category_filter) {
     int item_count = cloud_store_get_count(type);
-    int n = 0;
-    for (int i = 0; i < item_count && n < CLOUD_STORE_MAX_ITEMS; ++i) {
+    int count = 0;
+    for (int i = 0; i < item_count; ++i) {
         cloud_store_item_t item;
         if (!cloud_store_get_item(type, i, &item)) continue;
         if (category_filter && category_filter[0] && strcmp(item_category_name(&item), category_filter) != 0) continue;
-        out[n].original_index = i;
-        strncpy(out[n].name, item.name, CLOUD_STORE_NAME_MAX - 1);
-        out[n].name[CLOUD_STORE_NAME_MAX - 1] = '\0';
-        n++;
+        count++;
     }
-    qsort(out, n, sizeof(sorted_cloud_item_t), sort_items_compare);
-    *out_count = n;
+    return count;
+}
+
+static bool load_sorted_item_at(cloud_store_item_type_t type, const char *category_filter,
+                                int rank, sorted_cloud_item_t *out) {
+    char previous_name[CLOUD_STORE_NAME_MAX] = {0};
+    int previous_index = -1;
+    int item_count = cloud_store_get_count(type);
+    for (int current_rank = 0; current_rank <= rank; ++current_rank) {
+        bool found = false;
+        cloud_store_item_t candidate = {0};
+        int candidate_index = -1;
+        for (int i = 0; i < item_count; ++i) {
+            cloud_store_item_t item;
+            if (!cloud_store_get_item(type, i, &item)) continue;
+            if (category_filter && category_filter[0] &&
+                strcmp(item_category_name(&item), category_filter) != 0) continue;
+            int comparison = strcmp(item.name, previous_name);
+            if (comparison < 0 || (comparison == 0 && i <= previous_index)) continue;
+            if (!found || strcmp(item.name, candidate.name) < 0 ||
+                (strcmp(item.name, candidate.name) == 0 && i < candidate_index)) {
+                candidate = item;
+                candidate_index = i;
+                found = true;
+            }
+        }
+        if (!found) return false;
+        strncpy(previous_name, candidate.name, sizeof(previous_name) - 1);
+        previous_name[sizeof(previous_name) - 1] = '\0';
+        previous_index = candidate_index;
+        if (current_rank == rank) {
+            out->original_index = candidate_index;
+            strncpy(out->name, candidate.name, sizeof(out->name) - 1);
+            out->name[sizeof(out->name) - 1] = '\0';
+            return true;
+        }
+    }
+    return false;
 }
 
 // Keeps "Uncategorized" sorted last so real manifest categories lead the list.
@@ -338,7 +367,16 @@ static void render_categories(int *rendered, cloud_store_item_type_t type) {
     s_row_meta[*rendered].original_index = CLOUD_CATEGORY_ALL_INDEX;
     (*rendered)++;
 
-    for (int i = 0; i < s_categories_count && *rendered < CLOUD_STORE_MAX_ROWS; ++i) {
+    if (s_category_offset >= s_categories_count) s_category_offset = 0;
+    if (s_category_offset > 0) {
+        s_rows[*rendered] = options_view_add_item(s_options, LV_SYMBOL_LEFT "  Previous page",
+                                                   row_event_cb, (void *)(intptr_t)*rendered);
+        s_row_meta[*rendered].kind = ROW_KIND_PREVIOUS_CATEGORY_PAGE;
+        (*rendered)++;
+    }
+    int category_end = s_category_offset + CLOUD_STORE_MAX_ROWS - 4;
+    if (category_end > s_categories_count) category_end = s_categories_count;
+    for (int i = s_category_offset; i < category_end; ++i) {
         char line[64];
         // Explicit precision gives GCC a provable bound on the %s (it loses
         // track of the char[CLOUD_STORE_CATEGORY_MAX] array bound once this
@@ -350,6 +388,12 @@ static void render_categories(int *rendered, cloud_store_item_type_t type) {
         s_row_meta[*rendered].kind = ROW_KIND_CATEGORY;
         s_row_meta[*rendered].item_type = type;
         s_row_meta[*rendered].original_index = i;
+        (*rendered)++;
+    }
+    if (category_end < s_categories_count) {
+        s_rows[*rendered] = options_view_add_item(s_options, "Next page " LV_SYMBOL_RIGHT,
+                                                   row_event_cb, (void *)(intptr_t)*rendered);
+        s_row_meta[*rendered].kind = ROW_KIND_NEXT_CATEGORY_PAGE;
         (*rendered)++;
     }
 }
@@ -366,19 +410,33 @@ static void render_items(int *rendered, cloud_store_item_type_t type, cloud_stor
     s_row_meta[*rendered].kind = ROW_KIND_BACK;
     (*rendered)++;
 
+    const char *category_filter = s_current_category[0] ? s_current_category : NULL;
+    int item_total = filtered_item_count(type, category_filter);
+    if (s_item_offset >= item_total) s_item_offset = 0;
+    if (s_item_offset > 0) {
+        s_rows[*rendered] = options_view_add_item(s_options, LV_SYMBOL_LEFT "  Previous page",
+                                                   row_event_cb, (void *)(intptr_t)*rendered);
+        s_row_meta[*rendered].kind = ROW_KIND_PREVIOUS_PAGE;
+        (*rendered)++;
+    }
+
     sorted_cloud_item_t *items = (type == CLOUD_STORE_TYPE_APP) ? s_sorted_apps
                                : (type == CLOUD_STORE_TYPE_SCRIPT) ? s_sorted_scripts
                                : s_sorted_packs;
-    int *item_n_ptr = (type == CLOUD_STORE_TYPE_APP) ? &s_sorted_apps_count
-                    : (type == CLOUD_STORE_TYPE_SCRIPT) ? &s_sorted_scripts_count
-                    : &s_sorted_packs_count;
-    load_sorted_items(type, s_current_category[0] ? s_current_category : NULL, items, item_n_ptr);
-    int item_n = *item_n_ptr;
-    for (int i = 0; i < item_n && *rendered < CLOUD_STORE_MAX_ROWS - 1; ++i) {
-        add_item_row(rendered, type, items[i].original_index);
+    int item_n = 0;
+    for (; item_n < CLOUD_STORE_MAX_ITEMS && s_item_offset + item_n < item_total; ++item_n) {
+        if (!load_sorted_item_at(type, category_filter, s_item_offset + item_n, &items[item_n])) break;
+        add_item_row(rendered, type, items[item_n].original_index);
     }
 
-    if (item_n == 0) {
+    if (s_item_offset + item_n < item_total) {
+        s_rows[*rendered] = options_view_add_item(s_options, "Next page " LV_SYMBOL_RIGHT,
+                                                   row_event_cb, (void *)(intptr_t)*rendered);
+        s_row_meta[*rendered].kind = ROW_KIND_NEXT_PAGE;
+        (*rendered)++;
+    }
+
+    if (item_total == 0) {
         const char *msg = (status.state == CLOUD_STORE_STATE_FETCHING)
             ? "Loading..."
             : (type == CLOUD_STORE_TYPE_APP) ? "No apps available"
@@ -475,6 +533,8 @@ static void confirm_install_cb(void *user_data) {
 static void enter_folder(cloud_store_item_type_t type) {
     s_section = type;
     s_current_category[0] = '\0';
+    s_item_offset = 0;
+    s_category_offset = 0;
     load_categories(type);
     if (s_categories_count <= 1) {
         s_level = SECTION_LEVEL_ITEMS;
@@ -498,6 +558,8 @@ static void go_up_level(void) {
     if (s_level == SECTION_LEVEL_ITEMS && s_category_level_exists) {
         s_level = SECTION_LEVEL_CATEGORIES;
         s_current_category[0] = '\0';
+        s_item_offset = 0;
+        s_category_offset = 0;
         s_selected_row = 0;
         render_store();
         return;
@@ -506,6 +568,8 @@ static void go_up_level(void) {
     s_level = SECTION_LEVEL_NONE;
     s_category_level_exists = false;
     s_current_category[0] = '\0';
+    s_item_offset = 0;
+    s_category_offset = 0;
     s_selected_row = 0;
     render_store();
 }
@@ -527,7 +591,31 @@ static void select_current(void) {
                 s_current_category[sizeof(s_current_category) - 1] = '\0';
             }
             s_level = SECTION_LEVEL_ITEMS;
+            s_item_offset = 0;
+            s_category_offset = 0;
             s_selected_row = 1; // land on the first item, past the Back row
+            render_store();
+            return;
+        case ROW_KIND_PREVIOUS_PAGE:
+            s_item_offset -= CLOUD_STORE_MAX_ITEMS;
+            if (s_item_offset < 0) s_item_offset = 0;
+            s_selected_row = 1;
+            render_store();
+            return;
+        case ROW_KIND_NEXT_PAGE:
+            s_item_offset += CLOUD_STORE_MAX_ITEMS;
+            s_selected_row = 2;
+            render_store();
+            return;
+        case ROW_KIND_PREVIOUS_CATEGORY_PAGE:
+            s_category_offset -= CLOUD_STORE_MAX_ROWS - 4;
+            if (s_category_offset < 0) s_category_offset = 0;
+            s_selected_row = 2;
+            render_store();
+            return;
+        case ROW_KIND_NEXT_CATEGORY_PAGE:
+            s_category_offset += CLOUD_STORE_MAX_ROWS - 4;
+            s_selected_row = 3;
             render_store();
             return;
         case ROW_KIND_ITEM:    break;
@@ -650,6 +738,8 @@ static void cloud_store_create(void) {
     s_level = SECTION_LEVEL_NONE;
     s_category_level_exists = false;
     s_current_category[0] = '\0';
+    s_item_offset = 0;
+    s_category_offset = 0;
     s_selected_row = 0;
     s_last_refresh_ms = 0;
     touch_drag_reset(&s_touch_drag);
@@ -695,6 +785,8 @@ static void cloud_store_destroy(void) {
     s_level = SECTION_LEVEL_NONE;
     s_category_level_exists = false;
     s_current_category[0] = '\0';
+    s_item_offset = 0;
+    s_category_offset = 0;
     cloud_store_manager_cleanup();
 }
 

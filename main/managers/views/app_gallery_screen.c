@@ -1100,9 +1100,9 @@ static void apps_plugin_reload_done(void *arg) {
  * @brief Creates the apps menu screen view
  */
  void apps_menu_create(void) {
-    plugin_manager_init();
-    int boot_count = plugin_manager_count();
     bool plugins_enabled = apps_native_plugins_enabled();
+    if (plugins_enabled) plugin_manager_init();
+    int boot_count = plugin_manager_count();
     apps_allow_plugin_icon_load = plugins_enabled && (boot_count > 0);
     in_submenu = false;
     current_category[0] = '\0';
@@ -1115,13 +1115,11 @@ static void apps_plugin_reload_done(void *arg) {
     refresh_apps_surface_colors();
     display_manager_fill_screen(apps_bg_color);
 
-#if CONFIG_ENABLE_NATIVE_SD_APPS
     if (!s_native_apps_psram_warning_shown &&
         heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
         s_native_apps_psram_warning_shown = true;
         toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 1500);
     }
-#endif
 
     const char *title = (LV_VER_RES > 320 ? "Apps Menu" : "Apps");
 
@@ -1276,6 +1274,10 @@ void apps_menu_destroy(void) {
     touch_start_y = 0;
     touch_last_x = 0;
     touch_last_y = 0;
+    free(app_items);
+    app_items = NULL;
+    s_app_items_capacity = 0;
+    num_apps = 0;
 }
 
 /**

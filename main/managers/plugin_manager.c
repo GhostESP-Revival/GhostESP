@@ -30,6 +30,16 @@
 #define PLUGIN_MANIFEST_MAX_BYTES 8192
 
 static const char *TAG = "PluginManager";
+
+#ifdef CONFIG_NATIVE_SD_APP_MAX_COUNT
+#define PLUGIN_APP_REGISTRY_CAPACITY CONFIG_NATIVE_SD_APP_MAX_COUNT
+#else
+#define PLUGIN_APP_REGISTRY_CAPACITY PLUGIN_APP_MAX_COUNT
+#endif
+
+_Static_assert(PLUGIN_APP_REGISTRY_CAPACITY > 0 &&
+               PLUGIN_APP_REGISTRY_CAPACITY <= PLUGIN_APP_MAX_COUNT,
+               "native app registry capacity is out of range");
 static plugin_app_manifest_t *s_apps = NULL;
 static int s_app_count = 0;
 static char s_last_error[128];
@@ -47,6 +57,10 @@ static plugin_package_sig_t s_package_sigs[2];
 static bool s_packages_materialized = false;
 
 static bool read_file_to_buffer(const char *path, char **out_buf);
+
+static bool plugin_manager_has_psram(void) {
+    return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+}
 
 static bool plugin_manager_sd_jit_allowed(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -541,8 +555,13 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
 }
 
 void plugin_manager_init(void) {
+    if (!plugin_manager_has_psram()) {
+        s_app_count = 0;
+        s_last_error[0] = '\0';
+        return;
+    }
     if (!s_apps) {
-        s_apps = spiram_calloc(PLUGIN_APP_MAX_COUNT, sizeof(*s_apps));
+        s_apps = spiram_calloc(PLUGIN_APP_REGISTRY_CAPACITY, sizeof(*s_apps));
         if (!s_apps) {
             snprintf(s_last_error, sizeof(s_last_error), "failed to allocate app registry");
             return;
@@ -553,7 +572,7 @@ void plugin_manager_init(void) {
 
 bool plugin_manager_target_supported(void) {
 #if CONFIG_ENABLE_NATIVE_SD_APPS
-    return true;
+    return plugin_manager_has_psram();
 #else
     return false;
 #endif
@@ -588,13 +607,19 @@ bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app
 
 int plugin_manager_reload(void) {
     int64_t start_us = esp_timer_get_time();
+    if (!plugin_manager_target_supported()) {
+        s_app_count = 0;
+        s_last_error[0] = '\0';
+        if (s_progress_cb) s_progress_cb(100.0f, 0, 0, s_progress_user);
+        return 0;
+    }
     plugin_manager_init();
     if (!s_apps) return -1;
     for (int i = 0; i < s_app_count; ++i) {
         plugin_icon_free(s_apps[i].icon_dsc);
     }
     s_app_count = 0;
-    memset(s_apps, 0, sizeof(*s_apps) * PLUGIN_APP_MAX_COUNT);
+    memset(s_apps, 0, sizeof(*s_apps) * PLUGIN_APP_REGISTRY_CAPACITY);
     s_last_error[0] = '\0';
     if (s_progress_cb) s_progress_cb(0.0f, 0, 0, s_progress_user);
 
@@ -619,7 +644,7 @@ int plugin_manager_reload(void) {
     ESP_LOGI(TAG, "Package materialize check took %lld ms", (long long)((esp_timer_get_time() - materialize_start_us) / 1000));
 
     const char *scan_dirs[] = { PLUGIN_APPS_DIR, PLUGIN_APP_CACHE_DIR };
-    for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_MAX_COUNT; ++scan_i) {
+    for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY; ++scan_i) {
         DIR *dir = opendir(scan_dirs[scan_i]);
         if (!dir) {
             if (scan_i == 0) set_error("failed to open %s", scan_dirs[scan_i]);
@@ -627,7 +652,7 @@ int plugin_manager_reload(void) {
         }
 
         struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL && s_app_count < PLUGIN_APP_MAX_COUNT) {
+        while ((entry = readdir(dir)) != NULL && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY) {
             if (entry->d_name[0] == '.') continue;
             char base_path[PLUGIN_APP_PATH_MAX];
             if (!join_path(base_path, sizeof(base_path), scan_dirs[scan_i], entry->d_name)) {

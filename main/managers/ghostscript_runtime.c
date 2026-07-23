@@ -70,10 +70,6 @@ static void *gs_heap_realloc(void *ptr, size_t size) {
                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
-typedef struct {
-    uint16_t size;
-} gs_alloc_header_t;
-
 struct ghostscript_runtime {
     ghostscript_manifest_t manifest;
     ghostscript_runtime_hooks_t hooks;
@@ -149,35 +145,41 @@ static ghostscript_runtime_t *check_rt(lua_State *L) {
 }
 
 static void *gs_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
-    (void)osize;
     ghostscript_runtime_t *rt = (ghostscript_runtime_t *)ud;
     if (!rt) return NULL;
     if (nsize == 0) {
         if (ptr) {
-            gs_alloc_header_t *h = ((gs_alloc_header_t *)ptr) - 1;
-            if (rt->memory_used >= h->size) rt->memory_used -= h->size;
-            heap_caps_free(h);
+            if (rt->memory_used >= osize) rt->memory_used -= osize;
+            else rt->memory_used = 0;
+            heap_caps_free(ptr);
         }
         return NULL;
     }
     if (!ptr) {
+        if (nsize > SIZE_MAX - rt->memory_used) return NULL;
         if (rt->memory_used + nsize > rt->memory_limit && !rt->destroying) return NULL;
-        gs_alloc_header_t *h = gs_heap_alloc(sizeof(*h) + nsize);
-        if (!h) return NULL;
-        h->size = nsize;
+        void *allocated = gs_heap_alloc(nsize);
+        if (!allocated) return NULL;
         rt->memory_used += nsize;
         if (rt->memory_used > rt->memory_peak) rt->memory_peak = rt->memory_used;
-        return h + 1;
+        return allocated;
     }
-    gs_alloc_header_t *old = ((gs_alloc_header_t *)ptr) - 1;
-    size_t old_size = old->size;
-    if (nsize > old_size && rt->memory_used + (nsize - old_size) > rt->memory_limit && !rt->destroying) return NULL;
-    gs_alloc_header_t *h = gs_heap_realloc(old, sizeof(*h) + nsize);
-    if (!h) return NULL;
-    h->size = nsize;
-    rt->memory_used = rt->memory_used - old_size + nsize;
+    if (nsize > osize) {
+        size_t growth = nsize - osize;
+        if (growth > SIZE_MAX - rt->memory_used) return NULL;
+        if (rt->memory_used + growth > rt->memory_limit && !rt->destroying) return NULL;
+    }
+    void *allocated = gs_heap_realloc(ptr, nsize);
+    if (!allocated) return NULL;
+    if (nsize >= osize) {
+        rt->memory_used += nsize - osize;
+    } else {
+        size_t reduction = osize - nsize;
+        if (rt->memory_used >= reduction) rt->memory_used -= reduction;
+        else rt->memory_used = 0;
+    }
     if (rt->memory_used > rt->memory_peak) rt->memory_peak = rt->memory_used;
-    return h + 1;
+    return allocated;
 }
 
 static bool rt_has_perm(ghostscript_runtime_t *rt, uint32_t perm) {
@@ -422,13 +424,24 @@ static int l_event_wait(lua_State *L) {
         lua_pushvalue(L, -1);
         lua_setfield(L, -3, "_waits");
     }
-    lua_getfield(L, -1, "_next_wait_id");
-    int slot = lua_isinteger(L, -1) ? (int)lua_tointeger(L, -1) + 1 : 1;
+    int entry_index = lua_absindex(L, -3);
+    int waits_index = lua_absindex(L, -1);
+    lua_getfield(L, waits_index, "_next_wait_id");
+    int high_water = lua_isinteger(L, -1) ? (int)lua_tointeger(L, -1) : 0;
     lua_pop(L, 1);
-    lua_pushinteger(L, slot);
-    lua_setfield(L, -2, "_next_wait_id");
-    lua_pushvalue(L, -3);
-    lua_rawseti(L, -2, slot);
+    int slot = 1;
+    for (; slot <= high_water; ++slot) {
+        lua_rawgeti(L, waits_index, slot);
+        bool available = lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (available) break;
+    }
+    if (slot > high_water) {
+        lua_pushinteger(L, slot);
+        lua_setfield(L, waits_index, "_next_wait_id");
+    }
+    lua_pushvalue(L, entry_index);
+    lua_rawseti(L, waits_index, slot);
     lua_pop(L, 2);
     if (L == rt->thread) rt->waiting_for_event = true;
     return lua_yield(L, 0);
@@ -2858,8 +2871,6 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
     }
     char serialized[160];
     snprintf(serialized, sizeof(serialized), "%s", type);
-    lua_pushvalue(rt->L, -1);
-    lua_setfield(rt->L, LUA_REGISTRYINDEX, "ghostscript.last_input");
     dispatch_event(rt, topic, serialized);
     if (rt->state != GHOSTSCRIPT_STATE_RUNNING) {
         lua_pop(rt->L, 1);
@@ -2868,12 +2879,12 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
     lua_pushvalue(rt->L, -1);
     dispatch_event(rt, "input", serialized);
     if (rt->state != GHOSTSCRIPT_STATE_RUNNING) {
-        lua_pop(rt->L, 1);
+        lua_pop(rt->L, 2);
         return;
     }
     lua_pop(rt->L, 1);
     lua_getglobal(rt->L, "on_input");
-    if (!lua_isfunction(rt->L, -1)) { lua_pop(rt->L, 1); return; }
+    if (!lua_isfunction(rt->L, -1)) { lua_pop(rt->L, 2); return; }
     lua_insert(rt->L, -2);
     runtime_begin_slice(rt);
     int rc = lua_pcall(rt->L, 1, 0, 0);

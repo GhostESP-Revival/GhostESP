@@ -366,6 +366,99 @@ static void copy_json_size(cJSON *root, const char *key, size_t *out) {
     }
 }
 
+static int item_count_for_type(const cloud_store_item_t *items, int count, cloud_store_item_type_t type) {
+    int matches = 0;
+    for (int i = 0; items && i < count; ++i) {
+        if (items[i].type == type) matches++;
+    }
+    return matches;
+}
+
+static int catalog_item_limit_per_type(void) {
+    return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0
+        ? CLOUD_STORE_MAX_CATALOG_ITEMS_PER_TYPE
+        : CLOUD_STORE_MAX_ITEMS;
+}
+
+static bool append_catalog_item(cloud_store_item_t **items, int *count, int *capacity,
+                                const cloud_store_item_t *item) {
+    if (!items || !count || !capacity || !item ||
+        *count >= catalog_item_limit_per_type() * 3) {
+        return false;
+    }
+    if (*count == *capacity) {
+        int next_capacity = *capacity ? *capacity * 2 : CLOUD_STORE_MAX_ITEMS;
+        int total_limit = catalog_item_limit_per_type() * 3;
+        if (next_capacity > total_limit) {
+            next_capacity = total_limit;
+        }
+        cloud_store_item_t *grown = heap_caps_realloc_prefer(
+            *items, (size_t)next_capacity * sizeof(*grown), 2,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (!grown) {
+            ESP_LOGW(TAG, "catalog item allocation failed at %d entries", *count);
+            return false;
+        }
+        *items = grown;
+        *capacity = next_capacity;
+    }
+    (*items)[(*count)++] = *item;
+    return true;
+}
+
+static void copy_script_permissions(cJSON *root, cloud_store_item_t *item) {
+    if (!root || !item) return;
+    cJSON *permissions = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+    if (!cJSON_IsArray(permissions)) return;
+    cJSON *permission = NULL;
+    cJSON_ArrayForEach(permission, permissions) {
+        uint32_t value = 0;
+        if (cJSON_IsString(permission) &&
+            ghostscript_manager_permission_from_string(permission->valuestring, &value)) {
+            item->script_permissions |= value;
+        }
+    }
+}
+
+static const char *script_permission_name(uint32_t permission) {
+    switch (permission) {
+        case PLUGIN_PERMISSION_UI: return "ui";
+        case PLUGIN_PERMISSION_STORAGE: return "storage";
+        case PLUGIN_PERMISSION_COMMANDS: return "commands";
+        case PLUGIN_PERMISSION_TASKS: return "tasks";
+        case PLUGIN_PERMISSION_WIFI: return "wifi";
+        case PLUGIN_PERMISSION_BLE: return "ble";
+        case PLUGIN_PERMISSION_NFC: return "nfc";
+        case PLUGIN_PERMISSION_IR: return "ir";
+        case PLUGIN_PERMISSION_SUBGHZ: return "subghz";
+        case PLUGIN_PERMISSION_BADUSB: return "badusb";
+        case PLUGIN_PERMISSION_RAW_GPIO: return "raw_gpio";
+        case PLUGIN_PERMISSION_LVGL: return "lvgl";
+        case PLUGIN_PERMISSION_RGB: return "rgb";
+        case PLUGIN_PERMISSION_UART: return "uart";
+        case PLUGIN_PERMISSION_I2C: return "i2c";
+        case PLUGIN_PERMISSION_SPI: return "spi";
+        case PLUGIN_PERMISSION_ADC: return "adc";
+        case PLUGIN_PERMISSION_PWM: return "pwm";
+        case PLUGIN_PERMISSION_NETWORK: return "network";
+        case PLUGIN_PERMISSION_WIFI_CONTROL: return "wifi_control";
+        case PLUGIN_PERMISSION_POWER: return "power";
+        case PLUGIN_PERMISSION_INPUT: return "input";
+        case PLUGIN_PERMISSION_DISPLAY: return "display";
+        case PLUGIN_PERMISSION_TIME: return "time";
+        case PLUGIN_PERMISSION_RANDOM: return "random";
+        case PLUGIN_PERMISSION_SYSTEM: return "system";
+        case PLUGIN_PERMISSION_CAMERA: return "camera";
+        case PLUGIN_PERMISSION_USB: return "usb";
+        case PLUGIN_PERMISSION_ETHERNET: return "ethernet";
+        case PLUGIN_PERMISSION_AUDIO: return "audio";
+        case PLUGIN_PERMISSION_SETTINGS: return "settings";
+        case PLUGIN_PERMISSION_ZIGBEE: return "zigbee";
+        default: return NULL;
+    }
+}
+
 // authors[] array -> comma-joined string; falls back to a scalar "author" key.
 static void join_authors(cJSON *root, char *dst, size_t dst_len) {
     if (!dst || dst_len == 0) return;
@@ -404,12 +497,15 @@ static bool target_supported(cJSON *entry, const char *target) {
 
 // Apps catalog: each entry has downloads{ <target>: <url> }; pick the URL for
 // the running chip and skip apps that don't list this target.
-static void parse_apps_array(cJSON *array, cloud_store_item_t *items, int *count) {
+static void parse_apps_array(cJSON *array, cloud_store_item_t **items, int *count, int *capacity,
+                             bool *allocation_failed) {
     if (!cJSON_IsArray(array)) return;
     const char *target = current_target();
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, array) {
-        if (*count >= CLOUD_STORE_MAX_ITEMS || !cJSON_IsObject(entry)) continue;
+        if (*count >= catalog_item_limit_per_type() * 3 ||
+            item_count_for_type(*items, *count, CLOUD_STORE_TYPE_APP) >= catalog_item_limit_per_type() ||
+            !cJSON_IsObject(entry)) continue;
         cloud_store_item_t item = { .type = CLOUD_STORE_TYPE_APP };
         copy_json_string(entry, "id", item.id, sizeof(item.id));
         if (!safe_id(item.id)) continue;
@@ -432,17 +528,22 @@ static void parse_apps_array(cJSON *array, cloud_store_item_t *items, int *count
         }
         if (item.download_url[0] == '\0') continue;
 
-        items[*count] = item;
-        (*count)++;
+        if (!append_catalog_item(items, count, capacity, &item)) {
+            if (allocation_failed) *allocation_failed = true;
+            return;
+        }
     }
 }
 
 // Asset packs catalog: each entry has a single url string.
-static void parse_assets_array(cJSON *array, cloud_store_item_t *items, int *count) {
+static void parse_assets_array(cJSON *array, cloud_store_item_t **items, int *count, int *capacity,
+                               bool *allocation_failed) {
     if (!cJSON_IsArray(array)) return;
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, array) {
-        if (*count >= CLOUD_STORE_MAX_ITEMS || !cJSON_IsObject(entry)) continue;
+        if (*count >= catalog_item_limit_per_type() * 3 ||
+            item_count_for_type(*items, *count, CLOUD_STORE_TYPE_ASSET_PACK) >= catalog_item_limit_per_type() ||
+            !cJSON_IsObject(entry)) continue;
         cloud_store_item_t item = { .type = CLOUD_STORE_TYPE_ASSET_PACK };
         copy_json_string(entry, "id", item.id, sizeof(item.id));
         if (!safe_id(item.id)) continue;
@@ -459,17 +560,22 @@ static void parse_assets_array(cJSON *array, cloud_store_item_t *items, int *cou
         resolve_url(GHOSTESP_ASSET_PACKS_CATALOG_URL, raw_url, item.download_url, sizeof(item.download_url));
         if (item.download_url[0] == '\0') continue;
 
-        items[*count] = item;
-        (*count)++;
+        if (!append_catalog_item(items, count, capacity, &item)) {
+            if (allocation_failed) *allocation_failed = true;
+            return;
+        }
     }
 }
 
 // Scripts catalog: each entry has a single download URL string.
-static void parse_scripts_array(cJSON *array, cloud_store_item_t *items, int *count) {
+static void parse_scripts_array(cJSON *array, cloud_store_item_t **items, int *count, int *capacity,
+                                bool *allocation_failed) {
     if (!cJSON_IsArray(array)) return;
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, array) {
-        if (*count >= CLOUD_STORE_MAX_ITEMS || !cJSON_IsObject(entry)) continue;
+        if (*count >= catalog_item_limit_per_type() * 3 ||
+            item_count_for_type(*items, *count, CLOUD_STORE_TYPE_SCRIPT) >= catalog_item_limit_per_type() ||
+            !cJSON_IsObject(entry)) continue;
         cloud_store_item_t item = { .type = CLOUD_STORE_TYPE_SCRIPT };
         copy_json_string(entry, "id", item.id, sizeof(item.id));
         if (!safe_id(item.id)) continue;
@@ -479,6 +585,11 @@ static void parse_scripts_array(cJSON *array, cloud_store_item_t *items, int *co
         copy_json_string(entry, "category", item.category, sizeof(item.category));
         join_authors(entry, item.author, sizeof(item.author));
         copy_json_size(entry, "size", &item.size);
+        cJSON *memory_limit = cJSON_GetObjectItemCaseSensitive(entry, "memory_limit");
+        if (cJSON_IsNumber(memory_limit) && memory_limit->valueint > 0) {
+            item.script_memory_limit = (uint32_t)memory_limit->valueint;
+        }
+        copy_script_permissions(entry, &item);
         if (item.name[0] == '\0') strncpy(item.name, item.id, sizeof(item.name) - 1);
 
         char raw_url[CLOUD_STORE_URL_MAX] = {0};
@@ -486,8 +597,10 @@ static void parse_scripts_array(cJSON *array, cloud_store_item_t *items, int *co
         resolve_url(GHOSTESP_SCRIPTS_CATALOG_URL, raw_url, item.download_url, sizeof(item.download_url));
         if (item.download_url[0] == '\0') continue;
 
-        items[*count] = item;
-        (*count)++;
+        if (!append_catalog_item(items, count, capacity, &item)) {
+            if (allocation_failed) *allocation_failed = true;
+            return;
+        }
     }
 }
 
@@ -577,14 +690,16 @@ static const char *json_object_end(const char *start) {
     return NULL;
 }
 
-static void parse_assets_text_fallback(const char *text, cloud_store_item_t *items, int *count) {
+static void parse_assets_text_fallback(const char *text, cloud_store_item_t **items, int *count, int *capacity,
+                                       bool *allocation_failed) {
     if (!text || !items || !count) return;
     const char *assets = strstr(text, "\"assets\"");
     if (!assets) return;
     const char *p = strchr(assets, '[');
     if (!p) return;
 
-    while (*p && *count < CLOUD_STORE_MAX_ITEMS) {
+    while (*p && *count < catalog_item_limit_per_type() * 3 &&
+           item_count_for_type(*items, *count, CLOUD_STORE_TYPE_ASSET_PACK) < catalog_item_limit_per_type()) {
         const char *obj = strchr(p, '{');
         if (!obj) break;
         const char *end = json_object_end(obj);
@@ -605,25 +720,27 @@ static void parse_assets_text_fallback(const char *text, cloud_store_item_t *ite
         resolve_url(GHOSTESP_ASSET_PACKS_CATALOG_URL, raw_url, item.download_url, sizeof(item.download_url));
         if (item.name[0] == '\0') strncpy(item.name, item.id, sizeof(item.name) - 1);
         if (item.download_url[0] != '\0') {
-            items[*count] = item;
-            (*count)++;
+            if (!append_catalog_item(items, count, capacity, &item)) {
+                if (allocation_failed) *allocation_failed = true;
+                return;
+            }
         }
         p = end;
     }
 }
 
 static esp_err_t refresh_manifest(void) {
-    cloud_store_item_t *parsed = heap_caps_calloc(CLOUD_STORE_MAX_ITEMS, sizeof(cloud_store_item_t),
-                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!parsed) parsed = calloc(CLOUD_STORE_MAX_ITEMS, sizeof(cloud_store_item_t));
-    if (!parsed) return ESP_ERR_NO_MEM;
+    cloud_store_item_t *parsed = NULL;
     int count = 0;
+    int capacity = 0;
+    bool allocation_failed = false;
 
     char *text = NULL;
     if (cloud_store_apps_available() && fetch_url_text(GHOSTESP_APPS_CATALOG_URL, &text) == ESP_OK && text) {
         cJSON *root = cJSON_Parse(text);
         if (root) {
-            parse_apps_array(cJSON_GetObjectItemCaseSensitive(root, "apps"), parsed, &count);
+            parse_apps_array(cJSON_GetObjectItemCaseSensitive(root, "apps"), &parsed, &count, &capacity,
+                             &allocation_failed);
             cJSON_Delete(root);
         } else {
             ESP_LOGW(TAG, "apps catalog JSON parse failed");
@@ -636,13 +753,14 @@ static esp_err_t refresh_manifest(void) {
         int before_assets = count;
         cJSON *root = cJSON_Parse(text);
         if (root) {
-            parse_assets_array(cJSON_GetObjectItemCaseSensitive(root, "assets"), parsed, &count);
+            parse_assets_array(cJSON_GetObjectItemCaseSensitive(root, "assets"), &parsed, &count, &capacity,
+                               &allocation_failed);
             cJSON_Delete(root);
         } else {
             ESP_LOGW(TAG, "asset catalog JSON parse failed; trying fallback parser");
         }
         if (count == before_assets) {
-            parse_assets_text_fallback(text, parsed, &count);
+            parse_assets_text_fallback(text, &parsed, &count, &capacity, &allocation_failed);
         }
         ESP_LOGI(TAG, "asset catalog parsed, added=%d total=%d", count - before_assets, count);
         free(text);
@@ -652,13 +770,19 @@ static esp_err_t refresh_manifest(void) {
         int before_scripts = count;
         cJSON *root = cJSON_Parse(text);
         if (root) {
-            parse_scripts_array(cJSON_GetObjectItemCaseSensitive(root, "scripts"), parsed, &count);
+            parse_scripts_array(cJSON_GetObjectItemCaseSensitive(root, "scripts"), &parsed, &count, &capacity,
+                                &allocation_failed);
             cJSON_Delete(root);
         } else {
             ESP_LOGW(TAG, "scripts catalog JSON parse failed");
         }
         ESP_LOGI(TAG, "scripts catalog parsed, added=%d total=%d", count - before_scripts, count);
         free(text);
+    }
+
+    if (allocation_failed) {
+        free(parsed);
+        return ESP_ERR_NO_MEM;
     }
 
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
@@ -913,6 +1037,27 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
     return result;
 }
 
+static void recover_script_install(const char *final_gsb, const char *manifest_path) {
+    if (!final_gsb || !manifest_path) return;
+    char gsb_backup[164];
+    char manifest_backup[164];
+    snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
+    snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
+    struct stat st;
+    if (stat(gsb_backup, &st) == 0) {
+        unlink(final_gsb);
+        if (rename(gsb_backup, final_gsb) != 0) {
+            ESP_LOGW(TAG, "script backup restore failed: %s", final_gsb);
+        }
+    }
+    if (stat(manifest_backup, &st) == 0) {
+        unlink(manifest_path);
+        if (rename(manifest_backup, manifest_path) != 0) {
+            ESP_LOGW(TAG, "manifest backup restore failed: %s", manifest_path);
+        }
+    }
+}
+
 static esp_err_t install_item(const cloud_store_item_t *item) {
     if (!safe_id(item->id)) return ESP_ERR_INVALID_ARG;
     if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
@@ -989,19 +1134,79 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
             mkdir_if_missing(script_dir);
             char final_gsb[160];
             snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
-            unlink(final_gsb);
-            if (rename(download_path, final_gsb) != 0) {
-                err = ESP_FAIL;
-                ESP_LOGW(TAG, "rename failed for script %s: errno=%d", item->id, errno);
-            } else {
-                char manifest_path[160];
-                snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
-                FILE *mf = fopen(manifest_path, "w");
-                if (mf) {
-                    fprintf(mf, "{\"id\":\"%s\",\"name\":\"%s\",\"entry\":\"%s.gsb\"}",
-                            item->id, item->name, item->id);
-                    fclose(mf);
+            char entry_name[CLOUD_STORE_ID_MAX + 8];
+            snprintf(entry_name, sizeof(entry_name), "%s.gsb", item->id);
+            char manifest_path[160];
+            snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
+            char manifest_tmp_path[164];
+            snprintf(manifest_tmp_path, sizeof(manifest_tmp_path), "%s.tmp", manifest_path);
+            recover_script_install(final_gsb, manifest_path);
+            cJSON *manifest = cJSON_CreateObject();
+            cJSON *permissions = manifest ? cJSON_AddArrayToObject(manifest, "permissions") : NULL;
+            bool manifest_ok = manifest && permissions &&
+                               cJSON_AddStringToObject(manifest, "id", item->id) &&
+                               cJSON_AddStringToObject(manifest, "name", item->name) &&
+                               cJSON_AddStringToObject(manifest, "entry", entry_name) &&
+                               cJSON_AddNumberToObject(manifest, "memory_limit", item->script_memory_limit);
+            for (uint32_t bit = 0; manifest_ok && bit < 32; ++bit) {
+                uint32_t permission = 1u << bit;
+                if ((item->script_permissions & permission) == 0) continue;
+                const char *name = script_permission_name(permission);
+                if (!name || !cJSON_AddItemToArray(permissions, cJSON_CreateString(name))) {
+                    manifest_ok = false;
                 }
+            }
+            unlink(manifest_tmp_path);
+            char *manifest_json = manifest_ok ? cJSON_PrintUnformatted(manifest) : NULL;
+            FILE *mf = manifest_json ? fopen(manifest_tmp_path, "w") : NULL;
+            if (!mf) {
+                manifest_ok = false;
+            } else {
+                bool write_ok = fputs(manifest_json, mf) >= 0;
+                bool close_ok = fclose(mf) == 0;
+                manifest_ok = manifest_ok && write_ok && close_ok;
+            }
+            free(manifest_json);
+            cJSON_Delete(manifest);
+
+            char gsb_backup[164];
+            char manifest_backup[164];
+            snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
+            snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
+            struct stat st;
+            bool had_gsb = stat(final_gsb, &st) == 0;
+            bool had_manifest = stat(manifest_path, &st) == 0;
+            bool backed_gsb = false;
+            bool backed_manifest = false;
+            bool installed_gsb = false;
+            bool installed_manifest = false;
+            if (manifest_ok) {
+                unlink(gsb_backup);
+                unlink(manifest_backup);
+                if (had_gsb && rename(final_gsb, gsb_backup) != 0) manifest_ok = false;
+                else backed_gsb = had_gsb;
+                if (manifest_ok && had_manifest && rename(manifest_path, manifest_backup) != 0) manifest_ok = false;
+                else if (manifest_ok) backed_manifest = had_manifest;
+                if (manifest_ok && rename(download_path, final_gsb) != 0) manifest_ok = false;
+                else if (manifest_ok) installed_gsb = true;
+                if (manifest_ok && rename(manifest_tmp_path, manifest_path) != 0) manifest_ok = false;
+                else if (manifest_ok) installed_manifest = true;
+            }
+            if (!manifest_ok) {
+                unlink(manifest_tmp_path);
+                if (installed_manifest) unlink(manifest_path);
+                if (installed_gsb) unlink(final_gsb);
+                if (backed_manifest && rename(manifest_backup, manifest_path) != 0) {
+                    ESP_LOGW(TAG, "manifest rollback failed for script %s", item->id);
+                }
+                if (backed_gsb && rename(gsb_backup, final_gsb) != 0) {
+                    ESP_LOGW(TAG, "bytecode rollback failed for script %s", item->id);
+                }
+                ESP_LOGW(TAG, "script install failed for %s", item->id);
+                err = ESP_FAIL;
+            } else {
+                unlink(gsb_backup);
+                unlink(manifest_backup);
                 ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
                 err = ESP_OK;
             }

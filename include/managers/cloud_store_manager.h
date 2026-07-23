@@ -11,6 +11,8 @@ extern "C" {
 #endif
 
 #define CLOUD_STORE_MAX_ITEMS 8
+#define CLOUD_STORE_MAX_CATALOG_ITEMS_PER_TYPE 32
+#define CLOUD_STORE_MAX_CATALOG_ITEMS (CLOUD_STORE_MAX_CATALOG_ITEMS_PER_TYPE * 3)
 #define CLOUD_STORE_ID_MAX 24
 #define CLOUD_STORE_NAME_MAX 40
 #define CLOUD_STORE_VERSION_MAX 12
@@ -46,6 +48,8 @@ typedef struct {
     char description[CLOUD_STORE_DESC_MAX];
     char download_url[CLOUD_STORE_URL_MAX];
     size_t size; // manifest-declared byte size, 0 if the catalog didn't publish one
+    uint32_t script_permissions;
+    uint32_t script_memory_limit;
 } cloud_store_item_t;
 
 typedef struct {

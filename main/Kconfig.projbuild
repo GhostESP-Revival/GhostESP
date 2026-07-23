@@ -1410,6 +1410,7 @@ menu "Ghost ESP Options"
     config ENABLE_NATIVE_SD_APPS
         bool "Enable native apps loaded from SD"
         default y
+        depends on SPIRAM
         depends on IDF_TARGET_ESP32 || IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C61 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32C5
         select ELF_LOADER
         select ELF_DYNAMIC_LOAD_SHARED_OBJECT
@@ -1426,14 +1427,12 @@ menu "Ghost ESP Options"
 
     config NATIVE_SD_APP_MAX_COUNT
         int "Maximum number of SD apps to scan"
-        default 4 if !SPIRAM
         default 32
         range 1 32
         depends on ENABLE_NATIVE_SD_APPS
         help
             Maximum number of native SD apps that can be registered.
-            Lower values save RAM on devices without PSRAM.
-            Default is 8 for no-PSRAM builds, 32 for PSRAM builds.
+            Lower values save PSRAM. The default is 32.
 
     endmenu
 

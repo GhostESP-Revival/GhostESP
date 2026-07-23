@@ -120,11 +120,17 @@ static void script_cli_task(void *arg) {
     script_cli_task_args_t *task_args = (script_cli_task_args_t *)arg;
     ghostscript_manifest_t manifest;
     ghostscript_runtime_t *runtime = NULL;
-    bool loaded = task_args && task_args->path[0] &&
-                  ghostscript_manager_load_manifest(task_args->path, &manifest);
-    if (!loaded && task_args && task_args->path[0]) {
-        loaded = ghostscript_manager_make_single_file_manifest(task_args->path, &manifest);
+    bool loaded = false;
+    if (task_args && task_args->path[0]) {
+        if (ghostscript_manager_is_script_file(task_args->path)) {
+            loaded = ghostscript_manager_make_single_file_manifest(task_args->path, &manifest);
+            if (!loaded) loaded = ghostscript_manager_load_manifest(task_args->path, &manifest);
+        } else {
+            loaded = ghostscript_manager_load_manifest(task_args->path, &manifest);
+        }
     }
+    free(task_args);
+    task_args = NULL;
     if (!loaded) {
         glog("GhostScript load failed: %s\n", ghostscript_manager_last_error());
         goto done;

@@ -194,6 +194,9 @@ options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
 void options_view_destroy(options_view_t *ov) {
     if (!ov) return;
     if (ov->list && lv_obj_is_valid(ov->list)) lv_obj_del(ov->list);
+    lv_style_reset(&ov->style_item);
+    lv_style_reset(&ov->style_item_alt);
+    lv_style_reset(&ov->style_selected);
     free(ov->items);
     free(ov);
 }

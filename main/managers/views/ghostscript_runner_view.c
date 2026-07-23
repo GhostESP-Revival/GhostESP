@@ -89,8 +89,14 @@ static void script_task_fn(void *arg) {
         runner_print("No script selected\n", NULL);
         goto done;
     }
-    ok = ghostscript_manager_load_manifest(task_args->path, &manifest);
-    if (!ok) ok = ghostscript_manager_make_single_file_manifest(task_args->path, &manifest);
+    if (ghostscript_manager_is_script_file(task_args->path)) {
+        ok = ghostscript_manager_make_single_file_manifest(task_args->path, &manifest);
+        if (!ok) ok = ghostscript_manager_load_manifest(task_args->path, &manifest);
+    } else {
+        ok = ghostscript_manager_load_manifest(task_args->path, &manifest);
+    }
+    free(task_args);
+    task_args = NULL;
     if (!ok) {
         runner_set_title("Script Load Failed", NULL);
         runner_print(ghostscript_manager_last_error(), NULL);

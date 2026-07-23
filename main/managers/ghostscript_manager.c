@@ -284,9 +284,17 @@ bool ghostscript_manager_load_manifest(const char *path, ghostscript_manifest_t 
     return true;
 }
 
+static int browser_entry_compare(const void *a, const void *b) {
+    const ghostscript_browser_entry_t *ea = (const ghostscript_browser_entry_t *)a;
+    const ghostscript_browser_entry_t *eb = (const ghostscript_browser_entry_t *)b;
+    int result = strcasecmp(ea->name, eb->name);
+    return result != 0 ? result : strcmp(ea->path, eb->path);
+}
+
 int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_entry_t *out, int max_entries, bool *has_more) {
     if (has_more) *has_more = false;
     if (!dir || !out || max_entries <= 0) return 0;
+    if (offset < 0) offset = 0;
     bool display_was_suspended = false;
     if (!ghostscript_manager_sd_begin(&display_was_suspended)) return 0;
     DIR *d = opendir(dir);
@@ -297,10 +305,19 @@ int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_en
         return 0;
     }
     clear_error();
-    int seen = 0;
+    ghostscript_browser_entry_t *entries = NULL;
     int count = 0;
+    int capacity = 0;
+    bool allocation_failed = false;
+    int read_errno = 0;
     struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
+    while (true) {
+        errno = 0;
+        ent = readdir(d);
+        if (!ent) {
+            read_errno = errno;
+            break;
+        }
         if (ent->d_name[0] == '.') continue;
         char full[GHOSTSCRIPT_PATH_MAX];
         if (!join_path(full, sizeof(full), dir, ent->d_name)) continue;
@@ -314,20 +331,53 @@ int ghostscript_manager_list(const char *dir, int offset, ghostscript_browser_en
             has_manifest = join_path(mp, sizeof(mp), full, "manifest.json") && stat(mp, &st) == 0;
         }
         if (!is_dir && !is_script) continue;
-        if (seen++ < offset) continue;
-        if (count >= max_entries) { if (has_more) *has_more = true; break; }
-        strncpy(out[count].name, ent->d_name, sizeof(out[count].name) - 1);
-        out[count].name[sizeof(out[count].name) - 1] = '\0';
-        strncpy(out[count].path, full, sizeof(out[count].path) - 1);
-        out[count].path[sizeof(out[count].path) - 1] = '\0';
-        out[count].is_dir = is_dir;
-        out[count].is_script = is_script;
-        out[count].has_manifest = has_manifest;
+        if (count == capacity) {
+            int next_capacity = capacity ? capacity * 2 : 8;
+            ghostscript_browser_entry_t *grown = heap_caps_realloc_prefer(
+                entries, (size_t)next_capacity * sizeof(*entries), 2,
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (!grown) {
+                allocation_failed = true;
+                break;
+            }
+            entries = grown;
+            capacity = next_capacity;
+        }
+        ghostscript_browser_entry_t *entry = &entries[count];
+        memset(entry, 0, sizeof(*entry));
+        strncpy(entry->name, ent->d_name, sizeof(entry->name) - 1);
+        strncpy(entry->path, full, sizeof(entry->path) - 1);
+        entry->is_dir = is_dir;
+        entry->is_script = is_script;
+        entry->has_manifest = has_manifest;
         count++;
     }
     closedir(d);
+    if (read_errno != 0) {
+        free(entries);
+        errno = read_errno;
+        set_path_error("Cannot read scripts directory", dir);
+        ghostscript_manager_sd_end(display_was_suspended);
+        return 0;
+    }
+    if (allocation_failed) {
+        free(entries);
+        set_error("Not enough memory to list scripts");
+        ghostscript_manager_sd_end(display_was_suspended);
+        return 0;
+    }
+    if (count > 1) qsort(entries, (size_t)count, sizeof(*entries), browser_entry_compare);
+    int available = count - offset;
+    if (available < 0) available = 0;
+    int result_count = available < max_entries ? available : max_entries;
+    if (result_count > 0) {
+        memcpy(out, entries + offset, (size_t)result_count * sizeof(*out));
+    }
+    if (has_more) *has_more = available > result_count;
+    free(entries);
     ghostscript_manager_sd_end(display_was_suspended);
-    return count;
+    return result_count;
 }
 
 void ghostscript_manager_init(void) {
