@@ -2449,6 +2449,22 @@ static char tdeck_raw_to_char(int col, int row, bool shift, bool symbol) {
   
   return c;
 }
+
+// Emit a keyboard release event so the global key-repeat timer (kb_repeat_*)
+// gets cancelled when the held key is let go. Without this the T-Deck matrix
+// path only ever sends presses, so the repeat spams forever after release —
+// exactly like the Cardputer matrix bug fixed earlier. The release value is
+// ignored by kb_repeat_stop(); we just need one is_touch_move=true event.
+static void tdeck_emit_key_release(uint8_t key) {
+  if (key == 0) return;
+  InputEvent rel_event = {0};
+  rel_event.type = INPUT_TYPE_KEYBOARD;
+  rel_event.data.key_value = key;
+  rel_event.is_touch_move = true; // release
+  if (xQueueSend(input_queue, &rel_event, 0) != pdTRUE) {
+    ESP_LOGD(TAG, "Failed to queue T-Deck keyboard release event\n");
+  }
+}
 #endif
 
 
@@ -2571,7 +2587,9 @@ void hardware_input_task(void *pvParameters) {
               }
             }
           } else {
-            // No keys pressed - reset repeat state
+            // No keys pressed - emit release so the global key-repeat timer
+            // stops, then reset repeat state.
+            tdeck_emit_key_release((uint8_t)tdeck_repeat_char);
             tdeck_repeat_char = 0;
             tdeck_repeat_active = false;
           }
@@ -2603,13 +2621,17 @@ void hardware_input_task(void *pvParameters) {
             }
           }
         } else if (!key_pressed) {
-          // No keys pressed - reset repeat state
+          // No keys pressed - emit release so the global key-repeat timer
+          // stops, then reset repeat state.
+          tdeck_emit_key_release((uint8_t)tdeck_repeat_char);
           tdeck_repeat_char = 0;
           tdeck_repeat_active = false;
         }
       }
     } else {
-      // Reset state when pin is low
+      // Reset state when pin is low - emit release so the global key-repeat
+      // timer stops (the interrupt line can drop before a zero read arrives).
+      tdeck_emit_key_release((uint8_t)tdeck_repeat_char);
       memset(tdeck_last_raw_state, 0, TDECK_COLS);
       tdeck_shift_pressed = false;
       tdeck_symbol_pressed = false;

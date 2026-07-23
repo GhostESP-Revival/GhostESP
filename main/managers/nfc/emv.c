@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 static const char *TAG = "EMV";
 
 /* Counts consecutive transport-level failures (CRC/timeout) across APDUs.
@@ -170,7 +171,6 @@ static bool emv_tlv_find(uint16_t tag, const uint8_t *buf, size_t len,
     return false;
 }
 
-#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 // APDU exchange helper. Builds a correct short-APDU depending on payload:
 //  - data present  -> case-3/4: CLA INS P1 P2 Lc Data Le
 //  - no data       -> case-2   : CLA INS P1 P2 Le   (no Lc field!)

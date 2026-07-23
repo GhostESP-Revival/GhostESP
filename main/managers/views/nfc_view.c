@@ -1949,25 +1949,6 @@ bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
 }
 #endif
 
-#ifndef NFC_HAS_LOCAL_READER
-bool nfc_view_t2_scan_start(void) { return false; }
-bool nfc_view_t2_scan_stop(void) { return false; }
-bool nfc_view_t2_scan_active(void) { return false; }
-bool nfc_view_t2_read(nfc_view_t2_tag_info_t *out_info, uint8_t *ndef_out,
-                      size_t max_ndef_bytes, size_t *ndef_bytes_out) {
-    (void)out_info;
-    (void)ndef_out;
-    (void)max_ndef_bytes;
-    (void)ndef_bytes_out;
-    return false;
-}
-bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
-    (void)ndef;
-    (void)ndef_len;
-    return false;
-}
-#endif
-
 static void execute_selected(void) { /* no bottom status text in this view */ }
 
 static void highlight_selected(void) {

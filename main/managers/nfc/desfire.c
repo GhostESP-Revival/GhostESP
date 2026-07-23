@@ -230,6 +230,7 @@ static esp_err_t desfire_xch(pn532_io_handle_t io, uint8_t ins,
         }
     }
 }
+#endif
 
 // SimpleArray helpers used only by the poller. Allocations are tracked and
 // freed by desfire_tree_free().
@@ -402,6 +403,7 @@ static const desfire_known_app_t* find_known_app(const MfDesfireApplicationId* a
     return NULL;
 }
 
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool desfire_read_tree(pn532_io_handle_t io, MfDesfireData* out) {
     if (!io || !out) return false;
 
@@ -555,6 +557,7 @@ bool desfire_read_tree(pn532_io_handle_t io, MfDesfireData* out) {
 
     return true;
 }
+#endif
 
 /* ---------------------------------------------------------------------------
  * Saved-file loader: reconstruct the MfDesfire tree from a Flipper .nfc written
@@ -761,7 +764,6 @@ MfDesfireData *desfire_load_flipper_file(const char *path,
     }
     return tree;
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // Flipper-format .nfc file builder
