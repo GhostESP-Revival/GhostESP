@@ -29,9 +29,14 @@ static bool s_touch_started;
 static bool s_switch_pending;
 static lv_point_t s_touch_start;
 #define GS_BROWSER_RESUME_PATH_MAX 192
-static char s_resume_path[GS_BROWSER_RESUME_PATH_MAX];
-static char s_resume_dir[GS_BROWSER_RESUME_PATH_MAX];
+static char *s_resume_path;
+static char *s_resume_dir;
 static int s_resume_offset;
+
+static void ensure_resume_bufs(void) {
+    if (!s_resume_path) s_resume_path = calloc(1, GS_BROWSER_RESUME_PATH_MAX);
+    if (!s_resume_dir)  s_resume_dir  = calloc(1, GS_BROWSER_RESUME_PATH_MAX);
+}
 
 #define BROWSER_TAP_THRESHOLD 12
 #define BROWSER_SCROLL_THRESHOLD 16
@@ -50,10 +55,11 @@ static void parent_dir(void) {
 static void activate_row(int selected) {
     if (s_switch_pending) return;
     if (selected < 0 || selected >= s_row_count) return;
+    ensure_resume_bufs();
     row_t row = s_rows[selected];
     if (row.type == ROW_BACK) {
-        s_resume_dir[0] = '\0';
-        s_resume_path[0] = '\0';
+        if (s_resume_dir) s_resume_dir[0] = '\0';
+        if (s_resume_path) s_resume_path[0] = '\0';
         s_resume_offset = 0;
         s_switch_pending = true;
         display_manager_switch_view(&apps_menu_view);
@@ -70,8 +76,8 @@ static void activate_row(int selected) {
             s_offset = 0;
             refresh();
         } else {
-            strlcpy(s_resume_dir, s_dir, sizeof(s_resume_dir));
-            strlcpy(s_resume_path, entry->path, sizeof(s_resume_path));
+            strlcpy(s_resume_dir, s_dir, GS_BROWSER_RESUME_PATH_MAX);
+            strlcpy(s_resume_path, entry->path, GS_BROWSER_RESUME_PATH_MAX);
             s_resume_offset = s_offset;
             s_switch_pending = true;
             ghostscript_runner_set_script(entry->path);
@@ -176,7 +182,7 @@ static void refresh(void) {
         snprintf(label, sizeof(label), "%s%s", prefix, s_entries[i].name);
         int row_before = s_row_count;
         add_row(ROW_ENTRY, i, label);
-        if (s_row_count > row_before && s_resume_path[0] &&
+        if (s_row_count > row_before && s_resume_path && s_resume_path[0] &&
             strcmp(s_entries[i].path, s_resume_path) == 0) {
             resume_row = s_row_count - 1;
         }
@@ -200,8 +206,9 @@ static void event_handler(InputEvent *event) {
     if (!event || !s_opts) return;
     if (s_switch_pending) return;
     if (is_back(event)) {
-        s_resume_dir[0] = '\0';
-        s_resume_path[0] = '\0';
+        ensure_resume_bufs();
+        if (s_resume_dir) s_resume_dir[0] = '\0';
+        if (s_resume_path) s_resume_path[0] = '\0';
         s_resume_offset = 0;
         s_switch_pending = true;
         display_manager_switch_view(&apps_menu_view);
@@ -225,6 +232,7 @@ static void event_handler(InputEvent *event) {
 
 void ghostscript_browser_view_create(void) {
     ghostscript_manager_init();
+    ensure_resume_bufs();
     s_dir = malloc(GHOSTSCRIPT_PATH_MAX);
     s_entries = calloc(GHOSTSCRIPT_BROWSER_PAGE_SIZE, sizeof(*s_entries));
     s_rows = calloc(GHOSTSCRIPT_BROWSER_PAGE_SIZE + 5, sizeof(*s_rows));
@@ -235,12 +243,12 @@ void ghostscript_browser_view_create(void) {
         return;
     }
     strlcpy(s_dir,
-             s_resume_dir[0] ? s_resume_dir : GHOSTSCRIPT_ROOT_DIR,
+             (s_resume_dir && s_resume_dir[0]) ? s_resume_dir : GHOSTSCRIPT_ROOT_DIR,
              GHOSTSCRIPT_PATH_MAX);
     s_root = gui_screen_create_root(NULL, "GhostScript", lv_color_black(), LV_OPA_COVER);
     ghostscript_browser_view.root = s_root;
     s_opts = options_view_create(s_root, "GhostScript");
-    s_offset = s_resume_dir[0] ? s_resume_offset : 0;
+    s_offset = (s_resume_dir && s_resume_dir[0]) ? s_resume_offset : 0;
     s_touch_started = false;
     s_switch_pending = false;
     refresh();
