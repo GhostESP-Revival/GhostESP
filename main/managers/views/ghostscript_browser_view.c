@@ -28,8 +28,9 @@ static bool s_has_more;
 static bool s_touch_started;
 static bool s_switch_pending;
 static lv_point_t s_touch_start;
-static char s_resume_dir[GHOSTSCRIPT_PATH_MAX];
-static char s_resume_path[GHOSTSCRIPT_PATH_MAX];
+#define GS_BROWSER_RESUME_PATH_MAX 192
+static char s_resume_path[GS_BROWSER_RESUME_PATH_MAX];
+static char s_resume_dir[GS_BROWSER_RESUME_PATH_MAX];
 static int s_resume_offset;
 
 #define BROWSER_TAP_THRESHOLD 12
