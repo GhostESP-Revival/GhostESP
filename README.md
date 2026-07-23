@@ -578,6 +578,13 @@ Special thanks to:
       </a><br/>
       <sub>Flipper Zero Unleashed SubGHz improvements</sub>
     </td>
+    <td align="center">
+      <a href="https://github.com/DecentLabs">
+        <img src="https://github.com/DecentLabs.png" width="80" height="80" style="border-radius: 50%;" alt="DecentLabs"/><br/>
+        <b>DecentLabs</b>
+      </a><br/>
+      <sub><a href="https://github.com/DecentLabs/officeAir">officeAir</a> — multi-pass ARP scanning &amp; lwIP thread-safety techniques</sub>
+    </td>
   </tr>
 </table>
 

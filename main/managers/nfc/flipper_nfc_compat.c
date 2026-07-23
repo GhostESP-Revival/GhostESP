@@ -1,4 +1,5 @@
 #include "managers/nfc/flipper_nfc_compat.h"
+#include "managers/nfc/emv.h"
 
 static const char* TAG = "FlipperCompat";
 
@@ -276,6 +277,22 @@ void datetime_timestamp_to_datetime(uint32_t ts, DateTime* dt) {
     dt->second = (uint8_t)(rem % 60U);
 }
 
+bool datetime_is_leap_year(uint16_t year) {
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+uint16_t datetime_get_days_per_year(uint16_t year) {
+    return datetime_is_leap_year(year) ? 366 : 365;
+}
+
+uint8_t datetime_get_days_per_month(bool is_leap_year, uint8_t month) {
+    static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 0 || month > 12) return 0;
+    uint8_t d = days[month - 1];
+    if (month == 2 && is_leap_year) d++;
+    return d;
+}
+
 LocaleDateFormat locale_get_date_format(void) {
     return LocaleDateFormatDMY;
 }
@@ -444,6 +461,73 @@ MfClassicError mf_classic_poller_sync_auth(Nfc* nfc, uint8_t block, const MfClas
 MfClassicError mf_classic_poller_sync_read_block(Nfc* nfc, uint8_t block, const MfClassicKey* key, MfClassicKeyType type, MfClassicBlock* data) { return MfClassicErrorProtocol; }
 
 // --------------------------------------------------------------------------
+// MIFARE DESFire lookup helpers (read-only views over the poller-populated tree)
+// --------------------------------------------------------------------------
+
+const void* simple_array_cget(const SimpleArray* arr, size_t idx) {
+    if (!arr || !arr->data || arr->elem_size == 0 || idx >= arr->count) return NULL;
+    return (const uint8_t*)arr->data + idx * arr->elem_size;
+}
+
+void* simple_array_cget_data(const SimpleArray* arr) {
+    if (!arr) return NULL;
+    return arr->data;
+}
+
+size_t simple_array_get_count(const SimpleArray* arr) {
+    return arr ? arr->count : 0;
+}
+
+const MfDesfireApplication* mf_desfire_get_application(const MfDesfireData* data,
+                                                       const MfDesfireApplicationId* app_id) {
+    if (!data || !data->application_ids || !app_id) return NULL;
+    size_t n = simple_array_get_count(data->application_ids);
+    for (size_t i = 0; i < n; ++i) {
+        const MfDesfireApplicationId* slot =
+            (const MfDesfireApplicationId*)simple_array_cget(data->application_ids, i);
+        if (slot && memcmp(slot->data, app_id->data, MF_DESFIRE_APP_ID_SIZE) == 0) {
+            if (!data->applications) return NULL;
+            return (const MfDesfireApplication*)simple_array_cget(data->applications, i);
+        }
+    }
+    return NULL;
+}
+
+static const MfDesfireFileSettings* mf_desfire_find_file_settings(const MfDesfireApplication* app,
+                                                                  MfDesfireFileId file_id) {
+    if (!app || !app->file_ids || !app->file_settings) return NULL;
+    size_t n = simple_array_get_count(app->file_ids);
+    for (size_t i = 0; i < n; ++i) {
+        const MfDesfireFileId* slot =
+            (const MfDesfireFileId*)simple_array_cget(app->file_ids, i);
+        if (slot && *slot == file_id) {
+            return (const MfDesfireFileSettings*)simple_array_cget(app->file_settings, i);
+        }
+    }
+    return NULL;
+}
+
+const MfDesfireFileSettings* mf_desfire_get_file_settings(const MfDesfireApplication* app,
+                                                          const MfDesfireFileId* file_id) {
+    if (!file_id) return NULL;
+    return mf_desfire_find_file_settings(app, *file_id);
+}
+
+const MfDesfireFileData* mf_desfire_get_file_data(const MfDesfireApplication* app,
+                                                  const MfDesfireFileId* file_id) {
+    if (!app || !app->file_ids || !app->file_data || !file_id) return NULL;
+    size_t n = simple_array_get_count(app->file_ids);
+    for (size_t i = 0; i < n; ++i) {
+        const MfDesfireFileId* slot =
+            (const MfDesfireFileId*)simple_array_cget(app->file_ids, i);
+        if (slot && *slot == *file_id) {
+            return (const MfDesfireFileData*)simple_array_cget(app->file_data, i);
+        }
+    }
+    return NULL;
+}
+
+// --------------------------------------------------------------------------
 // Registry & Dispatcher
 // --------------------------------------------------------------------------
 
@@ -471,6 +555,12 @@ extern const NfcSupportedCardsPlugin two_cities_plugin;
 extern const NfcSupportedCardsPlugin umarsh_plugin;
 extern const NfcSupportedCardsPlugin zolotaya_korona_plugin;
 extern const NfcSupportedCardsPlugin zolotaya_korona_online_plugin;
+extern const NfcSupportedCardsPlugin myki_plugin;
+extern const NfcSupportedCardsPlugin clipper_plugin;
+extern const NfcSupportedCardsPlugin itso_plugin;
+extern const NfcSupportedCardsPlugin opal_plugin;
+extern const NfcSupportedCardsPlugin gallagher_plugin;
+extern const NfcSupportedCardsPlugin emv_plugin;
 
 // Registry array
 static const NfcSupportedCardsPlugin* s_plugins[] = {
@@ -497,6 +587,12 @@ static const NfcSupportedCardsPlugin* s_plugins[] = {
     &umarsh_plugin,
     &zolotaya_korona_plugin,
     &zolotaya_korona_online_plugin,
+    &myki_plugin,
+    &clipper_plugin,
+    &itso_plugin,
+    &opal_plugin,
+    &gallagher_plugin,
+    &emv_plugin,
     NULL
 };
 
@@ -519,6 +615,65 @@ char* flipper_nfc_try_parse_mfclassic_from_cache(const MfClassicData* data) {
                 char* result_copy = NULL;
                 if (res && strlen(res) > 0) {
                     result_copy = strdup(res);
+                }
+                furi_string_free(out);
+                return result_copy;
+            }
+            furi_string_free(out);
+        }
+    }
+    return NULL;
+}
+
+char* flipper_nfc_try_parse_mfdesfire(const MfDesfireData* data) {
+    if (!data) return NULL;
+
+    NfcDevice dev;
+    dev.protocol = NfcProtocolMfDesfire;
+    dev.data = (void*)data;
+
+    for (int i = 0; s_plugins[i] != NULL; i++) {
+        const NfcSupportedCardsPlugin* p = s_plugins[i];
+        if (p->protocol == NfcProtocolMfDesfire && p->parse) {
+            FuriString* out = furi_string_alloc();
+            if (p->parse(&dev, out)) {
+                const char* res = furi_string_get_cstr(out);
+                char* result_copy = NULL;
+                if (res && strlen(res) > 0) {
+                    result_copy = strdup(res);
+                    /* Strip Flipper canvas escape prefix \e# (0x1B '#') */
+                    if (result_copy && result_copy[0] == '\x1B' && result_copy[1] == '#') {
+                        memmove(result_copy, result_copy + 2, strlen(result_copy) - 1);
+                    }
+                }
+                furi_string_free(out);
+                return result_copy;
+            }
+            furi_string_free(out);
+        }
+    }
+    return NULL;
+}
+
+char* flipper_nfc_try_parse_emv(const void* data) {
+    if (!data) return NULL;
+
+    NfcDevice dev;
+    dev.protocol = NfcProtocolEmv;
+    dev.data = (void*)data;
+
+    for (int i = 0; s_plugins[i] != NULL; i++) {
+        const NfcSupportedCardsPlugin* p = s_plugins[i];
+        if (p->protocol == NfcProtocolEmv && p->parse) {
+            FuriString* out = furi_string_alloc();
+            if (p->parse(&dev, out)) {
+                const char* res = furi_string_get_cstr(out);
+                char* result_copy = NULL;
+                if (res && strlen(res) > 0) {
+                    result_copy = strdup(res);
+                    if (result_copy && result_copy[0] == '\x1B' && result_copy[1] == '#') {
+                        memmove(result_copy, result_copy + 2, strlen(result_copy) - 1);
+                    }
                 }
                 furi_string_free(out);
                 return result_copy;

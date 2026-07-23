@@ -4,6 +4,7 @@ if(CONFIG_NFC_ST25R3916)
     list(APPEND st25r3916_sources
         src/st25r3916.c
         src/st25r3916_iso14443a.c
+        src/st25r3916_iso14443_4a.c
         src/st25r3916_iso15693.c
         src/st25r3916_target.c
         src/st25r3916_mifare.c

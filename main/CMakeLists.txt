@@ -41,6 +41,14 @@ list(APPEND app_sources
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/umarsh.c"
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona.c"
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona_online.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/myki.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/clipper.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/itso.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/opal.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/gallagher.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/gallagher_util.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/emv_card.c"
+    "${CMAKE_SOURCE_DIR}/main/managers/nfc/emv.c"
 )
 # Exclude infrared view from glob; conditionally included below when IR is enabled
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")

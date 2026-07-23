@@ -6,6 +6,7 @@
 #include "st25r3916_adapter.h"
 #include "st25r3916.h"
 #include "st25r3916_iso14443a.h"
+#include "st25r3916_iso14443_4a.h"
 #include "st25r3916_mifare.h"
 #include "crypto1.h"
 
@@ -29,6 +30,10 @@ typedef struct {
    * data_exchange; cleared on (re)selection. */
   crypto1_t cipher;
   bool armed;
+  /* ISO14443-4A session for Type 4 tags (DESFire etc.). Allocated lazily when
+   * SAK bit 5 is set; used to route APDUs through the ISO14443-4A I-block
+   * layer (RATS/ATS + PCB framing) instead of raw NFC-A transceive. */
+  st25r3916_iso14443_4a_session_t *iso4;
 } adapter_state_t;
 
 static inline adapter_state_t *state_of(pn532_io_handle_t io) {
@@ -37,10 +42,43 @@ static inline adapter_state_t *state_of(pn532_io_handle_t io) {
 
 /* --- high-level vtable implementations ---------------------------------- */
 
+/* Tear down any active ISO14443-4A session (card removed / re-selected). */
+static void iso4_teardown(adapter_state_t *st) {
+  if (st && st->iso4) {
+    st25r3916_iso14443_4a_session_free(st->iso4);
+    st->iso4 = NULL;
+  }
+}
+
+/* SAK bit 5 (0x20) indicates the card supports ISO14443-4. */
+static bool sak_supports_iso14443_4(uint8_t sak) {
+  return (sak & 0x20) != 0;
+}
+
+/* Lazily activate an ISO14443-4A session for the currently selected tag. */
+static esp_err_t iso4_ensure_session(adapter_state_t *st) {
+  if (!st) return ESP_ERR_INVALID_STATE;
+  if (st->iso4) return ESP_OK;
+  if (!st->activated || !sak_supports_iso14443_4(st->sak)) return ESP_ERR_INVALID_STATE;
+
+  st25r3916_iso14443_4a_session_t *s = NULL;
+  esp_err_t err = st25r3916_iso14443_4a_session_alloc(&s);
+  if (err != ESP_OK) return err;
+
+  err = st25r3916_iso14443_4a_activate(s);
+  if (err != ESP_OK) {
+    st25r3916_iso14443_4a_session_free(s);
+    return err;
+  }
+  st->iso4 = s;
+  return ESP_OK;
+}
+
 static esp_err_t hl_activate_once(adapter_state_t *st) {
   esp_err_t err = st25r3916_nfca_activate_ex(st->uid, &st->uid_len, &st->atqa, &st->sak, 2, 20);
   st->activated = (err == ESP_OK);
   st->armed = false;  // (re)selection resets any MIFARE Crypto1 session
+  iso4_teardown(st);  // new card selection invalidates any ISO14443-4 session
   return err;
 }
 
@@ -89,8 +127,10 @@ static esp_err_t adapter_exchange(pn532_io_handle_t io, const uint8_t *tx, uint8
  *    command the PN532 services in hardware. Here we intercept it and run the
  *    software-Crypto1 handshake, arming the session cipher.
  *  - While a MIFARE session is armed, every command is an encrypted exchange.
- *  - Otherwise it is a plain transceive with hardware CRC (NTAG/Ultralight,
- *    ISO14443-4 APDUs). */
+ *  - When the selected tag supports ISO14443-4 (SAK bit 5), APDUs are routed
+ *    through the ISO14443-4A I-block layer (RATS/ATS + PCB framing) so Type 4
+ *    tags (DESFire etc.) work correctly.
+ *  - Otherwise it is a plain transceive with hardware CRC (NTAG/Ultralight). */
 static esp_err_t adapter_data_exchange(pn532_io_handle_t io, const uint8_t *tx, uint8_t tx_len,
                                        uint8_t *rx, uint8_t *rx_len) {
   adapter_state_t *st = state_of(io);
@@ -138,6 +178,22 @@ static esp_err_t adapter_data_exchange(pn532_io_handle_t io, const uint8_t *tx, 
     return err;
   }
 
+  /* Type 4 tag selected: route through ISO14443-4A I-block layer. */
+  if (st->activated && sak_supports_iso14443_4(st->sak)) {
+    esp_err_t err = iso4_ensure_session(st);
+    if (err == ESP_OK) {
+      uint16_t cap = rx_len ? *rx_len : 0;
+      uint16_t got = 0;
+      err = st25r3916_iso14443_4a_transceive(st->iso4, tx, tx_len, rx, cap, &got, 100);
+      if (rx_len) *rx_len = (uint8_t)((got > 0xFF) ? 0xFF : got);
+      return err;
+    }
+    /* ISO14443-4A activation failed; fall through to raw transceive so the
+     * caller gets a best-effort response rather than a hard failure. */
+    ESP_LOGD(TAG, "ISO14443-4A activation failed, raw transceive fallback: %s",
+             esp_err_to_name(err));
+  }
+
   return adapter_exchange(io, tx, tx_len, rx, rx_len, true);
 }
 
@@ -176,12 +232,30 @@ static esp_err_t adapter_mfc_auth_recover(pn532_io_handle_t io) {
 
 static void adapter_release_io(pn532_io_handle_t io) {
   /* Lightweight teardown between scans: drop the RF field but keep the chip up. */
-  (void)io;
+  adapter_state_t *st = state_of(io);
+  if (st) {
+    /* DESELECT is best-effort; drop the session handle either way. */
+    if (st->iso4) {
+      (void)st25r3916_iso14443_4a_halt(st->iso4);
+      st25r3916_iso14443_4a_session_free(st->iso4);
+      st->iso4 = NULL;
+    }
+    st->activated = false;
+    st->armed = false;
+  }
   st25r3916_field_off();
 }
 
 static void adapter_release_driver(pn532_io_handle_t io) {
   if (!io) return;
+  adapter_state_t *st = state_of(io);
+  if (st) {
+    if (st->iso4) {
+      (void)st25r3916_iso14443_4a_halt(st->iso4);
+      st25r3916_iso14443_4a_session_free(st->iso4);
+      st->iso4 = NULL;
+    }
+  }
   st25r3916_deinit();
   if (io->driver_data) {
     free(io->driver_data);

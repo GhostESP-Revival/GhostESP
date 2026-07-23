@@ -87,6 +87,7 @@ static const char* nfc_get_detected_title(void);
 #include "managers/nfc/ntag_t2.h"
 #include "managers/nfc/write_ntag.h"
 #include "managers/nfc/desfire.h"
+#include "managers/nfc/emv.h"
 #include "managers/nfc/ndef_builder.h"
 #include "managers/nfc/ndef_tag_gen.h"
 
@@ -716,6 +717,9 @@ static uint8_t g_uid[10] = {0};
 static uint8_t g_uid_len = 0;
 static uint16_t g_atqa = 0;
 static uint8_t g_sak = 0;
+/* Cached EMV read so the Save button works without re-tapping the card. */
+static EmvData g_emv;
+static bool g_is_emv = false;
 #ifdef NFC_HAS_LOCAL_READER
 static NTAG2XX_MODEL g_model = NTAG2XX_UNKNOWN;
 #endif
@@ -814,7 +818,7 @@ static void nfc_set_details_async(void *ptr) {
     }
     if (nfc_details_visible && nfc_details_label && lv_obj_is_valid(nfc_details_label)) {
         lv_label_set_text(nfc_details_label, nfc_details_text);
-        lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
     }
     // Reset dict-skip flag for next scans
     nfc_dict_skip_requested = false;
@@ -1033,11 +1037,98 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
     if (desfire_is_desfire_candidate(g_atqa, g_sak)) {
         desfire_version_t ver;
         bool have_ver = desfire_get_version(io, &ver);
+
+        // If GET_VERSION failed, this might be an EMV payment card
+        // (same ATQA/SAK, different protocol).
+        if (!have_ver) {
+            EmvData emv;
+            memset(&emv, 0, sizeof(emv));
+            if (emv_read_card(io, &emv)) {
+                g_emv = emv;       /* cache for the Save button */
+                g_is_emv = true;
+                char *plugin_text = flipper_nfc_try_parse_emv(&emv);
+                if (plugin_text) {
+                    size_t cap = 512;
+                    char *text = (char *)malloc(cap);
+                    if (text) {
+                        snprintf(text, cap, "Type: EMV Payment Card\nUID:");
+                        size_t pos = strlen(text);
+                        for (uint8_t i = 0; i < uid_len && pos < cap - 4; ++i) {
+                            pos += snprintf(text + pos, cap - pos, " %02X", uid[i]);
+                        }
+                        pos += snprintf(text + pos, cap - pos,
+                                        "\nATQA: %02X %02X  SAK: %02X\n",
+                                        (g_atqa >> 8) & 0xFF, g_atqa & 0xFF, g_sak);
+
+                        ndef_details_result_t *res = nfc_ndef_pool_alloc();
+                        if (!res) { free(text); free(plugin_text); return; }
+                        size_t h_len = strlen(text);
+                        size_t p_len = strlen(plugin_text);
+                        char *combined = (char *)malloc(h_len + 1 + p_len + 1);
+                        if (combined) {
+                            memcpy(combined, text, h_len);
+                            combined[h_len] = '\n';
+                            memcpy(combined + h_len + 1, plugin_text, p_len + 1);
+                            free(text);
+                            free(plugin_text);
+                            text = combined;
+                        } else {
+                            free(plugin_text);
+                        }
+                        res->text = text;
+                        res->text_len = strlen(text);
+                        res->session = nfc_scan_session;
+                        if (display_manager_is_available())
+                            display_manager_lvgl_async_call(nfc_set_details_async, res);
+                        else { free(text); nfc_ndef_pool_free(res); }
+                        return;
+                    }
+                    free(plugin_text);
+                }
+            }
+            // Neither DESFire nor EMV — show minimal Type 4 info
+            char *text = desfire_build_details_summary(NULL, uid, uid_len, g_atqa, g_sak);
+            if (!text) return;
+            ndef_details_result_t *res = nfc_ndef_pool_alloc();
+            if (!res) { free(text); return; }
+            res->text = text; res->text_len = strlen(text); res->session = nfc_scan_session;
+            if (display_manager_is_available()) display_manager_lvgl_async_call(nfc_set_details_async, res);
+            else { free(text); nfc_ndef_pool_free(res); }
+            return;
+        }
+
         const desfire_version_t *ver_ptr = have_ver ? &ver : NULL;
         char *text = desfire_build_details_summary(ver_ptr, uid, uid_len, g_atqa, g_sak);
         if (!text) {
             return;
         }
+
+        // Walk the DESFire application/file tree (plaintext files only) and
+        // let any registered supported-card parser (e.g. myki) annotate the
+        // summary with card-specific info.
+        if (have_ver) {
+            MfDesfireData *tree = desfire_tree_alloc();
+            if (tree) {
+                if (desfire_read_tree(io, tree)) {
+                    char *plugin_text = flipper_nfc_try_parse_mfdesfire(tree);
+                    if (plugin_text) {
+                        size_t h_len = strlen(text);
+                        size_t p_len = strlen(plugin_text);
+                        char *combined = (char *)malloc(h_len + 1 + p_len + 1);
+                        if (combined) {
+                            memcpy(combined, text, h_len);
+                            combined[h_len] = '\n';
+                            memcpy(combined + h_len + 1, plugin_text, p_len + 1);
+                            free(text);
+                            text = combined;
+                        }
+                        free(plugin_text);
+                    }
+                }
+                desfire_tree_free(tree);
+            }
+        }
+
         ndef_details_result_t *res = nfc_ndef_pool_alloc();
         if (!res) {
             free(text);
@@ -1052,6 +1143,68 @@ static void nfc_build_and_set_details(pn532_io_handle_t io, const uint8_t *uid, 
             nfc_ndef_pool_free(res);
         }
         return;
+    }
+
+    // ISO14443-4 fallback: SAK bit 5 set but not caught by the strict DESFire
+    // ATQA check above (e.g. EMV payment cards with ATQA 0x0004, 0x0002, etc.).
+    // Try DESFire GET_VERSION first, then EMV SELECT PPSE.
+    if (desfire_sak_is_iso14443_4(g_sak) && !desfire_is_desfire_candidate(g_atqa, g_sak)) {
+        desfire_version_t ver;
+        bool have_ver = desfire_get_version(io, &ver);
+
+        if (!have_ver) {
+            // Not a DESFire — try EMV payment card
+            EmvData emv;
+            memset(&emv, 0, sizeof(emv));
+            if (emv_read_card(io, &emv)) {
+                g_emv = emv;       /* cache for the Save button */
+                g_is_emv = true;
+                char *plugin_text = flipper_nfc_try_parse_emv(&emv);
+                if (plugin_text) {
+                    size_t cap = 512;
+                    char *text = (char *)malloc(cap);
+                    if (text) {
+                        snprintf(text, cap, "Type: EMV Payment Card\nUID:");
+                        size_t pos = strlen(text);
+                        for (uint8_t i = 0; i < uid_len && pos < cap - 4; ++i)
+                            pos += snprintf(text + pos, cap - pos, " %02X", uid[i]);
+                        pos += snprintf(text + pos, cap - pos,
+                                        "\nATQA: %02X %02X  SAK: %02X\n",
+                                        (g_atqa >> 8) & 0xFF, g_atqa & 0xFF, g_sak);
+                        size_t h_len = strlen(text);
+                        size_t p_len = strlen(plugin_text);
+                        char *combined = (char *)malloc(h_len + 1 + p_len + 1);
+                        if (combined) {
+                            memcpy(combined, text, h_len);
+                            combined[h_len] = '\n';
+                            memcpy(combined + h_len + 1, plugin_text, p_len + 1);
+                            free(text);
+                            text = combined;
+                        }
+                        free(plugin_text);
+                        ndef_details_result_t *res = nfc_ndef_pool_alloc();
+                        if (!res) { free(text); return; }
+                        res->text = text; res->text_len = strlen(text); res->session = nfc_scan_session;
+                        if (display_manager_is_available())
+                            display_manager_lvgl_async_call(nfc_set_details_async, res);
+                        else { free(text); nfc_ndef_pool_free(res); }
+                        return;
+                    }
+                    free(plugin_text);
+                }
+            }
+        }
+        // DESFire GET_VERSION succeeded but not ATQA=0x0344 — show as generic Type 4
+        if (have_ver) {
+            char *text = desfire_build_details_summary(&ver, uid, uid_len, g_atqa, g_sak);
+            if (!text) return;
+            ndef_details_result_t *res = nfc_ndef_pool_alloc();
+            if (!res) { free(text); return; }
+            res->text = text; res->text_len = strlen(text); res->session = nfc_scan_session;
+            if (display_manager_is_available()) display_manager_lvgl_async_call(nfc_set_details_async, res);
+            else { free(text); nfc_ndef_pool_free(res); }
+            return;
+        }
     }
 
     // Otherwise try NTAG/Ultralight (Type 2)
@@ -1665,6 +1818,7 @@ static void nfc_scan_task(void *arg) {
         return;
     }
     ESP_LOGI(TAGT, "scan_task: start (cancel=%d)", nfc_scan_cancel);
+    g_is_emv = false;
     mfc_set_attack_hooks(&nfc_ui_attack_hooks);
     if (!nfc_init_local_reader(TAGT)) {
         ESP_LOGE(TAGT, "local NFC reader init failed");
@@ -2857,6 +3011,13 @@ static bool write_flipper_nfc_file(void) {
     }
     char path[192];
 
+    /* EMV payment cards: save the cached read (no card re-tap required). */
+    if (g_is_emv) {
+        bool ok = emv_save_flipper_file(&g_emv, dir, g_uid, g_uid_len, g_atqa, g_sak, NULL, 0);
+        if (did) nfc_sd_end(susp);
+        return ok;
+    }
+
     if (mfc_is_classic_sak(g_sak)) {
         // Prefer cached save (io=NULL) so user can save without card present
         bool ok = mfc_save_flipper_file(NULL, g_uid, g_uid_len, g_atqa, g_sak, dir, NULL, 0);
@@ -2880,33 +3041,34 @@ static bool write_flipper_nfc_file(void) {
         desfire_version_t ver;
         bool have_ver = desfire_get_version(g_pn532, &ver);
 
-        char buf[512];
-        int pos = 0;
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "Filetype: Flipper NFC device\n");
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "Version: 4\n");
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "Device type: Mifare DESFire\n");
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "UID:");
-        for (uint8_t i = 0; i < g_uid_len && pos < (int)sizeof(buf) - 4; ++i) {
-            pos += snprintf(buf + pos, sizeof(buf) - pos, " %02X", g_uid[i]);
-        }
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-                        "ATQA: %02X %02X\nSAK: %02X\n",
-                        (g_atqa >> 8) & 0xFF, g_atqa & 0xFF, g_sak);
-
-        if (have_ver && ver.picc_version_len > 0) {
-            char line[128];
-            if (desfire_build_picc_version_line(&ver, line, sizeof(line))) {
-                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s\n", line);
-            }
+        /* Re-read the full application/file tree so the saved dump includes
+         * all plaintext files (e.g. myki card number, Clipper balance). */
+        MfDesfireData *tree = desfire_tree_alloc();
+        if (tree) {
+            (void)desfire_read_tree(g_pn532, tree);
         }
 
-        if (sd_card_write_file(path, buf, (size_t)pos) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to write DESFire header: %s", path);
+        char *buf = desfire_build_flipper_text(tree,
+                                                g_uid, g_uid_len,
+                                                g_atqa, g_sak,
+                                                have_ver ? &ver : NULL);
+        if (tree) desfire_tree_free(tree);
+
+        if (!buf) {
+            ESP_LOGE(TAG, "Failed to build DESFire dump");
             if (did) nfc_sd_end(susp);
             return false;
         }
-        ESP_LOGI(TAG, "Mifare DESFire header saved: %s", path);
+
+        size_t buflen = strlen(buf);
+        if (sd_card_write_file(path, buf, buflen) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to write DESFire dump: %s", path);
+            free(buf);
+            if (did) nfc_sd_end(susp);
+            return false;
+        }
+        ESP_LOGI(TAG, "Mifare DESFire dump saved (%u bytes): %s", (unsigned)buflen, path);
+        free(buf);
         if (did) nfc_sd_end(susp);
         return true;
     }
@@ -3495,7 +3657,7 @@ static void nfc_show_details_view(bool show) {
         if (nfc_details_label && lv_obj_is_valid(nfc_details_label)) {
             lv_obj_align(nfc_details_label, LV_ALIGN_TOP_LEFT, 0, 0);
             lv_label_set_long_mode(nfc_details_label, LV_LABEL_LONG_WRAP);
-            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_LEFT, 0);
+            lv_obj_set_style_text_align(nfc_details_label, LV_TEXT_ALIGN_CENTER, 0);
         }
         // Set details text
         const char *source_text = NULL;
@@ -4536,6 +4698,12 @@ static void create_nfc_credits_popup(void) {
         "Momentum NFC/NDEF blame includes WillyJL, xMasterX, noproto, "
         "Methodius, gornekich, hedger, Leptopt1los, hazardousvoltage, YaBa, "
         "ted-logan, tomholford, luu176, and mxcdoam.\n\n"
+        "EMV payment-card reading (PPSE/AID select, GPO, and record parsing) is "
+        "ported from Momentum-Firmware's EMV poller, with the payment-card parser "
+        "by Leptopt1los.\n\n"
+        "DESFire application/file reads are adapted from the Momentum-Firmware "
+        "MIFARE DESFire poller. Supported-card parsers include Opal by micolous, "
+        "myki by Emily Trau, ITSO, and Gallagher utilities by Nick Mooney.\n\n"
         "ST25R3916 NFC-V and target-mode behavior was cross-referenced with "
         "Momentum/Flipper NFC HAL work.\n\n"
         "PicoPass/iCLASS support is based on bettse/picopass, carried by "

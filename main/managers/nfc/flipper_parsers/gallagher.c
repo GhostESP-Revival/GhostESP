@@ -4,12 +4,23 @@
  * Reference: https://github.com/megabug/gallagher-research
 */
 
-#include "nfc_supported_card_plugin.h"
-#include <flipper_application.h>
+#include "managers/nfc/flipper_nfc_compat.h"
 
-#include "../../api/gallagher/gallagher_util.h"
+#define GALLAGHER_CREDENTIAL_SECTOR 15
+#define MF_CLASSIC_BLOCK_SIZE 16
 
-#include <bit_lib.h>
+typedef struct GallagherCredential {
+    uint8_t region;
+    uint8_t issue;
+    uint16_t facility;
+    uint32_t card;
+} GallagherCredential;
+
+extern const uint8_t GALLAGHER_DECODE_TABLE[256];
+extern const uint8_t GALLAGHER_CARDAX_ASCII[MF_CLASSIC_BLOCK_SIZE];
+void gallagher_deobfuscate_and_parse_credential(
+    GallagherCredential* credential,
+    const uint8_t* cardholder_data_obfuscated);
 
 static bool gallagher_parse(const NfcDevice* device, FuriString* parsed_data) {
     furi_assert(device);
@@ -68,7 +79,7 @@ static bool gallagher_parse(const NfcDevice* device, FuriString* parsed_data) {
     return true;
 }
 
-static const NfcSupportedCardsPlugin gallagher_plugin = {
+const NfcSupportedCardsPlugin gallagher_plugin = {
     .protocol = NfcProtocolMfClassic,
     .verify = NULL,
     .read = NULL,

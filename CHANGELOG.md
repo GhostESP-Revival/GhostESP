@@ -5,6 +5,9 @@
 ### NFC
 - Added ST25R3916/ST25R3916B NFC support over SPI or I2C, plus an `auto` / `pn532` / `st25r` backend selector in UI and CLI
 - Added more NFC tag tools: MIFARE Classic nested recovery, PicoPass/iCLASS reads, NDEF creation, NTAG metadata, and DESFire summaries, with credits to [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [@noproto](https://github.com/noproto), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
+- Added EMV payment-card reading (PPSE/AID selection, GPO, and record parsing for PAN, expiry, and issuer country/currency with ISO name lookup), ported from the [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) EMV poller and payment-card parser by [@leptopt1los](https://github.com/leptopt1los)
+- Expanded DESFire support from version summaries to full application/file tree reads (lists applications, file settings, and plaintext file data over ISO7816) with Flipper-compatible `.nfc` export, adapted from the [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) MIFARE DESFire poller
+- Added supported-card parsers for Opal (Sydney), myki (Melbourne), ITSO (UK), and Gallagher access control, ported from [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware) with credit to [@micolous](https://github.com/micolous) (Opal), [@emilytrau](https://github.com/emilytrau) (myki), and Nick Mooney (Gallagher)
 - Added Momentum-compatible nested logs at `/mnt/ghostesp/nfc/.nested.log` and the `nfc hardnested` CLI command
 - Cleaned up the NFC menu, scan popup, progress labels, and credits page
 - Fixed MIFARE Classic summaries skipping block reads after default-key auth
@@ -73,7 +76,6 @@
 - Fixed Apps menu grid scrolling so the selection stays visible when scrolling down on Cardputer
 - Fixed Cardputer ADV keyboard spamming repeated select/input events when opening Apps menu
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
-- ST25R3916 NFC-A poller retries, WUPA fallback, and HALT; tighter target/anti-collision handling
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
@@ -81,10 +83,10 @@
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
+- Reworked Evil Portal input capture to record full field values from inputs, textareas, selects, and browser autofill via debounced `sendBeacon` instead of per-keystroke XHR
 - Added pressed-state visual feedback (darken + scale) on interactive buttons across the UI
 - Smooth scroll on selection changes in options lists, detail views, and main menu grid/list
-- Lockscreen wrong-PIN shake animation on the PIN dots
-- Lockscreen ghost companion bob uses a sine wave instead of a triangle wave for a more organic feel
+- Lockscreen ghost companion bob uses a sine wave instead of a triangle wave
 - Toast notifications decelerate as they exit instead of accelerating off screen
 - Main menu list selection border now uses theme accent color instead of hardcoded white
 - Reworked Main Menu and Apps layouts with responsive Carousel, Grid, and List views across compact and large displays

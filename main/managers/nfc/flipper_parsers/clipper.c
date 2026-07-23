@@ -18,14 +18,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "nfc_supported_card_plugin.h"
-#include <flipper_application.h>
+#include "managers/nfc/flipper_nfc_compat.h"
 
-#include <lib/nfc/protocols/mf_desfire/mf_desfire.h>
-
-#include <bit_lib.h>
-#include <datetime.h>
-#include <locale/locale.h>
 #include <inttypes.h>
 
 //
@@ -569,8 +563,9 @@ static void furi_string_cat_timestamp(
     furi_string_free(time_str);
 }
 
-/* Actual implementation of app<>plugin interface */
-static const NfcSupportedCardsPlugin clipper_plugin = {
+/* Actual implementation of app<>plugin interface.
+ * Must have external linkage: flipper_nfc_compat.c references it from s_plugins[]. */
+const NfcSupportedCardsPlugin clipper_plugin = {
     .protocol = NfcProtocolMfDesfire,
     .verify = NULL,
     .read = NULL,

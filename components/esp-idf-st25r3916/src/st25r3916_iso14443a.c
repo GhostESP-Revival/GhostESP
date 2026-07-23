@@ -28,14 +28,33 @@ static const char *TAG = "st25r3916_nfca";
 #define NFCA_RX_SCRATCH 264
 
 static esp_err_t nfca_wait_rxe(int timeout_ms) {
-  uint8_t m = 0;
+  uint8_t m = 0, t = 0, e = 0;
   int iters = timeout_ms * 10;  // poll ~every 100 us
   if (iters < 1) iters = 1;
   for (int i = 0; i < iters; i++) {
-    st25r3916_irq_update(&m, NULL, NULL);
+    /* Poll all three IRQ groups so the sticky latch captures RXS/errors even on
+     * the iteration RXE finally appears; st25r3916_irq_update accumulates. */
+    st25r3916_irq_update(&m, &t, &e);
     if (m & ST25R3916_IRQ_MAIN_RXE) return ESP_OK;
     if (m & ST25R3916_IRQ_MAIN_COL) return ESP_ERR_INVALID_RESPONSE;  // bit collision
     esp_rom_delay_us(100);
+  }
+  /* [DIAG] Timed out with no RXE. Report what the receiver actually saw so a
+   * link failure (total silence: RXS=0) can be told apart from a demodulation
+   * failure (RXS=1 but the frame never completed) or a framing/CRC error
+   * (HFE/SFE/CRC/PAR set). This is the decisive GPO-timeout datapoint.
+   * Gated to >20 ms so idle REQA/WUPA detection (20 ms) and HALT (5 ms), which
+   * time out constantly by design, don't flood the log; T=CL RATS (50 ms) and
+   * EMV APDUs (>=22 ms) are what we want to see. */
+  if (timeout_ms > 20) {
+    ESP_LOGW(TAG,
+             "[DIAG] wait_rxe timeout %dms: main=0x%02X timer=0x%02X err=0x%02X "
+             "(RXS=%d RXE=%d COL=%d NRE=%d CRC=%d PAR=%d HFE=%d SFE=%d)",
+             timeout_ms, m, t, e, !!(m & ST25R3916_IRQ_MAIN_RXS),
+             !!(m & ST25R3916_IRQ_MAIN_RXE), !!(m & ST25R3916_IRQ_MAIN_COL),
+             !!(t & ST25R3916_IRQ_TIMER_NRE), !!(e & ST25R3916_IRQ_ERR_CRC),
+             !!(e & ST25R3916_IRQ_ERR_PAR), !!(e & ST25R3916_IRQ_ERR_HFE),
+             !!(e & ST25R3916_IRQ_ERR_SFE));
   }
   return ESP_ERR_TIMEOUT;
 }
