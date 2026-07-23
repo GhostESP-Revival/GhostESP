@@ -5713,7 +5713,9 @@ static void create_saved_details_popup(const char *path) {
     // reset stored details text
     if (saved_details_text) { free(saved_details_text); saved_details_text = NULL; }
     saved_details_parsed_view = false;
+#ifdef CONFIG_USE_TOUCHSCREEN
     touch_drag_reset(&saved_details_drag);
+#endif
 
     // parse file and show details (supports MIFARE Classic, DESFire, NTAG, and PicoPass)
     bool susp_load = false; bool did_load = nfc_sd_begin(&susp_load);
