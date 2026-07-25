@@ -73,7 +73,8 @@
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
-    gtag('config', 'G-Q9CNW8QW7K');
+    {{ $gaTitle := cond (and .Title (not .IsHome)) (printf "%s · %s" .Title .Site.Title) .Site.Title }}
+    gtag('config', 'G-Q9CNW8QW7K', { 'page_title': {{ $gaTitle | jsonify | safeJS }} });
   </script>
   <script type="application/ld+json">
   {
