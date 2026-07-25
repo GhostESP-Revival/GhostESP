@@ -16,6 +16,7 @@
 - Added Wi-Fi firmware updates from **Settings > Firmware Update**, with verification and rollback protection on supported boards
 - Added GhostLink peer updates, so a primary device can download firmware and safely flash its paired peer
 - Added offline SD card installs from `/ghostesp/firmware_update.bin`, with optional `.sha256` verification
+- Fixed a boot-time stack overflow in the peer OTA background check on GhostLink primary boards; background checks now run every boot (gated on connectivity instead of a 24h timer) and share a single task
 
 ### Cloud Store
 - Added Cloud Store in the Apps gallery for browsing and installing apps, scripts and asset packs from the GitHub catalogs

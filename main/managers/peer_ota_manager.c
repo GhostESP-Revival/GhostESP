@@ -29,7 +29,6 @@
 #define PEER_OTA_PEER_BOARD_KEY "somethingsomething2"
 #define PEER_OTA_SEND_WAIT_MS 2000
 #define PEER_OTA_RESPONSE_WAIT_MS 10000
-#define PEER_OTA_BACKGROUND_MIN_INTERVAL_SEC (24 * 60 * 60)
 #define PEER_OTA_DOWNLOAD_TASK_STACK_BYTES 12288
 #define PEER_OTA_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
 #define PEER_OTA_DOWNLOAD_RANGE_ATTEMPTS 5
@@ -182,8 +181,8 @@ static void peer_ota_set_error(const char *msg) {
     xSemaphoreGive(s_status_mutex);
 }
 
-// Shared by both the throttled background check and the manual "check now":
-// only proceeds while GhostLink reports a connected peer session; only ever
+// Shared by both the background check and the manual "check now": only
+// proceeds while GhostLink reports a connected peer session; only ever
 // fetches the peer's manifest entry and updates status.
 static void peer_ota_do_check(void) {
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
@@ -232,12 +231,13 @@ void peer_ota_manager_background_check(void) {
     if (!peer_ota_manager_is_supported()) {
         return;
     }
-    uint32_t last_check = settings_get_ota_last_check_time(&G_Settings);
-    uint32_t now = (uint32_t)time(NULL);
-    if (last_check != 0 && now > last_check && (now - last_check) < PEER_OTA_BACKGROUND_MIN_INTERVAL_SEC) {
+    // Runs every boot, but only actually does anything while a peer session
+    // is up -- no point spinning up the manifest fetch for a peer that isn't
+    // there to receive it.
+    if (!esp_comm_manager_is_connected()) {
         return;
     }
-    settings_set_ota_last_check_time(&G_Settings, now);
+    settings_set_ota_last_check_time(&G_Settings, (uint32_t)time(NULL));
     settings_persist_setting(SETTING_OTA_LAST_CHECK_TIME);
     peer_ota_do_check();
 }
@@ -443,9 +443,22 @@ static bool peer_ota_run_update_once(void) {
     xSemaphoreGive(s_status_mutex);
     status_display_show_status("Flashing peer...");
 
+    size_t relay_internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t relay_psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    glog("[peer OTA relay] before: internal_free=%u bytes, psram_free=%u bytes\n",
+         (unsigned)relay_internal_free_before, (unsigned)relay_psram_free_before);
+
     peer_ota_stream_ctx_t ctx = { .total_sent = 0, .ok = true };
-    if (!peer_ota_stream_download_with_retries(entry.download_url, entry.size, &ctx) ||
-        ctx.total_sent != entry.size) {
+    bool relay_ok = peer_ota_stream_download_with_retries(entry.download_url, entry.size, &ctx) &&
+                     ctx.total_sent == entry.size;
+
+    glog("[peer OTA relay] after: internal_free=%u bytes (used=%d), psram_free=%u bytes (used=%d)\n",
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+         (int)((long)relay_internal_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+         (int)((long)relay_psram_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+
+    if (!relay_ok) {
         glog("Peer firmware relay failed (got=%u/%u)\n",
              (unsigned)ctx.total_sent, (unsigned)entry.size);
         peer_ota_set_error("Peer firmware relay failed");
@@ -593,6 +606,9 @@ static void peer_ota_rx_worker_task(void *pv) {
         }
 
         if (msg.type == PEER_OTA_RX_MSG_BEGIN) {
+            glog("[peer OTA receive] before: internal_free=%u bytes, psram_free=%u bytes\n",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             s_peer_begin_result = ota_manager_raw_write_begin(msg.image_size);
             raw_active = (s_peer_begin_result == ESP_OK);
             if (s_peer_begin_sem) {
@@ -624,6 +640,9 @@ static void peer_ota_rx_worker_task(void *pv) {
             s_peer_have_result = true;
             s_peer_last_result_ok = (err == ESP_OK);
             s_peer_reboot_pending = (err == ESP_OK);
+            glog("[peer OTA receive] after: internal_free=%u bytes, psram_free=%u bytes\n",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         }
     }
 }

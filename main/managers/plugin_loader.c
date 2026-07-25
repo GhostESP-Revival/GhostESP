@@ -326,6 +326,11 @@ esp_err_t plugin_loader_tick(plugin_loaded_app_t *loaded, uint32_t elapsed_ms) {
 
 esp_err_t plugin_loader_unload(plugin_loaded_app_t *loaded) {
     if (!loaded || !loaded->manifest) return ESP_OK;
+    char id[sizeof(loaded->manifest->id)];
+    strncpy(id, loaded->manifest->id, sizeof(id));
+    id[sizeof(id) - 1] = '\0';
+    size_t internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     plugin_runner_stop_tick();
     plugin_loader_stop(loaded);
 #if CONFIG_ENABLE_NATIVE_SD_APPS
@@ -335,6 +340,14 @@ esp_err_t plugin_loader_unload(plugin_loaded_app_t *loaded) {
     plugin_api_release();
 #endif
     memset(loaded, 0, sizeof(*loaded));
+    size_t internal_free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Unloaded SD app %s: internal_free=%u->%u (freed=%d), psram_free=%u->%u (freed=%d)",
+             id,
+             (unsigned)internal_free_before, (unsigned)internal_free_after,
+             (int)((long)internal_free_after - (long)internal_free_before),
+             (unsigned)psram_free_before, (unsigned)psram_free_after,
+             (int)((long)psram_free_after - (long)psram_free_before));
     return ESP_OK;
 }
 

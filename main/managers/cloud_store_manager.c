@@ -1307,7 +1307,17 @@ static void install_task(void *arg) {
         xSemaphoreGive(s_ctx->mutex);
         ESP_LOGI(TAG, "installing %s from %s", item.id, item.download_url);
         cloud_store_pause_ap_if_needed();
+        size_t internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        size_t psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        ESP_LOGI(TAG, "[install %s] before: internal_free=%u bytes, psram_free=%u bytes",
+                 item.id, (unsigned)internal_free_before, (unsigned)psram_free_before);
         esp_err_t err = install_item(&item);
+        size_t internal_free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        ESP_LOGI(TAG, "[install %s] after: internal_free=%u bytes (used=%d), psram_free=%u bytes (used=%d)",
+                 item.id,
+                 (unsigned)internal_free_after, (int)((long)internal_free_before - (long)internal_free_after),
+                 (unsigned)psram_free_after, (int)((long)psram_free_before - (long)psram_free_after));
         bool cancelled = s_ctx->cancel_requested;
         if (cancelled) {
             ESP_LOGI(TAG, "install cancelled for %s", item.id);

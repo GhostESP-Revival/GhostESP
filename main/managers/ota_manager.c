@@ -45,7 +45,6 @@ static const char *TAG = "OtaManager";
 #define GHOSTESP_OTA_HOST "gespota.fuckyourcdn.com"
 
 #define OTA_MANIFEST_HTTP_BUFFER_SIZE 1024
-#define OTA_BACKGROUND_CHECK_MIN_INTERVAL_SEC (24 * 60 * 60)
 #define OTA_DOWNLOAD_TASK_STACK_BYTES 12288
 #define OTA_READBACK_CHUNK_SIZE 1024
 #define OTA_SD_READ_CHUNK_SIZE 4096
@@ -660,11 +659,8 @@ esp_err_t ota_manager_background_check(void) {
     ESP_LOGI(TAG, "Skipping OTA background check on no-PSRAM build");
     return ESP_OK;
 #endif
-    uint32_t last_check = settings_get_ota_last_check_time(&G_Settings);
-    uint32_t now = (uint32_t)time(NULL);
-    if (last_check != 0 && now > last_check && (now - last_check) < OTA_BACKGROUND_CHECK_MIN_INTERVAL_SEC) {
-        return ESP_OK; // checked recently, nothing to do
-    }
+    // Runs every boot -- ota_check_task fails fast (DNS/connect error) when
+    // there's no real network, so there's no need to throttle by wall clock.
     return ota_manager_check_now();
 }
 
@@ -774,6 +770,10 @@ static void ota_download_task(void *pv) {
     ota_set_state(OTA_STATE_DOWNLOADING);
     status_display_show_status("Downloading update...");
     s_download_cancel_requested = false;
+    size_t ota_internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t ota_psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "[OTA download] before: internal_free=%u bytes, psram_free=%u bytes",
+             (unsigned)ota_internal_free_before, (unsigned)ota_psram_free_before);
 
     // Safety cross-check: physical flash must match what this build assumes.
     uint32_t actual_flash_size = 0;
@@ -915,6 +915,11 @@ static void ota_download_task(void *pv) {
     ota_set_state(OTA_STATE_READY_TO_REBOOT);
     status_display_show_status("Update installed, rebooting...");
     glog("OTA update verified, rebooting into new firmware\n");
+    ESP_LOGI(TAG, "[OTA download] after: internal_free=%u bytes (used=%d), psram_free=%u bytes (used=%d)",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (int)((long)ota_internal_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (int)((long)ota_psram_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
     vTaskDelay(pdMS_TO_TICKS(1500));
     esp_restart();
 }
@@ -1076,6 +1081,10 @@ static void ota_sd_update_task(void *pv) {
     (void)pv;
     ota_set_state(OTA_STATE_DOWNLOADING);
     status_display_show_status("Reading SD firmware...");
+    size_t sd_ota_internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t sd_ota_psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "[SD OTA] before: internal_free=%u bytes, psram_free=%u bytes",
+             (unsigned)sd_ota_internal_free_before, (unsigned)sd_ota_psram_free_before);
 
     char firmware_path[256];
     if (!ota_sd_find_firmware(firmware_path, sizeof(firmware_path))) {
@@ -1162,6 +1171,11 @@ static void ota_sd_update_task(void *pv) {
     ota_set_state(OTA_STATE_READY_TO_REBOOT);
     status_display_show_status("Update installed, rebooting...");
     glog("SD OTA update applied, rebooting into new firmware\n");
+    ESP_LOGI(TAG, "[SD OTA] after: internal_free=%u bytes (used=%d), psram_free=%u bytes (used=%d)",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (int)((long)sd_ota_internal_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (int)((long)sd_ota_psram_free_before - (long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
     vTaskDelay(pdMS_TO_TICKS(1500));
     esp_restart();
 }
