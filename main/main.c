@@ -588,7 +588,7 @@ static void deferred_sd_init_task(void *arg) {
 
 void app_main(void) {
     memory_debug_start_boot_trace();
-    ghostchi_mood_init();
+    MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
     // Reduce NimBLE log verbosity (keep warnings/errors only)
@@ -923,7 +923,7 @@ void app_main(void) {
 
 #if GHOSTESP_OTA_SUPPORTED
     {
-        BaseType_t ota_task_rc = xTaskCreate(ota_background_check_task, "OTA Check", 4096, NULL,
+        BaseType_t ota_task_rc = xTaskCreate(ota_background_check_task, "OTA Check", 6144, NULL,
                                               tskIDLE_PRIORITY + 1, NULL);
         if (ota_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create OTA background check task");
