@@ -19,6 +19,7 @@
 #include "managers/self_ota_manager.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
+#include "gui/toast.h"
 #include "managers/plugin_manager.h"
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
@@ -121,35 +122,24 @@ static void apply_main_menu_background_cb(void *arg) {
 
 #if GHOSTESP_OTA_SUPPORTED
 static char s_self_ota_boot_error[160];
-static popup_confirm_t *s_self_ota_boot_popup = NULL;
 
-static void self_ota_boot_popup_dismiss_cb(void *user_data) {
-    (void)user_data;
-}
-
-static void self_ota_show_boot_popup(void) {
-    popup_confirm_show(&s_self_ota_boot_popup, lv_layer_top(), "Update Failed",
-                       s_self_ota_boot_error, "Close", NULL,
-                       self_ota_boot_popup_dismiss_cb, NULL);
-}
-
-static void self_ota_boot_error_popup_timer_cb(lv_timer_t *timer) {
+static void self_ota_boot_error_toast_timer_cb(lv_timer_t *timer) {
     lv_timer_del(timer);
     if (s_self_ota_boot_error[0] != '\0') {
-        self_ota_show_boot_popup();
+        toast_show(s_self_ota_boot_error, TOAST_WARN);
         s_self_ota_boot_error[0] = '\0';
     }
 }
 
-static void schedule_self_ota_boot_error_popup_cb(void *arg) {
+static void schedule_self_ota_boot_error_toast_cb(void *arg) {
     (void)arg;
     if (s_self_ota_boot_error[0] == '\0') return;
 
-    lv_timer_t *timer = lv_timer_create(self_ota_boot_error_popup_timer_cb, 1200, NULL);
+    lv_timer_t *timer = lv_timer_create(self_ota_boot_error_toast_timer_cb, 1200, NULL);
     if (timer) {
         lv_timer_set_repeat_count(timer, 1);
     } else {
-        self_ota_show_boot_popup();
+        toast_show(s_self_ota_boot_error, TOAST_WARN);
         s_self_ota_boot_error[0] = '\0';
     }
 }
@@ -161,7 +151,7 @@ static void maybe_schedule_self_ota_boot_error_popup(void) {
     if (status.state != SELF_OTA_STATE_FAILED || status.error_msg[0] == '\0') return;
 
     snprintf(s_self_ota_boot_error, sizeof(s_self_ota_boot_error), "%s", status.error_msg);
-    display_manager_run_on_lvgl(schedule_self_ota_boot_error_popup_cb, NULL);
+    display_manager_run_on_lvgl(schedule_self_ota_boot_error_toast_cb, NULL);
 }
 #endif
 
