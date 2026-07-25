@@ -465,6 +465,7 @@ void register_commands() {
 #endif
     register_command("loadconfig", handle_loadconfig_cmd);
     register_command("apps", handle_apps_cmd);
+    register_command("subghz", handle_subghz_cmd);
 
     cmd_comm_register_callback();
 
