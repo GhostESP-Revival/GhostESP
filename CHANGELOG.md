@@ -54,9 +54,15 @@
 - Added transmit support for the NEC42, NEC42ext, and RC5X protocols, so all of Flipper's IR protocols can now be sent as well as learned
 - Fixed the RC5 transmit encoder laying out bits in reverse order, so RC5 signals now transmit and re-decode correctly
 
+### Ethernet
+- Fixed `ethping`/ping sweep and `etharp`/ARP scan (CLI and GhostLink peer-relayed UI) always scanning a hardcoded /24 instead of the real DHCP netmask, missing hosts on smaller VLAN subnets
+- Sped up ARP scan to match the Wi-Fi ARP scan's batching/timing, cutting a full-subnet scan from ~9s to ~2.5s
+- Fixed peer-relayed Fingerprint Scan backing out immediately if a previous ARP/port/ping scan had run that session, from stale shared scan-done state
+
 ### Headless CLI
 - Added OS-style CLI commands for `echo`, `ifconfig`, `ping`, `version`, `uuid`, `macaddr`, `uptime`, `status`, and filesystem helpers
 - Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions
+- Fixed the `subghz` command missing its CLI registration since the commandline.c refactor, causing all subghz commands (local and GhostLink peer-relayed) to fail with "Unsupported command"
 
 ### Other Changes
 - Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
@@ -91,6 +97,7 @@
 - Main menu list selection border now uses theme accent color instead of hardcoded white
 - Reworked Main Menu and Apps layouts with responsive Carousel, Grid, and List views across compact and large displays
 - Added paginated Grid navigation with page dots, swipe/controller support, top-left page alignment, and subtle selected tiles
+- Fixed Grid view joystick/encoder/D-pad navigation dropping to the next row instead of the next page when pressing right/left from the edge column
 - Improved Carousel navigation with previous/next previews, consistent directions, and faster transitions
 
 ### Docs

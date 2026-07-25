@@ -45,6 +45,11 @@
 // Forward declaration - esp_netif_get_netif_impl is not in public API but exists internally
 void* esp_netif_get_netif_impl(esp_netif_t *esp_netif);
 
+// Cap ARP/ping sweep ranges derived from the real netmask (protects against
+// very large subnets, e.g. a /16, turning into an hours-long scan).
+#define ETH_ARP_SCAN_MAX_HOSTS 512
+#define ETH_PING_SCAN_MAX_HOSTS 512
+
 static volatile bool g_eth_scan_cancel = false;
 
 void eth_cmd_set_scan_cancel(bool cancel) {
@@ -288,88 +293,94 @@ void handle_eth_arp_cmd(int argc, char **argv) {
         return;
     }
 
-    // Calculate subnet prefix (e.g., "192.168.1.")
+    // Derive the actual scan range from the real netmask instead of assuming
+    // /24 -- smaller VLAN subnets (/25-/30) need the true range or hosts
+    // outside the real subnet get probed for nothing while real neighbors
+    // outside a hardcoded .1-.254 window get skipped.
+    const uint32_t ip_host      = ntohl(ip_info.ip.addr);
+    const uint32_t netmask_host = ntohl(ip_info.netmask.addr);
+    const uint32_t network_host = ip_host & netmask_host;
+    const uint32_t bcast_host   = network_host | (~netmask_host);
+
+    uint32_t start_host = network_host + 1;
+    uint32_t end_host   = (bcast_host > network_host) ? bcast_host - 1 : network_host;
+    if (end_host < start_host) {
+        start_host = network_host;
+        end_host   = bcast_host;
+    }
+    if (end_host - start_host + 1 > ETH_ARP_SCAN_MAX_HOSTS) {
+        end_host = start_host + ETH_ARP_SCAN_MAX_HOSTS - 1;
+    }
+    const int total_hosts = (int)(end_host - start_host + 1);
+
     char subnet_prefix[16];
-    uint32_t ip = ip_info.ip.addr;
-    uint32_t netmask = ip_info.netmask.addr;
-    uint32_t network = ip & netmask;
-    
-    snprintf(subnet_prefix, sizeof(subnet_prefix), "%d.%d.%d.",
-             (int)((network >> 0) & 0xFF),
-             (int)((network >> 8) & 0xFF),
-             (int)((network >> 16) & 0xFF));
+    ip4_addr_t network_addr;
+    network_addr.addr = htonl(network_host);
+    ip4addr_ntoa_r(&network_addr, subnet_prefix, sizeof(subnet_prefix));
 
     g_eth_scan_cancel = false;
-    glog("Starting ARP scan on Ethernet network %s0/24\n", subnet_prefix);
+    glog("Starting ARP scan on Ethernet network %s (%d hosts)\n", subnet_prefix, total_hosts);
     glog("Scanning network using ARP requests...\n");
 
-    const int START_HOST = 1;
-    const int END_HOST = 254;
-    const int batch_size = 10;
+    // Tuned to match the Wi-Fi ARP scan (scans/wifi/arp_scan.c): larger
+    // batches and shorter waits scan a /24 in ~2.5s/pass instead of ~9s.
+    const int batch_size = 20;
     int num_found = 0;
+    int scanned = 0;
 
     // Scan the subnet in batches
-    for (int batch_start = START_HOST; batch_start <= END_HOST && !g_eth_scan_cancel; batch_start += batch_size) {
-        int batch_end = (batch_start + batch_size - 1 > END_HOST) ? END_HOST : batch_start + batch_size - 1;
-        
+    for (uint32_t batch_start = start_host; batch_start <= end_host && !g_eth_scan_cancel; batch_start += batch_size) {
+        uint32_t batch_end = (batch_start + (uint32_t)batch_size - 1 > end_host) ? end_host : batch_start + (uint32_t)batch_size - 1;
+
         // Send batch of ARP requests
-        for (int host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
-            char current_ip[26];
-            snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-            
-            // Parse IP address
+        for (uint32_t host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
+            if (host == ip_host) continue;
             ip4_addr_t target_addr;
-            if (ip4addr_aton(current_ip, &target_addr)) {
-                // Send ARP request using lwIP
-                etharp_request(lwip_netif, &target_addr);
-            }
-            vTaskDelay(pdMS_TO_TICKS(10)); // Small delay between requests
+            target_addr.addr = htonl(host);
+            etharp_request(lwip_netif, &target_addr);
+            vTaskDelay(pdMS_TO_TICKS(5)); // Small delay between requests
         }
         if (g_eth_scan_cancel) break;
-        
+
         // Wait for responses to arrive
-        for (int i = 0; i < 5 && !g_eth_scan_cancel; i++) {
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        
+        vTaskDelay(pdMS_TO_TICKS(80));
+
         // Check ARP table for this batch
-        for (int host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
-            char current_ip[26];
-            snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-            
-            // Parse IP address
+        for (uint32_t host = batch_start; host <= batch_end && !g_eth_scan_cancel; host++) {
+            if (host == ip_host) continue;
             ip4_addr_t target_addr;
-            if (!ip4addr_aton(current_ip, &target_addr)) {
-                continue;
-            }
-            
+            target_addr.addr = htonl(host);
+
             // Search ARP table
             struct eth_addr *eth_ret = NULL;
             const ip4_addr_t *ip_ret = NULL;
             s8_t arp_idx = etharp_find_addr(lwip_netif, &target_addr, &eth_ret, &ip_ret);
-            
+
             if (arp_idx >= 0 && eth_ret) {
                 num_found++;
+                char current_ip[16];
+                ip4addr_ntoa_r(&target_addr, current_ip, sizeof(current_ip));
                 glog("  %-15s %02x:%02x:%02x:%02x:%02x:%02x\n",
                      current_ip,
                      eth_ret->addr[0], eth_ret->addr[1], eth_ret->addr[2],
                      eth_ret->addr[3], eth_ret->addr[4], eth_ret->addr[5]);
             }
         }
-        
+
         // Progress update
-        if (batch_end % 50 == 0 || batch_end == END_HOST) {
-            glog("Progress: Scanned %d/%d hosts, found %d active hosts\n", 
-                 batch_end - START_HOST + 1, END_HOST - START_HOST + 1, num_found);
+        scanned = (int)(batch_end - start_host + 1);
+        if (scanned % 50 == 0 || batch_end == end_host) {
+            glog("Progress: Scanned %d/%d hosts, found %d active hosts\n",
+                 scanned, total_hosts, num_found);
         }
     }
 
     glog("\n=== ARP Scan Summary ===\n");
-    glog("Network: %s0/24\n", subnet_prefix);
-    glog("Hosts scanned: %d (1-254)\n", END_HOST - START_HOST + 1);
+    glog("Network: %s\n", subnet_prefix);
+    glog("Hosts scanned: %d\n", total_hosts);
     glog("Active hosts found: %d\n", num_found);
     if (num_found > 0) {
-        glog("Success rate: %.1f%%\n", (float)num_found / (END_HOST - START_HOST + 1) * 100.0f);
+        glog("Success rate: %.1f%%\n", (float)num_found / total_hosts * 100.0f);
     }
     glog("=======================\n");
 }
@@ -606,10 +617,22 @@ void handle_eth_ping_cmd(int argc, char **argv) {
         return;
     }
 
-    const uint32_t ip_host = ntohl(ip_info.ip.addr);
+    // Derive the actual scan range from the real netmask instead of assuming
+    // /24 -- see handle_eth_arp_cmd for why this matters on smaller VLANs.
+    const uint32_t ip_host      = ntohl(ip_info.ip.addr);
     const uint32_t netmask_host = ntohl(ip_info.netmask.addr);
     const uint32_t network_host = ip_host & netmask_host;
-    const uint32_t base_host = network_host & 0xFFFFFF00;
+    const uint32_t bcast_host   = network_host | (~netmask_host);
+
+    uint32_t first_host = network_host + 1;
+    uint32_t last_host  = (bcast_host > network_host) ? bcast_host - 1 : network_host;
+    if (last_host < first_host) {
+        first_host = network_host;
+        last_host  = bcast_host;
+    }
+    if (last_host - first_host + 1 > ETH_PING_SCAN_MAX_HOSTS) {
+        last_host = first_host + ETH_PING_SCAN_MAX_HOSTS - 1;
+    }
 
     int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sock < 0) {
@@ -629,11 +652,12 @@ void handle_eth_ping_cmd(int argc, char **argv) {
     } icmp_hdr_t;
 
     g_eth_scan_cancel = false;
-    glog("Starting ICMP ping scan on local /24...\n");
+    glog("Starting ICMP ping scan on %d hosts...\n", (int)(last_host - first_host + 1));
 
     int alive = 0;
-    for (int host = 1; host <= 254 && !g_eth_scan_cancel; host++) {
-        const uint32_t target_host = base_host | (uint32_t)host;
+    uint16_t seq = 0;
+    for (uint32_t target_host = first_host; target_host <= last_host && !g_eth_scan_cancel; target_host++) {
+        seq++;
         if (target_host == ip_host) continue;
 
         struct sockaddr_in addr;
@@ -645,7 +669,7 @@ void handle_eth_ping_cmd(int argc, char **argv) {
         icmp.type = 8;
         icmp.code = 0;
         icmp.id = 0xBEEF;
-        icmp.seq = htons((uint16_t)host);
+        icmp.seq = htons(seq);
 
         uint16_t *buf = (uint16_t *)&icmp;
         uint32_t sum = 0;

@@ -557,6 +557,43 @@ static void navigate_vertical(int direction) {
     }
 }
 
+// Resolves the target index for a horizontal (left/right) press. For the
+// paginated launcher/grid layout, a press at the row's edge column advances
+// to the neighboring page instead of wrapping onto the next row of the same
+// page -- mirrors the page/slot math the swipe-gesture handler already uses
+// on touch release. Carousel/List are single-axis, so they keep the existing
+// flat +/-1 step.
+static int grid_horizontal_target(int direction) {
+    if (current_layout != MAIN_MENU_LAYOUT_LAUNCHER || num_items <= 0) {
+        return selected_item_index + direction;
+    }
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_items, &layout);
+    if (layout.columns <= 0 || layout.page_capacity <= 0 || layout.page_count <= 0) {
+        return selected_item_index + direction;
+    }
+
+    int page = selected_item_index / layout.page_capacity;
+    int slot = selected_item_index % layout.page_capacity;
+    int col  = slot % layout.columns;
+
+    if (direction > 0 && col < layout.columns - 1 && selected_item_index + 1 < num_items) {
+        return selected_item_index + 1; // room to the right within this row
+    }
+    if (direction < 0 && col > 0) {
+        return selected_item_index - 1; // room to the left within this row
+    }
+
+    // At the row's edge column: move to the neighboring page, same slot.
+    page += direction > 0 ? 1 : -1;
+    if (page < 0) page = layout.page_count - 1;
+    if (page >= layout.page_count) page = 0;
+    int target = page * layout.page_capacity + slot;
+    if (target >= num_items) target = num_items - 1;
+    return target;
+}
+
 /**
  *  @brief handles keyboard button presses
  */
@@ -566,10 +603,10 @@ void handle_keyboard_interactions(int keyValue){
     // arrows and vim keys: h/j/k/l, plus , /
     if (keyValue == 44 || keyValue == ',' || keyValue == 'h') { // left
         ESP_LOGI(TAG, "Left button or 'h' pressed\n");
-        select_menu_item(selected_item_index - 1, inverted ? true : false);
+        select_menu_item(grid_horizontal_target(-1), inverted ? true : false);
     } else if (keyValue == 47 || keyValue == '/' || keyValue == 'l') { // right
         ESP_LOGI(TAG, "Right button or 'l' pressed\n");
-        select_menu_item(selected_item_index + 1, inverted ? false : true);
+        select_menu_item(grid_horizontal_target(1), inverted ? false : true);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed\n");
         navigate_vertical(-1);
@@ -799,9 +836,9 @@ static void menu_item_event_handler(InputEvent *event) {
         } else {
             const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
             if (event->data.encoder.direction > 0)
-                select_menu_item(selected_item_index + 1, inverted ? false : true); // CW == right
+                select_menu_item(grid_horizontal_target(1), inverted ? false : true); // CW == right
             else
-                select_menu_item(selected_item_index - 1, inverted ? true : false);  // CCW == left
+                select_menu_item(grid_horizontal_target(-1), inverted ? true : false);  // CCW == left
         }
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         ESP_LOGI(TAG, "keyboard event");
@@ -825,9 +862,9 @@ static void menu_item_event_handler(InputEvent *event) {
 void handle_hardware_button_press(int ButtonPressed) {
     const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     if (ButtonPressed == 0) {
-        select_menu_item(selected_item_index - 1, inverted ? true : false);
+        select_menu_item(grid_horizontal_target(-1), inverted ? true : false);
     } else if (ButtonPressed == 3) {
-        select_menu_item(selected_item_index + 1, inverted ? false : true);
+        select_menu_item(grid_horizontal_target(1), inverted ? false : true);
     } else if (ButtonPressed == 2) { // up
         navigate_vertical(-1);
     } else if (ButtonPressed == 4) { // down

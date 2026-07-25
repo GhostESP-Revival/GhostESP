@@ -33,6 +33,9 @@ static lv_obj_t *press_hpa_label = NULL;
 static lv_obj_t *press_inhg_label = NULL;
 static lv_obj_t *alt_label = NULL;
 static lv_obj_t *touch_bar = NULL;
+static lv_obj_t *enviii_btn_up = NULL;
+static lv_obj_t *enviii_btn_back = NULL;
+static lv_obj_t *enviii_btn_down = NULL;
 static lv_timer_t *enviii_timer = NULL;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
@@ -668,23 +671,46 @@ static void enviii_timer_cb(lv_timer_t *timer) {
 /* -------------------------------------------------------------------------- */
 /* Input Handling                                                             */
 /* -------------------------------------------------------------------------- */
+#ifdef CONFIG_USE_TOUCHSCREEN
+static bool enviii_point_in_obj(const lv_point_t *p, lv_obj_t *obj) {
+    if (!p || !obj || !lv_obj_is_valid(obj)) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return p->x >= area.x1 && p->x <= area.x2 &&
+           p->y >= area.y1 && p->y <= area.y2;
+}
+#endif
+
 static void enviii_event_handler(InputEvent *event) {
     if (!event) return;
 #ifdef CONFIG_USE_TOUCHSCREEN
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
-        int bar_h = enviii_touch_bar_height();
-        bool in_touch_bar = data->point.y >= (LV_VER_RES - bar_h);
-
-        if (in_touch_bar) return;
 
         if (data->state == LV_INDEV_STATE_PR) {
+            if (enviii_point_in_obj(&data->point, enviii_btn_up)) {
+                enviii_scroll_content(-1);
+                touch_drag_reset(&enviii_touch_drag);
+                return;
+            }
+            if (enviii_point_in_obj(&data->point, enviii_btn_down)) {
+                enviii_scroll_content(1);
+                touch_drag_reset(&enviii_touch_drag);
+                return;
+            }
+            if (enviii_point_in_obj(&data->point, enviii_btn_back)) {
+                display_manager_switch_view(&main_menu_view);
+                touch_drag_reset(&enviii_touch_drag);
+                return;
+            }
+
             if (!enviii_touch_drag.started) {
                 touch_drag_begin(&enviii_touch_drag, data);
             } else if (enviii_content) {
                 touch_drag_update(&enviii_touch_drag, data, enviii_content);
             }
         } else if (data->state == LV_INDEV_STATE_REL) {
+            if (!enviii_touch_drag.started) return;
             touch_drag_release(&enviii_touch_drag, data);
         }
         return;
@@ -719,15 +745,6 @@ static void enviii_scroll_content(int dir) {
 static void get_enviii_callback(void **callback) {
     if (callback) *callback = (void *)enviii_event_handler;
 }
-
-#ifdef CONFIG_USE_TOUCHSCREEN
-static void enviii_touch_back_cb(lv_event_t *e) {
-    (void)e;
-    display_manager_switch_view(&main_menu_view);
-}
-static void enviii_touch_scroll_up_cb(lv_event_t *e) { (void)e; enviii_scroll_content(-1); }
-static void enviii_touch_scroll_down_cb(lv_event_t *e) { (void)e; enviii_scroll_content(1); }
-#endif
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -792,19 +809,20 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *scroll_up_btn = lv_btn_create(touch_bar);
+    enviii_btn_up = scroll_up_btn;
     lv_obj_set_size(scroll_up_btn, ENVIII_SCROLL_BTN_SIZE, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, ENVIII_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_up_btn, lv_color_hex(card_color), 0);
     lv_obj_set_style_radius(scroll_up_btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(scroll_up_btn, 0, 0);
     lv_obj_set_style_shadow_width(scroll_up_btn, 0, 0);
-    lv_obj_add_event_cb(scroll_up_btn, enviii_touch_scroll_up_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *up_label = lv_label_create(scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
     lv_obj_set_style_text_color(up_label, lv_color_hex(text_color), 0);
     lv_obj_center(up_label);
 
     lv_obj_t *back_btn = lv_btn_create(touch_bar);
+    enviii_btn_back = back_btn;
     lv_obj_set_size(back_btn, ENVIII_SCROLL_BTN_SIZE + 24, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(back_btn, lv_color_hex(card_color), 0);
@@ -812,7 +830,6 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_set_style_pad_hor(back_btn, 8, 0);
     lv_obj_set_style_border_width(back_btn, 0, 0);
     lv_obj_set_style_shadow_width(back_btn, 0, 0);
-    lv_obj_add_event_cb(back_btn, enviii_touch_back_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_label = lv_label_create(back_btn);
     lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
     lv_obj_set_style_text_color(back_label, lv_color_hex(text_color), 0);
@@ -820,13 +837,13 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_center(back_label);
 
     lv_obj_t *scroll_down_btn = lv_btn_create(touch_bar);
+    enviii_btn_down = scroll_down_btn;
     lv_obj_set_size(scroll_down_btn, ENVIII_SCROLL_BTN_SIZE, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -ENVIII_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_down_btn, lv_color_hex(card_color), 0);
     lv_obj_set_style_radius(scroll_down_btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(scroll_down_btn, 0, 0);
     lv_obj_set_style_shadow_width(scroll_down_btn, 0, 0);
-    lv_obj_add_event_cb(scroll_down_btn, enviii_touch_scroll_down_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *down_label = lv_label_create(scroll_down_btn);
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
     lv_obj_set_style_text_color(down_label, lv_color_hex(text_color), 0);
@@ -964,6 +981,9 @@ void enviii_destroy(void) {
     press_inhg_label = NULL;
     alt_label = NULL;
     touch_bar = NULL;
+    enviii_btn_up = NULL;
+    enviii_btn_back = NULL;
+    enviii_btn_down = NULL;
     sht30_initialized = false;
     qmp6988_initialized = false;
     sht_data_valid = false;
