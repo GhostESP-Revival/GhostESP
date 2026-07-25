@@ -186,13 +186,17 @@ static void splash_plugin_progress_cb(float pct, int files_scanned, int files_to
 #include "managers/microphone/mic_visualizer.h"
 #endif
 
-// Helper macro for measuring RAM usage
+// Helper macro for measuring RAM usage (internal + PSRAM) around a feature init call
 #define MEASURE_INIT_RAM(name, init_call) do { \
-    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
-    ESP_LOGI(TAG, "Free INTERNAL RAM before %s: %d bytes", name, (int)before); \
+    size_t before_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    size_t before_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); \
+    ESP_LOGI(TAG, "[%s] before: internal_free=%d bytes, psram_free=%d bytes", name, (int)before_int, (int)before_psram); \
     init_call; \
-    size_t after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
-    ESP_LOGI(TAG, "Free INTERNAL RAM after %s: %d bytes (used: %d bytes)", name, (int)after, (int)(before - after)); \
+    size_t after_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    size_t after_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); \
+    ESP_LOGI(TAG, "[%s] after: internal_free=%d bytes (used=%d), psram_free=%d bytes (used=%d)", name, \
+             (int)after_int, (int)(before_int - after_int), \
+             (int)after_psram, (int)(before_psram - after_psram)); \
 } while(0)
 
 RGBManager_t rgb_manager;  // Global instance for entire project
@@ -506,25 +510,21 @@ static bool start_boot_app_discovery_task(void) {
 }
 
 #if GHOSTESP_OTA_SUPPORTED
+// Both checks are low-priority, check-only passes -- they must never
+// download or flash. Shared by one task since neither blocks for long:
+// each background_check() call is a no-op unless its own connectivity
+// gate (GhostLink session / board has Wi-Fi) is already satisfied.
 static void ota_background_check_task(void *arg) {
     (void)arg;
-    // Let Wi-Fi connect (if configured) before hitting the network; this is
-    // a low-priority, check-only pass -- it must never download or flash.
-    // Cardputer ADV and similar boards need extra time for DNS to be ready.
-    vTaskDelay(pdMS_TO_TICKS(20000));
-    ota_manager_background_check();
-    vTaskDelete(NULL);
-}
-#endif
-
-#if GHOSTESP_OTA_SUPPORTED
-static void peer_ota_background_check_task(void *arg) {
-    (void)arg;
-    // GhostLink connects independently of Wi-Fi, but give the boot sequence
-    // a moment to settle either way -- this is a low-priority, check-only
-    // pass -- it must never download or flash.
+    // GhostLink connects independently of Wi-Fi, so the peer check can go
+    // first; give the boot sequence a moment to settle either way.
     vTaskDelay(pdMS_TO_TICKS(10000));
     peer_ota_manager_background_check();
+
+    // Extra time for Wi-Fi to connect (if configured) and DNS to be ready --
+    // Cardputer ADV and similar boards need it.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    ota_manager_background_check();
     vTaskDelete(NULL);
 }
 #endif
@@ -538,7 +538,9 @@ static void deferred_sd_init_task(void *arg) {
 #ifdef CONFIG_WITH_SCREEN
     boot_status_set_progress(-1.0f, "Mounting SD card...");
 #endif
-    if (sd_card_init() != ESP_OK) {
+    esp_err_t sd_init_ret = ESP_OK;
+    MEASURE_INIT_RAM("SD Card init", sd_init_ret = sd_card_init());
+    if (sd_init_ret != ESP_OK) {
         ESP_LOGW(TAG, "Deferred SD Card init failed, skipping coredump autosave");
 #ifdef CONFIG_WITH_SCREEN
         boot_status_set_progress(100.0f, "SD unavailable");
@@ -802,11 +804,11 @@ void app_main(void) {
     badusb_manager_register_stream_handler();
 #endif
 #ifdef CONFIG_WITH_ETHERNET
-    eth_comm_handler_init();
+    MEASURE_INIT_RAM("Ethernet Comm Handler init", eth_comm_handler_init());
 #endif
 #ifdef CONFIG_HAS_MIC
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
-    mic_visualizer_init();
+    MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
 #ifdef CONFIG_HAS_TLV320DAC_I2S
@@ -814,8 +816,8 @@ void app_main(void) {
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
 #ifdef CONFIG_HAS_CAMERA
-    motion_detector_init();
-    camera_stream_init();
+    MEASURE_INIT_RAM("Motion Detector init", motion_detector_init());
+    MEASURE_INIT_RAM("Camera Stream init", camera_stream_init());
 #endif
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
     nrf24_analyzer_register_stream_handler();
@@ -931,16 +933,6 @@ void app_main(void) {
     }
 #endif
 
-#if GHOSTESP_OTA_SUPPORTED
-    if (peer_ota_manager_is_supported()) {
-        BaseType_t peer_ota_task_rc = xTaskCreate(peer_ota_background_check_task, "Peer OTA Check", 4096, NULL,
-                                                   tskIDLE_PRIORITY + 1, NULL);
-        if (peer_ota_task_rc != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create peer OTA background check task");
-        }
-    }
-#endif
-
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {
         bool initialized = false;
@@ -1019,11 +1011,22 @@ void app_main(void) {
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     float percent_internal_free = (total_internal > 0) ? (100.0f * free_internal / total_internal) : 0.0f;
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    float percent_psram_free = (total_psram > 0) ? (100.0f * free_psram / total_psram) : 0.0f;
 
     ESP_LOGI(TAG, "Free heap after init: %d / %d bytes (%.1f%% free)", (int)free_heap, (int)total_heap, percent_free);
     ESP_LOGI(TAG, "Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)", (int)free_internal, (int)total_internal, percent_internal_free);
+    if (total_psram > 0) {
+        ESP_LOGI(TAG, "Free PSRAM after init: %d / %d bytes (%.1f%% free)", (int)free_psram, (int)total_psram, percent_psram_free);
+    } else {
+        ESP_LOGI(TAG, "PSRAM not present on this build");
+    }
     printf("Free heap after init: %d / %d bytes (%.1f%% free)\n", (int)free_heap, (int)total_heap, percent_free);
     printf("Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)\n", (int)free_internal, (int)total_internal, percent_internal_free);
+    if (total_psram > 0) {
+        printf("Free PSRAM after init: %d / %d bytes (%.1f%% free)\n", (int)free_psram, (int)total_psram, percent_psram_free);
+    }
 
 #ifdef CONFIG_HAS_RTC_CLOCK
     // Sync system time from RTC on boot
