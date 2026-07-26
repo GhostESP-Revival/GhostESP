@@ -1,5 +1,6 @@
 #include "managers/views/nrf24_analyzer_view.h"
 #include "sdkconfig.h"
+#include "gui/design_tokens.h"
 
 /* #define NRF24_JAM_DETECT_DEBUG */
 
@@ -1389,6 +1390,7 @@ void nrf24_analyzer_create(void) {
     lv_obj_add_event_cb(s_graph, nrf24_graph_draw_event, LV_EVENT_DRAW_MAIN, NULL);
 
     s_toggle_btn = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_toggle_btn);
     lv_obj_set_size(s_toggle_btn, 92, button_h);
     lv_obj_align(s_toggle_btn, LV_ALIGN_BOTTOM_LEFT, 8, -8);
     lv_obj_set_style_radius(s_toggle_btn, 6, LV_PART_MAIN);
@@ -1404,6 +1406,7 @@ void nrf24_analyzer_create(void) {
     lv_obj_center(s_toggle_label);
 
     s_back_btn = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_back_btn);
     lv_obj_set_size(s_back_btn, 92, button_h);
     lv_obj_align(s_back_btn, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
     lv_obj_set_style_radius(s_back_btn, 6, LV_PART_MAIN);

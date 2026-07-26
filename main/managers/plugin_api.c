@@ -499,6 +499,7 @@ static void plugin_api_ui_button_create_now(void *arg) {
     plugin_ui_create_ctx_t *ctx = (plugin_ui_create_ctx_t *)arg;
     lv_obj_t *parent = plugin_ui_parent_or_current(ctx->parent);
     lv_obj_t *button = lv_btn_create(parent);
+    gui_apply_pressed_style(button);
     if (!button) return;
     plugin_ui_style_button(button);
     lv_obj_set_width(button, LV_PCT(100));
@@ -619,6 +620,7 @@ static void plugin_api_ui_show_popup_now(void *arg) {
     lv_obj_set_style_text_font(body, gui_font_body(), LV_PART_MAIN);
 
     lv_obj_t *close = lv_btn_create(box);
+    gui_apply_pressed_style(close);
     plugin_ui_style_button(close);
     lv_obj_set_width(close, LV_PCT(100));
     lv_obj_t *close_label = lv_label_create(close);

@@ -1,6 +1,7 @@
 #include "managers/views/subghz_view.h"
 #include "sdkconfig.h"
 #include "esp_attr.h"
+#include "gui/design_tokens.h"
 
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
@@ -4619,6 +4620,7 @@ void subghz_view_create(void) {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     s_scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_scroll_up_btn);
     lv_obj_set_size(s_scroll_up_btn, SUBGHZ_SCROLL_BTN_SIZE, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_scroll_up_btn, LV_ALIGN_LEFT_MID, SUBGHZ_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(s_scroll_up_btn, ctrl_color, LV_PART_MAIN);
@@ -4633,6 +4635,7 @@ void subghz_view_create(void) {
     lv_obj_add_flag(s_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     s_back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_back_btn);
     lv_obj_set_size(s_back_btn, SUBGHZ_SCROLL_BTN_SIZE + 24, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_back_btn, ctrl_color, LV_PART_MAIN);
@@ -4647,6 +4650,7 @@ void subghz_view_create(void) {
     lv_obj_center(back_label);
 
     s_scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_scroll_down_btn);
     lv_obj_set_size(s_scroll_down_btn, SUBGHZ_SCROLL_BTN_SIZE, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_scroll_down_btn, LV_ALIGN_RIGHT_MID, -SUBGHZ_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(s_scroll_down_btn, ctrl_color, LV_PART_MAIN);

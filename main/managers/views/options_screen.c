@@ -3913,6 +3913,7 @@ void options_menu_create() {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_up_btn);
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_up_btn, control_color, LV_PART_MAIN);
@@ -3927,6 +3928,7 @@ void options_menu_create() {
     lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(back_btn);
     lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 24, SCROLL_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(back_btn, control_color, LV_PART_MAIN);
@@ -3941,6 +3943,7 @@ void options_menu_create() {
     lv_obj_center(back_label);
 
     scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_down_btn);
     lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_down_btn, control_color, LV_PART_MAIN);
@@ -4595,6 +4598,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_set_style_text_font(help_label, accessibility_get_font_small(), 0);
             
             lv_obj_t *close_btn = lv_btn_create(wigle_help_popup);
+            gui_apply_pressed_style(close_btn);
             wigle_help_close_btn = close_btn;
             lv_obj_add_flag(close_btn, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_size(close_btn, 80, 30);

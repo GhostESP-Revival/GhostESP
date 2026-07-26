@@ -103,8 +103,8 @@
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
 - Reworked Evil Portal input capture to record full field values from inputs, textareas, selects, and browser autofill via debounced `sendBeacon` instead of per-keystroke XHR
-- Added pressed-state visual feedback (darken + scale) on interactive buttons across the UI
-- Smooth scroll on selection changes in options lists, detail views, and main menu grid/list
+- Fixed pressed-state visual feedback (darken + scale) never actually being applied to any button; it's now wired into every button across the UI
+- Smooth scroll on selection changes in main menu grid/list
 - Lockscreen ghost companion bob uses a sine wave instead of a triangle wave
 - Toast notifications decelerate as they exit instead of accelerating off screen
 - Main menu list selection border now uses theme accent color instead of hardcoded white
@@ -112,6 +112,11 @@
 - Added paginated Grid navigation with page dots, swipe/controller support, top-left page alignment, and subtle selected tiles
 - Fixed Grid view joystick/encoder/D-pad navigation dropping to the next row instead of the next page when pressing right/left from the edge column
 - Improved Carousel navigation with previous/next previews, consistent directions, and faster transitions
+- Fixed the LVGL tick task feeding a fixed 10ms increment to the animation clock regardless of actual frame time, which made every animation on the device play in slow motion whenever a render ran long; it now advances by real elapsed time
+- Animated paged and row-selection scrolling in detail views (AP/STA/BLE/ARP/mDNS/sweep results) instead of snapping instantly
+- Animated main menu List layout selection scroll
+- Sped up and smoothed Grid page-swap transitions with a shorter, eased animation
+- Removed a redundant full-grid relayout that ran on every Grid navigation press instead of only on page changes
 
 ### Docs
 - Restructured getting-started docs with dedicated pages for installation, first scan, manual flashing, Flipper flashing, and control methods

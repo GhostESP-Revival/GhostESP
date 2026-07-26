@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include "gui/design_tokens.h"
 
 static const char *TAG = "SetupWizard";
 
@@ -314,6 +315,7 @@ static void show_welcome_screen(void) {
     int btn_offset = (total_btn_width > USABLE_W - 20) ? (USABLE_W - 20 - total_btn_width) / 2 : (btn_w / 2 + btn_gap);
 
     welcome_start_btn = lv_btn_create(root);
+    gui_apply_pressed_style(welcome_start_btn);
     lv_obj_set_size(welcome_start_btn, btn_w, btn_h);
     lv_obj_align(welcome_start_btn, LV_ALIGN_TOP_MID, -btn_offset, btn_y);
     style_wizard_btn(welcome_start_btn, lv_color_hex(0x333333), 5);
@@ -323,6 +325,7 @@ static void show_welcome_screen(void) {
     lv_obj_add_event_cb(welcome_start_btn, start_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
     welcome_skip_btn = lv_btn_create(root);
+    gui_apply_pressed_style(welcome_skip_btn);
     lv_obj_set_size(welcome_skip_btn, btn_w, btn_h);
     lv_obj_align(welcome_skip_btn, LV_ALIGN_TOP_MID, btn_offset, btn_y);
     style_wizard_btn(welcome_skip_btn, lv_color_hex(0x333333), 5);
@@ -402,6 +405,7 @@ static void show_option_screen(const char *title_text, const char **options, int
     
     for (int i = 0; i < count; i++) {
         lv_obj_t *btn = lv_btn_create(option_list);
+        gui_apply_pressed_style(btn);
         lv_obj_set_size(btn, item_w, btn_h);
         style_wizard_btn(btn, lv_color_hex(0x333333), 4);
         
@@ -485,6 +489,7 @@ static void show_country_screen(void) {
     
     for (int i = 0; i < (int)COUNTRY_COUNT; i++) {
         lv_obj_t *btn = lv_btn_create(country_list);
+        gui_apply_pressed_style(btn);
         lv_obj_set_size(btn, item_w, btn_h);
         style_wizard_btn(btn, lv_color_hex(0x333333), 4);
 
@@ -580,6 +585,7 @@ static void show_complete_screen(void) {
     if (btn_h > 35) btn_h = 35;
     
     lv_obj_t *finish_btn = lv_btn_create(root);
+    gui_apply_pressed_style(finish_btn);
     lv_obj_set_size(finish_btn, btn_w, btn_h);
     lv_obj_align(finish_btn, LV_ALIGN_BOTTOM_MID, 0, -btn_bottom);
     style_wizard_btn(finish_btn, lv_color_hex(0xFFFFFF), 5);

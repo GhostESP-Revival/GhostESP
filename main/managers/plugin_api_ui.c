@@ -3,6 +3,7 @@
 #include "gui/theme_palette_api.h"
 #include "lvgl.h"
 #include <stdlib.h>
+#include "gui/design_tokens.h"
 
 extern FSettings G_Settings;
 
@@ -81,6 +82,7 @@ static void plugin_api_touch_bar_add_button_now(void *arg) {
     if (!bar || !lv_obj_is_valid(bar)) return;
 
     lv_obj_t *btn = lv_btn_create(bar);
+    gui_apply_pressed_style(btn);
     if (!btn) return;
 
     bool round = ctx->slot != 0;

@@ -16,6 +16,7 @@
 #include "i2c_bus_lock.h"
 #include "i2c_shared.h"
 #include <math.h>
+#include "gui/design_tokens.h"
 
 #ifdef CONFIG_HAS_ENVIII
 
@@ -809,6 +810,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_up_btn);
     enviii_btn_up = scroll_up_btn;
     lv_obj_set_size(scroll_up_btn, ENVIII_SCROLL_BTN_SIZE, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, ENVIII_SCROLL_BTN_PADDING, 0);
@@ -822,6 +824,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_center(up_label);
 
     lv_obj_t *back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(back_btn);
     enviii_btn_back = back_btn;
     lv_obj_set_size(back_btn, ENVIII_SCROLL_BTN_SIZE + 24, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
@@ -837,6 +840,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_center(back_label);
 
     lv_obj_t *scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_down_btn);
     enviii_btn_down = scroll_down_btn;
     lv_obj_set_size(scroll_down_btn, ENVIII_SCROLL_BTN_SIZE, ENVIII_SCROLL_BTN_SIZE);
     lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -ENVIII_SCROLL_BTN_PADDING, 0);

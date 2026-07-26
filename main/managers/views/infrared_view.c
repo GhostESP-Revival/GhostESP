@@ -11,6 +11,7 @@
 #include "gui/ios_toggle.h"
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "gui/design_tokens.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -1452,6 +1453,7 @@ void infrared_view_create(void) {
     lv_obj_clear_flag(ir_touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     ir_scroll_up_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_scroll_up_btn);
     lv_obj_set_size(ir_scroll_up_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_scroll_up_btn, LV_ALIGN_LEFT_MID, IR_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(ir_scroll_up_btn, ir_ctrl, LV_PART_MAIN);
@@ -1466,6 +1468,7 @@ void infrared_view_create(void) {
     lv_obj_add_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     ir_back_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_back_btn);
     lv_obj_set_size(ir_back_btn, IR_SCROLL_BTN_SIZE + 24, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(ir_back_btn, ir_ctrl, LV_PART_MAIN);
@@ -1480,6 +1483,7 @@ void infrared_view_create(void) {
     lv_obj_center(back_label);
 
     ir_scroll_down_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_scroll_down_btn);
     lv_obj_set_size(ir_scroll_down_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_scroll_down_btn, LV_ALIGN_RIGHT_MID, -IR_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(ir_scroll_down_btn, ir_ctrl, LV_PART_MAIN);

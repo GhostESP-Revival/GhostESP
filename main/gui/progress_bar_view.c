@@ -176,6 +176,7 @@ progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, voi
 
         if (on_cancel) {
             lv_obj_t *back_btn = lv_btn_create(view->touch_bar);
+            gui_apply_pressed_style(back_btn);
             lv_obj_set_size(back_btn, PROGRESS_TOUCH_BAR_H + 24, PROGRESS_TOUCH_BAR_H - 6);
             lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
             lv_obj_set_style_bg_color(back_btn, ctrl_color, LV_PART_MAIN);

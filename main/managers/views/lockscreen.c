@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
+#include "gui/design_tokens.h"
 
 extern const lv_img_dsc_t tired_50x50;
 extern const lv_img_dsc_t what2_50x50;
@@ -536,6 +537,7 @@ static void lockscreen_build_numpad(void) {
 
     for (int i = 0; i < NUMPAD_BTNS; i++) {
         s_numpad_btns[i] = lv_btn_create(s_numpad_cont);
+        gui_apply_pressed_style(s_numpad_btns[i]);
         lv_obj_set_size(s_numpad_btns[i], btn_w, btn_h);
         lv_obj_add_event_cb(s_numpad_btns[i], lockscreen_numpad_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         lv_obj_set_style_bg_color(s_numpad_btns[i], lv_color_hex(0x222222), 0);

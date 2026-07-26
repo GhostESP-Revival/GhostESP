@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gui/design_tokens.h"
 
 extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
@@ -793,6 +794,7 @@ void terminal_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     if (show_back_btn) {
         back_btn = lv_btn_create(terminal_view.root);
+        gui_apply_pressed_style(back_btn);
         lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
         lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
         lv_obj_set_style_bg_color(back_btn, control_bg, LV_PART_MAIN);

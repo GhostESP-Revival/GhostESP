@@ -9,6 +9,7 @@
 #include "core/callbacks.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
+#include "gui/design_tokens.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
 #endif
@@ -706,6 +707,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     wd_scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(wd_scroll_up_btn);
     lv_obj_set_size(wd_scroll_up_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
     lv_obj_align(wd_scroll_up_btn, LV_ALIGN_LEFT_MID, WD_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(wd_scroll_up_btn, ctrl_color, LV_PART_MAIN);
@@ -719,6 +721,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_center(up_label);
 
     wd_back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(wd_back_btn);
     lv_obj_set_size(wd_back_btn, WD_SCROLL_BTN_SIZE + 24, WD_SCROLL_BTN_SIZE);
     lv_obj_align(wd_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(wd_back_btn, ctrl_color, LV_PART_MAIN);
@@ -733,6 +736,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_obj_center(back_label);
 
     wd_scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(wd_scroll_down_btn);
     lv_obj_set_size(wd_scroll_down_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
     lv_obj_align(wd_scroll_down_btn, LV_ALIGN_RIGHT_MID, -WD_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(wd_scroll_down_btn, ctrl_color, LV_PART_MAIN);

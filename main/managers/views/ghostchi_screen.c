@@ -1,4 +1,5 @@
 #include "managers/views/ghostchi_screen.h"
+#include "gui/design_tokens.h"
 
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
@@ -1429,8 +1430,11 @@ void ghostchi_create(void) {
     lv_obj_set_style_text_color(s_hint_label, lv_color_hex(color_muted), 0);
 
     s_touch_btn_left = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_touch_btn_left);
     s_touch_btn_mid = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_touch_btn_mid);
     s_touch_btn_right = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_touch_btn_right);
     lv_obj_set_style_bg_color(s_touch_btn_left, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_color(s_touch_btn_mid, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_color(s_touch_btn_right, lv_color_hex(0x000000), 0);

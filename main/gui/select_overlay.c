@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gui/design_tokens.h"
 
 struct gui_select_overlay_t {
     lv_obj_t *backdrop;
@@ -171,6 +172,7 @@ gui_select_overlay_t *gui_select_overlay_create(const gui_select_overlay_config_
 
     for (int i = 0; i < cfg->option_count; i++) {
         lv_obj_t *btn = lv_btn_create(overlay->list);
+        gui_apply_pressed_style(btn);
         if (!btn) continue;
         lv_obj_remove_style_all(btn);
         lv_obj_set_width(btn, LV_PCT(100));

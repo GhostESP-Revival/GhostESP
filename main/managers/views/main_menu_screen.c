@@ -284,7 +284,10 @@ static void scroll_launcher_card_to_view(int item_index) {
     lv_obj_t *card = grid_cards[item_index];
     if (!card || !lv_obj_is_valid(card)) return;
 
-    lv_obj_update_layout(grid_cards_container);
+    /* layout.screen_width/page_capacity come from pure arithmetic on the
+     * screen size, not live geometry, so forcing a full flex relayout of
+     * every page/card here (previously on every navigation press) bought
+     * nothing but cost. */
     main_menu_layout_metrics_t layout;
     main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_items, &layout);
     int page = item_index / layout.page_capacity;
@@ -403,6 +406,7 @@ static void animate_nav_button_press(lv_obj_t *btn) {
 static lv_obj_t *create_carousel_card(const main_menu_layout_metrics_t *layout,
                                       int x_offset, lv_opa_t opacity) {
     lv_obj_t *card = lv_btn_create(menu_container);
+    gui_apply_pressed_style(card);
     carousel_cache = (carousel_card_cache_t){0};
     carousel_cache.card = card;
     bool connected = esp_comm_manager_is_connected();
@@ -926,7 +930,7 @@ void select_menu_item(int index, bool slide_left) {
                 uint8_t theme = settings_get_menu_theme(&G_Settings);
                 lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
                 apply_card_selection_style(btn, accent);
-                lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
+                lv_obj_scroll_to_view(btn, LV_ANIM_ON);
             }
         }
     }
@@ -1123,6 +1127,7 @@ static void create_launcher_menu(void) {
 
         // Create card inside the current row
         grid_cards[i] = lv_btn_create(current_row);
+        gui_apply_pressed_style(grid_cards[i]);
         lv_obj_set_width(grid_cards[i], grid_card_width);
         lv_obj_set_height(grid_cards[i], LV_PCT(100));
 
@@ -1227,6 +1232,7 @@ static void create_list_menu(void) {
     for (int i = 0; i < num_items; i++) {
         int menu_index = visible_index_to_menu_index(i, connected);
         lv_obj_t *btn = lv_btn_create(menu_container);
+        gui_apply_pressed_style(btn);
         list_buttons[i] = btn;
         lv_obj_set_width(btn, LV_PCT(100));
         lv_obj_set_height(btn, button_height);
@@ -1399,6 +1405,7 @@ void main_menu_create(void) {
     if (should_show_nav_buttons) {
         // Create left navigation button
         left_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(left_nav_btn);
         
         int btn_size = layout.nav_button_size;
         int btn_margin = layout.nav_button_margin;
@@ -1427,6 +1434,7 @@ void main_menu_create(void) {
 
         // Create right navigation button
         right_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(right_nav_btn);
         lv_obj_set_size(right_nav_btn, btn_size, btn_size);
         // make button transparent and remove shadows/border
         lv_obj_set_style_bg_opa(right_nav_btn, LV_OPA_TRANSP, LV_PART_MAIN);

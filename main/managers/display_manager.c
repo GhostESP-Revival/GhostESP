@@ -3652,6 +3652,7 @@ bool touch_drag_release(touch_drag_t *d, const lv_indev_data_t *data) {
 void lvgl_tick_task(void *arg) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
   TickType_t last_mon = 0;
+  TickType_t last_tick_time = xTaskGetTickCount();
   while (1) {
       /* Cooperative quiesce point: if a shared-SPI consumer (SD) has asked us
        * to park, acknowledge here — outside any flush — and spin without
@@ -3674,9 +3675,22 @@ void lvgl_tick_task(void *arg) {
       if (s_lvgl_call_mutex) xSemaphoreTakeRecursive(s_lvgl_call_mutex, portMAX_DELAY);
       lv_timer_handler();
       if (s_lvgl_call_mutex) xSemaphoreGiveRecursive(s_lvgl_call_mutex);
-      lv_tick_inc(10);
-      // Monitor input queue backlog periodically
+      // Feed LVGL's animation clock the real elapsed time rather than a
+      // fixed 10ms: when a heavy frame (e.g. a full grid redraw) makes
+      // processEvent()+lv_timer_handler() run long, the wall-clock gap
+      // between ticks stretches well past 10ms. A hardcoded increment made
+      // every animation on the device play in slow motion during exactly
+      // the frames where smoothness mattered most.
       TickType_t now = xTaskGetTickCount();
+      uint32_t elapsed_ms = (uint32_t)(now - last_tick_time) * portTICK_PERIOD_MS;
+      if (elapsed_ms == 0) elapsed_ms = 1;
+      /* Clamp so a long shared-SPI JIT park (see s_lvgl_gate_closed above,
+       * which doesn't touch last_tick_time while parked) can't slingshot
+       * every in-flight animation/timer to its end state on resume. */
+      if (elapsed_ms > 100) elapsed_ms = 100;
+      lv_tick_inc(elapsed_ms);
+      last_tick_time = now;
+      // Monitor input queue backlog periodically
       if (now - last_mon >= pdMS_TO_TICKS(500)) {
           UBaseType_t pending = uxQueueMessagesWaiting((QueueHandle_t)input_queue);
           if (pending > 0) {

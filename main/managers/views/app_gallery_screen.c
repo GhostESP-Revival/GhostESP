@@ -629,7 +629,10 @@ static void scroll_app_launcher_card_to_view(int index) {
     lv_obj_t *card = apps_grid_cards[index];
     if (!card || !lv_obj_is_valid(card)) return;
 
-    lv_obj_update_layout(grid_cards_container);
+    /* layout.screen_width/page_capacity come from pure arithmetic on the
+     * screen size, not live geometry, so forcing a full flex relayout of
+     * every page/card here (previously on every navigation press) bought
+     * nothing but cost. */
     main_menu_layout_metrics_t layout;
     main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
     int page = index / layout.page_capacity;
@@ -651,6 +654,7 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
                                           int x_offset, lv_opa_t opacity) {
     int app_idx = selected_app_index;
     lv_obj_t *card = lv_btn_create(apps_container);
+    gui_apply_pressed_style(card);
     apps_carousel_cache = (apps_carousel_cache_t){0};
     apps_carousel_cache.card = card;
 
@@ -874,6 +878,7 @@ static void create_apps_launcher_menu(void) {
         }
 
         lv_obj_t *card = lv_btn_create(current_row);
+        gui_apply_pressed_style(card);
         apps_grid_cards[i] = card;
         lv_obj_set_width(card, card_width);
         lv_obj_set_height(card, LV_PCT(100));
@@ -975,6 +980,7 @@ static void create_apps_list_menu(void) {
 
     for (int i = 0; i < num_apps; ++i) {
         lv_obj_t *btn = lv_btn_create(apps_container);
+        gui_apply_pressed_style(btn);
         apps_list_buttons[i] = btn;
         lv_obj_set_width(btn, LV_PCT(100));
         lv_obj_set_height(btn, button_height);
@@ -1173,6 +1179,7 @@ static void apps_plugin_reload_done(void *arg) {
 
     if (should_show_nav_buttons) {
         left_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(left_nav_btn);
 
         int btn_size = layout.nav_button_size;
         int btn_margin = layout.nav_button_margin;
@@ -1195,6 +1202,7 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
 
         right_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(right_nav_btn);
         lv_obj_set_size(right_nav_btn, btn_size, btn_size);
         lv_obj_set_style_bg_opa(right_nav_btn, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(right_nav_btn, 0, LV_PART_MAIN);

@@ -109,8 +109,11 @@ void gui_menu_scroll_to_x(lv_obj_t *obj, int target_x, bool animate) {
     lv_anim_init(&anim);
     lv_anim_set_var(&anim, obj);
     lv_anim_set_values(&anim, current_x, target_x);
-    lv_anim_set_time(&anim, 70);
-    lv_anim_set_path_cb(&anim, lv_anim_path_linear);
+    /* Ease-out reaches the target sooner perceptually than a linear tween of
+     * the same length, and a shorter total time means fewer redraw ticks of
+     * the (icon-heavy) grid have to land before the animation is done. */
+    lv_anim_set_time(&anim, 45);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
     lv_anim_set_exec_cb(&anim, menu_scroll_x_anim);
     lv_anim_start(&anim);
 }

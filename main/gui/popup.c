@@ -219,6 +219,7 @@ lv_obj_t *popup_create_container_with_offset(lv_obj_t *parent, int width, int he
 lv_obj_t *popup_add_styled_button(lv_obj_t *container, const char *label_text, int btn_w, int btn_h, lv_align_t align, lv_coord_t x_ofs, lv_coord_t y_ofs, const lv_font_t *font, lv_event_cb_t cb, void *user_data) {
     if (!container) return NULL;
     lv_obj_t *btn = lv_btn_create(container);
+    gui_apply_pressed_style(btn);
     lv_obj_set_size(btn, btn_w, btn_h);
 
     lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -276,6 +277,7 @@ void popup_set_body(popup_t *p, const char *body) {
 lv_obj_t *popup_add_button(popup_t *p, const char *label, lv_event_cb_t event_cb, void *user_data) {
 	if (!p || !p->btn_container) return NULL;
 	lv_obj_t *btn = lv_btn_create(p->btn_container);
+	gui_apply_pressed_style(btn);
 	int btn_w = (p->width - (DEFAULT_MARGIN * 2) - 8) / 2; // default width for up to 2 buttons
 	lv_obj_set_size(btn, btn_w, 32);
 	lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), 0);

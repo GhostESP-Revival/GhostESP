@@ -1,4 +1,5 @@
 #include "managers/views/ghostscript_runner_view.h"
+#include "gui/design_tokens.h"
 
 #include "core/glog.h"
 #include "gui/lvgl_safe.h"
@@ -613,6 +614,7 @@ void ghostscript_runner_view_create(void) {
     lv_color_t ctrl_color = lv_color_hex(0x2A2A34);
     lv_color_t ctrl_text = lv_color_hex(0xFFFFFF);
     lv_obj_t *up_btn = lv_btn_create(s_touch_bar);
+    gui_apply_pressed_style(up_btn);
     lv_obj_set_size(up_btn, GS_RUNNER_TOUCH_BTN_SIZE, GS_RUNNER_TOUCH_BTN_SIZE);
     lv_obj_align(up_btn, LV_ALIGN_LEFT_MID, GS_RUNNER_TOUCH_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(up_btn, ctrl_color, LV_PART_MAIN);
@@ -626,6 +628,7 @@ void ghostscript_runner_view_create(void) {
     lv_obj_center(up_label);
 
     lv_obj_t *back_btn = lv_btn_create(s_touch_bar);
+    gui_apply_pressed_style(back_btn);
     lv_obj_set_size(back_btn, GS_RUNNER_TOUCH_BTN_SIZE + 24, GS_RUNNER_TOUCH_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_CENTER, -34, 0);
     lv_obj_set_style_bg_color(back_btn, ctrl_color, LV_PART_MAIN);
@@ -640,6 +643,7 @@ void ghostscript_runner_view_create(void) {
     lv_obj_center(back_label);
 
     lv_obj_t *stop_btn = lv_btn_create(s_touch_bar);
+    gui_apply_pressed_style(stop_btn);
     lv_obj_set_size(stop_btn, GS_RUNNER_TOUCH_BTN_SIZE + 24, GS_RUNNER_TOUCH_BTN_SIZE);
     lv_obj_align(stop_btn, LV_ALIGN_CENTER, 34, 0);
     lv_obj_set_style_bg_color(stop_btn, lv_color_hex(0x5A2630), LV_PART_MAIN);
@@ -654,6 +658,7 @@ void ghostscript_runner_view_create(void) {
     lv_obj_center(stop_label);
 
     lv_obj_t *down_btn = lv_btn_create(s_touch_bar);
+    gui_apply_pressed_style(down_btn);
     lv_obj_set_size(down_btn, GS_RUNNER_TOUCH_BTN_SIZE, GS_RUNNER_TOUCH_BTN_SIZE);
     lv_obj_align(down_btn, LV_ALIGN_RIGHT_MID, -GS_RUNNER_TOUCH_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(down_btn, ctrl_color, LV_PART_MAIN);

@@ -12,6 +12,7 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "gui/design_tokens.h"
 #ifdef CONFIG_HAS_TLV320DAC_I2C
 #include "io_manager.h"
 #include "tlv320dac3100.h"
@@ -286,6 +287,7 @@ static void create_file_list(void)
         bool selected = i == s_selected_index;
         bool playing = has_playing && i == playing_index;
         lv_obj_t *btn = lv_btn_create(s_file_list);
+        gui_apply_pressed_style(btn);
         lv_obj_set_width(btn, LV_PCT(100));
         lv_obj_set_height(btn, LV_VER_RES <= 160 ? 30 : 34);
         style_track_row(btn, selected, playing);
@@ -592,6 +594,7 @@ void audio_player_create(void)
 
     /* Previous button */
     s_prev_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_prev_btn);
     lv_obj_set_size(s_prev_btn, 48, 34);
     lv_obj_align(s_prev_btn, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_set_style_bg_color(s_prev_btn, s_surface_alt_color, 0);
@@ -604,6 +607,7 @@ void audio_player_create(void)
 
     /* Play button */
     s_play_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_play_btn);
     lv_obj_set_size(s_play_btn, 52, 34);
     lv_obj_align(s_play_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_play_btn, s_surface_alt_color, 0);
@@ -616,6 +620,7 @@ void audio_player_create(void)
 
     /* Pause button (initially hidden) */
     s_pause_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_pause_btn);
     lv_obj_set_size(s_pause_btn, 52, 34);
     lv_obj_align(s_pause_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_pause_btn, s_surface_alt_color, 0);
@@ -629,6 +634,7 @@ void audio_player_create(void)
 
     /* Next button */
     s_next_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_next_btn);
     lv_obj_set_size(s_next_btn, 48, 34);
     lv_obj_align(s_next_btn, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_set_style_bg_color(s_next_btn, s_surface_alt_color, 0);
