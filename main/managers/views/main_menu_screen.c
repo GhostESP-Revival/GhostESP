@@ -23,6 +23,9 @@
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#ifdef CONFIG_HAS_AUDIO_PLAYER
+#include "managers/views/audio_player_screen.h"
+#endif
 #ifdef CONFIG_HAS_NFC
 #include "managers/views/nfc_view.h"
 #endif
@@ -1016,7 +1019,9 @@ static void handle_menu_item_selection(int item_index) {
                 status_display_show_status("BadUSB");
             } else if (strcmp(menu_actions[i].name, "Audio") == 0) {
                 status_display_show_status("Audio Player");
+#ifdef CONFIG_HAS_AUDIO_PLAYER
                 audio_player_set_return_view(&main_menu_view);
+#endif
             } else if (strcmp(menu_actions[i].name, "Lock") == 0) {
                 if (!settings_get_lockscreen_enabled(&G_Settings)) return;
                 status_display_show_status("Locked");
