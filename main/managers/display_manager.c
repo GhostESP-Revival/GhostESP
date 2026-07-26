@@ -2383,6 +2383,7 @@ void set_backlight_brightness(uint8_t percentage) {
         if (rainbow_timer)         lv_timer_resume(rainbow_timer);
         if (terminal_update_timer) lv_timer_resume(terminal_update_timer);
         if (clock_timer)           lv_timer_resume(clock_timer);
+#ifdef CONFIG_IS_S3TWATCH
         {
             if (!wifi_manager_is_evil_portal_active()) {
                 esp_wifi_set_ps(WIFI_PS_NONE);
@@ -2393,6 +2394,7 @@ void set_backlight_brightness(uint8_t percentage) {
                 }
             }
         }
+#endif
     }
 }
 
