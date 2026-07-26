@@ -118,6 +118,8 @@ static const char *NVS_FONT_SIZE_KEY = "font_size";
 static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
 static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
+static const char *NVS_SUN_MODE_KEY = "sun_mode";
+static const char *NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY = "sun_mode_pb";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
 static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
@@ -267,6 +269,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->reduced_motion = false;
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
+  settings->sun_mode = false;
+  settings->sun_mode_saved_brightness = 100;
   settings->menu_item_borders = false;
   settings->menu_card_bg = true;
   settings->touch_drag_scroll = true;
@@ -849,6 +853,14 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->high_contrast = (bool)value_u8;
   }
+  err = nvs_get_u8(nvsHandle, NVS_SUN_MODE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->sun_mode = (bool)value_u8;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->sun_mode_saved_brightness = value_u8;
+  }
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
@@ -1211,6 +1223,11 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, G_Settings.high_contrast ? 1 : 0);
             key = NVS_HIGH_CONTRAST_KEY;
             break;
+        case SETTING_SUN_MODE:
+            err = nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, G_Settings.sun_mode ? 1 : 0);
+            key = NVS_SUN_MODE_KEY;
+            nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, G_Settings.sun_mode_saved_brightness);
+            break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
@@ -1469,6 +1486,8 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, settings->reduced_motion ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, settings->sun_mode ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, settings->sun_mode_saved_brightness));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0));
@@ -2255,6 +2274,16 @@ void settings_set_high_contrast(FSettings *settings, bool enabled) {
 
 bool settings_get_high_contrast(const FSettings *settings) {
   return settings ? settings->high_contrast : false;
+}
+
+void settings_set_sun_mode(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->sun_mode = enabled;
+  }
+}
+
+bool settings_get_sun_mode(const FSettings *settings) {
+  return settings ? settings->sun_mode : false;
 }
 
 void settings_set_menu_item_borders(FSettings *settings, bool enabled) {

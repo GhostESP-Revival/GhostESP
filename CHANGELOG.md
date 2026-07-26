@@ -100,6 +100,8 @@
 - Fixed Apps Gallery, NFC, Infrared, BadUSB, and SubGHz always resetting to the first item/root menu on re-entry instead of restoring the previous selection: their `destroy()` handlers were clearing state that `create()` needed to restore it
 
 ### Other Changes
+- Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off
+- Smoothed NRF24 frequency analyzer channel levels (local and GhostLink peer scans) to reduce graph jitter from the RPD carrier-detect readings
 - Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
 - Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
 - Fixed display resume crashes after shared SPI SD mounts on C5 boards

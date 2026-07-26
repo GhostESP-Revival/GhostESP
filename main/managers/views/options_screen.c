@@ -1768,6 +1768,7 @@ static SettingsItem settings_items[] = {
     {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Sun Mode", SETTING_SUN_MODE, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -4004,6 +4005,9 @@ static void load_current_settings_values(void) {
             case SETTING_INVERT_COLORS:
                 settings_items[i].current_value = settings_get_invert_colors(&G_Settings) ? 1 : 0;
                 break;
+            case SETTING_SUN_MODE:
+                settings_items[i].current_value = settings_get_sun_mode(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_WEB_AUTH:
                 settings_items[i].current_value = settings_get_web_auth_enabled(&G_Settings) ? 1 : 0;
                 break;
@@ -4275,6 +4279,30 @@ static void apply_setting_change(int setting_index, int new_value) {
                 lv_obj_invalidate(touch_bar);
             }
             break;
+        case SETTING_SUN_MODE: {
+            bool enabling = (new_value == 1);
+            settings_set_sun_mode(&G_Settings, enabling);
+            if (enabling) {
+                G_Settings.sun_mode_saved_brightness = settings_get_max_screen_brightness(&G_Settings);
+                settings_set_max_screen_brightness(&G_Settings, 100);
+            } else {
+                uint8_t restored = G_Settings.sun_mode_saved_brightness ? G_Settings.sun_mode_saved_brightness : 100;
+                settings_set_max_screen_brightness(&G_Settings, restored);
+            }
+            set_backlight_brightness(100); // scaled by max brightness
+            display_manager_update_status_bar_color();
+            if (g_options_view) {
+                options_view_refresh_styles(g_options_view);
+                update_settings_arrows_visibility();
+            }
+            for (int j = 0; j < settings_items_count; j++) {
+                if (settings_items[j].setting_type == SETTING_MAX_BRIGHTNESS) {
+                    int bv = (settings_get_max_screen_brightness(&G_Settings) / 10) - 1;
+                    settings_items[j].current_value = (bv < 0) ? 0 : bv;
+                }
+            }
+            break;
+        }
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
             break;

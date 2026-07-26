@@ -1043,7 +1043,10 @@ static void nrf24_timer_cb(lv_timer_t *timer) {
         }
 
         uint8_t raw_level = (uint8_t)((hits * 100) / samples_per_channel);
-        s_levels[ch] = (uint8_t)((s_levels[ch] * 3 + raw_level) / 4);
+        /* Heavier smoothing than a plain 3:1 EMA — RPD is a 1-bit carrier
+         * detect, not analog RSSI, so raw_level is coarsely quantized and a
+         * single noisy sample can otherwise swing the bar by 25% in one tick. */
+        s_levels[ch] = (uint8_t)((s_levels[ch] * 5 + raw_level) / 6);
 
         if (s_levels[ch] > s_peaks[ch]) {
             s_peaks[ch] = s_levels[ch];
