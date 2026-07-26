@@ -1016,6 +1016,7 @@ static void handle_menu_item_selection(int item_index) {
                 status_display_show_status("BadUSB");
             } else if (strcmp(menu_actions[i].name, "Audio") == 0) {
                 status_display_show_status("Audio Player");
+                audio_player_set_return_view(&main_menu_view);
             } else if (strcmp(menu_actions[i].name, "Lock") == 0) {
                 if (!settings_get_lockscreen_enabled(&G_Settings)) return;
                 status_display_show_status("Locked");

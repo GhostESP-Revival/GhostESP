@@ -76,33 +76,10 @@
 - Added persistent aliases, hostname/prompt color, banner control, history, `watch`, command scripts, environment variables, and typo suggestions
 - Fixed the `subghz` command missing its CLI registration since the commandline.c refactor, causing all subghz commands (local and GhostLink peer-relayed) to fail with "Unsupported command"
 
-### Other Changes
-- Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
+### Main Menu, Apps & Navigation
 - Restored submenu, selection, and scroll state when backing out of options and returning from tool views
-- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
-- Fixed display resume crashes after shared SPI SD mounts on C5 boards
-- Shared terminal and WebUI history to remove the duplicate AP log buffer
-- Freed the wardriving CSV line buffer when logging stops
-- Freed PCAP staging resources when capture stops
-- Freed the HTTP streaming buffer when the web server stops
-- Show the native SD-app PSRAM warning only once per boot
-- Coalesce duplicate toast notifications and their haptic feedback
-- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
-- Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
-- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
-- Converted eight built-in menu icons to compact A4 masks and added scaled A4 rendering support
 - Fixed Apps menu grid scrolling so the selection stays visible when scrolling down on Cardputer
 - Fixed Cardputer ADV keyboard spamming repeated select/input events when opening Apps menu
-- Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
-- Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
-- Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
-- Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
-- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
-- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
-- Hardened Evil Portal request handling against malformed and high-rate client traffic
-- Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
-- Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
-- Reworked Evil Portal input capture to record full field values from inputs, textareas, selects, and browser autofill via debounced `sendBeacon` instead of per-keystroke XHR
 - Fixed pressed-state visual feedback (darken + scale) never actually being applied to any button; it's now wired into every button across the UI
 - Smooth scroll on selection changes in main menu grid/list
 - Lockscreen ghost companion bob uses a sine wave instead of a triangle wave
@@ -117,6 +94,35 @@
 - Animated main menu List layout selection scroll
 - Sped up and smoothed Grid page-swap transitions with a shorter, eased animation
 - Removed a redundant full-grid relayout that ran on every Grid navigation press instead of only on page changes
+- Fixed Banshee touch registering double taps: LVGL's own indev polling and the manual touch-input pipeline were both independently reading the same touch controller and deciding taps on their own, most visibly right at view transitions
+- Fixed Audio Player's back button always returning to Apps Gallery instead of wherever it was actually opened from (it's reachable both from Apps Gallery and a direct Main Menu item)
+- Added a generic `display_manager_go_back()` so views reachable from more than one place (Apps Gallery, a direct menu item, a CLI command, or a hardware-button shortcut that can fire from any screen) return to wherever they were actually opened from, instead of a single hardcoded destination — fixes back navigation on NFC, Infrared, BadUSB, SubGHz, Compass, ENV-III, Accelerometer, Clock, Ghostchi, the plugin/GhostScript runners, and the music visualizer
+- Fixed Apps Gallery, NFC, Infrared, BadUSB, and SubGHz always resetting to the first item/root menu on re-entry instead of restoring the previous selection: their `destroy()` handlers were clearing state that `create()` needed to restore it
+
+### Other Changes
+- Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
+- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
+- Fixed display resume crashes after shared SPI SD mounts on C5 boards
+- Shared terminal and WebUI history to remove the duplicate AP log buffer
+- Freed the wardriving CSV line buffer when logging stops
+- Freed PCAP staging resources when capture stops
+- Freed the HTTP streaming buffer when the web server stops
+- Show the native SD-app PSRAM warning only once per boot
+- Coalesce duplicate toast notifications and their haptic feedback
+- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
+- Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
+- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
+- Converted eight built-in menu icons to compact A4 masks and added scaled A4 rendering support
+- Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
+- Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
+- Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
+- Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
+- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
+- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
+- Hardened Evil Portal request handling against malformed and high-rate client traffic
+- Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
+- Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level
+- Reworked Evil Portal input capture to record full field values from inputs, textareas, selects, and browser autofill via debounced `sendBeacon` instead of per-keystroke XHR
 
 ### Docs
 - Restructured getting-started docs with dedicated pages for installation, first scan, manual flashing, Flipper flashing, and control methods

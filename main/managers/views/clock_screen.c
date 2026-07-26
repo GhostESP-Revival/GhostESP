@@ -128,16 +128,16 @@ static void digital_clock_cb(lv_timer_t *timer) {
 
 static void clock_event_handler(InputEvent *event) {
     if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_REL) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_ENCODER && event->data.encoder.button) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
 #endif
     }
 }

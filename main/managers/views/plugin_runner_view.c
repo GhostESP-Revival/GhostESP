@@ -163,7 +163,7 @@ static void plugin_runner_tick_cb(lv_timer_t *timer) {
         if (loaded->app && loaded->app->on_stop) loaded->app->on_stop();
         loaded->running = false;
         loaded->state = PLUGIN_APP_STATE_LOADED;
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -345,7 +345,7 @@ static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
     ghostesp_input_event_t app_event = convert_input(event);
     if (app_event.type == GHOSTESP_INPUT_BACK) {
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     plugin_loaded_app_t *loaded = plugin_loader_current();
@@ -353,26 +353,26 @@ static void plugin_runner_event_handler(InputEvent *event) {
         switch (event->type) {
             case INPUT_TYPE_JOYSTICK:
                 if (event->data.joystick_index == 0 || event->data.joystick_index == 2) {
-                    display_manager_switch_view(&apps_menu_view);
+                    display_manager_go_back();
                     return;
                 }
                 break;
             case INPUT_TYPE_KEYBOARD:
                 if (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`' ||
                     event->data.key_value == 'q' || event->data.key_value == 'Q') {
-                    display_manager_switch_view(&apps_menu_view);
+                    display_manager_go_back();
                     return;
                 }
                 break;
             case INPUT_TYPE_ENCODER:
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             case INPUT_TYPE_EXIT_BUTTON:
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             case INPUT_TYPE_TOUCH:
                 if (plugin_runner_handle_touch(event)) return;
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             default:
                 break;

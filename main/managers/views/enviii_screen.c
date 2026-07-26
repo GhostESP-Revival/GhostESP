@@ -700,7 +700,7 @@ static void enviii_event_handler(InputEvent *event) {
                 return;
             }
             if (enviii_point_in_obj(&data->point, enviii_btn_back)) {
-                display_manager_switch_view(&main_menu_view);
+                display_manager_go_back();
                 touch_drag_reset(&enviii_touch_drag);
                 return;
             }
@@ -724,15 +724,15 @@ static void enviii_event_handler(InputEvent *event) {
         } else if (key == LV_KEY_DOWN || key == '.' || key == 'j') {
             enviii_scroll_content(1);
         } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`') {
-            display_manager_switch_view(&main_menu_view);
+            display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
         if (button == 2) enviii_scroll_content(-1);
         else if (button == 4) enviii_scroll_content(1);
-        else display_manager_switch_view(&main_menu_view);
+        else display_manager_go_back();
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 

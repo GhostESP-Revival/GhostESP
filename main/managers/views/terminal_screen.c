@@ -672,7 +672,7 @@ static void stop_all_operations(void) {
         display_manager_switch_view(terminal_return_view);
         terminal_return_view = NULL;
     } else {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)

@@ -850,7 +850,7 @@ static void go_back(void) {
         current_menu_state = BADUSB_MENU_MAIN;
         rebuild_menu();
     } else {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 
@@ -913,14 +913,40 @@ void badusb_view_create(void) {
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
-    current_menu_state = BADUSB_MENU_MAIN;
-    selected_item_index = 0;
+    /* current_menu_state/selected_item_index only reset on a genuine fresh
+     * entry from the Main Menu; returning here (e.g. after a hardware
+     * shortcut jumped elsewhere and back) restores whichever submenu and
+     * row were active instead of always landing back on the root menu. */
+    if (display_manager_previous_view == &main_menu_view) {
+        current_menu_state = BADUSB_MENU_MAIN;
+        selected_item_index = 0;
+    }
     num_items = 0;
 
-    const char **options = badusb_main_options;
-    add_options_items(g_ov, options);
-    for (const char **p = options; *p; p++) num_items++;
-    if (num_items > 0) select_item(0);
+    const char *title = "BadUSB";
+    const char **options = NULL;
+    switch (current_menu_state) {
+        case BADUSB_MENU_MAIN:
+            options = badusb_main_options;
+            break;
+        case BADUSB_MENU_SCRIPT_SELECT:
+            options = script_options;
+            title = "Select Script";
+            break;
+        case BADUSB_MENU_SETTINGS:
+            options = settings_options;
+            title = "Settings";
+            break;
+    }
+    if (options) {
+        options_view_set_title(g_ov, title);
+        add_options_items(g_ov, options);
+        for (const char **p = options; *p; p++) num_items++;
+    }
+    if (num_items > 0) {
+        if (selected_item_index < 0 || selected_item_index >= num_items) selected_item_index = 0;
+        select_item(selected_item_index);
+    }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -1009,9 +1035,10 @@ void badusb_view_destroy(void) {
     scroll_up_btn = NULL;
     scroll_down_btn = NULL;
     back_btn = NULL;
-    selected_item_index = 0;
+    /* selected_item_index/current_menu_state deliberately not reset here --
+     * they need to survive the destroy() -> create() cycle so create() can
+     * restore them when returning rather than always resetting to root. */
     num_items = 0;
-    current_menu_state = BADUSB_MENU_MAIN;
 }
 
 static void get_badusb_callback(void **callback) {

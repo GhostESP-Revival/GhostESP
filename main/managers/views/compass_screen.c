@@ -433,7 +433,7 @@ static void compass_event_handler(InputEvent *event) {
         reset_calibration();
         if (heading_label) lv_label_set_text(heading_label, "Resetting...");
     } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 

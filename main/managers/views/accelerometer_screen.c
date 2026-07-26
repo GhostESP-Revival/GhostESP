@@ -408,7 +408,7 @@ static void accel_event_handler(InputEvent *event) {
         if (peak_label) lv_label_set_text(peak_label, "Peak: 0.00 G");
         if (speed_label) lv_label_set_text(speed_label, "0.0 km/h  |  0.0 mph");
     } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 

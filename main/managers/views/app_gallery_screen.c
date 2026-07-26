@@ -1110,8 +1110,16 @@ static void apps_plugin_reload_done(void *arg) {
     if (plugins_enabled) plugin_manager_init();
     int boot_count = plugin_manager_count();
     apps_allow_plugin_icon_load = plugins_enabled && (boot_count > 0);
-    in_submenu = false;
-    current_category[0] = '\0';
+    /* Only force a fresh top-level entry when actually arriving from the
+     * Main Menu; returning here (e.g. after launching a native app or
+     * plugin) should preserve which category/item was selected instead of
+     * always snapping back to the first icon. */
+    bool fresh_entry = (display_manager_previous_view == &main_menu_view);
+    if (fresh_entry) {
+        in_submenu = false;
+        current_category[0] = '\0';
+        selected_app_index = 0;
+    }
     rebuild_app_items(plugins_enabled && boot_count > 0);
     if (plugins_enabled && boot_count > 0) {
         char msg[48];
@@ -1226,7 +1234,9 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_move_foreground(right_nav_btn);
     }
 
-    selected_app_index = 0;
+    /* render_app_items() clamps selected_app_index against num_apps itself,
+     * so a preserved index that's now out of range (e.g. a native app was
+     * added/removed since we were last here) is handled there. */
     render_app_items();
     gui_screen_apply_background(apps_menu_view.root);
 
@@ -1272,9 +1282,11 @@ void apps_menu_destroy(void) {
         apps_plugin_reload_tcb = NULL;
     }
 
-    selected_app_index = 0;
-    in_submenu = false;
-    current_category[0] = '\0';
+    /* selected_app_index/in_submenu/current_category are deliberately NOT
+     * reset here: they need to survive the destroy() -> create() cycle so
+     * apps_menu_create()'s fresh_entry check can tell "returning from a
+     * launched app" (preserve position) apart from "arriving from the Main
+     * Menu" (reset to the top). */
     touch_started = false;
     touch_dragged = false;
     touch_drag_axis = 0;
@@ -1420,6 +1432,11 @@ static void handle_app_item_selection(int item_index) {
         terminal_set_return_view(&apps_menu_view);
         terminal_set_dualcomm_filter(false);
     }
+#ifdef CONFIG_HAS_AUDIO_PLAYER
+    if (app_items[item_index].view == &audio_player_view) {
+        audio_player_set_return_view(&apps_menu_view);
+    }
+#endif
 
     display_manager_switch_view(app_items[item_index].view);
 }

@@ -1362,7 +1362,7 @@ static void back_event_cb(lv_event_t *e) {
     }
 
     // default: leave view
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 }
 
 void infrared_view_create(void) {
@@ -1435,8 +1435,14 @@ void infrared_view_create(void) {
     ir_add_back_row();
 #endif
     num_ir_items = options_view_get_item_count(g_ir_ov);
-    selected_ir_index = 0;
-    if (num_ir_items > 0) options_view_set_selected(g_ir_ov, 0);
+    /* Root-menu highlight only resets on a genuine fresh entry from the
+     * Main Menu; returning here restores the previously highlighted row. */
+    if (display_manager_previous_view == &main_menu_view) {
+        selected_ir_index = 0;
+    } else if (selected_ir_index < 0 || selected_ir_index >= num_ir_items) {
+        selected_ir_index = 0;
+    }
+    if (num_ir_items > 0) options_view_set_selected(g_ir_ov, selected_ir_index);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     uint8_t ir_theme = settings_get_menu_theme(&G_Settings);
@@ -1574,7 +1580,9 @@ void infrared_view_destroy(void) {
         lvgl_obj_del_safe(&root);
         list = NULL;
         infrared_view.root = NULL;
-        selected_ir_index = 0;
+        /* selected_ir_index deliberately not reset here -- it needs to
+         * survive the destroy() -> create() cycle so create() can restore
+         * it when returning rather than always resetting to the top. */
         num_ir_items = 0;
     }
 }

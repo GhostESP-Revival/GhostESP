@@ -834,7 +834,7 @@ static void handle_footer_action(int zone) {
         if (snap.running) {
             ghostchi_manager_stop();
         } else {
-            display_manager_switch_view(&apps_menu_view);
+            display_manager_go_back();
         }
     } else if (zone == 1) {
         /* Page 0 keeps the start/stop semantics. On pages 1 and 2 the
@@ -1377,7 +1377,7 @@ static void ghostchi_input_handler(InputEvent *event) {
         if (snap.running) {
             ghostchi_manager_stop();
         } else {
-            display_manager_switch_view(&apps_menu_view);
+            display_manager_go_back();
         }
     }
 }

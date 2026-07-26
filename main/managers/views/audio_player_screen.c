@@ -23,6 +23,16 @@
 
 static const char *TAG = "AudioPlayer";
 
+/* Audio Player is reachable both from Apps Gallery and directly from the
+ * Main Menu's "Audio" item; back/ESC must return to whichever one actually
+ * opened it, not a fixed destination. Callers set this before switching to
+ * audio_player_view (same convention as terminal_set_return_view). */
+static View *s_return_view = NULL;
+
+void audio_player_set_return_view(View *view) {
+    s_return_view = view;
+}
+
 /* UI element handles */
 static lv_obj_t *s_root = NULL;
 static lv_obj_t *s_file_list = NULL;
@@ -65,7 +75,7 @@ static void on_pause_clicked(lv_event_t *e);
 static void on_prev_clicked(lv_event_t *e);
 static void on_next_clicked(lv_event_t *e);
 static void update_timer_cb(lv_timer_t *timer);
-static void return_to_apps(void);
+static void audio_player_go_back(void);
 static void adjust_volume(int delta);
 static bool play_track_with_toast(int index);
 static bool change_track_with_toast(bool next);
@@ -439,9 +449,9 @@ static void update_timer_cb(lv_timer_t *timer)
     audio_player_update_status();
 }
 
-static void return_to_apps(void)
+static void audio_player_go_back(void)
 {
-    display_manager_switch_view(&apps_menu_view);
+    display_manager_switch_view(s_return_view ? s_return_view : &apps_menu_view);
 }
 
 static void adjust_volume(int delta)
@@ -850,7 +860,7 @@ static void audio_player_input_handler(InputEvent *event)
         int btn = event->data.joystick_index;
         /* Map joystick: 0=left, 1=select, 2=up, 3=right, 4=down */
         if (btn == 0) { /* Left -> exit */
-            return_to_apps();
+            audio_player_go_back();
         } else if (btn == 2) { /* Up */
             if (s_selected_index > 0) {
                 s_selected_index--;
@@ -889,14 +899,14 @@ static void audio_player_input_handler(InputEvent *event)
     }
 
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        return_to_apps();
+        audio_player_go_back();
         return;
     }
 
     if (event->type == INPUT_TYPE_KEYBOARD) {
         int key = event->data.key_value;
         if (key == LV_KEY_ESC || key == '`') {
-            return_to_apps();
+            audio_player_go_back();
         } else if (key == LV_KEY_UP || key == 'k') {
             if (s_selected_index > 0) {
                 s_selected_index--;

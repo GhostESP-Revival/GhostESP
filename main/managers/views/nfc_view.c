@@ -2640,7 +2640,7 @@ void nfc_view_input_cb(InputEvent *event) {
                 return;
             }
         }
-        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
 #endif
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
         int btn = event->data.joystick_index;
@@ -2652,7 +2652,7 @@ void nfc_view_input_cb(InputEvent *event) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_index);
             if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
         } else if (btn == 0) {
-            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
@@ -2674,11 +2674,11 @@ void nfc_view_input_cb(InputEvent *event) {
         } else if (kv == 47 || kv == '/' || kv == 46 || kv == '.') {
             if (g_nfc_ov) { options_view_move_selection(g_nfc_ov, 1); selected_index = options_view_get_selected(g_nfc_ov); }
         } else if (kv == 29 || kv == '`') {
-            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+            if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
         }
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_switch_view(&main_menu_view);
+        if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
 #endif
     }
 }
@@ -2816,7 +2816,7 @@ static void scroll_nfc_down(lv_event_t *e) {
 }
 static void back_event_cb(lv_event_t *e) {
     if (nfc_is_submenu_open()) back_to_root_menu();
-    else display_manager_switch_view(&main_menu_view);
+    else display_manager_go_back();
 }
 
 void cleanup_nfc_scan_popup(void *obj) {
@@ -6056,6 +6056,18 @@ void nfc_view_create(void) {
     options_view_add_back_row(g_nfc_ov, nfc_option_event_cb, (void *)"__BACK_OPTION__");
     num_items = options_view_get_item_count(g_nfc_ov);
 #endif
+
+    /* Root-menu highlight only resets on a genuine fresh entry from the
+     * Main Menu; returning here (e.g. after a hardware shortcut jumped
+     * elsewhere and back) restores the previously highlighted row instead
+     * of always landing on the first item. Submenu state (in_saved_list
+     * etc.) still always resets to root on re-entry, unchanged. */
+    if (display_manager_previous_view == &main_menu_view) {
+        selected_index = 0;
+    } else if (selected_index < 0 || selected_index >= num_items) {
+        selected_index = 0;
+    }
+    if (g_nfc_ov) options_view_set_selected(g_nfc_ov, selected_index);
 
     nfc_created_time_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
     nfc_option_invoked = false;

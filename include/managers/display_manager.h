@@ -97,6 +97,16 @@ void display_manager_switch_view(View *view);
 bool display_manager_switch_view_and_wait_for_refresh(View *view);
 
 /**
+ * @brief Switch back to whichever view was active before the current one,
+ * falling back to the main menu if there is no usable previous view. Views
+ * reachable from more than one place (Apps Gallery, a direct Main Menu
+ * item, a CLI/serial command, or a user-configured hardware button
+ * shortcut that can fire from any screen) should call this from their
+ * back/exit handler instead of hardcoding a single destination.
+ */
+void display_manager_go_back(void);
+
+/**
  * @brief Initialize slower display-adjacent peripherals after the first UI frame.
  */
 void display_manager_init_deferred_peripherals(void);

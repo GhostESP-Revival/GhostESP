@@ -315,7 +315,10 @@ static void scroll_output_page(int dir) {
 }
 
 static void back_to_browser(void) {
-    display_manager_switch_view(&ghostscript_browser_view);
+    /* Reachable both from the script browser and directly via a CLI
+     * "script run" command, so back must return to whichever actually
+     * opened this, not always the browser. */
+    display_manager_go_back();
 }
 
 static void stop_script(void) {

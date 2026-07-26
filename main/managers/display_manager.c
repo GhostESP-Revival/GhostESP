@@ -1796,16 +1796,18 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
         joystick_init(&exit_button, 6, 500 /*hold ms*/, true);
     }
-    
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        ESP_LOGI(TAG, "Initializing TSC2007 touch driver for The Banshee");
-        // Register touch driver with LVGL
-        static lv_indev_drv_t indev_drv;
-        lv_indev_drv_init(&indev_drv);
-        indev_drv.type = LV_INDEV_TYPE_POINTER;
-        indev_drv.read_cb = touch_driver_read;
-        lv_indev_drv_register(&indev_drv);
-    }
+    /* The Banshee's TSC2007 touch is read by hardware_input_task (see
+     * enable_touch_polling below), which pushes InputEvents through the
+     * same manual queue + view-callback tap/drag pipeline every other
+     * touchscreen board uses. This board used to *also* register a real
+     * lv_indev_drv_t pointing at the same touch_driver_read() -- LVGL's
+     * own indev polling then independently drove native press/click
+     * events on lv_obj widgets (e.g. LV_EVENT_CLICKED on grid cards) from
+     * the same physical touch, completely uncoordinated with the manual
+     * path. A single tap could be decided twice by two systems that don't
+     * know about each other, most visibly right at a view transition.
+     * Removed; this board now goes through the same single path as
+     * everything else. */
 #endif
 #endif
 #endif
@@ -2040,6 +2042,21 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
   }
   vSemaphoreDelete(done);
   return true;
+}
+
+void display_manager_go_back(void) {
+  /* display_manager_previous_view is kept up to date on every switch (see
+   * display_manager_switch_view_internal), so this is always "whichever
+   * screen was active right before the current one" regardless of how the
+   * current view was reached -- Apps Gallery, a direct Main Menu item, a
+   * CLI/serial command, or a hardware-button shortcut configured to jump
+   * here from anywhere. Falls back to the main menu if there's nothing
+   * usable (e.g. this is the very first view after boot). */
+  View *target = display_manager_previous_view;
+  if (!target || target == dm.current_view) {
+    target = &main_menu_view;
+  }
+  display_manager_switch_view(target);
 }
 
 void display_manager_init_deferred_peripherals(void) {
