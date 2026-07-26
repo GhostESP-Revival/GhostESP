@@ -64,10 +64,10 @@ static void sweep_run_internal(void) {
 
     int open_networks = 0, weak_networks = 0, secure_networks = 0;
 
-    if (sd_card_exists("/mnt/ghostesp")) {
-        mkdir("/mnt/ghostesp/sweeps", 0755);
+    if (sd_card_exists(SD_GHOSTESP_ROOT)) {
+        (void)sd_card_create_directory(SD_DIR_SWEEPS);
         int idx = get_next_sweep_file_index();
-        snprintf(report_path, sizeof(report_path), "/mnt/ghostesp/sweeps/sweep_%d.csv", idx);
+        snprintf(report_path, sizeof(report_path), SD_DIR_SWEEPS "/sweep_%d.csv", idx);
         report = fopen(report_path, "w");
         if (report) {
             fprintf(report, "Type,Name,MAC,Associated MAC,Channel,Frequency,RSSI,Auth,Cipher,802.11,WPS,Latitude,Longitude,Altitude,First Seen\n");
@@ -345,7 +345,7 @@ static int get_next_sweep_file_index(void) {
     int next = 0;
     char path[64];
     while (next < 9999) {
-        snprintf(path, sizeof(path), "/mnt/ghostesp/sweeps/sweep_%d.csv", next);
+        snprintf(path, sizeof(path), SD_DIR_SWEEPS "/sweep_%d.csv", next);
         FILE *f = fopen(path, "r");
         if (!f) break;
         fclose(f);

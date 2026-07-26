@@ -8,21 +8,29 @@ GhostESP uses SD cards to store captures, logs, and files. Learn how to manage f
 
 ## Storage Structure
 
-When initialized, GhostESP creates the following directory structure:
+When initialized, GhostESP creates the following directory structure. Result
+locations are part of the public storage layout; see
+[Storage Layout]({{< relref "storage-layout.md" >}}) for formats, app data,
+and folders that should not be used as backups.
 
 ```
 /mnt/ghostesp/
-├── debug/          # Debug logs
-├── pcaps/          # Packet captures
-├── scans/          # Scan results
-├── gps/            # GPS/wardriving logs
-├── games/          # Game saves
+├── captures/       # Motion JPEG snapshots
+├── pcaps/          # Standard packet captures
+├── scans/          # Saved scan reports
+├── sweeps/         # sweep_N.csv radio reports
+├── gps/            # WiGLE-compatible wardriving CSV
+├── ghostchi/       # Autonomous captures, logs, and state
+├── logs/           # Diagnostics and coredumps
 ├── evil_portal/
 │   └── portals/    # Custom portal HTML files
 ├── infrared/
 │   ├── remotes/    # Learned IR signals
 │   └── universals/ # Universal IR databases
-└── nfc/            # NFC card data (if enabled)
+├── nfc/            # NFC card data (if enabled)
+├── apps/           # Native SD app packages
+├── scripts/        # GhostScript packages
+└── themes/          # Theme packages
 ```
 
 ## Web Serial Interface

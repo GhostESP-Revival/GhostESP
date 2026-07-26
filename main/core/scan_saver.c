@@ -19,8 +19,7 @@
 #endif
 
 static bool try_jit_mount(scan_file_t *sf) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    if (sd_card_needs_jit_mount()) {
         bool disp_suspended = false;
         if (sd_card_mount_for_flush(&disp_suspended) == ESP_OK) {
             sf->jit_mounted = true;
@@ -29,9 +28,6 @@ static bool try_jit_mount(scan_file_t *sf) {
         }
         if (disp_suspended) sd_card_unmount_after_flush(disp_suspended);
     }
-#else
-    (void)sf;
-#endif
     return false;
 }
 
@@ -90,7 +86,11 @@ esp_err_t scan_file_open(scan_file_t *sf, const char *prefix, const char *extens
     sf->buffer_capacity = 0;
     sf->path[0] = '\0';
 
-    if (!sd_card_manager.is_initialized && !try_jit_mount(sf)) return ESP_ERR_NOT_FOUND;
+    if (sd_card_needs_jit_mount()) {
+        if (!try_jit_mount(sf)) return ESP_ERR_NOT_FOUND;
+    } else if (!sd_card_manager.is_initialized) {
+        return ESP_ERR_NOT_FOUND;
+    }
 
     ensure_scans_dir();
 

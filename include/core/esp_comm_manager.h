@@ -36,7 +36,7 @@ typedef void (*comm_response_callback_t)(const uint8_t* data, size_t length, voi
 typedef void (*comm_data_callback_t)(const uint8_t* data, size_t length, void* user_data);
 
 
-#define COMM_MAX_STREAM_CHANNELS 11
+#define COMM_MAX_STREAM_CHANNELS 12
 #define COMM_STREAM_CHANNEL_COMMAND 0
 #define COMM_STREAM_CHANNEL_KEYBOARD 1
 #define COMM_STREAM_CHANNEL_BADUSB  2
@@ -48,6 +48,7 @@ typedef void (*comm_data_callback_t)(const uint8_t* data, size_t length, void* u
 #define COMM_STREAM_CHANNEL_SUBGHZ 8
 #define COMM_STREAM_CHANNEL_AUDIO 9          // MP3 audio stream for DAC playback
 #define COMM_STREAM_CHANNEL_OTA 10           // Firmware image bytes for GhostLink peer flashing
+#define COMM_STREAM_CHANNEL_STORAGE 11       // Peer-backed file IO RPC for SD-less boards
 
 typedef void (*comm_stream_callback_t)(uint8_t channel, const uint8_t* data, size_t length, void* user_data);
 

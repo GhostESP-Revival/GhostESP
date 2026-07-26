@@ -61,6 +61,15 @@
 - Fixed `ethping`/ping sweep and `etharp`/ARP scan (CLI and GhostLink peer-relayed UI) always scanning a hardcoded /24 instead of the real DHCP netmask, missing hosts on smaller VLAN subnets
 - Sped up ARP scan to match the Wi-Fi ARP scan's batching/timing, cutting a full-subnet scan from ~9s to ~2.5s
 - Fixed peer-relayed Fingerprint Scan backing out immediately if a previous ARP/port/ping scan had run that session, from stale shared scan-done state
+- Added automatic SD export for all Ethernet scans (ARP, fingerprint, port, ping, ARP poison) as JSONL files in `/mnt/ghostesp/scans/`, written via a new GhostLink peer-storage channel on boards without a local SD slot
+
+### SD Storage
+- Centralized all standard directory paths in `sd_card_manager.h` as `SD_DIR_*` macros so features share one source of truth
+- Boot now creates `sweeps/`, `ghostchi/pcaps/`, `ghostchi/sessions/`, `app_cache/`, `appdata/`, `scripts/`, `scriptdata/`, and `downloads/` at mount time, matching the directories active features already use
+
+### GhostLink
+- Added `COMM_STREAM_CHANNEL_STORAGE` for peer-backed file IO, so an SD-less board (e.g. Banshee S3) can write files to its paired peer's SD card over GhostLink
+- Peer storage handler uses `sd_card_jit_begin/end` on the display peer so shared SPI bus arbitration with LVGL is respected automatically
 
 ### Headless CLI
 - Added OS-style CLI commands for `echo`, `ifconfig`, `ping`, `version`, `uuid`, `macaddr`, `uptime`, `status`, and filesystem helpers

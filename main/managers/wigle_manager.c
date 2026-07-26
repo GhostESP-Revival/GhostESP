@@ -1101,7 +1101,8 @@ void wigle_upload_all_async(void) {
     const char *key = wigle_get_api_key();
     if (!key || key[0] == '\0') return;
     wigle_upload_in_progress = true;
-    if (xTaskCreate(wigle_upload_all_task, "wigle_up", WIGLE_TASK_STACK, NULL, 5, NULL) == pdPASS) {
+    if (xTaskCreateWithCaps(wigle_upload_all_task, "wigle_up", WIGLE_TASK_STACK, NULL, 5, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
         glog("Wigle: auto-upload started\n");
     } else {
         glog("Wigle: failed to start upload task\n");
@@ -1306,7 +1307,8 @@ esp_err_t wigle_upload_single_csv_async(const char *filename) {
     task->filename[sizeof(task->filename) - 1] = '\0';
 
     wigle_manual_upload_in_progress = true;
-    if (xTaskCreate(wigle_single_upload_task, "wigle_up1", WIGLE_TASK_STACK, task, 5, NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(wigle_single_upload_task, "wigle_up1", WIGLE_TASK_STACK, task, 5, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         wigle_manual_upload_in_progress = false;
         free(task);
         return ESP_FAIL;
@@ -1456,7 +1458,8 @@ esp_err_t wigle_get_stats_async(void) {
     }
 
     wigle_stats_in_progress = true;
-    if (xTaskCreate(wigle_stats_task, "wigle_stats", WIGLE_TASK_STACK, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(wigle_stats_task, "wigle_stats", WIGLE_TASK_STACK, NULL, 5, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         wigle_stats_in_progress = false;
         return ESP_FAIL;
     }
@@ -1488,7 +1491,8 @@ esp_err_t wigle_test_api_key(void) {
     
     wigle_test_in_progress = true;
     
-    if (xTaskCreate(wigle_test_api_task, "wigle_test", WIGLE_TASK_STACK, result, 5, NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(wigle_test_api_task, "wigle_test", WIGLE_TASK_STACK, result, 5, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         free(result);
         wigle_test_in_progress = false;
         return ESP_FAIL;

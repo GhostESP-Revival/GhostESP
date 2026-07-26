@@ -9,6 +9,31 @@
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
 
+/* Public SD-card storage contract. Keep these paths stable: they are exposed
+ * through the WebUI, CLI, documentation, and native-app storage APIs. */
+#define SD_MOUNT_POINT "/mnt"
+#define SD_GHOSTESP_ROOT SD_MOUNT_POINT "/ghostesp"
+#define SD_STORAGE_LAYOUT_VERSION 1
+
+#define SD_DIR_LOGS SD_GHOSTESP_ROOT "/logs"
+#define SD_DIR_COREDUMPS SD_DIR_LOGS "/coredumps"
+#define SD_DIR_DEBUG SD_GHOSTESP_ROOT "/debug"
+#define SD_DIR_PCAPS SD_GHOSTESP_ROOT "/pcaps"
+#define SD_DIR_CAPTURES SD_GHOSTESP_ROOT "/captures"
+#define SD_DIR_SCANS SD_GHOSTESP_ROOT "/scans"
+#define SD_DIR_SWEEPS SD_GHOSTESP_ROOT "/sweeps"
+#define SD_DIR_GPS SD_GHOSTESP_ROOT "/gps"
+#define SD_DIR_GHOSTCHI SD_GHOSTESP_ROOT "/ghostchi"
+#define SD_DIR_GHOSTCHI_PCAPS SD_DIR_GHOSTCHI "/pcaps"
+#define SD_DIR_GHOSTCHI_SESSIONS SD_DIR_GHOSTCHI "/sessions"
+#define SD_DIR_APPS SD_GHOSTESP_ROOT "/apps"
+#define SD_DIR_APP_CACHE SD_GHOSTESP_ROOT "/app_cache"
+#define SD_DIR_APPDATA SD_GHOSTESP_ROOT "/appdata"
+#define SD_DIR_SCRIPTS SD_GHOSTESP_ROOT "/scripts"
+#define SD_DIR_SCRIPTDATA SD_GHOSTESP_ROOT "/scriptdata"
+#define SD_DIR_THEMES SD_GHOSTESP_ROOT "/themes"
+#define SD_DIR_DOWNLOADS SD_GHOSTESP_ROOT "/downloads"
+
 // SD card unmount context types
 typedef enum {
     SD_UNMOUNT_CONTEXT_USER = 0,    // User-initiated unmount

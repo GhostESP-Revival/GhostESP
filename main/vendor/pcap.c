@@ -35,7 +35,7 @@ static esp_err_t _pcap_flush_wireshark_stream_nolock();
 static void pcap_release_idle_resources(void);
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
-static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = "/mnt/ghostesp/pcaps";
+static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = SD_DIR_PCAPS;
 static volatile pcap_capture_type_t s_capture_type = PCAP_CAPTURE_WIFI;
 static volatile pcap_mode_t s_pcap_mode = PCAP_MODE_FILE;
 static uint8_t *pcap_buffer = NULL;
@@ -459,7 +459,7 @@ static void get_next_pcap_file_name(char *file_name_buffer,
 
 esp_err_t pcap_file_open(const char *base_file_name,
                          pcap_capture_type_t capture_type) {
-  return pcap_file_open_in_dir(base_file_name, "/mnt/ghostesp/pcaps",
+  return pcap_file_open_in_dir(base_file_name, SD_DIR_PCAPS,
                                capture_type);
 }
 
@@ -482,7 +482,7 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
     strncpy(pcap_dir_path, dir_path, sizeof(pcap_dir_path) - 1);
     pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
   } else {
-    strncpy(pcap_dir_path, "/mnt/ghostesp/pcaps", sizeof(pcap_dir_path) - 1);
+    strncpy(pcap_dir_path, SD_DIR_PCAPS, sizeof(pcap_dir_path) - 1);
     pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
   }
 

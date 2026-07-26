@@ -16,6 +16,7 @@
 #include "managers/settings_manager.h"
 #include "managers/ota_manager.h"
 #include "managers/peer_ota_manager.h"
+#include "managers/peer_storage_manager.h"
 #include "managers/self_ota_manager.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
@@ -193,6 +194,27 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
+
+/* timegm() is not available in ESP-IDF's newlib for ESP32-C5 (RISC-V).
+ * Provide a minimal implementation that both main.c (RTC sync) and
+ * minmea.c (GPS timestamp conversion) can link against. */
+time_t timegm(struct tm *tm) {
+    int y = tm->tm_year + 1900;
+    int m = tm->tm_mon + 1;
+    int d = tm->tm_mday;
+    // Days from 1970-01-01 to year y, month m, day d
+    static const int days_before_month[12] = {
+        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+    };
+    int64_t days = (int64_t)(y - 1970) * 365 + (y - 1969) / 4
+                 - (y - 1901) / 100 + (y - 1601) / 400
+                 + days_before_month[m - 1] + d - 1;
+    if (m > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) {
+        days++;
+    }
+    return (time_t)(days * 86400 + tm->tm_hour * 3600
+                  + tm->tm_min * 60 + tm->tm_sec);
+}
 
 
 
@@ -793,6 +815,11 @@ void app_main(void) {
 #ifdef CONFIG_HAS_BADUSB
     badusb_manager_register_stream_handler();
 #endif
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        peer_storage_manager_init_peer();
+    }
+#endif
 #ifdef CONFIG_WITH_ETHERNET
     MEASURE_INIT_RAM("Ethernet Comm Handler init", eth_comm_handler_init());
 #endif
@@ -1023,7 +1050,6 @@ void app_main(void) {
     // must be interpreted as UTC. mktime() would honor the TZ env var and treat
     // the fields as local time, shifting the restored clock by the timezone
     // offset; timegm() interprets the fields as UTC instead.
-    extern time_t timegm(struct tm *tm);
     RTC_Date rtc_time;
     if (rtc_get_datetime(&rtc_time) == ESP_OK) {
         struct timeval tv = {0};

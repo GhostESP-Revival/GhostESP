@@ -1414,21 +1414,30 @@ static esp_err_t ensure_sd_dir_exists(const char *path) {
 }
 
 esp_err_t sd_card_setup_directory_structure() {
-  const char *root_dir = "/mnt/ghostesp";
-  const char *logs_dir = "/mnt/ghostesp/logs";
-  const char *coredumps_dir = "/mnt/ghostesp/logs/coredumps";
-  const char *debug_dir = "/mnt/ghostesp/debug";
-  const char *pcaps_dir = "/mnt/ghostesp/pcaps";
-  const char *captures_dir = "/mnt/ghostesp/captures";
-  const char *scans_dir = "/mnt/ghostesp/scans";
-  const char *gps_dir = "/mnt/ghostesp/gps";
-  const char *games_dir = "/mnt/ghostesp/games";
-  const char *apps_dir = "/mnt/ghostesp/apps";
-  const char *themes_dir = "/mnt/ghostesp/themes";
-  const char *active_theme_dir = "/mnt/ghostesp/themes/active";
-  const char *evil_portal_dir = "/mnt/ghostesp/evil_portal";
-  const char *evil_portal_portals_dir = "/mnt/ghostesp/evil_portal/portals"; 
-  const char *universals_dir = "/mnt/ghostesp/infrared/universals";
+  const char *root_dir = SD_GHOSTESP_ROOT;
+  const char *logs_dir = SD_DIR_LOGS;
+  const char *coredumps_dir = SD_DIR_COREDUMPS;
+  const char *debug_dir = SD_DIR_DEBUG;
+  const char *pcaps_dir = SD_DIR_PCAPS;
+  const char *captures_dir = SD_DIR_CAPTURES;
+  const char *scans_dir = SD_DIR_SCANS;
+  const char *sweeps_dir = SD_DIR_SWEEPS;
+  const char *gps_dir = SD_DIR_GPS;
+  const char *ghostchi_dir = SD_DIR_GHOSTCHI;
+  const char *ghostchi_pcaps_dir = SD_DIR_GHOSTCHI_PCAPS;
+  const char *ghostchi_sessions_dir = SD_DIR_GHOSTCHI_SESSIONS;
+  const char *games_dir = SD_GHOSTESP_ROOT "/games";
+  const char *apps_dir = SD_DIR_APPS;
+  const char *app_cache_dir = SD_DIR_APP_CACHE;
+  const char *appdata_dir = SD_DIR_APPDATA;
+  const char *scripts_dir = SD_DIR_SCRIPTS;
+  const char *scriptdata_dir = SD_DIR_SCRIPTDATA;
+  const char *downloads_dir = SD_DIR_DOWNLOADS;
+  const char *themes_dir = SD_DIR_THEMES;
+  const char *active_theme_dir = SD_DIR_THEMES "/active";
+  const char *evil_portal_dir = SD_GHOSTESP_ROOT "/evil_portal";
+  const char *evil_portal_portals_dir = SD_GHOSTESP_ROOT "/evil_portal/portals";
+  const char *universals_dir = SD_GHOSTESP_ROOT "/infrared/universals";
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
   const char *nfc_dir = "/mnt/ghostesp/nfc";
 #endif
@@ -1440,6 +1449,21 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(apps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(app_cache_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(appdata_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(scripts_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(scriptdata_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(downloads_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(themes_dir);
@@ -1467,6 +1491,18 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(scans_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(sweeps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_pcaps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_sessions_dir);
   if (ret != ESP_OK) return ret;
 
   // Create evil_portal directory

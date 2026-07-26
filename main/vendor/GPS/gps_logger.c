@@ -685,7 +685,7 @@ esp_err_t csv_write_header(FILE *f) {
 
 void get_next_csv_file_name(char *file_name_buffer, const char *base_name) {
     int next_index = get_next_csv_file_index(base_name);
-    snprintf(file_name_buffer, GPS_MAX_FILE_NAME_LENGTH, "/mnt/ghostesp/gps/%s_%d.csv", base_name,
+    snprintf(file_name_buffer, GPS_MAX_FILE_NAME_LENGTH, SD_DIR_GPS "/%s_%d.csv", base_name,
              next_index);
 }
 
@@ -729,7 +729,7 @@ esp_err_t csv_file_open(const char *base_file_name) {
 
     bool gating_template = sd_card_needs_jit_mount();
 
-    if (sd_card_exists("/mnt/ghostesp/gps")) {
+    if (sd_card_exists(SD_DIR_GPS)) {
         get_next_csv_file_name(file_name, base_file_name);
         strncpy(csv_file_path, file_name, GPS_MAX_FILE_NAME_LENGTH);
         csv_file = fopen(file_name, "w");

@@ -63,11 +63,11 @@ static uint8_t    s_gateway_mac[6];
 static ip4_addr_t s_dns_server;
 static SemaphoreHandle_t s_hosts_mutex = NULL;
 
-static char s_domains[MAX_DOMAINS][MAX_DOMAIN_LEN];
+EXT_RAM_BSS_ATTR static char s_domains[MAX_DOMAINS][MAX_DOMAIN_LEN];
 static int  s_domain_count = 0;
-static char s_cookies[MAX_COOKIES][MAX_COOKIE_LEN];
+EXT_RAM_BSS_ATTR static char s_cookies[MAX_COOKIES][MAX_COOKIE_LEN];
 static int  s_cookie_count = 0;
-static char s_creds[MAX_CREDS][MAX_CRED_LEN];
+EXT_RAM_BSS_ATTR static char s_creds[MAX_CREDS][MAX_CRED_LEN];
 static int  s_cred_count = 0;
 
 static volatile bool s_running     = false;

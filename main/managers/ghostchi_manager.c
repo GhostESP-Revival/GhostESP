@@ -25,12 +25,12 @@
 #include <time.h>
 
 #define GHOSTCHI_LEARN_MAX 32
-#define GHOSTCHI_DIR "/mnt/ghostesp/ghostchi"
-#define GHOSTCHI_PCAP_DIR "/mnt/ghostesp/ghostchi/pcaps"
-#define GHOSTCHI_LOG_DIR "/mnt/ghostesp/ghostchi/sessions"
-#define GHOSTCHI_LEARN_FILE "/mnt/ghostesp/ghostchi/learn.bin"
-#define GHOSTCHI_LEARN_FILE_LEGACY "/mnt/ghostesp/ghostchi/learn.csv"
-#define GHOSTCHI_STATE_FILE "/mnt/ghostesp/ghostchi/state.bin"
+#define GHOSTCHI_DIR SD_DIR_GHOSTCHI
+#define GHOSTCHI_PCAP_DIR SD_DIR_GHOSTCHI_PCAPS
+#define GHOSTCHI_LOG_DIR SD_DIR_GHOSTCHI_SESSIONS
+#define GHOSTCHI_LEARN_FILE SD_DIR_GHOSTCHI "/learn.bin"
+#define GHOSTCHI_LEARN_FILE_LEGACY SD_DIR_GHOSTCHI "/learn.csv"
+#define GHOSTCHI_STATE_FILE SD_DIR_GHOSTCHI "/state.bin"
 #define GHOSTCHI_LEARN_MAGIC 0x314C4847u
 #define GHOSTCHI_STATE_MAGIC 0x31435447u
 #define GHOSTCHI_LEARN_VERSION 1u

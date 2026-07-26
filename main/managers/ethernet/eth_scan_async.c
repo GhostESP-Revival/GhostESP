@@ -457,6 +457,15 @@ static void ping_scan_task(void *arg) {
                              (struct sockaddr *)&from, &fromlen);
             if (r > 0 && from.sin_addr.s_addr == addr.sin_addr.s_addr) {
                 s_results.ping_alive++;
+                if (s_results.arp_count < 64) {
+                    eth_arp_result_t *hr = &s_results.arp_hosts[s_results.arp_count];
+                    ip4_addr_t resp_addr;
+                    resp_addr.addr = from.sin_addr.s_addr;
+                    ip4addr_ntoa_r(&resp_addr, hr->ip_str, sizeof(hr->ip_str));
+                    memset(hr->mac, 0, 6);
+                    hr->hostname[0] = '\0';
+                    s_results.arp_count++;
+                }
             }
 
             vTaskDelay(pdMS_TO_TICKS(10));
