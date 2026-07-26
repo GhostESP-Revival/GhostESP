@@ -1019,7 +1019,11 @@ void app_main(void) {
     }
 
 #ifdef CONFIG_HAS_RTC_CLOCK
-    // Sync system time from RTC on boot
+    // Sync system time from RTC on boot. The RTC stores UTC, so the struct tm
+    // must be interpreted as UTC. mktime() would honor the TZ env var and treat
+    // the fields as local time, shifting the restored clock by the timezone
+    // offset; timegm() interprets the fields as UTC instead.
+    extern time_t timegm(struct tm *tm);
     RTC_Date rtc_time;
     if (rtc_get_datetime(&rtc_time) == ESP_OK) {
         struct timeval tv = {0};
@@ -1031,8 +1035,9 @@ void app_main(void) {
         tm.tm_hour = rtc_time.hour;
         tm.tm_min = rtc_time.minute;
         tm.tm_sec = rtc_time.second;
+        tm.tm_isdst = 0;
         
-        tv.tv_sec = mktime(&tm);
+        tv.tv_sec = timegm(&tm);
         tv.tv_usec = 0;
         
         if (tv.tv_sec > 1600000000) { // Valid time (after Sept 2020)

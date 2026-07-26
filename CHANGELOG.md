@@ -87,6 +87,7 @@
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
+- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
 - Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors

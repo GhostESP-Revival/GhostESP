@@ -27,6 +27,9 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "gui/toast.h"
+#ifdef CONFIG_HAS_RTC_CLOCK
+#include "vendor/drivers/pcf8563.h"
+#endif
 
 // prototypes for static inline helpers
 static inline bool is_packet_valid(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
@@ -1233,6 +1236,24 @@ static void gps_try_sync_time_from_fix(const gps_t *g) {
     if (tv.tv_sec >= 1600000000) {
         settimeofday(&tv, NULL);
         gps_time_synced = true;
+
+#ifdef CONFIG_HAS_RTC_CLOCK
+        // Persist UTC time to the external RTC so it survives reboots, matching
+        // what NTP sync and the `settime` command do. gmtime_r yields UTC fields
+        // because tv was built directly from civil date/time without TZ.
+        struct tm utc_tm;
+        RTC_Date rtc_time;
+        gmtime_r(&tv.tv_sec, &utc_tm);
+        rtc_time.year = utc_tm.tm_year + 1900;
+        rtc_time.month = utc_tm.tm_mon + 1;
+        rtc_time.day = utc_tm.tm_mday;
+        rtc_time.hour = utc_tm.tm_hour;
+        rtc_time.minute = utc_tm.tm_min;
+        rtc_time.second = utc_tm.tm_sec;
+        if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+            ESP_LOGI("GPS", "UTC time saved to RTC from GPS fix");
+        }
+#endif
     }
 }
 
