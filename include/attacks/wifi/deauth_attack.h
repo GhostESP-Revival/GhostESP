@@ -50,4 +50,24 @@ uint32_t deauth_attack_get_packets_sent(void);
  */
 void deauth_attack_reset_packet_counter(void);
 
+/**
+ * @brief Start combined handshake capture + deauth attack
+ *
+ * Sends deauth frames to force clients to reconnect while simultaneously
+ * capturing EAPOL handshake frames to a PCAP file.
+ */
+void deauth_attack_start_handshake_deauth(void);
+
+/**
+ * @brief Stop the combined handshake capture + deauth attack
+ * @return true if the task was stopped, false if it wasn't running
+ */
+bool deauth_attack_stop_handshake_deauth(void);
+
+/**
+ * @brief Check if handshake+deauth attack is running
+ * @return true if running
+ */
+bool deauth_attack_handshake_deauth_is_running(void);
+
 #endif // DEAUTH_ATTACK_H

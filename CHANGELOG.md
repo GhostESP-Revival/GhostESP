@@ -37,6 +37,7 @@
 - Added JIT SD handling for display-sharing boards so GhostScript can access scripts without leaving the display SPI bus unavailable
 
 ### Wi-Fi
+- Added combined Handshake+Deauth attack (`attack -hsd`) that sends short deauth bursts to force client reconnection while capturing EAPOL handshakes to a PCAP file, accessible from the Attacks menu, AP/Station detail views, and GhostLink remote
 - Added a WiFi auto-reconnect toggle (Settings > Connectivity, `autoreconnect <on|off>` CLI, and `AutoReconnect=` in `config.cfg`) persisted to NVS
 - Fixed standalone station scans to run the AP scan spinner first when no APs are cached
 - Added SMB/NetBIOS enumeration scanner (`enumscan`) with native UI: discovers OS, domain, shares, and users via null session over port 445

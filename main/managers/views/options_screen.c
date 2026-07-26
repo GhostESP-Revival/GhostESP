@@ -1388,6 +1388,7 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
 
 static const char * const wifi_attacks_options[] = {
     "Start Deauth Attack",
+    "Start Handshake+Deauth",
     "Start Channel Switch Attack",
     "Beacon Spam - Random",
     "Beacon Spam - Rickroll",
@@ -1568,6 +1569,7 @@ static const char * const dual_comm_wifi_options[] = {
 
 static const char * const dual_comm_attacks_options[] = {
     "Start Deauth Attack",
+    "Start Handshake+Deauth",
     "Start EAPOL Logoff",
     "Start DHCP-Starve",
     "Stop DHCP-Starve",
@@ -7113,6 +7115,12 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend attack -d");
             view_switched = true;
+        } else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend attack -hsd");
+            view_switched = true;
         } else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
@@ -8206,6 +8214,17 @@ void option_event_cb(lv_event_t *e) {
             glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
         } else {
             simulateCommand("attack -d");
+        }
+        view_switched = true; 
+    }
+    
+    else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+        } else {
+            simulateCommand("attack -hsd");
         }
         view_switched = true; 
     }
@@ -11650,9 +11669,28 @@ static void ap_deauth_cb(lv_event_t *e) {
             detail_view_destroy(ap_detail_view);
             ap_detail_view = NULL;
         }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("attack -d");
+    }
+}
+
+static void ap_hs_deauth_cb(lv_event_t *e) {
+    (void)e;
+    if (selected_ap_index >= 0) {
+        ap_scan_select(selected_ap_index);
+        wifi_manager_select_ap(selected_ap_index);
+        if (ap_detail_view) {
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("attack -hsd");
     }
 }
 
@@ -11977,6 +12015,7 @@ static void show_ap_detail(int ap_index) {
         detail_view_add_info(ap_detail_view, "Actions:", "");
     }
     detail_view_add_action(ap_detail_view, "Deauth", ap_deauth_cb, NULL);
+    detail_view_add_action(ap_detail_view, "HS+Deauth", ap_hs_deauth_cb, NULL);
     detail_view_add_action(ap_detail_view, "Connect", ap_connect_cb, NULL);
     detail_view_add_action(ap_detail_view, "Track AP", ap_track_cb, NULL);
     detail_view_add_action(ap_detail_view, "Select AP", ap_select_cb, NULL);
@@ -12065,9 +12104,27 @@ static void station_deauth_cb(lv_event_t *e) {
         detail_view_destroy(sta_detail_view);
         sta_detail_view = NULL;
     }
+    current_wifi_menu_state = WIFI_MENU_STA_LIST;
+    suppress_wifi_state_reset_once = true;
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     simulateCommand("attack -d");
+}
+
+static void station_hs_deauth_cb(lv_event_t *e) {
+    (void)e;
+    if (!station_select_for_action()) {
+        return;
+    }
+    if (sta_detail_view) {
+        detail_view_destroy(sta_detail_view);
+        sta_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_STA_LIST;
+    suppress_wifi_state_reset_once = true;
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand("attack -hsd");
 }
 
 static void station_track_cb(lv_event_t *e) {
@@ -12159,6 +12216,7 @@ static void show_station_detail(int station_index) {
         detail_view_add_info(sta_detail_view, "Actions:", "");
     }
     detail_view_add_action(sta_detail_view, "Deauth", station_deauth_cb, NULL);
+    detail_view_add_action(sta_detail_view, "HS+Deauth", station_hs_deauth_cb, NULL);
     detail_view_add_action(sta_detail_view, "Track Station", station_track_cb, NULL);
     detail_view_add_action(sta_detail_view, "Select Station", station_select_cb, NULL);
     detail_view_add_back(sta_detail_view, station_detail_back_cb, NULL);

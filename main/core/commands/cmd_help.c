@@ -62,9 +62,10 @@ void handle_help(int argc, char **argv) {
         glog("attack\n");
         glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
         glog("    Arguments:\n");
         glog("        -d  : Start deauth attack (supports multiple APs)\n");
+        glog("        -hsd: Start handshake capture + deauth attack (forces handshakes)\n");
         glog("        -c  : Start channel switch attack (supports multiple APs)\n");
         glog("        -e  : Start EAPOL logoff attack\n");
         glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");

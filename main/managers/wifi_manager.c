@@ -3236,6 +3236,20 @@ void wifi_manager_auto_deauth() {
 void wifi_manager_stop_deauth() {
     deauth_attack_stop();
 }
+
+// Handshake + Deauth combined attack wrappers
+void wifi_manager_start_handshake_deauth() {
+    deauth_attack_start_handshake_deauth();
+}
+
+bool wifi_manager_stop_handshake_deauth() {
+    return deauth_attack_stop_handshake_deauth();
+}
+
+bool wifi_manager_handshake_deauth_is_running() {
+    return deauth_attack_handshake_deauth_is_running();
+}
+
 static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_record_t *rec, bool include_security) {
     char sanitized_ssid[33];
     sanitize_ssid_and_check_hidden((uint8_t *)rec->ssid, sanitized_ssid, sizeof(sanitized_ssid));

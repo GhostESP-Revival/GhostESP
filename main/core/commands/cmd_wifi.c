@@ -175,6 +175,11 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_deauth_station();
             status_display_show_status("Deauth Start");
             return;
+        } else if (strcmp(argv[1], "-hsd") == 0) {
+            glog("Handshake+Deauth starting...\n");
+            wifi_manager_start_handshake_deauth();
+            status_display_show_status("HS+Deauth Start");
+            return;
         } else if (strcmp(argv[1], "-c") == 0) {
             glog("Channel Switch attack starting...\n");
             wifi_manager_start_channel_switch_attack();
@@ -207,7 +212,7 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
+    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
     status_display_show_status("Attack Usage");
 }
 
@@ -241,6 +246,7 @@ void handle_stop_deauth(int argc, char **argv) {
     (void)argv;
     wifi_manager_stop_deauth();
     wifi_manager_stop_deauth_station();
+    wifi_manager_stop_handshake_deauth();
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
     wifi_manager_stop_channel_switch_attack();

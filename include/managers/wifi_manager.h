@@ -309,6 +309,11 @@ void wifi_manager_start_channel_switch_attack(void);
 void wifi_manager_stop_channel_switch_attack(void);
 bool wifi_manager_is_channel_switch_attack_running(void);
 
+// Handshake + Deauth combined attack
+void wifi_manager_start_handshake_deauth(void);
+bool wifi_manager_stop_handshake_deauth(void);
+bool wifi_manager_handshake_deauth_is_running(void);
+
 // HTML buffer functions for evil portal
 void wifi_manager_set_html_from_uart(void);
 void wifi_manager_store_html_chunk(const char* data, size_t len, bool is_final);

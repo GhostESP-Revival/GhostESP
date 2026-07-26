@@ -135,6 +135,10 @@ void handle_stop_flipper(int argc, char **argv) {
         stopped_any = true;
     }
     wifi_manager_stop_deauth();
+    if (wifi_manager_stop_handshake_deauth()) {
+        glog("Stopped handshake+deauth attack.\n");
+        stopped_any = true;
+    }
     wifi_manager_stop_channel_switch_attack();
     wifi_manager_cancel_connect();
 
