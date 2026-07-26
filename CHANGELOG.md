@@ -47,6 +47,7 @@
 - Added a graphical Packet Visualizer with smooth color-filled per-channel activity, channel hopping, and custom channel selection
 - Added a responsive Channel Congestion chart with active-channel labels and scan summaries
 - Airspace Monitor now detects more attacks: deauth spoof/tool fingerprinting (reason code + sequence analysis), evil-twin APs, Karma/Mana, auth floods, and adaptive beacon-flood detection that self-tunes to the local RF density
+- Normalized WiFi TX buffer allocation and lwIP TCP window/mbox sizing across board configs, trimming redundant heap usage with no change to scan/deauth/sniffer behavior
 
 ### Wardriving
 - Refactored CSV logging to drain bounded batches asynchronously, keeping Wi-Fi, BLE, and GhostLink capture paths responsive during storage writes
