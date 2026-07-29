@@ -130,7 +130,11 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
 
     ESP_ELFSYM_EXPORT(__errno),
     ESP_ELFSYM_EXPORT(__getreent),
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    /* _ctype_ is the ctype lookup table that RISC-V newlib's isX()/toX() macros
+       index into. Xtensa newlib exposes no such symbol (its macros go through
+       __ctype_ptr__ instead), so referencing _ctype_ there fails to compile.
+       Only export it on RISC-V targets; the IDF<6 builds didn't need it at all. */
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && defined(CONFIG_IDF_TARGET_ARCH_RISCV)
     { "_ctype_", (void *)_ctype_ },
 #endif
 #ifdef __HAVE_LOCALE_INFO__
