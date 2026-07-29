@@ -7,6 +7,8 @@
 #include <stddef.h>
 
 #define DEFAULT_BAUD_RATE 115200
+#define COMM_COMMAND_END_STATUS_OK 0
+#define COMM_COMMAND_END_STATUS_DISPATCH_FAILED 1
 
 typedef enum {
     COMM_STATE_IDLE,
@@ -34,6 +36,9 @@ typedef struct {
 typedef void (*comm_command_callback_t)(const char* command, const char* data, void* user_data);
 typedef void (*comm_response_callback_t)(const uint8_t* data, size_t length, void* user_data);
 typedef void (*comm_data_callback_t)(const uint8_t* data, size_t length, void* user_data);
+/* Signals that the remote command callback returned. This is a dispatch
+ * boundary, not completion of asynchronous work started by the command. */
+typedef void (*comm_command_end_callback_t)(uint8_t status, void* user_data);
 
 
 #define COMM_MAX_STREAM_CHANNELS 12
@@ -64,6 +69,7 @@ comm_state_t esp_comm_manager_get_state(void);
 void esp_comm_manager_set_command_callback(comm_command_callback_t callback, void* user_data);
 void esp_comm_manager_set_response_callback(comm_response_callback_t callback, void* user_data);
 void esp_comm_manager_set_data_callback(comm_data_callback_t callback, void* user_data);
+void esp_comm_manager_set_command_end_callback(comm_command_end_callback_t callback, void* user_data);
 void esp_comm_manager_disconnect(void);
 void esp_comm_manager_deinit(void);
 bool esp_comm_manager_send_response(const uint8_t* data, size_t length);

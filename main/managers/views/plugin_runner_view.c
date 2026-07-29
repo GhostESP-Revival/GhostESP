@@ -10,7 +10,11 @@
 #include "gui/toast.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +25,9 @@ static char s_pending_app_id[PLUGIN_APP_ID_MAX];
 static lv_obj_t *s_root = NULL;
 static lv_obj_t *s_title = NULL;
 static lv_obj_t *s_output = NULL;
-static lv_timer_t *s_tick_timer = NULL;
+static TaskHandle_t s_tick_task = NULL;
+static SemaphoreHandle_t s_tick_stopped = NULL;
+static volatile bool s_tick_stop_requested = false;
 static lv_timer_t *s_launch_timer = NULL;
 /* Heap-allocated so no-PSRAM boards (e.g. CYDMicroUSB) don't put 2 KB of
  * scrollback into .dram0.bss and overflow the region. Allocated on view
@@ -152,24 +158,74 @@ static bool s_sd_eject_detected = false;
 
 static void plugin_runner_launch_pending(void);
 
-static void plugin_runner_tick_cb(lv_timer_t *timer) {
-    (void)timer;
-    if (s_sd_eject_detected) return;
-    plugin_loaded_app_t *loaded = plugin_loader_current();
-    if (!loaded || !loaded->running || loaded->state != PLUGIN_APP_STATE_RUNNING) return;
-    if (!sd_card_manager.is_initialized) {
-        ESP_LOGW(TAG, "SD card removed while app running, stopping");
-        s_sd_eject_detected = true;
-        if (loaded->app && loaded->app->on_stop) loaded->app->on_stop();
-        loaded->running = false;
-        loaded->state = PLUGIN_APP_STATE_LOADED;
-        display_manager_go_back();
-        return;
+static uint32_t plugin_runner_tick_interval(const plugin_loaded_app_t *loaded) {
+    if (loaded && loaded->manifest && loaded->manifest->tick_interval_ms) {
+        return loaded->manifest->tick_interval_ms;
     }
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    uint32_t elapsed_ms = loaded->last_tick_ms ? now_ms - loaded->last_tick_ms : PLUGIN_RUNNER_TICK_MS;
-    loaded->last_tick_ms = now_ms;
-    plugin_loader_tick(loaded, elapsed_ms);
+    return PLUGIN_RUNNER_TICK_MS;
+}
+
+static void plugin_runner_go_back_async(void *arg) {
+    (void)arg;
+    display_manager_go_back();
+}
+
+static void plugin_runner_tick_task(void *arg) {
+    plugin_loaded_app_t *loaded = (plugin_loaded_app_t *)arg;
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t interval = pdMS_TO_TICKS(plugin_runner_tick_interval(loaded));
+
+    while (!s_tick_stop_requested && loaded && loaded->running &&
+           loaded->state == PLUGIN_APP_STATE_RUNNING) {
+        if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
+            ESP_LOGW(TAG, "SD card removed while app running, stopping");
+            s_sd_eject_detected = true;
+            display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+            break;
+        }
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        uint32_t elapsed_ms = loaded->last_tick_ms
+                                  ? now_ms - loaded->last_tick_ms
+                                  : plugin_runner_tick_interval(loaded);
+        loaded->last_tick_ms = now_ms;
+        plugin_loader_tick(loaded, elapsed_ms);
+        if (!s_tick_stop_requested) vTaskDelayUntil(&last_wake, interval ? interval : 1);
+    }
+
+    s_tick_task = NULL;
+    if (s_tick_stopped) xSemaphoreGive(s_tick_stopped);
+    vTaskDeleteWithCaps(NULL);
+}
+
+static bool plugin_runner_start_tick(plugin_loaded_app_t *loaded) {
+    if (!loaded || !loaded->app || !loaded->app->on_tick || s_tick_task) return false;
+    if (!s_tick_stopped) s_tick_stopped = xSemaphoreCreateBinary();
+    if (!s_tick_stopped) return false;
+    while (xSemaphoreTake(s_tick_stopped, 0) == pdTRUE) {}
+    s_tick_stop_requested = false;
+    uint32_t stack_size = loaded->manifest && loaded->manifest->stack_size
+                              ? loaded->manifest->stack_size
+                              : 4096;
+    if (stack_size < 4096) stack_size = 4096;
+    bool psram_stack = true;
+    BaseType_t created = xTaskCreateWithCaps(plugin_runner_tick_task, "native_app_tick",
+                                             stack_size, loaded, 2, &s_tick_task,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (created != pdPASS) {
+        psram_stack = false;
+        created = xTaskCreateWithCaps(plugin_runner_tick_task, "native_app_tick",
+                                      stack_size, loaded, 2, &s_tick_task,
+                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (created != pdPASS) {
+        s_tick_task = NULL;
+        ESP_LOGE(TAG, "Failed to create native app tick task (%lu-byte PSRAM stack)",
+                 (unsigned long)stack_size);
+        return false;
+    }
+    ESP_LOGI(TAG, "Started native app tick task with %lu-byte %s stack",
+             (unsigned long)stack_size, psram_stack ? "PSRAM" : "internal");
+    return true;
 }
 
 void plugin_runner_set_app(const char *app_id) {
@@ -425,16 +481,11 @@ static void plugin_runner_launch_pending(void) {
         runner_show_load_error_toast(err);
         return;
     }
-    if (loaded->app && loaded->app->on_tick && !s_tick_timer) {
-        s_tick_timer = lv_timer_create(plugin_runner_tick_cb, PLUGIN_RUNNER_TICK_MS, NULL);
-    }
+    plugin_runner_start_tick(loaded);
 }
 
 void plugin_runner_view_create(void) {
-    if (s_tick_timer) {
-        lv_timer_del(s_tick_timer);
-        s_tick_timer = NULL;
-    }
+    plugin_runner_stop_tick();
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
@@ -449,9 +500,7 @@ void plugin_runner_view_create(void) {
         plugin_runner_view.root = s_root;
         display_manager_add_status_bar("SD App");
         if (loaded->app && loaded->app->on_resume) loaded->app->on_resume();
-        if (loaded->app && loaded->app->on_tick) {
-            s_tick_timer = lv_timer_create(plugin_runner_tick_cb, PLUGIN_RUNNER_TICK_MS, NULL);
-        }
+        plugin_runner_start_tick(loaded);
         return;
     }
     s_resume_from_keyboard_input = false;
@@ -506,10 +555,15 @@ void plugin_runner_view_create(void) {
 }
 
 void plugin_runner_stop_tick(void) {
-    if (s_tick_timer) {
-        lv_timer_del(s_tick_timer);
-        s_tick_timer = NULL;
+    TaskHandle_t task = s_tick_task;
+    if (!task) return;
+    if (task == xTaskGetCurrentTaskHandle()) {
+        s_tick_stop_requested = true;
+        return;
     }
+    s_tick_stop_requested = true;
+    if (s_tick_stopped) xSemaphoreTake(s_tick_stopped, portMAX_DELAY);
+    s_tick_task = NULL;
 }
 
 void plugin_runner_preserve_for_keyboard_input(void) {

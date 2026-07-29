@@ -24,6 +24,10 @@
 - Bounded catalog response buffering to protect heap availability during refreshes
 
 ### Native SD Apps & SDK
+- Added RGB565 canvas blits and per-app tick intervals for high-frame-rate native apps
+- Added ESP32-C5 GOT relocation support and build-time relocation validation for larger native apps
+- Added offset-based native app data and packaged-asset reads for streaming large files on JIT-mounted SD boards
+- Added the joystick-required Doom Port native app with a bundled, directly streamed Freedoom IWAD
 - Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
 - Fixed native app keyboard dialogs preserving the loaded app across the keyboard view, preventing callbacks into unloaded apps after submission
 - Normalized physical keyboard arrow keys for native SD app navigation
@@ -52,6 +56,9 @@
 ### Wardriving
 - Refactored CSV logging to drain bounded batches asynchronously, keeping Wi-Fi, BLE, and GhostLink capture paths responsive during storage writes
 - Fixed WiGLE headers for UART/JIT SD output, reliable JIT SD finalization, and hidden/32-byte/UTF-8 SSID handling
+- Fixed AP entries being silently dropped when a malformed beacon's DS Parameter Set IE reported a garbage channel number, now falls back to the radio's own channel instead
+- Removed console log spam on every UART-streamed CSV chunk during active wardriving
+- Added the actual error reason to the "Failed to write wardriving data to CSV buffer" log for easier diagnosis
 
 ### Infrared
 - Added transmit support for the NEC42, NEC42ext, and RC5X protocols, so all of Flipper's IR protocols can now be sent as well as learned
@@ -66,6 +73,7 @@
 ### SD Storage
 - Centralized all standard directory paths in `sd_card_manager.h` as `SD_DIR_*` macros so features share one source of truth
 - Boot now creates `sweeps/`, `ghostchi/pcaps/`, `ghostchi/sessions/`, `app_cache/`, `appdata/`, `scripts/`, `scriptdata/`, and `downloads/` at mount time, matching the directories active features already use
+- **Eliminated the long-standing Banshee C5 display/SD contention:** persistent shared SPI now allows SD card IO while the display continues rendering, without disruptive JIT mount handoffs
 
 ### GhostLink
 - Added `COMM_STREAM_CHANNEL_STORAGE` for peer-backed file IO, so an SD-less board (e.g. Banshee S3) can write files to its paired peer's SD card over GhostLink

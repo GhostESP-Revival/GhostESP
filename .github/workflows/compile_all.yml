@@ -179,7 +179,17 @@ jobs:
           if [ -f build/Ghost_ESP_IDF.elf ]; then
             cp build/Ghost_ESP_IDF.elf "$ARTIFACT_DIR/$ELF_FILE" || { echo "Failed to copy app elf"; exit 1; }
           fi
-          FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE=" sdkconfig.defaults | cut -d'"' -f2)
+          # Source flash mode/freq/size from the resolved build config so
+          # merge_bin's header re-stamp exactly matches what the binaries were
+          # compiled with. merge_bin does NOT recompute each image's SHA-256, so
+          # any mismatch here breaks the bootloader's per-boot image check (and a
+          # too-small size also makes partitions past that size unreachable).
+          get_cfg() { sed -nE "s/^#define $1 \"([^\"]*)\"/\1/p" build/config/sdkconfig.h; }
+          FLASH_MODE=$(get_cfg CONFIG_ESPTOOLPY_FLASHMODE)
+          FLASH_FREQ=$(get_cfg CONFIG_ESPTOOLPY_FLASHFREQ)
+          FLASH_SIZE=$(get_cfg CONFIG_ESPTOOLPY_FLASHSIZE)
+          FLASH_MODE=${FLASH_MODE:-dio}
+          FLASH_FREQ=${FLASH_FREQ:-40m}
           FLASH_SIZE=${FLASH_SIZE:-4MB}
           IDF_TARGET="${{ matrix.target.idf_target }}"
           if [ "$IDF_TARGET" = "esp32" ] || [ "$IDF_TARGET" = "esp32s2" ]; then
@@ -189,8 +199,8 @@ jobs:
           fi
           python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
-            --flash_mode dio \
-            --flash_freq 40m \
+            --flash_mode "$FLASH_MODE" \
+            --flash_freq "$FLASH_FREQ" \
             --flash_size "$FLASH_SIZE" \
             --target-offset 0x0 \
             "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \

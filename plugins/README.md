@@ -64,6 +64,20 @@ plugins/
 
 Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly recommended and required when `NATIVE_SD_APPS_REQUIRE_TARGET_MATCH` is enabled (default).
 
+### Hardware Requirements
+
+Use `"requires_features"` to prevent discovery/launch on unsupported input hardware. Supported values are `touchscreen`, `joystick` (or `dpad`), `encoder`, and `keyboard`.
+
+```json
+"requires_features": ["joystick"]
+```
+
+The App Gallery reports the missing requirement, and the loader rejects CLI/direct launches as well.
+
+### Tick Rate
+
+Apps with an `on_tick` callback run every 100 ms by default. Set `"tick_interval_ms"` to request a per-app interval from 16 to 1000 ms. Use this only for apps that need regular updates; Doom uses `28` ms to match its 35 Hz game tic.
+
 ### Permissions
 
 | Permission | Unlocks |
@@ -134,7 +148,7 @@ api->ui_button_create(root, "Run", on_run_clicked, NULL);
 api->ui_show_popup("My App", "Done");
 ```
 
-The UI layer provides screens, cards, labels, buttons, popups, detail views, options menus, scan status overlays, canvas drawing, arc/line widgets, animations, paged menus, input dialogs, flex layout, and theme color access. See the SDK header for the full surface.
+The UI layer provides screens, cards, labels, buttons, popups, detail views, options menus, scan status overlays, canvas drawing, RGB565 framebuffer blits with nearest-neighbor scaling, arc/line widgets, animations, paged menus, input dialogs, flex layout, and theme color access. See the SDK header for the full surface.
 
 The stable UI layer is intentionally decoupled from GhostESP's internal view code — apps stay source-compatible as firmware views change.
 

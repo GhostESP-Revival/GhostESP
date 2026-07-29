@@ -27,6 +27,19 @@ typedef struct {
 
 typedef struct {
     ghostesp_ui_obj_t canvas;
+    const uint16_t *pixels;
+    int32_t src_width;
+    int32_t src_height;
+    int32_t src_stride;
+    int32_t dst_x;
+    int32_t dst_y;
+    int32_t dst_width;
+    int32_t dst_height;
+    bool result;
+} canvas_blit_ctx_t;
+
+typedef struct {
+    ghostesp_ui_obj_t canvas;
     const ghostesp_point_t *points;
     int count;
     uint32_t hex_color;
@@ -479,6 +492,137 @@ bool plugin_api_ui_image_set_src(ghostesp_ui_obj_t img, const char *app_relative
     image_src_ctx_t ctx = { .obj = img, .path = full_path, .result = false };
     plugin_api_internal_run_sync(plugin_api_ui_image_set_src_now, &ctx);
     return ctx.result;
+}
+
+static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
+    canvas_blit_ctx_t *ctx = (canvas_blit_ctx_t *)arg;
+    lv_obj_t *canvas = (lv_obj_t *)ctx->canvas;
+    if (!canvas || !lv_obj_is_valid(canvas) || !ctx->pixels || ctx->src_width <= 0 ||
+        ctx->src_height <= 0 || ctx->src_stride < ctx->src_width || ctx->dst_width <= 0 ||
+        ctx->dst_height <= 0 || LV_COLOR_SIZE != 16) return;
+
+    lv_img_dsc_t *image = lv_canvas_get_img(canvas);
+    if (!image || !image->data || image->header.w <= 0 || image->header.h <= 0) return;
+
+    const int32_t canvas_width = image->header.w;
+    const int32_t canvas_height = image->header.h;
+    const int32_t left = ctx->dst_x < 0 ? 0 : ctx->dst_x;
+    const int32_t top = ctx->dst_y < 0 ? 0 : ctx->dst_y;
+    const int32_t right = ctx->dst_x + ctx->dst_width > canvas_width ? canvas_width : ctx->dst_x + ctx->dst_width;
+    const int32_t bottom = ctx->dst_y + ctx->dst_height > canvas_height ? canvas_height : ctx->dst_y + ctx->dst_height;
+    if (left >= right || top >= bottom) return;
+
+    uint16_t *destination = (uint16_t *)image->data;
+    const bool copy_rows = left == ctx->dst_x && right == ctx->dst_x + ctx->dst_width &&
+                           ctx->dst_width == ctx->src_width;
+    for (int32_t y = top; y < bottom; y++) {
+        int32_t source_y = (y - ctx->dst_y) * ctx->src_height / ctx->dst_height;
+        const uint16_t *source_row = ctx->pixels + source_y * ctx->src_stride;
+        uint16_t *destination_row = destination + y * canvas_width;
+        if (copy_rows) {
+#if LV_COLOR_16_SWAP
+            int32_t x = 0;
+            for (; x + 1 < ctx->src_width; x += 2) {
+                uint32_t pixels;
+                memcpy(&pixels, source_row + x, sizeof(pixels));
+                pixels = ((pixels & 0x00ff00ffu) << 8) | ((pixels & 0xff00ff00u) >> 8);
+                memcpy(destination_row + left + x, &pixels, sizeof(pixels));
+            }
+            for (; x < ctx->src_width; ++x) {
+                uint16_t pixel = source_row[x];
+                destination_row[left + x] = (uint16_t)(pixel << 8 | pixel >> 8);
+            }
+#else
+            memcpy(destination_row + left, source_row, (size_t)ctx->src_width * sizeof(uint16_t));
+#endif
+            continue;
+        }
+        for (int32_t x = left; x < right; x++) {
+            int32_t source_x = (x - ctx->dst_x) * ctx->src_width / ctx->dst_width;
+#if LV_COLOR_16_SWAP
+            uint16_t pixel = source_row[source_x];
+            destination_row[x] = (uint16_t)(pixel << 8 | pixel >> 8);
+#else
+            destination_row[x] = source_row[source_x];
+#endif
+        }
+    }
+    lv_obj_invalidate(canvas);
+    ctx->result = true;
+}
+
+bool plugin_api_ui_canvas_blit_rgb565(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                      int32_t src_width, int32_t src_height, int32_t src_stride,
+                                      int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height) {
+    if (!plugin_api_internal_has_ui_permission()) return false;
+    canvas_blit_ctx_t ctx = {
+        .canvas = canvas, .pixels = pixels, .src_width = src_width, .src_height = src_height,
+        .src_stride = src_stride, .dst_x = dst_x, .dst_y = dst_y,
+        .dst_width = dst_width, .dst_height = dst_height,
+    };
+    return plugin_api_internal_run_sync(plugin_api_ui_canvas_blit_rgb565_now, &ctx) && ctx.result;
+}
+
+/* Async blit: a rendering app that blocks on every frame's blit serializes
+   its own render against the UI task's compositing+flush, which roughly
+   doubles frame time. These let the app hand off a finished frame and get
+   straight back to rendering the next one. Only one blit may be in flight
+   (the app is expected to double-buffer), which also keeps the queued
+   context to a single allocation. */
+static volatile bool s_async_blit_pending = false;
+static SemaphoreHandle_t s_async_blit_done = NULL;
+
+static void plugin_api_ui_canvas_blit_async_cb(void *arg) {
+    canvas_blit_ctx_t *ctx = (canvas_blit_ctx_t *)arg;
+    plugin_api_ui_canvas_blit_rgb565_now(ctx);
+    free(ctx);
+    s_async_blit_pending = false;
+    if (s_async_blit_done) xSemaphoreGive(s_async_blit_done);
+}
+
+bool plugin_api_ui_canvas_blit_async_wait(uint32_t timeout_ms) {
+    if (!s_async_blit_pending) return true;
+    if (!s_async_blit_done) return false;
+    if (xSemaphoreTake(s_async_blit_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
+    /* Give it back so a second waiter (or the drain below) still sees a
+       consistent state; pending is the authoritative flag. */
+    xSemaphoreGive(s_async_blit_done);
+    return !s_async_blit_pending;
+}
+
+bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                            int32_t src_width, int32_t src_height, int32_t src_stride,
+                                            int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height) {
+    if (!plugin_api_internal_has_ui_permission()) return false;
+    if (s_async_blit_pending) return false;
+    if (!s_async_blit_done) {
+        s_async_blit_done = xSemaphoreCreateBinary();
+        if (!s_async_blit_done) return false;
+    }
+    canvas_blit_ctx_t *ctx = malloc(sizeof(*ctx));
+    if (!ctx) return false;
+    *ctx = (canvas_blit_ctx_t){
+        .canvas = canvas, .pixels = pixels, .src_width = src_width, .src_height = src_height,
+        .src_stride = src_stride, .dst_x = dst_x, .dst_y = dst_y,
+        .dst_width = dst_width, .dst_height = dst_height,
+    };
+    while (xSemaphoreTake(s_async_blit_done, 0) == pdTRUE) { /* drain stale signal */ }
+    s_async_blit_pending = true;
+    /* Runs inline if we're already on the UI task, which clears pending
+       before this returns — that's fine, it just degrades to synchronous. */
+    plugin_api_internal_run_async(plugin_api_ui_canvas_blit_async_cb, ctx);
+    return true;
+}
+
+bool plugin_api_ui_canvas_is_rgb565_native_byte_order(void) {
+    /* LV_COLOR_16_SWAP exchanges bytes on read/write so the canvas storage already
+       matches what the display DMA pushes to the panel. Apps may then fill their
+       RGB565 framebuffer directly in screen byte order. */
+#if LV_COLOR_16_SWAP
+    return true;
+#else
+    return false;
+#endif
 }
 
 static void plugin_api_ui_image_set_builtin_now(void *arg) {

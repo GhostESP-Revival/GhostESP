@@ -716,15 +716,38 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
         boot_offset = "0x1000" if target['idf_target'] in ["esp32", "esp32s2"] else "0x0"
         partition_offset = "0x8000"
         firmware_offset = "0x10000"
+        import re
         import sys
+
+        # Source flash mode/freq/size from the resolved build config so merge_bin
+        # re-stamps the image headers with the exact values the binaries were
+        # compiled with. merge_bin does NOT recompute each image's SHA-256, so a
+        # mismatch here silently breaks the bootloader's per-boot image check
+        # (and a too-small size makes partitions past that size unreachable).
+        def _resolved_cfg(key):
+            sdkconfig_h = os.path.join("build", "config", "sdkconfig.h")
+            try:
+                with open(sdkconfig_h, "r", encoding="utf-8") as fh:
+                    m = re.search(r'^#define\s+%s\s+"([^"]*)"' % re.escape(key),
+                                  fh.read(), re.MULTILINE)
+                if m:
+                    return m.group(1)
+            except OSError:
+                pass
+            return None
+
+        flash_mode = _resolved_cfg("CONFIG_ESPTOOLPY_FLASHMODE") or "dio"
+        flash_freq = _resolved_cfg("CONFIG_ESPTOOLPY_FLASHFREQ") or "40m"
+        flash_size = _resolved_cfg("CONFIG_ESPTOOLPY_FLASHSIZE") or "4MB"
+
         merge_cmd = [
             sys.executable, "-m", "esptool", 
             "--chip", target['idf_target'],
             "merge-bin",
             "-o", merged_bin_path,
-            "--flash-mode", "dio",
-            "--flash-freq", "40m",
-            "--flash-size", "4MB",
+            "--flash-mode", flash_mode,
+            "--flash-freq", flash_freq,
+            "--flash-size", flash_size,
             boot_offset, bootloader_bin,
             partition_offset, partition_bin,
             firmware_offset, firmware_bin

@@ -73,7 +73,8 @@ typedef enum {
     PACKET_TYPE_RESPONSE = 0x05,
     PACKET_TYPE_PING = 0x06,
     PACKET_TYPE_PONG = 0x07,
-    PACKET_TYPE_STREAM = 0x08
+    PACKET_TYPE_STREAM = 0x08,
+    PACKET_TYPE_COMMAND_END = 0x09
 } packet_type_t;
 
 typedef enum {
@@ -177,6 +178,8 @@ static comm_response_callback_t s_response_callback = NULL;
 static void* s_response_callback_user_data = NULL;
 static comm_data_callback_t s_data_callback = NULL;
 static void* s_data_callback_user_data = NULL;
+static comm_command_end_callback_t s_command_end_callback = NULL;
+static void* s_command_end_callback_user_data = NULL;
 static uart_port_t s_uart_num = UART_NUM_1; /* selected UART for dualcomm */
 
 // Forward declarations for functions referenced before their definitions
@@ -196,6 +199,7 @@ static bool queue_received_command(esp_comm_manager_t* comm, const char* command
 static void drain_command_queue(QueueHandle_t queue);
 static void reset_command_stream(esp_comm_manager_t* comm);
 static void release_command_stream(esp_comm_manager_t* comm);
+static bool send_command_end_packet(uint8_t status);
 
 static inline void lock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
@@ -447,6 +451,7 @@ static void handle_command_stream_data(esp_comm_manager_t* comm, const uint8_t* 
                 comm->remote_output_capture = true;
                 if (!queue_command_line(comm, comm->command_stream_buf)) {
                     printf("Stream command dropped\n");
+                    (void)send_command_end_packet(COMM_COMMAND_END_STATUS_DISPATCH_FAILED);
                 }
             }
             reset_command_stream(comm);
@@ -463,6 +468,7 @@ static void handle_command_stream_data(esp_comm_manager_t* comm, const uint8_t* 
             printf("Stream command too long\n");
             reset_command_stream(comm);
             comm->command_stream_discarding = true;
+            (void)send_command_end_packet(COMM_COMMAND_END_STATUS_DISPATCH_FAILED);
             continue;
         }
         comm->command_stream_buf[comm->command_stream_len++] = (char)b;
@@ -576,6 +582,19 @@ static bool send_packet(const comm_packet_t* packet) {
         ? pdMS_TO_TICKS(100)
         : pdMS_TO_TICKS(5);
     return send_packet_internal(packet, wait);
+}
+
+static bool send_command_end_packet(uint8_t status) {
+    comm_packet_t packet = {0};
+    packet.start_byte = PACKET_START_BYTE;
+    packet.type = PACKET_TYPE_COMMAND_END;
+    packet.length = 1;
+    packet.data[0] = status;
+    if (!send_packet(&packet)) {
+        printf("Command dispatch end packet dropped (status=%u)\n", (unsigned)status);
+        return false;
+    }
+    return true;
 }
 
 static void tx_task(void* arg) {
@@ -981,7 +1000,9 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     data[data_len] = '\0';
                 }
 
-                (void)queue_received_command(comm, command, data[0] ? data : NULL);
+                if (!queue_received_command(comm, command, data[0] ? data : NULL)) {
+                    (void)send_command_end_packet(COMM_COMMAND_END_STATUS_DISPATCH_FAILED);
+                }
             }
             break;
 
@@ -1163,6 +1184,16 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
             }
             break;
 
+        case PACKET_TYPE_COMMAND_END:
+            if (comm->state == COMM_STATE_CONNECTED && packet->length >= 1) {
+                comm_command_end_callback_t callback = s_command_end_callback;
+                void* user_data = s_command_end_callback_user_data;
+                if (callback) {
+                    callback(packet->data[0], user_data);
+                }
+            }
+            break;
+
         default:
             printf("Unknown packet type: 0x%02x\n", packet->type);
             break;
@@ -1181,6 +1212,9 @@ static void command_executor_task(void* arg) {
                 bool was_remote = esp_comm_manager_is_remote_command();
                 esp_comm_manager_set_remote_command_flag(true);
                 comm->command_callback(received_cmd.command, data, comm->callback_user_data);
+                /* This only marks command callback return. Commands may have
+                 * started asynchronous work that is still running. */
+                (void)send_command_end_packet(COMM_COMMAND_END_STATUS_OK);
                 // Restore the previous remote command flag state
                 esp_comm_manager_set_remote_command_flag(was_remote);
             }
@@ -1794,6 +1828,11 @@ void esp_comm_manager_set_response_callback(comm_response_callback_t callback, v
 void esp_comm_manager_set_data_callback(comm_data_callback_t callback, void* user_data) {
     s_data_callback = callback;
     s_data_callback_user_data = user_data;
+}
+
+void esp_comm_manager_set_command_end_callback(comm_command_end_callback_t callback, void* user_data) {
+    s_command_end_callback = callback;
+    s_command_end_callback_user_data = user_data;
 }
 
 void esp_comm_manager_set_remote_command_flag(bool is_remote) {

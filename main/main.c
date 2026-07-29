@@ -496,6 +496,7 @@ static void splash_boot_step_done(uint32_t step) {
 
 static void boot_app_discovery_task(void *arg) {
     (void)arg;
+    ESP_LOGI(TAG, "Boot app discovery started");
 #ifdef CONFIG_WITH_SCREEN
     plugin_manager_set_progress_cb(splash_plugin_progress_cb, NULL);
     boot_status_set_progress(-1.0f, "Checking apps...");
@@ -503,6 +504,7 @@ static void boot_app_discovery_task(void *arg) {
     if (plugin_manager_reload() < 0) {
         ESP_LOGW(TAG, "Boot plugin reload failed: %s", plugin_manager_last_error());
     }
+    ESP_LOGI(TAG, "Boot app discovery finished (%d apps)", plugin_manager_count());
 #ifdef CONFIG_WITH_SCREEN
     plugin_manager_set_progress_cb(NULL, NULL);
     splash_boot_step_done(BOOT_DONE_PLUGIN);
@@ -574,6 +576,7 @@ static void deferred_sd_init_task(void *arg) {
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
+    splash_require_completion();
     asset_pack_set_progress_cb(splash_asset_pack_progress_cb, NULL);
     boot_status_set_progress(0.0f, "Loading asset pack...");
     esp_err_t asset_err = asset_pack_load_active();

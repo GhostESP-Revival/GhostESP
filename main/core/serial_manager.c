@@ -96,6 +96,11 @@ int serial_manager_write_bytes(const void *data, size_t len) {
 
 // Cursor position tracking
 static int cursor_position = 0;
+// Which physical input last contributed to the in-progress serial_buffer line:
+// -1 = none yet, 0 = wired UART, 1 = USB-JTAG console. Both inputs share one
+// line buffer, so a byte arriving from a different source than the one
+// currently mid-line must not be appended to it (see serial_task()).
+static int8_t last_input_source = -1;
 
 // Command history instance
 EXT_RAM_BSS_ATTR static CommandHistory command_history;
@@ -710,6 +715,7 @@ void serial_task(void *pvParameter) {
       hwm_log_counter = 0;
     }
     int length = 0;
+    int8_t read_source = 0; // 0 = wired UART, 1 = USB-JTAG
 
     // Read data from the main UART (if not disabled or temporarily handed off)
     if (!s_uart_disabled && !s_uart_paused) {
@@ -720,10 +726,24 @@ void serial_task(void *pvParameter) {
     if (length <= 0) {
       length =
           usb_serial_jtag_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
+      if (length > 0) read_source = 1;
     }
 #endif
 
     if (length > 0) {
+      // The wired UART (Flipper) and the USB-JTAG console share serial_buffer.
+      // If a line is already in progress from the other source, discard it
+      // instead of letting these bytes append onto it and form a bogus
+      // merged command (e.g. a typed-but-unsent "startwd" plus an
+      // app-triggered "stop\n" becoming "startwdstop").
+      if (index > 0 && last_input_source != -1 && last_input_source != read_source) {
+        memset(serial_buffer, 0, sizeof(serial_buffer));
+        index = 0;
+        cursor_position = 0;
+        arrow_state = ARROW_STATE_NONE;
+      }
+      last_input_source = read_source;
+
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
 

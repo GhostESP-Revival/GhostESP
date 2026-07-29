@@ -1035,7 +1035,6 @@ static esp_err_t csv_write_chunk_to_sink(const char *data, size_t len) {
         }
 
         glog_set_defer(1);
-        glog("Streaming CSV buffer over UART\n");
         const char *mark_begin = "[BUF/BEGIN]";
         const char *mark_close = "[BUF/CLOSE]";
         size_t mark_begin_len = strlen(mark_begin);

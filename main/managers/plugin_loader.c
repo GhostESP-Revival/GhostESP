@@ -219,6 +219,7 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     }
 
     const ghostesp_api_t *api = plugin_api_get(manifest->id,
+                                               manifest->base_path,
                                                manifest->permissions,
                                                manifest->memory_limit,
                                                manifest->allow_absolute_storage);

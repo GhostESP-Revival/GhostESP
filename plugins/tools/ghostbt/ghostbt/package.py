@@ -103,7 +103,8 @@ def package_app(
         gapp_path = dist_root / f"{app_id}-{version}-{target}.gapp"
         if gapp_path.exists():
             gapp_path.unlink()
-        write_gapp(package_dir, gapp_path)
+        store_prefixes = ("assets/",) if manifest.get("direct_read_assets") else ()
+        write_gapp(package_dir, gapp_path, store_prefixes=store_prefixes)
         print(gapp_path)
         return gapp_path
     else:

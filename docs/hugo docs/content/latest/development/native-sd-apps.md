@@ -88,9 +88,10 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `storage_scope` | No | `"app"` (default — scoped to `/mnt/ghostesp/appdata/<id>/`) or `"ghostesp"` (absolute paths under `/mnt/ghostesp/`). |
 | `permissions` | No | Array of permission strings (see below). Unknown permission names make the manifest invalid. |
 | `memory_limit` | No | Advisory limit in bytes for `app_malloc`/`app_calloc` tracked allocations. |
-| `stack_size` | No | Advisory stack size hint in bytes. |
+| `stack_size` | No | Advisory stack size hint in bytes. Also used as the native app tick task's stack size when set (minimum 4096). |
+| `tick_interval_ms` | No | Interval in ms between `on_tick` calls, `16`-`1000`. Defaults to `100` when unset. Use a small value (e.g. `28` for a 35 Hz game loop) only for apps that need frequent updates — every app with `on_tick` gets its own dedicated FreeRTOS task at this interval. |
 | `requires_psram` | No | If `true`, loader additionally checks that PSRAM is available (all native SD apps already require PSRAM at a baseline). Apps with this flag are hidden from the gallery on no-PSRAM boards. |
-| `requires_features` | No | Array of required physical inputs: `touchscreen`, `dpad` (or `joystick`), `encoder`, and `keyboard`. The app remains visible on unsupported hardware; selecting it shows a requirement toast and does not launch it. Unknown feature names make the manifest invalid. |
+| `requires_features` | No | Array of required physical inputs: `touchscreen` (or `touch`), `dpad` (or `joystick`), `encoder`, and `keyboard` (or `physical_keyboard`). The app remains visible on unsupported hardware; selecting it shows a requirement toast and does not launch it. Unknown feature names make the manifest invalid. |
 | `icon` | No | Path relative to app folder (raw RGB565 binary). |
 | `icon_width` | No | Icon pixel width. |
 | `icon_height` | No | Icon pixel height. |
@@ -166,13 +167,15 @@ Load → on_start() → [on_tick() / on_input()] → on_pause() / on_resume() �
 | Callback | When |
 |----------|------|
 | `on_start()` | After successful load and validation. Set up UI here. |
-| `on_tick(uint32_t elapsed_ms)` | Periodic tick (interval set by host UI). Update animations, polls. |
+| `on_tick(uint32_t elapsed_ms)` | Periodic tick, runs on its own FreeRTOS task (not the UI/LVGL task) at `tick_interval_ms` (default 100 ms). Update animations, polls, game loops. |
 | `on_input(const ghostesp_input_event_t *event)` | User input (keys, encoder, touch). |
 | `on_pause()` | App loses foreground (e.g. settings overlay). |
 | `on_resume()` | App regains foreground. |
 | `on_stop()` | App is being unloaded. Free resources, save state. Callback runs before `dlclose`. |
 
-Call `api->app_exit()` from your app to request a clean shutdown.
+Because `on_tick` runs off the UI task, calls into the UI API from it still marshal onto the LVGL task under the hood and block until applied — for high frame-rate rendering, use the async canvas blit (below) instead of a synchronous UI call every tick.
+
+Call `api->app_exit()` from your app to request a clean shutdown, or `api->request_exit()` to immediately back out of the app's screen (equivalent to pressing the hardware back button) — useful from a context outside your own callbacks where the cooperative `on_stop` flow doesn't apply.
 
 The host then releases app-owned API resources before unloading the app binary. This includes managed tasks, sockets, event subscriptions, GPIO interrupts, PWM channels, SPI devices, and active radio capture state. Apps must still stop work in `on_stop()` so their own state is consistent before that cleanup runs.
 
@@ -230,6 +233,7 @@ const char *(*app_data_path)(void);
 uint8_t     (*settings_get_theme)(void);
 const char *(*settings_get_device_name)(void);
 void        (*app_exit)(void);
+void        (*request_exit)(void);
 bool        (*has_permission)(const char *permission);
 bool        (*has_feature)(const char *feature);
 ```
@@ -405,6 +409,28 @@ void (*ui_canvas_draw_line)(ghostesp_ui_obj_t canvas, const ghostesp_point_t *pt
 void (*ui_canvas_draw_arc)(ghostesp_ui_obj_t canvas, int32_t cx, int32_t cy, int32_t r, int32_t start_angle, int32_t end_angle, uint32_t hex_color, int32_t width);
 ```
 
+#### RGB565 Framebuffer Blits
+
+For apps that render their own framebuffer (emulators, games) rather than drawing primitives one at a time:
+
+```c
+bool (*ui_canvas_blit_rgb565)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                              int32_t src_width, int32_t src_height, int32_t src_stride,
+                              int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+bool (*ui_canvas_is_rgb565_native_byte_order)(void);
+
+bool (*ui_canvas_blit_rgb565_async)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                    int32_t src_width, int32_t src_height, int32_t src_stride,
+                                    int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
+```
+
+`ui_canvas_blit_rgb565` copies a raw RGB565 buffer into a canvas, nearest-neighbor scaling from `src_width`x`src_height` (row `src_stride` pixels apart) into a `dst_width`x`dst_height` region at `(dst_x, dst_y)`, clipped to the canvas bounds. Requires `ui` permission.
+
+`ui_canvas_is_rgb565_native_byte_order` reports whether the canvas's internal storage already matches the display panel's native RGB565 byte order. When it returns `true`, fill your source buffer directly in screen byte order and skip any manual swap — the blit still handles byte-swapping internally either way, this is purely an optimization hint for apps doing their own pixel packing upstream.
+
+`ui_canvas_blit_rgb565_async` queues the same blit on the UI task and returns immediately instead of blocking until it's applied — a rendering loop that blits synchronously every frame serializes its own render against the UI task's compositing/flush, which roughly halves achievable frame rate. Only one async blit may be outstanding at a time (it returns `false` if one is already queued), and **`pixels` must stay valid and unmodified until the blit completes** — render into a second buffer, don't touch the one just handed over. Call `ui_canvas_blit_async_wait(timeout_ms)` before reusing that buffer; it returns `true` once no blit is outstanding (or immediately if none ever was).
+
 ### Animations
 
 ```c
@@ -538,6 +564,24 @@ bool    (*app_storage_mkdir_recursive)(const char *path);
 
 Absolute storage utilities follow the same absolute-storage manifest rules as `storage_*`; app-scoped utilities stay under `/mnt/ghostesp/appdata/<app_id>/`.
 
+### Offset Reads & Asset Streaming (`storage` Permission)
+
+For apps that stream large files in pieces (e.g. reading WAD lumps or sprite sheets on demand) instead of loading the whole thing into memory:
+
+```c
+int (*storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int (*app_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int (*asset_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int64_t (*asset_storage_size)(const char *path);
+bool (*asset_path)(const char *path, char *out, size_t out_len);
+bool (*asset_session_begin)(void);
+void (*asset_session_end)(void);
+```
+
+`storage_read_at` and `app_storage_read_at` are offset-seeking variants of `storage_read`/`app_storage_read`, following the same absolute/app-scoped path rules. `asset_storage_read_at` reads from a path under the app's `assets/` folder — but transparently, some assets may never be extracted to the SD cache at all: if the app's `.gapp` package was materialized with those assets left packed, `asset_storage_read_at` reads straight out of the installed `.gapp` archive at the recorded byte offset instead. Use `asset_storage_size` to get an asset's length regardless of which of the two cases applies — don't assume a real file exists on disk at the path `asset_path()` returns.
+
+Bracket a run of many small reads against the same file with `asset_session_begin()`/`asset_session_end()`. Without a session, every `*_read_at` call opens and closes the file fresh; inside a session, the file handle for the most recently touched path is kept open across calls, which matters when per-read `fopen`/`fclose` overhead would otherwise dominate frame time (e.g. a game reading several small lumps every tick). `asset_session_begin` also holds the SD card mounted (relevant on JIT-mount boards) for the duration — always pair it with `asset_session_end`, including on error paths.
+
 ### WiFi
 
 ```c
@@ -634,6 +678,29 @@ uint32_t (*input_buttons_state)(void);
 ```
 
 Permissions: `power`, `display`, and `input`. `input_buttons_state` returns bit 0-4 for left/select/up/right/down.
+
+### Input Snapshot (`input` Permission)
+
+`input_buttons_state` only reports which buttons are *currently* held. For a game loop that needs press/release edges without missing a transition between polls:
+
+```c
+#define GHOSTESP_BUTTON_LEFT   (1u << 0)
+#define GHOSTESP_BUTTON_SELECT (1u << 1)
+#define GHOSTESP_BUTTON_UP     (1u << 2)
+#define GHOSTESP_BUTTON_RIGHT  (1u << 3)
+#define GHOSTESP_BUTTON_DOWN   (1u << 4)
+
+typedef struct {
+    uint32_t held;
+    uint32_t pressed;
+    uint32_t released;
+    uint32_t last_change_ms;
+} ghostesp_input_snapshot_t;
+
+bool (*input_snapshot)(ghostesp_input_snapshot_t *out);
+```
+
+`held` is the current bitmask (same bits as `input_buttons_state`). `pressed`/`released` are edge bitmasks accumulated since the *last* `input_snapshot` call — a button pressed and released between two polls still sets its bit in both, so nothing gets lost even if `on_tick` isn't called often enough to catch every raw event. `last_change_ms` is the host uptime (ms) of the most recent state change. Both edge masks are cleared each time `input_snapshot` is called, so read it once per tick rather than from multiple call sites.
 
 ### App Tasks (`tasks` Permission)
 

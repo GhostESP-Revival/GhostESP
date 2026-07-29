@@ -2694,7 +2694,8 @@ bool ghostscript_runtime_start(ghostscript_runtime_t *rt) {
         ghostscript_manager_sd_end(display_was_suspended);
         return false;
     }
-    rt->api = plugin_api_get(rt->manifest.id, rt->manifest.permissions, rt->manifest.memory_limit, rt->manifest.allow_absolute_storage);
+    rt->api = plugin_api_get(rt->manifest.id, rt->manifest.base_path, rt->manifest.permissions,
+                             rt->manifest.memory_limit, rt->manifest.allow_absolute_storage);
     rt->api_active = rt->api != NULL;
     if (!rt->api) {
         snprintf(rt->error, sizeof(rt->error), "app API busy for script: %.90s", rt->manifest.id);

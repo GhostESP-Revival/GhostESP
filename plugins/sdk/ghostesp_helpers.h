@@ -710,6 +710,7 @@ static inline void gh_page_clear(int *depth) {
  * Note: This goes at the bottom of your .c file, outside any function.
  * ============================================================ */
 #define GHOSTESP_APP_INIT(app_var, app_id_str, min_api_size)               \
+    __attribute__((visibility("default")))                                \
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {    \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;  \
         if (ha->struct_size < (min_api_size)) {                            \
@@ -722,6 +723,7 @@ static inline void gh_page_clear(int *depth) {
 
 /* Variant that also sets the global api pointer */
 #define GHOSTESP_APP_INIT_WITH_API(app_var, api_ptr, app_id_str, min_api_size) \
+    __attribute__((visibility("default")))                                    \
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {        \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;      \
         if (ha->struct_size < (min_api_size)) {                                \

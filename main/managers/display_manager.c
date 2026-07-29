@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "lvgl_helpers.h"
 #include "managers/sd_card_manager.h"
+#include "managers/plugin_api.h"
 #include "managers/settings_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "gui/theme_palette_api.h"
@@ -2246,7 +2247,9 @@ void display_manager_resume_lvgl_task(void) {
    * unbalanced resume calls (e.g. the lightweight shared-SPI guard path) are
    * safe. */
   s_lvgl_gate_closed = false;
-  vTaskResume(lvgl_task_handle);
+  if (xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
+    vTaskResume(lvgl_task_handle);
+  }
 }
 
 static void display_manager_set_backlight_raw(uint8_t percentage) {
@@ -2990,69 +2993,43 @@ void hardware_input_task(void *pvParameters) {
     }
 #else
     static uint32_t joystick_repeat_next_ms[5] = {0};
+    static bool joystick_reported_pressed[5] = {false};
     for (int i = 0; i < 5; i++) {
       if (joysticks[i].pin < 0) continue;
 
-      // For the select button (index 1), check release BEFORE press so that
-      // joystick_just_released() sees the state before joystick_just_pressed()
-      // clears it. Release events are only sent for index 1.
-      if (i == 1) {
-        if (joystick_just_released(&joysticks[1])) {
-          InputEvent event;
-          event.type = INPUT_TYPE_JOYSTICK;
-          event.data.joystick_index = 1;
-          event.data.joystick_pressed = false;
-          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
-          continue;
-        } else if (joystick_just_pressed(&joysticks[1])) {
+      bool pressed_now = joystick_get_button_state(&joysticks[i]);
+      plugin_api_record_joystick_state((unsigned int)i, pressed_now);
+      if (pressed_now != joystick_reported_pressed[i]) {
+        joystick_reported_pressed[i] = pressed_now;
+        ESP_LOGI(TAG, "Joystick %d %s", i, pressed_now ? "pressed" : "released");
+        InputEvent event;
+        event.type = INPUT_TYPE_JOYSTICK;
+        event.data.joystick_index = i;
+        event.data.joystick_pressed = pressed_now;
+        if (pressed_now) {
           last_touch_time = xTaskGetTickCount();
           if (is_backlight_dimmed || is_backlight_off) {
             set_backlight_brightness(100);
             is_backlight_dimmed = false;
             is_backlight_off = false;
           } else {
-            InputEvent event;
-            event.type = INPUT_TYPE_JOYSTICK;
-            event.data.joystick_index = 1;
-            event.data.joystick_pressed = true;
             if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
               ESP_LOGE(TAG, "Failed to send joystick input to queue\n");
             }
           }
-          continue;
-        }
-        continue;
-      }
-
-      if (joystick_just_pressed(&joysticks[i])) {
-        last_touch_time = xTaskGetTickCount();
-
-        if (is_backlight_dimmed || is_backlight_off) {
-          set_backlight_brightness(100);
-          is_backlight_dimmed = false;
-          is_backlight_off = false;
+          if (i != 1) {
+            joystick_repeat_next_ms[i] = dm_now_ms() + get_joystick_repeat_initial_delay();
+          }
+        } else {
           joystick_repeat_next_ms[i] = 0;
-          continue;
-        }
-
-        InputEvent event;
-        event.type = INPUT_TYPE_JOYSTICK;
-        event.data.joystick_index = i;
-        event.data.joystick_pressed = true;
-
-        if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
-          ESP_LOGE(TAG, "Failed to send joystick input to queue\n");
-        }
-
-        if (i == 0 || i == 2 || i == 3 || i == 4) {
-          joystick_repeat_next_ms[i] = dm_now_ms() + get_joystick_repeat_initial_delay();
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
         }
         continue;
       }
 
       if (i != 0 && i != 2 && i != 3 && i != 4) continue;
 
-      if (!joystick_get_button_state(&joysticks[i])) {
+      if (!pressed_now) {
         joystick_repeat_next_ms[i] = 0;
         continue;
       }
@@ -3446,11 +3423,12 @@ void processEvent() {
         processed++;
         continue;
       }
-      // Joystick release events are only meaningful in the keyboard view and trackpad view.
-      // All other views only check joystick_index and would double-fire on release.
+      // Keyboard, trackpad, and native apps need release events for held controls.
+      // Other views only check joystick_index and would double-fire on release.
       if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
           strcmp(view_name, "Keyboard Screen") != 0 &&
-          strcmp(view_name, "Trackpad") != 0) {
+          strcmp(view_name, "Trackpad") != 0 &&
+          strcmp(view_name, "SD App") != 0) {
         processed++;
         continue;
       }
@@ -3515,7 +3493,8 @@ void processEvent() {
           // drop live move samples for views that still treat pressed touches as clicks
         } else if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
             strcmp(view_name, "Keyboard Screen") != 0 &&
-            strcmp(view_name, "Trackpad") != 0) {
+            strcmp(view_name, "Trackpad") != 0 &&
+            strcmp(view_name, "SD App") != 0) {
           // drop release event for non-keyboard/non-trackpad views
         } else if (event.type == INPUT_TYPE_KEYBOARD && event.is_touch_move) {
           // keyboard release: stop global repeat, forward only to Trackpad

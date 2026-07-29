@@ -1314,7 +1314,9 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
     esp_err_t ret = csv_write_data_to_buffer(data);
     if (ret != ESP_OK) {
         if (ret != ESP_ERR_TIMEOUT && ret != ESP_ERR_NO_MEM) {
-            ESP_LOGE(GPS_TAG, "Failed to write wardriving data to CSV buffer");
+            ESP_LOGE(GPS_TAG,
+                     "Failed to write wardriving data to CSV buffer: %s (ble=%d channel=%d)",
+                     esp_err_to_name(ret), data->ble_data.is_ble_device, data->channel);
         }
         return ret;
     }

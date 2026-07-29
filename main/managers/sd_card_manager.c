@@ -27,6 +27,11 @@
 #include "gui/toast.h"
 #include "lvgl_tft/disp_spi.h"
 
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
+#include "esp_rom_gpio.h"
+#include "soc/gpio_sig_map.h"
+#endif
+
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
 
@@ -252,6 +257,37 @@ static int sd_spi_host_id(void) {
 #else
   return SPI2_HOST;
 #endif
+}
+
+static bool sd_card_uses_experimental_shared_spi(void) {
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
+#else
+  return false;
+#endif
+}
+
+static esp_err_t sd_card_route_experimental_shared_spi(void) {
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (!sd_card_uses_experimental_shared_spi()) {
+    return ESP_OK;
+  }
+
+  esp_err_t ret = gpio_set_direction(sd_card_manager.spi_mosi_pin, GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) return ret;
+  ret = gpio_set_direction(sd_card_manager.spi_clk_pin, GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) return ret;
+  ret = gpio_set_direction(sd_card_manager.spi_miso_pin, GPIO_MODE_INPUT);
+  if (ret != ESP_OK) return ret;
+
+  /* SPI2 is already initialized on the display pins. Mirror its output
+   * signals to the SD pins and select the SD pin as the host's MISO input. */
+  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_mosi_pin, FSPID_OUT_IDX, false, false);
+  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_clk_pin, FSPICLK_OUT_IDX, false, false);
+  esp_rom_gpio_connect_in_signal(sd_card_manager.spi_miso_pin, FSPIQ_IN_IDX, false);
+  ESP_LOGW(TAG, "Experimental persistent shared SPI enabled; TFT and SD remain attached to SPI2");
+#endif
+  return ESP_OK;
 }
 
 
@@ -669,6 +705,7 @@ esp_err_t sd_card_init(void) {
 #endif
 
   bool gating_template = false;
+  bool experimental_shared_spi = sd_card_uses_experimental_shared_spi();
   /* On classic-ESP32 boards whose SD owns a separate SPI3 bus (every CYD
    * variant), SD genuinely *owns* that bus (bus_init_success == true).
    * See sd_keep_spi_bus_for_board() for why freeing it freezes the display;
@@ -681,7 +718,7 @@ esp_err_t sd_card_init(void) {
   bool display_was_suspended = false;
   /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
    * the panel. Same-pin shared SPI boards like TEmbedC1101 keep the old path. */
-  if (gating_template || display_rebind_required) {
+  if (!experimental_shared_spi && (gating_template || display_rebind_required)) {
     display_was_suspended = display_spi_suspend_for_sd();
     if (display_was_suspended) {
       /* Full suspend removed the panel device. Do not resume the LVGL task via
@@ -776,6 +813,9 @@ esp_err_t sd_card_init(void) {
 #elif defined(CONFIG_SHARED_TFT_SD_SPI)
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
+  if (experimental_shared_spi) {
+    host.max_freq_khz = 10000;    /* Persistent routing avoids JIT churn; use a conservative faster clock. */
+  }
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
 
@@ -785,7 +825,15 @@ esp_err_t sd_card_init(void) {
     .sclk_io_num = sd_card_manager.spi_clk_pin,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    .max_transfer_sz = 512,
+    /* Bulk transfers (app-package materialize, large asset writes) were
+       chopped into 512-byte SPI transactions, each paying fixed CS-toggle/
+       setup overhead regardless of clock speed. Raised to 2048 (not higher)
+       since this board's internal RAM is extremely tight at the exact point
+       large writes happen (as little as ~6KB free during boot materialize
+       per observed logs) and the sdspi driver's per-transaction DMA buffer
+       scales with this cap; left the SPI clock itself untouched since it was
+       deliberately capped low after past timeout issues on this hardware. */
+    .max_transfer_sz = 2048,
   };
   /* The SD SPI device configures CS when it attaches. Preconfiguring it here
    * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
@@ -819,6 +867,14 @@ esp_err_t sd_card_init(void) {
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
+  }
+
+  esp_err_t route_ret = sd_card_route_experimental_shared_spi();
+  if (route_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure experimental shared SPI routing: %s",
+             esp_err_to_name(route_ret));
+    sd_spi_bus_release_if_tracked();
+    return route_ret;
   }
 #elif !defined(CONFIG_USE_TDECK)
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -954,7 +1010,7 @@ esp_err_t sd_card_init(void) {
 
   sd_card_setup_directory_structure();
 
-  if (gating_template) {
+  if (gating_template && !experimental_shared_spi) {
     sd_card_update_cached_stats();
     sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
     if (display_was_suspended) {
@@ -1025,7 +1081,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
     .miso_io_num = sd_card_manager.spi_miso_pin,
     .sclk_io_num = sd_card_manager.spi_clk_pin,
-    .max_transfer_sz = 512,
+    .max_transfer_sz = 2048,  /* see rationale in sd_card_init's bus_config above */
   };
 
   /* The SD SPI device configures CS when it attaches. Preconfiguring it here
@@ -1127,6 +1183,9 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
 }
 
 bool sd_card_needs_jit_mount(void) {
+    if (sd_card_uses_experimental_shared_spi()) {
+        return false;
+    }
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     /* Boards where the SD card shares SPI pins/host with the LVGL display
      * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).

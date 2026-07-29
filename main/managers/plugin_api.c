@@ -34,6 +34,7 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,16 +61,111 @@ static void (*s_ui_clear)(void) = NULL;
 static void (*s_ui_toast)(const char *message) = NULL;
 static char s_app_id[PLUGIN_APP_ID_MAX];
 static char s_app_data_path[PLUGIN_APP_PATH_MAX];
+static char s_app_base_path[PLUGIN_APP_PATH_MAX];
+static bool s_asset_session_active;
+static bool s_asset_session_display_suspended;
 static plugin_permission_t s_permissions = 0;
 static bool s_allow_absolute_storage = false;
 static size_t s_memory_limit = 0;
 static size_t s_memory_used = 0;
 static bool s_api_active = false;
 static SemaphoreHandle_t s_api_mutex = NULL;
+static portMUX_TYPE s_input_snapshot_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_input_held;
+static uint32_t s_input_pressed;
+static uint32_t s_input_released;
+static uint32_t s_input_last_change_ms;
+
+/* Assets an app's materialize pass chose to leave inside its .gapp archive
+   rather than extract to the SD cache (see plugin_installer.c's ".direct_index"
+   writer). Loaded once when the app's base path is set, freed on unload. */
+typedef struct {
+    char name[96];
+    uint32_t offset;
+    uint32_t length;
+} plugin_direct_asset_t;
+static char s_direct_gapp_path[PLUGIN_APP_PATH_MAX];
+static plugin_direct_asset_t *s_direct_assets = NULL;
+static int s_direct_asset_count = 0;
+
+static void plugin_api_direct_index_reset(void) {
+    if (s_direct_assets) {
+        free(s_direct_assets);
+        s_direct_assets = NULL;
+    }
+    s_direct_asset_count = 0;
+    s_direct_gapp_path[0] = '\0';
+}
+
+static void plugin_api_direct_index_load(const char *base_path) {
+    plugin_api_direct_index_reset();
+    if (!base_path || base_path[0] == '\0') return;
+
+    char index_path[PLUGIN_APP_PATH_MAX];
+    if (snprintf(index_path, sizeof(index_path), "%s/.direct_index", base_path) <= 0) return;
+    FILE *f = fopen(index_path, "rb");
+    if (!f) return;
+
+    uint8_t magic[4];
+    uint16_t version = 0, gapp_len = 0;
+    uint32_t count = 0;
+    bool header_ok = fread(magic, 1, 4, f) == 4 && memcmp(magic, "DIDX", 4) == 0 &&
+                      fread(&version, sizeof(version), 1, f) == 1 && version == 1 &&
+                      fread(&gapp_len, sizeof(gapp_len), 1, f) == 1 &&
+                      gapp_len > 0 && gapp_len < sizeof(s_direct_gapp_path) &&
+                      fread(s_direct_gapp_path, 1, gapp_len, f) == gapp_len;
+    if (header_ok) {
+        s_direct_gapp_path[gapp_len] = '\0';
+        header_ok = fread(&count, sizeof(count), 1, f) == 1 && count > 0 && count <= 256;
+    }
+    if (!header_ok) {
+        fclose(f);
+        s_direct_gapp_path[0] = '\0';
+        return;
+    }
+
+    plugin_direct_asset_t *entries = heap_caps_malloc(sizeof(plugin_direct_asset_t) * count,
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!entries) entries = malloc(sizeof(plugin_direct_asset_t) * count);
+    if (!entries) {
+        fclose(f);
+        s_direct_gapp_path[0] = '\0';
+        return;
+    }
+
+    uint32_t loaded = 0;
+    for (; loaded < count; ++loaded) {
+        uint16_t name_len = 0;
+        if (fread(&name_len, sizeof(name_len), 1, f) != 1 || name_len == 0 ||
+            name_len >= sizeof(entries[loaded].name)) break;
+        if (fread(entries[loaded].name, 1, name_len, f) != name_len) break;
+        entries[loaded].name[name_len] = '\0';
+        if (fread(&entries[loaded].offset, sizeof(uint32_t), 1, f) != 1) break;
+        if (fread(&entries[loaded].length, sizeof(uint32_t), 1, f) != 1) break;
+    }
+    fclose(f);
+
+    if (loaded != count) {
+        free(entries);
+        s_direct_gapp_path[0] = '\0';
+        return;
+    }
+    s_direct_assets = entries;
+    s_direct_asset_count = (int)count;
+}
+
+static const plugin_direct_asset_t *plugin_api_direct_index_find(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < s_direct_asset_count; ++i) {
+        if (strcmp(s_direct_assets[i].name, name) == 0) return &s_direct_assets[i];
+    }
+    return NULL;
+}
 
 static uint16_t plugin_ap_count = 0;
 static wifi_ap_record_t *plugin_scanned_aps = NULL;
 static volatile bool s_plugin_live_scan_active = false;
+static bool s_plugin_ble_started = false;
 static char s_subghz_loaded_path[PLUGIN_APP_PATH_MAX];
 
 static void plugin_wifi_snapshot_scan_results(void) {
@@ -280,6 +376,9 @@ bool plugin_api_feature_supported(const char *feature) {
 
 static bool plugin_api_has_feature(const char *feature) {
     if (feature && strcmp(feature, "absolute_storage") == 0) return s_allow_absolute_storage;
+    if (feature && strcmp(feature, "persistent_storage") == 0) {
+        return sd_card_manager.is_initialized && !sd_card_needs_jit_mount();
+    }
     return plugin_api_feature_supported(feature);
 }
 
@@ -293,6 +392,16 @@ static void plugin_ui_sync_apply(void *arg) {
     if (call && call->done) xSemaphoreGive(call->done);
 }
 
+/* Diagnostic-only: totals how long callers actually block here waiting for
+   the LVGL task to service a cross-task UI call, separate from any time
+   spent inside the callback itself, logged periodically so a slow
+   native-app present/blit path can be attributed correctly instead of
+   assumed to be the callback's own work. */
+static uint32_t s_sync_wait_window_start_ms;
+static uint32_t s_sync_wait_count;
+static uint32_t s_sync_wait_us_total;
+#define PLUGIN_UI_SYNC_LOG_INTERVAL_MS 5000
+
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
     if (!fn) return false;
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
@@ -302,9 +411,24 @@ static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
         .ctx = ctx,
         .done = done,
     };
+    int64_t wait_start_us = esp_timer_get_time();
     display_manager_run_on_lvgl(plugin_ui_sync_apply, &call);
     bool ok = xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE;
+    s_sync_wait_us_total += (uint32_t)(esp_timer_get_time() - wait_start_us);
+    s_sync_wait_count++;
     vSemaphoreDelete(done);
+
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_sync_wait_window_start_ms == 0) {
+        s_sync_wait_window_start_ms = now_ms;
+    } else if (now_ms - s_sync_wait_window_start_ms >= PLUGIN_UI_SYNC_LOG_INTERVAL_MS) {
+        ESP_LOGI(TAG, "plugin_ui_run_sync: calls=%u avg_wait=%uus",
+                 (unsigned)s_sync_wait_count,
+                 (unsigned)(s_sync_wait_us_total / s_sync_wait_count));
+        s_sync_wait_window_start_ms = now_ms;
+        s_sync_wait_count = 0;
+        s_sync_wait_us_total = 0;
+    }
     return ok;
 }
 
@@ -337,6 +461,10 @@ const char *plugin_api_internal_app_id(void) {
 
 bool plugin_api_internal_run_sync(void (*fn)(void *ctx), void *ctx) {
     return plugin_ui_run_sync(fn, ctx);
+}
+
+void plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx) {
+    display_manager_run_on_lvgl(fn, ctx);
 }
 
 lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent) {
@@ -657,6 +785,72 @@ static int plugin_api_storage_read(const char *path, void *buffer, size_t buffer
     return (int)n;
 }
 
+static bool plugin_api_build_asset_path(const char *path, char *out, size_t out_len) {
+    if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) ||
+        s_app_base_path[0] == '\0' || !path || path[0] == '\0') return false;
+    if (path[0] == '/' || path[0] == '\\' || strstr(path, "..")) return false;
+    int n = snprintf(out, out_len, "%s/assets/%s", s_app_base_path, path);
+    return n > 0 && (size_t)n < out_len;
+}
+
+/* Callers doing many small offset-reads against the same file within one
+   asset_session_begin()/end() bracket (e.g. a game streaming WAD lumps
+   during gameplay) used to pay a full fopen/fclose per read here, which on
+   some SD paths dominated frame time far more than the actual data
+   transfer. Kept open across reads of the same path while a session is
+   active; closed on session end, on a path change, or with no active
+   session (matching the original always-close-immediately behavior). */
+static FILE *s_read_cache_file = NULL;
+static char s_read_cache_path[PLUGIN_APP_PATH_MAX];
+
+static void plugin_api_read_cache_close(void) {
+    if (s_read_cache_file) {
+        fclose(s_read_cache_file);
+        s_read_cache_file = NULL;
+    }
+    s_read_cache_path[0] = '\0';
+}
+
+static int plugin_api_read_at_path(const char *path, uint32_t offset,
+                                   void *buffer, size_t buffer_len) {
+    if (!path || !buffer || buffer_len == 0 || buffer_len > INT_MAX || offset > LONG_MAX) return -1;
+
+    bool display_was_suspended = false;
+    if (!sd_card_jit_begin(&display_was_suspended, false)) return -1;
+
+    int result = -1;
+    FILE *f;
+    if (s_asset_session_active && s_read_cache_file && strcmp(s_read_cache_path, path) == 0) {
+        f = s_read_cache_file;
+    } else {
+        plugin_api_read_cache_close();
+        f = fopen(path, "rb");
+        if (f && s_asset_session_active) {
+            s_read_cache_file = f;
+            strncpy(s_read_cache_path, path, sizeof(s_read_cache_path) - 1);
+            s_read_cache_path[sizeof(s_read_cache_path) - 1] = '\0';
+        }
+    }
+    if (f) {
+        if (fseek(f, (long)offset, SEEK_SET) == 0) {
+            result = (int)fread(buffer, 1, buffer_len, f);
+        }
+        if (!s_asset_session_active) {
+            if (f == s_read_cache_file) plugin_api_read_cache_close();
+            else fclose(f);
+        }
+    }
+
+    sd_card_jit_end(display_was_suspended);
+    return result;
+}
+
+static int plugin_api_storage_read_at(const char *path, uint32_t offset,
+                                      void *buffer, size_t buffer_len) {
+    if (!plugin_api_absolute_storage_allowed(path)) return -1;
+    return plugin_api_read_at_path(path, offset, buffer, buffer_len);
+}
+
 static bool plugin_api_storage_write(const char *path, const void *data, size_t len) {
     if (!plugin_api_absolute_storage_allowed(path) || (!data && len > 0)) return false;
     return sd_card_write_file(path, data, len) == ESP_OK;
@@ -722,6 +916,106 @@ static int plugin_api_app_storage_read(const char *path, void *buffer, size_t bu
     size_t n = fread(buffer, 1, buffer_len, f);
     fclose(f);
     return (int)n;
+}
+
+static int plugin_api_app_storage_read_at(const char *path, uint32_t offset,
+                                           void *buffer, size_t buffer_len) {
+    char full_path[PLUGIN_APP_PATH_MAX];
+    if (!plugin_api_build_app_path(path, full_path, sizeof(full_path))) return -1;
+    return plugin_api_read_at_path(full_path, offset, buffer, buffer_len);
+}
+
+static int plugin_api_asset_storage_read_at(const char *path, uint32_t offset,
+                                             void *buffer, size_t buffer_len) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) || !path || path[0] == '\0') return -1;
+    const plugin_direct_asset_t *direct = plugin_api_direct_index_find(path);
+    if (direct) {
+        /* Served straight out of the installed .gapp at the offset recorded
+           by materialize; clamp so a caller can never read past this asset's
+           own bytes into whatever entry follows it in the archive. */
+        if (offset >= direct->length) return 0;
+        size_t avail = direct->length - offset;
+        size_t want = buffer_len < avail ? buffer_len : avail;
+        return plugin_api_read_at_path(s_direct_gapp_path, direct->offset + offset, buffer, want);
+    }
+    char full_path[PLUGIN_APP_PATH_MAX];
+    if (!plugin_api_build_asset_path(path, full_path, sizeof(full_path))) return -1;
+    return plugin_api_read_at_path(full_path, offset, buffer, buffer_len);
+}
+
+static int64_t plugin_api_asset_storage_size(const char *path) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) || !path || path[0] == '\0') return -1;
+    const plugin_direct_asset_t *direct = plugin_api_direct_index_find(path);
+    if (direct) return (int64_t)direct->length;
+    char full_path[PLUGIN_APP_PATH_MAX];
+    if (!plugin_api_build_asset_path(path, full_path, sizeof(full_path))) return -1;
+    struct stat st;
+    if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) return -1;
+    return (int64_t)st.st_size;
+}
+
+static bool plugin_api_asset_path(const char *path, char *out, size_t out_len) {
+    return plugin_api_build_asset_path(path, out, out_len);
+}
+
+static bool plugin_api_asset_session_begin(void) {
+    if (s_asset_session_active || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE)) return false;
+    bool display_was_suspended = false;
+    if (!sd_card_jit_begin(&display_was_suspended, false)) return false;
+    s_asset_session_display_suspended = display_was_suspended;
+    s_asset_session_active = true;
+    return true;
+}
+
+static void plugin_api_asset_session_end(void) {
+    if (!s_asset_session_active) return;
+    bool display_was_suspended = s_asset_session_display_suspended;
+    s_asset_session_active = false;
+    s_asset_session_display_suspended = false;
+    plugin_api_read_cache_close();
+    sd_card_jit_end(display_was_suspended);
+}
+
+static void plugin_api_request_exit_now(void *arg) {
+    (void)arg;
+    display_manager_go_back();
+}
+
+static void plugin_api_request_exit(void) {
+    display_manager_run_on_lvgl(plugin_api_request_exit_now, NULL);
+}
+
+void plugin_api_record_joystick_state(unsigned int index, bool pressed) {
+    if (index >= 5 || !s_api_active) return;
+    uint32_t bit = 1u << index;
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    if (pressed) {
+        if (!(s_input_held & bit)) {
+            s_input_pressed |= bit;
+            s_input_last_change_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        }
+        s_input_held |= bit;
+    } else {
+        if (s_input_held & bit) {
+            s_input_released |= bit;
+            s_input_last_change_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        }
+        s_input_held &= ~bit;
+    }
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
+}
+
+static bool plugin_api_input_snapshot(ghostesp_input_snapshot_t *out) {
+    if (!out || !s_api_active || !plugin_api_has_permission(PLUGIN_PERMISSION_INPUT)) return false;
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    out->held = s_input_held;
+    out->pressed = s_input_pressed;
+    out->released = s_input_released;
+    out->last_change_ms = s_input_last_change_ms;
+    s_input_pressed = 0;
+    s_input_released = 0;
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
+    return true;
 }
 
 static bool plugin_api_app_storage_write(const char *path, const void *data, size_t len) {
@@ -838,7 +1132,8 @@ static bool plugin_api_ble_start_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     ghostscript_runtime_reset_ble_seen();
-    return gatt_scan_start();
+    s_plugin_ble_started = gatt_scan_start();
+    return s_plugin_ble_started;
 #else
     return false;
 #endif
@@ -847,6 +1142,7 @@ static bool plugin_api_ble_start_scan(void) {
 static bool plugin_api_ble_stop_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
+    s_plugin_ble_started = false;
     ble_stop();
     return true;
 #else
@@ -1535,6 +1831,14 @@ extern void plugin_api_ui_canvas_draw_rect(ghostesp_ui_obj_t canvas, int32_t x, 
 extern void plugin_api_ui_canvas_fill(ghostesp_ui_obj_t canvas, uint32_t hex_color);
 extern void plugin_api_ui_canvas_draw_line(ghostesp_ui_obj_t canvas, const ghostesp_point_t *points, int count, uint32_t hex_color, int32_t width);
 extern void plugin_api_ui_canvas_draw_arc(ghostesp_ui_obj_t canvas, int32_t cx, int32_t cy, int32_t r, int32_t start_angle, int32_t end_angle, uint32_t hex_color, int32_t width);
+extern bool plugin_api_ui_canvas_blit_rgb565(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                             int32_t src_width, int32_t src_height, int32_t src_stride,
+                                             int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+extern bool plugin_api_ui_canvas_is_rgb565_native_byte_order(void);
+extern bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                                   int32_t src_width, int32_t src_height, int32_t src_stride,
+                                                   int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+extern bool plugin_api_ui_canvas_blit_async_wait(uint32_t timeout_ms);
 
 extern void plugin_api_ui_anim_slide_in(ghostesp_ui_obj_t obj, int direction, uint32_t duration_ms);
 extern void plugin_api_ui_anim_slide_out(ghostesp_ui_obj_t obj, int direction, uint32_t duration_ms, ghostesp_anim_done_cb_t on_done, void *user);
@@ -2048,9 +2352,23 @@ static ghostesp_api_t s_api = {
     .nfc_t2_read = plugin_api_nfc_t2_read,
     .nfc_t2_write_ndef = plugin_api_nfc_t2_write_ndef,
     .ui_image_set_builtin = plugin_api_ui_image_set_builtin,
+    .ui_canvas_blit_rgb565 = plugin_api_ui_canvas_blit_rgb565,
+    .ui_canvas_is_rgb565_native_byte_order = plugin_api_ui_canvas_is_rgb565_native_byte_order,
+    .storage_read_at = plugin_api_storage_read_at,
+    .app_storage_read_at = plugin_api_app_storage_read_at,
+    .asset_storage_read_at = plugin_api_asset_storage_read_at,
+    .asset_path = plugin_api_asset_path,
+    .asset_session_begin = plugin_api_asset_session_begin,
+    .asset_session_end = plugin_api_asset_session_end,
+    .request_exit = plugin_api_request_exit,
+    .input_snapshot = plugin_api_input_snapshot,
+    .asset_storage_size = plugin_api_asset_storage_size,
+    .ui_canvas_blit_rgb565_async = plugin_api_ui_canvas_blit_rgb565_async,
+    .ui_canvas_blit_async_wait = plugin_api_ui_canvas_blit_async_wait,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
+                                     const char *base_path,
                                      uint64_t permissions,
                                      size_t memory_limit,
                                      bool allow_absolute_storage) {
@@ -2066,6 +2384,16 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
     s_memory_used = 0;
     s_app_id[0] = '\0';
     s_app_data_path[0] = '\0';
+    s_app_base_path[0] = '\0';
+    s_asset_session_active = false;
+    s_asset_session_display_suspended = false;
+    s_plugin_ble_started = false;
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    s_input_held = 0;
+    s_input_pressed = 0;
+    s_input_released = 0;
+    s_input_last_change_ms = 0;
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
     if (app_id) {
         for (const char *p = app_id; *p; ++p) {
             if (!(isalnum((unsigned char)*p) || *p == '_' || *p == '-')) {
@@ -2077,8 +2405,13 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
         strncpy(s_app_id, app_id, sizeof(s_app_id) - 1);
         s_app_id[sizeof(s_app_id) - 1] = '\0';
         snprintf(s_app_data_path, sizeof(s_app_data_path), "/mnt/ghostesp/appdata/%s", s_app_id);
+        if (base_path) {
+            strncpy(s_app_base_path, base_path, sizeof(s_app_base_path) - 1);
+            s_app_base_path[sizeof(s_app_base_path) - 1] = '\0';
+        }
         sd_card_create_directory("/mnt/ghostesp/appdata");
         sd_card_create_directory(s_app_data_path);
+        plugin_api_direct_index_load(s_app_base_path);
     }
 
     if (s_api_swapped) {
@@ -2109,11 +2442,17 @@ bool plugin_api_is_active(void) {
 void plugin_api_release(void) {
     plugin_api_lock();
 
+    plugin_api_asset_session_end();
+    /* App storage may leave the shared-SPI quiesce gate closed while an exit
+     * callback is already running on LVGL. Clear it before the next UI loop. */
+    display_manager_resume_lvgl_task();
+
     /* Safety: stop hardware that a misbehaving script may have left running. */
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-    if (ble_is_initialized()) {
+    if (s_plugin_ble_started && ble_is_initialized()) {
         ble_stop();
     }
+    s_plugin_ble_started = false;
 #endif
     if (s_plugin_live_scan_active) {
         s_plugin_live_scan_active = false;
@@ -2123,6 +2462,9 @@ void plugin_api_release(void) {
     }
     s_plugin_async_scan_active = false;
 
+    /* An async blit still queued here would read the app's pixel buffer
+       after the app is torn down and its memory freed. Drain it first. */
+    plugin_api_ui_canvas_blit_async_wait(1000);
     plugin_api_lowlevel_release();
     s_api_active = false;
     s_permissions = 0;
@@ -2131,6 +2473,18 @@ void plugin_api_release(void) {
     s_memory_used = 0;
     s_app_id[0] = '\0';
     s_app_data_path[0] = '\0';
+    s_app_base_path[0] = '\0';
+    plugin_api_direct_index_reset();
+    /* Backstop: normally closed by asset_session_end(), but an app that
+       unloads mid-session (crash, forced exit) shouldn't leave an open
+       file handle behind for the next app that loads. */
+    plugin_api_read_cache_close();
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    s_input_held = 0;
+    s_input_pressed = 0;
+    s_input_released = 0;
+    s_input_last_change_ms = 0;
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
 
     if (!s_api_swapped) {
         memcpy(&s_api_live_backup, &s_api, sizeof(s_api));

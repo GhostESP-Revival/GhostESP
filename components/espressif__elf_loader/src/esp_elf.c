@@ -799,7 +799,6 @@ int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf)
 
                         memset((void *)elf->symtab[num].name, 0, len);
                         memcpy((void *)elf->symtab[num].name, strtab + symtab[j].name, len);
-                        ESP_LOGI(TAG, "elf->symtab[%d], func: %s", num, strtab + symtab[j].name);
                         num++;
                     }
                 }

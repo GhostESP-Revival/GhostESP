@@ -2651,9 +2651,21 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         }
 
         // DS Parameter Set IE - authoritative AP channel from the beacon itself
-        // (rx_ctrl.channel can be unreliable on some targets)
+        // (rx_ctrl.channel can be unreliable on some targets). This is a raw,
+        // unvalidated byte from over-the-air data though, so malformed/spoofed
+        // beacons can put garbage here; only trust it if it's a real 2.4GHz or
+        // 5GHz channel number (same ranges csv_wifi_channel_is_valid() accepts
+        // downstream), otherwise keep the radio's own rx_ctrl.channel.
         if (id == 3 && ie_len == 1) {
-            channel = payload[index + 2];
+            uint8_t ds_channel = payload[index + 2];
+            bool ds_channel_valid =
+                (ds_channel >= 1 && ds_channel <= 14) ||
+                (ds_channel >= 36 && ds_channel <= 64 && (ds_channel % 4) == 0) ||
+                (ds_channel >= 100 && ds_channel <= 144 && (ds_channel % 4) == 0) ||
+                (ds_channel >= 149 && ds_channel <= 165 && ((ds_channel - 149) % 4) == 0);
+            if (ds_channel_valid) {
+                channel = ds_channel;
+            }
         }
 
         if (id == 48) {

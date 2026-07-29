@@ -97,6 +97,7 @@ typedef struct {
     uint32_t data_version;
     uint32_t memory_limit;
     uint32_t stack_size;
+    uint32_t tick_interval_ms;
     plugin_feature_t required_features;
     uint16_t icon_width;
     uint16_t icon_height;

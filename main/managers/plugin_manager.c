@@ -315,6 +315,7 @@ static bool materialize_gapp_dir(const char *dir_path) {
 
         if (package_cache_current(cache_path)) continue;
 
+        ESP_LOGI(TAG, "Materializing changed package: %s", entry->d_name);
         esp_err_t err = plugin_installer_extract_gapp_to_dir(package_path, cache_path);
         if (err != ESP_OK) {
             all_ok = false;
@@ -455,6 +456,7 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     out->data_version = copy_json_u32(root, "data_version", PLUGIN_APP_DATA_VERSION_DEFAULT);
     out->memory_limit = copy_json_u32(root, "memory_limit", 0);
     out->stack_size = copy_json_u32(root, "stack_size", 0);
+    out->tick_interval_ms = copy_json_u32(root, "tick_interval_ms", 0);
     out->icon_width = (uint16_t)copy_json_u32(root, "icon_width", 0);
     out->icon_height = (uint16_t)copy_json_u32(root, "icon_height", 0);
     out->requires_psram = copy_json_bool(root, "requires_psram", false);
@@ -531,6 +533,10 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     }
     if (out->manifest_version != PLUGIN_APP_MANIFEST_VERSION) {
         snprintf(out->error, sizeof(out->error), "manifest version mismatch");
+        return false;
+    }
+    if (out->tick_interval_ms != 0 && (out->tick_interval_ms < 16 || out->tick_interval_ms > 1000)) {
+        snprintf(out->error, sizeof(out->error), "tick interval must be 16-1000 ms");
         return false;
     }
     if (strcmp(out->storage_scope, PLUGIN_APP_STORAGE_SCOPE_APP) != 0 &&

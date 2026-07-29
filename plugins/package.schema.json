@@ -86,7 +86,16 @@
     },
     "memory_limit": { "type": "integer", "minimum": 0 },
     "stack_size": { "type": "integer", "minimum": 0 },
+    "tick_interval_ms": { "type": "integer", "minimum": 16, "maximum": 1000 },
     "requires_psram": { "type": "boolean" },
+    "requires_features": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["touchscreen", "touch", "dpad", "joystick", "encoder", "keyboard", "physical_keyboard"]
+      },
+      "uniqueItems": true
+    },
     "checksum": { "type": "string" }
   }
 }

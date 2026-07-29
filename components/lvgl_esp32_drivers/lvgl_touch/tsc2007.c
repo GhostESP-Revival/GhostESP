@@ -19,8 +19,6 @@ static i2c_master_bus_handle_t s_tsc2007_bus = NULL;
 
 static const char *TAG = "TSC2007";
 
-#include "i2c_bus_lock.h"
-
 static bool tsc2007_i2c_read_cmd(uint8_t func, uint16_t *res) {
     uint8_t cmd = (func << 4) | (1 << 2) | (0 << 1); // Func, ADON_IRQOFF, 12-bit
     uint8_t data[2] = {0};
@@ -29,21 +27,8 @@ static bool tsc2007_i2c_read_cmd(uint8_t func, uint16_t *res) {
         return false;
     }
     
-    // Acquire shared lock from io_manager
-    if (!i2c_bus_lock(I2C_PORT_NUM, 50)) {
-        return false;
-    }
-    
-    esp_err_t ret = i2c_shared_transmit_to_addr(s_tsc2007_bus, s_tsc2007_addr, 100000, &cmd, 1, 50);
-
-    if (ret != ESP_OK) {
-        i2c_bus_unlock(I2C_PORT_NUM);
-        return false;
-    }
-    
-    ret = i2c_shared_receive_from_addr(s_tsc2007_bus, s_tsc2007_addr, 100000, data, 2, 50);
-    
-    i2c_bus_unlock(I2C_PORT_NUM);
+    esp_err_t ret = i2c_shared_transmit_receive_from_addr(
+        s_tsc2007_bus, s_tsc2007_addr, 100000, &cmd, 1, data, 2, 50);
 
     if (ret == ESP_OK) {
         *res = ((data[0] << 4) | (data[1] >> 4));
