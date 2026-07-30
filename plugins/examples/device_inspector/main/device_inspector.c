@@ -6,6 +6,13 @@
 #include <string.h>
 #include <stdlib.h>
 
+char *strcpy(char *dst, const char *src) __attribute__((weak));
+char *strcpy(char *dst, const char *src) {
+    char *out = dst;
+    while ((*dst++ = *src++) != '\0') {}
+    return out;
+}
+
 static const ghostesp_api_t *api;
 static ghostesp_theme_t theme;
 static ghostesp_layout_t layout;
