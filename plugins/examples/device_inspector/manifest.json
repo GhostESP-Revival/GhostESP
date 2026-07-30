@@ -6,7 +6,7 @@
   "description": "Comprehensive hardware and API test suite with responsive native UI. Tests WiFi, BLE, GPS, RGB, storage, canvas drawing, input events, and theme inspection.",
   "category": "System",
   "entry": "ghostesp_device_inspector.so",
-  "target": "esp32s3",
+  "target": "esp32c5",
   "api_version": 1,
   "manifest_version": 1,
   "package_version": 2,
