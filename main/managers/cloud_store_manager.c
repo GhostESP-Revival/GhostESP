@@ -74,7 +74,7 @@ typedef struct {
     TickType_t last_report_tick; // tick at last UI status push (time throttle)
     const cloud_store_item_t *item;
     bool ok;
-    // Buffered mode (JIT-mount / shared display+SD SPI boards): received bytes
+    // Buffered mode (shared display+SD SPI boards): received bytes
     // accumulate here and flush to SD one slice at a time, so the shared SPI
     // bus is only taken briefly per flush. That leaves the display live during
     // the network receive (progress bar actually animates) instead of holding
@@ -83,7 +83,7 @@ typedef struct {
     uint8_t *buf;            // NULL => direct mode (write straight to ->file)
     size_t buf_len;
     size_t buf_cap;
-    bool jit;                // flushes take the shared bus via sd_card_jit_begin/end
+    bool jit;                // flushes mount/unmount only on JIT boards
     bool file_started;       // first flush of an attempt truncates ("wb"), rest append ("ab")
 } download_ctx_t;
 
@@ -97,7 +97,7 @@ typedef struct {
 #define CLOUD_DOWNLOAD_REPORT_STEP (4 * 1024)
 #define CLOUD_DOWNLOAD_REPORT_INTERVAL_MS 60
 
-// Buffered-download staging size for JIT-mount boards. Received data collects
+// Buffered-download staging size for shared-SPI boards. Received data collects
 // in PSRAM and flushes to SD a slice at a time; the display bus is only taken
 // during each flush, not for the whole download. 256KB -> a ~500KB asset pack
 // flushes ~twice, so the bar animates smoothly with only a couple brief
@@ -942,18 +942,19 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
 
 static esp_err_t download_with_retries(const cloud_store_item_t *item, const char *path) {
     bool jit = sd_card_needs_jit_mount();
+    bool shared_display_spi = sd_card_uses_shared_display_spi();
     download_ctx_t ctx = { .item = item, .ok = true, .jit = jit, .path = path };
 
-    // JIT boards stage the download in RAM so the display bus is only taken per
-    // flush; otherwise the SD (== display) bus is held for the whole download
-    // and the progress bar freezes. Non-JIT boards keep the simple direct path.
-    // If the PSRAM staging buffer can't be had, fall back to direct write.
-    if (jit) {
+    // Stage every shared-bus download in PSRAM. Experimental persistent shared
+    // SPI keeps the SD mounted, so it is not a JIT board, but direct 1KB writes
+    // still contend with display traffic and pay repeated SD/FAT overhead.
+    // If the staging buffer cannot be allocated, fall back to direct writes.
+    if (jit || shared_display_spi) {
         ctx.buf = heap_caps_malloc(CLOUD_DOWNLOAD_BUFFER_CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (ctx.buf) {
             ctx.buf_cap = CLOUD_DOWNLOAD_BUFFER_CAP;
         } else {
-            ESP_LOGW(TAG, "download staging buffer alloc failed; direct write (display will pause)");
+            ESP_LOGW(TAG, "download staging buffer alloc failed; direct shared-SPI writes enabled");
         }
     }
 

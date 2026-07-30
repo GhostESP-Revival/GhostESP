@@ -92,6 +92,13 @@ void sd_card_unmount_after_flush(bool display_was_suspended);
 bool sd_card_needs_jit_mount(void);
 
 /*
+ * Returns true when SD file I/O contends with the display on one SPI host.
+ * Streaming callers can stage writes in RAM to avoid a small SD transaction
+ * for every received network chunk.
+ */
+bool sd_card_uses_shared_display_spi(void);
+
+/*
  * sd_card_jit_begin / sd_card_jit_end wrap the JIT mount/unmount pattern
  * used by views and managers that may run on builds without a permanent SD
  * mount. On builds where the SD card stays mounted after init, these are

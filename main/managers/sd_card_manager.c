@@ -1197,6 +1197,10 @@ bool sd_card_needs_jit_mount(void) {
 #endif
 }
 
+bool sd_card_uses_shared_display_spi(void) {
+    return sd_card_uses_experimental_shared_spi() || is_shared_display_sd_spi();
+}
+
 bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {
     if (display_was_suspended) *display_was_suspended = false;
 
