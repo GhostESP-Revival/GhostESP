@@ -156,6 +156,16 @@ void eapol_logoff_start(void) {
         return;
     }
     
+    // Injecting on WIFI_IF_AP requires the AP interface to be active. Set AP
+    // mode here (as deauth/beacon-spam/channel-switch do) instead of relying on
+    // the WiFi manager having booted in APSTA — it now runs STA-only when the
+    // SoftAP is disabled in settings, so an ambient AP interface isn't guaranteed.
+    esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (mode_err != ESP_OK) {
+        glog("EAPOL Logoff: failed to set AP mode: %s\n", esp_err_to_name(mode_err));
+        return;
+    }
+
     eapol_logoff_running = true;
     eapol_logoff_packets_sent = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY

@@ -2482,28 +2482,43 @@ void wifi_manager_init(void) {
         }
     }
 
-    // Set WiFi mode to STA (station)
-    ESP_LOGI(TAG, "wifi_manager: setting WiFi mode to APSTA...");
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_LOGI(TAG, "wifi_manager: WiFi mode set, free internal RAM: %d bytes", 
+    // Bring the AP interface up only when the SoftAP is actually enabled in
+    // settings. Running STA-only otherwise keeps the AP MAC (beaconing + AP
+    // TX buffers) from activating, reclaiming internal RAM on starved boards.
+    // The AP netif itself stays allocated above, so wifiAP is never NULL and
+    // portal/AP code paths are unaffected. Attacks that inject on WIFI_IF_AP
+    // (deauth, beacon spam, channel-switch) set AP mode themselves before TX;
+    // eapol-logoff is hardened to do the same. Promiscuous/monitor and STA
+    // scanning all work in STA mode, so sniffing/wardriving is unaffected.
+    bool ap_enabled = settings_get_ap_enabled(&G_Settings);
+    if (ap_enabled) {
+        ESP_LOGI(TAG, "wifi_manager: setting WiFi mode to APSTA...");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    } else {
+        ESP_LOGI(TAG, "wifi_manager: AP disabled in settings, setting WiFi mode to STA...");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    }
+    ESP_LOGI(TAG, "wifi_manager: WiFi mode set, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
-    // Configure the SoftAP settings
-    ESP_LOGI(TAG, "wifi_manager: configuring AP...");
-    wifi_config_t ap_config = {
-        .ap = {.ssid = "",
-               .ssid_len = strlen(""),
-               .password = "",
-               .channel = 1,
-               .authmode = WIFI_AUTH_OPEN,
-               .max_connection = 4,
-               .ssid_hidden = 1},
-    };
+    if (ap_enabled) {
+        // Configure the SoftAP settings
+        ESP_LOGI(TAG, "wifi_manager: configuring AP...");
+        wifi_config_t ap_config = {
+            .ap = {.ssid = "",
+                   .ssid_len = strlen(""),
+                   .password = "",
+                   .channel = 1,
+                   .authmode = WIFI_AUTH_OPEN,
+                   .max_connection = 4,
+                   .ssid_hidden = 1},
+        };
 
-    // Apply the AP configuration
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
-    
-    // Start the Wi-Fi AP
+        // Apply the AP configuration
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    }
+
+    // Start Wi-Fi
     ESP_LOGI(TAG, "wifi_manager: starting WiFi (esp_wifi_start)...");
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "wifi_manager: WiFi started, free internal RAM: %d bytes", 
@@ -3844,7 +3859,11 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     // Set the connecting bit BEFORE any WiFi operations
     xEventGroupSetBits(wifi_event_group, WIFI_CONNECTING_BIT);
 
-    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    // Match the init policy: keep the AP half only when the SoftAP is enabled,
+    // otherwise connect STA-only so the AP interface's internal RAM stays freed
+    // during normal connected operation (this is the state Cloud Store runs in).
+    wifi_mode_t connect_mode = settings_get_ap_enabled(&G_Settings) ? WIFI_MODE_APSTA : WIFI_MODE_STA;
+    esp_err_t err = esp_wifi_set_mode(connect_mode);
     if (err != ESP_OK) {
         printf("Failed to set WiFi mode: %s\n", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("Failed to set WiFi mode\n");
