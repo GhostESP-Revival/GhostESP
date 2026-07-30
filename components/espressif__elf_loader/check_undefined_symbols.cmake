@@ -1,3 +1,6 @@
+# Script mode does not inherit policies from the app's CMake configure.
+cmake_policy(SET CMP0057 NEW)
+
 execute_process(
     COMMAND "${NM}" -u "${OUT}"
     RESULT_VARIABLE NM_RESULT
