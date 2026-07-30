@@ -12,6 +12,13 @@ void *memmove(void *dst, const void *src, size_t n) {
     return dst;
 }
 
+char *strcpy(char *dst, const char *src) __attribute__((weak));
+char *strcpy(char *dst, const char *src) {
+    char *out = dst;
+    while ((*dst++ = *src++) != '\0') {}
+    return out;
+}
+
 long long __divdi3(long long a, long long b) __attribute__((weak));
 long long __divdi3(long long a, long long b) {
     if (b == 0) return 0;
@@ -31,7 +38,9 @@ long long __moddi3(long long a, long long b) {
     unsigned long long ub = b < 0 ? (unsigned long long)(-(b + 1)) + 1ULL : (unsigned long long)b;
     while (ub < ua && !(ub & (1ULL << 63))) ub <<= 1;
     while (ub > (unsigned long long)(b < 0 ? -(b + 1) + 1ULL : b)) {
-        if (ua >= ub) ua -= ub; ub >>= 1; if (ub == 0) break;
+        if (ua >= ub) ua -= ub;
+        ub >>= 1;
+        if (ub == 0) break;
     }
     if (ub > 0 && ua >= ub) ua -= ub;
     return a < 0 ? -(long long)ua : (long long)ua;
@@ -51,7 +60,11 @@ unsigned long long __umoddi3(unsigned long long a, unsigned long long b) {
     if (b == 0) return 0;
     unsigned long long orig = b;
     while (b < a && !(b & (1ULL << 63))) b <<= 1;
-    while (b >= orig) { if (a >= b) a -= b; b >>= 1; if (b == 0) break; }
+    while (b >= orig) {
+        if (a >= b) a -= b;
+        b >>= 1;
+        if (b == 0) break;
+    }
     return a;
 }
 
