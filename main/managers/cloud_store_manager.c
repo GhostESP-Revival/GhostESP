@@ -884,6 +884,14 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
     }
     if (evt->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
 
+    // Do not mistake an HTML/API error response for a package download.
+    int status = esp_http_client_get_status_code(evt->client);
+    if (status != 200 && status != 206) {
+        ctx->ok = false;
+        ESP_LOGW(TAG, "download body rejected: HTTP %d", status);
+        return ESP_FAIL;
+    }
+
     if (ctx->buf) {
         // Buffered mode: copy into the RAM staging buffer, flushing a slice to
         // SD whenever it fills. The display keeps the bus between flushes.
@@ -902,7 +910,9 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
             }
         }
     } else {
-        // Direct mode: SD is mounted for the whole download; write straight out.
+        // Open lazily after validating the response so an HTTP error cannot
+        // truncate a prior package or leave its error page on the SD card.
+        if (!ctx->file) ctx->file = fopen(ctx->path, "wb");
         if (!ctx->file || fwrite(evt->data, 1, evt->data_len, ctx->file) != (size_t)evt->data_len) {
             ctx->ok = false;
             return ESP_FAIL;
@@ -959,20 +969,14 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
         ctx.file_started = false;
         ctx.file = NULL;
 
-        // Direct mode holds the output file (and, on a JIT board that couldn't
-        // get a buffer, the SD mount) open for the whole transfer.
+        // Direct mode holds the SD mount on a JIT board for the whole transfer.
+        // Its output file opens only after the first successful response byte.
         bool direct_suspended = false;
         bool direct_mounted = false;
         if (!ctx.buf) {
             if (jit) {
                 if (!sd_card_jit_begin(&direct_suspended, false)) { result = ESP_FAIL; break; }
                 direct_mounted = true;
-            }
-            ctx.file = fopen(path, "wb");
-            if (!ctx.file) {
-                if (direct_mounted) sd_card_jit_end(direct_suspended);
-                result = ESP_FAIL;
-                break;
             }
         }
 
@@ -1022,6 +1026,13 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
         if (err != ESP_OK || !ctx.ok || (status != 200 && status != 206)) {
             ESP_LOGW(TAG, "Download failed err=%s http=%d written=%u total=%u",
                      esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
+            // A missing/unauthorized package will not appear on a retry. Keep
+            // retrying transient server and transport failures instead.
+            if (status >= 400 && status < 500 && status != 408 && status != 429) {
+                ESP_LOGW(TAG, "Download response is not retryable: HTTP %d", status);
+                result = ESP_FAIL;
+                break;
+            }
             vTaskDelay(pdMS_TO_TICKS(400 * attempt));
             continue;
         }
