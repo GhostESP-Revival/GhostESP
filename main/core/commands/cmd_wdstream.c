@@ -23,13 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 #define WDSTREAM_DEFAULT_INTERVAL_MS 2000U
 #define WDSTREAM_MIN_INTERVAL_MS 100U

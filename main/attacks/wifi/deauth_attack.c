@@ -34,14 +34,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-// Maximum WiFi channel
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 // Rate limiting
 #define MAX_PACKETS_PER_SECOND 500

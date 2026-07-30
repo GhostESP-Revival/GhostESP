@@ -107,6 +107,21 @@
 - Added a generic `display_manager_go_back()` so views reachable from more than one place (Apps Gallery, a direct menu item, a CLI command, or a hardware-button shortcut that can fire from any screen) return to wherever they were actually opened from, instead of a single hardcoded destination — fixes back navigation on NFC, Infrared, BadUSB, SubGHz, Compass, ENV-III, Accelerometer, Clock, Ghostchi, the plugin/GhostScript runners, and the music visualizer
 - Fixed Apps Gallery, NFC, Infrared, BadUSB, and SubGHz always resetting to the first item/root menu on re-entry instead of restoring the previous selection: their `destroy()` handlers were clearing state that `create()` needed to restore it
 
+### Fixed
+- Fixed stack buffer overflow in infrared universal file path construction when SD card filenames exceeded available space
+- Fixed memory leak in DIAL manager session binding when HTTPS response buffer allocation fails
+- Fixed memory leak in DESFire application tree read when realloc fails mid-enumeration
+- Fixed memory leak in ESP command stream buffer reallocation (old buffer was not freed before replacement)
+- Consolidated `MAX_WIFI_CHANNEL` into `network_constants.h` and removed nine duplicate definitions across the codebase
+- Fixed `MAX_WIFI_CHANNEL` incorrectly set to 165 for ESP32-C6 (which does not support 5 GHz)
+- Fixed `SERIAL_BUFFER_SIZE` conflicting macro definitions (512 vs 528) between serial manager and AP manager
+- Added `static` to `const` arrays in four headers (`ghost_esp_site_gz.h`, `m5_keyboard_def.h`, `default_portal.h`, `keyboard_handler.h`) to prevent multiple-definition linker errors and save flash
+- Fixed `rgb_effect_task_handle` declared without `extern` in header, causing tentative definitions on every include
+- Fixed `strncpy` not null-terminating when SSID is exactly 32 bytes in PineAP detection
+- Fixed include guard mismatches: `commandline.h` used `COMMAND_H`, `gps_logger.h` used `WARDRIVING_CSV_H`
+- Fixed Kconfig typo: "Device Detials" to "Device Details"
+- Replaced hardcoded GPIO pin 24 with `CONFIG_INFRARED_LED_PIN` in infrared manager (poltergeist template)
+
 ### Other Changes
 - Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off
 - Smoothed NRF24 frequency analyzer channel levels (local and GhostLink peer scans) to reduce graph jitter from the RPD carrier-detect readings

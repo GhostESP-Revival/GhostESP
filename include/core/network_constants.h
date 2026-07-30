@@ -91,6 +91,15 @@ extern const uint8_t NAN_DEST_MAC[6];
 // Minimum RSSI threshold for packet processing
 #define MIN_RSSI_THRESHOLD -90
 
+// Maximum WiFi channel based on target
+#if !defined(MAX_WIFI_CHANNEL)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define MAX_WIFI_CHANNEL 165
+#else
+#define MAX_WIFI_CHANNEL 13
+#endif
+#endif
+
 // Minimum 802.11 header size
 #define MIN_PACKET_LENGTH 24
 

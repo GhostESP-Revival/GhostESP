@@ -1,7 +1,5 @@
-// command.h
-
-#ifndef COMMAND_H
-#define COMMAND_H
+#ifndef COMMANDLINE_H
+#define COMMANDLINE_H
 
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -31,4 +29,4 @@ void register_commands();
 // Stop command handler
 void handle_stop_flipper(int argc, char **argv);
 
-#endif // COMMAND_H
+#endif // COMMANDLINE_H

@@ -459,6 +459,12 @@ esp_err_t bind_session_id(Device *device) {
       .buffer = malloc(DIAL_RESPONSE_BUFFER_SIZE), .buffer_len = 0, .buffer_size = DIAL_RESPONSE_BUFFER_SIZE};
   if (resp_buf.buffer == NULL) {
     ESP_LOGE(TAG, "Failed to allocate memory for response buffer");
+    free(url_params);
+    free(encoded_loungeIdToken);
+    free(encoded_UUID);
+    free(encoded_zx);
+    free(encoded_name);
+    free(zx);
     return ESP_FAIL;
   }
 

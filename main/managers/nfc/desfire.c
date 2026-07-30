@@ -413,15 +413,17 @@ bool desfire_read_tree(pn532_io_handle_t io, MfDesfireData* out) {
     esp_err_t list_err = desfire_xch(io, 0x6A, NULL, 0, aids, sizeof(aids), &aids_len);
     if (list_err == ESP_OK && aids_len >= 3) {
         size_t aid_count = aids_len / 3;  // AIDs are 3 bytes each.
-        out->application_ids->data = realloc(out->application_ids->data,
+        void *tmp_ids = realloc(out->application_ids->data,
                                              aid_count * out->application_ids->elem_size);
-        if (!out->application_ids->data) return false;
+        if (!tmp_ids) return false;
+        out->application_ids->data = tmp_ids;
         out->application_ids->count = aid_count;
         memcpy(out->application_ids->data, aids, aid_count * 3);
 
-        out->applications->data = realloc(out->applications->data,
+        void *tmp_apps = realloc(out->applications->data,
                 aid_count * out->applications->elem_size);
-        if (!out->applications->data) return false;
+        if (!tmp_apps) return false;
+        out->applications->data = tmp_apps;
         out->applications->count = aid_count;
         memset(out->applications->data, 0, aid_count * out->applications->elem_size);
         ESP_LOGI(TAG, "read_tree: listed %u application(s)", (unsigned)aid_count);

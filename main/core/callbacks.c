@@ -51,11 +51,7 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define MIN_SSIDS_FOR_DETECTION 2 // Minimum SSIDs needed to flag as PineAP
 #define MAX_PINEAP_NETWORKS 20
 #define MAX_SSIDS_PER_BSSID 10
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
+#include "core/network_constants.h"
 #define CHANNEL_HOP_INTERVAL_MS 100
 #define WARDRIVE_STREAM_VERSION 2
 #define WARDRIVE_STREAM_VERSION_LEGACY 1
@@ -2395,6 +2391,7 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
 
         // Add to recent SSIDs circular buffer
         strncpy(network->recent_ssids[network->recent_ssid_index], ssid, 32);
+        network->recent_ssids[network->recent_ssid_index][32] = '\0';
         network->recent_ssid_index = (network->recent_ssid_index + 1) % RECENT_SSID_COUNT;
 
         // If we detect multiple SSIDs from same BSSID, mark as potential Pineap

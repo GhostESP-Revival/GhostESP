@@ -392,9 +392,11 @@ static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t need
         return true;
     }
 
+    free(comm->command_stream_buf);
     char* new_buf = (char*)malloc(COMM_STREAM_COMMAND_MAX + 1);
     if (!new_buf) {
-        reset_command_stream(comm);
+        comm->command_stream_buf = NULL;
+        comm->command_stream_cap = 0;
         return false;
     }
     comm->command_stream_buf = new_buf;

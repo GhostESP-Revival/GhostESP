@@ -1,5 +1,5 @@
-#ifndef WARDRIVING_CSV_H
-#define WARDRIVING_CSV_H
+#ifndef GPS_LOGGER_H
+#define GPS_LOGGER_H
 
 #include "esp_err.h"
 #include "vendor/GPS/MicroNMEA.h"
@@ -80,4 +80,4 @@ void populate_gps_quality_data(wardriving_data_t *data, const gps_t *gps);
 const char *get_gps_quality_string(const wardriving_data_t *data);
 void gps_info_display_task(void *pvParameters);
 
-#endif // WARDRIVING_CSV_H
+#endif // GPS_LOGGER_H

@@ -86,14 +86,7 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
                                   const char *track_name,
                                   const char *artist_name);
 
-// Defines for Wireshark channel validation
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#elif defined(CONFIG_IDF_TARGET_ESP32C6)
-#define MAX_WIFI_CHANNEL 13
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
+#include "core/network_constants.h"
 
 #define MAX_DEVICES 255
 #define CHUNK_SIZE 4096

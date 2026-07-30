@@ -28,6 +28,7 @@
 #endif
 
 static const char *TAG = "RGBManager";
+TaskHandle_t rgb_effect_task_handle = NULL;
 static SemaphoreHandle_t rgb_mutex = NULL;
 static bool rgb_power_transition_active = false;
 static int rgb_power_transition_lock_depth = 0;

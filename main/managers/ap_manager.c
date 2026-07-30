@@ -98,7 +98,7 @@ static esp_err_t teardown_mdns(void);
 #define SD_DIRECTORY_PATH_MAX 512
 #define SD_DIRECTORY_MAX_ENTRIES 64
 #define MIN_(a, b) ((a) < (b) ? (a) : (b))
-#define SERIAL_BUFFER_SIZE 528          // Size of serial buffer
+#define AP_SERIAL_BUFFER_SIZE 528       // Size of serial buffer
 #define AUTH_MAX_HDR_LEN 512            // max size for Authorization header (increased for Digest)
 #define AUTH_MAX_DECODE_LEN 256         // max decoded credential length
 
