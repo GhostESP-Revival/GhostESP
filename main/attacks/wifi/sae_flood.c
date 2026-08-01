@@ -21,10 +21,12 @@
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
 #include "freertos/semphr.h"
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/private/ecp.h"
 #include "mbedtls/private/sha256.h"
 #include "mbedtls/private/bignum.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>

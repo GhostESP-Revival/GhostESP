@@ -5,7 +5,7 @@ dependencies:
   espressif/w5500:
     version: ^1.0.1
     rules:
-    - if: target in ["esp32s3"]
+    - if: "target in [esp32s3] && CONFIG_WITH_ETHERNET == True"
   espressif/usb:
     version: ^1.0.1
     rules:
