@@ -6658,16 +6658,20 @@ static void karma_portal_ssids_cb(const char *input) {
         return;
     }
 
-    // Build full SD path for the chosen portal file (or keep "default").
-    // static: avoids 320 bytes on the LVGL task stack; callbacks are serialised.
-    static char portal_path[320];
+    // Keep this off the small LVGL task stack without reserving permanent DRAM.
+    char *portal_path = malloc(320);
+    if (!portal_path) {
+        error_popup_create("Out of memory.");
+        return;
+    }
     if (strcmp(selected_karma_portal, "default") == 0) {
-        strncpy(portal_path, "default", sizeof(portal_path));
+        strncpy(portal_path, "default", 320);
     } else {
-        snprintf(portal_path, sizeof(portal_path),
-                 "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
+        snprintf(portal_path, 320,
+                  "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
     }
     wifi_manager_set_karma_portal_file(portal_path);
+    free(portal_path);
 
     // Parse optional comma-separated SSIDs; blank = passive/auto mode.
     if (input && strlen(input) > 0) {
