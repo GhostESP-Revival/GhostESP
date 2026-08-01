@@ -125,6 +125,7 @@
 - Fixed include guard mismatches: `commandline.h` used `COMMAND_H`, `gps_logger.h` used `WARDRIVING_CSV_H`
 - Fixed Kconfig typo: "Device Detials" to "Device Details"
 - Replaced hardcoded GPIO pin 24 with `CONFIG_INFRARED_LED_PIN` in infrared manager (poltergeist template)
+- Fixed status bar view titles and the Ghostchi level text clipping: the title now sits further left in a smaller font, and the level label can no longer be squeezed out by the status icons
 
 ### Other Changes
 - Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off

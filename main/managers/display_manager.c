@@ -1300,21 +1300,21 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_remove_style_all(left_container);
   lv_obj_set_size(left_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(left_container, LV_FLEX_FLOW_ROW);
-  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_SAFEAREA_HOR, 0);
+  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_GRID, 0);
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, lv_color_hex(theme_palette_get_text(theme)), 0);
   lv_label_set_long_mode(mainlabel, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR * 2);
-  lv_obj_set_style_text_font(mainlabel, accessibility_get_font_body(), 0);
+  lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR);
+  lv_obj_set_style_text_font(mainlabel, accessibility_get_font_small(), 0);
 
   lv_obj_t *right_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(right_container);
   lv_obj_set_size(right_container, lv_pct(50), GUI_STATUS_BAR_H);
   lv_obj_set_flex_flow(right_container, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(right_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(right_container, GUI_GRID, 0);
-  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_SAFEAREA_HOR, 0);
+  lv_obj_set_style_pad_column(right_container, GUI_GRID / 2, 0);
+  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_GRID, 0);
   level_label = lv_label_create(right_container);
   lv_label_set_text(level_label, "");
   lv_obj_set_style_text_color(level_label, lv_color_hex(0x666666), 0);
