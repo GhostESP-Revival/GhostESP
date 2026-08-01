@@ -6671,7 +6671,6 @@ static void karma_portal_ssids_cb(const char *input) {
                   "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
     }
     wifi_manager_set_karma_portal_file(portal_path);
-    free(portal_path);
 
     // Parse optional comma-separated SSIDs; blank = passive/auto mode.
     if (input && strlen(input) > 0) {
@@ -6679,6 +6678,7 @@ static void karma_portal_ssids_cb(const char *input) {
         // Heap-allocate to avoid blowing the LVGL task stack (2 KB+ on-stack otherwise).
         char *ssid_buf = malloc(33 * KARMA_MAX_SSIDS);
         if (!ssid_buf) {
+            free(portal_path);
             error_popup_create("Out of memory.");
             return;
         }
@@ -6712,6 +6712,7 @@ static void karma_portal_ssids_cb(const char *input) {
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom portal: %s\n", portal_path);
+    free(portal_path);
     keyboard_view_set_submit_callback(NULL);
 }
 
