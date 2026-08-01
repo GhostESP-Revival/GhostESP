@@ -4,6 +4,7 @@
 #include "managers/wifi_manager.h"
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_now.h"
 #include "esp_timer.h"
@@ -35,8 +36,8 @@ typedef struct __attribute__((packed)) {
 static const char *TAG = "EspNowManager";
 static const uint8_t s_broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static espnow_manager_peer_t s_peers[ESPNOW_MANAGER_MAX_PEERS];
-static espnow_manager_message_t s_messages[ESPNOW_MANAGER_MAX_MESSAGES];
+static espnow_manager_peer_t *s_peers;
+static espnow_manager_message_t *s_messages;
 static uint8_t s_message_head;
 static uint8_t s_message_count;
 static uint8_t s_channel;
@@ -46,6 +47,33 @@ static char s_name[ESPNOW_MANAGER_NAME_MAX];
 static char s_last_error[96];
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static bool allocate_buffers(void) {
+    if (!s_peers) {
+        s_peers = heap_caps_malloc(sizeof(espnow_manager_peer_t) * ESPNOW_MANAGER_MAX_PEERS,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_peers) s_peers = malloc(sizeof(espnow_manager_peer_t) * ESPNOW_MANAGER_MAX_PEERS);
+        if (!s_peers) return false;
+    }
+    if (!s_messages) {
+        s_messages = heap_caps_malloc(sizeof(espnow_manager_message_t) * ESPNOW_MANAGER_MAX_MESSAGES,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_messages) s_messages = malloc(sizeof(espnow_manager_message_t) * ESPNOW_MANAGER_MAX_MESSAGES);
+        if (!s_messages) {
+            free(s_peers);
+            s_peers = NULL;
+            return false;
+        }
+    }
+    return true;
+}
+
+static void free_buffers(void) {
+    free(s_peers);
+    free(s_messages);
+    s_peers = NULL;
+    s_messages = NULL;
 }
 
 static void set_error(const char *message) {
@@ -233,9 +261,16 @@ bool espnow_manager_start(uint8_t channel) {
     ESP_LOGI(TAG, "Starting ESP-NOW channel=%u identity='%s' reconnect_sta=%d",
              channel, s_name, reconnect_sta_on_stop);
 
+    if (!allocate_buffers()) {
+        set_error("Out of memory for nearby chat");
+        wifi_manager_set_reconnect_hold(false);
+        if (reconnect_sta_on_stop) wifi_manager_configure_sta_from_settings();
+        return false;
+    }
     esp_err_t err = esp_now_init();
     if (err != ESP_OK) {
         set_error(esp_err_to_name(err));
+        free_buffers();
         wifi_manager_set_reconnect_hold(false);
         if (reconnect_sta_on_stop) wifi_manager_configure_sta_from_settings();
         return false;
@@ -244,13 +279,14 @@ bool espnow_manager_start(uint8_t channel) {
     if (err != ESP_OK) {
         esp_now_deinit();
         set_error(esp_err_to_name(err));
+        free_buffers();
         wifi_manager_set_reconnect_hold(false);
         if (reconnect_sta_on_stop) wifi_manager_configure_sta_from_settings();
         return false;
     }
     portENTER_CRITICAL(&s_lock);
-    memset(s_peers, 0, sizeof(s_peers));
-    memset(s_messages, 0, sizeof(s_messages));
+    memset(s_peers, 0, sizeof(espnow_manager_peer_t) * ESPNOW_MANAGER_MAX_PEERS);
+    memset(s_messages, 0, sizeof(espnow_manager_message_t) * ESPNOW_MANAGER_MAX_MESSAGES);
     s_message_head = 0;
     s_message_count = 0;
     s_channel = channel;
@@ -274,6 +310,7 @@ void espnow_manager_stop(void) {
     s_channel = 0;
     s_reconnect_sta_on_stop = false;
     portEXIT_CRITICAL(&s_lock);
+    free_buffers();
     wifi_manager_set_reconnect_hold(false);
     if (reconnect_sta) wifi_manager_configure_sta_from_settings();
 }
@@ -299,6 +336,7 @@ bool espnow_manager_announce(void) {
 }
 
 int espnow_manager_peer_count(void) {
+    if (!s_peers) return 0;
     int count = 0;
     portENTER_CRITICAL(&s_lock);
     for (int i = 0; i < ESPNOW_MANAGER_MAX_PEERS; ++i) {
@@ -309,7 +347,7 @@ int espnow_manager_peer_count(void) {
 }
 
 bool espnow_manager_get_peer(int index, espnow_manager_peer_t *out) {
-    if (!out || index < 0) return false;
+    if (!out || index < 0 || !s_peers) return false;
     int current = 0;
     bool found = false;
     portENTER_CRITICAL(&s_lock);
@@ -339,7 +377,7 @@ int espnow_manager_message_count(void) {
 }
 
 bool espnow_manager_receive(espnow_manager_message_t *out) {
-    if (!out) return false;
+    if (!out || !s_messages) return false;
     bool received = false;
     portENTER_CRITICAL(&s_lock);
     if (s_message_count > 0) {
