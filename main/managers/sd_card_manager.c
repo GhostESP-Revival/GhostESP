@@ -26,6 +26,9 @@
 #include "managers/display_manager.h"
 #include "gui/toast.h"
 #include "lvgl_tft/disp_spi.h"
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+#include "lvgl_touch/tp_spi.h"
+#endif
 
 #if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
 #include "esp_rom_gpio.h"
@@ -84,6 +87,7 @@ static void sd_spi_bus_clear_tracking(void) {
 #endif
 #include "managers/display_manager.h"
 static bool s_display_spi_suspended_flag = false;
+static bool s_touch_spi_detached = false;
 /* Tracks whether the display panel's SPI device is currently attached to the bus.
  * Set true on boot after disp_spi_add_device() succeeds; cleared on suspend. Lets
  * the resume path skip a redundant lvgl_spi_driver_init() when the bus is still
@@ -129,6 +133,7 @@ static bool display_spi_suspend_for_sd(void) {
     return true;  /* already suspended — idempotent, matches resume_after_sd guard */
   }
   /* Stop LVGL from queuing new flushes. */
+  display_manager_suspend_input_task();
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
@@ -140,15 +145,48 @@ static bool display_spi_suspend_for_sd(void) {
    * or "stuck" pixel row until the next resume cycle. */
   disp_wait_for_pending_transactions();
   display_manager_suspend_lvgl_task();
-  esp_err_t remove_ret = disp_spi_remove_device();
-  if (remove_ret != ESP_OK) {
-    ESP_LOGE(TAG, "Cannot release display SPI device for SD: %s", esp_err_to_name(remove_ret));
+  if (display_sd_spi_pins_match()) {
+    /* All devices can remain registered on a same-pin bus. Their owning tasks
+     * are parked, so SPI master arbitration and chip-select handling remain in
+     * the known-working boot configuration while SD temporarily owns traffic. */
+#ifdef CONFIG_LV_DISP_SPI_CS
+    gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+#endif
+    s_display_panel_attached = true;
+    s_display_spi_suspended_flag = true;
+    return true;
+  }
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  esp_err_t touch_ret = tp_spi_remove_device();
+  if (touch_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release touch SPI device for SD: %s", esp_err_to_name(touch_ret));
     lv_disp_t *disp = lv_disp_get_default();
     if (disp) {
       lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
       if (refr) lv_timer_resume(refr);
     }
     display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
+    return false;
+  }
+  s_touch_spi_detached = true;
+#endif
+  esp_err_t remove_ret = disp_spi_remove_device();
+  if (remove_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release display SPI device for SD: %s", esp_err_to_name(remove_ret));
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+    if (s_touch_spi_detached) {
+      tp_spi_add_device(TOUCH_SPI_HOST);
+      s_touch_spi_detached = false;
+    }
+#endif
+    lv_disp_t *disp = lv_disp_get_default();
+    if (disp) {
+      lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
+      if (refr) lv_timer_resume(refr);
+    }
+    display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
     return false;
   }
   s_display_panel_attached = false;
@@ -206,6 +244,12 @@ static bool display_spi_resume_after_sd(void) {
     ESP_LOGE(TAG, "Display SPI rebind failed; LVGL remains suspended");
     return false;
   }
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  if (s_touch_spi_detached) {
+    tp_spi_add_device(TOUCH_SPI_HOST);
+    s_touch_spi_detached = false;
+  }
+#endif
   /* Resume LVGL only after its panel device is attached to the display bus. */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
@@ -213,6 +257,7 @@ static bool display_spi_resume_after_sd(void) {
     if (refr) lv_timer_resume(refr);
   }
   display_manager_resume_lvgl_task();
+  display_manager_resume_input_task();
   s_display_spi_suspended_flag = false;
   return true;
 }
@@ -227,7 +272,10 @@ static bool display_spi_resume_after_sd(void) { return true; }
 static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
   ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d)", guard_active);
-  if (guard_active) display_manager_resume_lvgl_task();
+  if (guard_active) {
+    display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
+  }
 #else
   (void)guard_active;
 #endif
@@ -288,6 +336,63 @@ static esp_err_t sd_card_route_experimental_shared_spi(void) {
   ESP_LOGW(TAG, "Experimental persistent shared SPI enabled; TFT and SD remain attached to SPI2");
 #endif
   return ESP_OK;
+}
+
+static esp_err_t sd_card_prepare_shared_spi_card(void) {
+#if defined(CONFIG_USING_SPI)
+  if (!is_shared_display_sd_spi()) return ESP_OK;
+
+  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
+  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
+#ifdef CONFIG_LV_DISP_SPI_CS
+  gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+#endif
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  gpio_set_level(TP_SPI_CS, 1);
+#endif
+
+  spi_device_interface_config_t devcfg = {
+      .clock_speed_hz = 400000,
+      .mode = 0,
+      .spics_io_num = -1,
+      .queue_size = 1,
+  };
+  spi_device_handle_t clock_device = NULL;
+  esp_err_t ret = spi_bus_add_device(sd_spi_host_id(), &devcfg, &clock_device);
+  if (ret != ESP_OK) return ret;
+
+  uint8_t idle_clocks[20];
+  memset(idle_clocks, 0xFF, sizeof(idle_clocks));
+  spi_transaction_t transaction = {
+      .length = sizeof(idle_clocks) * 8,
+      .tx_buffer = idle_clocks,
+  };
+  ret = spi_device_transmit(clock_device, &transaction);
+  esp_err_t remove_ret = spi_bus_remove_device(clock_device);
+  return ret != ESP_OK ? ret : remove_ret;
+#else
+  return ESP_OK;
+#endif
+}
+
+static esp_err_t sd_card_mount_spi_with_retry(
+    sdmmc_host_t *host,
+    const sdspi_device_config_t *slot_config,
+    const esp_vfs_fat_sdmmc_mount_config_t *mount_config) {
+  esp_err_t ret = ESP_FAIL;
+  for (int attempt = 1; attempt <= 3; ++attempt) {
+    esp_err_t prepare_ret = sd_card_prepare_shared_spi_card();
+    if (prepare_ret != ESP_OK) {
+      ESP_LOGW(TAG, "Shared SPI SD idle clocks failed: %s", esp_err_to_name(prepare_ret));
+    }
+    sd_card_manager.card = NULL;
+    ret = esp_vfs_fat_sdspi_mount("/mnt", host, slot_config, mount_config,
+                                  &sd_card_manager.card);
+    if (ret == ESP_OK) return ESP_OK;
+    ESP_LOGW(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
+    if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  return ret;
 }
 
 
@@ -694,6 +799,7 @@ esp_err_t sd_card_init(void) {
      * gating/rebind block below before SD claims the bus. */
     shared_spi_guard_active = true;
     ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
+    display_manager_suspend_input_task();
     display_manager_suspend_lvgl_task();
     disp_wait_for_pending_transactions();
 #ifdef CONFIG_LV_DISP_SPI_CS
@@ -713,7 +819,8 @@ esp_err_t sd_card_init(void) {
   bool keep_bus_on_failure = sd_keep_spi_bus_for_board();
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
   gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-                     strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0 ||
+                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0);
 #endif
   bool display_was_suspended = false;
   /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
@@ -809,7 +916,7 @@ esp_err_t sd_card_init(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
   host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
+  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
 #elif defined(CONFIG_SHARED_TFT_SD_SPI)
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
@@ -976,15 +1083,7 @@ esp_err_t sd_card_init(void) {
   slot_config.host_id = SPI2_HOST;
 #endif
 
-  ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                &sd_card_manager.card);
-  if (ret == ESP_ERR_INVALID_RESPONSE || ret == ESP_ERR_INVALID_SIZE) {
-    ESP_LOGW(TAG, "First SD probe failed (%s), retrying at lower SPI frequency", esp_err_to_name(ret));
-    host.max_freq_khz = 4000;
-    vTaskDelay(pdMS_TO_TICKS(30));
-    ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                  &sd_card_manager.card);
-  }
+  ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
   ESP_LOGD(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d",
            esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
   shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
@@ -1074,7 +1173,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   host.slot = sd_spi_host_id();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
+  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
 #endif
 
   spi_bus_config_t bus_config = {
@@ -1117,14 +1216,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   slot_config.gpio_cs = sd_card_manager.spi_cs_pin;
   slot_config.host_id = sd_spi_host_id();
 
-  esp_err_t ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                &sd_card_manager.card);
-  if (ret == ESP_ERR_INVALID_RESPONSE || ret == ESP_ERR_INVALID_SIZE) {
-    host.max_freq_khz = 4000;
-    vTaskDelay(pdMS_TO_TICKS(30));
-    ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                  &sd_card_manager.card);
-  }
+  esp_err_t ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
   if (ret != ESP_OK) {
     if (!sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
@@ -1191,7 +1283,8 @@ bool sd_card_needs_jit_mount(void) {
      * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).
      * Force JIT mount/unmount so the display is restored between SD use. */
     return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0;
 #else
     return false;
 #endif

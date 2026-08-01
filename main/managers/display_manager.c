@@ -278,6 +278,8 @@ static TaskHandle_t input_task_handle = NULL;
  * match the existing idempotent suspend/resume semantics. */
 static volatile bool s_lvgl_gate_closed = false;
 static volatile bool s_lvgl_gate_parked = false;
+static volatile bool s_input_gate_closed = false;
+static volatile bool s_input_gate_parked = false;
 /* Serializes every cross-task entry into LVGL's internal timer list/heap
  * (lv_timer_handler() and lv_async_call()); see the creation site for why
  * this must be recursive. */
@@ -289,6 +291,7 @@ static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
 static bool is_backlight_dimmed = false;
 static bool is_backlight_off = false;
+static bool s_switch_backlight_configured = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
@@ -2190,8 +2193,9 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
-          strcmp(view_name, "GhostScript Runner") == 0 ||
-          strcmp(view_name, "BadUSB") == 0 ||
+           strcmp(view_name, "GhostScript Runner") == 0 ||
+           strcmp(view_name, "SD App") == 0 ||
+           strcmp(view_name, "BadUSB") == 0 ||
           strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0 ||
           strcmp(view_name, "Cloud Store") == 0 ||
@@ -2221,7 +2225,7 @@ void display_manager_fill_screen(lv_color_t color) {
 }
 
 void display_manager_suspend_lvgl_task(void) {
-  if (!lvgl_task_handle) return;
+  if (!lvgl_task_handle || s_lvgl_gate_closed) return;
   if (xTaskGetCurrentTaskHandle() == lvgl_task_handle) return;
   /* Ask the render task to park itself outside lv_timer_handler(), then wait
    * for the acknowledgment before fully suspending. If it is currently mid-flush
@@ -2249,6 +2253,29 @@ void display_manager_resume_lvgl_task(void) {
   s_lvgl_gate_closed = false;
   if (xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
     vTaskResume(lvgl_task_handle);
+  }
+}
+
+void display_manager_suspend_input_task(void) {
+  if (!input_task_handle || s_input_gate_closed) return;
+  if (xTaskGetCurrentTaskHandle() == input_task_handle) return;
+  s_input_gate_closed = true;
+  TickType_t start = xTaskGetTickCount();
+  while (!s_input_gate_parked) {
+    if (xTaskGetTickCount() - start > pdMS_TO_TICKS(500)) {
+      ESP_LOGW(TAG, "input quiesce timed out; forcing suspend");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  vTaskSuspend(input_task_handle);
+}
+
+void display_manager_resume_input_task(void) {
+  if (!input_task_handle || !s_input_gate_closed) return;
+  s_input_gate_closed = false;
+  if (xTaskGetCurrentTaskHandle() != input_task_handle) {
+    vTaskResume(input_task_handle);
   }
 }
 
@@ -2293,9 +2320,19 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     ESP_LOGD(TAG, "set_backlight_brightness: %d%% (CH422G EXIO2, already on)", percentage);
 #else
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
-        gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
-        gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
+        if (!s_switch_backlight_configured) {
+            gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
+            gpio_set_drive_capability(CONFIG_LV_DISP_PIN_BCKL, GPIO_DRIVE_CAP_3);
+            gpio_sleep_sel_dis(CONFIG_LV_DISP_PIN_BCKL);
+            s_switch_backlight_configured = true;
+        }
+        gpio_hold_dis(CONFIG_LV_DISP_PIN_BCKL);
         gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+        gpio_hold_en(CONFIG_LV_DISP_PIN_BCKL);
+        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (requested=%u%%, scaled=%u%%)",
+                 CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? "ON" : "OFF",
+                 (unsigned)((max_brightness > 0) ? (percentage * 100) / max_brightness : 0),
+                 (unsigned)percentage);
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping switch backlight");
     }
@@ -2540,6 +2577,13 @@ void hardware_input_task(void *pvParameters) {
   ESP_LOGI(TAG, "T-Deck keyboard initialized in raw mode");
 #endif
   while (1) {
+    if (s_input_gate_closed) {
+      s_input_gate_parked = true;
+      while (s_input_gate_closed) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+      s_input_gate_parked = false;
+    }
 #ifdef CONFIG_USE_TDECK
     // Read raw keyboard state for shift key support
     uint8_t raw_data[TDECK_COLS] = {0};

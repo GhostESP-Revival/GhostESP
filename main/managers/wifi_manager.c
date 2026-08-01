@@ -681,7 +681,13 @@ static void wifi_reconnect_timer_stop(void) {
     }
 }
 
+static bool wifi_reconnect_hold = false;
+
 static bool wifi_reconnect_blocked(const char **reason_out) {
+    if (wifi_reconnect_hold) {
+        if (reason_out) *reason_out = "radio reserved";
+        return true;
+    }
     if (wifi_monitor_capture_active) {
         if (reason_out) *reason_out = "monitor mode";
         return true;
@@ -700,6 +706,11 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
     }
 
     return false;
+}
+
+void wifi_manager_set_reconnect_hold(bool hold) {
+    wifi_reconnect_hold = hold;
+    if (hold) wifi_manager_stop_reconnect();
 }
 
 static void wifi_reconnect_reset(void) {

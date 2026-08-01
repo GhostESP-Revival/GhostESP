@@ -10,6 +10,7 @@
 #include "managers/badusb_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/display_manager.h"
+#include "managers/espnow_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/plugin_manager.h"
@@ -166,6 +167,7 @@ static uint16_t plugin_ap_count = 0;
 static wifi_ap_record_t *plugin_scanned_aps = NULL;
 static volatile bool s_plugin_live_scan_active = false;
 static bool s_plugin_ble_started = false;
+static bool s_plugin_espnow_started = false;
 static char s_subghz_loaded_path[PLUGIN_APP_PATH_MAX];
 
 static void plugin_wifi_snapshot_scan_results(void) {
@@ -486,6 +488,7 @@ static void plugin_ui_style_button(lv_obj_t *obj) {
     lv_obj_set_style_border_color(obj, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(obj, GUI_GRID * 4, LV_PART_MAIN);
     lv_obj_set_style_pad_ver(obj, GUI_GRID * 3, LV_PART_MAIN);
 }
@@ -1579,6 +1582,72 @@ static bool plugin_api_wifi_live_scan_active(void) {
     return s_plugin_live_scan_active;
 }
 
+static bool plugin_api_espnow_start(uint8_t channel) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW)) return false;
+    s_plugin_espnow_started = espnow_manager_start(channel);
+    return s_plugin_espnow_started;
+}
+
+static void plugin_api_espnow_stop(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW)) return;
+    espnow_manager_stop();
+    s_plugin_espnow_started = false;
+}
+
+static bool plugin_api_espnow_is_active(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_is_active();
+}
+
+static uint8_t plugin_api_espnow_channel(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_channel() : 0;
+}
+
+static const char *plugin_api_espnow_name(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_name() : "";
+}
+
+static const char *plugin_api_espnow_last_error(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_last_error() : "ESP-NOW permission required";
+}
+
+static bool plugin_api_espnow_announce(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_announce();
+}
+
+static int plugin_api_espnow_peer_count(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_peer_count() : 0;
+}
+
+static bool plugin_api_espnow_get_peer(int index, ghostesp_espnow_peer_t *out) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) || !out) return false;
+    espnow_manager_peer_t peer;
+    if (!espnow_manager_get_peer(index, &peer)) return false;
+    memcpy(out->mac, peer.mac, sizeof(out->mac));
+    out->rssi = peer.rssi;
+    out->last_seen_ms = peer.last_seen_ms;
+    snprintf(out->name, sizeof(out->name), "%s", peer.name);
+    return true;
+}
+
+static bool plugin_api_espnow_send(const uint8_t mac[6], const char *text) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_send(mac, text);
+}
+
+static int plugin_api_espnow_message_count(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_message_count() : 0;
+}
+
+static bool plugin_api_espnow_receive(ghostesp_espnow_message_t *out) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) || !out) return false;
+    espnow_manager_message_t message;
+    if (!espnow_manager_receive(&message)) return false;
+    memcpy(out->sender_mac, message.sender_mac, sizeof(out->sender_mac));
+    out->received_at_ms = message.received_at_ms;
+    snprintf(out->sender_name, sizeof(out->sender_name), "%s", message.sender_name);
+    snprintf(out->text, sizeof(out->text), "%s", message.text);
+    return true;
+}
+
 static void plugin_api_app_exit(void) {
     if (!s_api_active) return;
     display_manager_switch_view(&apps_menu_view);
@@ -2365,6 +2434,18 @@ static ghostesp_api_t s_api = {
     .asset_storage_size = plugin_api_asset_storage_size,
     .ui_canvas_blit_rgb565_async = plugin_api_ui_canvas_blit_rgb565_async,
     .ui_canvas_blit_async_wait = plugin_api_ui_canvas_blit_async_wait,
+    .espnow_start = plugin_api_espnow_start,
+    .espnow_stop = plugin_api_espnow_stop,
+    .espnow_is_active = plugin_api_espnow_is_active,
+    .espnow_channel = plugin_api_espnow_channel,
+    .espnow_name = plugin_api_espnow_name,
+    .espnow_last_error = plugin_api_espnow_last_error,
+    .espnow_announce = plugin_api_espnow_announce,
+    .espnow_peer_count = plugin_api_espnow_peer_count,
+    .espnow_get_peer = plugin_api_espnow_get_peer,
+    .espnow_send = plugin_api_espnow_send,
+    .espnow_message_count = plugin_api_espnow_message_count,
+    .espnow_receive = plugin_api_espnow_receive,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
@@ -2388,6 +2469,7 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
     s_asset_session_active = false;
     s_asset_session_display_suspended = false;
     s_plugin_ble_started = false;
+    s_plugin_espnow_started = false;
     portENTER_CRITICAL(&s_input_snapshot_mux);
     s_input_held = 0;
     s_input_pressed = 0;
@@ -2459,6 +2541,10 @@ void plugin_api_release(void) {
         wifi_manager_stop_monitor_mode();
         esp_wifi_stop();
         ap_manager_start_services();
+    }
+    if (s_plugin_espnow_started) {
+        espnow_manager_stop();
+        s_plugin_espnow_started = false;
     }
     s_plugin_async_scan_active = false;
 

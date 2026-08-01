@@ -51,7 +51,13 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define MIN_SSIDS_FOR_DETECTION 2 // Minimum SSIDs needed to flag as PineAP
 #define MAX_PINEAP_NETWORKS 20
 #define MAX_SSIDS_PER_BSSID 10
-#include "core/network_constants.h"
+#if !defined(MAX_WIFI_CHANNEL)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define MAX_WIFI_CHANNEL 165
+#else
+#define MAX_WIFI_CHANNEL 13
+#endif
+#endif
 #define CHANNEL_HOP_INTERVAL_MS 100
 #define WARDRIVE_STREAM_VERSION 2
 #define WARDRIVE_STREAM_VERSION_LEGACY 1

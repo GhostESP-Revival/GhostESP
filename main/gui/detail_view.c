@@ -446,12 +446,13 @@ static void detail_view_info_draw_event(lv_event_t *e) {
 
         const char *label = dv->info_items[i].label ? dv->info_items[i].label : "";
         const char *value = dv->info_items[i].value ? dv->info_items[i].value : "";
+        bool full_width_value = label[0] == '\0';
 
         lv_coord_t label_x1 = obj_coords.x1 + x_pad;
         lv_coord_t label_x2 = split_x - x_pad;
         if (label_x2 < label_x1) label_x2 = label_x1;
 
-        lv_coord_t value_x1 = split_x + x_pad;
+        lv_coord_t value_x1 = full_width_value ? obj_coords.x1 + x_pad : split_x + x_pad;
         lv_coord_t value_x2 = obj_coords.x2 - x_pad;
         if (value_x2 < value_x1) value_x2 = value_x1;
 
@@ -480,7 +481,7 @@ static void detail_view_info_draw_event(lv_event_t *e) {
         lv_point_t value_size;
         lv_txt_get_size(&value_size, value, value_dsc.font, value_dsc.letter_space, value_dsc.line_space,
                         LV_COORD_MAX, value_dsc.flag);
-        lv_coord_t value_x = value_x2 - value_size.x + 1;
+        lv_coord_t value_x = full_width_value ? value_x1 : value_x2 - value_size.x + 1;
         if (value_x < value_x1) value_x = value_x1;
         lv_coord_t value_y = y1 + (row_h - value_size.y) / 2;
         if (value_y < y1) value_y = y1;

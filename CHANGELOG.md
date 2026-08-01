@@ -25,14 +25,18 @@
 
 ### Native SD Apps & SDK
 - Added RGB565 canvas blits and per-app tick intervals for high-frame-rate native apps
+- Added HackChat for nearby ESP-NOW messaging with deterministic Ghostchi identities
+- Added permission-gated ESP-NOW discovery and messaging APIs for native apps
 - Added ESP32-C5 GOT relocation support and build-time relocation validation for larger native apps
 - Added offset-based native app data and packaged-asset reads for streaming large files on JIT-mounted SD boards
 - Added the joystick-required Doom Port native app with a bundled, directly streamed Freedoom IWAD
 - Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
 - Fixed native app keyboard dialogs preserving the loaded app across the keyboard view, preventing callbacks into unloaded apps after submission
+- Added live bounded touch scrolling to native apps without full-screen redraws
 - Normalized physical keyboard arrow keys for native SD app navigation
 - Added manifest input requirements that keep incompatible apps visible and prevent unsupported launches with a toast
 - Added stable `ui_image_set_builtin` SDK access to bundled Ghostchi images
+- Added interleaved true-color-alpha app icons and fixed GAPP manifest checksums on Windows
 
 ### GhostScript
 - Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM

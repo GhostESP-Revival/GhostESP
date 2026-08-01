@@ -608,6 +608,14 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
+#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN)
+    /* Keep the card deselected before any shared-bus display/touch traffic. */
+    gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
+    gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
+    ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+#endif
+
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
 
@@ -627,11 +635,6 @@ void app_main(void) {
         gpio_set_level(12, 1);
         ESP_LOGI(TAG, "CC1101 SS pin 12 set HIGH");
 
-        // SD Card CS pin
-        gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
-        gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
-        ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
     }
 #endif
 

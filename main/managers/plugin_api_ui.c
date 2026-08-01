@@ -501,6 +501,7 @@ static void plugin_api_ui_obj_set_scrollable_now(void *arg) {
     if (!obj || !lv_obj_is_valid(obj)) return;
     if (ctx->visible) {
         lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
         lv_obj_set_scroll_dir(obj, LV_DIR_VER);
         lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_AUTO);
     } else {
@@ -526,7 +527,7 @@ static void plugin_api_ui_obj_scroll_by_now(void *arg) {
     scroll_by_ctx_t *ctx = (scroll_by_ctx_t *)arg;
     lv_obj_t *obj = (lv_obj_t *)ctx->obj;
     if (!obj || !lv_obj_is_valid(obj)) return;
-    lv_obj_scroll_by(obj, ctx->dx, ctx->dy, ctx->animated ? LV_ANIM_ON : LV_ANIM_OFF);
+    lv_obj_scroll_by_bounded(obj, ctx->dx, ctx->dy, ctx->animated ? LV_ANIM_ON : LV_ANIM_OFF);
 }
 
 void plugin_api_ui_obj_scroll_by(ghostesp_ui_obj_t obj, int32_t dx, int32_t dy, bool animated) {
@@ -557,6 +558,7 @@ static void plugin_api_ui_button_set_selected_now(void *arg) {
     lv_color_t border = lv_color_hex(ctx->visible ? theme_palette_get_accent(theme) : theme_palette_get_surface_alt(theme));
     lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, ctx->visible ? 3 : 1, LV_PART_MAIN);
+    if (ctx->visible) lv_obj_scroll_to_view(obj, LV_ANIM_OFF);
 }
 
 void plugin_api_ui_button_set_selected(ghostesp_ui_obj_t button, bool selected) {

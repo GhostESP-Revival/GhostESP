@@ -208,6 +208,8 @@ bool display_manager_is_low_i2c_mode(void);
 
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
+void display_manager_suspend_input_task(void);
+void display_manager_resume_input_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
 

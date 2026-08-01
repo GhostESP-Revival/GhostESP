@@ -199,6 +199,7 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password);
 void wifi_manager_cancel_connect(void);
 
 void wifi_manager_stop_reconnect(void);
+void wifi_manager_set_reconnect_hold(bool hold);
 
 void wifi_manager_start_visualizer(bool for_screen);
 

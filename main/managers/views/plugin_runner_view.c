@@ -41,6 +41,7 @@ static lv_point_t s_touch_last = {0};
 static lv_obj_t *s_touch_scroll_target = NULL;
 static bool s_preserve_for_keyboard_input = false;
 static bool s_resume_from_keyboard_input = false;
+static int64_t s_ignore_input_until_us = 0;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
@@ -362,7 +363,7 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
             if (!s_touch_scroll_target) s_touch_scroll_target = find_scrollable_at(&data->point);
             if (s_touch_scroll_target && lv_obj_is_valid(s_touch_scroll_target)) {
                 s_touch_scrolling = true;
-                lv_obj_scroll_by_bounded(s_touch_scroll_target, 0, dy, LV_ANIM_OFF);
+                display_manager_queue_scroll(s_touch_scroll_target, dy);
                 return true;
             }
         }
@@ -399,6 +400,7 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
 
 static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
+    if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
     if (app_event.type == GHOSTESP_INPUT_BACK) {
         display_manager_go_back();
@@ -435,7 +437,9 @@ static void plugin_runner_event_handler(InputEvent *event) {
         }
     }
     if (plugin_runner_handle_touch(event)) return;
-    if (event->type == INPUT_TYPE_ENCODER && !event->data.encoder.button && s_root && lv_obj_is_valid(s_root)) {
+    if (event->type == INPUT_TYPE_ENCODER && !event->data.encoder.button &&
+        (!loaded || !loaded->app || !loaded->app->on_input) &&
+        s_root && lv_obj_is_valid(s_root)) {
         lv_obj_t *scrollable = find_scrollable_descendant(s_root);
         if (scrollable) {
             int dy = event->data.encoder.direction > 0 ? -40 : 40;
@@ -494,6 +498,7 @@ void plugin_runner_view_create(void) {
     if (s_resume_from_keyboard_input && s_root && lv_obj_is_valid(s_root) &&
         loaded && loaded->running && loaded->state == PLUGIN_APP_STATE_RUNNING) {
         s_resume_from_keyboard_input = false;
+        s_ignore_input_until_us = esp_timer_get_time() + 350000;
         s_touch_started = false;
         s_touch_scrolling = false;
         s_touch_scroll_target = NULL;

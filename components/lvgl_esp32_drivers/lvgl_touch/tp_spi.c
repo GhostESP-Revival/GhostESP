@@ -75,6 +75,18 @@ void tp_spi_add_device(spi_host_device_t host)
 	tp_spi_add_device_config(host, &devcfg);
 }
 
+esp_err_t tp_spi_remove_device(void)
+{
+	if (!spi) return ESP_OK;
+	esp_err_t ret = spi_bus_remove_device(spi);
+	if (ret == ESP_OK) {
+		spi = NULL;
+		gpio_set_direction(TP_SPI_CS, GPIO_MODE_OUTPUT);
+		gpio_set_level(TP_SPI_CS, 1);
+	}
+	return ret;
+}
+
 void tp_spi_xchg(uint8_t* data_send, uint8_t* data_recv, uint8_t byte_count)
 {
 	spi_transaction_t t = {

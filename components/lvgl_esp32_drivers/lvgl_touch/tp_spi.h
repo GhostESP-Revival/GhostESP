@@ -28,6 +28,7 @@ extern "C" {
  * GLOBAL PROTOTYPES
  **********************/
 void tp_spi_add_device(spi_host_device_t host);
+esp_err_t tp_spi_remove_device(void);
 void tp_spi_add_device_config(spi_host_device_t host, spi_device_interface_config_t *config);
 void tp_spi_xchg(uint8_t* data_send, uint8_t* data_recv, uint8_t byte_count);
 void tp_spi_write_reg(uint8_t* data, uint8_t byte_count);
