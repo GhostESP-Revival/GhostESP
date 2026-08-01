@@ -61,8 +61,8 @@ static void (*s_ui_print)(const char *text) = NULL;
 static void (*s_ui_clear)(void) = NULL;
 static void (*s_ui_toast)(const char *message) = NULL;
 static char s_app_id[PLUGIN_APP_ID_MAX];
-static char s_app_data_path[PLUGIN_APP_PATH_MAX];
-static char s_app_base_path[PLUGIN_APP_PATH_MAX];
+static char *s_app_data_path;
+static char *s_app_base_path;
 static bool s_asset_session_active;
 static bool s_asset_session_display_suspended;
 static plugin_permission_t s_permissions = 0;
@@ -85,7 +85,7 @@ typedef struct {
     uint32_t offset;
     uint32_t length;
 } plugin_direct_asset_t;
-static char s_direct_gapp_path[PLUGIN_APP_PATH_MAX];
+static char *s_direct_gapp_path;
 static plugin_direct_asset_t *s_direct_assets = NULL;
 static int s_direct_asset_count = 0;
 
@@ -95,7 +95,8 @@ static void plugin_api_direct_index_reset(void) {
         s_direct_assets = NULL;
     }
     s_direct_asset_count = 0;
-    s_direct_gapp_path[0] = '\0';
+    free(s_direct_gapp_path);
+    s_direct_gapp_path = NULL;
 }
 
 static void plugin_api_direct_index_load(const char *base_path) {
@@ -111,17 +112,21 @@ static void plugin_api_direct_index_load(const char *base_path) {
     uint16_t version = 0, gapp_len = 0;
     uint32_t count = 0;
     bool header_ok = fread(magic, 1, 4, f) == 4 && memcmp(magic, "DIDX", 4) == 0 &&
-                      fread(&version, sizeof(version), 1, f) == 1 && version == 1 &&
-                      fread(&gapp_len, sizeof(gapp_len), 1, f) == 1 &&
-                      gapp_len > 0 && gapp_len < sizeof(s_direct_gapp_path) &&
-                      fread(s_direct_gapp_path, 1, gapp_len, f) == gapp_len;
+                     fread(&version, sizeof(version), 1, f) == 1 && version == 1 &&
+                     fread(&gapp_len, sizeof(gapp_len), 1, f) == 1 &&
+                     gapp_len > 0 && gapp_len < PLUGIN_APP_PATH_MAX;
+    if (header_ok) {
+        s_direct_gapp_path = malloc((size_t)gapp_len + 1);
+        header_ok = s_direct_gapp_path && fread(s_direct_gapp_path, 1, gapp_len, f) == gapp_len;
+    }
     if (header_ok) {
         s_direct_gapp_path[gapp_len] = '\0';
         header_ok = fread(&count, sizeof(count), 1, f) == 1 && count > 0 && count <= 256;
     }
     if (!header_ok) {
         fclose(f);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
 
@@ -130,7 +135,8 @@ static void plugin_api_direct_index_load(const char *base_path) {
     if (!entries) entries = malloc(sizeof(plugin_direct_asset_t) * count);
     if (!entries) {
         fclose(f);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
 
@@ -148,7 +154,8 @@ static void plugin_api_direct_index_load(const char *base_path) {
 
     if (loaded != count) {
         free(entries);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
     s_direct_assets = entries;
@@ -168,7 +175,7 @@ static wifi_ap_record_t *plugin_scanned_aps = NULL;
 static volatile bool s_plugin_live_scan_active = false;
 static bool s_plugin_ble_started = false;
 static bool s_plugin_espnow_started = false;
-static char s_subghz_loaded_path[PLUGIN_APP_PATH_MAX];
+static char *s_subghz_loaded_path;
 
 static void plugin_wifi_snapshot_scan_results(void) {
     extern uint16_t ap_count;
@@ -520,7 +527,8 @@ static bool plugin_api_absolute_storage_allowed(const char *path) {
 }
 
 static bool plugin_api_build_app_path(const char *path, char *out, size_t out_len) {
-    if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) || s_app_data_path[0] == '\0') return false;
+    if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) ||
+        !s_app_data_path || s_app_data_path[0] == '\0') return false;
     if (!path || path[0] == '\0') {
         int n = snprintf(out, out_len, "%s", s_app_data_path);
         return n > 0 && (size_t)n < out_len;
@@ -790,7 +798,7 @@ static int plugin_api_storage_read(const char *path, void *buffer, size_t buffer
 
 static bool plugin_api_build_asset_path(const char *path, char *out, size_t out_len) {
     if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) ||
-        s_app_base_path[0] == '\0' || !path || path[0] == '\0') return false;
+        !s_app_base_path || s_app_base_path[0] == '\0' || !path || path[0] == '\0') return false;
     if (path[0] == '/' || path[0] == '\\' || strstr(path, "..")) return false;
     int n = snprintf(out, out_len, "%s/assets/%s", s_app_base_path, path);
     return n > 0 && (size_t)n < out_len;
@@ -804,14 +812,15 @@ static bool plugin_api_build_asset_path(const char *path, char *out, size_t out_
    active; closed on session end, on a path change, or with no active
    session (matching the original always-close-immediately behavior). */
 static FILE *s_read_cache_file = NULL;
-static char s_read_cache_path[PLUGIN_APP_PATH_MAX];
+static char *s_read_cache_path;
 
 static void plugin_api_read_cache_close(void) {
     if (s_read_cache_file) {
         fclose(s_read_cache_file);
         s_read_cache_file = NULL;
     }
-    s_read_cache_path[0] = '\0';
+    free(s_read_cache_path);
+    s_read_cache_path = NULL;
 }
 
 static int plugin_api_read_at_path(const char *path, uint32_t offset,
@@ -823,22 +832,22 @@ static int plugin_api_read_at_path(const char *path, uint32_t offset,
 
     int result = -1;
     FILE *f;
-    if (s_asset_session_active && s_read_cache_file && strcmp(s_read_cache_path, path) == 0) {
+    if (s_asset_session_active && s_read_cache_file && s_read_cache_path &&
+        strcmp(s_read_cache_path, path) == 0) {
         f = s_read_cache_file;
     } else {
         plugin_api_read_cache_close();
         f = fopen(path, "rb");
         if (f && s_asset_session_active) {
-            s_read_cache_file = f;
-            strncpy(s_read_cache_path, path, sizeof(s_read_cache_path) - 1);
-            s_read_cache_path[sizeof(s_read_cache_path) - 1] = '\0';
+            s_read_cache_path = strdup(path);
+            if (s_read_cache_path) s_read_cache_file = f;
         }
     }
     if (f) {
         if (fseek(f, (long)offset, SEEK_SET) == 0) {
             result = (int)fread(buffer, 1, buffer_len, f);
         }
-        if (!s_asset_session_active) {
+        if (!s_asset_session_active || f != s_read_cache_file) {
             if (f == s_read_cache_file) plugin_api_read_cache_close();
             else fclose(f);
         }
@@ -902,7 +911,7 @@ static const char *plugin_api_app_id(void) {
 }
 
 static const char *plugin_api_app_data_path(void) {
-    return s_app_data_path;
+    return s_app_data_path ? s_app_data_path : "";
 }
 
 static bool plugin_api_app_storage_exists(const char *path) {
@@ -1327,11 +1336,12 @@ static bool plugin_api_subghz_load_snapshot(const char *app_relative_path) {
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
     char full_path[PLUGIN_APP_PATH_MAX];
     if (!plugin_api_build_app_path(app_relative_path, full_path, sizeof(full_path))) return false;
-    s_subghz_loaded_path[0] = '\0';
+    free(s_subghz_loaded_path);
+    s_subghz_loaded_path = NULL;
     bool loaded_snapshot = subghz_remote_manager_load_snapshot(full_path);
     if (loaded_snapshot || sd_card_exists(full_path)) {
-        snprintf(s_subghz_loaded_path, sizeof(s_subghz_loaded_path), "%s", full_path);
-        return true;
+        s_subghz_loaded_path = strdup(full_path);
+        return s_subghz_loaded_path != NULL;
     }
     return false;
 #else
@@ -1344,7 +1354,7 @@ static bool plugin_subghz_transmit_path(const char *full_path);
 static bool plugin_api_subghz_transmit_loaded(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
-    return plugin_subghz_transmit_path(s_subghz_loaded_path);
+    return s_subghz_loaded_path && plugin_subghz_transmit_path(s_subghz_loaded_path);
 #else
     return false;
 #endif
@@ -2464,8 +2474,10 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
     s_memory_limit = memory_limit;
     s_memory_used = 0;
     s_app_id[0] = '\0';
-    s_app_data_path[0] = '\0';
-    s_app_base_path[0] = '\0';
+    free(s_app_data_path);
+    free(s_app_base_path);
+    s_app_data_path = NULL;
+    s_app_base_path = NULL;
     s_asset_session_active = false;
     s_asset_session_display_suspended = false;
     s_plugin_ble_started = false;
@@ -2486,10 +2498,19 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
         }
         strncpy(s_app_id, app_id, sizeof(s_app_id) - 1);
         s_app_id[sizeof(s_app_id) - 1] = '\0';
-        snprintf(s_app_data_path, sizeof(s_app_data_path), "/mnt/ghostesp/appdata/%s", s_app_id);
-        if (base_path) {
-            strncpy(s_app_base_path, base_path, sizeof(s_app_base_path) - 1);
-            s_app_base_path[sizeof(s_app_base_path) - 1] = '\0';
+        char app_data_path[PLUGIN_APP_PATH_MAX];
+        snprintf(app_data_path, sizeof(app_data_path), "/mnt/ghostesp/appdata/%s", s_app_id);
+        s_app_data_path = strdup(app_data_path);
+        s_app_base_path = strdup(base_path ? base_path : "");
+        if (!s_app_data_path || !s_app_base_path) {
+            free(s_app_data_path);
+            free(s_app_base_path);
+            s_app_data_path = NULL;
+            s_app_base_path = NULL;
+            s_app_id[0] = '\0';
+            plugin_api_unlock();
+            ESP_LOGE(TAG, "plugin_api_get: out of memory for app paths");
+            return NULL;
         }
         sd_card_create_directory("/mnt/ghostesp/appdata");
         sd_card_create_directory(s_app_data_path);
@@ -2558,8 +2579,12 @@ void plugin_api_release(void) {
     s_memory_limit = 0;
     s_memory_used = 0;
     s_app_id[0] = '\0';
-    s_app_data_path[0] = '\0';
-    s_app_base_path[0] = '\0';
+    free(s_app_data_path);
+    free(s_app_base_path);
+    free(s_subghz_loaded_path);
+    s_app_data_path = NULL;
+    s_app_base_path = NULL;
+    s_subghz_loaded_path = NULL;
     plugin_api_direct_index_reset();
     /* Backstop: normally closed by asset_session_end(), but an app that
        unloads mid-session (crash, forced exit) shouldn't leave an open
