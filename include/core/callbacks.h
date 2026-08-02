@@ -35,11 +35,14 @@ void start_pineap_detection(void);
 void stop_pineap_detection(void);
 
 // Wardriving channel hopping control functions
-void start_wardriving(void);
-void start_wardriving_helper(void);
+bool start_wardriving(void);
+bool start_wardriving_helper(void);
 void stop_wardriving(void);
 void wardriving_set_peer_assist(bool enabled);
+void wardriving_expect_peer_assist(bool enabled);
 bool wardriving_is_helper_mode(void);
+bool wardriving_is_peer_assist_active(void);
+bool wardriving_has_peer_helper(void);
 void wardriving_register_stream_handler(void);
 bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len);
 bool wardriving_set_helper_channels_from_csv(const char *csv);

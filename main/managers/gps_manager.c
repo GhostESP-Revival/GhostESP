@@ -335,15 +335,20 @@ static esp_err_t gps_soft_restart_parser(const char *reason, const minmea_soft_s
 }
 
 void gps_manager_set_peer_gps_preferred(bool enabled) {
+    taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_preferred = enabled;
     if (!enabled) {
         gps_peer_last_update_tick = 0;
         gps_peer_has_seen_update = false;
     }
+    taskEXIT_CRITICAL(&gps_state_lock);
 }
 
 bool gps_manager_is_peer_gps_preferred(void) {
-    return gps_peer_preferred;
+    taskENTER_CRITICAL(&gps_state_lock);
+    bool preferred = gps_peer_preferred;
+    taskEXIT_CRITICAL(&gps_state_lock);
+    return preferred;
 }
 
 void gps_manager_clear_peer_fix(void) {
@@ -1172,21 +1177,16 @@ bool gps_manager_has_seen_update(void) {
     return gps_peer_preferred ? gps_peer_has_seen_update : gps_has_seen_update;
 }
 
-esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
+static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
+                                                       const gps_wd_lite_t *gps_snapshot,
+                                                       bool using_peer) {
     if (!data) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    gps_wd_lite_t gps;
-    memset(&gps, 0, sizeof(gps));
-    bool using_peer = false;
-    if (!gps_manager_get_wd_lite(&gps, &using_peer)) {
+    if (!gps_snapshot) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    if (!gps_manager_has_recent_update()) {
-        return ESP_ERR_INVALID_STATE;
-    }
+    gps_wd_lite_t gps = *gps_snapshot;
     
     TickType_t now = xTaskGetTickCount();
     bool gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS &&
@@ -1361,6 +1361,61 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
     }
 
     return ret;
+}
+
+bool gps_manager_get_recent_active_gps_snapshot(gps_t *out_gps, bool *using_peer) {
+    if (!out_gps) return false;
+
+    TickType_t now = xTaskGetTickCount();
+    taskENTER_CRITICAL(&gps_state_lock);
+    bool peer = gps_peer_preferred;
+    TickType_t last_tick = peer ? gps_peer_last_update_tick : gps_last_update_tick;
+    bool available = peer ? gps_peer_has_seen_update : (g_gpsManager.isinitilized && gps_has_seen_update);
+    bool recent = available && last_tick != 0 &&
+                  (now - last_tick) <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS);
+    if (recent) {
+        *out_gps = peer ? gps_peer_fix_snapshot : gps_local_snapshot;
+    }
+    taskEXIT_CRITICAL(&gps_state_lock);
+
+    if (using_peer) *using_peer = peer;
+    return recent;
+}
+
+esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
+    gps_wd_lite_t gps;
+    memset(&gps, 0, sizeof(gps));
+    bool using_peer = false;
+    if (!gps_manager_get_wd_lite(&gps, &using_peer) || !gps_manager_has_recent_update()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return gps_manager_log_wardriving_data_impl(data, &gps, using_peer);
+}
+
+esp_err_t gps_manager_log_wardriving_data_with_snapshot(wardriving_data_t *data,
+                                                        const gps_t *gps_snapshot,
+                                                        bool using_peer) {
+    if (!gps_snapshot) return ESP_ERR_INVALID_STATE;
+
+    gps_wd_lite_t gps = {
+        .valid = gps_snapshot->valid,
+        .fix = gps_snapshot->fix,
+        .fix_mode = gps_snapshot->fix_mode,
+        .sats_in_use = gps_snapshot->sats_in_use,
+        .sats_in_view = gps_snapshot->sats_in_view,
+        .latitude = gps_snapshot->latitude,
+        .longitude = gps_snapshot->longitude,
+        .altitude = gps_snapshot->altitude,
+        .dop_h = gps_snapshot->dop_h,
+        .dop_p = gps_snapshot->dop_p,
+        .dop_v = gps_snapshot->dop_v,
+        .speed = gps_snapshot->speed,
+        .cog = gps_snapshot->cog,
+        .variation = gps_snapshot->variation,
+        .date = gps_snapshot->date,
+        .tim = gps_snapshot->tim,
+    };
+    return gps_manager_log_wardriving_data_impl(data, &gps, using_peer);
 }
 
 bool gps_is_timeout_detected(void) { return gps_timeout_detected; }

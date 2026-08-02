@@ -340,7 +340,7 @@ On press, the device switches to the terminal view and runs the command. To use 
 
 - **`gpspin [pin]`** — View or set the GPS RX pin for external GPS modules. Without arguments, shows current pin. Setting persists to NVS; restart GPS commands to apply.
 - **`gpsinfo [-s]`** — Stream current fix, satellites, and speed; pass `-s` to stop the display task.
-- **`startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop. Use `--helper` to enable the GhostLink split-channel helper. Use `--channels` to specify a CSV of channels to hop (e.g., `1,6,11`). Use `--hop` to set the channel hop interval in ms (default: 100). Use `--weighted` to enable 5GHz weighted scanning.
+- **`startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop. Use `--helper` to enable the GhostLink split-channel helper. Use `--channels` to specify a CSV of channels to hop (e.g., `1,6,11`). Use `--hop` to set the channel hop interval in ms (default: 125). Use `--weighted` to enable 5GHz weighted scanning.
 
 ## Ethernet
 *(Requires `CONFIG_WITH_ETHERNET`)*

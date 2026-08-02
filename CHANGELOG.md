@@ -59,6 +59,10 @@
 
 ### Wardriving
 - Refactored CSV logging to drain bounded batches asynchronously, keeping Wi-Fi, BLE, and GhostLink capture paths responsive during storage writes
+- Added helper readiness, GPS freshness, link-loss fallback, and retry-safe GhostLink forwarding for split wardriving
+- Added a PSRAM-backed observation queue with GPS-at-capture snapshots, graceful draining, backpressure retries, and drop/high-water telemetry
+- Changed the default primary/helper channel-hop interval to 125 ms and kept weighted common-channel 5 GHz coverage enabled by default
+- Reduced wardriving callback load with management-frame hardware filtering
 - Fixed WiGLE headers for UART/JIT SD output, reliable JIT SD finalization, and hidden/32-byte/UTF-8 SSID handling
 - Fixed AP entries being silently dropped when a malformed beacon's DS Parameter Set IE reported a garbage channel number, now falls back to the radio's own channel instead
 - Removed console log spam on every UART-streamed CSV chunk during active wardriving

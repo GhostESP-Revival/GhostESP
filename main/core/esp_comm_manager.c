@@ -1734,7 +1734,9 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         size_t data_len = strlen(data);
         size_t max_data_len = COMM_PACKET_SIZE - packet.length - 4;
         if (data_len > max_data_len) {
-            data_len = max_data_len;
+            printf("Command data too long (%u > %u); use command stream transport\n",
+                   (unsigned)data_len, (unsigned)max_data_len);
+            return false;
         }
         strncpy((char*)packet.data + packet.length, data, data_len);
         packet.length += data_len;

@@ -37,6 +37,7 @@
 #include "managers/views/lockscreen.h"
 #include "managers/views/splash_screen.h"
 #include "managers/encoder_manager.h"
+#include "managers/crash_reporter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -112,6 +113,7 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 #endif
 
 QueueHandle_tt input_queue = NULL;
+joystick_t joysticks[5];
 
 static volatile bool g_low_i2c_mode = false;
 static bool s_deferred_peripherals_initialized = false;
@@ -3439,6 +3441,10 @@ void processEvent() {
       processed++;
       continue;
     }
+    if (crash_reporter_handle_input(&event)) {
+      processed++;
+      continue;
+    }
     if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
       View *current = dm.current_view;
       void (*input_callback)(InputEvent *) = NULL;
@@ -3509,6 +3515,9 @@ void processEvent() {
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;
+        return;
+      }
+      if (crash_reporter_handle_input(&event)) {
         return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {

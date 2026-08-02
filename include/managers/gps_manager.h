@@ -38,6 +38,9 @@ typedef struct {
 void gps_manager_init(GPSManager *manager);
 void gps_manager_deinit(GPSManager *manager);
 esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data);
+esp_err_t gps_manager_log_wardriving_data_with_snapshot(wardriving_data_t *data,
+                                                        const gps_t *gps_snapshot,
+                                                        bool using_peer);
 bool gps_is_timeout_detected(void);
 void gps_manager_note_update(void);
 bool gps_manager_has_recent_update(void);
@@ -49,6 +52,7 @@ void gps_manager_update_local_snapshot(const gps_t *fix);
 void gps_manager_update_peer_fix(const gps_peer_fix_t *fix);
 bool gps_manager_get_local_gps_snapshot(gps_t *out_gps);
 bool gps_manager_get_active_gps_snapshot(gps_t *out_gps, bool *using_peer);
+bool gps_manager_get_recent_active_gps_snapshot(gps_t *out_gps, bool *using_peer);
 GPSManager g_gpsManager;
 
 #endif // GPSMANAGER_H

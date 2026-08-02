@@ -356,9 +356,7 @@ void register_commands() {
     register_command("stopspoof", handle_stop_spoof);
     register_command("chameleon", handle_chameleon_cmd);
 #endif
-#ifdef DEBUG
     register_command("crash", handle_crash);
-#endif
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     register_command("coredump", handle_coredump_cmd);
 #endif
