@@ -271,7 +271,7 @@ LV_IMG_DECLARE(nfc_icon);
 LV_IMG_DECLARE(compass);
 LV_IMG_DECLARE(usb);
 
-joystick_t joysticks[5];
+extern joystick_t joysticks[5];
 #ifdef CONFIG_USE_ENCODER
 #endif
 
