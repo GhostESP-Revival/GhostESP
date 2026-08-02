@@ -1,7 +1,7 @@
 ---
 title: "USB Dongle Mode (Wireshark)"
 description: "Use GhostESP as a wireless capture dongle for Wireshark."
-weight: 25
+weight: 26
 ---
 
 Use your GhostESP as a **USB wireless capture dongle** for Wireshark. Instead of saving packets to an SD card, the device streams Wi-Fi and BLE traffic directly to your computer in real-time—just like a commercial Wi-Fi adapter in monitor mode.
@@ -134,7 +134,7 @@ Click the red **Stop** button in Wireshark or run `capture -stop` on the GhostES
 
 The GhostESP will stream BLE advertising packets to Wireshark.
 
-### What you'll see
+### What you'll see (BLE)
 
 Wireshark will decode:
 - **LE Advertising Reports**: Device advertisements with names, UUIDs, manufacturer data
@@ -142,7 +142,7 @@ Wireshark will decode:
 - **MAC addresses**: Device identifiers (public or random)
 - **Advertisement data**: Service UUIDs, local names, flags
 
-### Stop capture
+### Stop capture (BLE)
 
 Click **Stop** in Wireshark or run `capture -stop` on the device.
 
@@ -163,7 +163,7 @@ capture -wireshark [-c <channel>]
 capture -wiresharkble
 ```
 
-### Stop capture
+### Stop capture (CLI)
 ```
 capture -stop
 ```

@@ -18,7 +18,7 @@ If you see `built without CONFIG_HAS_NRF24`, the firmware was built without loca
 
 ## On-device UI
 
-1. Open **Menu -> NRF24 -> Frequency Analyzer**.
+1. Open **Menu → NRF24 → Frequency Analyzer**.
 2. Watch the graph while the scan cursor sweeps channels.
 3. Use **Pause/Resume** to freeze or continue sampling.
 4. Select **Back** to exit.

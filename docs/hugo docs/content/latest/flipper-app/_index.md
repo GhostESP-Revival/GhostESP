@@ -5,7 +5,7 @@ weight: 400
 keywords: ["flipper zero", "companion app", "mobile control", "gui", "fap"]
 aliases:
   - "/flipper-app/"
-  - "/latest/getting-started/flipper-companion-app/"
+  - "/getting-started/flipper-companion-app/"
 ---
 
 The GhostESP Flipper Zero companion app provides a comprehensive graphical interface to control and interact with your GhostESP device directly from your Flipper Zero. This app enables you to perform Wi-Fi operations, Bluetooth scanning, GPS tracking, and more without needing a computer or web browser.

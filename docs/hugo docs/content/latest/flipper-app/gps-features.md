@@ -23,7 +23,7 @@ keywords: ["gps", "wardriving", "location", "tracking", "coordinates"]
 ## Common Workflow: GPS Wardriving
 
 1. Ensure GPS module is connected and receiving signal
-2. Navigate to **GPS** → **Wardriving** → **WiFi Wardriving**
+2. Navigate to **GPS** → **Wardriving** → **Start Wardriving**
 3. Start wardriving session
 4. Drive around to collect data
 5. Stop and export CSV file with GPS coordinates

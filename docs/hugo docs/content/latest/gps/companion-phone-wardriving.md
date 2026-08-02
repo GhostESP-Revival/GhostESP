@@ -87,4 +87,4 @@ Future versions of the Companion app will support direct WiGLE upload from the C
 
 ## Next Step
 
-For firmware-based wardriving with an attached GPS module, see [Wardriving](/latest/gps/wardriving/).
+For firmware-based wardriving with an attached GPS module, see [Wardriving]({{< relref "wardriving.md" >}}).

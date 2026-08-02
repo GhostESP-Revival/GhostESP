@@ -12,7 +12,7 @@ This method uses a Flipper Zero as the programmer for a compatible ESP32 board. 
 ## Before you start
 
 - A Flipper Zero with an SD card.
-- The GhostESP Flipper app from the [Flipper app store](https://lab.flipper.net/apps) or [latest release](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases/latest).
+- The GhostESP Flipper app from the [Flipper app catalog](https://lab.flipper.net/apps) or [latest release](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases/latest).
 - The GhostESP firmware `.zip` that matches the ESP32 chip.
 - A way to copy the extracted firmware files to the Flipper SD card.
 - Correct GPIO wiring between the Flipper and ESP32 board. Refer to the GhostESP Flipper app for the pinout.
@@ -25,7 +25,7 @@ This method uses a Flipper Zero as the programmer for a compatible ESP32 board. 
 4. Wire the ESP32 to the Flipper GPIO pins.
 5. Put the ESP32 into bootloader mode: hold **BOOT**, connect USB, then release **BOOT**.
 6. Open the **ESP flasher** app on the Flipper and choose **Manual Flash**.
-7. Select `bootloader.bin`, `partitions.bin`, and `GhostESP.bin`, then confirm the target variant.
+7. Select `bootloader.bin`, `partitions.bin`, and `firmware.bin`, then confirm the target variant.
 8. Start the flash and reset the ESP32 when it completes.
 
 ## Expected result

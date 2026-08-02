@@ -16,7 +16,7 @@ Create a fake Wi-Fi network that shows a login page when users connect.
 ## Starting a portal
 
 ### On-device UI
-1. Open **WiFi → Evil Portal → Start Evil Portal**.
+1. Open **Menu → WiFi → Evil Portal → Start Evil Portal**.
    The device will launch the built-in default portal.
 2. To use a custom HTML page, choose **Start Custom Evil Portal** instead.
    Select your page and enter the network name and optional password.

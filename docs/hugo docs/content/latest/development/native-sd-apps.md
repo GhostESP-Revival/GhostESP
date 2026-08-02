@@ -1030,7 +1030,7 @@ gh_layout_init(api, &layout);
 // layout.compact, layout.has_touch
 ```
 
-### Widget Styling
+### Widget Styling Helpers
 
 Batch-apply common style properties in one call:
 
@@ -1080,7 +1080,7 @@ void on_input(const ghostesp_input_event_t *event) {
 
 Use `gh_touch_update_tap()` to also detect taps (press + release with no significant movement). Call `gh_touch_reset()` when changing pages/views.
 
-### Touch Bar
+### Touch Bar Helper
 
 Create a standard touch bar in one call:
 
@@ -1374,7 +1374,7 @@ Apps that crash or fail to load keep a failure count and last error for diagnost
 apps reset <id>
 ```
 
-A clean exit (normal `on_stop` -> `dlclose`) resets the failure count to 0.
+A clean exit (normal `on_stop` → `dlclose`) resets the failure count to 0.
 
 ## Memory & Load Constraints
 

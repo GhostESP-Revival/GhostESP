@@ -4,7 +4,7 @@ description: "Write Lua scripts that chain CLI commands, react to events, and au
 weight: 620
 toc: true
 aliases:
-  - "/latest/development/ghostscript/"
+  - "/development/ghostscript/"
 ---
 
 ## What is GhostScript?
@@ -403,12 +403,12 @@ Tune `COOLDOWN_MS` and `BURSTS` to avoid hammering the radio; the per-BSSID cool
 
 ### Stop capture on first handshake
 
-Useful for unattended captures where you only need one 4-way. The script starts `capture -handshake`, waits for `handshake_captured`, and stops capture as soon as one is seen.
+Useful for unattended captures where you only need one 4-way. The script starts `capture -eapol`, waits for `handshake_captured`, and stops capture as soon as one is seen.
 
 ```lua
 local TARGET_BSSID = nil  -- nil = any BSSID; or pin to a specific MAC
 
-ghost.commands.start("capture -handshake")
+ghost.commands.start("capture -eapol")
 
 ghost.event.on("handshake_captured", function(payload)
     local bssid, pair = payload:match("([^|]+)|(.+)")
@@ -465,7 +465,7 @@ Available standard libraries:
       table.insert(fields, unescape(f))
   end
   ```
-- **Output buffer is 4 KB**; older text is trimmed. If you need a full log, `commands.start` to a CLI command that already writes to a file (e.g. `capture -handshake`) instead of capturing in Lua.
+- **Output buffer is 4 KB**; older text is trimmed. If you need a full log, `commands.start` to a CLI command that already writes to a file (e.g. `capture -eapol`) instead of capturing in Lua.
 - **No permission prompt at runtime.** If a script doesn't have a permission, the API call errors with `permission denied`. Check the manifest before shipping.
 - **Wi-Fi and BLE share one radio on most ESP32s.** Starting a BLE scan mid-Wi-Fi-scan will tear down Wi-Fi. Drive them sequentially from the same script.
 

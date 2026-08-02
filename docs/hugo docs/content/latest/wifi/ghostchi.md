@@ -4,7 +4,7 @@ description: "An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and ha
 weight: 35
 ---
 
-Ghostchi is a tamagotchi that lives on your device and hunts WPA handshakes. It scans for access points, ranks them by likelihood of a successful capture, listens for EAPOL traffic, and if passive listening doesn't work, it forces the issue with a deauth burst. It remembers what worked and what didn't across sessions and reboots. It also has a name, moods, and things to say about it.
+Ghostchi is a tamagotchi that lives on your device and hunts WPA handshakes. It scans for access points, ranks them by likelihood of a successful capture, listens for EAPOL traffic, and if passive listening doesn't work, it forces the issue with a deauth burst. It remembers what worked and what didn't across sessions and reboots. It also has a name, moods, and things to say about you and the networks it hunts.
 
 > **Legal note**: Only capture traffic from networks you own or have explicit permission to test. Unauthorized network testing is illegal in most jurisdictions.
 
@@ -163,7 +163,7 @@ Each session appends to its own PCAP file and flushes it cleanly when stopped. C
 
 ## Quick start
 
-1. Open **Menu -> Apps -> Ghostchi**.
+1. Open **Menu → Apps → Ghostchi**.
 2. Make sure an SD card is mounted. The ghost will tell you if it's blocked.
 3. Start a session. The ghost takes over from there.
 4. Leave it running. It will sweep, lock, listen, and adapt.

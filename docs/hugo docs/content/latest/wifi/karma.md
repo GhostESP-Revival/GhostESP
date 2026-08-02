@@ -18,7 +18,6 @@ Create fake Wi-Fi networks based on SSIDs that nearby devices are searching for.
 - Only test on your own devices or with written permission.
 - Never use Karma on networks you don't own.
 
-
 ## Starting Karma
 
 ### On-device UI
@@ -49,5 +48,5 @@ When a device connects to a fake network, a captive portal starts automatically 
 ## Troubleshooting
 
 - **Fake networks not appearing**: Try restarting with `karma stop` then `karma start`.
-- **No devices connecting**: Ensure devices are actually searching for networks. Try moving closer to the ESP32.
+- **No devices connecting**: Ensure devices are actually searching for networks. Try moving closer to the GhostESP device.
 

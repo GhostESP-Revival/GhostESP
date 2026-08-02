@@ -19,7 +19,7 @@ View and control your device's screen from your computer.
 
 The script is in `scripts/screen_mirror/`. It installs dependencies (pygame, pyserial, numpy) on first run.
 
-**For Web-Based Mirror**: If you prefer not to install Python, use the web mirror at [ghostesp.net/serial](https://ghostesp.net/serial) by opening the **Web Serial** tab.
+**For Web-Based Mirror**: If you prefer not to install Python, use the web mirror at [ghostesp.net/serial](https://ghostesp.net/serial) by opening the **Mirror** tab.
 
 ## Starting the Mirror
 
@@ -53,7 +53,7 @@ python ghost_mirror.py --list
 
 ### Web-Based Mirror
 
-Alternatively, visit [ghostesp.net/serial](https://ghostesp.net/serial) and open the **Screen Mirror** tab to use the browser-based mirror without installing Python. The web serial mirror also includes a console and file browser on the same page.
+Alternatively, visit [ghostesp.net/serial](https://ghostesp.net/serial) and open the **Mirror** tab to use the browser-based mirror without installing Python. The web serial mirror also includes a console and file browser on the same page.
 
 ## Device-Specific Considerations
 

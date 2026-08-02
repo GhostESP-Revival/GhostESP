@@ -9,4 +9,4 @@ aliases:
 
 GhostESP includes an NRF24 analyzer for viewing 2.4 GHz activity across channels 0-125 with built-in jamming threat detection.
 
-Use this section for setup, local analyzer usage, jamming identification, and GhostLink remote control mode.
+Use this section for local analyzer usage, jamming identification, hardware setup, and GhostLink remote control mode.

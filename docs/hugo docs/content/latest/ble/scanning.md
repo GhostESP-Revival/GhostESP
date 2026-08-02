@@ -44,7 +44,7 @@ Discover nearby BLE devices and gather information about them.
 - Detects active BLE spam attacks from nearby devices. Useful for testing whether your own spam is visible or detecting hostile spam.
 
 ### AirTag Scanner
-- **UI**: Menu → Bluetooth → Start AirTag Scanner
+- **UI**: Menu → Bluetooth → AirTag → Start AirTag Scanner
 - **CLI**: `blescan -a`
 - Scans for Apple AirTags and other Find My devices using active scanning to find more devices.
 - Allows duplicate advertisements to be reported for better tracking.

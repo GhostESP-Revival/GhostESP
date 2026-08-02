@@ -6,14 +6,14 @@ weight: 10
 
 ## Prerequisites
 
-- GhostESP firmware compiled with NFC support and a connected PN532 module, ST25R3916 module, or chameleon ultra.
+- GhostESP firmware compiled with NFC support and a connected PN532 module, ST25R3916 module, or Chameleon Ultra.
 - (Optional) SD card if you plan to save tag dumps.
 
 ## Backend Selection
 
 If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
 
-- **UI:** the NFC menu has a **Backend** row that cycles `auto -> pn532 -> st25r`.
+- **UI:** the NFC menu has a **Backend** row that cycles `auto → pn532 → st25r`.
 - **CLI:** `nfc backend auto`, `nfc backend pn532`, or `nfc backend st25r`.
 
 `auto` tries the PN532 first, then the ST25R3916. For MIFARE Classic dictionary brute-force the PN532 is noticeably faster because it has hardware Crypto1; the ST25R3916 does the same auth in software. Keep that in mind if brute-force feels slow - switch to `pn532` (or `auto`) when you just need a dump.
@@ -76,7 +76,7 @@ If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
 ## Verify
 
 - Confirm the tag type and UID shown on-screen match the physical tag you scanned.
-- For Mifare Classic cards, check the listed sectors to see how many keys were recovered.
+- For MIFARE Classic cards, check the listed sectors to see how many keys were recovered.
 - If you saved the capture, verify a new `<Model>_<UID>.nfc` file was created under `/mnt/ghostesp/nfc/`.
 
 ## Troubleshooting

@@ -143,12 +143,14 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | RabbitLabs Minion | `RabbitLabs_Minion.zip` | <img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"> |
 | RabbitLabs Phantom | `CYD2USB2.4Inch.zip` | <img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"> |
 | Lolin S3 Pro | `Lolin_S3_Pro.zip` | <img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"> |
-| Seeed Studio XIAO ESP32-S3 Sense | `xiao_esp32s3_sense.zip` | |
-| Seeed Studio XIAO ESP32-C5 | `xiao_esp32c5.zip` | |
+| Seeed Studio XIAO ESP32-S3 Sense | `XIAO_S3_Sense.zip` | |
+| Seeed Studio XIAO ESP32-C5 | `XIAO_C5.zip` | |
 | Flipper JCMK GPS | `Flipper_JCMK_GPS.zip` | <img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"> |
 | JC3248W535EN | `JC3248W535EN_LCD.zip` | |
 | Wired Hatters ESPRocket | `esp32-generic.zip` | <img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"> |
 | Wired Hatters Ultimate Marauder | Red Port: `esp32-generic.zip` and Blue Port: `MarauderV4_FlipperHub.zip` | <img src="../images/wired_hatters_ultimate_marauder.jpg" alt="Wired Hatters Ultimate Marauder"> |
-| Heltec V3 | `heltecv3.zip` | |
+| Heltec V3 | `HeltecV3.zip` | |
+| Wired Hatters Banshee C5 | `Banshee_C5.zip` | |
+| Wired Hatters Banshee S3 | `Banshee_S3.zip` | |
 
 > **Note:** Images are being added as they become available.

@@ -25,7 +25,7 @@ Analyzer behavior tuning:
 - `CONFIG_NRF24_ANALYZER_SETTLE_US`
 - `CONFIG_NRF24_ANALYZER_CHANNELS_PER_TICK`
 
-Pin defaults depend on your selected board config. In `menuconfig`, these options are under **Ghost ESP Options -> Misc Options -> NRF24 Options**.
+Pin defaults depend on your selected board config. In `menuconfig`, these options are under **Ghost ESP Options → Misc Options → NRF24 Options**.
 
 ## GhostLink remote mode
 

@@ -105,7 +105,7 @@ Use indices in subsequent commands:
 
 ```
 sd info 2         # Get info for config.txt
-sd cat 3 1000     # Read first 1000 bytes of log.csv
+sd read 3 0 1000  # Read first 1000 bytes of log.csv
 ```
 
 ### File Info
@@ -312,8 +312,8 @@ All `sd` command responses use a consistent format for scripting:
 | `SD:DIR:[n] name` | Directory entry with index |
 | `SD:FILE:[n] name size` | File entry with index and size |
 | `SD:INFO:key=value` | File info key-value pair |
-| `SD:CAT:BEGIN:path` | File content start marker |
-| `SD:CAT:END:bytes=n` | File content end marker |
+| `SD:READ:BEGIN:path` | File content start marker |
+| `SD:READ:END:bytes=n` | File content end marker |
 | `SD:TREE:path` | Tree listing header |
 | `SD:EMPTY` | Empty directory |
 

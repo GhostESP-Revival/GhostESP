@@ -39,7 +39,7 @@ Client isolation sees "broadcast" and may let it through, but only the target IP
 
 ### Display (Touchscreen)
 
-1. Navigate to **Wi-Fi → Attacks → Start GTK Abuse**
+1. Navigate to **Menu → WiFi → Attacks → Start GTK Abuse**
 2. Enter the **network SSID** when prompted
 3. Enter the **network password** when prompted
 4. The test will connect, extract the GTK, inject a test frame, and check for a reply

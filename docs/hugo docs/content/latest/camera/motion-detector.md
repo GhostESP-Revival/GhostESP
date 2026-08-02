@@ -9,7 +9,7 @@ GhostESP can use an onboard camera as a lightweight motion detector. The current
 
 ## Supported Boards
 
-- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) is the primary supported camera build at the moment.
+- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) — the only camera-enabled build currently available.
 - Other boards need an enabled `CONFIG_HAS_CAMERA` build plus compatible camera pin mapping.
 
 ## How It Works

@@ -14,12 +14,12 @@ weight: 20
 
 ### Universal libraries
 
-- Universal `.ir` packs live under `/ghostesp/infrared/universals` and contain large collections of commands grouped by device.
+- Universal `.ir` packs live under `/mnt/ghostesp/infrared/universals` and contain large collections of commands grouped by device.
 - When you open a universal file, GhostESP scans the command list and prompts you to pick a specific button to send.
 - Parsing very large libraries (for example, community dumps) can take several seconds; wait for the list to finish populating before selecting.
 - You can find supported universals at [Momentum Flipper Firmware](https://github.com/Next-Flip/Momentum-Firmware/tree/dev/applications/main/infrared/resources/infrared/assets). Download and place the files under `infrared/universals`.
 
-GhostESP also includes a built-in Universal IR file with popular TV POWER signals. Use the `TURNHISTVOFF` universal to turn on or off many different TVs.
+GhostESP also includes a built-in Universal IR file with popular TV POWER signals — see [Infrared Files]({{< relref "files.md" >}}) for details.
 
 ### Tips
 
@@ -67,4 +67,4 @@ command: E7 18
 [IR/CLOSE]
 ```
 
-See the [CLI Reference](/getting-started/command-line-reference/#infrared) for full command details.
+See the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}#infrared) for full command details.

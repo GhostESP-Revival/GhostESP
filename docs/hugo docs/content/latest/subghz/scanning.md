@@ -19,7 +19,7 @@ Monitor radio activity across 64 channels in real-time to detect signals on supp
 2. Select **Start** from the popup menu to begin scanning.
 3. The device will scan the current frequency band.
 4. Signal strength is displayed across 64 channels.
-4. Use **Cycle Frequency** to switch between bands (315, 390, 433.92, 868.35, 915 MHz).
+5. Use **Cycle Frequency** to switch between bands (315, 390, 433.92, 868.35, 915 MHz).
 5. Press **Back** to stop scanning.
 
 ### Command line

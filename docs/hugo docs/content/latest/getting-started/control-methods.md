@@ -51,5 +51,5 @@ You can access a GhostESP menu or receive output from the `help` command. If you
 
 - [WebUI guide]({{< relref "webui-guide.md" >}})
 - [CLI reference]({{< relref "command-line-reference.md" >}})
-- [Control App]({{< relref "latest/companion-tools/control-app.md" >}})
+- [Control App]({{< relref "../companion-tools/control-app.md" >}})
 - [Try your first scan]({{< relref "first-scan.md" >}})

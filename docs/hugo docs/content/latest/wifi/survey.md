@@ -19,7 +19,7 @@ This passive scan lists nearby Wi-Fi access points without connecting to them or
 2. Choose **Scan Access Points**.
 3. Wait for the scan to finish.
 4. Select **List Access Points**.
-4. Review each network's name, channel, signal strength, and manufacturer.
+5. Review each network's name, channel, signal strength, and manufacturer.
 
 Use **Scan APs Live** to see access points as they appear, or **Channel Congestion** to review activity by channel.
 

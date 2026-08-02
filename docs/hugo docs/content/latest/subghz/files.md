@@ -70,7 +70,7 @@ All SubGHz files are stored in `/mnt/ghostesp/subghz/` on the SD card.
 subghz list
 
 # Load a specific signal
-subghz load <filename>
+subghz load <name>
 
 # Load the last captured signal
 subghz load last
