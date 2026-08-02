@@ -134,13 +134,34 @@ bool ndef_builder_vcard(const char *name, const char *phone, const char *email,
     if ((!name || !*name) && (!phone || !*phone) && (!email || !*email)) return false;
 
     char buf[384];
-    int pos = 0;
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "BEGIN:VCARD\r\nVERSION:3.0\r\n");
-    if (name && *name) pos += snprintf(buf + pos, sizeof(buf) - pos, "FN:%s\r\n", name);
-    if (phone && *phone) pos += snprintf(buf + pos, sizeof(buf) - pos, "TEL:%s\r\n", phone);
-    if (email && *email) pos += snprintf(buf + pos, sizeof(buf) - pos, "EMAIL:%s\r\n", email);
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "END:VCARD\r\n");
-    if (pos <= 0 || pos >= (int)sizeof(buf)) return false;
+    size_t pos = 0;
+    size_t rem = sizeof(buf);
+    int n;
+
+    n = snprintf(buf + pos, rem, "BEGIN:VCARD\r\nVERSION:3.0\r\n");
+    if (n < 0 || (size_t)n >= rem) return false;
+    pos += n; rem -= n;
+
+    if (name && *name) {
+        n = snprintf(buf + pos, rem, "FN:%s\r\n", name);
+        if (n < 0 || (size_t)n >= rem) return false;
+        pos += n; rem -= n;
+    }
+    if (phone && *phone) {
+        n = snprintf(buf + pos, rem, "TEL:%s\r\n", phone);
+        if (n < 0 || (size_t)n >= rem) return false;
+        pos += n; rem -= n;
+    }
+    if (email && *email) {
+        n = snprintf(buf + pos, rem, "EMAIL:%s\r\n", email);
+        if (n < 0 || (size_t)n >= rem) return false;
+        pos += n; rem -= n;
+    }
+    n = snprintf(buf + pos, rem, "END:VCARD\r\n");
+    if (n < 0 || (size_t)n >= rem) return false;
+    pos += n;
+
+    if (pos == 0) return false;
 
     static const char mime[] = "text/vcard";
     return build_and_wrap(0x02, (const uint8_t *)mime, (uint8_t)(sizeof(mime) - 1),

@@ -664,12 +664,11 @@ static bool peer_ota_ensure_rx_worker(void) {
         return true;
     }
 
-    const uint32_t stack_words = (PEER_OTA_RX_TASK_STACK_BYTES + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-    s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t),
+    s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(PEER_OTA_RX_TASK_STACK_BYTES,
                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_peer_rx_task_stack) {
-        s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t),
-                                                               MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(PEER_OTA_RX_TASK_STACK_BYTES,
+                                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     s_peer_rx_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t),
                                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -685,7 +684,7 @@ static bool peer_ota_ensure_rx_worker(void) {
         return false;
     }
 
-    s_peer_rx_task_handle = xTaskCreateStatic(peer_ota_rx_worker_task, "peer_ota_rx", stack_words,
+    s_peer_rx_task_handle = xTaskCreateStatic(peer_ota_rx_worker_task, "peer_ota_rx", PEER_OTA_RX_TASK_STACK_BYTES,
                                               NULL, tskIDLE_PRIORITY + 2,
                                               s_peer_rx_task_stack, s_peer_rx_task_tcb);
     if (!s_peer_rx_task_handle) {

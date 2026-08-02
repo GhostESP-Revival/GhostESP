@@ -70,7 +70,6 @@
 
 ### Infrared
 - Added transmit support for the NEC42, NEC42ext, and RC5X protocols, so all of Flipper's IR protocols can now be sent as well as learned
-- Fixed the RC5 transmit encoder laying out bits in reverse order, so RC5 signals now transmit and re-decode correctly
 
 ### Ethernet
 - Fixed `ethping`/ping sweep and `etharp`/ARP scan (CLI and GhostLink peer-relayed UI) always scanning a hardcoded /24 instead of the real DHCP netmask, missing hosts on smaller VLAN subnets
@@ -130,29 +129,43 @@
 - Fixed Kconfig typo: "Device Detials" to "Device Details"
 - Replaced hardcoded GPIO pin 24 with `CONFIG_INFRARED_LED_PIN` in infrared manager (poltergeist template)
 - Fixed status bar view titles and the Ghostchi level text clipping: the title now sits further left in a smaller font, and the level label can no longer be squeezed out by the status icons
+- Fixed RC5/RC5X transmit sending no data: `send_rmt` hardcoded mark/space levels, discarding the encoder's Manchester-encoded level sequence; added per-timing level pass-through so RC5, RC5X, and RC6 signals transmit and decode correctly
+- Fixed OTA download task stack 4× under-sized (3 KB effective instead of 12 KB) on PSRAM boards: ESP-IDF FreeRTOS treats `xTaskCreateStatic` depth as bytes, not words
+- Fixed peer OTA rx worker stack 4× under-sized (1.5 KB effective instead of 6 KB), same root cause
+- Fixed BLE bridge task stack 4× under-sized from the same word/byte confusion
+- Fixed `arp_scan` NULL-pointer dereference when printing results after transferring `ctx->hosts` to `g_arp_results`
+- Fixed `ndef_builder_vcard` stack buffer overflow when combined name+phone+email exceeds 384 bytes (snprintf size underflow on unsigned subtraction)
+- Fixed standalone station scan silently capturing nothing: `esp_wifi_stop()` was called before `esp_wifi_set_promiscuous(true)` without a matching `esp_wifi_start()`
+- Fixed SNMP walk infinite loop against a responder that repeats its OID: added 10,000-entry iteration cap
+- Fixed CLI `watch` task deterministic stack overflow (4 KB task calling `handle_tail_cmd` which needs 8 KB+); increased to 12 KB
+- Fixed unbounded `source` script recursion crashing the console task (~4 nested levels overflow the serial stack); added depth cap of 4
+- Fixed unbounded `peer:` command prefix recursion in `handle_serial_command` (~7 nested prefixes overflow the stack); added depth cap of 4
+- Fixed EMV Track 2 separator detection missing byte 0xD0 exactly and all even-nibble PAN cases; now handles both odd-nibble (0xD in high nibble) and even-nibble (0xD in low nibble) separator alignments
+- Added JSON string escaping for all attacker-controlled fields (hostname, fingerprint name/device_type/protocol/service/os, poison domain/cookie/cred) in Ethernet JSONL scan exports
+- Moved scan, attack, cloud, and pcap-writer task stacks to PSRAM-preferred allocation via `xTaskCreate_psram()` helper (PSRAM first, internal fallback), freeing ~120 KB of internal RAM on PSRAM boards
+- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
+- Fixed display resume crashes after shared SPI SD mounts on C5 boards
+- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
+- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
+- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
+- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 
 ### Other Changes
 - Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off
 - Smoothed NRF24 frequency analyzer channel levels (local and GhostLink peer scans) to reduce graph jitter from the RPD carrier-detect readings
 - Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
-- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
-- Fixed display resume crashes after shared SPI SD mounts on C5 boards
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
 - Freed the wardriving CSV line buffer when logging stops
 - Freed PCAP staging resources when capture stops
 - Freed the HTTP streaming buffer when the web server stops
 - Show the native SD-app PSRAM warning only once per boot
 - Coalesce duplicate toast notifications and their haptic feedback
-- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
 - Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
-- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
 - Converted eight built-in menu icons to compact A4 masks and added scaled A4 rendering support
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
-- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
-- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level

@@ -2405,6 +2405,9 @@ static int l_tasks_spawn(lua_State *L) {
     if (!bg_rt->L) { free(bg_rt); free(t); return luaL_error(L, "out of memory"); }
     /* Open a safe subset of stdlib. */
     luaL_requiref(bg_rt->L, LUA_GNAME, luaopen_base, 1); lua_pop(bg_rt->L, 1);
+    lua_pushnil(bg_rt->L); lua_setglobal(bg_rt->L, "dofile");
+    lua_pushnil(bg_rt->L); lua_setglobal(bg_rt->L, "loadfile");
+    lua_pushnil(bg_rt->L); lua_setglobal(bg_rt->L, "load");
     luaL_requiref(bg_rt->L, "string", luaopen_string, 1); lua_pop(bg_rt->L, 1);
     luaL_requiref(bg_rt->L, "table", luaopen_table, 1); lua_pop(bg_rt->L, 1);
     /* coroutine library is not linked; lua_yield/lua_resume still work. */
@@ -2592,6 +2595,9 @@ static int l_initialize_runtime(lua_State *L) {
     ghostscript_runtime_t *rt = (ghostscript_runtime_t *)lua_touserdata(L, 1);
     if (!rt) return luaL_error(L, "runtime missing");
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1); lua_pop(L, 1);
+    lua_pushnil(L); lua_setglobal(L, "dofile");
+    lua_pushnil(L); lua_setglobal(L, "loadfile");
+    lua_pushnil(L); lua_setglobal(L, "load");
     luaL_requiref(L, "string", luaopen_string, 1); lua_pop(L, 1);
     luaL_requiref(L, "table", luaopen_table, 1); lua_pop(L, 1);
     open_math_lite(L);

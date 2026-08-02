@@ -1901,6 +1901,8 @@ bool display_manager_register_view(View *view) {
   return true;
 }
 
+static void dm_clear_pressed_state(lv_obj_t *obj);
+
 static void display_manager_switch_view_internal(View *view) {
   if (view == NULL) return;
 #ifdef CONFIG_JC3248W535EN_LCD
@@ -1910,6 +1912,9 @@ static void display_manager_switch_view_internal(View *view) {
     ESP_LOGI(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
     if (view == &lockscreen_view) {
       display_manager_run_freeze_pre_lock();
+    }
+    if (dm.current_view && dm.current_view->root) {
+      dm_clear_pressed_state(dm.current_view->root);
     }
     if (dm.current_view && dm.current_view->root) {
       display_manager_previous_view = dm.current_view;
@@ -3273,13 +3278,16 @@ void hardware_input_task(void *pvParameters) {
  #endif
 
     bool enable_touch_polling = false;
-#ifdef CONFIG_USE_TOUCHSCREEN
+#ifdef CONFIG_JC3248W535EN_LCD
+    /* The BSP pointer indev is the sole touch owner on this board. */
+    enable_touch_polling = false;
+#elif defined(CONFIG_USE_TOUCHSCREEN)
     enable_touch_polling = true;
-#endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
         enable_touch_polling = true;
     }
+#endif
 #endif
 
     if (enable_touch_polling) {
@@ -3441,6 +3449,7 @@ void processEvent() {
       processed++;
       continue;
     }
+    dm_update_manual_touch_pressed_state(&event);
     if (crash_reporter_handle_input(&event)) {
       processed++;
       continue;
@@ -3517,6 +3526,7 @@ void processEvent() {
         is_backlight_off = false;
         return;
       }
+      dm_update_manual_touch_pressed_state(&event);
       if (crash_reporter_handle_input(&event)) {
         return;
       }

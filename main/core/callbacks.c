@@ -1,4 +1,5 @@
 #include "core/callbacks.h"
+#include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "managers/gps_manager.h"
 #include "managers/rgb_manager.h"
@@ -1405,7 +1406,7 @@ static inline void ensure_pcap_queue_started(void) {
 
     s_pcap_q = xQueueCreate(EAPOL_Q_LEN, sizeof(pcap_q_item_t));
     if (s_pcap_q != NULL && s_pcap_writer_task == NULL) {
-        xTaskCreate(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
+        xTaskCreate_psram(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
     }
 }
 

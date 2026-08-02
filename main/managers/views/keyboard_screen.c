@@ -1366,7 +1366,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         char c = (char)event->data.key_value;
         if (c == '`') {
-            display_manager_switch_view(&options_menu_view);
+            display_manager_switch_view(keyboard_return_view ? keyboard_return_view : &options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
             if (immediate_callback) {
                 // Real-time typing mode (e.g. BadUSB): send Enter, don't close

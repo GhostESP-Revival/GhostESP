@@ -948,7 +948,7 @@ esp_err_t ota_manager_start_update(void) {
         return ESP_ERR_NO_MEM;
     }
     TaskHandle_t handle = xTaskCreateStatic(ota_download_task, "ota_dl",
-                                             OTA_DOWNLOAD_TASK_STACK_BYTES / sizeof(StackType_t), NULL,
+                                             OTA_DOWNLOAD_TASK_STACK_BYTES, NULL,
                                              5, stack, tcb);
     if (!handle) {
         heap_caps_free(stack);

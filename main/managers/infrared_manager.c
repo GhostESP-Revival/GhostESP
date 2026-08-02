@@ -531,7 +531,7 @@ static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(cons
     return NULL;
 }
 
-static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty) {
+static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty, const bool *levels) {
     size_t item_count = (count + 1) / 2;
     size_t hw_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 
@@ -587,9 +587,9 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
         return false;
     }
     for (size_t i = 0; i < item_count; i++) {
-        symbols[i].level0 = 1;
+        symbols[i].level0 = levels ? (levels[2 * i] ? 1 : 0) : 1;
         symbols[i].duration0 = timings[2 * i];
-        symbols[i].level1 = 0;
+        symbols[i].level1 = levels ? ((2 * i + 1 < count && levels[2 * i + 1]) ? 1 : 0) : 0;
         symbols[i].duration1 = (2 * i + 1 < count) ? timings[2 * i + 1] : 0;
     }
 
@@ -659,7 +659,7 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
         ok = send_rmt(signal->payload.raw.timings,
                       signal->payload.raw.timings_size,
                       signal->payload.raw.frequency,
-                      signal->payload.raw.duty_cycle);
+                      signal->payload.raw.duty_cycle, NULL);
         infrared_rx_pause_for_tx(false);
     } else {
         const InfraredCommonProtocolSpec* protocol_spec = infrared_manager_get_protocol_spec(signal->payload.message.protocol);
@@ -672,8 +672,9 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
             
             size_t max_timings = 2 + max_bits * 2 + 10;
             uint32_t* timings = malloc(max_timings * sizeof(uint32_t));
+            bool* enc_levels = malloc(max_timings * sizeof(bool));
             
-            if (timings) {
+            if (timings && enc_levels) {
                 size_t timing_count = 0;
                 InfraredStatus st;
                 uint32_t dur;
@@ -684,10 +685,12 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
                 }
                 if (st == InfraredStatusOk) {
                     do {
+                        enc_levels[timing_count] = level;
                         timings[timing_count++] = dur;
                         st = infrared_common_encode(enc, &dur, &level);
                     } while (st == InfraredStatusOk && timing_count < max_timings);
                     if (st == InfraredStatusDone && timing_count < max_timings) {
+                        enc_levels[timing_count] = level;
                         timings[timing_count++] = dur;
                     }
                 }
@@ -695,10 +698,11 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
                     infrared_rx_pause_for_tx(true);
                     ok = send_rmt(timings, timing_count,
                                   protocol_spec->carrier_frequency,
-                                  protocol_spec->duty_cycle);
+                                  protocol_spec->duty_cycle, enc_levels);
                     infrared_rx_pause_for_tx(false);
                 }
                 free(timings);
+                free(enc_levels);
             }
             infrared_common_encoder_free(enc);
         } else {

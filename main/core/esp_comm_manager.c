@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
+#include "managers/peer_storage_manager.h"
 
 #define COMM_BUFFER_SIZE 256
 #define UART_RX_BUFFER_SIZE (COMM_BUFFER_SIZE * 2)
@@ -1905,6 +1906,8 @@ void esp_comm_manager_disconnect(void) {
 void esp_comm_manager_deinit(void) {
     if (!s_comm_manager) return;
 
+    peer_storage_manager_reset();
+
     // Signal shutdown first - tasks check this flag
     s_comm_manager->initialized = false;
 
@@ -2021,6 +2024,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
 
     comm->state = COMM_STATE_SCANNING;
     comm->remote_output_capture = false;
+    peer_storage_manager_reset();
 
     // Stop ping timer; keep it allocated and restart on next connection.
     if (comm->ping_timer) {

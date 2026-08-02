@@ -15,7 +15,8 @@
  * null-padded text records that both sides parse with sscanf/strtok:
  *
  *   request -> peer:
- *     "OPEN|<mode>|<path>\0"        mode = "w" | "a" | "wb" | "ab"
+ *     "OPEN|<mode>|<path>\0"        mode = "w" | "a" | "wb" | "ab" |
+ *                                          "wx" | "wbx"
  *     "WRITE|<handle>|<nbytes>\0"   followed by <nbytes> raw bytes in the
  *                                  NEXT stream packet on the same channel.
  *     "CLOSE|<handle>\0"
@@ -70,6 +71,10 @@ bool peer_storage_manager_is_client(void);
  * where peer_storage_manager_is_peer() is true. Idempotent.
  */
 esp_err_t peer_storage_manager_init_peer(void);
+
+/* Abort all in-flight client/peer protocol state after a link loss. On the
+ * SD-owning peer this closes every open file and releases any JIT mount. */
+void peer_storage_manager_reset(void);
 
 /*
  * Caller-side session. Returns PEER_STORAGE_OK on success. Subsequent

@@ -1,6 +1,7 @@
 #include "managers/cloud_store_manager.h"
 
 #include "cJSON.h"
+#include "core/system_manager.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "managers/http_proxy.h"
@@ -1288,7 +1289,7 @@ esp_err_t cloud_store_refresh_async(void) {
     s_ctx->status.error[0] = '\0';
     xSemaphoreGive(s_ctx->mutex);
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreate(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
+    BaseType_t rc = xTaskCreate_psram(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
     if (rc != pdPASS) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
         s_ctx->task_running = false;
@@ -1394,14 +1395,14 @@ esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id
     xSemaphoreGive(s_ctx->mutex);
 
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreate(install_task, "cloud_install", CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL);
+    BaseType_t rc = xTaskCreate_psram(install_task, "cloud_install", CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL);
     if (rc != pdPASS && CLOUD_INSTALL_TASK_STACK_BYTES != CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES) {
         ESP_LOGW(TAG, "install task stack allocation failed (%u bytes; free=%u largest=%u); retrying with %u bytes",
                  (unsigned)CLOUD_INSTALL_TASK_STACK_BYTES,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES);
-        rc = xTaskCreate(install_task, "cloud_install", CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
+        rc = xTaskCreate_psram(install_task, "cloud_install", CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
     }
     if (rc != pdPASS) {
         ESP_LOGE(TAG, "install task failed to start (free=%u largest=%u)",

@@ -66,6 +66,11 @@ static void wipe_exec_cb(void *var, int32_t v) {
         if (!item) continue;
         lv_coord_t y = lv_obj_get_y(item);
         lv_coord_t h = lv_obj_get_height(item);
+        if (h <= 0) {
+            lv_obj_set_style_opa(item, y < v ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+            if (y < v) lv_obj_set_x(item, 0);
+            continue;
+        }
         if (y + h <= v) {
             lv_obj_set_style_opa(item, LV_OPA_COVER, 0);
             lv_coord_t cur_x = lv_obj_get_x(item);

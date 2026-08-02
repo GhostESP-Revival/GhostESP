@@ -13,6 +13,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
+#include "core/system_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
 #include "esp_wifi.h"
@@ -764,8 +765,8 @@ void sae_flood_start(const char *password) {
     wifi_manager_start_monitor_mode(sae_monitor_callback);
     esp_wifi_set_channel(sae_target_channel, WIFI_SECOND_CHAN_NONE);
 
-    BaseType_t attack_rc = xTaskCreate(sae_flood_task, "sae_flood_task", 3072, NULL, 5, &sae_flood_task_handle);
-    BaseType_t display_rc = xTaskCreate(sae_flood_display_task, "sae_displ", 2048, NULL, 3, &sae_flood_display_task_handle);
+    BaseType_t attack_rc = xTaskCreate_psram(sae_flood_task, "sae_flood_task", 3072, NULL, 5, &sae_flood_task_handle);
+    BaseType_t display_rc = xTaskCreate_psram(sae_flood_display_task, "sae_displ", 2048, NULL, 3, &sae_flood_display_task_handle);
     if (attack_rc != pdPASS || display_rc != pdPASS) {
         glog("SAE flood failed to start tasks (attack=%ld, display=%ld)\n", (long)attack_rc, (long)display_rc);
         sae_flood_running = false;

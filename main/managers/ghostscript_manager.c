@@ -425,7 +425,10 @@ static void write_state(const ghostscript_manifest_t *manifest, uint32_t failure
     sd_card_create_directory(GHOSTSCRIPT_DATA_DIR);
     sd_card_create_directory(manifest->data_path);
     char path[GHOSTSCRIPT_PATH_MAX];
-    if (!state_path(manifest, path, sizeof(path))) return;
+    if (!state_path(manifest, path, sizeof(path))) {
+        ghostscript_manager_sd_end(display_was_suspended);
+        return;
+    }
     FILE *f = fopen(path, "wb");
     if (!f) {
         ghostscript_manager_sd_end(display_was_suspended);

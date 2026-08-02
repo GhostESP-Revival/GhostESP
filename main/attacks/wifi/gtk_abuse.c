@@ -13,6 +13,7 @@
 #include "attacks/wifi/gtk_abuse.h"
 #include "core/wpa_crypto.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
@@ -560,7 +561,7 @@ void gtk_abuse_start(const char *ssid, const char *password) {
     }
     snprintf(args, args_len, "%s\x1F%s", ssid, password ? password : "");
 
-    BaseType_t rc = xTaskCreate(gtk_abuse_task, "gtk_abuse", 8192, args, 5, &gtk_abuse_task_handle);
+    BaseType_t rc = xTaskCreate_psram(gtk_abuse_task, "gtk_abuse", 8192, args, 5, &gtk_abuse_task_handle);
     if (rc != pdPASS) {
         glog("GTK Abuse: Failed to start task\n");
         gtk_abuse_running = false;

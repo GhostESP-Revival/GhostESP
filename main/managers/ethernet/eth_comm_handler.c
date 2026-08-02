@@ -4,6 +4,7 @@
 
 #include "managers/ethernet/eth_comm_handler.h"
 #include "core/esp_comm_manager.h"
+#include "core/system_manager.h"
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet/eth_fingerprint.h"
 #include "attacks/ethernet/eth_arp_poison.h"
@@ -37,6 +38,24 @@ static void eth_export_timestamp(char *out, size_t out_len) {
 static void eth_export_write_line(int handle, const char *line) {
     if (handle < 0) return;
     (void)peer_storage_write(handle, line, strlen(line));
+}
+
+static void eth_json_escape(char *dst, size_t dst_len, const char *src) {
+    size_t o = 0;
+    if (!src || !dst || dst_len < 2) { if (dst && dst_len) dst[0] = '\0'; return; }
+    for (size_t i = 0; src[i] && o + 2 < dst_len; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            if (o + 2 >= dst_len) break;
+            dst[o++] = '\\'; dst[o++] = (char)c;
+        } else if (c < 0x20) {
+            if (o + 6 >= dst_len) break;
+            o += (size_t)snprintf(dst + o, dst_len - o, "\\u%04x", c);
+        } else {
+            dst[o++] = (char)c;
+        }
+    }
+    dst[o] = '\0';
 }
 
 static void eth_export_write_header(int handle) {
@@ -165,14 +184,16 @@ static void remote_arp_task(void *arg) {
             r->arp_hosts[i].mac[2], r->arp_hosts[i].mac[3],
             r->arp_hosts[i].mac[4], r->arp_hosts[i].mac[5],
             r->arp_hosts[i].hostname);
-        char line[192];
+        char esc_host[128];
+        eth_json_escape(esc_host, sizeof(esc_host), r->arp_hosts[i].hostname);
+        char line[256];
         snprintf(line, sizeof(line),
                  "{\"type\":\"arp\",\"ip\":\"%s\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"hostname\":\"%s\"}\n",
                  r->arp_hosts[i].ip_str,
                  r->arp_hosts[i].mac[0], r->arp_hosts[i].mac[1],
                  r->arp_hosts[i].mac[2], r->arp_hosts[i].mac[3],
                  r->arp_hosts[i].mac[4], r->arp_hosts[i].mac[5],
-                 r->arp_hosts[i].hostname);
+                 esc_host);
         eth_export_write_line(export_h, line);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -210,13 +231,19 @@ static void remote_fp_task(void *arg) {
         eth_stream_record("F|%s|%s|%s|%s|%s|%s",
             h->ip_str, h->name, h->device_type,
             h->protocol, h->service_type, h->os_info);
-        char line[256];
+        char esc_name[128], esc_dtype[64], esc_proto[32], esc_svc[32], esc_os[64];
+        eth_json_escape(esc_name, sizeof(esc_name), h->name);
+        eth_json_escape(esc_dtype, sizeof(esc_dtype), h->device_type);
+        eth_json_escape(esc_proto, sizeof(esc_proto), h->protocol);
+        eth_json_escape(esc_svc, sizeof(esc_svc), h->service_type);
+        eth_json_escape(esc_os, sizeof(esc_os), h->os_info);
+        char line[512];
         snprintf(line, sizeof(line),
                  "{\"type\":\"fingerprint\",\"ip\":\"%s\",\"name\":\"%s\","
                  "\"device_type\":\"%s\",\"protocol\":\"%s\","
                  "\"service\":\"%s\",\"os\":\"%s\"}\n",
-                 h->ip_str, h->name, h->device_type,
-                 h->protocol, h->service_type, h->os_info);
+                 h->ip_str, esc_name, esc_dtype,
+                 esc_proto, esc_svc, esc_os);
         eth_export_write_line(export_h, line);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -253,10 +280,12 @@ static void remote_port_task(void *arg) {
     eth_export_write_header(export_h);
     for (int i = 0; i < r->port_count && i < 256; i++) {
         eth_stream_record("P|%d|%s", r->port_results[i].port, r->port_results[i].service);
-        char line[160];
+        char esc_svc[64];
+        eth_json_escape(esc_svc, sizeof(esc_svc), r->port_results[i].service);
+        char line[192];
         snprintf(line, sizeof(line),
                  "{\"type\":\"port\",\"target\":\"%s\",\"port\":%d,\"service\":\"%s\"}\n",
-                 r->target_ip, r->port_results[i].port, r->port_results[i].service);
+                 r->target_ip, r->port_results[i].port, esc_svc);
         eth_export_write_line(export_h, line);
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -319,26 +348,32 @@ static void remote_poison_monitor_task(void *arg) {
             int counts[3] = { snap.domain_count, snap.cookie_count, snap.cred_count };
             for (int i = prev_counts[0]; i < counts[0] && i < 50; i++) {
                 eth_stream_record("D|%s", snap.domains[i]);
-                char line[128];
+                char esc[128];
+                eth_json_escape(esc, sizeof(esc), snap.domains[i]);
+                char line[192];
                 snprintf(line, sizeof(line),
                          "{\"type\":\"poison_domain\",\"domain\":\"%s\"}\n",
-                         snap.domains[i]);
+                         esc);
                 eth_export_write_line(export_h, line);
             }
             for (int i = prev_counts[1]; i < counts[1] && i < 10; i++) {
                 eth_stream_record("K|%s", snap.cookies[i]);
-                char line[128];
+                char esc[256];
+                eth_json_escape(esc, sizeof(esc), snap.cookies[i]);
+                char line[320];
                 snprintf(line, sizeof(line),
                          "{\"type\":\"poison_cookie\",\"cookie\":\"%s\"}\n",
-                         snap.cookies[i]);
+                         esc);
                 eth_export_write_line(export_h, line);
             }
             for (int i = prev_counts[2]; i < counts[2] && i < 10; i++) {
                 eth_stream_record("C|%s", snap.creds[i]);
-                char line[128];
+                char esc[256];
+                eth_json_escape(esc, sizeof(esc), snap.creds[i]);
+                char line[320];
                 snprintf(line, sizeof(line),
                          "{\"type\":\"poison_cred\",\"cred\":\"%s\"}\n",
-                         snap.creds[i]);
+                         esc);
                 eth_export_write_line(export_h, line);
             }
             eth_stream_record("M|%d|%d|%d|%d",
@@ -374,18 +409,17 @@ bool eth_comm_handler_handle_command(const char *command, const char *data) {
     }
 
     if (strcmp(data, "arp_scan") == 0) {
-        xTaskCreate(remote_arp_task,    "eth_rem_arp",  8192, NULL, 5, &s_remote_task);
-    } else if (strcmp(data, "fp_scan") == 0) {
-        xTaskCreate(remote_fp_task,     "eth_rem_fp",   10240, NULL, 5, &s_remote_task);
-    } else if (strcmp(data, "port_scan_local") == 0) {
-        xTaskCreate(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)false, 5, &s_remote_task);
-    } else if (strcmp(data, "port_scan_all") == 0) {
-        xTaskCreate(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)true,  5, &s_remote_task);
-    } else if (strcmp(data, "ping_sweep") == 0) {
-        xTaskCreate(remote_ping_task,   "eth_rem_ping", 8192, NULL, 5, &s_remote_task);
-    } else if (strcmp(data, "poison_start") == 0) {
-        eth_arp_poison_start();
-        xTaskCreate(remote_poison_monitor_task, "eth_rem_mon", 8192, NULL, 3, &s_remote_task);
+        xTaskCreate_psram(remote_arp_task,    "eth_rem_arp",  8192, NULL, 5, &s_remote_task);
+    } else if (strcmp(sub, "fp") == 0 || strcmp(sub, "fingerprint") == 0) {
+        xTaskCreate_psram(remote_fp_task,     "eth_rem_fp",   10240, NULL, 5, &s_remote_task);
+    } else if (strcmp(sub, "port") == 0) {
+        xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)false, 5, &s_remote_task);
+    } else if (strcmp(sub, "ports") == 0) {
+        xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)true,  5, &s_remote_task);
+    } else if (strcmp(sub, "ping") == 0) {
+        xTaskCreate_psram(remote_ping_task,   "eth_rem_ping", 8192, NULL, 5, &s_remote_task);
+    } else if (strcmp(sub, "poison") == 0 || strcmp(sub, "monitor") == 0) {
+        xTaskCreate_psram(remote_poison_monitor_task, "eth_rem_mon", 8192, NULL, 3, &s_remote_task);
     } else if (strcmp(data, "poison_stop") == 0) {
         eth_arp_poison_stop();
     } else if (strcmp(data, "status") == 0) {

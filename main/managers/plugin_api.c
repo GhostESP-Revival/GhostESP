@@ -401,16 +401,6 @@ static void plugin_ui_sync_apply(void *arg) {
     if (call && call->done) xSemaphoreGive(call->done);
 }
 
-/* Diagnostic-only: totals how long callers actually block here waiting for
-   the LVGL task to service a cross-task UI call, separate from any time
-   spent inside the callback itself, logged periodically so a slow
-   native-app present/blit path can be attributed correctly instead of
-   assumed to be the callback's own work. */
-static uint32_t s_sync_wait_window_start_ms;
-static uint32_t s_sync_wait_count;
-static uint32_t s_sync_wait_us_total;
-#define PLUGIN_UI_SYNC_LOG_INTERVAL_MS 5000
-
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
     if (!fn) return false;
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
@@ -420,24 +410,12 @@ static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
         .ctx = ctx,
         .done = done,
     };
-    int64_t wait_start_us = esp_timer_get_time();
     display_manager_run_on_lvgl(plugin_ui_sync_apply, &call);
-    bool ok = xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE;
-    s_sync_wait_us_total += (uint32_t)(esp_timer_get_time() - wait_start_us);
-    s_sync_wait_count++;
+    /* The queued call borrows both call and ctx. They must remain alive until
+       LVGL has completed the callback; there is no safe timeout without queue
+       cancellation support from display_manager_run_on_lvgl(). */
+    bool ok = xSemaphoreTake(done, portMAX_DELAY) == pdTRUE;
     vSemaphoreDelete(done);
-
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    if (s_sync_wait_window_start_ms == 0) {
-        s_sync_wait_window_start_ms = now_ms;
-    } else if (now_ms - s_sync_wait_window_start_ms >= PLUGIN_UI_SYNC_LOG_INTERVAL_MS) {
-        ESP_LOGI(TAG, "plugin_ui_run_sync: calls=%u avg_wait=%uus",
-                 (unsigned)s_sync_wait_count,
-                 (unsigned)(s_sync_wait_us_total / s_sync_wait_count));
-        s_sync_wait_window_start_ms = now_ms;
-        s_sync_wait_count = 0;
-        s_sync_wait_us_total = 0;
-    }
     return ok;
 }
 
@@ -2569,9 +2547,8 @@ void plugin_api_release(void) {
     }
     s_plugin_async_scan_active = false;
 
-    /* An async blit still queued here would read the app's pixel buffer
-       after the app is torn down and its memory freed. Drain it first. */
-    plugin_api_ui_canvas_blit_async_wait(1000);
+    /* Async blits own a packed snapshot of the app pixels, so teardown must
+       not block the LVGL task waiting for a callback queued on that task. */
     plugin_api_lowlevel_release();
     s_api_active = false;
     s_permissions = 0;

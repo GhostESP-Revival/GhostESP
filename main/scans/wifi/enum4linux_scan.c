@@ -13,6 +13,7 @@
 #include "scans/wifi/netbios_scan.h"
 #include "core/scan_saver.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "core/utils.h"
 #include "esp_random.h"
 #include "esp_log.h"
@@ -1114,7 +1115,7 @@ esp_err_t enum_scan_start_async(void) {
     g_enum_scan_running = true;
     g_enum_scan_done = false;
 
-    BaseType_t ret = xTaskCreate(enum_scan_task, "enum_scan", 8192, NULL, 5, NULL);
+    BaseType_t ret = xTaskCreate_psram(enum_scan_task, "enum_scan", 8192, NULL, 5, NULL);
     if (ret != pdPASS) {
         g_enum_scan_running = false;
         free(g_enum_results);

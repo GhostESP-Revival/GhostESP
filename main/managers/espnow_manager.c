@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ESPNOW_MANAGER_MAX_PEERS 16
@@ -33,6 +34,12 @@ typedef struct __attribute__((packed)) {
     char text[ESPNOW_MANAGER_MESSAGE_MAX];
 } espnow_manager_packet_t;
 
+typedef struct {
+    uint32_t callbacks;
+    espnow_manager_peer_t peers[ESPNOW_MANAGER_MAX_PEERS];
+    espnow_manager_message_t messages[ESPNOW_MANAGER_MAX_MESSAGES];
+} espnow_manager_session_t;
+
 static const char *TAG = "EspNowManager";
 static const uint8_t s_broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -50,30 +57,23 @@ static uint32_t now_ms(void) {
 }
 
 static bool allocate_buffers(void) {
-    if (!s_peers) {
-        s_peers = heap_caps_malloc(sizeof(espnow_manager_peer_t) * ESPNOW_MANAGER_MAX_PEERS,
-                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!s_peers) s_peers = malloc(sizeof(espnow_manager_peer_t) * ESPNOW_MANAGER_MAX_PEERS);
-        if (!s_peers) return false;
-    }
-    if (!s_messages) {
-        s_messages = heap_caps_malloc(sizeof(espnow_manager_message_t) * ESPNOW_MANAGER_MAX_MESSAGES,
-                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!s_messages) s_messages = malloc(sizeof(espnow_manager_message_t) * ESPNOW_MANAGER_MAX_MESSAGES);
-        if (!s_messages) {
-            free(s_peers);
-            s_peers = NULL;
-            return false;
-        }
-    }
+    if (s_peers && s_messages) return true;
+    espnow_manager_session_t *session = heap_caps_calloc(
+        1, sizeof(*session), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!session) session = calloc(1, sizeof(*session));
+    if (!session) return false;
+    s_peers = session->peers;
+    s_messages = session->messages;
     return true;
 }
 
 static void free_buffers(void) {
-    free(s_peers);
-    free(s_messages);
+    espnow_manager_session_t *session = s_peers
+        ? (espnow_manager_session_t *)((uint8_t *)s_peers - offsetof(espnow_manager_session_t, peers))
+        : NULL;
     s_peers = NULL;
     s_messages = NULL;
+    free(session);
 }
 
 static void set_error(const char *message) {
@@ -189,6 +189,17 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
         return;
     }
 
+    portENTER_CRITICAL(&s_lock);
+    espnow_manager_session_t *session = s_peers
+        ? (espnow_manager_session_t *)((uint8_t *)s_peers - offsetof(espnow_manager_session_t, peers))
+        : NULL;
+    if (!s_active || !session) {
+        portEXIT_CRITICAL(&s_lock);
+        return;
+    }
+    session->callbacks++;
+    portEXIT_CRITICAL(&s_lock);
+
     char name[ESPNOW_MANAGER_NAME_MAX];
     char text[ESPNOW_MANAGER_MESSAGE_MAX];
     memcpy(name, packet->name, packet->name_len);
@@ -205,6 +216,9 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
     if (packet->type == ESPNOW_MANAGER_TYPE_MESSAGE && text[0]) {
         queue_message(info->src_addr, name, text);
     }
+    portENTER_CRITICAL(&s_lock);
+    session->callbacks--;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 bool espnow_manager_start(uint8_t channel) {
@@ -302,15 +316,27 @@ void espnow_manager_stop(void) {
     if (!s_active) return;
     ESP_LOGI(TAG, "Stopping ESP-NOW channel=%u peers=%d queued_messages=%d",
              s_channel, espnow_manager_peer_count(), espnow_manager_message_count());
-    esp_now_unregister_recv_cb();
-    esp_now_deinit();
     portENTER_CRITICAL(&s_lock);
     bool reconnect_sta = s_reconnect_sta_on_stop;
     s_active = false;
     s_channel = 0;
     s_reconnect_sta_on_stop = false;
     portEXIT_CRITICAL(&s_lock);
+    esp_now_unregister_recv_cb();
+    esp_now_deinit();
+    for (;;) {
+        portENTER_CRITICAL(&s_lock);
+        espnow_manager_session_t *session = s_peers
+            ? (espnow_manager_session_t *)((uint8_t *)s_peers - offsetof(espnow_manager_session_t, peers))
+            : NULL;
+        bool callbacks_done = !session || session->callbacks == 0;
+        portEXIT_CRITICAL(&s_lock);
+        if (callbacks_done) break;
+        vTaskDelay(1);
+    }
+    portENTER_CRITICAL(&s_lock);
     free_buffers();
+    portEXIT_CRITICAL(&s_lock);
     wifi_manager_set_reconnect_hold(false);
     if (reconnect_sta) wifi_manager_configure_sta_from_settings();
 }

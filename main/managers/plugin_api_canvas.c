@@ -1,6 +1,7 @@
 #include "managers/plugin_api_internal.h"
 #include "gui/gui_anim.h"
 #include "esp_heap_caps.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,6 +37,7 @@ typedef struct {
     int32_t dst_width;
     int32_t dst_height;
     bool result;
+    uint16_t *owned_pixels;
 } canvas_blit_ctx_t;
 
 typedef struct {
@@ -199,7 +201,14 @@ static void plugin_api_ui_canvas_create_now(void *arg) {
     lv_obj_t *canvas = lv_canvas_create(parent);
     if (!canvas) return;
 
-    size_t buf_size = (size_t)ctx->width * ctx->height * LV_COLOR_SIZE / 8;
+    const size_t bytes_per_pixel = (LV_COLOR_SIZE + 7u) / 8u;
+    const size_t width = (size_t)ctx->width;
+    const size_t height = (size_t)ctx->height;
+    if (width > SIZE_MAX / height || width * height > SIZE_MAX / bytes_per_pixel) {
+        lv_obj_del(canvas);
+        return;
+    }
+    size_t buf_size = width * height * bytes_per_pixel;
     void *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) buf = calloc(1, buf_size);
     if (!buf) {
@@ -214,6 +223,7 @@ static void plugin_api_ui_canvas_create_now(void *arg) {
 
 ghostesp_ui_obj_t plugin_api_ui_canvas_create(ghostesp_ui_obj_t parent, int32_t width, int32_t height) {
     if (!plugin_api_internal_has_ui_permission()) return NULL;
+    if (width <= 0 || height <= 0) return NULL;
     canvas_create_ctx_t ctx = { .parent = parent, .width = width, .height = height };
     return plugin_api_internal_run_sync(plugin_api_ui_canvas_create_now, &ctx) ? ctx.result : NULL;
 }
@@ -506,19 +516,23 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 
     const int32_t canvas_width = image->header.w;
     const int32_t canvas_height = image->header.h;
+    if ((size_t)(ctx->src_height - 1) > (SIZE_MAX - (size_t)ctx->src_width) / (size_t)ctx->src_stride ||
+        (size_t)canvas_height > SIZE_MAX / (size_t)canvas_width) return;
+    const int64_t dst_right = (int64_t)ctx->dst_x + ctx->dst_width;
+    const int64_t dst_bottom = (int64_t)ctx->dst_y + ctx->dst_height;
     const int32_t left = ctx->dst_x < 0 ? 0 : ctx->dst_x;
     const int32_t top = ctx->dst_y < 0 ? 0 : ctx->dst_y;
-    const int32_t right = ctx->dst_x + ctx->dst_width > canvas_width ? canvas_width : ctx->dst_x + ctx->dst_width;
-    const int32_t bottom = ctx->dst_y + ctx->dst_height > canvas_height ? canvas_height : ctx->dst_y + ctx->dst_height;
+    const int32_t right = dst_right > canvas_width ? canvas_width : (int32_t)dst_right;
+    const int32_t bottom = dst_bottom > canvas_height ? canvas_height : (int32_t)dst_bottom;
     if (left >= right || top >= bottom) return;
 
     uint16_t *destination = (uint16_t *)image->data;
-    const bool copy_rows = left == ctx->dst_x && right == ctx->dst_x + ctx->dst_width &&
+    const bool copy_rows = left == ctx->dst_x && right == dst_right &&
                            ctx->dst_width == ctx->src_width;
     for (int32_t y = top; y < bottom; y++) {
-        int32_t source_y = (y - ctx->dst_y) * ctx->src_height / ctx->dst_height;
-        const uint16_t *source_row = ctx->pixels + source_y * ctx->src_stride;
-        uint16_t *destination_row = destination + y * canvas_width;
+        int32_t source_y = (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+        const uint16_t *source_row = ctx->pixels + (size_t)source_y * (size_t)ctx->src_stride;
+        uint16_t *destination_row = destination + (size_t)y * (size_t)canvas_width;
         if (copy_rows) {
 #if LV_COLOR_16_SWAP
             int32_t x = 0;
@@ -538,7 +552,7 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
             continue;
         }
         for (int32_t x = left; x < right; x++) {
-            int32_t source_x = (x - ctx->dst_x) * ctx->src_width / ctx->dst_width;
+            int32_t source_x = (int32_t)(((int64_t)x - ctx->dst_x) * ctx->src_width / ctx->dst_width);
 #if LV_COLOR_16_SWAP
             uint16_t pixel = source_row[source_x];
             destination_row[x] = (uint16_t)(pixel << 8 | pixel >> 8);
@@ -575,6 +589,7 @@ static SemaphoreHandle_t s_async_blit_done = NULL;
 static void plugin_api_ui_canvas_blit_async_cb(void *arg) {
     canvas_blit_ctx_t *ctx = (canvas_blit_ctx_t *)arg;
     plugin_api_ui_canvas_blit_rgb565_now(ctx);
+    free(ctx->owned_pixels);
     free(ctx);
     s_async_blit_pending = false;
     if (s_async_blit_done) xSemaphoreGive(s_async_blit_done);
@@ -583,7 +598,8 @@ static void plugin_api_ui_canvas_blit_async_cb(void *arg) {
 bool plugin_api_ui_canvas_blit_async_wait(uint32_t timeout_ms) {
     if (!s_async_blit_pending) return true;
     if (!s_async_blit_done) return false;
-    if (xSemaphoreTake(s_async_blit_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
+    TickType_t timeout = timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    if (xSemaphoreTake(s_async_blit_done, timeout) != pdTRUE) return false;
     /* Give it back so a second waiter (or the drain below) still sees a
        consistent state; pending is the authoritative flag. */
     xSemaphoreGive(s_async_blit_done);
@@ -594,17 +610,37 @@ bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint
                                             int32_t src_width, int32_t src_height, int32_t src_stride,
                                             int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height) {
     if (!plugin_api_internal_has_ui_permission()) return false;
+    if (!pixels || src_width <= 0 || src_height <= 0 || src_stride < src_width ||
+        dst_width <= 0 || dst_height <= 0) return false;
     if (s_async_blit_pending) return false;
     if (!s_async_blit_done) {
         s_async_blit_done = xSemaphoreCreateBinary();
         if (!s_async_blit_done) return false;
     }
-    canvas_blit_ctx_t *ctx = malloc(sizeof(*ctx));
+    const size_t width = (size_t)src_width;
+    const size_t height = (size_t)src_height;
+    const size_t max_pixels = (size_t)LV_HOR_RES * (size_t)LV_VER_RES;
+    if (width > SIZE_MAX / height || width * height > max_pixels ||
+        width * height > SIZE_MAX / sizeof(uint16_t) ||
+        (size_t)(src_height - 1) > (SIZE_MAX - width) / (size_t)src_stride) return false;
+    const size_t pixel_count = width * height;
+    canvas_blit_ctx_t *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return false;
+    ctx->owned_pixels = malloc(pixel_count * sizeof(uint16_t));
+    if (!ctx->owned_pixels) {
+        free(ctx);
+        return false;
+    }
+    for (size_t y = 0; y < height; ++y) {
+        memcpy(ctx->owned_pixels + y * width,
+               pixels + y * (size_t)src_stride,
+               width * sizeof(uint16_t));
+    }
     *ctx = (canvas_blit_ctx_t){
-        .canvas = canvas, .pixels = pixels, .src_width = src_width, .src_height = src_height,
-        .src_stride = src_stride, .dst_x = dst_x, .dst_y = dst_y,
+        .canvas = canvas, .pixels = ctx->owned_pixels, .src_width = src_width, .src_height = src_height,
+        .src_stride = src_width, .dst_x = dst_x, .dst_y = dst_y,
         .dst_width = dst_width, .dst_height = dst_height,
+        .owned_pixels = ctx->owned_pixels,
     };
     while (xSemaphoreTake(s_async_blit_done, 0) == pdTRUE) { /* drain stale signal */ }
     s_async_blit_pending = true;

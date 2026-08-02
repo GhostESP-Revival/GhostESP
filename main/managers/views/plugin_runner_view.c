@@ -504,7 +504,7 @@ void plugin_runner_view_create(void) {
         s_touch_scroll_target = NULL;
         plugin_runner_view.root = s_root;
         display_manager_add_status_bar("SD App");
-        if (loaded->app && loaded->app->on_resume) loaded->app->on_resume();
+        plugin_loader_resume(loaded);
         plugin_runner_start_tick(loaded);
         return;
     }

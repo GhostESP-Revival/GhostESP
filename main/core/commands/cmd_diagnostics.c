@@ -8,6 +8,7 @@
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
 #include "core/memory_debug.h"
+#include "core/system_manager.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -305,7 +306,7 @@ void handle_dial_command(int argc, char **argv) {
             dial_manager_set_device_name(argv[i]);
         }
     }
-    BaseType_t rc = xTaskCreate(&discover_task, "discover_task", DISCOVER_TASK_STACK, NULL, 5, NULL);
+    BaseType_t rc = xTaskCreate_psram(&discover_task, "discover_task", DISCOVER_TASK_STACK, NULL, 5, NULL);
     if (rc != pdPASS) {
         glog("Failed to start DIAL discovery task (err=%ld).\n", (long)rc);
     }
