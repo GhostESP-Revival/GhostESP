@@ -63,6 +63,9 @@ static bool gps_peer_preferred = false;
 static volatile TickType_t gps_peer_last_update_tick = 0;
 static volatile bool gps_peer_has_seen_update = false;
 static portMUX_TYPE gps_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE gps_lifecycle_lock = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t gps_lifecycle_owner = NULL;
+static uint32_t gps_lifecycle_depth = 0;
 static gps_t gps_local_snapshot = {0};
 static gps_t gps_peer_fix_snapshot = {0};
 static bool ghostscript_local_fix_known = false;
@@ -79,6 +82,35 @@ static void gps_soft_watchdog_task(void *pvParameters);
 static void gps_soft_try_release_rgb_rmt(void);
 static void gps_soft_try_reacquire_rgb_rmt(void);
 static void gps_soft_prepare_rx_pin(void);
+
+static bool gps_lifecycle_begin(const char *operation) {
+    TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool acquired = false;
+
+    taskENTER_CRITICAL(&gps_lifecycle_lock);
+    if (gps_lifecycle_owner == NULL || gps_lifecycle_owner == current) {
+        gps_lifecycle_owner = current;
+        gps_lifecycle_depth++;
+        acquired = true;
+    }
+    taskEXIT_CRITICAL(&gps_lifecycle_lock);
+
+    if (!acquired) {
+        ESP_LOGW(GPS_TAG, "GPS lifecycle busy; skipping %s", operation);
+    }
+    return acquired;
+}
+
+static void gps_lifecycle_end(void) {
+    taskENTER_CRITICAL(&gps_lifecycle_lock);
+    if (gps_lifecycle_owner == xTaskGetCurrentTaskHandle() && gps_lifecycle_depth > 0) {
+        gps_lifecycle_depth--;
+        if (gps_lifecycle_depth == 0) {
+            gps_lifecycle_owner = NULL;
+        }
+    }
+    taskEXIT_CRITICAL(&gps_lifecycle_lock);
+}
 
 #define GPS_SOFT_WATCHDOG_POLL_MS 2000
 #define GPS_SOFT_WATCHDOG_STALL_MS 12000
@@ -629,6 +661,9 @@ void gps_manager_init(GPSManager *manager) {
         ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_init");
         return;
     }
+    if (!gps_lifecycle_begin("initialization")) {
+        return;
+    }
 
     if (manager->isinitilized || nmea_hdl != NULL || gps_check_task_handle != NULL ||
         gps_soft_watchdog_task_handle != NULL) {
@@ -721,6 +756,7 @@ void gps_manager_init(GPSManager *manager) {
     if (current_rx_pin == 0) {
         ESP_LOGE(GPS_TAG, "No GPS RX pin configured. Set one via 'gpspin <gpio>' command or Kconfig.");
         glog("No GPS RX pin configured. Use 'gpspin <gpio>' to set one.\n");
+        gps_lifecycle_end();
         return;
     }
 
@@ -868,6 +904,7 @@ void gps_manager_init(GPSManager *manager) {
             esp_comm_manager_init_with_defaults();
             gps_disabled_comm_for_conflict = false;
         }
+        gps_lifecycle_end();
         return;
     }
     if (!gps_soft_mode_active) {
@@ -915,6 +952,7 @@ void gps_manager_init(GPSManager *manager) {
         status_display_show_status("GPS Task Fail");
         // proceed without the connection-check task; parser remains initialized
     }
+    gps_lifecycle_end();
 }
 
 static void check_gps_connection_task(void *pvParameters) {
@@ -1089,6 +1127,9 @@ void gps_manager_deinit(GPSManager *manager) {
         ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_deinit");
         return;
     }
+    if (!gps_lifecycle_begin("deinitialization")) {
+        return;
+    }
 
     bool had_gps_resources = manager->isinitilized || nmea_hdl != NULL ||
                              gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL;
@@ -1150,6 +1191,7 @@ void gps_manager_deinit(GPSManager *manager) {
     } else {
         status_display_show_status("GPS Not Init");
     }
+    gps_lifecycle_end();
 }
 
 #define GPS_STATUS_MESSAGE "GPS: %s\nAPs: %lu\nSats: %u/%u\nSpeed: %.1f km/h\nAccuracy: %s\n"

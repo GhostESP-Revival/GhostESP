@@ -259,9 +259,7 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    const uint32_t stack_words = (stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-
-    res->stack = alloc_task_stack(stack_words * sizeof(StackType_t));
+    res->stack = alloc_task_stack(stack_bytes);
     res->tcb = alloc_task_tcb();
 
     if (!res->stack || !res->tcb) {
@@ -269,7 +267,7 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    return xTaskCreateStatic(task_fn, name, stack_words, arg, priority, res->stack, res->tcb);
+    return xTaskCreateStatic(task_fn, name, stack_bytes, arg, priority, res->stack, res->tcb);
 }
 
 static StackType_t* alloc_task_stack(size_t stack_bytes) {
@@ -1455,11 +1453,10 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->initialized = true;
 
     const uint32_t rx_stack_bytes = 4096;
-    const uint32_t rx_stack_words = (rx_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-    s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_words * sizeof(StackType_t));
+    s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_bytes);
     s_comm_manager->rx_task_res.tcb = alloc_task_tcb();
     if (s_comm_manager->rx_task_res.stack && s_comm_manager->rx_task_res.tcb) {
-        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_words,
+        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_bytes,
                                                            s_comm_manager, 12,
                                                            s_comm_manager->rx_task_res.stack,
                                                            s_comm_manager->rx_task_res.tcb);
@@ -1687,7 +1684,9 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
         return false;
     }
 
-    xTimerStop(s_comm_manager->discovery_timer, 0);
+    if (s_comm_manager->discovery_timer) {
+        xTimerStop(s_comm_manager->discovery_timer, 0);
+    }
     lock_state(s_comm_manager);
     s_comm_manager->state = COMM_STATE_HANDSHAKE;
     s_comm_manager->role = COMM_ROLE_MASTER;

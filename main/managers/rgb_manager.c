@@ -1050,7 +1050,6 @@ void police_task(void *pvParameter) {
 
     vTaskDelay(pdMS_TO_TICKS(20));
   }
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1058,6 +1057,7 @@ void police_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 
@@ -1065,7 +1065,6 @@ void strobe_task(void *pvParameter) {
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
   rainbow_task_should_exit = false;
   rgb_manager_strobe_effect(rgb_manager, settings_get_rgb_speed(&G_Settings));
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1073,6 +1072,7 @@ void strobe_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 
@@ -1080,7 +1080,6 @@ void knightrider_task(void *pvParameter) {
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
   rainbow_task_should_exit = false;
   rgb_manager_knightrider_effect(rgb_manager, settings_get_rgb_speed(&G_Settings));
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1088,6 +1087,7 @@ void knightrider_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 

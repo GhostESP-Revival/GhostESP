@@ -79,7 +79,7 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define WARDRIVE_HELPER_REFRESH_MS 2000
 #define WARDRIVE_OBS_QUEUE_PSRAM_LEN 64
 #define WARDRIVE_OBS_QUEUE_INTERNAL_LEN 32
-#define WARDRIVE_OBS_TASK_STACK_WORDS 2560
+#define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
 #define RECENT_SSID_COUNT 5
@@ -365,11 +365,11 @@ static bool wardrive_obs_queue_ensure(void) {
 
     StackType_t *stack = NULL;
 #if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
-    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_WORDS * sizeof(StackType_t),
+    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #endif
     if (!stack) {
-        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_WORDS * sizeof(StackType_t),
+        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -394,7 +394,7 @@ static bool wardrive_obs_queue_ensure(void) {
     wardrive_obs_task_tcb = tcb;
     wardrive_obs_drain_sem = drain_sem;
     wardrive_obs_lifecycle_mutex = lifecycle_mutex;
-    wardrive_obs_task_handle = xTaskCreateStatic(wardrive_obs_task, "wd_obs", WARDRIVE_OBS_TASK_STACK_WORDS,
+    wardrive_obs_task_handle = xTaskCreateStatic(wardrive_obs_task, "wd_obs", WARDRIVE_OBS_TASK_STACK_BYTES,
                                                  NULL, 2, stack, tcb);
     if (!wardrive_obs_task_handle) {
         wardrive_obs_queue = NULL;
@@ -416,8 +416,9 @@ static bool wardrive_obs_queue_ensure(void) {
         return false;
     }
 
-    ESP_LOGI(TAG, "Wardrive observation queue: %u entries, %u bytes (%s)",
-             (unsigned)capacity, (unsigned)storage_size, in_psram ? "PSRAM" : "internal RAM");
+    ESP_LOGI(TAG, "Wardrive observation queue: %u entries, %u bytes (%s), stack=%u bytes",
+             (unsigned)capacity, (unsigned)storage_size, in_psram ? "PSRAM" : "internal RAM",
+             (unsigned)WARDRIVE_OBS_TASK_STACK_BYTES);
     wardrive_obs_init_done();
     return true;
 }
