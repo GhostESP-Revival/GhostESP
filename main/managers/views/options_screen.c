@@ -3591,11 +3591,22 @@ void options_menu_create() {
      * destroy/create to avoid expensive LVGL operations and watchdog starvation.
      */
     ESP_LOGI(TAG, "options_menu_create: SelectedMenuType=%d (%s)", SelectedMenuType, options_menu_type_to_string(SelectedMenuType));
+    /* Only restore the captured nav state when the menu state has not been
+     * deliberately changed since the options view was torn down. Keyboard
+     * submit callbacks (e.g. BLE OUI vendor search / prefix, settings) set
+     * their own target state before switching back here; restoring the stale
+     * capture would clobber it and dump the user on the wrong menu. */
     bool restoring_view = s_resume_menu_state.valid &&
                           s_resume_menu_state.menu_type == SelectedMenuType &&
+                          s_resume_menu_state.wifi_state == current_wifi_menu_state &&
+                          s_resume_menu_state.bluetooth_state == current_bluetooth_menu_state &&
+                          s_resume_menu_state.dualcomm_state == current_dualcomm_menu_state &&
+                          s_resume_menu_state.settings_root == current_settings_root &&
+                          s_resume_menu_state.settings_category == current_settings_category &&
                           display_manager_previous_view != &main_menu_view;
     if (!restoring_view) {
         s_resume_menu_state.valid = false;
+        s_pending_restore_state.valid = false;
     }
     if (restoring_view) {
         current_wifi_menu_state = s_resume_menu_state.wifi_state;

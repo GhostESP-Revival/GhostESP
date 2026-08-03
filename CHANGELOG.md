@@ -2,6 +2,20 @@
 
 ## Revival v2.1.0
 
+### TL;DR
+
+**NFC:** GhostESP now supports a second NFC chip, the ST25R3916. It works next to the PN532. GhostESP can now read more card types. These include EMV payment cards, full DESFire application and file trees, PicoPass/iCLASS cards, and transit cards such as Opal, myki, ITSO, and Gallagher.
+
+**Updates and apps:** You can now update the firmware from GhostESP itself. You can update over Wi-Fi, from the SD card, or through a paired GhostLink peer. A new Cloud Store lets you browse and install apps, scripts, and asset packs directly on the board. GhostScript adds a sandboxed Lua runtime to run scripts from the SD card. Native SD apps can now send ESP-NOW messages. They can also be larger on C5 boards. This release adds two new apps: a Doom port and HackChat.
+
+**Wi-Fi:** GhostESP can now run a combined handshake and deauth attack. It adds SMB and SNMP enumeration and a live packet visualizer. The Airspace Monitor can now detect more attack types. Before, it could only show that traffic was suspicious.
+
+**Reliability:** Wardriving now handles heavy load better. Before, Ethernet scans always used a /24 subnet size. Now they use the real subnet size. The Banshee C5 display and SD card no longer block each other. Before, they had to share the same SPI bus one at a time.
+
+**UI:** This release fixes an old timing bug. The LVGL tick task used a fixed 10ms step, not the real frame time. This made animations play too slowly when a frame took a long time to draw. The tick now uses the actual time that has passed. This fix makes menu navigation and scrolling smoother.
+
+**Also included:** a Sun Mode setting for outdoor visibility, more Infrared protocols for signal transmit, safer Evil Portal request handling, and new headless CLI commands. This release also fixes many stability problems. These problems include stack overflows, memory leaks, and several Banshee C5 crashes.
+
 ### NFC
 - Added ST25R3916/ST25R3916B NFC support over SPI or I2C, plus an `auto` / `pn532` / `st25r` backend selector in UI and CLI
 - Added more NFC tag tools: MIFARE Classic nested recovery, PicoPass/iCLASS reads, NDEF creation, NTAG metadata, and DESFire summaries, with credits to [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [@noproto](https://github.com/noproto), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))

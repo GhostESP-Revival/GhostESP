@@ -916,6 +916,14 @@ static void keyboard_destroy() {
         input_label = NULL;
         submit_callback = NULL;
         immediate_callback = NULL;
+        /* Clear the return view too. It is global state set by the opener
+         * *before* switching to the keyboard; leaving it stale meant a later
+         * opener that doesn't set its own (e.g. the options-menu keyboards)
+         * inherited the previous target -- most visibly &terminal_view from the
+         * terminal command box -- so pressing Done dumped the user into the
+         * terminal instead of returning to whatever opened the keyboard. Each
+         * opener that needs a return view (NFC, terminal) sets it every time. */
+        keyboard_return_view = NULL;
         input_len = 0;
         input_buffer[0] = '\0';
         is_symbols_mode = false;
