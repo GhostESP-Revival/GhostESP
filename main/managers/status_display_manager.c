@@ -46,6 +46,8 @@ static i2c_master_bus_handle_t s_i2c_bus;
 static i2c_master_dev_handle_t s_display_dev;
 static bool s_i2c_bus_owned;
 static uint8_t *s_buffer;
+static uint8_t s_dirty_pages; // pages pending flush (bit = page)
+static uint8_t s_drawn_pages; // pages drawn in the last render pass
 #define STATUS_BUFFER_SIZE (128 * 8)
 #define STATUS_ANIM_TASK_STACK_BYTES 3072
 static char s_line1[24];
@@ -187,14 +189,18 @@ static void status_display_flush(void) {
     }
     s_next_flush_allowed_tick = now + STATUS_DISPLAY_MIN_FLUSH_INTERVAL_TICKS;
 #endif
+    uint8_t dirty = s_dirty_pages;
     for (uint8_t page = 0; page < 8; ++page) {
+        if (!(dirty & (uint8_t)(1u << page))) continue;
         uint8_t setup[] = { (uint8_t)(0xB0 | page), 0x00, 0x10 };
         if (status_display_send(STATUS_CMD, setup, sizeof(setup)) != ESP_OK) return;
         const uint8_t *chunk = &s_buffer[page * 128];
         if (status_display_send(STATUS_DATA, chunk, 128) != ESP_OK) return;
+        s_dirty_pages &= (uint8_t)~(1u << page);
 #if defined(CONFIG_USE_IO_EXPANDER)
-        // brief pause lets other IO expander clients grab the bus between 1kB bursts
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // brief pause lets other IO expander clients grab the bus between bursts;
+        // skipped after the last page and for partial flushes
+        if (s_dirty_pages) vTaskDelay(pdMS_TO_TICKS(5));
 #endif
     }
 }
@@ -208,6 +214,9 @@ static void status_display_plot_pixel(int x, int y, bool on) {
     int index = x + (y / 8) * 128;
     uint8_t bit = 1u << (y & 7);
     if (on) s_buffer[index] |= bit; else s_buffer[index] &= (uint8_t)~bit;
+    uint8_t page_bit = (uint8_t)(1u << (y / 8));
+    s_drawn_pages |= page_bit;
+    s_dirty_pages |= page_bit;
 }
 
 static void status_display_draw_char(int x, int y, char c) {
@@ -255,6 +264,9 @@ static void status_display_draw_text(int x, int y, const char *text) {
 }
 
 static void status_display_render_locked(const char *line_one, const char *line_two) {
+    // pages from the previous pass still hold content: re-flush them to erase
+    s_dirty_pages |= s_drawn_pages;
+    s_drawn_pages = 0;
     status_display_clear_buffer();
     int len1 = (int)strlen(line_one);
     int len2 = (int)strlen(line_two);
@@ -348,6 +360,9 @@ static void status_display_anim_task(void *arg) {
         IdleAnimation anim = settings_get_status_idle_animation(&G_Settings);
 
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            // pages from the previous pass still hold content: re-flush them to erase
+            s_dirty_pages |= s_drawn_pages;
+            s_drawn_pages = 0;
             StatusAnimGfx gfx = {
                 .clear = anim_clear,
                 .flush = anim_flush,
@@ -462,6 +477,7 @@ void status_display_init(void) {
 
     // clear any garbage before first text
     status_display_clear_buffer();
+    s_dirty_pages = 0xFF;
     status_display_flush();
 
     s_ready = true;
@@ -554,6 +570,7 @@ void status_display_deinit(void) {
     if (!s_ready) return;
     ESP_LOGI(TAG, "deinitializing status display");
     status_display_clear_buffer();
+    s_dirty_pages = 0xFF;
     status_display_flush();
     s_ready = false;
     if (s_idle_timer) {

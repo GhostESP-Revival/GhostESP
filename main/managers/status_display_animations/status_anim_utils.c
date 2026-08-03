@@ -48,6 +48,9 @@ static void draw_image_1bpp_msb(const StatusAnimGfx *gfx,
     if (!gfx || !gfx->plot_pixel || !img || !img->data) return;
     int w = img->width;
     int h = img->height;
+    // skip sprites that are entirely off-screen
+    if (x + w - 1 < 0 || x >= gfx->width) return;
+    if (y + h - 1 < 0 || y >= gfx->height) return;
     int bytes_per_row = (w + 7) / 8;
     for (int row = 0; row < h; ++row) {
         const uint8_t *rowptr = img->data + row * bytes_per_row;

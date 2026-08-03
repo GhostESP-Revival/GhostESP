@@ -2322,6 +2322,7 @@ static void settings_confirm_import_cb(void *user_data);
 static void settings_confirm_factory_reset_cb(void *user_data);
 
 static lv_timer_t *menu_build_timer = NULL;
+static bool s_back_option_added = false;
 static const char * const *current_options_list = NULL;
 static int build_item_index = 0;
 static int button_height_global = 0;
@@ -3899,10 +3900,12 @@ void options_menu_create() {
     if (is_settings_mode) {
         current_options_list = NULL;
         build_item_index = 0;
+        s_back_option_added = false;
         menu_build_timer = lv_timer_create(menu_builder_cb, current_settings_category < 0 ? 20 : 15, NULL);
     } else {
         current_options_list = options;
         build_item_index = 0;
+        s_back_option_added = false;
         // note: when returning from terminal, submenu states are preserved,
         // so we rebuild the correct submenu (e.g., wifi scanning) automatically
         menu_build_timer = lv_timer_create(menu_builder_cb, 15, NULL);
@@ -3972,6 +3975,13 @@ void options_menu_create() {
     if (g_freeze_hook_id < 0) {
         g_freeze_hook_id = display_manager_register_freeze_pre_lock(options_menu_freeze_pre_lock);
     }
+
+    // Build the first batch synchronously so short menus appear instantly
+    // (like the dedicated BadUSB/NFC views) instead of crawling in from the
+    // top; the timer only fills overflow rows, keeping big lists responsive.
+    // Done last so touch bar / scroll buttons / final container size exist.
+    menu_builder_cb(NULL);
+
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
 }
 
@@ -12723,6 +12733,7 @@ static void rebuild_current_menu(void) {
     options_menu_push_rendered_state();
     settings_select_close();
     lvgl_timer_del_safe(&menu_build_timer);
+    s_back_option_added = false;
     
     if (g_options_view) {
         options_view_clear(g_options_view);
@@ -12988,8 +12999,12 @@ static void rebuild_current_menu(void) {
         }
     }
     
-    // start incremental build with longer period for smoother operation
+    // Build the first batch synchronously so short menus (WiFi/BLE mains,
+    // submenus) appear instantly like the dedicated BadUSB/NFC views instead
+    // of crawling in from the top; the timer only fills overflow rows, which
+    // keeps huge lists (AP/STA scans, portals, settings) non-blocking.
     menu_build_timer = lv_timer_create(menu_builder_cb, timer_period, NULL);
+    menu_builder_cb(NULL);
 }
 
 static void switch_to_settings_root(int root_idx) {
@@ -13549,8 +13564,12 @@ static void dual_comm_http_request_kb_cb(const char *text) {
 static void menu_builder_cb(lv_timer_t *t)
 {
     if (!menu_container || !lv_obj_is_valid(menu_container) || !g_options_view) {
-        if (t) lv_timer_del(t);
-        menu_build_timer = NULL;
+        if (t) {
+            lv_timer_del(t);
+            menu_build_timer = NULL;
+        } else {
+            lvgl_timer_del_safe(&menu_build_timer);
+        }
         return;
     }
     const bool is_portal_select =
@@ -13568,7 +13587,7 @@ static void menu_builder_cb(lv_timer_t *t)
     int built_this_tick = 0;
     bool all_current_options_processed = false;
 
-    bool back_option_was_added_in_previous_tick = (bool)(intptr_t)t->user_data;
+    bool back_option_was_added_in_previous_tick = s_back_option_added;
 
     if (!back_option_was_added_in_previous_tick) {
         if (is_settings_mode) {
@@ -13771,17 +13790,21 @@ static void menu_builder_cb(lv_timer_t *t)
                     if (label) lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
                 }
                 num_items++;
-                t->user_data = (void*)1;
+                s_back_option_added = true;
             }
         }
         if (
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-            (bool)(intptr_t)t->user_data
+            s_back_option_added
 #else
-            need_back_button ? (bool)(intptr_t)t->user_data : true
+            need_back_button ? s_back_option_added : true
 #endif
         ) {
-            lv_timer_del(t);
+            if (t) {
+                lv_timer_del(t);
+            } else {
+                lvgl_timer_del_safe(&menu_build_timer);
+            }
             if (menu_container && lv_obj_is_valid(menu_container)) {
                 update_scroll_buttons_visibility();
                 update_settings_arrows_visibility();

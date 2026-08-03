@@ -1224,7 +1224,11 @@ static void create_list_menu(void) {
     lv_obj_set_style_pad_row(menu_container, layout.list_row_gap, 0);
     lv_obj_add_flag(menu_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(menu_container, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_AUTO);
+    // No elastic spring-back and no scrollbar: scrolling redraws only the
+    // moved rows instead of stretch frames plus a scrollbar strip, which
+    // keeps drag/flick scrolling smooth on low-refresh displays.
+    lv_obj_clear_flag(menu_container, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_OFF);
 
     if (list_buttons) {
         free(list_buttons);
@@ -1250,8 +1254,10 @@ static void create_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        // Shadow-free rows: per-pixel shadow blending on every row is the
+        // dominant cost when scrolling; the accent border keeps focus visible.
         apply_card_style(btn, menu_surface_color, menu_items[menu_index].border_color,
-                         show_borders ? 2 : 0, 6);
+                         show_borders ? 2 : 0, 0);
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, layout.list_button_pad, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, layout.list_column_gap, LV_PART_MAIN);
