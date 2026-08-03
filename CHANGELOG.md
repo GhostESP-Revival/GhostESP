@@ -4,17 +4,38 @@
 
 ### TL;DR
 
-**NFC:** GhostESP now supports a second NFC chip, the ST25R3916. It works next to the PN532. GhostESP can now read more card types. These include EMV payment cards, full DESFire application and file trees, PicoPass/iCLASS cards, and transit cards such as Opal, myki, ITSO, and Gallagher.
+**NFC:**
+- GhostESP now supports a second NFC chip, the ST25R3916.
+- GhostESP can now read more card types, including EMV payment cards, full DESFire application and file trees, PicoPass/iCLASS cards, and transit cards such as Opal, myki, ITSO, and Gallagher.
+- MIFARE Classic keys can now be recovered with nested attacks, and you can create NDEF tags and read NTAG metadata.
 
-**Updates and apps:** You can now update the firmware from GhostESP itself. You can update over Wi-Fi, from the SD card, or through a paired GhostLink peer. A new Cloud Store lets you browse and install apps, scripts, and asset packs directly on the board. GhostScript adds a sandboxed Lua runtime to run scripts from the SD card. Native SD apps can now send ESP-NOW messages. They can also be larger on C5 boards. This release adds two new apps: a Doom port and HackChat.
+**Updates and apps:**
+- You can now update the firmware from GhostESP itself. You can update over Wi-Fi, from the SD card, or through a paired GhostLink peer.
+- A new Cloud Store App lets you browse and install apps, scripts, and asset packs directly on the board through a connected wifi connection.
+- GhostScript adds a sandboxed Lua runtime to run scripts from the SD card. 
+- Native SD apps can now send ESP-NOW messages. This release adds three new apps: a Doom port, HackChat (an ESP-NOW messaging app), and a QR Generator.
 
-**Wi-Fi:** GhostESP can now run a combined handshake and deauth attack. It adds SMB and SNMP enumeration and a live packet visualizer. The Airspace Monitor can now detect more attack types. Before, it could only show that traffic was suspicious.
+**Wi-Fi:**
+- GhostESP can now run a combined handshake and deauth attack. 
+- In 2.1 we also added SMB and SNMP enumeration and a live packet visualizer.
+- The Airspace Monitor can now detect more attack types. Before, it could only show that traffic was suspicious.
+- Wi-Fi can now reconnect to your saved network automatically (Settings > Connectivity), and a new Channel Congestion chart shows how busy each channel is.
 
-**Reliability:** Wardriving now handles heavy load better. Before, Ethernet scans always used a /24 subnet size. Now they use the real subnet size. The Banshee C5 display and SD card no longer block each other. Before, they had to share the same SPI bus one at a time.
+**Ethernet:**
+- Ethernet scans are about three times faster and now export their results to the SD card automatically.
 
-**UI:** This release fixes an old timing bug. The LVGL tick task used a fixed 10ms step, not the real frame time. This made animations play too slowly when a frame took a long time to draw. The tick now uses the actual time that has passed. This fix makes menu navigation and scrolling smoother.
+**Command line:**
+- The terminal gained OS-style commands (echo, ifconfig, ping, version, uptime), persistent aliases, command scripts, environment variables, and typo suggestions.
 
-**Also included:** a Sun Mode setting for outdoor visibility, more Infrared protocols for signal transmit, safer Evil Portal request handling, and new headless CLI commands. This release also fixes many stability problems. These problems include stack overflows, memory leaks, and several Banshee C5 crashes.
+**Reliability:**
+- Wardriving now handles heavy load better.
+- Before, Ethernet scans always used a /24 subnet size. Now they use the real subnet size.
+- The Banshee C5 display and SD card no longer block each other. Before, they had to share the same SPI bus one at a time.
+- Boards without an SD slot (like the Banshee S3) can now save files to their paired GhostLink peer's SD card.
+- A long list of stability bugs was fixed: the external RTC keeps correct time across reboots, station scans no longer silently capture nothing, and several under-sized task stacks (OTA updates, BLE bridge, CLI watch) were fixed.
+
+**UI:** This release fixes an old timing bug. The LVGL tick task used a fixed 10ms step, not the real frame time. This made animations play too slowly when a frame took a long time to draw. The tick now uses the actual time that has passed. This fix makes menu navigation and scrolling smoother. The main menu and Apps layouts were also reworked (Carousel, Grid, and List views), scrolling is animated and smoother throughout, and more screens remember where you were when you go back.
+
 
 ### NFC
 - Added ST25R3916/ST25R3916B NFC support over SPI or I2C, plus an `auto` / `pn532` / `st25r` backend selector in UI and CLI
