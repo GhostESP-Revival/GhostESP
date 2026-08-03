@@ -4,6 +4,7 @@
 #include <lvgl.h>
 
 const lv_font_t *accessibility_get_font_small(void);
+const lv_font_t *accessibility_get_font_icon(void);
 const lv_font_t *accessibility_get_font_body(void);
 const lv_font_t *accessibility_get_font_title(void);
 const lv_font_t *accessibility_get_font_display(void);

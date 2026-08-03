@@ -42,6 +42,13 @@ const lv_font_t *accessibility_get_font_small(void) {
     return get_base_font(size);
 }
 
+const lv_font_t *accessibility_get_font_icon(void) {
+    uint8_t size = settings_get_font_size(&G_Settings);
+    if (size >= 2) return &lv_font_montserrat_10;
+    if (size >= 1) return &lv_font_montserrat_8;
+    return &lv_font_montserrat_8;
+}
+
 const lv_font_t *accessibility_get_font_body(void) {
     uint8_t size = settings_get_font_size(&G_Settings);
     return get_body_font_for_size(size);

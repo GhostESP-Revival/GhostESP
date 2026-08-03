@@ -65,7 +65,6 @@ static volatile int g_arp_progress_total_hosts = 0;
 static volatile int g_arp_progress_found = 0;
 
 typedef struct {
-    struct tcpip_api_call_data call;
     const ip4_addr_t *target;
     uint8_t *mac;
     arp_scanner_ctx_t *scanner;
@@ -94,14 +93,6 @@ static void log_host_entry(scan_file_t *sf, size_t index, const char *ip, const 
     if (scan_file_is_open(sf)) {
         scan_file_printf(sf, "%s\n", entry);
     }
-}
-
-/**
- * @brief Report scan progress
- */
-static void report_progress(int scanned, int total, size_t hosts_found) {
-    glog("Progress: %d/%d scanned, %zu hosts found\n", scanned, total, hosts_found);
-    ESP_LOGI(TAG, "Progress: %d/%d, found %zu hosts so far", scanned, total, hosts_found);
 }
 
 // ============================================================================
@@ -157,10 +148,11 @@ void arp_scanner_cleanup(arp_scanner_ctx_t *ctx) {
  * buffer exhaustion) and lets the stack handle retransmits.
  * Technique inspired by DecentLabs/officeAir (MIT-licensed).
  */
-static err_t arp_request_api(struct tcpip_api_call_data *call) {
-    arp_tcpip_call_t *request = (arp_tcpip_call_t *)call;
-    if (!netif_default) return ERR_IF;
-    return etharp_request(netif_default, request->target);
+static void arp_request_callback(void *ctx) {
+    arp_tcpip_call_t *request = (arp_tcpip_call_t *)ctx;
+    if (netif_default) {
+        etharp_request(netif_default, request->target);
+    }
 }
 
 bool send_arp_request(const char *target_ip) {
@@ -176,7 +168,7 @@ bool send_arp_request(const char *target_ip) {
     }
 
     arp_tcpip_call_t call = {.target = &target_addr};
-    return tcpip_api_call(arp_request_api, &call.call) == ERR_OK;
+    return tcpip_callback_with_block(arp_request_callback, &call, 1);
 }
 
 /**
@@ -194,21 +186,20 @@ static bool send_arp_request_lwip(const char *target_ip) {
     }
 
     arp_tcpip_call_t call = {.target = &target_addr};
-    return tcpip_api_call(arp_request_api, &call.call) == ERR_OK;
+    return tcpip_callback_with_block(arp_request_callback, &call, 1) == ERR_OK;
 }
 
 /**
  * @brief Get ARP table entry for IP address (thread-safe)
  */
-static err_t arp_lookup_api(struct tcpip_api_call_data *call) {
-    arp_tcpip_call_t *lookup = (arp_tcpip_call_t *)call;
+static void arp_lookup_callback(void *ctx) {
+    arp_tcpip_call_t *lookup = (arp_tcpip_call_t *)ctx;
     struct eth_addr *eth = NULL;
     const ip4_addr_t *found_ip = NULL;
-    if (etharp_find_addr(NULL, lookup->target, &eth, &found_ip) < 0 || !eth) {
-        return ERR_VAL;
+    if (etharp_find_addr(NULL, lookup->target, &eth, &found_ip) >= 0 && eth) {
+        memcpy(lookup->mac, eth->addr, 6);
+        lookup->scanner = (arp_scanner_ctx_t *)(uintptr_t)1; // success flag
     }
-    memcpy(lookup->mac, eth->addr, 6);
-    return ERR_OK;
 }
 
 bool get_arp_table_entry(const char *ip, uint8_t *mac) {
@@ -222,8 +213,9 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
         return false;
     }
 
-    arp_tcpip_call_t call = {.target = &target_addr, .mac = mac};
-    return tcpip_api_call(arp_lookup_api, &call.call) == ERR_OK;
+    arp_tcpip_call_t call = {.target = &target_addr, .mac = mac, .scanner = NULL};
+    return tcpip_callback_with_block(arp_lookup_callback, &call, 1) == ERR_OK;
+    return call.scanner != NULL;
 }
 
 // ============================================================================
@@ -345,10 +337,10 @@ static bool is_host_known(const arp_scanner_ctx_t *ctx, const char *ip) {
  * @brief Harvest all entries currently in the lwIP ARP table
  *
  * Called between sub-batches and between passes to pick up early responses.
- * Thread-safe: holds the TCP/IP core lock while iterating the table.
+ * Thread-safe: runs on the TCP/IP core thread while iterating the table.
  */
-static err_t harvest_arp_table_api(struct tcpip_api_call_data *call) {
-    arp_scanner_ctx_t *ctx = ((arp_tcpip_call_t *)call)->scanner;
+static void harvest_arp_table_callback(void *ctx) {
+    arp_scanner_ctx_t *scanner = (arp_scanner_ctx_t *)ctx;
     for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;
@@ -358,16 +350,14 @@ static err_t harvest_arp_table_api(struct tcpip_api_call_data *call) {
         char ip_str[16];
         ip4addr_ntoa_r(ip, ip_str, sizeof(ip_str));
 
-        if (!is_host_known(ctx, ip_str)) {
-            add_discovered_host(ctx, ip_str, eth->addr);
+        if (!is_host_known(scanner, ip_str)) {
+            add_discovered_host(scanner, ip_str, eth->addr);
         }
     }
-    return ERR_OK;
 }
 
 static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
-    arp_tcpip_call_t call = {.scanner = ctx};
-    if (tcpip_api_call(harvest_arp_table_api, &call.call) != ERR_OK) {
+    if (tcpip_callback_with_block(harvest_arp_table_callback, ctx, 1) != ERR_OK) {
         ESP_LOGW(TAG, "Failed to read ARP table on TCP/IP thread");
     }
 }
@@ -955,8 +945,6 @@ static void poll_passive_arp_table(void) {
     int new_count = 0;
     if (!new_lines) return;
 
-    arp_tcpip_call_t call = {0};
-    call.scanner = (arp_scanner_ctx_t *)&new_count;
     /* Passive monitor table polling is marshalled separately below. */
     for (size_t i = 0; i < ARP_TABLE_SIZE && new_count < PASSIVE_ARP_MAX_HOSTS; i++) {
         ip4_addr_t *ip = NULL;

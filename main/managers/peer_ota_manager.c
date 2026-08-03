@@ -665,7 +665,7 @@ static bool peer_ota_ensure_rx_worker(void) {
     }
 
     s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(PEER_OTA_RX_TASK_STACK_BYTES,
-                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!s_peer_rx_task_stack) {
         s_peer_rx_task_stack = (StackType_t *)heap_caps_malloc(PEER_OTA_RX_TASK_STACK_BYTES,
                                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

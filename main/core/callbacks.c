@@ -2282,8 +2282,6 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
                 peer_fix.valid &&
                 peer_fix.latitude >= -90.0f && peer_fix.latitude <= 90.0f &&
                 peer_fix.longitude >= -180.0f && peer_fix.longitude <= 180.0f;
-
-            gps_manager_update_peer_fix(&peer_fix);
         }
     }
 

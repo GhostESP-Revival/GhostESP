@@ -547,7 +547,7 @@ static void draw_cursor(live_chart_t *chart, lv_draw_ctx_t *draw_ctx,
     lv_draw_line_dsc_t cursor;
     lv_draw_line_dsc_init(&cursor);
     cursor.color = color;
-    cursor.opa = LV_OPA_70;
+    cursor.opa = chart->type == LIVE_CHART_BAR ? LV_OPA_30 : LV_OPA_70;
     cursor.width = 1;
     lv_point_t top = {.x = x, .y = plot->y1};
     lv_point_t bottom = {.x = x, .y = plot->y2};
@@ -657,7 +657,8 @@ static void live_chart_draw(live_chart_t *chart, lv_draw_ctx_t *draw_ctx) {
                                   series, series_color, text);
             }
         }
-        draw_cursor(chart, draw_ctx, &plot, muted);
+        draw_cursor(chart, draw_ctx, &plot,
+                    chart->type == LIVE_CHART_BAR ? accent : muted);
     }
     draw_alert(chart, draw_ctx, &plot, font);
 }

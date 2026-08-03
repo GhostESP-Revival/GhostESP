@@ -149,6 +149,8 @@
 - Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
 - Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
 - Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
+- Fixed wardriving screen GPS speed flickering to 0 when using peer GPS: the wardrive stream handler was clobbering the peer fix snapshot with speed=0 on every WiFi observation, racing with the GPS stream that carried the real speed
+- Reduced status bar icon sizes and increased spacing between icons for a cleaner look
 
 ### Other Changes
 - Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off

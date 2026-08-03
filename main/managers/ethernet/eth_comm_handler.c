@@ -410,15 +410,15 @@ bool eth_comm_handler_handle_command(const char *command, const char *data) {
 
     if (strcmp(data, "arp_scan") == 0) {
         xTaskCreate_psram(remote_arp_task,    "eth_rem_arp",  8192, NULL, 5, &s_remote_task);
-    } else if (strcmp(sub, "fp") == 0 || strcmp(sub, "fingerprint") == 0) {
+    } else if (strcmp(data, "fp") == 0 || strcmp(data, "fingerprint") == 0) {
         xTaskCreate_psram(remote_fp_task,     "eth_rem_fp",   10240, NULL, 5, &s_remote_task);
-    } else if (strcmp(sub, "port") == 0) {
+    } else if (strcmp(data, "port") == 0) {
         xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)false, 5, &s_remote_task);
-    } else if (strcmp(sub, "ports") == 0) {
+    } else if (strcmp(data, "ports") == 0) {
         xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)true,  5, &s_remote_task);
-    } else if (strcmp(sub, "ping") == 0) {
+    } else if (strcmp(data, "ping") == 0) {
         xTaskCreate_psram(remote_ping_task,   "eth_rem_ping", 8192, NULL, 5, &s_remote_task);
-    } else if (strcmp(sub, "poison") == 0 || strcmp(sub, "monitor") == 0) {
+    } else if (strcmp(data, "poison") == 0 || strcmp(data, "monitor") == 0) {
         xTaskCreate_psram(remote_poison_monitor_task, "eth_rem_mon", 8192, NULL, 3, &s_remote_task);
     } else if (strcmp(data, "poison_stop") == 0) {
         eth_arp_poison_stop();
