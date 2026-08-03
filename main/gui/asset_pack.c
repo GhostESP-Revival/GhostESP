@@ -39,8 +39,8 @@
 /* Internal-RAM-only icon cap: 32x32 RGB565A8 = 3 KB. Keeps the worst-case
  * icon cache footprint to 2 * 3 KB = 6 KB on devices without PSRAM. */
 #define ASSET_PACK_ICON_MAX_RAW_INTERNAL (32 * 32 * 3)
-/* Internal-RAM-only bg tile cap: 32x32 RGB565A8 = 3 KB (matches icon cap). */
-#define ASSET_PACK_BG_MAX_RAW_INTERNAL (32 * 32 * 3)
+/* Allows the 80x107 low-RAM variant while rejecting the 120x160 half image. */
+#define ASSET_PACK_BG_MAX_RAW_INTERNAL (5 * 1024)
 #define ASSET_PACK_BG_FULLSCREEN_MAX_RAW (320 * 240 * 2)
 #define ASSET_PACK_GTHEME_MAX_FILE (256 * 1024)
 #define ASSET_PACK_EXTRACT_BUF_SIZE 4096
@@ -55,6 +55,7 @@
  * followed by packed 4-bit pixel indices (low nibble = even pixel).
  * LVGL renders natively via LV_IMG_CF_INDEXED_4BIT. */
 #define GIMG_FORMAT_INDEXED_4BPP 3
+#define GIMG_FORMAT_INDEXED_1BPP 4
 #define GIMG_COMP_NONE 0
 #define GIMG_COMP_DEFLATE_RAW 1
 
@@ -68,14 +69,20 @@ typedef struct {
 } asset_icon_entry_t;
 
 typedef struct {
-    /* FNV-1a 64-bit hash of the resolved file path within the active pack
-     * (e.g. "icons/wifi.gimg"). Keyed by path rather than icon name so
-     * multiple icon entries pointing at the same file share a single
+    /* FNV-1a 64-bit hash of the decoded pixel content (the GIMG file's
+     * embedded content hash). Keyed by content rather than path/name so
+     * multiple icon entries whose images are byte-identical share a single
      * decoded image in the cache. */
     uint64_t key_hash;
     lv_img_dsc_t dsc;
     uint8_t *data;
     uint32_t last_used;
+    /* Set while a live LVGL widget holds a pointer to &dsc. Pinned slots are
+     * never evicted, so a screen showing more distinct icons than the cache
+     * has slots for gets the fallback icon for the overflow instead of a
+     * dangling pointer into a freed buffer. Cleared per-screen via
+     * asset_pack_reset_icon_pins(). */
+    bool pinned;
 } asset_icon_cache_entry_t;
 
 static bool s_loaded = false;
@@ -695,14 +702,18 @@ static bool select_next_bg_candidate(void) {
 static lv_img_cf_t gimg_cf(uint8_t fmt) {
     if (fmt == GIMG_FORMAT_RGB565A8) return LV_IMG_CF_RGB565A8;
     if (fmt == GIMG_FORMAT_INDEXED_4BPP) return LV_IMG_CF_INDEXED_4BIT;
+    if (fmt == GIMG_FORMAT_INDEXED_1BPP) return LV_IMG_CF_INDEXED_1BIT;
     return LV_IMG_CF_TRUE_COLOR;
 }
 
-static void premultiply_indexed4_palette(lv_img_dsc_t *dsc) {
-    if (!dsc || dsc->header.cf != LV_IMG_CF_INDEXED_4BIT || !dsc->data || dsc->data_size < 64) return;
+static void premultiply_indexed_palette(lv_img_dsc_t *dsc) {
+    if (!dsc || !dsc->data) return;
+    int color_count = dsc->header.cf == LV_IMG_CF_INDEXED_4BIT ? 16
+                    : dsc->header.cf == LV_IMG_CF_INDEXED_1BIT ? 2 : 0;
+    if (color_count == 0 || dsc->data_size < (uint32_t)color_count * sizeof(lv_color32_t)) return;
 
     lv_color32_t *palette = (lv_color32_t *)dsc->data;
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < color_count; ++i) {
         uint8_t alpha = palette[i].ch.alpha;
         if (alpha == 255) continue;
         palette[i].ch.red = (uint8_t)(((uint16_t)palette[i].ch.red * alpha + 127) / 255);
@@ -732,6 +743,21 @@ static size_t tinfl_decompress_heap(void *out, size_t out_len,
     return (st != TINFL_STATUS_DONE) ? TINFL_DECOMPRESS_MEM_TO_MEM_FAILED : dst_len;
 }
 
+/* Reads just the 32-byte GIMG header to recover the content hash (a checksum
+ * of the decoded pixel data, stamped in by the pack builder) without paying
+ * for a full decode. Lets the icon cache dedupe by image content instead of
+ * by file path, so packs that reuse one image across many icon names collapse
+ * onto a single cache slot instead of exhausting the tiny no-PSRAM cache. */
+static bool peek_gimg_hash(const char *path, uint64_t *out_hash) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    uint8_t hdr[32];
+    bool ok = fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && memcmp(hdr, "GIMG", 4) == 0;
+    if (ok) *out_hash = rd64(hdr + 24);
+    fclose(f);
+    return ok;
+}
+
 static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, lv_img_dsc_t *out_dsc, uint8_t **out_data) {
     *out_data = NULL;
     memset(out_dsc, 0, sizeof(*out_dsc));
@@ -759,7 +785,8 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         fclose(f);
         return ESP_ERR_INVALID_SIZE;
     }
-    if (fmt != GIMG_FORMAT_RGB565 && fmt != GIMG_FORMAT_RGB565A8 && fmt != GIMG_FORMAT_INDEXED_4BPP) {
+    if (fmt != GIMG_FORMAT_RGB565 && fmt != GIMG_FORMAT_RGB565A8 &&
+        fmt != GIMG_FORMAT_INDEXED_4BPP && fmt != GIMG_FORMAT_INDEXED_1BPP) {
         fclose(f);
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -774,7 +801,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
     }
     /* Indexed 4bpp deflate isn't supported — 4bpp data doesn't compress well
      * and keeping the codec simple means one consistent uncompressed path. */
-    if (fmt == GIMG_FORMAT_INDEXED_4BPP && comp != GIMG_COMP_NONE) {
+    if ((fmt == GIMG_FORMAT_INDEXED_4BPP || fmt == GIMG_FORMAT_INDEXED_1BPP) && comp != GIMG_COMP_NONE) {
         fclose(f);
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -783,6 +810,13 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
     if (fmt == GIMG_FORMAT_INDEXED_4BPP) {
         indexed_pixel_bytes = ((size_t)width * (size_t)height + 1) / 2;
         size_t expected_raw = 64 + indexed_pixel_bytes;
+        if (raw_size != expected_raw || payload_size != expected_raw) {
+            fclose(f);
+            return ESP_ERR_INVALID_SIZE;
+        }
+    } else if (fmt == GIMG_FORMAT_INDEXED_1BPP) {
+        indexed_pixel_bytes = ((size_t)width * (size_t)height + 7) / 8;
+        size_t expected_raw = 8 + indexed_pixel_bytes;
         if (raw_size != expected_raw || payload_size != expected_raw) {
             fclose(f);
             return ESP_ERR_INVALID_SIZE;
@@ -842,10 +876,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         return ESP_ERR_INVALID_CRC;
     }
 
-    if (fmt == GIMG_FORMAT_INDEXED_4BPP) {
-        /* Layout: [16 * lv_color32_t palette (64 B)][W*H/2 packed pixels].
-         * The cache's data pointer owns the single combined buffer; palette
-         * and pixel data both live inside it. */
+    if (fmt == GIMG_FORMAT_INDEXED_4BPP || fmt == GIMG_FORMAT_INDEXED_1BPP) {
         out_dsc->header.cf = gimg_cf(fmt);
         out_dsc->header.always_zero = 0;
         out_dsc->header.reserved = 0;
@@ -854,8 +885,8 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
         out_dsc->data_size = raw_size;
         out_dsc->data = raw;
         *out_data = raw;
-        ESP_LOGD(TAG, "load_gimg OK: %s %ux%u fmt=indexed4 raw=%lu data=%p",
-                 path, width, height, (unsigned long)raw_size,
+        ESP_LOGD(TAG, "load_gimg OK: %s %ux%u fmt=indexed%u raw=%lu data=%p",
+                 path, width, height, fmt == GIMG_FORMAT_INDEXED_1BPP ? 1U : 4U, (unsigned long)raw_size,
                  (void *)out_dsc->data);
         return ESP_OK;
     }
@@ -1074,27 +1105,56 @@ static uint64_t hash_path(const char *path) {
     return checksum_bytes((const uint8_t *)path, strlen(path));
 }
 
-static asset_icon_cache_entry_t *cache_find_path(const char *path) {
-    if (!path || !s_icon_cache) return NULL;
-    uint64_t h = hash_path(path);
+static asset_icon_cache_entry_t *cache_find_hash(uint64_t content_hash) {
+    if (!content_hash || !s_icon_cache) return NULL;
     for (int i = 0; i < s_icon_cache_size; ++i) {
-        if (s_icon_cache[i].key_hash && s_icon_cache[i].data && s_icon_cache[i].key_hash == h) {
+        if (s_icon_cache[i].key_hash && s_icon_cache[i].data && s_icon_cache[i].key_hash == content_hash) {
             return &s_icon_cache[i];
         }
     }
     return NULL;
 }
 
+/* Picks a slot to reuse for a new icon, preferring an empty slot and
+ * otherwise the least-recently-used *unpinned* one. Slots pinned by a live
+ * on-screen widget (see asset_pack_reset_icon_pins) are never evicted; if
+ * every occupied slot is pinned, returns NULL so the caller falls back to
+ * the built-in icon instead of corrupting a widget that's still visible. */
 static asset_icon_cache_entry_t *cache_slot_for_evict(void) {
     if (!s_icon_cache || s_icon_cache_size <= 0) return NULL;
-    asset_icon_cache_entry_t *oldest = &s_icon_cache[0];
+    asset_icon_cache_entry_t *oldest = NULL;
     for (int i = 0; i < s_icon_cache_size; ++i) {
         if (s_icon_cache[i].key_hash == 0) return &s_icon_cache[i];
-        if (s_icon_cache[i].last_used < oldest->last_used) oldest = &s_icon_cache[i];
+        if (s_icon_cache[i].pinned) continue;
+        if (!oldest || s_icon_cache[i].last_used < oldest->last_used) oldest = &s_icon_cache[i];
     }
+    if (!oldest) return NULL;
     free_img_dsc(&oldest->dsc, &oldest->data);
     oldest->key_hash = 0;
     return oldest;
+}
+
+void asset_pack_reset_icon_pins(void) {
+    if (!s_icon_cache) return;
+    for (int i = 0; i < s_icon_cache_size; ++i) {
+        s_icon_cache[i].pinned = false;
+    }
+}
+
+void asset_pack_release_cached_images(void) {
+    if (s_icon_cache) {
+        for (int i = 0; i < s_icon_cache_size; ++i) {
+            free_img_dsc(&s_icon_cache[i].dsc, &s_icon_cache[i].data);
+            s_icon_cache[i].key_hash = 0;
+            s_icon_cache[i].last_used = 0;
+            s_icon_cache[i].pinned = false;
+        }
+    }
+    free_img_dsc(&s_bg_tile_dsc, &s_bg_tile_data);
+    free_img_dsc(&s_bg_fullscreen_dsc, &s_bg_fullscreen_data);
+    s_last_icon = NULL;
+    s_last_icon_key = NULL;
+    s_last_icon_version = 0;
 }
 
 static void preload_loaded_assets(void) {
@@ -1136,9 +1196,16 @@ static void preload_loaded_assets(void) {
             if (!join_pack_path(path, sizeof(path), rels[r])) continue;
             if (path_load_failed(path)) continue;
 
-            /* Skip paths already loaded; multiple icon names can resolve to the
-             * same file and we want a single decoded image in the cache. */
-            if (cache_find_path(path)) {
+            uint64_t content_hash = 0;
+            if (!peek_gimg_hash(path, &content_hash)) {
+                remember_failed_path(path);
+                continue;
+            }
+
+            /* Skip images already loaded; multiple icon names (or differently
+             * named size variants) can resolve to identical pixel content, and
+             * we want a single decoded image in the cache regardless of path. */
+            if (cache_find_hash(content_hash)) {
                 deduped++;
                 icon_done = true;
                 continue;
@@ -1157,7 +1224,7 @@ static void preload_loaded_assets(void) {
                 ESP_LOGW(TAG, "icon preload failed for %s (%s): %s", s_icons[i].name ? s_icons[i].name : "?", path, esp_err_to_name(err));
                 continue;
             }
-            slot->key_hash = hash_path(path);
+            slot->key_hash = content_hash;
             slot->last_used = ++s_cache_tick;
             loaded++;
             icon_done = true;
@@ -1381,6 +1448,10 @@ int asset_pack_get_current_index(void) {
     return 0;
 }
 
+void asset_pack_rescan_installed(void) {
+    scan_installed_packs();
+}
+
 static void scan_installed_packs(void) {
     s_installed_count = 0;
     if (!s_installed_names) {
@@ -1516,56 +1587,59 @@ const lv_img_dsc_t *asset_pack_get_icon(const char *name, const lv_img_dsc_t *fa
         return fallback;
     }
 
-    /* Cache lookup by resolved path. Multiple icon names that resolve to
-     * the same file share a single decoded image in the cache. */
-    for (int r = 0; r < rel_count; ++r) {
-        char path[192];
-        if (!join_pack_path(path, sizeof(path), rels[r])) continue;
-        if (path_load_failed(path)) continue;
-        asset_icon_cache_entry_t *cached = cache_find_path(path);
-        if (cached) {
-            cached->last_used = ++s_cache_tick;
-            s_last_icon = &cached->dsc;
-            s_last_icon_key = name;
-            s_last_icon_version = s_version;
-            return &cached->dsc;
-        }
-    }
-
-    asset_icon_cache_entry_t *slot = cache_slot_for_evict();
-    if (!slot) return fallback;
     bool mounted_here = false;
     bool display_suspended = false;
     esp_err_t mount_err = asset_sd_begin(&mounted_here, &display_suspended);
     if (mount_err != ESP_OK) return fallback;
+
     uint32_t icon_max = s_has_psram ? ASSET_PACK_ICON_MAX_RAW : ASSET_PACK_ICON_MAX_RAW_INTERNAL;
-    char loaded_path[192] = {0};
-    esp_err_t err = ESP_ERR_NOT_FOUND;
+    const lv_img_dsc_t *result = fallback;
+
+    /* Peek each candidate's content hash first. Multiple icon names (or size
+     * variants) that resolve to identical pixel content share a single
+     * decoded image in the cache regardless of file path. */
     for (int r = 0; r < rel_count; ++r) {
         char path[192];
         if (!join_pack_path(path, sizeof(path), rels[r])) continue;
         if (path_load_failed(path)) continue;
-        err = load_gimg(path, false, icon_max, &slot->dsc, &slot->data);
-        if (err == ESP_OK) {
-            snprintf(loaded_path, sizeof(loaded_path), "%s", path);
+
+        uint64_t content_hash = 0;
+        if (!peek_gimg_hash(path, &content_hash)) {
+            remember_failed_path(path);
+            continue;
+        }
+
+        asset_icon_cache_entry_t *cached = cache_find_hash(content_hash);
+        if (cached) {
+            cached->last_used = ++s_cache_tick;
+            cached->pinned = true;
+            result = &cached->dsc;
             break;
         }
-        remember_failed_path(path);
-        if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_VERSION || err == ESP_ERR_INVALID_CRC) {
-            invalidate_active_archive_cache();
+
+        asset_icon_cache_entry_t *slot = cache_slot_for_evict();
+        if (!slot) break;
+        esp_err_t err = load_gimg(path, false, icon_max, &slot->dsc, &slot->data);
+        if (err != ESP_OK) {
+            remember_failed_path(path);
+            if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_VERSION || err == ESP_ERR_INVALID_CRC) {
+                invalidate_active_archive_cache();
+            }
+            ESP_LOGW(TAG, "icon load failed for %s (%s): %s", name, path, esp_err_to_name(err));
+            continue;
         }
-        ESP_LOGW(TAG, "icon load failed for %s (%s): %s", name, path, esp_err_to_name(err));
+        slot->key_hash = content_hash;
+        slot->last_used = ++s_cache_tick;
+        slot->pinned = true;
+        result = &slot->dsc;
+        break;
     }
+
     asset_sd_end(mounted_here, display_suspended);
-    if (err != ESP_OK) {
-        return fallback;
-    }
-    slot->key_hash = hash_path(loaded_path);
-    slot->last_used = ++s_cache_tick;
-    s_last_icon = &slot->dsc;
+    s_last_icon = result;
     s_last_icon_key = name;
     s_last_icon_version = s_version;
-    return &slot->dsc;
+    return result;
 }
 
 const lv_img_dsc_t *asset_pack_get_app_icon(const lv_img_dsc_t *fallback) {
@@ -1576,7 +1650,7 @@ const lv_img_dsc_t *asset_pack_get_app_icon(const lv_img_dsc_t *fallback) {
 const lv_img_dsc_t *asset_pack_get_background_tile(void) {
     if (!s_loaded || !s_bg_tile[0]) return NULL;
     if (s_bg_tile_data) {
-        premultiply_indexed4_palette(&s_bg_tile_dsc);
+        premultiply_indexed_palette(&s_bg_tile_dsc);
         return &s_bg_tile_dsc;
     }
 
@@ -1592,8 +1666,7 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
          * Internal: cap is the selected low-RAM variant, psram_only=false so
          * the loader falls back to internal heap. */
         uint32_t bg_max = s_has_psram ? ASSET_PACK_BG_FULLSCREEN_MAX_RAW
-                                      : ASSET_PACK_BG_MAX_RAW_INTERNAL;
-        if (!s_has_psram && s_bg_scale_to_fill) bg_max = ASSET_PACK_BG_FULLSCREEN_MAX_RAW;
+                                       : ASSET_PACK_BG_MAX_RAW_INTERNAL;
         bool psram_only = s_has_psram;
 
         bool mounted_here = false;
@@ -1616,10 +1689,11 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
             if (select_next_bg_candidate()) continue;
             return NULL;
         }
-        premultiply_indexed4_palette(&s_bg_tile_dsc);
-        ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u scale=%d",
-                 path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
-                 (unsigned)s_bg_tile_dsc.header.cf, s_bg_scale_to_fill ? 1 : 0);
+        premultiply_indexed_palette(&s_bg_tile_dsc);
+        ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u bytes=%lu scale=%d",
+                  path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
+                  (unsigned)s_bg_tile_dsc.header.cf, (unsigned long)s_bg_tile_dsc.data_size,
+                  s_bg_scale_to_fill ? 1 : 0);
         return &s_bg_tile_dsc;
     }
     return NULL;
@@ -1767,7 +1841,7 @@ void asset_pack_switch_task(int index) {
     }
 
     s_switch_running = true;
-    BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096,
+    BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 12288,
                                 (void *)(intptr_t)index, 6, NULL);
     if (ok != pdPASS) {
         s_switch_running = false;

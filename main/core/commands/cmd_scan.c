@@ -4,6 +4,7 @@
 #include "core/callbacks.h"
 #include "core/commands.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "scans/ble/flipper_scan.h"
 #include "attacks/wifi/dhcp_starvation.h"
 #include "esp_timer.h"
@@ -64,10 +65,10 @@ static void sweep_run_internal(void) {
 
     int open_networks = 0, weak_networks = 0, secure_networks = 0;
 
-    if (sd_card_exists("/mnt/ghostesp")) {
-        mkdir("/mnt/ghostesp/sweeps", 0755);
+    if (sd_card_exists(SD_GHOSTESP_ROOT)) {
+        (void)sd_card_create_directory(SD_DIR_SWEEPS);
         int idx = get_next_sweep_file_index();
-        snprintf(report_path, sizeof(report_path), "/mnt/ghostesp/sweeps/sweep_%d.csv", idx);
+        snprintf(report_path, sizeof(report_path), SD_DIR_SWEEPS "/sweep_%d.csv", idx);
         report = fopen(report_path, "w");
         if (report) {
             fprintf(report, "Type,Name,MAC,Associated MAC,Channel,Frequency,RSSI,Auth,Cipher,802.11,WPS,Latitude,Longitude,Altitude,First Seen\n");
@@ -284,7 +285,7 @@ void sweep_start_async(int wifi_seconds, int ble_seconds) {
     g_sweep_ble_seconds = ble_seconds < 1 ? 10 : ble_seconds;
     g_sweep_result.running = true;
     g_sweep_result.total_phases = 6;
-    xTaskCreate(sweep_task, "sweep", 8192, NULL, 5, NULL);
+    xTaskCreate_psram(sweep_task, "sweep", 8192, NULL, 5, NULL);
 }
 
 bool sweep_check_done(void) {
@@ -345,7 +346,7 @@ static int get_next_sweep_file_index(void) {
     int next = 0;
     char path[64];
     while (next < 9999) {
-        snprintf(path, sizeof(path), "/mnt/ghostesp/sweeps/sweep_%d.csv", next);
+        snprintf(path, sizeof(path), SD_DIR_SWEEPS "/sweep_%d.csv", next);
         FILE *f = fopen(path, "r");
         if (!f) break;
         fclose(f);

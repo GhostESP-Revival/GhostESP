@@ -38,7 +38,7 @@ weight: 20
 ## Troubleshooting
 
 - **Save button disabled.** Re-scan the tag and wait for the title to show “NFC Tag”.
-- **“No SD card” error.** Check card seating and filesystem. The path `/mnt/ghostesp/` must be writeable.
+- **“No SD card” error.** Check card seating and filesystem. The path `/mnt/ghostesp/` must be writable.
 - **File overwriting**: GhostESP auto-generates names and will overwrite if the same model/UID is scanned repeatedly.
 
 ## FAQ

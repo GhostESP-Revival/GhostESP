@@ -29,7 +29,7 @@
 
 static const char *TAG_IR_MANAGER = "infrared_manager";
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
 static uint32_t s_poltergeist_io24_hold_refcount = 0;
 #endif
 
@@ -46,12 +46,12 @@ bool infrared_manager_init(void) {
         ESP_LOGI(TAG_IR_MANAGER, "IR LED pin initialized: %d", CONFIG_INFRARED_LED_PIN);
     }
 #endif
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_reset_pin(24);
-        gpio_set_direction(24, GPIO_MODE_OUTPUT);
-        gpio_set_level(24, 0);
-        ESP_LOGI(TAG_IR_MANAGER, "IO24 configured for poltergeist template");
+        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
+        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
+        ESP_LOGI(TAG_IR_MANAGER, "IO%d configured for poltergeist template", CONFIG_INFRARED_LED_PIN);
     }
 #endif
     return ok;
@@ -515,6 +515,8 @@ void infrared_manager_free_list(infrared_signal_t *signals, size_t count) {
 static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(const char* name) {
     if (strcasecmp(name, "nec") == 0) return &infrared_protocol_nec;
     if (strcasecmp(name, "necext") == 0) return &infrared_protocol_necext;
+    if (strcasecmp(name, "nec42") == 0) return &infrared_protocol_nec42;
+    if (strcasecmp(name, "nec42ext") == 0) return &infrared_protocol_nec42ext;
     if (strcasecmp(name, "kaseikyo") == 0) return &infrared_protocol_kaseikyo;
     if (strcasecmp(name, "pioneer") == 0) return &infrared_protocol_pioneer;
     if (strcasecmp(name, "rca") == 0) return &infrared_protocol_rca;
@@ -524,11 +526,12 @@ static const InfraredCommonProtocolSpec* infrared_manager_get_protocol_spec(cons
     if (strcasecmp(name, "sirc15") == 0) return &infrared_protocol_sirc15;
     if (strcasecmp(name, "sirc20") == 0) return &infrared_protocol_sirc20;
     if (strcasecmp(name, "rc5") == 0) return &infrared_protocol_rc5;
+    if (strcasecmp(name, "rc5x") == 0) return &infrared_protocol_rc5x;
     if (strcasecmp(name, "rc6") == 0) return &infrared_protocol_rc6;
     return NULL;
 }
 
-static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty) {
+static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float duty, const bool *levels) {
     size_t item_count = (count + 1) / 2;
     size_t hw_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 
@@ -584,9 +587,9 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
         return false;
     }
     for (size_t i = 0; i < item_count; i++) {
-        symbols[i].level0 = 1;
+        symbols[i].level0 = levels ? (levels[2 * i] ? 1 : 0) : 1;
         symbols[i].duration0 = timings[2 * i];
-        symbols[i].level1 = 0;
+        symbols[i].level1 = levels ? ((2 * i + 1 < count && levels[2 * i + 1]) ? 1 : 0) : 0;
         symbols[i].duration1 = (2 * i + 1 < count) ? timings[2 * i + 1] : 0;
     }
 
@@ -610,12 +613,12 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
 }
 
 void infrared_manager_poltergeist_hold_io24_begin(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_reset_pin(24);
-        gpio_set_direction(24, GPIO_MODE_OUTPUT);
-        gpio_set_level(24, 1);
+        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
+        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(CONFIG_INFRARED_LED_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(250));
     }
     s_poltergeist_io24_hold_refcount++;
@@ -623,12 +626,12 @@ void infrared_manager_poltergeist_hold_io24_begin(void) {
 }
 
 void infrared_manager_poltergeist_hold_io24_end(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
     if (s_poltergeist_io24_hold_refcount == 0) return;
     s_poltergeist_io24_hold_refcount--;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_set_level(24, 0);
+        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
     }
 #endif
 }
@@ -636,7 +639,7 @@ void infrared_manager_poltergeist_hold_io24_end(void) {
 bool infrared_manager_transmit(const infrared_signal_t *signal) {
     if (!signal) return false;
     ESP_LOGI(TAG_IR_MANAGER, "transmitting IR signal (name: %s)", signal->name);
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     bool poltergeist_local_hold = false;
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
         if (s_poltergeist_io24_hold_refcount == 0) {
@@ -656,7 +659,7 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
         ok = send_rmt(signal->payload.raw.timings,
                       signal->payload.raw.timings_size,
                       signal->payload.raw.frequency,
-                      signal->payload.raw.duty_cycle);
+                      signal->payload.raw.duty_cycle, NULL);
         infrared_rx_pause_for_tx(false);
     } else {
         const InfraredCommonProtocolSpec* protocol_spec = infrared_manager_get_protocol_spec(signal->payload.message.protocol);
@@ -669,8 +672,9 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
             
             size_t max_timings = 2 + max_bits * 2 + 10;
             uint32_t* timings = malloc(max_timings * sizeof(uint32_t));
+            bool* enc_levels = malloc(max_timings * sizeof(bool));
             
-            if (timings) {
+            if (timings && enc_levels) {
                 size_t timing_count = 0;
                 InfraredStatus st;
                 uint32_t dur;
@@ -681,10 +685,12 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
                 }
                 if (st == InfraredStatusOk) {
                     do {
+                        enc_levels[timing_count] = level;
                         timings[timing_count++] = dur;
                         st = infrared_common_encode(enc, &dur, &level);
                     } while (st == InfraredStatusOk && timing_count < max_timings);
                     if (st == InfraredStatusDone && timing_count < max_timings) {
+                        enc_levels[timing_count] = level;
                         timings[timing_count++] = dur;
                     }
                 }
@@ -692,10 +698,11 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
                     infrared_rx_pause_for_tx(true);
                     ok = send_rmt(timings, timing_count,
                                   protocol_spec->carrier_frequency,
-                                  protocol_spec->duty_cycle);
+                                  protocol_spec->duty_cycle, enc_levels);
                     infrared_rx_pause_for_tx(false);
                 }
                 free(timings);
+                free(enc_levels);
             }
             infrared_common_encoder_free(enc);
         } else {
@@ -706,7 +713,7 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
 #ifdef CONFIG_HAS_INFRARED
     gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
 #endif
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0 && poltergeist_local_hold) {
         infrared_manager_poltergeist_hold_io24_end();
     }

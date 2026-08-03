@@ -62,5 +62,6 @@ void command_history_add(const char* command);
 const char* command_history_get_previous(void);
 const char* command_history_get_next(void);
 void command_history_reset_display_index(void);
+void command_history_print(void);
 
 #endif // SERIAL_MANAGER_H

@@ -24,6 +24,7 @@
 #include "managers/views/music_visualizer.h"
 #endif
 #include <core/commandline.h>
+#include <core/shell.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,6 +96,11 @@ int serial_manager_write_bytes(const void *data, size_t len) {
 
 // Cursor position tracking
 static int cursor_position = 0;
+// Which physical input last contributed to the in-progress serial_buffer line:
+// -1 = none yet, 0 = wired UART, 1 = USB-JTAG console. Both inputs share one
+// line buffer, so a byte arriving from a different source than the one
+// currently mid-line must not be appended to it (see serial_task()).
+static int8_t last_input_source = -1;
 
 // Command history instance
 EXT_RAM_BSS_ATTR static CommandHistory command_history;
@@ -385,6 +391,14 @@ void command_history_reset_display_index(void) {
     command_history.display_index = -1;
 }
 
+void command_history_print(void) {
+    int start = (command_history.current_index - command_history.history_count + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
+    for (int i = 0; i < command_history.history_count; ++i) {
+        int index = (start + i) % MAX_HISTORY_SIZE;
+        glog("%2d  %s\n", i + 1, command_history.commands[index]);
+    }
+}
+
 // Cursor management functions
 static void move_cursor_to_position(int new_pos) {
     // Ensure cursor position is within bounds
@@ -567,11 +581,9 @@ static void clear_entire_line(void) {
 }
 
 static void display_prompt(void) {
-    const char prompt[] = "ghost-cli> ";
-    uart_write_bytes(UART_NUM, prompt, sizeof(prompt) - 1);
-#if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)prompt, sizeof(prompt) - 1, 0);
-#endif
+    char prompt[96];
+    shell_get_prompt(prompt, sizeof(prompt));
+    serial_manager_write_bytes(prompt, strlen(prompt));
     prompt_displayed = true;
 }
 
@@ -703,6 +715,7 @@ void serial_task(void *pvParameter) {
       hwm_log_counter = 0;
     }
     int length = 0;
+    int8_t read_source = 0; // 0 = wired UART, 1 = USB-JTAG
 
     // Read data from the main UART (if not disabled or temporarily handed off)
     if (!s_uart_disabled && !s_uart_paused) {
@@ -713,10 +726,24 @@ void serial_task(void *pvParameter) {
     if (length <= 0) {
       length =
           usb_serial_jtag_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
+      if (length > 0) read_source = 1;
     }
 #endif
 
     if (length > 0) {
+      // The wired UART (Flipper) and the USB-JTAG console share serial_buffer.
+      // If a line is already in progress from the other source, discard it
+      // instead of letting these bytes append onto it and form a bogus
+      // merged command (e.g. a typed-but-unsent "startwd" plus an
+      // app-triggered "stop\n" becoming "startwdstop").
+      if (index > 0 && last_input_source != -1 && last_input_source != read_source) {
+        memset(serial_buffer, 0, sizeof(serial_buffer));
+        index = 0;
+        cursor_position = 0;
+        arrow_state = ARROW_STATE_NONE;
+      }
+      last_input_source = read_source;
+
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
 
@@ -1110,6 +1137,11 @@ void serial_manager_reacquire_uart(void) {
 int handle_serial_command(const char *input) {
   // Handle peer commands with logging and proper remote flag management
   if (strncmp(input, "peer:", 5) == 0) {
+    static int peer_depth = 0;
+    if (peer_depth >= 4) {
+      glog("peer: command nesting too deep\n");
+      return ESP_FAIL;
+    }
     const char* actual_command = input + 5;
     esp_comm_manager_set_remote_command_flag(true);
     bool quiet_badusb_setting =
@@ -1133,17 +1165,21 @@ int handle_serial_command(const char *input) {
       esp_comm_manager_set_remote_command_flag(false);
       return ESP_OK;
     }
+    peer_depth++;
     int result = handle_serial_command(actual_command);
+    peer_depth--;
     esp_comm_manager_set_remote_command_flag(false);
     return result;
   }
   
+  char expanded_input[SERIAL_BUFFER_SIZE];
+  shell_expand_command(input, expanded_input, sizeof(expanded_input));
   char input_copy[SERIAL_BUFFER_SIZE];
-  size_t input_len = strlen(input);
+  size_t input_len = strlen(expanded_input);
   if (input_len >= sizeof(input_copy)) {
     input_len = sizeof(input_copy) - 1;
   }
-  memcpy(input_copy, input, input_len);
+  memcpy(input_copy, expanded_input, input_len);
   input_copy[input_len] = '\0';
   char *argv[10];
   int argc = 0;
@@ -1158,40 +1194,37 @@ int handle_serial_command(const char *input) {
       break;
     }
 
-    if (*p == '"' || *p == '\'') {
-      // Handle quoted arguments
-      char quote = *p++;
-      argv[argc++] = p; // Start of the argument
-
-      while (*p != '\0' && *p != quote) {
-        p++;
+    char *write = p;
+    char quote = '\0';
+    argv[argc++] = write;
+    while (*p != '\0') {
+      if (quote != '\0') {
+        if (*p == quote) { quote = '\0'; p++; continue; }
+        *write++ = *p++;
+        continue;
       }
-
-      if (*p == quote) {
-        *p = '\0'; // Null-terminate the argument
-        p++;
-      } else {
-        // Handle missing closing quote
-        printf("Error: Missing closing quote\n");
-        return ESP_ERR_INVALID_ARG;
-      }
-    } else {
-      // Handle unquoted arguments
-      argv[argc++] = p; // Start of the argument
-
-      while (*p != '\0' && !isspace((unsigned char)*p)) {
-        p++;
-      }
-
-      if (*p != '\0') {
-        *p = '\0'; // Null-terminate the argument
-        p++;
-      }
+      if (*p == '"' || *p == '\'') { quote = *p++; continue; }
+      if (isspace((unsigned char)*p)) break;
+      *write++ = *p++;
     }
+    if (quote != '\0') {
+      printf("Error: Missing closing quote\n");
+      return ESP_ERR_INVALID_ARG;
+    }
+    /* Advance past the delimiter before terminating the compacted token. If
+       the token had no quotes, write and p point at the same whitespace byte. */
+    if (*p != '\0') p++;
+    *write = '\0';
+    while (isspace((unsigned char)*p)) p++;
   }
 
   if (argc == 0) {
     return ESP_ERR_INVALID_ARG;
+  }
+
+  if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+    shell_print_command_help(argv[0]);
+    return ESP_OK;
   }
 
   CommandFunction cmd_func = find_command(argv[0]);

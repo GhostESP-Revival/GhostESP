@@ -30,7 +30,7 @@ Capture Wi-Fi authentication handshakes from nearby networks.
 3. Run `capture -eapol` to start listening.
 4. Wait for a device to authenticate to the network.
    You should see `Handshake found!` when successful.
-5. Run `stop` to finish capturing.
+5. Run `capture -stop` to finish capturing.
    The file location will be shown in the log.
 
 ## Next steps

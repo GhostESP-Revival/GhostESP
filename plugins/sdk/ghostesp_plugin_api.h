@@ -28,6 +28,19 @@ typedef struct {
     bool pressed;
 } ghostesp_input_event_t;
 
+#define GHOSTESP_BUTTON_LEFT   (1u << 0)
+#define GHOSTESP_BUTTON_SELECT (1u << 1)
+#define GHOSTESP_BUTTON_UP     (1u << 2)
+#define GHOSTESP_BUTTON_RIGHT  (1u << 3)
+#define GHOSTESP_BUTTON_DOWN   (1u << 4)
+
+typedef struct {
+    uint32_t held;
+    uint32_t pressed;
+    uint32_t released;
+    uint32_t last_change_ms;
+} ghostesp_input_snapshot_t;
+
 typedef struct {
     uint8_t bssid[6];
     char ssid[33];
@@ -57,6 +70,50 @@ typedef struct {
     char subtype[20];
     bool tracking;
 } ghostesp_ble_detect_info_t;
+
+typedef struct {
+    uint8_t mac[6];
+    uint8_t addr_type;
+    int8_t rssi;
+    uint8_t event_type;
+    uint32_t seen_count;
+    char name[24];
+    bool has_flags;
+    uint8_t flags;
+    bool has_tx_power;
+    int8_t tx_power;
+    bool has_manufacturer_id;
+    uint16_t manufacturer_id;
+    bool is_ibeacon;
+    char ibeacon_uuid[37];
+    uint16_t ibeacon_major;
+    uint16_t ibeacon_minor;
+    int8_t ibeacon_measured_power;
+    char adv_type[16];
+    char manufacturer[24];
+    char oui_vendor[32];
+    char services[96];
+    char service_data[64];
+    bool has_appearance;
+    uint16_t appearance;
+} ghostesp_ble_adv_info_t;
+
+#define GHOSTESP_ESPNOW_NAME_MAX 24
+#define GHOSTESP_ESPNOW_MESSAGE_MAX 160
+
+typedef struct {
+    uint8_t mac[6];
+    int8_t rssi;
+    uint32_t last_seen_ms;
+    char name[GHOSTESP_ESPNOW_NAME_MAX];
+} ghostesp_espnow_peer_t;
+
+typedef struct {
+    uint8_t sender_mac[6];
+    uint32_t received_at_ms;
+    char sender_name[GHOSTESP_ESPNOW_NAME_MAX];
+    char text[GHOSTESP_ESPNOW_MESSAGE_MAX];
+} ghostesp_espnow_message_t;
 
 typedef void *ghostesp_ui_obj_t;
 typedef void (*ghostesp_ui_button_cb_t)(void *user);
@@ -142,6 +199,21 @@ typedef struct {
     uint64_t size;
     bool is_directory;
 } ghostesp_storage_stat_t;
+
+#define GHOSTESP_NFC_T2_NDEF_MAX 1024
+
+typedef struct {
+    uint8_t uid[10];
+    uint8_t uid_len;
+    char model[24];
+    uint16_t user_bytes;
+    uint16_t ndef_length;
+    bool ndef_present;
+    bool read_only;
+    bool password_protected;
+    bool static_locked;
+    bool dynamic_locked;
+} ghostesp_nfc_t2_info_t;
 
 typedef struct ghostesp_api {
     uint32_t api_version;
@@ -504,6 +576,72 @@ typedef struct ghostesp_api {
     bool (*has_permission)(const char *permission);
     bool (*has_feature)(const char *feature);
     bool (*subghz_transmit_file)(const char *app_relative_path);
+    void (*ble_adv_scan_start)(void);
+    void (*ble_adv_scan_stop)(void);
+    bool (*ble_adv_scan_active)(void);
+    int (*ble_adv_scan_count)(void);
+    bool (*ble_adv_scan_get)(int index, ghostesp_ble_adv_info_t *out);
+    bool (*ble_adv_scan_track)(int index);
+    void (*ble_adv_scan_stop_tracking)(void);
+    bool (*ble_adv_scan_save_to_sd)(int index);
+
+    bool (*nfc_t2_scan_start)(void);
+    bool (*nfc_t2_scan_stop)(void);
+    bool (*nfc_t2_scan_active)(void);
+    bool (*nfc_t2_read)(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
+                        size_t max_ndef_bytes, size_t *ndef_bytes_out);
+    bool (*nfc_t2_write_ndef)(const uint8_t *ndef, size_t ndef_len);
+    bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
+    /* Copy a RGB565 framebuffer into a canvas, scaling with nearest-neighbor sampling. */
+    bool (*ui_canvas_blit_rgb565)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                  int32_t src_width, int32_t src_height, int32_t src_stride,
+                                  int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+    /* True when host canvas buffers already match the screen's native RGB565 byte order. When true,
+       callers can populate pixels directly in screen byte order and skip the read back/byte swap. */
+    bool (*ui_canvas_is_rgb565_native_byte_order)(void);
+    int (*storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+    int (*app_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+    int (*asset_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+    bool (*asset_path)(const char *path, char *out, size_t out_len);
+    bool (*asset_session_begin)(void);
+    void (*asset_session_end)(void);
+    void (*request_exit)(void);
+    bool (*input_snapshot)(ghostesp_input_snapshot_t *out);
+    /* Size in bytes of a named asset, or -1 if unknown. Works whether the asset
+       was extracted to the on-SD app cache or is served directly out of the
+       installed .gapp archive (see asset_storage_read_at) — callers that need
+       an asset's length (e.g. to discover how many numbered parts a split
+       file has) should use this instead of assuming a real file exists on
+       disk at asset_path()'s returned path. */
+    int64_t (*asset_storage_size)(const char *path);
+    /* Non-blocking variant of ui_canvas_blit_rgb565: queues the blit on the
+       UI task and returns immediately, so a rendering app can start its next
+       frame while the previous one is still being pushed to the display
+       (blitting synchronously serializes the two and roughly halves the
+       achievable frame rate).
+         - `pixels` MUST stay valid and unmodified until the blit completes,
+           so render into a second buffer, not the one just handed over.
+         - Returns false if a queued blit is still outstanding, so wait via
+           ui_canvas_blit_async_wait() before reusing the pixel buffer. */
+    bool (*ui_canvas_blit_rgb565_async)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                        int32_t src_width, int32_t src_height, int32_t src_stride,
+                                        int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+    /* Blocks until any queued async blit has finished (or the timeout
+       elapses). Returns true when no blit is outstanding — i.e. when the
+       buffer passed to the last async blit is safe to overwrite. */
+    bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
+    bool (*espnow_start)(uint8_t channel);
+    void (*espnow_stop)(void);
+    bool (*espnow_is_active)(void);
+    uint8_t (*espnow_channel)(void);
+    const char *(*espnow_name)(void);
+    const char *(*espnow_last_error)(void);
+    bool (*espnow_announce)(void);
+    int (*espnow_peer_count)(void);
+    bool (*espnow_get_peer)(int index, ghostesp_espnow_peer_t *out);
+    bool (*espnow_send)(const uint8_t mac[6], const char *text);
+    int (*espnow_message_count)(void);
+    bool (*espnow_receive)(ghostesp_espnow_message_t *out);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

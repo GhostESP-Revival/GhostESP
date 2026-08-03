@@ -68,7 +68,7 @@ This shows the strongest bin in the latest full composite:
 The palette is tuned for RF visualization:
 
 ```text
-black -> deep blue -> purple -> magenta -> orange -> white
+black → deep blue → purple → magenta → orange → white
 ```
 
 Low-level noise is kept dark, while stronger signals move into brighter colors. The waterfall uses percentile-based noise-floor and ceiling tracking so a single spike does not cause the whole display to flicker or re-scale aggressively.

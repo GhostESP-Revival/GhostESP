@@ -140,10 +140,23 @@ def png_to_rgb565a8(src: pathlib.Path, width: int, height: int) -> bytes:
     for i in range(pixel_count):
         r, g, b, a = rgba[i * 4:i * 4 + 4]
         rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-        off = i * 3
+        off = i * 2
         out[off] = rgb565 & 0xFF
         out[off + 1] = (rgb565 >> 8) & 0xFF
-        out[off + 2] = a
+        out[pixel_count * 2 + i] = a
+    return bytes(out)
+
+
+def png_to_true_color_alpha(src: pathlib.Path, width: int, height: int) -> bytes:
+    in_w, in_h, rgba = _read_png_rgba(src)
+    rgba = _resize_nearest(in_w, in_h, rgba, width, height)
+    out = bytearray(width * height * 3)
+    for i in range(width * height):
+        r, g, b, a = rgba[i * 4:i * 4 + 4]
+        rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        out[i * 3] = rgb565 & 0xFF
+        out[i * 3 + 1] = (rgb565 >> 8) & 0xFF
+        out[i * 3 + 2] = a
     return bytes(out)
 
 
@@ -160,6 +173,22 @@ def png_to_rgb565(src: pathlib.Path, width: int, height: int) -> bytes:
         out[i * 2] = rgb565 & 0xFF
         out[i * 2 + 1] = (rgb565 >> 8) & 0xFF
     return bytes(out)
+
+
+def png_to_indexed_1bpp(src: pathlib.Path, width: int, height: int) -> bytes:
+    """Convert a monochrome background to a two-color palette plus packed pixels."""
+    in_w, in_h, rgba = _read_png_rgba(src)
+    rgba = _resize_nearest(in_w, in_h, rgba, width, height)
+    pixel_count = width * height
+    pixel_bytes = bytearray((pixel_count + 7) // 8)
+    for i in range(pixel_count):
+        r, g, b, a = rgba[i * 4:i * 4 + 4]
+        luminance = ((r * 77 + g * 150 + b * 29) >> 8) * a // 255
+        if luminance >= 128:
+            pixel_bytes[i >> 3] |= 1 << (7 - (i & 7))
+
+    palette = struct.pack("<BBBBBBBB", 0, 0, 0, 255, 255, 255, 255, 255)
+    return palette + bytes(pixel_bytes)
 
 
 def png_to_indexed_4bpp(src: pathlib.Path, width: int, height: int) -> bytes:

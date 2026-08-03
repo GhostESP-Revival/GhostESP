@@ -1,0 +1,27 @@
+#pragma once
+
+#include "lvgl.h"
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
+                         lv_color_t surface, lv_color_t border,
+                         int border_width, int shadow_width);
+void gui_menu_card_apply_selected(lv_obj_t *obj, bool background_enabled,
+                                  lv_color_t accent);
+void gui_menu_launcher_tile_apply(lv_obj_t *obj, bool background_enabled,
+                                  lv_color_t surface);
+void gui_menu_launcher_tile_apply_selected(lv_obj_t *obj, bool background_enabled,
+                                           lv_color_t accent);
+void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int page_count,
+                                    lv_color_t active, lv_color_t inactive);
+void gui_menu_scroll_to_x(lv_obj_t *obj, int target_x, bool animate);
+void gui_menu_image_fit(lv_obj_t *image, const lv_img_dsc_t *source,
+                        int target_size, int max_zoom);
+
+#ifdef __cplusplus
+}
+#endif

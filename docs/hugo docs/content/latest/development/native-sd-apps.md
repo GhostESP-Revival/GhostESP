@@ -21,7 +21,7 @@ python plugins/tools/build_app.py plugins/examples/my_tool --target esp32s3
 python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 ```
 
-Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` or `/mnt/ghostesp/packages/` on your SD card. The app gallery will pick it up on the next reload.
+Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. GhostESP discovers and extracts the app during startup.
 
 A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "gbt" >}}).
 
@@ -32,7 +32,6 @@ A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "
   apps/<app_id>/           Extracted app folders
     manifest.json
     <entry>.so
-  packages/                .gapp archive discovery
   app_cache/               Auto-extracted .gapp content
   appdata/<app_id>/        Per-app storage + .state.json
 ```
@@ -65,7 +64,8 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
   "permissions": ["ui", "storage", "commands", "wifi", "ble", "rgb", "tasks", "lvgl", "power", "display", "input", "network", "wifi_control", "ethernet", "raw_gpio", "i2c", "spi", "uart", "adc", "pwm", "time", "random", "system", "settings", "nfc", "ir", "subghz", "nrf24", "badusb", "camera", "usb", "audio", "zigbee"],
   "memory_limit": 65536,
   "stack_size": 8192,
-  "requires_psram": false
+  "requires_psram": false,
+  "requires_features": ["touchscreen"]
 }
 ```
 
@@ -88,8 +88,10 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `storage_scope` | No | `"app"` (default — scoped to `/mnt/ghostesp/appdata/<id>/`) or `"ghostesp"` (absolute paths under `/mnt/ghostesp/`). |
 | `permissions` | No | Array of permission strings (see below). Unknown permission names make the manifest invalid. |
 | `memory_limit` | No | Advisory limit in bytes for `app_malloc`/`app_calloc` tracked allocations. |
-| `stack_size` | No | Advisory stack size hint in bytes. |
+| `stack_size` | No | Advisory stack size hint in bytes. Also used as the native app tick task's stack size when set (minimum 4096). |
+| `tick_interval_ms` | No | Interval in ms between `on_tick` calls, `16`-`1000`. Defaults to `100` when unset. Use a small value (e.g. `28` for a 35 Hz game loop) only for apps that need frequent updates — every app with `on_tick` gets its own dedicated FreeRTOS task at this interval. |
 | `requires_psram` | No | If `true`, loader additionally checks that PSRAM is available (all native SD apps already require PSRAM at a baseline). Apps with this flag are hidden from the gallery on no-PSRAM boards. |
+| `requires_features` | No | Array of required physical inputs: `touchscreen` (or `touch`), `dpad` (or `joystick`), `encoder`, and `keyboard` (or `physical_keyboard`). The app remains visible on unsupported hardware; selecting it shows a requirement toast and does not launch it. Unknown feature names make the manifest invalid. |
 | `icon` | No | Path relative to app folder (raw RGB565 binary). |
 | `icon_width` | No | Icon pixel width. |
 | `icon_height` | No | Icon pixel height. |
@@ -165,13 +167,17 @@ Load → on_start() → [on_tick() / on_input()] → on_pause() / on_resume() �
 | Callback | When |
 |----------|------|
 | `on_start()` | After successful load and validation. Set up UI here. |
-| `on_tick(uint32_t elapsed_ms)` | Periodic tick (interval set by host UI). Update animations, polls. |
+| `on_tick(uint32_t elapsed_ms)` | Periodic tick, runs on its own FreeRTOS task (not the UI/LVGL task) at `tick_interval_ms` (default 100 ms). Update animations, polls, game loops. |
 | `on_input(const ghostesp_input_event_t *event)` | User input (keys, encoder, touch). |
 | `on_pause()` | App loses foreground (e.g. settings overlay). |
 | `on_resume()` | App regains foreground. |
 | `on_stop()` | App is being unloaded. Free resources, save state. Callback runs before `dlclose`. |
 
-Call `api->app_exit()` from your app to request a clean shutdown.
+Because `on_tick` runs off the UI task, calls into the UI API from it still marshal onto the LVGL task under the hood and block until applied — for high frame-rate rendering, use the async canvas blit (below) instead of a synchronous UI call every tick.
+
+Call `api->app_exit()` from your app to request a clean shutdown, or `api->request_exit()` to immediately back out of the app's screen (equivalent to pressing the hardware back button) — useful from a context outside your own callbacks where the cooperative `on_stop` flow doesn't apply.
+
+The host then releases app-owned API resources before unloading the app binary. This includes managed tasks, sockets, event subscriptions, GPIO interrupts, PWM channels, SPI devices, and active radio capture state. Apps must still stop work in `on_stop()` so their own state is consistent before that cleanup runs.
 
 ## Input Events
 
@@ -227,11 +233,12 @@ const char *(*app_data_path)(void);
 uint8_t     (*settings_get_theme)(void);
 const char *(*settings_get_device_name)(void);
 void        (*app_exit)(void);
+void        (*request_exit)(void);
 bool        (*has_permission)(const char *permission);
 bool        (*has_feature)(const char *feature);
 ```
 
-`has_permission` checks the current app manifest permissions by name, for example `"wifi"` or `"nrf24"`. `has_feature` checks host capabilities such as `"touchscreen"`, `"compact_screen"`, `"absolute_storage"`, `"subghz"`, `"nrf24"`, `"camera"`, `"usb"`, `"badusb"`, `"ir"`, or `"ble"`.
+`has_permission` checks the current app manifest permissions by name, for example `"wifi"` or `"nrf24"`. `has_feature` checks host capabilities such as `"touchscreen"`, `"dpad"`, `"encoder"`, `"keyboard"`, `"compact_screen"`, `"absolute_storage"`, `"subghz"`, `"nrf24"`, `"camera"`, `"usb"`, `"badusb"`, `"ir"`, or `"ble"`.
 
 ### Memory (Tracked)
 
@@ -402,6 +409,28 @@ void (*ui_canvas_draw_line)(ghostesp_ui_obj_t canvas, const ghostesp_point_t *pt
 void (*ui_canvas_draw_arc)(ghostesp_ui_obj_t canvas, int32_t cx, int32_t cy, int32_t r, int32_t start_angle, int32_t end_angle, uint32_t hex_color, int32_t width);
 ```
 
+#### RGB565 Framebuffer Blits
+
+For apps that render their own framebuffer (emulators, games) rather than drawing primitives one at a time:
+
+```c
+bool (*ui_canvas_blit_rgb565)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                              int32_t src_width, int32_t src_height, int32_t src_stride,
+                              int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+bool (*ui_canvas_is_rgb565_native_byte_order)(void);
+
+bool (*ui_canvas_blit_rgb565_async)(ghostesp_ui_obj_t canvas, const uint16_t *pixels,
+                                    int32_t src_width, int32_t src_height, int32_t src_stride,
+                                    int32_t dst_x, int32_t dst_y, int32_t dst_width, int32_t dst_height);
+bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
+```
+
+`ui_canvas_blit_rgb565` copies a raw RGB565 buffer into a canvas, nearest-neighbor scaling from `src_width`x`src_height` (row `src_stride` pixels apart) into a `dst_width`x`dst_height` region at `(dst_x, dst_y)`, clipped to the canvas bounds. Requires `ui` permission.
+
+`ui_canvas_is_rgb565_native_byte_order` reports whether the canvas's internal storage already matches the display panel's native RGB565 byte order. When it returns `true`, fill your source buffer directly in screen byte order and skip any manual swap — the blit still handles byte-swapping internally either way, this is purely an optimization hint for apps doing their own pixel packing upstream.
+
+`ui_canvas_blit_rgb565_async` queues the same blit on the UI task and returns immediately instead of blocking until it's applied — a rendering loop that blits synchronously every frame serializes its own render against the UI task's compositing/flush, which roughly halves achievable frame rate. Only one async blit may be outstanding at a time (it returns `false` if one is already queued), and **`pixels` must stay valid and unmodified until the blit completes** — render into a second buffer, don't touch the one just handed over. Call `ui_canvas_blit_async_wait(timeout_ms)` before reusing that buffer; it returns `true` once no blit is outstanding (or immediately if none ever was).
+
 ### Animations
 
 ```c
@@ -433,7 +462,10 @@ void (*ui_line_set_width)(ghostesp_ui_obj_t line, int32_t width);
 ```c
 ghostesp_ui_obj_t (*ui_image_create)(ghostesp_ui_obj_t parent);
 bool (*ui_image_set_src)(ghostesp_ui_obj_t img, const char *app_relative_path);
+bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
 ```
+
+`ui_image_set_builtin` assigns a firmware-bundled image without requiring the app to ship a copy. Available names are `ghostchi/angry`, `ghostchi/banshee`, `ghostchi/cake`, `ghostchi/evil`, `ghostchi/happy`, `ghostchi/love`, `ghostchi/sleep`, `ghostchi/speech`, `ghostchi/subghz`, `ghostchi/surprised`, `ghostchi/tired`, and `ghostchi/what`.
 
 ### Paged Menu
 
@@ -532,6 +564,24 @@ bool    (*app_storage_mkdir_recursive)(const char *path);
 
 Absolute storage utilities follow the same absolute-storage manifest rules as `storage_*`; app-scoped utilities stay under `/mnt/ghostesp/appdata/<app_id>/`.
 
+### Offset Reads & Asset Streaming (`storage` Permission)
+
+For apps that stream large files in pieces (e.g. reading WAD lumps or sprite sheets on demand) instead of loading the whole thing into memory:
+
+```c
+int (*storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int (*app_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int (*asset_storage_read_at)(const char *path, uint32_t offset, void *buffer, size_t buffer_len);
+int64_t (*asset_storage_size)(const char *path);
+bool (*asset_path)(const char *path, char *out, size_t out_len);
+bool (*asset_session_begin)(void);
+void (*asset_session_end)(void);
+```
+
+`storage_read_at` and `app_storage_read_at` are offset-seeking variants of `storage_read`/`app_storage_read`, following the same absolute/app-scoped path rules. `asset_storage_read_at` reads from a path under the app's `assets/` folder — but transparently, some assets may never be extracted to the SD cache at all: if the app's `.gapp` package was materialized with those assets left packed, `asset_storage_read_at` reads straight out of the installed `.gapp` archive at the recorded byte offset instead. Use `asset_storage_size` to get an asset's length regardless of which of the two cases applies — don't assume a real file exists on disk at the path `asset_path()` returns.
+
+Bracket a run of many small reads against the same file with `asset_session_begin()`/`asset_session_end()`. Without a session, every `*_read_at` call opens and closes the file fresh; inside a session, the file handle for the most recently touched path is kept open across calls, which matters when per-read `fopen`/`fclose` overhead would otherwise dominate frame time (e.g. a game reading several small lumps every tick). `asset_session_begin` also holds the SD card mounted (relevant on JIT-mount boards) for the duration — always pair it with `asset_session_end`, including on error paths.
+
 ### WiFi
 
 ```c
@@ -628,6 +678,29 @@ uint32_t (*input_buttons_state)(void);
 ```
 
 Permissions: `power`, `display`, and `input`. `input_buttons_state` returns bit 0-4 for left/select/up/right/down.
+
+### Input Snapshot (`input` Permission)
+
+`input_buttons_state` only reports which buttons are *currently* held. For a game loop that needs press/release edges without missing a transition between polls:
+
+```c
+#define GHOSTESP_BUTTON_LEFT   (1u << 0)
+#define GHOSTESP_BUTTON_SELECT (1u << 1)
+#define GHOSTESP_BUTTON_UP     (1u << 2)
+#define GHOSTESP_BUTTON_RIGHT  (1u << 3)
+#define GHOSTESP_BUTTON_DOWN   (1u << 4)
+
+typedef struct {
+    uint32_t held;
+    uint32_t pressed;
+    uint32_t released;
+    uint32_t last_change_ms;
+} ghostesp_input_snapshot_t;
+
+bool (*input_snapshot)(ghostesp_input_snapshot_t *out);
+```
+
+`held` is the current bitmask (same bits as `input_buttons_state`). `pressed`/`released` are edge bitmasks accumulated since the *last* `input_snapshot` call — a button pressed and released between two polls still sets its bit in both, so nothing gets lost even if `on_tick` isn't called often enough to catch every raw event. `last_change_ms` is the host uptime (ms) of the most recent state change. Both edge masks are cleared each time `input_snapshot` is called, so read it once per tick rather than from multiple call sites.
 
 ### App Tasks (`tasks` Permission)
 
@@ -916,6 +989,278 @@ void *(*display_get_current_view)(void);
 void *(*raw_symbol)(const char *name);
 ```
 
+## SDK Helpers (`ghostesp_helpers.h`)
+
+The SDK ships an optional `ghostesp_helpers.h` header alongside `ghostesp_plugin_api.h`. It provides inline functions and macros that eliminate the most common boilerplate patterns. All helpers are zero-cost for unused functions — just `#include "ghostesp_helpers.h"` alongside the API header.
+
+### Null-Safe API Calls
+
+Every API function pointer can be null if the firmware predates that feature. The `GH_CALL` and `GH_VOID` macros wrap the null check:
+
+```c
+// Before (repeated dozens of times):
+if (api->ui_obj_set_bg_color) api->ui_obj_set_bg_color(obj, 0x333333);
+
+// After:
+GH_VOID(api, ui_obj_set_bg_color, obj, 0x333333);
+GH_CALL(api, ui_screen_get_width);  // returns 0 if null
+```
+
+### Theme Snapshot
+
+Cache all theme colors once at startup instead of querying with null checks everywhere:
+
+```c
+ghostesp_theme_t theme;
+gh_theme_init(api, &theme);
+
+// Use theme.bg, theme.surface, theme.surface_alt, theme.text,
+// theme.text_muted, theme.accent, theme.bright
+```
+
+### Layout Snapshot
+
+Cache screen dimensions and device capabilities once:
+
+```c
+ghostesp_layout_t layout;
+gh_layout_init(api, &layout);
+
+// Use layout.w, layout.h, layout.content_w, layout.content_h,
+// layout.compact, layout.has_touch
+```
+
+### Widget Styling Helpers
+
+Batch-apply common style properties in one call:
+
+```c
+// Full style (pass -1 to skip any property):
+gh_style(api, obj, 0x333333, 0xFFFFFF, 14, 0, GHOSTESP_FONT_BODY);
+
+// Common combo (bg + text + radius, border always 0):
+gh_style_simple(api, btn, 0x333333, 0xFFFFFF, 14);
+```
+
+### Styled Widget Constructors
+
+Create fully styled widgets in a single call:
+
+```c
+ghostesp_ui_obj_t btn = gh_button(api, parent, "Click Me",
+    0xFF9F0A, 0xFFFFFF, 14, on_click, user);
+
+ghostesp_ui_obj_t lbl = gh_label(api, parent, "Hello",
+    theme.text, GHOSTESP_FONT_BODY);
+```
+
+### Container Helpers
+
+Quickly create flex containers (transparent background, no border, no padding):
+
+```c
+ghostesp_ui_obj_t row = gh_row(api, parent);      // flex row
+ghostesp_ui_obj_t col = gh_column(api, parent);    // flex column
+```
+
+### Touch Swipe Detection
+
+Track touch press/release and get the swipe direction. Replaces the ~30-line pattern copy-pasted across all examples:
+
+```c
+static ghostesp_touch_state_t ts;
+
+void on_input(const ghostesp_input_event_t *event) {
+    ghostesp_input_type_t swipe = gh_touch_update(&ts, event);
+    if (swipe == GHOSTESP_INPUT_RIGHT) app_exit();
+    else if (swipe == GHOSTESP_INPUT_DOWN) scroll(1);
+    else if (swipe == GHOSTESP_INPUT_UP) scroll(-1);
+}
+```
+
+Use `gh_touch_update_tap()` to also detect taps (press + release with no significant movement). Call `gh_touch_reset()` when changing pages/views.
+
+### Touch Bar Helper
+
+Create a standard touch bar in one call:
+
+```c
+// Simple (back button only):
+ghostesp_ui_obj_t bar = gh_touch_bar(api, true, on_back, NULL);
+
+// Full (back + scroll up/down):
+ghostesp_ui_obj_t bar = gh_touch_bar_full(api,
+    on_back, NULL, on_up, NULL, on_down, NULL, true);
+```
+
+### D-Pad Grid Navigation
+
+Manage 2D button grid selection with d-pad input. Handles wrapping, sparse grids, and selection highlighting:
+
+```c
+static const uint8_t grid_cols[] = {4, 4, 4, 4, 3}; // 5 rows, last has 3 cols
+ghostesp_grid_t grid;
+gh_grid_init(&grid, 5, grid_cols);
+
+// In on_input:
+int btn = gh_grid_input(&grid, event);
+if (btn >= 0) {
+    if (event->type == GHOSTESP_INPUT_SELECT) handle_button(btn);
+    gh_grid_highlight(&grid, api, btn_objs, btn_count);
+}
+```
+
+### Standard Input Handler
+
+Combine d-pad, touch swipe, back button, and keyboard shortcuts into one dispatcher:
+
+```c
+static ghostesp_nav_t nav = {
+    .on_up = on_up, .on_down = on_down,
+    .on_select = on_select, .on_back = on_back,
+    .swipe_back = true, .swipe_vert = true,
+};
+
+// In on_input:
+gh_nav_input(api, &nav, event, NULL);
+```
+
+### Popup Helper
+
+Create and show a popup in one call:
+
+```c
+ghostesp_popup_t p = gh_popup(api, 260, 180,
+    "Error", "File not found", "OK", on_ok, NULL);
+```
+
+### Detail View Helpers
+
+```c
+gh_detail_section(dv, api, "Section Header");
+gh_detail_printf(dv, api, "Uptime", "%lu ms", uptime);
+```
+
+### Canvas Drawing Extras
+
+The canvas API lacks filled circles and single pixels. Helpers fill the gaps:
+
+```c
+gh_canvas_fill_circle(api, canvas, cx, cy, 20, theme.accent);
+gh_canvas_pixel(api, canvas, x, y, 0xFFFFFF);
+gh_canvas_rect_outline(api, canvas, x, y, w, h, color, 2);
+```
+
+### App Init Boilerplate
+
+Generate the `ghostesp_app_init()` and `app_main()` functions:
+
+```c
+// At bottom of your .c file (sets api pointer automatically):
+GHOSTESP_APP_INIT_WITH_API(app, api, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
+
+// Without setting api pointer:
+GHOSTESP_APP_INIT(app, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
+```
+
+### Color Utilities
+
+```c
+uint32_t c = GH_RGB(255, 159, 10);       // 0xFF9F0A
+uint32_t dim = gh_color_dim(c, 128);       // 50% brightness
+uint32_t blend = gh_color_blend(c1, c2, 128); // 50/50 blend
+```
+
+### Math Helpers
+
+```c
+int v = gh_clamp(value, 0, 100);   // clamp to range
+int lo = gh_min(a, b);              // minimum
+int hi = gh_max(a, b);              // maximum
+int mapped = gh_map(val, 0, 1023, 0, 240);  // map between ranges
+```
+
+### Formatted Label Update
+
+Eliminates the `snprintf` + `ui_label_set_text` two-liner:
+
+```c
+// Before:
+char buf[64];
+snprintf(buf, sizeof(buf), "%lu ms", (unsigned long)uptime);
+api->ui_label_set_text(label, buf);
+
+// After:
+gh_label_printf(api, label, "%lu ms", (unsigned long)uptime);
+```
+
+### Formatted Status Bar
+
+```c
+gh_status_printf(api, "Step %d: RGB(%d,%d,%d)", step, r, g, b);
+```
+
+### MAC Address Formatter
+
+Writes `"AA:BB:CC:DD:EE:FF"` into a buffer (requires >= 18 bytes):
+
+```c
+char mac[18];
+gh_mac_fmt(mac, device->mac);
+api->ui_detail_add_info(dv, "MAC", mac);
+```
+
+### Confirmation Popup
+
+Two-button Yes/No dialog:
+
+```c
+ghostesp_popup_t p = gh_confirm(api, 260, 160,
+    "Delete File?", "This cannot be undone.",
+    on_yes, on_no, user);
+```
+
+### Options Menu from String Array
+
+Populate an options menu from a simple string array:
+
+```c
+const char *colors[] = {"Red", "Green", "Blue"};
+gh_options_from_array(api, menu, colors, 3, on_select, NULL);
+```
+
+### Detail View from Arrays
+
+Populate a detail view from parallel label/value arrays:
+
+```c
+const char *labels[] = {"Name", "Type", "Size"};
+const char *values[] = {"file.txt", "Text", "1.2 KB"};
+gh_detail_from_arrays(dv, api, labels, values, 3);
+```
+
+### Responsive Layout
+
+Set up a screen with responsive row/column layout based on screen orientation:
+
+```c
+ghostesp_flex_flow_t flow = gh_responsive_setup(api, screen, &layout);
+// flow is ROW for landscape, COLUMN for portrait
+```
+
+### Page Stack
+
+Simple push/pop page stack for menu navigation:
+
+```c
+static int page_stack[8];
+static int page_depth = 0;
+
+gh_page_push(page_stack, &page_depth, 8, PAGE_SETTINGS);
+int current = gh_page_current(page_stack, page_depth);
+gh_page_pop(&page_depth);
+```
+
 ## Application Template
 
 The SDK includes a template project:
@@ -935,14 +1280,28 @@ plugins/templates/basic_app/
 
 ```c
 #include "ghostesp_plugin_api.h"
+#include "ghostesp_helpers.h"
 
-static const ghostesp_api_t *g_api;
+static const ghostesp_api_t *api;
+static ghostesp_theme_t theme;
+static ghostesp_layout_t layout;
 
 static void on_start(void) {
-    g_api->ui_print("Hello from SD app!\n");
+    gh_theme_init(api, &theme);
+    gh_layout_init(api, &layout);
+    api->ui_print("Hello from SD app!\n");
 }
 
-GHOSTESP_APP_DEFINE("my_app", "My App", on_start, NULL, NULL, NULL)
+static void on_input(const ghostesp_input_event_t *event) {
+    if (!event) return;
+    if (event->type == GHOSTESP_INPUT_BACK) GH_VOID(api, app_exit);
+}
+
+static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(
+    "my_app", "My App", on_start, NULL, on_input, NULL
+);
+
+GHOSTESP_APP_INIT_WITH_API(app, api, "my_app", GHOSTESP_API_STRUCT_SIZE_V1)
 ```
 
 ### CMake Project Structure
@@ -974,6 +1333,20 @@ Build one `.so` per supported native SD app target. Xtensa (esp32/s2/s3) and RIS
 
 `esp32c3` is not listed because the current ELF loader configuration does not enable native SD `.gapp` shared-object loading for C3.
 
+### Target-specific release workflow
+
+Use `gbt dist` once per target. Do not build for one target and then run `gbt package`: packaging otherwise falls back to the target in `manifest.json` and can label the archive incorrectly.
+
+```powershell
+# Build and package an ESP32-S3 release.
+gbt dist plugins/examples/my_tool --target esp32s3 --gapp
+
+# Build and package a separate ESP32-C5 release.
+gbt dist plugins/examples/my_tool --target esp32c5 --gapp
+```
+
+After each build, test the `.gapp` on a device with the matching target before publishing it.
+
 ## .gapp Archive Format
 
 The `.gapp` format is a custom streaming archive (not ZIP):
@@ -1001,7 +1374,7 @@ Apps that crash or fail to load keep a failure count and last error for diagnost
 apps reset <id>
 ```
 
-A clean exit (normal `on_stop` -> `dlclose`) resets the failure count to 0.
+A clean exit (normal `on_stop` → `dlclose`) resets the failure count to 0.
 
 ## Memory & Load Constraints
 
@@ -1048,7 +1421,7 @@ If your app fails to load with an exec-memory error, check this value. Disabling
 | Command | Description |
 |---------|-------------|
 | `apps list` | List all discovered SD apps |
-| `apps reload` | Rescan `/mnt/ghostesp/apps/` and `/mnt/ghostesp/packages/` |
+| `apps reload` | Rescan `/mnt/ghostesp/apps/` |
 | `apps info <id>` | Show manifest details and failure count |
 | `apps run <id>` | Launch app (UI mode if screen available, headless otherwise) |
 | `apps stop` | Stop the currently running app |

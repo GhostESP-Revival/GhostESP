@@ -97,6 +97,16 @@ void display_manager_switch_view(View *view);
 bool display_manager_switch_view_and_wait_for_refresh(View *view);
 
 /**
+ * @brief Switch back to whichever view was active before the current one,
+ * falling back to the main menu if there is no usable previous view. Views
+ * reachable from more than one place (Apps Gallery, a direct Main Menu
+ * item, a CLI/serial command, or a user-configured hardware button
+ * shortcut that can fire from any screen) should call this from their
+ * back/exit handler instead of hardcoding a single destination.
+ */
+void display_manager_go_back(void);
+
+/**
  * @brief Initialize slower display-adjacent peripherals after the first UI frame.
  */
 void display_manager_init_deferred_peripherals(void);
@@ -185,9 +195,11 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 
 // Status Bar Functions
 
-void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active);
+void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+void display_manager_raise_status_bar(void);
+void display_manager_restore_status_bar(void);
 
 // Reduce I2C activity (e.g., pause battery polling/logging) while other subsystems
 // such as PN532 scanning/bruteforcing are active to avoid bus contention.
@@ -196,8 +208,19 @@ bool display_manager_is_low_i2c_mode(void);
 
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
+void display_manager_suspend_input_task(void);
+void display_manager_resume_input_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+
+/* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
+ * heap are not thread-safe, and the render task calls lv_timer_handler() on a
+ * dedicated tick task with no locking of its own; calling lv_async_call()
+ * directly from any other task races that task and can corrupt a timer node,
+ * producing a garbage callback pointer (Guru Meditation in lv_async_timer_cb).
+ * Every call site outside display_manager.c must go through this instead of
+ * calling lv_async_call() directly. */
+lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data);
 
 /* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
  * instead of running it on every touch sample. The accumulator is flushed
@@ -248,7 +271,7 @@ LV_IMG_DECLARE(nfc_icon);
 LV_IMG_DECLARE(compass);
 LV_IMG_DECLARE(usb);
 
-joystick_t joysticks[5];
+extern joystick_t joysticks[5];
 #ifdef CONFIG_USE_ENCODER
 #endif
 

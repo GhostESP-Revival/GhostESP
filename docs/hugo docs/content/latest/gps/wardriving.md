@@ -21,7 +21,7 @@ For best results, wait for a valid 2D/3D fix before expecting CSV growth. Indoor
 ### Wi-Fi
 
 1. Connect GPS and insert SD card
-2. Open **GPS** -> **Start Wardriving**
+2. Open **GPS** → **Start Wardriving**
 3. Wait for GPS lock (`2D`/`3D` preferred)
 4. Move through your route and let channel hopping run
 5. End with **Stop Wardriving**
@@ -29,14 +29,14 @@ For best results, wait for a valid 2D/3D fix before expecting CSV growth. Indoor
 ### BLE
 
 1. Connect GPS and insert SD card
-2. Open **GPS** -> **BLE Wardriving**
+2. Open **GPS** → **BLE Wardriving**
 3. Wait for GPS lock
 4. Move through your route
 5. Stop BLE wardriving from the same menu
 
 ## CLI Quick Start
 
-### Wi-Fi
+### Wi-Fi (CLI)
 
 ```bash
 startwd [--hop <ms>] [--weighted]
@@ -48,7 +48,7 @@ Stop:
 startwd -s
 ```
 
-### BLE
+### BLE (CLI)
 
 ```bash
 blewardriving
@@ -183,6 +183,6 @@ In helper mode, status lines include helper transmit counters (`tx(...)`) and st
 
 ## Next Step
 
-After capture, see [WiGLE Upload](/latest/gps/wigle/) to upload CSV files.
+After capture, see [WiGLE Upload]({{< relref "wigle.md" >}}) to upload CSV files.
 
-For wardriving without a GPS module on your GhostESP device, see [Companion Phone GPS Wardriving](/latest/gps/companion-phone-wardriving/).
+For wardriving without a GPS module on your GhostESP device, see [Companion Phone GPS Wardriving]({{< relref "companion-phone-wardriving.md" >}}).

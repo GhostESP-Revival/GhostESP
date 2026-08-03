@@ -161,6 +161,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddStringToObject(o, "wigle_api_key", s->wigle_api_key);
   cJSON_AddBoolToObject(o, "wigle_auto_upload", s->wigle_auto_upload);
   cJSON_AddBoolToObject(o, "wigle_donate", s->wigle_donate);
+  cJSON_AddBoolToObject(o, "wifi_auto_reconnect", s->wifi_auto_reconnect);
 
   cJSON_AddStringToObject(o, "io_btn_p10_cmd", s->io_btn_p10_cmd);
   cJSON_AddStringToObject(o, "io_btn_p11_cmd", s->io_btn_p11_cmd);
@@ -310,6 +311,9 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "wigle_donate")) {
     s->wigle_donate = jget_bool(root, "wigle_donate", s->wigle_donate);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "wifi_auto_reconnect")) {
+    s->wifi_auto_reconnect = jget_bool(root, "wifi_auto_reconnect", s->wifi_auto_reconnect);
   }
 
   jstrcpy_field(s->io_btn_p10_cmd, sizeof(s->io_btn_p10_cmd), root, "io_btn_p10_cmd");

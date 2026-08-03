@@ -1,6 +1,6 @@
 ---
 title: "FAQ"
-weight: 40
+weight: 130
 description: Frequently asked questions about GhostESP setup, credentials, and troubleshooting.
 ---
 
@@ -15,7 +15,7 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 ---
 
 ### 2. What are the default credentials for the web interface?
-- Authentication is **off by default** in v1.8.1.
+- Authentication is **off by default**.
 - If you enable it with `webauth on`, the defaults are:
   - **Username:** `GhostNet`
   - **Password:** `GhostNet`
@@ -44,7 +44,7 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 
 ### 5. How do I flash my board?
 - See the [Installation Guide]({{< relref "installation-guide.md" >}}).
-- Use the web flasher at: [https://flasher.ghostesp.net/](https://flasher.ghostesp.net/)
+- Use the web flasher at: [https://ghostesp.net/flasher](https://ghostesp.net/flasher)
 
 ---
 
@@ -72,6 +72,6 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 ---
 
 ### 10. Why won’t my SD card work?
-- "Generic" firmware builds include SD card support by default; use `sd_config` to see the pins or `sd_pins_spi <cs> <clk> <miso> <mosi>` to set SPI pins and `sd_save_config` to save the pin config to SD card.
+- "Generic" firmware builds include SD card support by default; use `sd_config` to see the pins or `sd_pins_spi <cs> <clk> <miso> <mosi>` to set SPI pins and `sd_save_config` to save the pin config to NVS.
 - Ensure your SD card is formatted as **FAT32**.
 - Try using a SanDisk brand SD card 32GB or less.

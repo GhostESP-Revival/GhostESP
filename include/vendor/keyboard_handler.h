@@ -29,7 +29,7 @@ typedef struct {
     uint8_t x_2;
 } Chart_t;
 
-const Chart_t X_map_chart[7] = {{1, 0, 1},   {2, 2, 3},  {4, 4, 5},
+static const Chart_t X_map_chart[7] = {{1, 0, 1},   {2, 2, 3},  {4, 4, 5},
                                 {8, 6, 7},   {16, 8, 9}, {32, 10, 11},
                                 {64, 12, 13}};
 
@@ -38,7 +38,7 @@ typedef struct {
     const char value_second;
 } KeyValue_t;
 
-const KeyValue_t _key_value_map[4][14] = {{{'`', '~'},
+static const KeyValue_t _key_value_map[4][14] = {{{'`', '~'},
                                            {'1', '!'},
                                            {'2', '@'},
                                            {'3', '#'},

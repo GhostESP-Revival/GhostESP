@@ -107,9 +107,10 @@ macro(project_so project_name)
 
     # Compile flags for building component sources into position-independent .o files
     set(so_compile_flags -c
-                         -Oz
-                         -fPIC
-                         -fmerge-all-constants
+                          -Oz
+                          -fPIC
+                          -fvisibility=hidden
+                          -fmerge-all-constants
                          -fno-ident
                          -DCONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT)
 
@@ -126,7 +127,8 @@ macro(project_so project_name)
                        -static-libgcc
                       -nostdlib
                       -nostartfiles
-                      -Wl,-z,max-page-size=4
+                       -Wl,-z,max-page-size=4
+                       -Wl,-Bsymbolic
 
                       -fdata-sections
                       -ffunction-sections
@@ -239,10 +241,16 @@ macro(project_so project_name)
     foreach(inc_dir ${include_dirs})
         list(APPEND include_flags "-I${inc_dir}")
     endforeach()
+    foreach(inc_dir ${ELF_INCLUDE_DIRS})
+        list(APPEND include_flags "-I${inc_dir}")
+    endforeach()
 
     # Build definition flags as a list
     set(def_flags "")
     foreach(def ${compile_defs})
+        list(APPEND def_flags "-D${def}")
+    endforeach()
+    foreach(def ${ELF_DEFINITIONS})
         list(APPEND def_flags "-D${def}")
     endforeach()
     list(APPEND def_flags "-DCONFIG_IDF_TARGET_${target_upper}=1")
@@ -272,6 +280,7 @@ macro(project_so project_name)
     add_custom_command(OUTPUT ${so_output}
             # Undefined symbols are allowed to support modules resolved at runtime.
             COMMAND ${CMAKE_C_COMPILER} ${so_link_flags} -o ${so_output} ${so_obj_files} ${so_link_libs} -Wl,--allow-shlib-undefined
+            COMMAND ${CMAKE_COMMAND} -DOUT=${so_output} -DNM=${CMAKE_NM} -DREADELF=${CMAKE_READELF} -P ${ELF_LOADER_CMAKE_DIR}/check_undefined_symbols.cmake
             COMMAND ${CMAKE_COMMAND} -DOUT=${so_output} -P ${ELF_LOADER_CMAKE_DIR}/check_shared_object.cmake
             COMMAND ${CMAKE_COMMAND} -E echo "Linking ${so_output} completed"
             COMMAND ${CMAKE_STRIP_SO} ${so_strip_flags} ${so_output}

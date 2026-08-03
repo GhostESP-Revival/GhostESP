@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lgfx/utility/lgfx_miniz.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -122,6 +123,30 @@ static uint64_t checksum_bytes(const uint8_t *data, size_t len) {
     return hash;
 }
 
+/* Streams an existing extracted file to check whether it already matches
+   the archive entry, so re-extraction can skip files that are unchanged
+   between materialize passes (e.g. rebuilding just doom_port.so shouldn't
+   force every multi-megabyte WAD part to be re-decompressed and rewritten
+   to the SD cache). */
+static bool existing_file_matches(const char *path, uint32_t expected_size, uint64_t expected_checksum) {
+    struct stat st;
+    if (stat(path, &st) != 0 || (uint32_t)st.st_size != expected_size) return false;
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    uint8_t buf[512];
+    uint64_t hash = 14695981039346656037ULL;
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        for (size_t i = 0; i < n; ++i) {
+            hash ^= buf[i];
+            hash *= 1099511628211ULL;
+        }
+    }
+    bool read_ok = !ferror(f);
+    fclose(f);
+    return read_ok && hash == expected_checksum;
+}
+
 static bool archive_path_safe(const char *name) {
     if (!name || name[0] == '\0' || name[0] == '/' || strchr(name, '\\') || strchr(name, ':')) return false;
     if (strstr(name, "..")) return false;
@@ -141,6 +166,50 @@ static bool read_exact(FILE *f, void *buf, size_t len) {
     return len == 0 || fread(buf, 1, len, f) == len;
 }
 
+#define GAPP_ASSET_PREFIX "assets/"
+#define GAPP_ASSET_PREFIX_LEN 7
+
+typedef struct {
+    char name[96];
+    uint32_t offset;
+    uint32_t length;
+} gapp_direct_entry_t;
+
+/* Writes the ".direct_index" sidecar so plugin_api.c's asset reader can serve
+   these entries straight out of the .gapp instead of a materialized copy.
+   Format: "DIDX" magic, u16 version=1, u16 gapp_path_len, gapp_path bytes,
+   u32 count, then per entry: u16 name_len, name bytes, u32 offset, u32 length. */
+static bool write_direct_index(const char *dst_dir, const char *gapp_path,
+                               const gapp_direct_entry_t *entries, uint32_t count) {
+    char index_path[PATH_MAX_LOCAL];
+    if (!join_path(index_path, sizeof(index_path), dst_dir, ".direct_index")) return false;
+    if (count == 0) {
+        unlink(index_path);
+        return true;
+    }
+    size_t gapp_len = strlen(gapp_path);
+    if (gapp_len == 0 || gapp_len > 0xFFFF) return false;
+
+    FILE *f = fopen(index_path, "wb");
+    if (!f) return false;
+    bool ok = fwrite("DIDX", 1, 4, f) == 4;
+    uint16_t version = 1, gapp_len16 = (uint16_t)gapp_len;
+    ok = ok && fwrite(&version, sizeof(version), 1, f) == 1;
+    ok = ok && fwrite(&gapp_len16, sizeof(gapp_len16), 1, f) == 1;
+    ok = ok && fwrite(gapp_path, 1, gapp_len, f) == gapp_len;
+    ok = ok && fwrite(&count, sizeof(count), 1, f) == 1;
+    for (uint32_t i = 0; ok && i < count; ++i) {
+        uint16_t name_len = (uint16_t)strlen(entries[i].name);
+        ok = fwrite(&name_len, sizeof(name_len), 1, f) == 1 &&
+             fwrite(entries[i].name, 1, name_len, f) == name_len &&
+             fwrite(&entries[i].offset, sizeof(uint32_t), 1, f) == 1 &&
+             fwrite(&entries[i].length, sizeof(uint32_t), 1, f) == 1;
+    }
+    fclose(f);
+    if (!ok) unlink(index_path);
+    return ok;
+}
+
 static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir) {
     FILE *f = fopen(gapp_path, "rb");
     if (!f) { ESP_LOGE(TAG, "extract: cannot open %s", gapp_path); return ESP_FAIL; }
@@ -155,8 +224,28 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
     uint32_t file_count = rd32(file_hdr + 8);
     if (file_count == 0 || file_count > 128) { fclose(f); return ESP_ERR_INVALID_SIZE; }
 
+    /* STORE-method entries under "assets/" can be served straight out of the
+       .gapp at read time instead of being decompressed+copied to the SD
+       cache (see write_direct_index / plugin_api.c's direct-index reader).
+       Falling back gracefully (direct_entries == NULL) just means every
+       entry extracts the old way, so an allocation failure here never
+       breaks materialize, only the size optimization. */
+    gapp_direct_entry_t *direct_entries = heap_caps_malloc(sizeof(gapp_direct_entry_t) * file_count,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!direct_entries) direct_entries = malloc(sizeof(gapp_direct_entry_t) * file_count);
+    uint32_t direct_count = 0;
+
+    /* Diagnostic-only timing to pinpoint where materialize time actually
+       goes (source read vs decompress CPU vs cache write vs skip-check),
+       instead of guessing further at the SD/SPI layer. */
+    int64_t t_skipcheck_us = 0, t_read_us = 0, t_decompress_us = 0, t_write_us = 0;
+    uint64_t bytes_read = 0, bytes_written = 0;
+    int extracted_count = 0, skipped_count = 0;
+    int64_t extract_start_us = esp_timer_get_time();
+
     for (uint32_t i = 0; i < file_count; ++i) {
         if (!read_exact(f, file_hdr, sizeof(file_hdr)) || memcmp(file_hdr, "FILE", 4) != 0) {
+            free(direct_entries);
             fclose(f);
             ESP_LOGE(TAG, "extract: bad FILE header at entry %u in %s", i, gapp_path);
             return ESP_FAIL;
@@ -167,25 +256,60 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
         uint32_t comp_size = rd32(file_hdr + 12);
         uint64_t expected_checksum = rd64(file_hdr + 16);
         if (name_len == 0 || name_len >= PATH_MAX_LOCAL || uncomp_size > GAPP_MAX_FILE_BYTES || comp_size > GAPP_MAX_FILE_BYTES) {
+            free(direct_entries);
             fclose(f);
             ESP_LOGE(TAG, "extract: invalid sizes at entry %u (name=%u uncomp=%u comp=%u)", i, name_len, uncomp_size, comp_size);
             return ESP_ERR_INVALID_SIZE;
         }
 
         char name[PATH_MAX_LOCAL];
-        if (!read_exact(f, name, name_len)) { fclose(f); return ESP_FAIL; }
+        if (!read_exact(f, name, name_len)) { free(direct_entries); fclose(f); return ESP_FAIL; }
         name[name_len] = '\0';
-        if (!archive_path_safe(name)) { fclose(f); return ESP_ERR_INVALID_ARG; }
+        if (!archive_path_safe(name)) { free(direct_entries); fclose(f); return ESP_ERR_INVALID_ARG; }
 
         char out_path[PATH_MAX_LOCAL];
-        if (!join_path(out_path, sizeof(out_path), dst_dir, name)) { fclose(f); return ESP_ERR_INVALID_SIZE; }
+        if (!join_path(out_path, sizeof(out_path), dst_dir, name)) { free(direct_entries); fclose(f); return ESP_ERR_INVALID_SIZE; }
+
+        if (direct_entries && method == GAPP_METHOD_STORE &&
+            strncmp(name, GAPP_ASSET_PREFIX, GAPP_ASSET_PREFIX_LEN) == 0 &&
+            direct_count < file_count &&
+            strlen(name + GAPP_ASSET_PREFIX_LEN) < sizeof(direct_entries[0].name)) {
+            int64_t payload_offset = ftell(f);
+            if (payload_offset < 0) { free(direct_entries); fclose(f); return ESP_FAIL; }
+            gapp_direct_entry_t *entry = &direct_entries[direct_count++];
+            /* Length already checked above, so this can never truncate. */
+            memcpy(entry->name, name + GAPP_ASSET_PREFIX_LEN, strlen(name + GAPP_ASSET_PREFIX_LEN) + 1);
+            entry->offset = (uint32_t)payload_offset;
+            entry->length = uncomp_size;
+            /* Some apps' own code (e.g. doomgeneric's IWAD lookup) does a
+               plain fopen()-based existence check on the asset's nominal
+               path before ever asking the host to read it. A 0-byte
+               placeholder satisfies that cheaply — it's never actually read,
+               since asset_storage_read_at/size answer from the index first. */
+            write_bytes_to_file(out_path, NULL, 0);
+            if (fseek(f, (long)comp_size, SEEK_CUR) != 0) { free(direct_entries); fclose(f); return ESP_FAIL; }
+            continue;
+        }
+
+        int64_t t0 = esp_timer_get_time();
+        bool matches = existing_file_matches(out_path, uncomp_size, expected_checksum);
+        t_skipcheck_us += esp_timer_get_time() - t0;
+        if (matches) {
+            /* Already correct on disk: skip the read/decompress/write for
+               this entry entirely, just seek past its compressed payload. */
+            if (fseek(f, (long)comp_size, SEEK_CUR) != 0) { free(direct_entries); fclose(f); return ESP_FAIL; }
+            skipped_count++;
+            continue;
+        }
 
         uint8_t *comp = heap_caps_malloc(comp_size ? comp_size : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!comp) comp = malloc(comp_size ? comp_size : 1);
-        if (!comp) { fclose(f); return ESP_ERR_NO_MEM; }
-        if (!read_exact(f, comp, comp_size)) { free(comp); fclose(f); return ESP_FAIL; }
-
-        uint64_t payload_hash = checksum_bytes(comp, comp_size);
+        if (!comp) { free(direct_entries); fclose(f); return ESP_ERR_NO_MEM; }
+        t0 = esp_timer_get_time();
+        bool read_ok = read_exact(f, comp, comp_size);
+        t_read_us += esp_timer_get_time() - t0;
+        bytes_read += comp_size;
+        if (!read_ok) { free(comp); free(direct_entries); fclose(f); return ESP_FAIL; }
 
         bool ok = false;
         if (method == GAPP_METHOD_STORE) {
@@ -195,24 +319,32 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
             } else if (comp_size != uncomp_size) {
                 ESP_LOGE(TAG, "extract: size mismatch for %s (entry %u)", name, i);
             } else {
+                t0 = esp_timer_get_time();
                 ok = write_bytes_to_file(out_path, comp, comp_size);
+                t_write_us += esp_timer_get_time() - t0;
+                bytes_written += comp_size;
                 if (!ok) ESP_LOGE(TAG, "extract: write failed for %s", out_path);
             }
         } else if (method == GAPP_METHOD_DEFLATE) {
             uint8_t *out = heap_caps_malloc(uncomp_size ? uncomp_size : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!out) out = malloc(uncomp_size ? uncomp_size : 1);
             if (out) {
+                t0 = esp_timer_get_time();
                 size_t out_len = lgfx_tinfl_decompress_mem_to_mem(out, uncomp_size, comp, comp_size, 0);
+                t_decompress_us += esp_timer_get_time() - t0;
                 if (out_len == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
-                    ESP_LOGE(TAG, "extract: decompression failed for %s (entry %u) comp_size=%u uncomp_size=%u payload_hash=0x%016llx", name, i, comp_size, uncomp_size, (unsigned long long)payload_hash);
+                    ESP_LOGE(TAG, "extract: decompression failed for %s (entry %u) comp_size=%u uncomp_size=%u", name, i, comp_size, uncomp_size);
                 } else if (out_len != uncomp_size) {
                     ESP_LOGE(TAG, "extract: decompress size mismatch for %s (%u vs %u)", name, (unsigned)out_len, uncomp_size);
                 } else {
                     uint64_t actual = checksum_bytes(out, uncomp_size);
                     if (actual != expected_checksum) {
-                        ESP_LOGE(TAG, "extract: checksum mismatch (deflate) for %s (entry %u) expected=0x%016llx actual=0x%016llx payload_hash=0x%016llx", name, i, (unsigned long long)expected_checksum, (unsigned long long)actual, (unsigned long long)payload_hash);
+                        ESP_LOGE(TAG, "extract: checksum mismatch (deflate) for %s (entry %u) expected=0x%016llx actual=0x%016llx", name, i, (unsigned long long)expected_checksum, (unsigned long long)actual);
                     } else {
+                        t0 = esp_timer_get_time();
                         ok = write_bytes_to_file(out_path, out, uncomp_size);
+                        t_write_us += esp_timer_get_time() - t0;
+                        bytes_written += uncomp_size;
                         if (!ok) ESP_LOGE(TAG, "extract: write failed for %s", out_path);
                     }
                 }
@@ -222,15 +354,27 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
             }
         } else {
             free(comp);
+            free(direct_entries);
             fclose(f);
             ESP_LOGE(TAG, "extract: unknown method %u for %s (entry %u)", method, name, i);
             return ESP_ERR_NOT_SUPPORTED;
         }
         free(comp);
-        if (!ok) { fclose(f); return ESP_FAIL; }
+        if (!ok) { free(direct_entries); fclose(f); return ESP_FAIL; }
+        extracted_count++;
     }
 
     fclose(f);
+    if (!write_direct_index(dst_dir, gapp_path, direct_entries, direct_count)) {
+        ESP_LOGW(TAG, "extract %s: failed to write direct-read index (%u entries)", dst_dir, (unsigned)direct_count);
+    }
+    free(direct_entries);
+    ESP_LOGI(TAG, "extract %s: total=%lldms skipcheck=%lldms read=%lldms(%lluB) decompress=%lldms write=%lldms(%lluB) extracted=%d skipped=%d direct=%u",
+             dst_dir,
+             (long long)((esp_timer_get_time() - extract_start_us) / 1000),
+             (long long)(t_skipcheck_us / 1000), (long long)(t_read_us / 1000), (unsigned long long)bytes_read,
+             (long long)(t_decompress_us / 1000), (long long)(t_write_us / 1000), (unsigned long long)bytes_written,
+             extracted_count, skipped_count, (unsigned)direct_count);
     return ESP_OK;
 }
 
@@ -372,7 +516,7 @@ static bool parse_manifest_identity(const char *package_path, char *app_id, size
     return ok;
 }
 
-esp_err_t plugin_installer_install_package(const char *package_path) {
+static esp_err_t install_package(const char *package_path, bool validate_package_checksums) {
     s_last_error[0] = '\0';
     if (has_gapp_extension(package_path) && !path_is_dir(package_path)) {
         return plugin_installer_install_gapp(package_path);
@@ -384,7 +528,9 @@ esp_err_t plugin_installer_install_package(const char *package_path) {
     if (!parse_manifest_identity(package_path, app_id, sizeof(app_id), entry, sizeof(entry))) {
         return set_error(ESP_ERR_INVALID_ARG, "package manifest invalid");
     }
-    if (!validate_checksums(package_path)) return set_error(ESP_ERR_INVALID_CRC, "package checksum validation failed");
+    if (validate_package_checksums && !validate_checksums(package_path)) {
+        return set_error(ESP_ERR_INVALID_CRC, "package checksum validation failed");
+    }
 
     char entry_path[PATH_MAX_LOCAL];
     if (!join_path(entry_path, sizeof(entry_path), package_path, entry) || !path_exists(entry_path)) {
@@ -422,6 +568,10 @@ esp_err_t plugin_installer_install_package(const char *package_path) {
     return ESP_OK;
 }
 
+esp_err_t plugin_installer_install_package(const char *package_path) {
+    return install_package(package_path, true);
+}
+
 esp_err_t plugin_installer_install_gapp(const char *gapp_path) {
     s_last_error[0] = '\0';
     if (!gapp_path || !has_gapp_extension(gapp_path) || !path_exists(gapp_path)) {
@@ -434,7 +584,8 @@ esp_err_t plugin_installer_install_gapp(const char *gapp_path) {
         remove_recursive(GAPP_EXTRACT_DIR);
         return set_error(err, "failed to extract .gapp package");
     }
-    err = plugin_installer_install_package(GAPP_EXTRACT_DIR);
+    /* GAPP extraction already verifies every uncompressed entry checksum. */
+    err = install_package(GAPP_EXTRACT_DIR, false);
     remove_recursive(GAPP_EXTRACT_DIR);
     return err;
 }

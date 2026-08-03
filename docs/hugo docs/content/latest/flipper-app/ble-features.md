@@ -32,7 +32,7 @@ keywords: ["ble", "bluetooth", "scanning", "attacks", "airtag", "skimmer"]
 
 ## Common Workflow: BLE Device Scanning
 
-1. Navigate to **Bluetooth** → **Scanning & Detection** → **Scan BLE**
+1. Navigate to **Bluetooth** → **Scanning & Detection** → **Scan Advertisers**
 2. Wait for scan to complete
 3. View discovered devices
 4. Select device for additional actions (spoof, track, etc.)

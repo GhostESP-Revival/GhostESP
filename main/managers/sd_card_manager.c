@@ -6,6 +6,7 @@
 #include "driver/sdmmc_types.h"
 #include "esp_heap_trace.h"
 #include "esp_log.h"
+#include "esp_private/esp_gpio_reserve.h"
 #include "esp_vfs_fat.h"
 #include "vendor/drivers/CH422G.h"
 #include "vendor/pcap.h"
@@ -25,6 +26,14 @@
 #include "managers/display_manager.h"
 #include "gui/toast.h"
 #include "lvgl_tft/disp_spi.h"
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+#include "lvgl_touch/tp_spi.h"
+#endif
+
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
+#include "esp_rom_gpio.h"
+#include "soc/gpio_sig_map.h"
+#endif
 
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
@@ -36,15 +45,35 @@ static SemaphoreHandle_t s_sd_jit_mutex = NULL;
 static uint32_t s_sd_jit_mount_depth = 0;
 static bool s_sd_jit_display_suspended = false;
 
-// track SPI bus initialization and mount type locally so we only free what we
-// initialized and always clear initialized state on unmount
+// Track SPI bus ownership locally so cleanup only frees a bus SD initialized
+// itself, while still clearing reused-host bookkeeping on unmount/failure.
 static bool s_spi_bus_initialized = false;
+static bool s_spi_bus_owned_by_sd = false;
 static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
+
+static void sd_spi_release_cs_pin(void) {
+#if defined(CONFIG_USING_SPI)
+  int cs_pin = sd_card_manager.spi_cs_pin;
+  if (cs_pin >= 0 && cs_pin < 64) esp_gpio_revoke(1ULL << cs_pin);
+#endif
+}
+
+static void sd_spi_bus_track(int host_id, bool owned_by_sd) {
+  s_spi_bus_initialized = owned_by_sd;
+  s_spi_bus_owned_by_sd = owned_by_sd;
+  s_spi_host_id = host_id;
+}
+
+static void sd_spi_bus_clear_tracking(void) {
+  s_spi_bus_initialized = false;
+  s_spi_bus_owned_by_sd = false;
+  s_spi_host_id = -1;
+}
 
 /* time multiplex spi when display and sd share the spi bus */
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDISPLAY_S3)
@@ -58,6 +87,7 @@ static void sd_spi_bus_release_if_tracked(void);
 #endif
 #include "managers/display_manager.h"
 static bool s_display_spi_suspended_flag = false;
+static bool s_touch_spi_detached = false;
 /* Tracks whether the display panel's SPI device is currently attached to the bus.
  * Set true on boot after disp_spi_add_device() succeeds; cleared on suspend. Lets
  * the resume path skip a redundant lvgl_spi_driver_init() when the bus is still
@@ -93,6 +123,8 @@ static bool display_spi_requires_rebind_for_sd(void) {
   return is_shared_display_sd_spi() && !display_sd_spi_pins_match();
 }
 
+static bool display_spi_resume_after_sd(void);
+
 static bool display_spi_suspend_for_sd(void) {
   if (!is_shared_display_sd_spi()) {
     return false;
@@ -101,6 +133,7 @@ static bool display_spi_suspend_for_sd(void) {
     return true;  /* already suspended — idempotent, matches resume_after_sd guard */
   }
   /* Stop LVGL from queuing new flushes. */
+  display_manager_suspend_input_task();
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
@@ -112,9 +145,58 @@ static bool display_spi_suspend_for_sd(void) {
    * or "stuck" pixel row until the next resume cycle. */
   disp_wait_for_pending_transactions();
   display_manager_suspend_lvgl_task();
-  disp_spi_remove_device();
+  if (display_sd_spi_pins_match()) {
+    /* All devices can remain registered on a same-pin bus. Their owning tasks
+     * are parked, so SPI master arbitration and chip-select handling remain in
+     * the known-working boot configuration while SD temporarily owns traffic. */
+#ifdef CONFIG_LV_DISP_SPI_CS
+    gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+#endif
+    s_display_panel_attached = true;
+    s_display_spi_suspended_flag = true;
+    return true;
+  }
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  esp_err_t touch_ret = tp_spi_remove_device();
+  if (touch_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release touch SPI device for SD: %s", esp_err_to_name(touch_ret));
+    lv_disp_t *disp = lv_disp_get_default();
+    if (disp) {
+      lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
+      if (refr) lv_timer_resume(refr);
+    }
+    display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
+    return false;
+  }
+  s_touch_spi_detached = true;
+#endif
+  esp_err_t remove_ret = disp_spi_remove_device();
+  if (remove_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release display SPI device for SD: %s", esp_err_to_name(remove_ret));
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+    if (s_touch_spi_detached) {
+      tp_spi_add_device(TOUCH_SPI_HOST);
+      s_touch_spi_detached = false;
+    }
+#endif
+    lv_disp_t *disp = lv_disp_get_default();
+    if (disp) {
+      lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
+      if (refr) lv_timer_resume(refr);
+    }
+    display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
+    return false;
+  }
   s_display_panel_attached = false;
-  spi_bus_free(TFT_SPI_HOST);
+  esp_err_t free_ret = spi_bus_free(TFT_SPI_HOST);
+  if (free_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Cannot release display SPI bus for SD: %s", esp_err_to_name(free_ret));
+    s_display_spi_suspended_flag = true;
+    display_spi_resume_after_sd();
+    return false;
+  }
   /* assert CS high so that panel stays quiet */
   #ifdef CONFIG_LV_DISP_SPI_CS
   gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
@@ -122,12 +204,12 @@ static bool display_spi_suspend_for_sd(void) {
   s_display_spi_suspended_flag = true;
   return true;
 }
-static void display_spi_resume_after_sd(void) {
+static bool display_spi_resume_after_sd(void) {
   if (!is_shared_display_sd_spi()) {
-    return;
+    return true;
   }
   if (!s_display_spi_suspended_flag) {
-    return;
+    return true;
   }
   if (s_display_panel_attached) {
     /* Already attached: nothing to do (shouldn't normally hit this, but
@@ -156,27 +238,44 @@ static void display_spi_resume_after_sd(void) {
       ESP_LOGE("sd_card", "display_spi_resume: bus init failed: %s", esp_err_to_name(ret));
     }
   }
-  /* resume lvgl refresh */
+  if (!s_display_panel_attached) {
+    /* Keep LVGL parked: a live render task without a panel device can use a
+     * stale SPI handle and turn one failed handoff into a watchdog reset. */
+    ESP_LOGE(TAG, "Display SPI rebind failed; LVGL remains suspended");
+    return false;
+  }
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  if (s_touch_spi_detached) {
+    tp_spi_add_device(TOUCH_SPI_HOST);
+    s_touch_spi_detached = false;
+  }
+#endif
+  /* Resume LVGL only after its panel device is attached to the display bus. */
   lv_disp_t *disp = lv_disp_get_default();
   if (disp) {
     lv_timer_t *refr = _lv_disp_get_refr_timer(disp);
     if (refr) lv_timer_resume(refr);
   }
   display_manager_resume_lvgl_task();
+  display_manager_resume_input_task();
   s_display_spi_suspended_flag = false;
+  return true;
 }
 #else
 static bool display_sd_spi_pins_match(void) { return false; }
 static bool is_shared_display_sd_spi(void) { return false; }
 static bool display_spi_requires_rebind_for_sd(void) { return false; }
 static bool display_spi_suspend_for_sd(void) { return false; }
-static void display_spi_resume_after_sd(void) {}
+static bool display_spi_resume_after_sd(void) { return true; }
 #endif
 
 static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
   ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d)", guard_active);
-  if (guard_active) display_manager_resume_lvgl_task();
+  if (guard_active) {
+    display_manager_resume_lvgl_task();
+    display_manager_resume_input_task();
+  }
 #else
   (void)guard_active;
 #endif
@@ -186,7 +285,7 @@ static const char *sd_spi_host_name(int host_id) {
   switch (host_id) {
     case SPI2_HOST:
       return "SPI2_HOST";
-#if defined(SPI3_HOST)
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
     case SPI3_HOST:
       return "SPI3_HOST";
 #endif
@@ -206,6 +305,94 @@ static int sd_spi_host_id(void) {
 #else
   return SPI2_HOST;
 #endif
+}
+
+static bool sd_card_uses_experimental_shared_spi(void) {
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
+#else
+  return false;
+#endif
+}
+
+static esp_err_t sd_card_route_experimental_shared_spi(void) {
+#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (!sd_card_uses_experimental_shared_spi()) {
+    return ESP_OK;
+  }
+
+  esp_err_t ret = gpio_set_direction(sd_card_manager.spi_mosi_pin, GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) return ret;
+  ret = gpio_set_direction(sd_card_manager.spi_clk_pin, GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) return ret;
+  ret = gpio_set_direction(sd_card_manager.spi_miso_pin, GPIO_MODE_INPUT);
+  if (ret != ESP_OK) return ret;
+
+  /* SPI2 is already initialized on the display pins. Mirror its output
+   * signals to the SD pins and select the SD pin as the host's MISO input. */
+  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_mosi_pin, FSPID_OUT_IDX, false, false);
+  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_clk_pin, FSPICLK_OUT_IDX, false, false);
+  esp_rom_gpio_connect_in_signal(sd_card_manager.spi_miso_pin, FSPIQ_IN_IDX, false);
+  ESP_LOGW(TAG, "Experimental persistent shared SPI enabled; TFT and SD remain attached to SPI2");
+#endif
+  return ESP_OK;
+}
+
+static esp_err_t sd_card_prepare_shared_spi_card(void) {
+#if defined(CONFIG_USING_SPI)
+  if (!is_shared_display_sd_spi()) return ESP_OK;
+
+  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
+  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
+#ifdef CONFIG_LV_DISP_SPI_CS
+  gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+#endif
+#if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
+  gpio_set_level(TP_SPI_CS, 1);
+#endif
+
+  spi_device_interface_config_t devcfg = {
+      .clock_speed_hz = 400000,
+      .mode = 0,
+      .spics_io_num = -1,
+      .queue_size = 1,
+  };
+  spi_device_handle_t clock_device = NULL;
+  esp_err_t ret = spi_bus_add_device(sd_spi_host_id(), &devcfg, &clock_device);
+  if (ret != ESP_OK) return ret;
+
+  uint8_t idle_clocks[20];
+  memset(idle_clocks, 0xFF, sizeof(idle_clocks));
+  spi_transaction_t transaction = {
+      .length = sizeof(idle_clocks) * 8,
+      .tx_buffer = idle_clocks,
+  };
+  ret = spi_device_transmit(clock_device, &transaction);
+  esp_err_t remove_ret = spi_bus_remove_device(clock_device);
+  return ret != ESP_OK ? ret : remove_ret;
+#else
+  return ESP_OK;
+#endif
+}
+
+static esp_err_t sd_card_mount_spi_with_retry(
+    sdmmc_host_t *host,
+    const sdspi_device_config_t *slot_config,
+    const esp_vfs_fat_sdmmc_mount_config_t *mount_config) {
+  esp_err_t ret = ESP_FAIL;
+  for (int attempt = 1; attempt <= 3; ++attempt) {
+    esp_err_t prepare_ret = sd_card_prepare_shared_spi_card();
+    if (prepare_ret != ESP_OK) {
+      ESP_LOGW(TAG, "Shared SPI SD idle clocks failed: %s", esp_err_to_name(prepare_ret));
+    }
+    sd_card_manager.card = NULL;
+    ret = esp_vfs_fat_sdspi_mount("/mnt", host, slot_config, mount_config,
+                                  &sd_card_manager.card);
+    if (ret == ESP_OK) return ESP_OK;
+    ESP_LOGW(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
+    if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  return ret;
 }
 
 
@@ -242,8 +429,7 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
     int host_id = preferred_hosts[i];
     esp_err_t probe_ret = spi_bus_initialize(host_id, bus_config, dma_channel);
     if (probe_ret == ESP_OK) {
-      s_spi_bus_initialized = true;
-      s_spi_host_id = host_id;
+      sd_spi_bus_track(host_id, true);
       ESP_LOGI(TAG, "Selected free SD SPI host: %s", sd_spi_host_name(host_id));
       return host_id;
     }
@@ -258,27 +444,36 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
-/* CYD 2.4" keeps display+touch on SPI2 while SD owns SPI3 by itself. On the
- * classic ESP32, tearing the SPI3 bus down with spi_bus_free() disturbs the
- * live SPI2 display and freezes it. So on this board we leave SD's bus
- * initialized instead of freeing it (a later (re)mount reuses it via
- * ESP_ERR_INVALID_STATE, already handled). Every other board frees as before. */
+/* Every CYD board (and any classic-ESP32 board with the same topology) keeps
+ * its display on SPI2 while SD owns a separate SPI3 bus: display and SD use
+ * different pins, so is_shared_display_sd_spi() is false and sd_spi_host_id()
+ * picks SPI3_HOST for SD. On the classic ESP32, tearing that SPI3 bus down
+ * with spi_bus_free() on mount failure (no card) or unmount disturbs the live
+ * SPI2 display and freezes it. So in that topology we leave SD's bus
+ * initialized instead of freeing it; a later (re)mount reuses it via
+ * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
+ * shares the display's bus are unaffected (the shared-bus path handles them). */
 static bool sd_keep_spi_bus_for_board(void) {
-#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "CYD2USB2.4Inch") == 0;
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN)
+  return !is_shared_display_sd_spi();
 #else
   return false;
 #endif
 }
 
 static void sd_spi_bus_release_if_tracked(void) {
-  ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
-           s_spi_bus_initialized, s_spi_host_id);
-  if (s_spi_bus_initialized && s_spi_host_id >= 0) {
+  ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: initialized=%d owned=%d host=%d",
+            s_spi_bus_initialized, s_spi_bus_owned_by_sd, s_spi_host_id);
+  if (s_spi_host_id >= 0) {
+    if (!s_spi_bus_owned_by_sd || sd_keep_spi_bus_for_board()) {
+      ESP_LOGD(TAG, "Skipping spi_bus_free for reused SPI host %d", s_spi_host_id);
+      sd_spi_bus_clear_tracking();
+      return;
+    }
+
     ESP_LOGD(TAG, "Freeing SPI bus host %d", s_spi_host_id);
     spi_bus_free(s_spi_host_id);
-    s_spi_bus_initialized = false;
-    s_spi_host_id = -1;
+    sd_spi_bus_clear_tracking();
   }
 }
 
@@ -343,7 +538,7 @@ static esp_err_t mount_virtual_storage(void) {
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = true,
-        .max_files = 5,
+        .max_files = 3,
         .allocation_unit_size = 4 * 1024
     };
 
@@ -453,12 +648,8 @@ esp_err_t sd_card_init(void) {
     return ESP_OK;
   }
 
-  /* Clean up stale tracked SPI state before a fresh init attempt. On the
-   * CYD 2.4" we deliberately keep SD's bus alive (see
-   * sd_keep_spi_bus_for_board); freeing it here would freeze the live
-   * display. A reused bus is fine — the mount below handles INVALID_STATE. */
-  if (s_mount_type == MOUNT_SPI && s_spi_bus_initialized &&
-      !sd_keep_spi_bus_for_board()) {
+  /* Clean up stale tracked SPI state before a fresh init attempt. */
+  if (s_spi_host_id >= 0) {
     sd_spi_bus_release_if_tracked();
   }
   sd_card_manager.card = NULL;
@@ -509,7 +700,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -565,7 +756,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 16 * 1024};
 
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
@@ -608,6 +799,7 @@ esp_err_t sd_card_init(void) {
      * gating/rebind block below before SD claims the bus. */
     shared_spi_guard_active = true;
     ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
+    display_manager_suspend_input_task();
     display_manager_suspend_lvgl_task();
     disp_wait_for_pending_transactions();
 #ifdef CONFIG_LV_DISP_SPI_CS
@@ -619,20 +811,21 @@ esp_err_t sd_card_init(void) {
 #endif
 
   bool gating_template = false;
-  /* On the CYD 2.4" the display+touch live on SPI2 while SD gets SPI3 to
-   * itself, so SD genuinely *owns* the SPI3 bus (bus_init_success == true).
-   * Other CYDs share SD's host with touch, so SD only reuses an already-init
-   * bus and never frees it. See sd_keep_spi_bus_for_board() for why freeing it
-   * freezes the display; keep the bus alive on mount failure (no card) here. */
+  bool experimental_shared_spi = sd_card_uses_experimental_shared_spi();
+  /* On classic-ESP32 boards whose SD owns a separate SPI3 bus (every CYD
+   * variant), SD genuinely *owns* that bus (bus_init_success == true).
+   * See sd_keep_spi_bus_for_board() for why freeing it freezes the display;
+   * keep the bus alive on mount failure (no card) here. */
   bool keep_bus_on_failure = sd_keep_spi_bus_for_board();
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
   gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-                     strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0 ||
+                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0);
 #endif
   bool display_was_suspended = false;
   /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
    * the panel. Same-pin shared SPI boards like TEmbedC1101 keep the old path. */
-  if (gating_template || display_rebind_required) {
+  if (!experimental_shared_spi && (gating_template || display_rebind_required)) {
     display_was_suspended = display_spi_suspend_for_sd();
     if (display_was_suspended) {
       /* Full suspend removed the panel device. Do not resume the LVGL task via
@@ -723,10 +916,13 @@ esp_err_t sd_card_init(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
   host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
+  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
 #elif defined(CONFIG_SHARED_TFT_SD_SPI)
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
+  if (experimental_shared_spi) {
+    host.max_freq_khz = 10000;    /* Persistent routing avoids JIT churn; use a conservative faster clock. */
+  }
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
 
@@ -736,11 +932,18 @@ esp_err_t sd_card_init(void) {
     .sclk_io_num = sd_card_manager.spi_clk_pin,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    .max_transfer_sz = 4096,
+    /* Bulk transfers (app-package materialize, large asset writes) were
+       chopped into 512-byte SPI transactions, each paying fixed CS-toggle/
+       setup overhead regardless of clock speed. Raised to 2048 (not higher)
+       since this board's internal RAM is extremely tight at the exact point
+       large writes happen (as little as ~6KB free during boot materialize
+       per observed logs) and the sdspi driver's per-transaction DMA buffer
+       scales with this cap; left the SPI clock itself untouched since it was
+       deliberately capped low after past timeout issues on this hardware. */
+    .max_transfer_sz = 2048,
   };
-  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
-  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
-  vTaskDelay(pdMS_TO_TICKS(2));
+  /* The SD SPI device configures CS when it attaches. Preconfiguring it here
+   * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
 
 #ifdef CONFIG_IDF_TARGET_ESP32
   int dmabus = SPI_DMA_CH_AUTO;
@@ -762,16 +965,23 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret == ESP_ERR_INVALID_STATE) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, false);
     } else {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
+  }
+
+  esp_err_t route_ret = sd_card_route_experimental_shared_spi();
+  if (route_ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure experimental shared SPI routing: %s",
+             esp_err_to_name(route_ret));
+    sd_spi_bus_release_if_tracked();
+    return route_ret;
   }
 #elif !defined(CONFIG_USE_TDECK)
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -781,11 +991,10 @@ esp_err_t sd_card_init(void) {
     ESP_LOGI(TAG, "ESP32: spi_bus_initialize returned %s", esp_err_to_name(bus_ret));
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = sd_host_id;
+      sd_spi_bus_track(sd_host_id, true);
     } else if (bus_ret == ESP_ERR_INVALID_STATE) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", sd_host_id);
-      s_spi_host_id = sd_host_id;
+      sd_spi_bus_track(sd_host_id, false);
     } else {
       ESP_LOGE(TAG, "ESP32: spi_bus_initialize failed with %s", esp_err_to_name(bus_ret));
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
@@ -803,8 +1012,7 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -827,8 +1035,9 @@ esp_err_t sd_card_init(void) {
       esp_err_t bus_ret = spi_bus_initialize(host_id, &bus_config, dmabus);
       if (bus_ret == ESP_OK) {
         bus_init_success = true;
-        s_spi_bus_initialized = true;
-        s_spi_host_id = host_id;
+        sd_spi_bus_track(host_id, true);
+      } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+        sd_spi_bus_track(host_id, false);
       } else if (bus_ret != ESP_ERR_INVALID_STATE) {
         shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
         printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -847,8 +1056,7 @@ esp_err_t sd_card_init(void) {
     esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
     if (bus_ret == ESP_OK) {
       bus_init_success = true;
-      s_spi_bus_initialized = true;
-      s_spi_host_id = SPI2_HOST;
+      sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
@@ -860,7 +1068,7 @@ esp_err_t sd_card_init(void) {
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
-      .max_files = 5,
+      .max_files = 3,
       .allocation_unit_size = 4 * 1024};
 
   sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
@@ -875,26 +1083,18 @@ esp_err_t sd_card_init(void) {
   slot_config.host_id = SPI2_HOST;
 #endif
 
-  ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                &sd_card_manager.card);
-  if (ret == ESP_ERR_INVALID_RESPONSE || ret == ESP_ERR_INVALID_SIZE) {
-    ESP_LOGW(TAG, "First SD probe failed (%s), retrying at lower SPI frequency", esp_err_to_name(ret));
-    host.max_freq_khz = 4000;
-    vTaskDelay(pdMS_TO_TICKS(30));
-    ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                  &sd_card_manager.card);
-  }
-  ESP_LOGI(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d", 
+  ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
+  ESP_LOGD(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d",
            esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
   shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
   if (ret != ESP_OK) {
-    ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
+    ESP_LOGD(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-    if (bus_init_success && !keep_bus_on_failure) {
-      sd_spi_bus_release_if_tracked();
-    }
+    (void)bus_init_success;
+    (void)keep_bus_on_failure;
+    sd_spi_bus_release_if_tracked();
     if (display_was_suspended) {
-      ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
+      ESP_LOGD(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
     sd_card_manager.card = NULL;
@@ -909,11 +1109,11 @@ esp_err_t sd_card_init(void) {
 
   sd_card_setup_directory_structure();
 
-  if (gating_template) {
+  if (gating_template && !experimental_shared_spi) {
     sd_card_update_cached_stats();
     sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
     if (display_was_suspended) {
-      ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
+      ESP_LOGD(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
     }
     return ESP_OK;
@@ -973,19 +1173,18 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   host.slot = sd_spi_host_id();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 4000;       /* 4 MHz for ESP32-C5 to avoid timeout issues */
+  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
 #endif
 
   spi_bus_config_t bus_config = {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
     .miso_io_num = sd_card_manager.spi_miso_pin,
     .sclk_io_num = sd_card_manager.spi_clk_pin,
-    .max_transfer_sz = 4096,
+    .max_transfer_sz = 2048,  /* see rationale in sd_card_init's bus_config above */
   };
 
-  gpio_set_direction(sd_card_manager.spi_cs_pin, GPIO_MODE_OUTPUT);
-  gpio_set_level(sd_card_manager.spi_cs_pin, 1);
-  vTaskDelay(pdMS_TO_TICKS(2));
+  /* The SD SPI device configures CS when it attaches. Preconfiguring it here
+   * causes a harmless but noisy GPIO matrix reassignment on JIT mounts. */
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
   int dmabus = SPI_DMA_CH_AUTO;
@@ -1002,8 +1201,9 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
       return bus_ret;
     }
     if (bus_ret == ESP_OK) {
-      s_spi_bus_initialized = true;
-      s_spi_host_id = host_id;
+      sd_spi_bus_track(host_id, true);
+    } else {
+      sd_spi_bus_track(host_id, false);
     }
   }
 
@@ -1016,14 +1216,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   slot_config.gpio_cs = sd_card_manager.spi_cs_pin;
   slot_config.host_id = sd_spi_host_id();
 
-  esp_err_t ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                &sd_card_manager.card);
-  if (ret == ESP_ERR_INVALID_RESPONSE || ret == ESP_ERR_INVALID_SIZE) {
-    host.max_freq_khz = 4000;
-    vTaskDelay(pdMS_TO_TICKS(30));
-    ret = esp_vfs_fat_sdspi_mount("/mnt", &host, &slot_config, &mount_config,
-                                  &sd_card_manager.card);
-  }
+  esp_err_t ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
   if (ret != ESP_OK) {
     if (!sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
@@ -1082,15 +1275,23 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
 }
 
 bool sd_card_needs_jit_mount(void) {
+    if (sd_card_uses_experimental_shared_spi()) {
+        return false;
+    }
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     /* Boards where the SD card shares SPI pins/host with the LVGL display
      * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).
      * Force JIT mount/unmount so the display is restored between SD use. */
     return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0;
 #else
     return false;
 #endif
+}
+
+bool sd_card_uses_shared_display_spi(void) {
+    return sd_card_uses_experimental_shared_spi() || is_shared_display_sd_spi();
 }
 
 bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {
@@ -1157,6 +1358,7 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #if SOC_SDMMC_HOST_SUPPORTED && SOC_SDMMC_USE_GPIO_MATRIX
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
+    sd_spi_release_cs_pin();
     if (s_mount_type == MOUNT_SPI && !sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
     }
@@ -1191,6 +1393,7 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #else
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
+    sd_spi_release_cs_pin();
     if (!sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
     }
@@ -1315,8 +1518,6 @@ esp_err_t sd_card_create_directory(const char *path) {
   }
 
   if (sd_card_exists(path)) {
-    printf("Directory already exists: %s\n", path);
-
     if (!has_full_permissions(path)) {
       printf("Directory %s does not have full permissions. Deleting and "
              "recreating.\n",
@@ -1333,10 +1534,7 @@ esp_err_t sd_card_create_directory(const char *path) {
         return ESP_FAIL;
       }
 
-      printf("Directory created: %s\n", path);
-
     } else {
-      printf("Directory %s has correct permissions.\n", path);
       return ESP_OK;
     }
     return ESP_OK;
@@ -1348,7 +1546,6 @@ esp_err_t sd_card_create_directory(const char *path) {
     return ESP_FAIL;
   }
 
-  printf("Directory created: %s\n", path);
   return ESP_OK;
 }
 
@@ -1363,34 +1560,40 @@ bool sd_card_exists(const char *path) {
 
 static esp_err_t ensure_sd_dir_exists(const char *path) {
   if (!sd_card_exists(path)) {
-    printf("Creating directory: %s\n", path);
     esp_err_t ret = sd_card_create_directory(path);
     if (ret != ESP_OK) {
       printf("Failed to create directory %s: %s\n", path, esp_err_to_name(ret));
       return ret;
     }
-  } else {
-    printf("Directory %s already exists\n", path);
   }
   return ESP_OK;
 }
 
 esp_err_t sd_card_setup_directory_structure() {
-  const char *root_dir = "/mnt/ghostesp";
-  const char *logs_dir = "/mnt/ghostesp/logs";
-  const char *coredumps_dir = "/mnt/ghostesp/logs/coredumps";
-  const char *debug_dir = "/mnt/ghostesp/debug";
-  const char *pcaps_dir = "/mnt/ghostesp/pcaps";
-  const char *captures_dir = "/mnt/ghostesp/captures";
-  const char *scans_dir = "/mnt/ghostesp/scans";
-  const char *gps_dir = "/mnt/ghostesp/gps";
-  const char *games_dir = "/mnt/ghostesp/games";
-  const char *apps_dir = "/mnt/ghostesp/apps";
-  const char *themes_dir = "/mnt/ghostesp/themes";
-  const char *active_theme_dir = "/mnt/ghostesp/themes/active";
-  const char *evil_portal_dir = "/mnt/ghostesp/evil_portal";
-  const char *evil_portal_portals_dir = "/mnt/ghostesp/evil_portal/portals"; 
-  const char *universals_dir = "/mnt/ghostesp/infrared/universals";
+  const char *root_dir = SD_GHOSTESP_ROOT;
+  const char *logs_dir = SD_DIR_LOGS;
+  const char *coredumps_dir = SD_DIR_COREDUMPS;
+  const char *debug_dir = SD_DIR_DEBUG;
+  const char *pcaps_dir = SD_DIR_PCAPS;
+  const char *captures_dir = SD_DIR_CAPTURES;
+  const char *scans_dir = SD_DIR_SCANS;
+  const char *sweeps_dir = SD_DIR_SWEEPS;
+  const char *gps_dir = SD_DIR_GPS;
+  const char *ghostchi_dir = SD_DIR_GHOSTCHI;
+  const char *ghostchi_pcaps_dir = SD_DIR_GHOSTCHI_PCAPS;
+  const char *ghostchi_sessions_dir = SD_DIR_GHOSTCHI_SESSIONS;
+  const char *games_dir = SD_GHOSTESP_ROOT "/games";
+  const char *apps_dir = SD_DIR_APPS;
+  const char *app_cache_dir = SD_DIR_APP_CACHE;
+  const char *appdata_dir = SD_DIR_APPDATA;
+  const char *scripts_dir = SD_DIR_SCRIPTS;
+  const char *scriptdata_dir = SD_DIR_SCRIPTDATA;
+  const char *downloads_dir = SD_DIR_DOWNLOADS;
+  const char *themes_dir = SD_DIR_THEMES;
+  const char *active_theme_dir = SD_DIR_THEMES "/active";
+  const char *evil_portal_dir = SD_GHOSTESP_ROOT "/evil_portal";
+  const char *evil_portal_portals_dir = SD_GHOSTESP_ROOT "/evil_portal/portals";
+  const char *universals_dir = SD_GHOSTESP_ROOT "/infrared/universals";
 #if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_CHAMELEON)
   const char *nfc_dir = "/mnt/ghostesp/nfc";
 #endif
@@ -1402,6 +1605,21 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(apps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(app_cache_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(appdata_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(scripts_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(scriptdata_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(downloads_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(themes_dir);
@@ -1429,6 +1647,18 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(scans_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(sweeps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_pcaps_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(ghostchi_sessions_dir);
   if (ret != ESP_OK) return ret;
 
   // Create evil_portal directory
@@ -1477,7 +1707,6 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 #endif
 
-  printf("Directory structure successfully set up.\n");
   return ESP_OK;
 }
 

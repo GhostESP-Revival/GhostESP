@@ -44,7 +44,7 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 
 ### 5. How do I flash my board?
 - See the [Installation Guide]({{< relref "installation-guide.md" >}}).
-- Use the web flasher at: [https://flasher.ghostesp.net/](https://flasher.ghostesp.net/)
+- Use the web flasher at: [https://ghostesp.net/flasher](https://ghostesp.net/flasher)
 
 ---
 

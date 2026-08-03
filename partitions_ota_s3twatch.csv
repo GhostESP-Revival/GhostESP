@@ -1,0 +1,14 @@
+# OTA (A/B) partition table for S3TWatch (16MB, LilyGo S3TWatch-2020).
+#
+# storage stays fixed at 0x400000/0x400000 (same offset/size as the non-OTA
+# partitions_s3twatch.csv) for on-device asset storage. OTA slots are placed
+# above it in the previously-unused 0x800000-0x1000000 region instead of the
+# tight pre-storage gap.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+otadata,    data, ota,      0x10000,  0x2000,
+coredump,   data, coredump, 0x20000,  0x20000,
+storage,    data, fat,      0x400000, 0x400000,
+ota_0,      app,  ota_0,    0x800000, 0x400000,
+ota_1,      app,  ota_1,    0xC00000, 0x400000,

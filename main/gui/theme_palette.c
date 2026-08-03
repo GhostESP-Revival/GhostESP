@@ -118,6 +118,9 @@ uint32_t theme_palette_get(uint8_t theme, int slot) {
 }
 
 uint32_t theme_palette_get_accent(uint8_t theme) {
+    if (settings_get_sun_mode(&G_Settings)) {
+        return 0x0000CC; // Dark blue accent, readable on the light Sun Mode background
+    }
     if (settings_get_high_contrast(&G_Settings)) {
         return 0xFFFF00; // Bright yellow for maximum contrast
     }
@@ -131,6 +134,17 @@ uint32_t theme_palette_get_accent(uint8_t theme) {
 static uint32_t theme_surface_get(uint8_t theme, theme_surface_slot_t slot) {
     (void)theme;
     if (slot < 0 || slot >= THEME_SURFACE_SLOT_COUNT) slot = THEME_SURFACE_BG;
+
+    if (settings_get_sun_mode(&G_Settings)) {
+        static const uint32_t sun_mode_surfaces[THEME_SURFACE_SLOT_COUNT] = {
+            0xFFFFFF,  // BG: white, reflects ambient light instead of absorbing it
+            0xF0F0F0,  // Surface: near-white
+            0xE0E0E0,  // SurfaceAlt: light gray
+            0x000000,  // Text: pure black
+            0x404040   // TextMuted: dark gray
+        };
+        return sun_mode_surfaces[slot];
+    }
 
     if (settings_get_high_contrast(&G_Settings)) {
         static const uint32_t high_contrast_surfaces[THEME_SURFACE_SLOT_COUNT] = {
@@ -183,6 +197,9 @@ uint32_t theme_palette_get_text_muted(uint8_t theme) {
 }
 
 bool theme_palette_is_bright(uint8_t theme) {
+    if (settings_get_sun_mode(&G_Settings)) {
+        return false; // Dark blue accent on a white background; selected text should be light.
+    }
     if (settings_get_high_contrast(&G_Settings)) {
         return true; // Yellow accent is bright; selected text should be dark.
     }

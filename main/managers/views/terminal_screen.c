@@ -1,6 +1,7 @@
 #include "managers/views/terminal_screen.h"
 #include "core/serial_manager.h"
 #include "core/commandline.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -18,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gui/design_tokens.h"
 
 extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
@@ -113,36 +115,35 @@ static void terminal_canvas_draw_event(lv_event_t *e);
 static void terminal_canvas_size_event(lv_event_t *e);
 static void terminal_push_incoming(const char *data, size_t len);
 static void clear_lines(void);
+static void recompute_partial_start(void);
+static void trim_terminal_history(size_t capacity);
 
-// Global ring buffer for terminal bytes
-static char *term_ring = NULL;
-static size_t term_wcount = 0; // total bytes written
-static size_t term_rcount = 0; // consumption baseline for overflow tracking
-static portMUX_TYPE term_ring_mux = portMUX_INITIALIZER_UNLOCKED;
-static size_t dropped_bytes_total = 0;
-static size_t dropped_bytes_notified = 0;
-static size_t last_displayed_wcount = 0;
-
-// Virtualized terminal canvas and line storage
-static lv_obj_t *terminal_canvas = NULL;
-// Reasonable caps to keep memory and draw bounded
 #define MAX_TERMINAL_LINES 400
 #define MAX_TERMINAL_TEXT_BYTES (MAX_TEXT_LENGTH * 2)
+#define TERMINAL_TEXT_ARENA_BYTES (MAX_TERMINAL_TEXT_BYTES + MAX_TERMINAL_LINES)
+
+// Virtualized terminal canvas and line storage. The text arena is the sole
+// owner of retained output; line entries only describe slices within it.
+static lv_obj_t *terminal_canvas = NULL;
 
 typedef struct {
-  char *text;
+  uint16_t offset;
+  uint16_t len;
   uint16_t pxh; // cached pixel height at last layout width
   bool is_dualcomm; // precomputed at insert time, read in draw callback
 } TermLine;
 
-static TermLine term_lines[MAX_TERMINAL_LINES];
+static char *term_text_arena = NULL;
+static size_t term_text_capacity = 0;
+static size_t term_text_used = 0;
+static size_t term_partial_start = 0;
+static TermLine *term_lines = NULL;
 static uint16_t term_line_head = 0;   // index of oldest
 static uint16_t term_line_count = 0;  // number of valid lines
-static size_t term_text_bytes = 0;    // total bytes across stored lines
-
-static char *build_line_buf = NULL;   // partial line builder
-static size_t build_len = 0;
-static size_t build_cap = 0;
+static SemaphoreHandle_t term_store_mutex = NULL;
+static portMUX_TYPE term_store_init_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t term_store_generation = 0;
+static uint32_t term_seen_generation = 0;
 static lv_coord_t cached_layout_width = -1;
 static lv_coord_t cached_total_height = 0;
 
@@ -160,32 +161,72 @@ static void *terminal_alloc_buffer(size_t size) {
   return ptr;
 }
 
-static bool ensure_terminal_buffers(void) {
-  if (term_ring) {
-    return true;
+static bool terminal_store_lock(void) {
+  if (!term_store_mutex) {
+    SemaphoreHandle_t new_mutex = xSemaphoreCreateRecursiveMutex();
+    portENTER_CRITICAL(&term_store_init_mux);
+    if (!term_store_mutex) {
+      term_store_mutex = new_mutex;
+      new_mutex = NULL;
+    }
+    portEXIT_CRITICAL(&term_store_init_mux);
+    if (new_mutex) vSemaphoreDelete(new_mutex);
   }
+  return term_store_mutex &&
+         xSemaphoreTakeRecursive(term_store_mutex, portMAX_DELAY) == pdTRUE;
+}
 
-  term_ring = terminal_alloc_buffer(MAX_TEXT_LENGTH);
-  if (!term_ring) {
-    ESP_LOGE(TAG, "Failed to allocate terminal ring buffer");
+static void terminal_store_unlock(void) {
+  if (term_store_mutex) xSemaphoreGiveRecursive(term_store_mutex);
+}
+
+static bool ensure_terminal_text_arena(size_t capacity) {
+  if (term_text_arena && term_text_capacity >= capacity) return true;
+
+  char *new_arena = terminal_alloc_buffer(capacity);
+  if (!new_arena) {
+    ESP_LOGE(TAG, "Failed to allocate terminal text arena");
     return false;
   }
-  memset(term_ring, 0, MAX_TEXT_LENGTH);
-
+  if (term_text_arena && term_text_used) {
+    memcpy(new_arena, term_text_arena, term_text_used);
+  }
+  free(term_text_arena);
+  term_text_arena = new_arena;
+  term_text_capacity = capacity;
   return true;
 }
 
-static inline void term_ring_write(const char *data, size_t len) {
-  if (!data || len == 0) return;
-  if (!ensure_terminal_buffers()) return;
-  portENTER_CRITICAL(&term_ring_mux);
-  size_t wpos = term_wcount % MAX_TEXT_LENGTH;
-  size_t first = len;
-  if (first > (size_t)(MAX_TEXT_LENGTH - wpos)) first = MAX_TEXT_LENGTH - wpos;
-  memcpy(&term_ring[wpos], data, first);
-  if (len > first) memcpy(&term_ring[0], data + first, len - first);
-  term_wcount += len;
-  portEXIT_CRITICAL(&term_ring_mux);
+static bool ensure_terminal_lines(void) {
+  if (term_lines) return true;
+  term_lines = terminal_alloc_buffer(sizeof(TermLine) * MAX_TERMINAL_LINES);
+  if (!term_lines) {
+    ESP_LOGE(TAG, "Failed to allocate terminal line metadata");
+    return false;
+  }
+  memset(term_lines, 0, sizeof(TermLine) * MAX_TERMINAL_LINES);
+  return true;
+}
+
+static void rebuild_terminal_lines(void) {
+  clear_lines();
+  size_t start = 0;
+  for (size_t pos = 0; pos < term_text_used; pos++) {
+    if (term_text_arena[pos] != '\0') continue;
+
+    if (term_line_count >= MAX_TERMINAL_LINES) {
+      term_line_head = (term_line_head + 1) % MAX_TERMINAL_LINES;
+      term_line_count--;
+    }
+    uint16_t idx = (term_line_head + term_line_count) % MAX_TERMINAL_LINES;
+    term_lines[idx].offset = (uint16_t)start;
+    term_lines[idx].len = (uint16_t)(pos - start);
+    term_lines[idx].pxh = 0;
+    term_lines[idx].is_dualcomm = terminal_is_dualcomm_line(term_text_arena + start);
+    term_line_count++;
+    start = pos + 1;
+  }
+  term_partial_start = start;
 }
 
 static void submit_text() {
@@ -224,35 +265,32 @@ static void update_input_label() {
         }
     }
 }
-static void clear_message_queue(void) {
-  if (!ensure_terminal_buffers()) {
-    return;
-  }
-  portENTER_CRITICAL(&term_ring_mux);
-  term_wcount = 0;
-  term_rcount = 0;
-  memset(term_ring, 0, MAX_TEXT_LENGTH);
-  portEXIT_CRITICAL(&term_ring_mux);
-  dropped_bytes_total = 0;
-  dropped_bytes_notified = 0;
-  last_displayed_wcount = 0;
+static void release_terminal_view_storage(void) {
+  if (!terminal_store_lock()) return;
+  trim_terminal_history(MAX_TEXT_LENGTH);
   clear_lines();
-  if (build_line_buf) {
-    free(build_line_buf);
-    build_line_buf = NULL;
-    build_len = 0;
-    build_cap = 0;
+  free(term_lines);
+  term_lines = NULL;
+  if (term_text_capacity > MAX_TEXT_LENGTH) {
+    char *small_arena = terminal_alloc_buffer(MAX_TEXT_LENGTH);
+    if (small_arena) {
+      free(term_text_arena);
+      term_text_arena = small_arena;
+      term_text_capacity = MAX_TEXT_LENGTH;
+    }
   }
+  recompute_partial_start();
+  term_store_generation++;
+  terminal_store_unlock();
   cached_layout_width = -1;
   cached_total_height = 0;
   if (terminal_canvas && lv_obj_is_valid(terminal_canvas)) {
-    lv_obj_set_height(terminal_canvas, 0);
     lv_obj_invalidate(terminal_canvas);
   }
 }
 
 static void clear_pre_init_message_queue(void) {
-  // no-op with ring buffer
+  // Output is retained directly in the canonical terminal text arena.
 }
 
 static void update_terminal_label(const char *text) { (void)text; (void)terminal_label; }
@@ -269,93 +307,146 @@ static void scroll_to_bottom_if_needed(bool was_near_bottom) {
 // ========== Virtualized terminal helpers ==========
 
 static void clear_lines(void) {
-  for (uint16_t i = 0; i < term_line_count; i++) {
-    uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
-    if (term_lines[idx].text) {
-      free(term_lines[idx].text);
-      term_lines[idx].text = NULL;
-    }
-    term_lines[idx].pxh = 0;
+  if (term_lines) {
+    memset(term_lines, 0, sizeof(TermLine) * MAX_TERMINAL_LINES);
   }
   term_line_head = 0;
   term_line_count = 0;
-  term_text_bytes = 0;
 }
 
 static void drop_oldest_line(void) {
-  if (term_line_count == 0) return;
+  if (!term_lines || term_line_count == 0) return;
   uint16_t idx = term_line_head;
-  if (term_lines[idx].text) {
-    term_text_bytes -= strlen(term_lines[idx].text);
-    free(term_lines[idx].text);
+  size_t remove_end = (size_t)term_lines[idx].offset + term_lines[idx].len + 1;
+  if (remove_end > term_text_used) remove_end = term_text_used;
+
+  if (remove_end > 0) {
+    size_t remaining = term_text_used - remove_end;
+    if (remaining > 0) {
+      memmove(term_text_arena, term_text_arena + remove_end, remaining);
+    }
+    term_text_used = remaining;
+    term_partial_start = term_partial_start >= remove_end ?
+                         term_partial_start - remove_end : 0;
   }
-  term_lines[idx].text = NULL;
-  term_lines[idx].pxh = 0;
+
   term_line_head = (term_line_head + 1) % MAX_TERMINAL_LINES;
   term_line_count--;
+  for (uint16_t i = 0; i < term_line_count; i++) {
+    uint16_t line_idx = (term_line_head + i) % MAX_TERMINAL_LINES;
+    term_lines[line_idx].offset -= remove_end;
+  }
 }
 
-static void append_line(const char *line, size_t len) {
-  // allocate and copy
-  char *copy = (char *)malloc(len + 1);
-  if (!copy) return;
-  memcpy(copy, line, len);
-  copy[len] = '\0';
+static void recompute_partial_start(void) {
+  term_partial_start = 0;
+  for (size_t i = 0; i < term_text_used; i++) {
+    if (term_text_arena[i] == '\0') term_partial_start = i + 1;
+  }
+}
 
-  // ensure capacity by dropping oldest
+static void trim_terminal_history(size_t capacity) {
+  if (!term_text_arena || term_text_used <= capacity) return;
+
+  size_t remove = term_text_used - capacity;
+  while (remove < term_text_used && term_text_arena[remove - 1] != '\0') {
+    remove++;
+  }
+  if (remove >= term_text_used) {
+    // A single unbroken line is larger than the retained history.
+    remove = term_text_used - capacity;
+  }
+
+  memmove(term_text_arena, term_text_arena + remove, term_text_used - remove);
+  term_text_used -= remove;
+  recompute_partial_start();
+  if (term_lines) rebuild_terminal_lines();
+}
+
+static void append_line(size_t len) {
+  size_t offset = term_partial_start;
+  if (!term_lines || offset > UINT16_MAX || len > UINT16_MAX) return;
   if (term_line_count >= MAX_TERMINAL_LINES) {
     drop_oldest_line();
+    offset = term_partial_start;
   }
-  while (term_text_bytes + len > MAX_TERMINAL_TEXT_BYTES && term_line_count > 0) {
-    drop_oldest_line();
-  }
-
   uint16_t idx = (term_line_head + term_line_count) % MAX_TERMINAL_LINES;
-  term_lines[idx].text = copy;
+  term_lines[idx].offset = (uint16_t)offset;
+  term_lines[idx].len = (uint16_t)len;
   term_lines[idx].pxh = 0; // recalc lazily
-  term_lines[idx].is_dualcomm = terminal_is_dualcomm_line(copy);
+  term_lines[idx].is_dualcomm = terminal_is_dualcomm_line(term_text_arena + offset);
   term_line_count++;
-  term_text_bytes += len;
 }
 
-static void build_reserve(size_t need) {
-  if (build_cap >= need) return;
-  size_t new_cap = build_cap ? build_cap * 2 : 128;
-  if (new_cap < need) new_cap = need;
-  char *p = (char *)realloc(build_line_buf, new_cap);
-  if (!p) return;
-  build_line_buf = p;
-  build_cap = new_cap;
+static void ensure_text_space(size_t needed) {
+  if (term_text_used + needed > term_text_capacity && term_lines &&
+      term_text_capacity < TERMINAL_TEXT_ARENA_BYTES) {
+    size_t expanded_capacity = term_text_capacity + 4096;
+    if (expanded_capacity < term_text_used + needed) {
+      expanded_capacity = term_text_used + needed;
+    }
+    if (expanded_capacity > TERMINAL_TEXT_ARENA_BYTES) {
+      expanded_capacity = TERMINAL_TEXT_ARENA_BYTES;
+    }
+    (void)ensure_terminal_text_arena(expanded_capacity);
+  }
+
+  while (term_text_used + needed > term_text_capacity && term_text_used > 0) {
+    if (term_lines && term_line_count > 0) {
+      drop_oldest_line();
+    } else {
+      size_t remove = term_text_used + needed - term_text_capacity;
+      while (remove < term_text_used && term_text_arena[remove - 1] != '\0') {
+        remove++;
+      }
+      if (remove >= term_text_used) remove = term_text_used + needed - term_text_capacity;
+      memmove(term_text_arena, term_text_arena + remove, term_text_used - remove);
+      term_text_used -= remove;
+      recompute_partial_start();
+    }
+  }
+  if (term_text_used + needed <= term_text_capacity) return;
+
+  // A single unbroken line exceeded the bounded history. Keep its tail rather
+  // than allowing the old partial-line builder to grow without bound.
+  size_t drop = term_text_used + needed - term_text_capacity;
+  if (drop > term_text_used) drop = term_text_used;
+  if (drop > 0) {
+    memmove(term_text_arena, term_text_arena + drop, term_text_used - drop);
+    term_text_used -= drop;
+    term_partial_start = term_partial_start >= drop ? term_partial_start - drop : 0;
+  }
 }
 
 static void terminal_push_incoming(const char *data, size_t len) {
   if (!data || len == 0) return;
-  const char *p = data;
-  size_t rem = len;
-  while (rem) {
-    const char *nl = (const char *)memchr(p, '\n', rem);
-    if (nl) {
-      size_t chunk = (size_t)(nl - p);
-      // append chunk to builder
-      build_reserve(build_len + chunk + 1);
-      if (!build_line_buf) { break; }
-      if (chunk) memcpy(build_line_buf + build_len, p, chunk);
-      build_len += chunk;
-      // trim trailing CR
-      if (build_len && build_line_buf[build_len - 1] == '\r') build_len--;
-      append_line(build_line_buf, build_len);
-      build_len = 0;
-      p = nl + 1;
-      rem = data + len - p;
-    } else {
-      // no newline, accumulate remainder
-      build_reserve(build_len + rem + 1);
-      if (!build_line_buf) { break; }
-      if (rem) memcpy(build_line_buf + build_len, p, rem);
-      build_len += rem;
-      break;
-    }
+  if (!terminal_store_lock()) return;
+  if (!ensure_terminal_text_arena(MAX_TEXT_LENGTH)) {
+    terminal_store_unlock();
+    return;
   }
+
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] == '\n') {
+      if (term_text_used > term_partial_start &&
+          term_text_arena[term_text_used - 1] == '\r') {
+        term_text_arena[term_text_used - 1] = '\0';
+      } else {
+        ensure_text_space(1);
+        term_text_arena[term_text_used++] = '\0';
+      }
+      if (term_lines) {
+        append_line(term_text_used - term_partial_start - 1);
+      }
+      term_partial_start = term_text_used;
+      continue;
+    }
+
+    ensure_text_space(1);
+    term_text_arena[term_text_used++] = data[i];
+  }
+  term_store_generation++;
+  terminal_store_unlock();
 }
 
 
@@ -366,8 +457,12 @@ static bool terminal_should_use_split_view(void) {
 
 static void recalc_layout_if_needed(void) {
   if (!terminal_canvas || !lv_obj_is_valid(terminal_canvas)) return;
+  if (!terminal_store_lock()) return;
   lv_coord_t full_w = lv_obj_get_width(terminal_canvas);
-  if (full_w <= 0) return;
+  if (full_w <= 0 || !term_lines || !term_text_arena) {
+    terminal_store_unlock();
+    return;
+  }
 
   bool split = terminal_should_use_split_view() && (full_w > 0);
   lv_coord_t col_w = split ? (full_w / 2) : full_w;
@@ -392,7 +487,7 @@ static void recalc_layout_if_needed(void) {
     TermLine *L = &term_lines[idx];
     if (L->pxh == 0) {
       lv_point_t sz;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      const char *txt = L->len ? term_text_arena + L->offset : " ";
       lv_txt_get_size(&sz, txt, font, letter_space, line_space, col_w, LV_TEXT_FLAG_NONE);
       if (sz.y <= 0) sz.y = lv_font_get_line_height(font);
       L->pxh = (uint16_t)sz.y;
@@ -402,6 +497,7 @@ static void recalc_layout_if_needed(void) {
   if (total <= 0) total = 1;
   cached_total_height = total;
   lv_obj_set_height(terminal_canvas, total);
+  terminal_store_unlock();
 }
 
 static void terminal_canvas_size_event(lv_event_t *e) {
@@ -414,15 +510,22 @@ static void terminal_canvas_size_event(lv_event_t *e) {
 static void terminal_canvas_draw_event(lv_event_t *e) {
   lv_obj_t *obj = lv_event_get_target(e);
   if (!obj || obj != terminal_canvas) return;
+  if (!terminal_store_lock()) return;
   recalc_layout_if_needed();
 
   lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
-  if (!draw_ctx) return;
+  if (!draw_ctx) {
+    terminal_store_unlock();
+    return;
+  }
 
   lv_area_t obj_coords;
   lv_obj_get_coords(obj, &obj_coords);
   const lv_area_t *clip = draw_ctx->clip_area;
-  if (!clip) return;
+  if (!clip) {
+    terminal_store_unlock();
+    return;
+  }
 
   lv_draw_label_dsc_t dsc;
   lv_draw_label_dsc_init(&dsc);
@@ -437,6 +540,10 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
   lv_coord_t col_w = split ? (w / 2) : w;
   lv_coord_t local_top = clip->y1 - obj_coords.y1;
   lv_coord_t local_bottom = clip->y2 - obj_coords.y1;
+  if (!term_lines || !term_text_arena) {
+    terminal_store_unlock();
+    return;
+  }
 
   if (!split) {
     // Single-column mode: draw all lines sequentially as before
@@ -447,7 +554,7 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       lv_coord_t h = L->pxh;
       if ((y + h) < local_top) { y += h; continue; }
       if (y > local_bottom) break;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      const char *txt = L->len ? term_text_arena + L->offset : " ";
       lv_area_t a;
       a.x1 = obj_coords.x1;
       a.y1 = obj_coords.y1 + y;
@@ -469,7 +576,7 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       }
       if ((y_left + h) < local_top) { y_left += h; continue; }
       if (y_left > local_bottom) break;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      const char *txt = L->len ? term_text_arena + L->offset : " ";
       lv_area_t a;
       a.x1 = obj_coords.x1;
       a.y1 = obj_coords.y1 + y_left;
@@ -490,7 +597,7 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       }
       if ((y_right + h) < local_top) { y_right += h; continue; }
       if (y_right > local_bottom) break;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
+      const char *txt = L->len ? term_text_arena + L->offset : " ";
       const char *s = terminal_dualcomm_display_text(txt);
       lv_area_t b;
       b.x1 = obj_coords.x1 + col_w;
@@ -501,10 +608,10 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       y_right += h;
     }
   }
+  terminal_store_unlock();
 }
 
 static void process_queued_messages(void) {
-  if (!ensure_terminal_buffers()) return;
   if (!terminal_active || !terminal_scroller || !terminal_canvas || is_stopping) return;
   if (!lv_obj_is_valid(terminal_scroller) || !lv_obj_is_valid(terminal_canvas)) {
     ESP_LOGW(TAG, "terminal scroller invalid, skipping queued message processing");
@@ -513,72 +620,16 @@ static void process_queued_messages(void) {
     return;
   }
 
+  if (!terminal_store_lock()) return;
+  bool has_new_data = term_seen_generation != term_store_generation;
+  if (has_new_data) term_seen_generation = term_store_generation;
+  terminal_store_unlock();
+  if (!has_new_data) return;
+
   bool was_near_bottom = terminal_is_near_bottom();
-  size_t prev_displayed = last_displayed_wcount;
-
-  size_t write_count;
-  size_t read_count;
-  size_t to_copy;
-  size_t drop = 0;
-
-  portENTER_CRITICAL(&term_ring_mux);
-  write_count = term_wcount;
-  read_count = term_rcount;
-  size_t available = write_count - read_count;
-  if (available > MAX_TEXT_LENGTH) {
-    drop = available - MAX_TEXT_LENGTH;
-    read_count = write_count - MAX_TEXT_LENGTH;
-  }
-  to_copy = write_count - read_count;
-  size_t start_index = read_count;
-  term_rcount = write_count;
-  portEXIT_CRITICAL(&term_ring_mux);
-
-  if (drop) {
-    dropped_bytes_total += drop;
-  }
-
-  bool has_new_data = (write_count != prev_displayed);
-  if (!has_new_data && drop == 0 && dropped_bytes_notified == dropped_bytes_total) {
-    size_t remain;
-    portENTER_CRITICAL(&term_ring_mux);
-    remain = term_wcount - term_rcount;
-    portEXIT_CRITICAL(&term_ring_mux);
-    if (terminal_update_timer) {
-      lv_timer_set_period(terminal_update_timer, remain ? PROCESSING_INTERVAL_FAST_MS : PROCESSING_INTERVAL_MS);
-    }
-    return;
-  }
-
-  size_t drop_delta = dropped_bytes_total - dropped_bytes_notified;
-  if (drop_delta > 0) {
-    char drop_msg[64];
-    snprintf(drop_msg, sizeof(drop_msg), "(dropped %u bytes)\n", (unsigned)drop_delta);
-    terminal_push_incoming(drop_msg, strlen(drop_msg));
-    dropped_bytes_notified = dropped_bytes_total;
-  }
-
-  if (to_copy > 0) {
-    size_t rpos = start_index % MAX_TEXT_LENGTH;
-    size_t first_chunk = (to_copy > (MAX_TEXT_LENGTH - rpos)) ? (MAX_TEXT_LENGTH - rpos) : to_copy;
-    terminal_push_incoming(&term_ring[rpos], first_chunk);
-    if (to_copy > first_chunk) {
-      terminal_push_incoming(&term_ring[0], to_copy - first_chunk);
-    }
-    recalc_layout_if_needed();
-    if (terminal_canvas) lv_obj_invalidate(terminal_canvas);
-  }
+  recalc_layout_if_needed();
+  if (terminal_canvas) lv_obj_invalidate(terminal_canvas);
   scroll_to_bottom_if_needed(was_near_bottom);
-
-  last_displayed_wcount = write_count;
-
-  size_t remain;
-  portENTER_CRITICAL(&term_ring_mux);
-  remain = term_wcount - term_rcount;
-  portEXIT_CRITICAL(&term_ring_mux);
-  if (terminal_update_timer) {
-    lv_timer_set_period(terminal_update_timer, remain ? PROCESSING_INTERVAL_FAST_MS : PROCESSING_INTERVAL_MS);
-  }
 }
 
 static void process_queued_messages_callback(lv_timer_t * timer) {
@@ -621,7 +672,7 @@ static void stop_all_operations(void) {
         display_manager_switch_view(terminal_return_view);
         terminal_return_view = NULL;
     } else {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
@@ -644,9 +695,19 @@ void terminal_view_create(void) {
         return;
     }
 
-    if (!ensure_terminal_buffers()) {
-        ESP_LOGE(TAG, "Terminal buffers unavailable");
-        return;
+    bool terminal_storage_ready = false;
+    if (terminal_store_lock()) {
+        if (ensure_terminal_text_arena(MAX_TEXT_LENGTH) && ensure_terminal_lines()) {
+            rebuild_terminal_lines();
+            term_store_generation++;
+            terminal_storage_ready = true;
+        }
+        terminal_store_unlock();
+    }
+    if (!terminal_storage_ready) {
+        // The view switcher requires a root even under severe heap pressure.
+        // Keep the CLI usable and allow logging to resume if memory recovers.
+        ESP_LOGE(TAG, "Terminal history unavailable: insufficient heap");
     }
 
     if (!terminal_mutex) {
@@ -733,6 +794,7 @@ void terminal_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     if (show_back_btn) {
         back_btn = lv_btn_create(terminal_view.root);
+        gui_apply_pressed_style(back_btn);
         lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
         lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
         lv_obj_set_style_bg_color(back_btn, control_bg, LV_PART_MAIN);
@@ -799,17 +861,6 @@ void terminal_view_create(void) {
     // core UI objects and timer exist; allow producers to enqueue immediately
     terminal_initialized = true;
     
-    // Initialize consumer read pointer to show recent history window
-    portENTER_CRITICAL(&term_ring_mux);
-    if (term_wcount > MAX_TEXT_LENGTH) {
-        term_rcount = term_wcount - MAX_TEXT_LENGTH;
-    } else {
-        term_rcount = 0;
-    }
-    portEXIT_CRITICAL(&term_ring_mux);
-    
-    // already initialized above
-    
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
 }
 static void terminal_retry_cleanup_cb(lv_timer_t *timer) {
@@ -831,13 +882,12 @@ void terminal_view_destroy(void) {
     is_stopping = true;
     terminal_initialized = false; // Reset initialization flag
 
-    // Clear ring buffer and reset state
-    clear_message_queue();
     input_len = 0;
     input_buffer[0] = '\0';
 
     // Delete timer first to prevent callbacks after objects are freed
     lvgl_timer_del_safe(&terminal_update_timer);
+    release_terminal_view_storage();
 
     // Safely delete LVGL objects
     if (terminal_mutex) {
@@ -898,11 +948,71 @@ static const char *terminal_dualcomm_display_text(const char *text) {
 }
 
 void terminal_view_add_text(const char *text) {
-  if (!text || is_stopping || text[0] == '\0') {
+  if (!text || text[0] == '\0') {
       return;
   }
-  // Always write to ring; consumer drains on timer
-  term_ring_write(text, strlen(text));
+  terminal_push_incoming(text, strlen(text));
+}
+
+bool terminal_view_visit_history(terminal_history_visitor_t visitor, void *ctx) {
+  if (!visitor || !terminal_store_lock()) return false;
+
+  bool complete = true;
+  size_t start = 0;
+  for (size_t i = 0; i < term_text_used; i++) {
+    if (term_text_arena[i] != '\0') continue;
+    term_text_arena[i] = '\n';
+    complete = visitor(term_text_arena + start, i - start + 1, ctx);
+    term_text_arena[i] = '\0';
+    if (!complete) break;
+    start = i + 1;
+  }
+  if (complete && start < term_text_used) {
+    complete = visitor(term_text_arena + start, term_text_used - start, ctx);
+  }
+
+  terminal_store_unlock();
+  return complete;
+}
+
+void terminal_view_clear_history(void) {
+  if (!terminal_store_lock()) return;
+  term_text_used = 0;
+  term_partial_start = 0;
+  clear_lines();
+  term_store_generation++;
+  terminal_store_unlock();
+
+  cached_layout_width = -1;
+  cached_total_height = 0;
+  if (terminal_canvas && lv_obj_is_valid(terminal_canvas)) {
+    lv_obj_set_height(terminal_canvas, 0);
+    lv_obj_invalidate(terminal_canvas);
+  }
+}
+
+size_t terminal_view_log_count(void) {
+  return term_line_count;
+}
+
+bool terminal_view_log_get(size_t index, char *out, size_t out_len) {
+  if (!out || out_len == 0 || !terminal_store_lock()) return false;
+  if (!term_lines || !term_text_arena || index >= term_line_count) {
+    terminal_store_unlock();
+    return false;
+  }
+  uint16_t idx = (term_line_head + (uint16_t)index) % MAX_TERMINAL_LINES;
+  const TermLine *line = &term_lines[idx];
+  size_t len = line->len;
+  if (line->offset >= term_text_used || len > term_text_used - line->offset) {
+    terminal_store_unlock();
+    return false;
+  }
+  if (len >= out_len) len = out_len - 1;
+  memcpy(out, term_text_arena + line->offset, len);
+  out[len] = '\0';
+  terminal_store_unlock();
+  return true;
 }
 
 static bool terminal_is_near_bottom(void) {

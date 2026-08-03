@@ -52,6 +52,7 @@ static const char *NVS_DISPLAY_TIMEOUT_KEY = "disp_timeout";
 static const char *NVS_ENABLE_RTS_KEY = "rts_enable";
 static const char *NVS_STA_SSID_KEY = "sta_ssid";
 static const char *NVS_STA_PASSWORD_KEY = "sta_password";
+static const char *NVS_WIFI_AUTO_RECONNECT_KEY = "sta_auto_rec";
 static const char *NVS_RGB_DATA_PIN_KEY = "rgb_data_pin";
 static const char *NVS_RGB_RED_PIN_KEY = "rgb_red_pin";
 static const char *NVS_RGB_GREEN_PIN_KEY = "rgb_green_pin";
@@ -82,6 +83,9 @@ static const char *NVS_WIFI_COUNTRY_KEY = "wifi_country";
 static const char *NVS_WIGLE_API_KEY = "wigle_api_key";
 static const char *NVS_WIGLE_DONATE_KEY = "wigle_donate";
 static const char *NVS_WIGLE_AUTO_UPLOAD_KEY = "wigle_auto_ul";
+static const char *NVS_OTA_CHANNEL_KEY = "ota_channel";
+static const char *NVS_OTA_UPDATE_AVAIL_KEY = "ota_avail";
+static const char *NVS_OTA_LAST_CHECK_KEY = "ota_last_chk";
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char *NVS_STATUS_IDLE_ANIM_KEY = "idle_anim"; // nvs keys must be <=15 chars
 static const char *NVS_STATUS_IDLE_TIMEOUT_KEY = "idle_to_ms";
@@ -114,6 +118,8 @@ static const char *NVS_FONT_SIZE_KEY = "font_size";
 static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
 static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
+static const char *NVS_SUN_MODE_KEY = "sun_mode";
+static const char *NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY = "sun_mode_pb";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
 static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
@@ -202,6 +208,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->rts_enabled = false;
   strcpy(settings->sta_ssid, ""); // Default empty station SSID
   strcpy(settings->sta_password, ""); // Default empty station password
+  settings->wifi_auto_reconnect = true; // Auto-reconnect on involuntary disconnect
   settings->rgb_data_pin = -1;
   settings->rgb_red_pin = -1;
   settings->rgb_green_pin = -1;
@@ -230,7 +237,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
   settings->nav_buttons_enabled = true; // Default to enabled
-  settings->menu_layout = 0; // Default to carousel layout
+  settings->menu_layout = 1; // Default to adaptive paginated grid
   settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
@@ -241,6 +248,9 @@ void settings_set_defaults(FSettings *settings) {
   strcpy(settings->wigle_api_key, "");
   settings->wigle_auto_upload = false; // Default to off
   settings->wigle_donate = true; // Default to donating
+  settings->ota_channel = 0; // Default to stable channel
+  settings->ota_update_available = false;
+  settings->ota_last_check_time = 0;
   settings->io_btn_p10_cmd[0] = '\0';
   settings->io_btn_p11_cmd[0] = '\0';
   settings->io_btn_p12_cmd[0] = '\0';
@@ -259,13 +269,15 @@ void settings_set_defaults(FSettings *settings) {
   settings->reduced_motion = false;
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
+  settings->sun_mode = false;
+  settings->sun_mode_saved_brightness = 100;
   settings->menu_item_borders = false;
   settings->menu_card_bg = true;
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
-  settings->wd_hop_primary_ms = 100;
-  settings->wd_hop_helper_ms = 100;
+  settings->wd_hop_primary_ms = 125;
+  settings->wd_hop_helper_ms = 125;
   settings->wd_weighted_5g = true;
 
   // Lockscreen defaults (disabled by default)
@@ -486,6 +498,14 @@ void settings_load(FSettings *settings) {
     strcpy(settings->sta_password, ""); // Ensure it's empty if not found
   }
 
+  // Load WiFi auto-reconnect setting
+  uint8_t wifi_auto_reconnect_val = 1;
+  err = nvs_get_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, &wifi_auto_reconnect_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load WiFi auto-reconnect setting: %s\n", esp_err_to_name(err));
+  }
+  settings->wifi_auto_reconnect = (wifi_auto_reconnect_val != 0);
+
   // Load Wigle API key (format: APIName:APIToken)
   str_size = sizeof(settings->wigle_api_key);
   err = nvs_get_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key, &str_size);
@@ -510,6 +530,28 @@ void settings_load(FSettings *settings) {
     printf("Failed to load Wigle auto-upload setting: %s\n", esp_err_to_name(err));
   }
   settings->wigle_auto_upload = (auto_upload_val != 0);
+
+  // Load OTA settings
+  uint8_t ota_channel_val = 0;
+  err = nvs_get_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, &ota_channel_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA channel setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_channel = ota_channel_val;
+
+  uint8_t ota_avail_val = 0;
+  err = nvs_get_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, &ota_avail_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA update-available setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_update_available = (ota_avail_val != 0);
+
+  uint32_t ota_last_check_val = 0;
+  err = nvs_get_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, &ota_last_check_val);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    printf("Failed to load OTA last-check setting: %s\n", esp_err_to_name(err));
+  }
+  settings->ota_last_check_time = ota_last_check_val;
 
   str_size = sizeof(settings->io_btn_p10_cmd);
   err = nvs_get_str(nvsHandle, NVS_IO_BTN_P10_CMD_KEY, settings->io_btn_p10_cmd, &str_size);
@@ -657,7 +699,7 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_layout = value_u8;
   } else {
-    settings->menu_layout = 0; // Default to carousel layout if not found
+    settings->menu_layout = 1; // Default to adaptive paginated grid if not found
   }
 
   // Load carousel slide direction inversion
@@ -810,6 +852,14 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->high_contrast = (bool)value_u8;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_SUN_MODE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->sun_mode = (bool)value_u8;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->sun_mode_saved_brightness = value_u8;
   }
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -1102,6 +1152,18 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WIGLE_DONATE_KEY, G_Settings.wigle_donate ? 1 : 0);
             key = NVS_WIGLE_DONATE_KEY;
             break;
+        case SETTING_OTA_CHANNEL:
+            err = nvs_set_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, G_Settings.ota_channel);
+            key = NVS_OTA_CHANNEL_KEY;
+            break;
+        case SETTING_OTA_UPDATE_AVAILABLE:
+            err = nvs_set_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, G_Settings.ota_update_available ? 1 : 0);
+            key = NVS_OTA_UPDATE_AVAIL_KEY;
+            break;
+        case SETTING_OTA_LAST_CHECK_TIME:
+            err = nvs_set_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, G_Settings.ota_last_check_time);
+            key = NVS_OTA_LAST_CHECK_KEY;
+            break;
         case SETTING_MIC_VISUALIZER_MODE:
             err = nvs_set_u8(nvsHandle, NVS_MIC_VISUALIZER_MODE_KEY, (uint8_t)G_Settings.mic_visualizer_mode);
             key = NVS_MIC_VISUALIZER_MODE_KEY;
@@ -1160,6 +1222,11 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_HIGH_CONTRAST:
             err = nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, G_Settings.high_contrast ? 1 : 0);
             key = NVS_HIGH_CONTRAST_KEY;
+            break;
+        case SETTING_SUN_MODE:
+            err = nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, G_Settings.sun_mode ? 1 : 0);
+            key = NVS_SUN_MODE_KEY;
+            nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, G_Settings.sun_mode_saved_brightness);
             break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
@@ -1226,6 +1293,10 @@ void settings_persist_setting(SettingsType setting) {
             }
             key = NVS_STA_SSID_KEY;
             break;
+        case SETTING_WIFI_AUTO_RECONNECT:
+            err = nvs_set_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, G_Settings.wifi_auto_reconnect ? 1 : 0);
+            key = NVS_WIFI_AUTO_RECONNECT_KEY;
+            break;
         case SETTING_TIMEZONE:
             err = nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, G_Settings.selected_timezone);
             key = NVS_TIMEZONE_NAME;
@@ -1242,7 +1313,7 @@ void settings_persist_setting(SettingsType setting) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to commit NVS for %s: %s", key, esp_err_to_name(err));
         } else {
-            ESP_LOGI(TAG, "Persisted setting %s", key);
+            ESP_LOGD(TAG, "Persisted setting %s", key);
         }
     }
 }
@@ -1347,6 +1418,7 @@ esp_err_t settings_save(const FSettings *settings) {
 
     NVS_SET(nvs_set_str(nvsHandle, NVS_STA_SSID_KEY, settings->sta_ssid));
     NVS_SET(nvs_set_str(nvsHandle, NVS_STA_PASSWORD_KEY, settings->sta_password));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_WIFI_AUTO_RECONNECT_KEY, settings->wifi_auto_reconnect ? 1 : 0));
 
     NVS_SET(nvs_set_i32(nvsHandle, NVS_RGB_DATA_PIN_KEY, settings->rgb_data_pin));
     NVS_SET(nvs_set_i32(nvsHandle, NVS_RGB_RED_PIN_KEY, settings->rgb_red_pin));
@@ -1376,6 +1448,9 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIGLE_DONATE_KEY, settings->wigle_donate ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIGLE_AUTO_UPLOAD_KEY, settings->wigle_auto_upload ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_OTA_CHANNEL_KEY, settings->ota_channel));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_OTA_UPDATE_AVAIL_KEY, settings->ota_update_available ? 1 : 0));
+    NVS_SET(nvs_set_u32(nvsHandle, NVS_OTA_LAST_CHECK_KEY, settings->ota_last_check_time));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P10_CMD_KEY, settings->io_btn_p10_cmd));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P11_CMD_KEY, settings->io_btn_p11_cmd));
     NVS_SET(nvs_set_str(nvsHandle, NVS_IO_BTN_P12_CMD_KEY, settings->io_btn_p12_cmd));
@@ -1411,6 +1486,8 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, settings->reduced_motion ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, settings->sun_mode ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, settings->sun_mode_saved_brightness));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0));
@@ -1857,12 +1934,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 2) layout = 0;
+    if (layout > 2) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 2 ? settings->menu_layout : 0;
+    return settings->menu_layout <= 2 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
@@ -1913,6 +1990,30 @@ void settings_set_wigle_auto_upload(FSettings *settings, bool enabled) {
 
 bool settings_get_wigle_auto_upload(const FSettings *settings) {
   return settings->wigle_auto_upload;
+}
+
+void settings_set_ota_channel(FSettings *settings, uint8_t channel) {
+  settings->ota_channel = channel;
+}
+
+uint8_t settings_get_ota_channel(const FSettings *settings) {
+  return settings->ota_channel;
+}
+
+void settings_set_ota_update_available(FSettings *settings, bool available) {
+  settings->ota_update_available = available;
+}
+
+bool settings_get_ota_update_available(const FSettings *settings) {
+  return settings->ota_update_available;
+}
+
+void settings_set_ota_last_check_time(FSettings *settings, uint32_t timestamp) {
+  settings->ota_last_check_time = timestamp;
+}
+
+uint32_t settings_get_ota_last_check_time(const FSettings *settings) {
+  return settings->ota_last_check_time;
 }
 
 void settings_set_wigle_donate(FSettings *settings, bool enabled) {
@@ -2175,6 +2276,16 @@ bool settings_get_high_contrast(const FSettings *settings) {
   return settings ? settings->high_contrast : false;
 }
 
+void settings_set_sun_mode(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->sun_mode = enabled;
+  }
+}
+
+bool settings_get_sun_mode(const FSettings *settings) {
+  return settings ? settings->sun_mode : false;
+}
+
 void settings_set_menu_item_borders(FSettings *settings, bool enabled) {
   if (settings) {
     settings->menu_item_borders = enabled;
@@ -2245,7 +2356,7 @@ void settings_set_wd_hop_primary_ms(FSettings *settings, uint16_t ms) {
   if (settings) settings->wd_hop_primary_ms = ms;
 }
 uint16_t settings_get_wd_hop_primary_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_primary_ms : 100;
+  return settings ? settings->wd_hop_primary_ms : 125;
 }
 void settings_set_wd_hop_helper_ms(FSettings *settings, uint16_t ms) {
   if (ms < 50) ms = 50;
@@ -2253,11 +2364,18 @@ void settings_set_wd_hop_helper_ms(FSettings *settings, uint16_t ms) {
   if (settings) settings->wd_hop_helper_ms = ms;
 }
 uint16_t settings_get_wd_hop_helper_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_helper_ms : 100;
+  return settings ? settings->wd_hop_helper_ms : 125;
 }
 void settings_set_wd_weighted_5g(FSettings *settings, bool enabled) {
   if (settings) settings->wd_weighted_5g = enabled;
 }
 bool settings_get_wd_weighted_5g(const FSettings *settings) {
   return settings ? settings->wd_weighted_5g : true;
+}
+
+void settings_set_wifi_auto_reconnect(FSettings *settings, bool enabled) {
+  if (settings) settings->wifi_auto_reconnect = enabled;
+}
+bool settings_get_wifi_auto_reconnect(const FSettings *settings) {
+  return settings ? settings->wifi_auto_reconnect : true;
 }

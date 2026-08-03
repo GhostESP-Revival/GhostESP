@@ -28,7 +28,6 @@ plugins/
   apps/<app_id>/            Extracted app folders
     manifest.json
     <entry>.so
-  packages/                 .gapp archive discovery
   app_cache/                Auto-extracted .gapp content
   appdata/<app_id>/         Per-app persistent storage
     .state.json             Quarantine / failure state
@@ -64,6 +63,20 @@ plugins/
 ```
 
 Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly recommended and required when `NATIVE_SD_APPS_REQUIRE_TARGET_MATCH` is enabled (default).
+
+### Hardware Requirements
+
+Use `"requires_features"` to prevent discovery/launch on unsupported input hardware. Supported values are `touchscreen`, `joystick` (or `dpad`), `encoder`, and `keyboard`.
+
+```json
+"requires_features": ["joystick"]
+```
+
+The App Gallery reports the missing requirement, and the loader rejects CLI/direct launches as well.
+
+### Tick Rate
+
+Apps with an `on_tick` callback run every 100 ms by default. Set `"tick_interval_ms"` to request a per-app interval from 16 to 1000 ms. Use this only for apps that need regular updates; Doom uses `28` ms to match its 35 Hz game tic.
 
 ### Permissions
 
@@ -102,6 +115,7 @@ Required fields: `id`, `name`, `entry`, `api_version`. `target` is strongly reco
 | `audio` | Reserved for microphone/audio APIs |
 | `settings` | Limited settings read/write/save APIs |
 | `zigbee` | Reserved for IEEE 802.15.4/Zigbee APIs |
+| `espnow` | Nearby ESP-NOW discovery and messaging |
 
 ## Entry Point
 
@@ -135,7 +149,7 @@ api->ui_button_create(root, "Run", on_run_clicked, NULL);
 api->ui_show_popup("My App", "Done");
 ```
 
-The UI layer provides screens, cards, labels, buttons, popups, detail views, options menus, scan status overlays, canvas drawing, arc/line widgets, animations, paged menus, input dialogs, flex layout, and theme color access. See the SDK header for the full surface.
+The UI layer provides screens, cards, labels, buttons, popups, detail views, options menus, scan status overlays, canvas drawing, RGB565 framebuffer blits with nearest-neighbor scaling, arc/line widgets, animations, paged menus, input dialogs, flex layout, and theme color access. See the SDK header for the full surface.
 
 The stable UI layer is intentionally decoupled from GhostESP's internal view code — apps stay source-compatible as firmware views change.
 
@@ -190,7 +204,7 @@ Xtensa and RISC-V app binaries are not interchangeable. Build one `.so` per targ
 
 Custom streaming archive (not ZIP). Header: 4-byte magic `GAPP`, version, flags, file count. Each file entry: `FILE` magic, compression method (0=store, 1=raw-deflate), path, sizes, FNV-1a 64-bit checksum, then payload. Firmware extracts `.gapp` files into `/mnt/ghostesp/app_cache/` because `elf_loader` needs a real `.so` file path for `dlopen()`.
 
-Drop `.gapp` files into `/mnt/ghostesp/packages/` or `/mnt/ghostesp/apps/` for automatic discovery. The gallery reload path detects new/changed packages, extracts them to cache, and registers the app. Removing the source `.gapp` unregisters it on the next reload.
+Drop `.gapp` files into `/mnt/ghostesp/apps/`, then reboot the device. GhostESP discovers new packages during startup, extracts them into cache, and registers the app.
 
 ## Quick Start
 
@@ -208,7 +222,7 @@ python plugins/tools/package_app.py plugins/examples/my_tool
 python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 ```
 
-Copy `manifest.json` and the `.so` to `/mnt/ghostesp/apps/<id>/` on the SD card, or drop the `.gapp` into `/mnt/ghostesp/packages/`.
+Copy `manifest.json` and the `.so` to `/mnt/ghostesp/apps/<id>/` on the SD card, or drop the `.gapp` into `/mnt/ghostesp/apps/` and reboot.
 
 ## GBT (Ghost Build Tool)
 

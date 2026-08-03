@@ -1,28 +1,36 @@
 ---
 title: "SD Card"
 description: "Using SD card storage with GhostESP for file management, captures, and configuration."
-weight: 40
+weight: 90
 ---
 
 GhostESP uses SD cards to store captures, logs, and files. Learn how to manage files and configure pins.
 
 ## Storage Structure
 
-When initialized, GhostESP creates the following directory structure:
+When initialized, GhostESP creates the following directory structure. Result
+locations are part of the public storage layout; see
+[Storage Layout]({{< relref "storage-layout.md" >}}) for formats, app data,
+and folders that should not be used as backups.
 
 ```
 /mnt/ghostesp/
-├── debug/          # Debug logs
-├── pcaps/          # Packet captures
-├── scans/          # Scan results
-├── gps/            # GPS/wardriving logs
-├── games/          # Game saves
+├── captures/       # Motion JPEG snapshots
+├── pcaps/          # Standard packet captures
+├── scans/          # Saved scan reports
+├── sweeps/         # sweep_N.csv radio reports
+├── gps/            # WiGLE-compatible wardriving CSV
+├── ghostchi/       # Autonomous captures, logs, and state
+├── logs/           # Diagnostics and coredumps
 ├── evil_portal/
 │   └── portals/    # Custom portal HTML files
 ├── infrared/
 │   ├── remotes/    # Learned IR signals
 │   └── universals/ # Universal IR databases
-└── nfc/            # NFC card data (if enabled)
+├── nfc/            # NFC card data (if enabled)
+├── apps/           # Native SD app packages
+├── scripts/        # GhostScript packages
+└── themes/          # Theme packages
 ```
 
 ## Web Serial Interface
@@ -97,7 +105,7 @@ Use indices in subsequent commands:
 
 ```
 sd info 2         # Get info for config.txt
-sd cat 3 1000     # Read first 1000 bytes of log.csv
+sd read 3 0 1000  # Read first 1000 bytes of log.csv
 ```
 
 ### File Info
@@ -304,8 +312,8 @@ All `sd` command responses use a consistent format for scripting:
 | `SD:DIR:[n] name` | Directory entry with index |
 | `SD:FILE:[n] name size` | File entry with index and size |
 | `SD:INFO:key=value` | File info key-value pair |
-| `SD:CAT:BEGIN:path` | File content start marker |
-| `SD:CAT:END:bytes=n` | File content end marker |
+| `SD:READ:BEGIN:path` | File content start marker |
+| `SD:READ:END:bytes=n` | File content end marker |
 | `SD:TREE:path` | Tree listing header |
 | `SD:EMPTY` | Empty directory |
 

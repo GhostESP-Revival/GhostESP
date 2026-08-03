@@ -1,5 +1,6 @@
 #include "managers/views/nrf24_analyzer_view.h"
 #include "sdkconfig.h"
+#include "gui/design_tokens.h"
 
 /* #define NRF24_JAM_DETECT_DEBUG */
 
@@ -1042,7 +1043,10 @@ static void nrf24_timer_cb(lv_timer_t *timer) {
         }
 
         uint8_t raw_level = (uint8_t)((hits * 100) / samples_per_channel);
-        s_levels[ch] = (uint8_t)((s_levels[ch] * 3 + raw_level) / 4);
+        /* Heavier smoothing than a plain 3:1 EMA — RPD is a 1-bit carrier
+         * detect, not analog RSSI, so raw_level is coarsely quantized and a
+         * single noisy sample can otherwise swing the bar by 25% in one tick. */
+        s_levels[ch] = (uint8_t)((s_levels[ch] * 5 + raw_level) / 6);
 
         if (s_levels[ch] > s_peaks[ch]) {
             s_peaks[ch] = s_levels[ch];
@@ -1389,6 +1393,7 @@ void nrf24_analyzer_create(void) {
     lv_obj_add_event_cb(s_graph, nrf24_graph_draw_event, LV_EVENT_DRAW_MAIN, NULL);
 
     s_toggle_btn = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_toggle_btn);
     lv_obj_set_size(s_toggle_btn, 92, button_h);
     lv_obj_align(s_toggle_btn, LV_ALIGN_BOTTOM_LEFT, 8, -8);
     lv_obj_set_style_radius(s_toggle_btn, 6, LV_PART_MAIN);
@@ -1404,6 +1409,7 @@ void nrf24_analyzer_create(void) {
     lv_obj_center(s_toggle_label);
 
     s_back_btn = lv_btn_create(s_content);
+    gui_apply_pressed_style(s_back_btn);
     lv_obj_set_size(s_back_btn, 92, button_h);
     lv_obj_align(s_back_btn, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
     lv_obj_set_style_radius(s_back_btn, 6, LV_PART_MAIN);

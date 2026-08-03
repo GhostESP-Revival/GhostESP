@@ -11,7 +11,7 @@ ESP32-S3 devices can use USB Host mode to accept input from a USB keyboard.
 - **ESP32-S3 based device** (Cardputer ADV, T-Deck, etc.)
 - **USB OTG adapter** (Type-C to USB-A)
 - **USB keyboard**
-- **CONFIG_USE_USB_KEYBOARD** enabled in build config (ESP32-S3 only)
+- **USE_USB_KEYBOARD** enabled in build config (ESP32-S3 only)
 
 ## Enabling USB Host Mode
 
@@ -19,7 +19,7 @@ USB Host mode can be enabled in two ways:
 
 ### Via Settings Menu
 
-1. Navigate to **Settings → System & Hardware**
+1. Navigate to **Settings → General → Power**
 2. Find **USB Host Mode**
 3. Toggle to **On**
 

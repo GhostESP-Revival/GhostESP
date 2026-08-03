@@ -1,0 +1,6 @@
+# Partition table used only to build the tiny updater app. The resulting app
+# image is embedded in the main Banshee C5 firmware and written to the real
+# updater partition at 0x650000.
+# Name,     Type, SubType, Offset,  Size,    Flags
+nvs,        data, nvs,     0x9000,  0x7000,
+factory,    app,  factory, 0x10000, 0x200000,

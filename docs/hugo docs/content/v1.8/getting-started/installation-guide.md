@@ -28,7 +28,7 @@ Choose your preferred method:
 ### Web Flasher Method
 
 1. **Prepare**
-   - Open **[flasher.ghostesp.net](https://flasher.ghostesp.net/)** in Chrome.
+   - Open **[ghostesp.net/flasher](https://ghostesp.net/flasher)** in Chrome.
    - Close apps using the serial port. If the site glitches, clear cache.
 
 2. **Enter Bootloader**

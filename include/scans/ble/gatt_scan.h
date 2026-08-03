@@ -24,7 +24,7 @@
  * Initializes BLE if needed, clears any previous results, and starts
  * a BLE scan with the GATT device detection callback registered.
  */
-void gatt_scan_start(void);
+bool gatt_scan_start(void);
 
 /**
  * @brief Stop scanning for BLE devices

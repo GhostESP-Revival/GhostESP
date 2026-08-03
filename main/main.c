@@ -1,4 +1,5 @@
 #include "boot_banner_text.h"
+#include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
 #include "core/serial_manager.h"
@@ -13,8 +14,14 @@
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
+#include "managers/peer_storage_manager.h"
+#include "managers/self_ota_manager.h"
+#include "managers/crash_reporter.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
+#include "gui/toast.h"
 #include "managers/plugin_manager.h"
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
@@ -43,6 +50,7 @@
 #include <string.h>
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
 #include "esp_partition.h"
 #endif
 
@@ -67,6 +75,7 @@
 #include "managers/views/splash_screen.h"
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/tdongle_status_screen.h"
+#include "gui/popup.h"
 #include "gui/screen_layout.h"
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 #include "managers/views/nrf24_analyzer_view.h"
@@ -114,6 +123,41 @@ static void apply_main_menu_background_cb(void *arg) {
     gui_screen_apply_background(main_menu_view.root);
 }
 
+#if GHOSTESP_OTA_SUPPORTED
+static char s_self_ota_boot_error[160];
+
+static void self_ota_boot_error_toast_timer_cb(lv_timer_t *timer) {
+    lv_timer_del(timer);
+    if (s_self_ota_boot_error[0] != '\0') {
+        toast_show(s_self_ota_boot_error, TOAST_WARN);
+        s_self_ota_boot_error[0] = '\0';
+    }
+}
+
+static void schedule_self_ota_boot_error_toast_cb(void *arg) {
+    (void)arg;
+    if (s_self_ota_boot_error[0] == '\0') return;
+
+    lv_timer_t *timer = lv_timer_create(self_ota_boot_error_toast_timer_cb, 1200, NULL);
+    if (timer) {
+        lv_timer_set_repeat_count(timer, 1);
+    } else {
+        toast_show(s_self_ota_boot_error, TOAST_WARN);
+        s_self_ota_boot_error[0] = '\0';
+    }
+}
+
+static void maybe_schedule_self_ota_boot_error_popup(void) {
+    if (!self_ota_manager_is_supported()) return;
+
+    SelfOtaStatus status = self_ota_manager_get_status();
+    if (status.state != SELF_OTA_STATE_FAILED || status.error_msg[0] == '\0') return;
+
+    snprintf(s_self_ota_boot_error, sizeof(s_self_ota_boot_error), "%s", status.error_msg);
+    display_manager_run_on_lvgl(schedule_self_ota_boot_error_toast_cb, NULL);
+}
+#endif
+
 static void splash_asset_pack_progress_cb(float pct, const char *stage, void *user) {
     (void)user;
     boot_status_set_progress(pct, stage);
@@ -135,13 +179,17 @@ static void splash_plugin_progress_cb(float pct, int files_scanned, int files_to
 #include "managers/microphone/mic_visualizer.h"
 #endif
 
-// Helper macro for measuring RAM usage
+// Helper macro for measuring RAM usage (internal + PSRAM) around a feature init call
 #define MEASURE_INIT_RAM(name, init_call) do { \
-    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
-    ESP_LOGI(TAG, "Free INTERNAL RAM before %s: %d bytes", name, (int)before); \
+    size_t before_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    size_t before_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); \
+    ESP_LOGI(TAG, "[%s] before: internal_free=%d bytes, psram_free=%d bytes", name, (int)before_int, (int)before_psram); \
     init_call; \
-    size_t after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
-    ESP_LOGI(TAG, "Free INTERNAL RAM after %s: %d bytes (used: %d bytes)", name, (int)after, (int)(before - after)); \
+    size_t after_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL); \
+    size_t after_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); \
+    ESP_LOGI(TAG, "[%s] after: internal_free=%d bytes (used=%d), psram_free=%d bytes (used=%d)", name, \
+             (int)after_int, (int)(before_int - after_int), \
+             (int)after_psram, (int)(before_psram - after_psram)); \
 } while(0)
 
 RGBManager_t rgb_manager;  // Global instance for entire project
@@ -149,9 +197,31 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
 
+/* timegm() is not available in ESP-IDF's newlib for ESP32-C5 (RISC-V).
+ * Provide a minimal implementation that both main.c (RTC sync) and
+ * minmea.c (GPS timestamp conversion) can link against. */
+time_t timegm(struct tm *tm) {
+    int y = tm->tm_year + 1900;
+    int m = tm->tm_mon + 1;
+    int d = tm->tm_mday;
+    // Days from 1970-01-01 to year y, month m, day d
+    static const int days_before_month[12] = {
+        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+    };
+    int64_t days = (int64_t)(y - 1970) * 365 + (y - 1969) / 4
+                 - (y - 1901) / 100 + (y - 1601) / 400
+                 + days_before_month[m - 1] + d - 1;
+    if (m > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) {
+        days++;
+    }
+    return (time_t)(days * 86400 + tm->tm_hour * 3600
+                  + tm->tm_min * 60 + tm->tm_sec);
+}
+
 
 
 static void print_boot_banner(void) {
+    if (!shell_get_banner_enabled()) return;
     static const char *const banners[] = {
         BOOT_BANNER_BLOCK,
         BOOT_BANNER_GHOSTS,
@@ -314,24 +384,68 @@ static void coredump_write_summary(const char *summary_path, const char *bin_pat
     if (elf_offset > 0) {
         fprintf(f, "elf_offset=%d\n", elf_offset);
     }
-    fprintf(f, "panic_reason=%s\n", panic_reason && panic_reason[0] ? panic_reason : "not_available");
+    fprintf(f, "panic_reason=%s\n", panic_reason && panic_reason[0] ? panic_reason : "run idf.py coredump-info for decoded panic reason");
     fprintf(f, "decode_hint=idf.py coredump-info -c <file>\n");
     fclose(f);
 }
 
-static void coredump_autosave_on_boot(void) {
+/* Decode the panic reason recorded in the flash coredump, if any. Returns
+ * true and fills out[] with a short human-readable reason. */
+static bool coredump_get_panic_reason_text(char *out, size_t out_len) {
+    if (!out || out_len == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    esp_err_t err = esp_core_dump_get_panic_reason(out, out_len);
+    if (err == ESP_OK && out[0] != '\0') {
+        return true;
+    }
+#if defined(__riscv)
+    static const char *const riscv_causes[] = {
+        "Instruction address misaligned", "Instruction access fault", "Illegal instruction",
+        "Breakpoint", "Load address misaligned", "Load access fault",
+        "Store address misaligned", "Store access fault"
+    };
+    esp_core_dump_summary_t summary;
+    if (esp_core_dump_get_summary(&summary) == ESP_OK) {
+        uint32_t cause = summary.ex_info.mcause;
+        if (cause < sizeof(riscv_causes) / sizeof(riscv_causes[0])) {
+            snprintf(out, out_len, "%s", riscv_causes[cause]);
+        } else {
+            snprintf(out, out_len, "RISC-V exception %lu", (unsigned long)cause);
+        }
+        return true;
+    }
+#endif
+    return false;
+}
+
+/* Returns true if a coredump was found in flash, meaning the previous boot
+ * ended in a crash. The coredump is saved to the SD card when possible. */
+static bool coredump_autosave_on_boot(char *panic_reason, size_t panic_reason_len) {
+    if (panic_reason && panic_reason_len) {
+        panic_reason[0] = '\0';
+    }
     const esp_partition_t *part = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA,
         ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
         NULL);
     if (!part) {
-        return;
+        return false;
     }
 
     int elf_offset = -1;
     uint32_t sig = 0;
     if (!coredump_detect_present_and_sig(part, &elf_offset, &sig)) {
-        return;
+        return false;
+    }
+
+    char decoded_reason[256];
+    if (!coredump_get_panic_reason_text(decoded_reason, sizeof(decoded_reason))) {
+        decoded_reason[0] = '\0';
+    }
+    if (panic_reason && panic_reason_len) {
+        snprintf(panic_reason, panic_reason_len, "%s", decoded_reason);
     }
 
     bool display_was_suspended = false;
@@ -339,7 +453,7 @@ static void coredump_autosave_on_boot(void) {
     if (!sd_card_manager.is_initialized) {
         if (sd_card_mount_for_flush(&display_was_suspended) != ESP_OK) {
             ESP_LOGW(TAG, "Coredump present but SD unavailable for autosave");
-            return;
+            return true;
         }
         did_jit_mount = true;
     }
@@ -378,9 +492,7 @@ static void coredump_autosave_on_boot(void) {
         goto cleanup;
     }
 
-    const char *panic_reason = "run idf.py coredump-info for decoded panic reason";
-
-    coredump_write_summary(summary_path, bin_path, part, elf_offset, panic_reason);
+    coredump_write_summary(summary_path, bin_path, part, elf_offset, decoded_reason);
     coredump_write_saved_sig(sig_id);
     ESP_LOGI(TAG, "Coredump autosaved (%u bytes): %s", (unsigned)bytes_written, bin_path);
 
@@ -397,6 +509,7 @@ cleanup:
     if (did_jit_mount) {
         sd_card_unmount_after_flush(display_was_suspended);
     }
+    return true;
 }
 #endif
 
@@ -428,6 +541,7 @@ static void splash_boot_step_done(uint32_t step) {
 
 static void boot_app_discovery_task(void *arg) {
     (void)arg;
+    ESP_LOGI(TAG, "Boot app discovery started");
 #ifdef CONFIG_WITH_SCREEN
     plugin_manager_set_progress_cb(splash_plugin_progress_cb, NULL);
     boot_status_set_progress(-1.0f, "Checking apps...");
@@ -435,6 +549,7 @@ static void boot_app_discovery_task(void *arg) {
     if (plugin_manager_reload() < 0) {
         ESP_LOGW(TAG, "Boot plugin reload failed: %s", plugin_manager_last_error());
     }
+    ESP_LOGI(TAG, "Boot app discovery finished (%d apps)", plugin_manager_count());
 #ifdef CONFIG_WITH_SCREEN
     plugin_manager_set_progress_cb(NULL, NULL);
     splash_boot_step_done(BOOT_DONE_PLUGIN);
@@ -453,6 +568,26 @@ static bool start_boot_app_discovery_task(void) {
     return true;
 }
 
+#if GHOSTESP_OTA_SUPPORTED
+// Both checks are low-priority, check-only passes -- they must never
+// download or flash. Shared by one task since neither blocks for long:
+// each background_check() call is a no-op unless its own connectivity
+// gate (GhostLink session / board has Wi-Fi) is already satisfied.
+static void ota_background_check_task(void *arg) {
+    (void)arg;
+    // GhostLink connects independently of Wi-Fi, so the peer check can go
+    // first; give the boot sequence a moment to settle either way.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    peer_ota_manager_background_check();
+
+    // Extra time for Wi-Fi to connect (if configured) and DNS to be ready --
+    // Cardputer ADV and similar boards need it.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    ota_manager_background_check();
+    vTaskDelete(NULL);
+}
+#endif
+
 static void deferred_sd_init_task(void *arg) {
     // Short initial delay: the splash holds the screen during boot work, so we
     // only need enough time for splash_create to render the progress bar.
@@ -462,7 +597,9 @@ static void deferred_sd_init_task(void *arg) {
 #ifdef CONFIG_WITH_SCREEN
     boot_status_set_progress(-1.0f, "Mounting SD card...");
 #endif
-    if (sd_card_init() != ESP_OK) {
+    esp_err_t sd_init_ret = ESP_OK;
+    MEASURE_INIT_RAM("SD Card init", sd_init_ret = sd_card_init());
+    if (sd_init_ret != ESP_OK) {
         ESP_LOGW(TAG, "Deferred SD Card init failed, skipping coredump autosave");
 #ifdef CONFIG_WITH_SCREEN
         boot_status_set_progress(100.0f, "SD unavailable");
@@ -480,10 +617,15 @@ static void deferred_sd_init_task(void *arg) {
 #ifdef CONFIG_WITH_SCREEN
     boot_status_set_progress(-1.0f, "Saving core dump...");
 #endif
-    coredump_autosave_on_boot();
+    char panic_reason[256];
+    bool had_crash = coredump_autosave_on_boot(panic_reason, sizeof(panic_reason));
+    if (had_crash) {
+        crash_reporter_set_boot_crash(panic_reason);
+    }
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
+    splash_require_completion();
     asset_pack_set_progress_cb(splash_asset_pack_progress_cb, NULL);
     boot_status_set_progress(0.0f, "Loading asset pack...");
     esp_err_t asset_err = asset_pack_load_active();
@@ -498,9 +640,13 @@ static void deferred_sd_init_task(void *arg) {
     // Hand off app discovery to its own PSRAM-backed static task so the GAPP
     // inflate can use the same fat stack the Apps menu allocates. The SD Init
     // task stays at 6K; the splash holds until both boot steps are signalled.
+#if CONFIG_ENABLE_NATIVE_SD_APPS
     if (!start_boot_app_discovery_task()) {
         splash_boot_step_done(BOOT_DONE_PLUGIN);
     }
+#else
+    splash_boot_step_done(BOOT_DONE_PLUGIN);
+#endif
     splash_boot_step_done(BOOT_DONE_SD_ASSET);
 #endif
     vTaskDelete(NULL);
@@ -508,8 +654,16 @@ static void deferred_sd_init_task(void *arg) {
 
 void app_main(void) {
     memory_debug_start_boot_trace();
-    ghostchi_mood_init();
+    MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
+
+#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN)
+    /* Keep the card deselected before any shared-bus display/touch traffic. */
+    gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
+    gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
+    ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+#endif
 
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
@@ -530,11 +684,6 @@ void app_main(void) {
         gpio_set_level(12, 1);
         ESP_LOGI(TAG, "CC1101 SS pin 12 set HIGH");
 
-        // SD Card CS pin
-        gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
-        gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
-        ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
     }
 #endif
 
@@ -634,6 +783,31 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing Settings");
     MEASURE_INIT_RAM("Settings init", settings_init(&G_Settings));
 
+#if GHOSTESP_OTA_SUPPORTED
+    MEASURE_INIT_RAM("OTA manager init", ota_manager_init());
+#ifndef CONFIG_WITH_SCREEN
+    // Screen-less boards (e.g. somethingsomething2 / Banshee S3) never reach
+    // the display-init confirm-boot-ok hook further down (it's compiled out
+    // entirely for them) -- settings having loaded successfully is as good a
+    // "did boot succeed" checkpoint as this board gets.
+    ota_manager_confirm_boot_ok();
+#endif
+#endif
+
+#if GHOSTESP_OTA_SUPPORTED
+    // Gated the same as the ota_manager_init() call above -- peer_ota_manager.c
+    // and self_ota_manager.c are only ever meaningfully used on 8MB/16MB boards
+    // (somethingsomething/somethingsomething2 today), but without this guard
+    // these calls would reference their symbols unconditionally on every board,
+    // pulling both files' static buffers into every 4MB build's BSS for nothing.
+    if (peer_ota_manager_is_supported()) {
+        peer_ota_manager_init();
+    }
+    if (self_ota_manager_is_supported()) {
+        MEASURE_INIT_RAM("Self-OTA manager init", self_ota_manager_init());
+    }
+#endif
+
     // Apply timezone from settings
     const char *tz = settings_get_timezone_str(&G_Settings);
     if (tz && strlen(tz) > 0) {
@@ -696,12 +870,17 @@ void app_main(void) {
 #ifdef CONFIG_HAS_BADUSB
     badusb_manager_register_stream_handler();
 #endif
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+        peer_storage_manager_init_peer();
+    }
+#endif
 #ifdef CONFIG_WITH_ETHERNET
-    eth_comm_handler_init();
+    MEASURE_INIT_RAM("Ethernet Comm Handler init", eth_comm_handler_init());
 #endif
 #ifdef CONFIG_HAS_MIC
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
-    mic_visualizer_init();
+    MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
 #ifdef CONFIG_HAS_TLV320DAC_I2S
@@ -709,8 +888,8 @@ void app_main(void) {
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
 #ifdef CONFIG_HAS_CAMERA
-    motion_detector_init();
-    camera_stream_init();
+    MEASURE_INIT_RAM("Motion Detector init", motion_detector_init());
+    MEASURE_INIT_RAM("Camera Stream init", camera_stream_init());
 #endif
 #if defined(CONFIG_WITH_SCREEN) && (defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE))
     nrf24_analyzer_register_stream_handler();
@@ -776,6 +955,15 @@ void app_main(void) {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
     }
     MEASURE_INIT_RAM("Deferred display peripherals", display_manager_init_deferred_peripherals());
+#if GHOSTESP_OTA_SUPPORTED
+    // Boot got this far without crashing -- confirm the image and cancel any
+    // pending bootloader rollback (no-op if this wasn't a post-OTA boot).
+    ota_manager_confirm_boot_ok();
+    maybe_schedule_self_ota_boot_error_popup();
+#endif
+    // If the previous boot crashed, show a short popup once the boot
+    // screens are gone (Flipper Zero style crash notice).
+    crash_reporter_init();
 #ifdef CONFIG_HAS_DRV2605_HAPTICS
     esp_err_t haptic_err;
     MEASURE_INIT_RAM("Haptic Manager", haptic_err = haptic_manager_init());
@@ -809,6 +997,16 @@ void app_main(void) {
             ESP_LOGE(TAG, "Failed to create SD Init task");
         }
     }
+
+#if GHOSTESP_OTA_SUPPORTED
+    {
+        BaseType_t ota_task_rc = xTaskCreate(ota_background_check_task, "OTA Check", 6144, NULL,
+                                              tskIDLE_PRIORITY + 1, NULL);
+        if (ota_task_rc != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create OTA background check task");
+        }
+    }
+#endif
 
     // Initialize RGB Manager based on persisted settings or compile-time defaults
     {
@@ -888,14 +1086,28 @@ void app_main(void) {
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     float percent_internal_free = (total_internal > 0) ? (100.0f * free_internal / total_internal) : 0.0f;
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    float percent_psram_free = (total_psram > 0) ? (100.0f * free_psram / total_psram) : 0.0f;
 
     ESP_LOGI(TAG, "Free heap after init: %d / %d bytes (%.1f%% free)", (int)free_heap, (int)total_heap, percent_free);
     ESP_LOGI(TAG, "Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)", (int)free_internal, (int)total_internal, percent_internal_free);
+    if (total_psram > 0) {
+        ESP_LOGI(TAG, "Free PSRAM after init: %d / %d bytes (%.1f%% free)", (int)free_psram, (int)total_psram, percent_psram_free);
+    } else {
+        ESP_LOGI(TAG, "PSRAM not present on this build");
+    }
     printf("Free heap after init: %d / %d bytes (%.1f%% free)\n", (int)free_heap, (int)total_heap, percent_free);
     printf("Free INTERNAL RAM after init: %d / %d bytes (%.1f%% free)\n", (int)free_internal, (int)total_internal, percent_internal_free);
+    if (total_psram > 0) {
+        printf("Free PSRAM after init: %d / %d bytes (%.1f%% free)\n", (int)free_psram, (int)total_psram, percent_psram_free);
+    }
 
 #ifdef CONFIG_HAS_RTC_CLOCK
-    // Sync system time from RTC on boot
+    // Sync system time from RTC on boot. The RTC stores UTC, so the struct tm
+    // must be interpreted as UTC. mktime() would honor the TZ env var and treat
+    // the fields as local time, shifting the restored clock by the timezone
+    // offset; timegm() interprets the fields as UTC instead.
     RTC_Date rtc_time;
     if (rtc_get_datetime(&rtc_time) == ESP_OK) {
         struct timeval tv = {0};
@@ -907,8 +1119,9 @@ void app_main(void) {
         tm.tm_hour = rtc_time.hour;
         tm.tm_min = rtc_time.minute;
         tm.tm_sec = rtc_time.second;
+        tm.tm_isdst = 0;
         
-        tv.tv_sec = mktime(&tm);
+        tv.tv_sec = timegm(&tm);
         tv.tv_usec = 0;
         
         if (tv.tv_sec > 1600000000) { // Valid time (after Sept 2020)
@@ -930,5 +1143,5 @@ void app_main(void) {
     ESP_LOGI(TAG, "Ghost ESP INIT complete.");
     print_boot_banner();
     printf("\n");
-    printf("ghostcli> Type 'help' for available commands\n");
+    printf("Type 'help' for available commands\n");
 }

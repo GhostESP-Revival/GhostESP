@@ -13,6 +13,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "core/system_manager.h"
 #include "core/glog.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -156,12 +157,22 @@ void eapol_logoff_start(void) {
         return;
     }
     
+    // Injecting on WIFI_IF_AP requires the AP interface to be active. Set AP
+    // mode here (as deauth/beacon-spam/channel-switch do) instead of relying on
+    // the WiFi manager having booted in APSTA — it now runs STA-only when the
+    // SoftAP is disabled in settings, so an ambient AP interface isn't guaranteed.
+    esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (mode_err != ESP_OK) {
+        glog("EAPOL Logoff: failed to set AP mode: %s\n", esp_err_to_name(mode_err));
+        return;
+    }
+
     eapol_logoff_running = true;
     eapol_logoff_packets_sent = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     status_display_show_attack("EAPOL logoff", "running");
 #endif
-    BaseType_t attack_rc = xTaskCreate(eapol_logoff_task, "eapol_logoff", 2048, NULL, 5, &eapol_logoff_task_handle);
+    BaseType_t attack_rc = xTaskCreate_psram(eapol_logoff_task, "eapol_logoff", 2048, NULL, 5, &eapol_logoff_task_handle);
     if (attack_rc != pdPASS) {
         glog("EAPOL Logoff failed to start (attack=%ld)\n", (long)attack_rc);
         eapol_logoff_running = false;

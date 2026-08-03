@@ -32,6 +32,7 @@ extern "C" {
 #define PLUGIN_APP_QUARANTINE_THRESHOLD 3u
 
 typedef uint64_t plugin_permission_t;
+typedef uint32_t plugin_feature_t;
 
 #define PLUGIN_PERMISSION_UI           (1ULL << 0)
 #define PLUGIN_PERMISSION_STORAGE      (1ULL << 1)
@@ -66,6 +67,12 @@ typedef uint64_t plugin_permission_t;
 #define PLUGIN_PERMISSION_SETTINGS     (1ULL << 30)
 #define PLUGIN_PERMISSION_ZIGBEE       (1ULL << 31)
 #define PLUGIN_PERMISSION_NRF24        (1ULL << 32)
+#define PLUGIN_PERMISSION_ESPNOW       (1ULL << 33)
+
+#define PLUGIN_FEATURE_TOUCHSCREEN     (1U << 0)
+#define PLUGIN_FEATURE_DPAD            (1U << 1)
+#define PLUGIN_FEATURE_ENCODER         (1U << 2)
+#define PLUGIN_FEATURE_KEYBOARD        (1U << 3)
 
 typedef struct {
     char id[PLUGIN_APP_ID_MAX];
@@ -91,6 +98,8 @@ typedef struct {
     uint32_t data_version;
     uint32_t memory_limit;
     uint32_t stack_size;
+    uint32_t tick_interval_ms;
+    plugin_feature_t required_features;
     uint16_t icon_width;
     uint16_t icon_height;
     uint32_t launch_failure_count;
@@ -111,6 +120,7 @@ const plugin_app_manifest_t *plugin_manager_find(const char *id);
 const lv_img_dsc_t *plugin_manager_get_icon(const plugin_app_manifest_t *app);
 bool plugin_manager_target_supported(void);
 bool plugin_manager_target_matches(const plugin_app_manifest_t *app);
+bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app, char *missing_feature, size_t missing_feature_len);
 bool plugin_manager_reset_app_state(const char *id);
 const char *plugin_manager_last_error(void);
 

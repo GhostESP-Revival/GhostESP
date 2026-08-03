@@ -5,6 +5,7 @@
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -26,6 +27,10 @@
 void *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
 
 static const char *TAG = "EthScanAsync";
+
+// Cap ARP sweep range derived from the real netmask (protects against very
+// large subnets, e.g. a /16, turning into an hours-long scan).
+#define ETH_ARP_SCAN_MAX_HOSTS 512
 
 static eth_scan_results_t s_results;
 static volatile bool      s_running      = false;
@@ -63,9 +68,11 @@ static const char *port_to_service(uint16_t port) {
 
 // ---------------------------------------------------------------------------
 // ARP scan task
-// Mirrors handle_eth_arp_cmd: sends ARP requests in batches of 10 across the
-// local /24 subnet derived from the interface IP & netmask, then reads the
-// lwIP ARP table and stores hits in s_results.arp_hosts[].
+// Mirrors handle_eth_arp_cmd: sends ARP requests in batches across the
+// actual subnet derived from the interface IP & real netmask (not a
+// hardcoded /24 -- smaller VLAN subnets need the true range), then reads
+// the lwIP ARP table and stores hits in s_results.arp_hosts[]. Batch size
+// and wait times are tuned to match scans/wifi/arp_scan.c.
 // ---------------------------------------------------------------------------
 static void arp_scan_task(void *arg) {
     ESP_LOGI(TAG, "ARP scan task started");
@@ -94,62 +101,60 @@ static void arp_scan_task(void *arg) {
             goto done;
         }
 
-        // Build subnet prefix exactly as commandline.c does: use network = ip & netmask
-        // The lwIP addresses are stored in little-endian byte order (addr byte 0 = octet 0).
-        uint32_t ip       = ip_info.ip.addr;
-        uint32_t netmask  = ip_info.netmask.addr;
-        uint32_t network  = ip & netmask;
+        const uint32_t ip_host      = ntohl(ip_info.ip.addr);
+        const uint32_t netmask_host = ntohl(ip_info.netmask.addr);
+        const uint32_t network_host = ip_host & netmask_host;
+        const uint32_t bcast_host   = network_host | (~netmask_host);
+
+        uint32_t start_host = network_host + 1;
+        uint32_t end_host   = (bcast_host > network_host) ? bcast_host - 1 : network_host;
+        if (end_host < start_host) {
+            start_host = network_host;
+            end_host   = bcast_host;
+        }
+        if (end_host - start_host + 1 > ETH_ARP_SCAN_MAX_HOSTS) {
+            end_host = start_host + ETH_ARP_SCAN_MAX_HOSTS - 1;
+        }
 
         char subnet_prefix[16];
-        snprintf(subnet_prefix, sizeof(subnet_prefix), "%d.%d.%d.",
-                 (int)((network >>  0) & 0xFF),
-                 (int)((network >>  8) & 0xFF),
-                 (int)((network >> 16) & 0xFF));
+        ip4_addr_t network_addr;
+        network_addr.addr = htonl(network_host);
+        ip4addr_ntoa_r(&network_addr, subnet_prefix, sizeof(subnet_prefix));
 
-        ESP_LOGI(TAG, "ARP scan: %s0/24", subnet_prefix);
+        ESP_LOGI(TAG, "ARP scan: %s (%u hosts)", subnet_prefix,
+                 (unsigned)(end_host - start_host + 1));
 
-        const int START_HOST = 1;
-        const int END_HOST   = 254;
-        const int batch_size = 10;
+        const uint32_t batch_size = 20;
 
-        s_results.progress_total   = END_HOST - START_HOST + 1;
+        s_results.progress_total   = (int)(end_host - start_host + 1);
         s_results.progress_current = 0;
 
-        for (int batch_start = START_HOST;
-             batch_start <= END_HOST && !s_cancelled;
+        for (uint32_t batch_start = start_host;
+             batch_start <= end_host && !s_cancelled;
              batch_start += batch_size) {
 
-            int batch_end = batch_start + batch_size - 1;
-            if (batch_end > END_HOST) batch_end = END_HOST;
+            uint32_t batch_end = batch_start + batch_size - 1;
+            if (batch_end > end_host) batch_end = end_host;
 
             // Send ARP requests for this batch
-            for (int host = batch_start; host <= batch_end && !s_cancelled; host++) {
-                char current_ip[26];
-                snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-
+            for (uint32_t host = batch_start; host <= batch_end && !s_cancelled; host++) {
+                if (host == ip_host) continue;
                 ip4_addr_t target_addr;
-                if (ip4addr_aton(current_ip, &target_addr)) {
-                    etharp_request(lwip_netif, &target_addr);
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
+                target_addr.addr = htonl(host);
+                etharp_request(lwip_netif, &target_addr);
+                vTaskDelay(pdMS_TO_TICKS(5));
             }
 
             if (s_cancelled) break;
 
-            // Wait for ARP replies (5 × 50 ms = 250 ms)
-            for (int i = 0; i < 5 && !s_cancelled; i++) {
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
+            // Wait for ARP replies
+            vTaskDelay(pdMS_TO_TICKS(80));
 
             // Check ARP table for each host in the batch
-            for (int host = batch_start; host <= batch_end && !s_cancelled; host++) {
-                char current_ip[26];
-                snprintf(current_ip, sizeof(current_ip), "%s%d", subnet_prefix, host);
-
+            for (uint32_t host = batch_start; host <= batch_end && !s_cancelled; host++) {
+                if (host == ip_host) continue;
                 ip4_addr_t target_addr;
-                if (!ip4addr_aton(current_ip, &target_addr)) {
-                    continue;
-                }
+                target_addr.addr = htonl(host);
 
                 struct eth_addr    *eth_ret = NULL;
                 const ip4_addr_t   *ip_ret  = NULL;
@@ -158,14 +163,14 @@ static void arp_scan_task(void *arg) {
                 if (arp_idx >= 0 && eth_ret) {
                     if (s_results.arp_count < 64) {
                         eth_arp_result_t *r = &s_results.arp_hosts[s_results.arp_count];
-                        strlcpy(r->ip_str, current_ip, sizeof(r->ip_str));
+                        ip4addr_ntoa_r(&target_addr, r->ip_str, sizeof(r->ip_str));
                         memcpy(r->mac, eth_ret->addr, 6);
                         r->hostname[0] = '\0'; // hostname resolution not attempted
                         s_results.arp_count++;
                     }
                 }
 
-                s_results.progress_current = host - START_HOST + 1;
+                s_results.progress_current = (int)(host - start_host + 1);
             }
         }
     }
@@ -350,10 +355,14 @@ done:
 
 // ---------------------------------------------------------------------------
 // Ping sweep task
-// Mirrors handle_eth_ping_cmd: raw ICMP echo to each host in the local /24.
-// Uses base_host = network & 0xFFFFFF00 (lower 24 bits of host-order IP),
-// iterates host bytes 1-254, skips own IP, stores alive count.
+// Mirrors handle_eth_ping_cmd: raw ICMP echo to each host in the actual
+// DHCP-assigned subnet (derived from the real netmask, not a hardcoded /24 --
+// smaller VLAN subnets, e.g. /25-/28, need the real range or hosts outside
+// the true subnet get pinged for nothing while real neighbors get skipped).
+// Range is capped at ETH_PING_SWEEP_MAX_HOSTS for very large subnets.
 // ---------------------------------------------------------------------------
+#define ETH_PING_SWEEP_MAX_HOSTS 512
+
 static void ping_scan_task(void *arg) {
     ESP_LOGI(TAG, "Ping sweep task started");
 
@@ -369,11 +378,21 @@ static void ping_scan_task(void *arg) {
             goto done;
         }
 
-        // Exactly as commandline.c: convert to host byte order, mask off host octet
         const uint32_t ip_host       = ntohl(ip_info.ip.addr);
         const uint32_t netmask_host  = ntohl(ip_info.netmask.addr);
         const uint32_t network_host  = ip_host & netmask_host;
-        const uint32_t base_host     = network_host & 0xFFFFFF00;
+        const uint32_t bcast_host    = network_host | (~netmask_host);
+
+        uint32_t first_host = network_host + 1;
+        uint32_t last_host  = (bcast_host > network_host) ? bcast_host - 1 : network_host;
+        if (last_host < first_host) {
+            // Degenerate mask (/31, /32): fall back to the two addresses we have.
+            first_host = network_host;
+            last_host  = bcast_host;
+        }
+        if (last_host - first_host + 1 > ETH_PING_SWEEP_MAX_HOSTS) {
+            last_host = first_host + ETH_PING_SWEEP_MAX_HOSTS - 1;
+        }
 
         int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
         if (sock < 0) {
@@ -394,13 +413,14 @@ static void ping_scan_task(void *arg) {
 
         s_results.ping_total   = 0;
         s_results.ping_alive   = 0;
-        s_results.progress_total   = 254;
+        s_results.progress_total   = (int)(last_host - first_host + 1);
         s_results.progress_current = 0;
 
-        for (int host = 1; host <= 254 && !s_cancelled; host++) {
-            s_results.progress_current = host;
+        uint16_t seq = 0;
+        for (uint32_t target_host = first_host; target_host <= last_host && !s_cancelled; target_host++) {
+            seq++;
+            s_results.progress_current = (int)seq;
 
-            const uint32_t target_host = base_host | (uint32_t)host;
             if (target_host == ip_host) {
                 continue; // skip own IP
             }
@@ -417,7 +437,7 @@ static void ping_scan_task(void *arg) {
             icmp.type     = 8;
             icmp.code     = 0;
             icmp.id       = 0xBEEF;
-            icmp.seq      = htons((uint16_t)host);
+            icmp.seq      = htons(seq);
 
             uint16_t *buf16 = (uint16_t *)&icmp;
             uint32_t sum = 0;
@@ -438,6 +458,15 @@ static void ping_scan_task(void *arg) {
                              (struct sockaddr *)&from, &fromlen);
             if (r > 0 && from.sin_addr.s_addr == addr.sin_addr.s_addr) {
                 s_results.ping_alive++;
+                if (s_results.arp_count < 64) {
+                    eth_arp_result_t *hr = &s_results.arp_hosts[s_results.arp_count];
+                    ip4_addr_t resp_addr;
+                    resp_addr.addr = from.sin_addr.s_addr;
+                    ip4addr_ntoa_r(&resp_addr, hr->ip_str, sizeof(hr->ip_str));
+                    memset(hr->mac, 0, 6);
+                    hr->hostname[0] = '\0';
+                    s_results.arp_count++;
+                }
             }
 
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -496,7 +525,7 @@ void eth_scan_start_arp(void) {
     eth_scan_reset();
     s_results.type = ETH_SCAN_TYPE_ARP;
     s_running = true;
-    xTaskCreate(arp_scan_task, "eth_arp_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(arp_scan_task, "eth_arp_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 void eth_scan_start_port(const char *target_ip, bool scan_all) {
@@ -507,7 +536,7 @@ void eth_scan_start_port(const char *target_ip, bool scan_all) {
         strlcpy(s_results.target_ip, target_ip, sizeof(s_results.target_ip));
     }
     s_running = true;
-    xTaskCreate(port_scan_task, "eth_port_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(port_scan_task, "eth_port_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 void eth_scan_start_ping(void) {
@@ -515,7 +544,7 @@ void eth_scan_start_ping(void) {
     eth_scan_reset();
     s_results.type = ETH_SCAN_TYPE_PING;
     s_running = true;
-    xTaskCreate(ping_scan_task, "eth_ping_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(ping_scan_task, "eth_ping_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 #endif // CONFIG_WITH_ETHERNET

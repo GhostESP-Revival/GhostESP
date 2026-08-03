@@ -323,6 +323,11 @@ static void dispatch_fp_scan(void) {
     }
     s_scan_running = true;
     s_scan.type = 0; // FP uses s_fp, not s_scan
+    // Remote mode reads s_scan.done to decide when the scan finished, but
+    // it's only cleared by the peer's async "S|scanning" echo -- if it was
+    // left true by a previous ARP/port/ping scan, the very next poll tick
+    // reads it as already done and backs out before the peer even starts.
+    s_scan.done = false;
 #ifdef ETH_HAS_LOCAL
     eth_fingerprint_start_async();
 #else

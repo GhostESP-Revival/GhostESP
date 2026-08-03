@@ -8,6 +8,7 @@
 #include "esp_sntp.h"
 #include "esp_mac.h"
 #include "managers/ap_manager.h"
+#include "managers/ota_manager.h"
 #include "sdkconfig.h"
 #include "vendor/drivers/pcf8563.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -232,6 +233,15 @@ CommandFunction find_command(const char *name) {
     return NULL;
 }
 
+const char *command_name_at(size_t index) {
+    Command *current = command_list_head;
+    while (current != NULL && index > 0) {
+        current = current->next;
+        index--;
+    }
+    return current ? current->name : NULL;
+}
+
 
 
 
@@ -240,8 +250,41 @@ CommandFunction find_command(const char *name) {
 
 void register_commands() {
     command_init();
+    register_command("echo", handle_echo_cmd);
+    register_command("ifconfig", handle_ifconfig_cmd);
+    register_command("ping", handle_ping_cmd);
+    register_command("version", handle_version_cmd);
+    register_command("uuid", handle_uuid_cmd);
+    register_command("macaddr", handle_macaddr_cmd);
+    register_command("uptime", handle_uptime_cmd);
+    register_command("date", handle_time_cmd);
+    register_command("whoami", handle_whoami_cmd);
+    register_command("status", handle_status_cmd);
+    register_command("clear", handle_clear_cmd);
+    register_command("hostname", handle_hostname_cmd);
+    register_command("color", handle_color_cmd);
+    register_command("cli_color", handle_color_cmd);
+    register_command("banner", handle_banner_cmd);
+    register_command("alias", handle_alias_cmd);
+    register_command("unalias", handle_unalias_cmd);
+    register_command("history", handle_history_cmd);
+    register_command("didyoumean", handle_didyoumean_cmd);
+    register_command("ps", handle_ps_cmd);
+    register_command("top", handle_ps_cmd);
+    register_command("df", handle_df_cmd);
+    register_command("tail", handle_tail_cmd);
+    register_command("grep", handle_grep_cmd);
+    register_command("source", handle_source_cmd);
+    register_command("tee", handle_tee_cmd);
+    register_command("env", handle_env_cmd);
+    register_command("export", handle_export_cmd);
+    register_command("watch", handle_watch_cmd);
     register_command("help", handle_help);
     register_command("mem", handle_mem_cmd);
+#if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
+    register_command("nfc", handle_nfc_cmd);
+    register_command("nfctest", handle_nfctest_cmd);
+#endif
     register_command("scanap", cmd_wifi_scan_start);
     register_command("scansta", handle_sta_scan);
     register_command("scanlocal", handle_ip_lookup);
@@ -261,6 +304,7 @@ void register_commands() {
     register_command("startportal", handle_start_portal);
     register_command("disconnect", handle_wifi_disconnect);
     register_command("wifistatus", handle_wifi_status);
+    register_command("autoreconnect", handle_wifi_autoreconnect_cmd);
     register_command("stopportal", stop_portal);
     register_command("sinkhole", handle_sinkhole_cmd);
     register_command("connect", handle_wifi_connection);
@@ -280,6 +324,7 @@ void register_commands() {
     register_command("netbiosscan", handle_netbios_scan);
     register_command("httpbannerscan", handle_http_banner_scan);
     register_command("snmpprobe", handle_snmp_probe);
+    register_command("enumscan", handle_enum_scan);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("settings", handle_settings_cmd);
@@ -291,6 +336,15 @@ void register_commands() {
     register_command("commstatus", handle_comm_status);
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
+#if GHOSTESP_OTA_SUPPORTED
+    // Only registered on 8MB/16MB boards -- these handlers live in
+    // peer_ota_manager.c, so registering them unconditionally would pull
+    // that file's static buffers into every board's BSS for nothing.
+    register_command("otarecv", handle_otarecv_cmd);
+    register_command("otastatus", handle_otastatus_cmd);
+    register_command("otaabort", handle_otaabort_cmd);
+    register_command("otainfo", handle_otainfo_cmd);
+#endif
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     register_command("blescan", handle_ble_scan_cmd);
@@ -302,9 +356,7 @@ void register_commands() {
     register_command("stopspoof", handle_stop_spoof);
     register_command("chameleon", handle_chameleon_cmd);
 #endif
-#ifdef DEBUG
     register_command("crash", handle_crash);
-#endif
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     register_command("coredump", handle_coredump_cmd);
 #endif
@@ -362,6 +414,9 @@ void register_commands() {
     register_command("nrf24", handle_nrf24_cmd);
     register_command("audio", handle_audio_cmd);
     register_command("badusb", handle_badusb_cmd);
+#if CONFIG_ENABLE_GHOSTSCRIPT
+    register_command("script", handle_script_cmd);
+#endif
 #ifdef CONFIG_WITH_ETHERNET
     register_command("ethup", handle_eth_up_cmd);
     register_command("ethdown", handle_eth_down_cmd);
@@ -408,12 +463,11 @@ void register_commands() {
 #endif
     register_command("loadconfig", handle_loadconfig_cmd);
     register_command("apps", handle_apps_cmd);
+    register_command("subghz", handle_subghz_cmd);
 
     cmd_comm_register_callback();
 
     glog("Registered Commands\n");
 }
-
-
 
 

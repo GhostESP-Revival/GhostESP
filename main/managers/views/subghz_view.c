@@ -1,5 +1,7 @@
 #include "managers/views/subghz_view.h"
 #include "sdkconfig.h"
+#include "esp_attr.h"
+#include "gui/design_tokens.h"
 
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
@@ -117,6 +119,7 @@ static const char *TAG = "SubGHzView";
 
 static lv_obj_t *s_root = NULL;
 static options_view_t *s_ov = NULL;
+static int s_root_selected_index = 0;
 static lv_obj_t *s_scan_row = NULL;
 static lv_obj_t *s_capture_row = NULL;
 static lv_obj_t *s_raw_capture_row = NULL;
@@ -257,12 +260,12 @@ static bool s_wf_remote_have_cursor = false;
 static uint8_t s_levels[SUBGHZ_SCANNER_CHANNEL_COUNT] = {0};
 static uint8_t s_peaks[SUBGHZ_SCANNER_CHANNEL_COUNT] = {0};
 static uint8_t s_cursor = 0;
-static int32_t s_capture_raw[SUBGHZ_RAW_MAX_DURATIONS] = {0};
+EXT_RAM_BSS_ATTR static int32_t s_capture_raw[SUBGHZ_RAW_MAX_DURATIONS] = {0};
 static size_t s_capture_raw_count = 0;
 static uint8_t s_capture_preview_cursor = 0;
 static bool s_capture_buffer_valid = false;
 static char s_capture_name[SUBGHZ_SNAPSHOT_NAME_MAX] = "capture";
-static int32_t s_remote_raw_work[SUBGHZ_RAW_MAX_DURATIONS] = {0};
+EXT_RAM_BSS_ATTR static int32_t s_remote_raw_work[SUBGHZ_RAW_MAX_DURATIONS] = {0};
 static size_t s_remote_raw_expected = 0;
 static size_t s_remote_raw_received = 0;
 static subghz_decoded_signal_t s_remote_decoded = {0};
@@ -3219,7 +3222,7 @@ static void subghz_back_btn_cb(lv_event_t *e) {
     if (s_in_saved_list) {
         subghz_back_to_root_menu();
     } else {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 
@@ -3282,7 +3285,7 @@ static void subghz_select_row(void) {
     } else if (sel == 4) {
         subghz_open_waterfall_popup();
     } else {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 
@@ -3313,7 +3316,7 @@ static void subghz_back_row_cb(lv_event_t *e) {
     if (s_ov) {
         options_view_set_selected(s_ov, 5);
     }
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 }
 
 static void subghz_capture_row_cb(lv_event_t *e) {
@@ -4532,7 +4535,7 @@ static void subghz_input_handler(InputEvent *event) {
                 if (s_in_saved_list) {
                     subghz_back_to_root_menu();
                 } else {
-                    display_manager_switch_view(&main_menu_view);
+                    display_manager_go_back();
                 }
                 return;
             }
@@ -4547,7 +4550,7 @@ static void subghz_input_handler(InputEvent *event) {
             subghz_select_row();
         } else if (ji == 0) {
             if (s_in_saved_list) subghz_back_to_root_menu();
-            else display_manager_switch_view(&main_menu_view);
+            else display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
@@ -4569,11 +4572,11 @@ static void subghz_input_handler(InputEvent *event) {
             subghz_select_row();
         } else if (kv == LV_KEY_ESC || kv == 27 || kv == LV_KEY_LEFT || kv == ',' || kv == '`') {
             if (s_in_saved_list) subghz_back_to_root_menu();
-            else display_manager_switch_view(&main_menu_view);
+            else display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         if (s_in_saved_list) subghz_back_to_root_menu();
-        else display_manager_switch_view(&main_menu_view);
+        else display_manager_go_back();
     }
 }
 
@@ -4603,7 +4606,14 @@ void subghz_view_create(void) {
     s_freq_analyzer_row = options_view_add_item(s_ov, "Freq Analyzer", subghz_freq_analyzer_row_cb, NULL);
     s_waterfall_row = options_view_add_item(s_ov, "Waterfall", subghz_waterfall_row_cb, NULL);
     s_back_row = options_view_add_back_row(s_ov, subghz_back_row_cb, NULL);
-    options_view_set_selected(s_ov, 0);
+    if (display_manager_previous_view == &main_menu_view) {
+        s_root_selected_index = 0;
+    }
+    int root_item_count = options_view_get_item_count(s_ov);
+    if (s_root_selected_index < 0 || s_root_selected_index >= root_item_count) {
+        s_root_selected_index = 0;
+    }
+    options_view_set_selected(s_ov, s_root_selected_index);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -4618,6 +4628,7 @@ void subghz_view_create(void) {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     s_scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_scroll_up_btn);
     lv_obj_set_size(s_scroll_up_btn, SUBGHZ_SCROLL_BTN_SIZE, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_scroll_up_btn, LV_ALIGN_LEFT_MID, SUBGHZ_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(s_scroll_up_btn, ctrl_color, LV_PART_MAIN);
@@ -4632,6 +4643,7 @@ void subghz_view_create(void) {
     lv_obj_add_flag(s_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     s_back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_back_btn);
     lv_obj_set_size(s_back_btn, SUBGHZ_SCROLL_BTN_SIZE + 24, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_back_btn, ctrl_color, LV_PART_MAIN);
@@ -4646,6 +4658,7 @@ void subghz_view_create(void) {
     lv_obj_center(back_label);
 
     s_scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(s_scroll_down_btn);
     lv_obj_set_size(s_scroll_down_btn, SUBGHZ_SCROLL_BTN_SIZE, SUBGHZ_SCROLL_BTN_SIZE);
     lv_obj_align(s_scroll_down_btn, LV_ALIGN_RIGHT_MID, -SUBGHZ_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(s_scroll_down_btn, ctrl_color, LV_PART_MAIN);
@@ -4674,6 +4687,15 @@ void subghz_view_create(void) {
 }
 
 void subghz_view_destroy(void) {
+    /* Captured before any of the teardown below touches s_ov/s_in_saved_list,
+     * so create() can restore the highlighted root-menu row if we're
+     * returning here rather than arriving fresh from the Main Menu. Only
+     * meaningful if we were actually on the root menu, not inside the
+     * saved-files list. */
+    if (s_ov && !s_in_saved_list) {
+        s_root_selected_index = options_view_get_selected(s_ov);
+    }
+
     subghz_close_popup(true);
     subghz_close_freq_analyzer_popup();
     subghz_close_waterfall_popup();

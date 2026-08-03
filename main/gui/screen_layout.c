@@ -21,12 +21,18 @@ static void invalidate_bg_shortcut(void) {
     s_indexed_scaled_bg_src = NULL;
 }
 
-static lv_color_t indexed4_px(const lv_img_dsc_t *src, uint32_t x, uint32_t y) {
+static lv_color_t indexed_px(const lv_img_dsc_t *src, uint32_t x, uint32_t y) {
     const lv_color32_t *palette = (const lv_color32_t *)src->data;
-    const uint8_t *pixels = src->data + 64;
     uint32_t i = (uint32_t)src->header.w * y + x;
-    uint8_t packed = pixels[i / 2];
-    uint8_t index = (i & 1) ? (packed >> 4) : (packed & 0x0F);
+    uint8_t index;
+    if (src->header.cf == LV_IMG_CF_INDEXED_1BIT) {
+        const uint8_t *pixels = src->data + 8;
+        index = (pixels[i / 8] >> (7 - (i & 7))) & 1;
+    } else {
+        const uint8_t *pixels = src->data + 64;
+        uint8_t packed = pixels[i / 2];
+        index = (i & 1) ? (packed >> 4) : (packed & 0x0F);
+    }
     lv_color32_t c = palette[index & 0x0F];
     return lv_color_make(c.ch.red, c.ch.green, c.ch.blue);
 }
@@ -34,7 +40,8 @@ static lv_color_t indexed4_px(const lv_img_dsc_t *src, uint32_t x, uint32_t y) {
 static void indexed_scaled_bg_draw_cb(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
     const lv_img_dsc_t *src = s_indexed_scaled_bg_src;
-    if (!src || src->header.cf != LV_IMG_CF_INDEXED_4BIT || !src->data) return;
+    if (!src || (src->header.cf != LV_IMG_CF_INDEXED_4BIT &&
+                 src->header.cf != LV_IMG_CF_INDEXED_1BIT) || !src->data) return;
 
     lv_obj_t *obj = lv_event_get_target(e);
     lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
@@ -68,7 +75,7 @@ static void indexed_scaled_bg_draw_cb(lv_event_t *e) {
             uint32_t dst_x = (uint32_t)(x - obj->coords.x1);
             uint32_t sx = (dst_x * 256u) / zoom;
             if (sx >= src_w) sx = src_w - 1;
-            line[x - draw_area.x1] = indexed4_px(src, sx, sy);
+            line[x - draw_area.x1] = indexed_px(src, sx, sy);
         }
 
         lv_img_dsc_t line_img = {0};
@@ -84,7 +91,9 @@ static void indexed_scaled_bg_draw_cb(lv_event_t *e) {
 
 static void apply_bg_widget(lv_obj_t *root, const lv_img_dsc_t *src) {
     lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, LV_PART_MAIN);
-    bool custom_indexed_scale = asset_pack_background_should_scale() && src->header.cf == LV_IMG_CF_INDEXED_4BIT;
+    bool custom_indexed_scale = asset_pack_background_should_scale() &&
+                                (src->header.cf == LV_IMG_CF_INDEXED_4BIT ||
+                                 src->header.cf == LV_IMG_CF_INDEXED_1BIT);
 
     lv_obj_t *bg_img = NULL;
     if (s_last_applied_bg_widget && lv_obj_is_valid(s_last_applied_bg_widget) &&

@@ -14,9 +14,18 @@ static const char *TAG = "m5_kbd";
     // forward declare get_key_value so it can be used throughout this file
 static uint8_t get_key_value(const Point2D_t* keyCoor, bool shift, bool ctrl, bool is_caps_locked);
 
+#define CARDPUTER_MATRIX_MAX_KEYS 56
+#define CARDPUTER_MAX_MODIFIER_KEYS 3
+
 #ifndef CONFIG_USE_CARDPUTER_ADV
 static const int output_list[] = {8, 9, 11};
 static const int input_list[] = {13, 15, 3, 4, 5, 6, 7};
+
+// The normal Cardputer keyboard is an 8x7 matrix. Reuse fixed storage while
+// scanning rather than reallocating short-lived lists on every input update.
+static Point2D_t s_key_list[CARDPUTER_MATRIX_MAX_KEYS];
+static char s_word[CARDPUTER_MATRIX_MAX_KEYS];
+static uint8_t s_modifier_keys[CARDPUTER_MAX_MODIFIER_KEYS];
 #else
 #include "lvgl_helpers.h"
 #include "lvgl_i2c/i2c_manager.h"
@@ -49,7 +58,10 @@ static SemaphoreHandle_t s_tca_sem = NULL;
 static TaskHandle_t s_tca_task = NULL;
 // keyboard event push helper (avoid extra allocations)
 static void tca_push_key_event(uint8_t key_value, bool pressed){
-    InputEvent ev; ev.type = INPUT_TYPE_KEYBOARD; ev.data.key_value = key_value; ev.is_touch_move = !pressed;
+    InputEvent ev = {0};
+    ev.type = INPUT_TYPE_KEYBOARD;
+    ev.data.key_value = key_value;
+    ev.is_touch_move = !pressed;
     xQueueSend((QueueHandle_t)input_queue, &ev, 0);
 }
 
@@ -224,7 +236,15 @@ static void tca_keyboard_task(void* arg){
 static void keys_state_reset(KeysState_t* keys_state);
 
 void keyboard_init(Keyboard_t* keyboard) {
+#ifndef CONFIG_USE_CARDPUTER_ADV
+    keyboard->key_list_buffer = s_key_list;
+    keyboard->keys_state_buffer.word = s_word;
+    keyboard->keys_state_buffer.modifier_keys = s_modifier_keys;
+#else
     keyboard->key_list_buffer = NULL;
+    keyboard->keys_state_buffer.word = NULL;
+    keyboard->keys_state_buffer.modifier_keys = NULL;
+#endif
     keyboard->key_list_buffer_len = 0;
     keyboard->key_pos_print_keys = NULL;
     keyboard->key_pos_print_keys_len = 0;
@@ -232,11 +252,9 @@ void keyboard_init(Keyboard_t* keyboard) {
     keyboard->key_pos_hid_keys_len = 0;
     keyboard->key_pos_modifier_keys = NULL;
     keyboard->key_pos_modifier_keys_len = 0;
-    keyboard->keys_state_buffer.word = NULL;
     keyboard->keys_state_buffer.word_len = 0;
     keyboard->keys_state_buffer.hid_keys = NULL;
     keyboard->keys_state_buffer.hid_keys_len = 0;
-    keyboard->keys_state_buffer.modifier_keys = NULL;
     keyboard->keys_state_buffer.modifier_keys_len = 0;
     keyboard->keys_state_buffer.reset = keys_state_reset;
     keyboard->is_caps_locked = false;
@@ -333,9 +351,8 @@ uint8_t keyboard_get_key(const Keyboard_t* keyboard, Point2D_t keyCoor) {
 
 void keyboard_update_key_list(Keyboard_t* keyboard) {
 #ifndef CONFIG_USE_CARDPUTER_ADV
-    // Clear current key list
-    free(keyboard->key_list_buffer);
-    keyboard->key_list_buffer = NULL;
+    // Clear the fixed-capacity current key list.
+    keyboard->key_list_buffer = s_key_list;
     keyboard->key_list_buffer_len = 0;
 
     Point2D_t coor;
@@ -348,20 +365,13 @@ void keyboard_update_key_list(Keyboard_t* keyboard) {
         if (input_value) {
             for (int j = 0; j < 7; j++) {
                 if (input_value & (1 << j)) {
+                    if (keyboard->key_list_buffer_len >= CARDPUTER_MATRIX_MAX_KEYS) return;
                     coor.x  = (i > 3) ? X_map_chart[j].x_1 : X_map_chart[j].x_2;
                     coor.y = (i > 3) ? (i - 4) : i;
 
                     coor.y = -coor.y + 3;  // Adjust Y coordinate to match picture
 
-                    keyboard->key_list_buffer_len++;
-                    void *tmp = realloc(keyboard->key_list_buffer,
-                        keyboard->key_list_buffer_len * sizeof(Point2D_t));
-                    if (!tmp) {
-                        keyboard->key_list_buffer_len--;
-                        return;
-                    }
-                    keyboard->key_list_buffer = (Point2D_t *)tmp;
-                    keyboard->key_list_buffer[keyboard->key_list_buffer_len - 1] = coor;
+                    keyboard->key_list_buffer[keyboard->key_list_buffer_len++] = coor;
                 }
             }
         }
@@ -406,39 +416,21 @@ void keyboard_update_keys_state(Keyboard_t* keyboard) {
                 break;
             case KEY_LEFT_CTRL:
                 keyboard->keys_state_buffer.ctrl = true;
-                keyboard->keys_state_buffer.modifier_keys_len++;
-                {
-                    void *tmp_mk = realloc(
-                        keyboard->keys_state_buffer.modifier_keys,
-                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
-                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
-                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                if (keyboard->keys_state_buffer.modifier_keys_len < CARDPUTER_MAX_MODIFIER_KEYS) {
+                    keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len++] = KEY_LEFT_CTRL;
                 }
-                keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_CTRL;
                 break;
             case KEY_LEFT_SHIFT:
                 keyboard->keys_state_buffer.shift = true;
-                keyboard->keys_state_buffer.modifier_keys_len++;
-                {
-                    void *tmp_mk = realloc(
-                        keyboard->keys_state_buffer.modifier_keys,
-                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
-                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
-                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                if (keyboard->keys_state_buffer.modifier_keys_len < CARDPUTER_MAX_MODIFIER_KEYS) {
+                    keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len++] = KEY_LEFT_SHIFT;
                 }
-                keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_SHIFT;
                 break;
             case KEY_LEFT_ALT:
                 keyboard->keys_state_buffer.alt = true;
-                keyboard->keys_state_buffer.modifier_keys_len++;
-                {
-                    void *tmp_mk = realloc(
-                        keyboard->keys_state_buffer.modifier_keys,
-                        keyboard->keys_state_buffer.modifier_keys_len * sizeof(uint8_t));
-                    if (!tmp_mk) { keyboard->keys_state_buffer.modifier_keys_len--; break; }
-                    keyboard->keys_state_buffer.modifier_keys = (uint8_t *)tmp_mk;
+                if (keyboard->keys_state_buffer.modifier_keys_len < CARDPUTER_MAX_MODIFIER_KEYS) {
+                    keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len++] = KEY_LEFT_ALT;
                 }
-                keyboard->keys_state_buffer.modifier_keys[keyboard->keys_state_buffer.modifier_keys_len - 1] = KEY_LEFT_ALT;
                 break;
             case KEY_TAB:
                 keyboard->keys_state_buffer.tab = true;
@@ -453,20 +445,12 @@ void keyboard_update_keys_state(Keyboard_t* keyboard) {
                 keyboard->keys_state_buffer.space = true;
                 break;
             default:
-                keyboard->keys_state_buffer.word_len++;
-                {
-                    void *tmp_w = realloc(
-                        keyboard->keys_state_buffer.word,
-                        keyboard->keys_state_buffer.word_len * sizeof(char));
-                    if (!tmp_w) { keyboard->keys_state_buffer.word_len--; break; }
-                    keyboard->keys_state_buffer.word = (char *)tmp_w;
-                }
-                
+                if (keyboard->keys_state_buffer.word_len >= CARDPUTER_MATRIX_MAX_KEYS) break;
                 char character = (keyboard->keys_state_buffer.shift || keyboard->is_caps_locked)
                                      ? get_key_value(&key_pos, true, keyboard->keys_state_buffer.ctrl, keyboard->is_caps_locked)
                                      : get_key_value(&key_pos, false, keyboard->keys_state_buffer.ctrl, keyboard->is_caps_locked);
                 
-                keyboard->keys_state_buffer.word[keyboard->keys_state_buffer.word_len - 1] = character;
+                keyboard->keys_state_buffer.word[keyboard->keys_state_buffer.word_len++] = character;
                 break;
         }
     }
@@ -489,12 +473,17 @@ static void keys_state_reset(KeysState_t* keys_state) {
     keys_state->enter = false;
     keys_state->space = false;
     keys_state->modifiers = 0;
+#ifndef CONFIG_USE_CARDPUTER_ADV
+    keys_state->word = s_word;
+    keys_state->modifier_keys = s_modifier_keys;
+#else
     free(keys_state->word);
-    free(keys_state->hid_keys);
     free(keys_state->modifier_keys);
     keys_state->word = NULL;
-    keys_state->hid_keys = NULL;
     keys_state->modifier_keys = NULL;
+#endif
+    free(keys_state->hid_keys);
+    keys_state->hid_keys = NULL;
     keys_state->word_len = 0;
     keys_state->hid_keys_len = 0;
     keys_state->modifier_keys_len = 0;

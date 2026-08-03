@@ -128,7 +128,7 @@ simulateCommand("commsend karma start");
 
 BadUSB uses TinyUSB in device mode, which conflicts with USB Host mode.
 
-### Pin Configuration
+### Pin Configuration (BadUSB)
 
 ```
 CONFIG_HAS_BADUSB=y
@@ -147,7 +147,7 @@ These modes are mutually exclusive. The device typically defaults to CDC console
 
 Ethernet uses SPI, which may conflict with other SPI peripherals.
 
-### Pin Configuration
+### Pin Configuration (Ethernet)
 
 ```
 CONFIG_WITH_ETHERNET=y
@@ -169,7 +169,7 @@ If Ethernet shares SPI with display or SD:
 
 IR TX/RX uses RMT (Remote Control Transceiver) peripheral, which is separate from SPI.
 
-### Pin Configuration
+### Pin Configuration (Infrared)
 
 ```
 CONFIG_HAS_INFRARED=y

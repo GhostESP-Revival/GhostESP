@@ -40,6 +40,7 @@ static lv_timer_t *s_timer = NULL;
 
 static volatile bool s_showing = false;
 static uint16_t s_current_duration_ms = 0;
+static toast_slot_t s_current;
 
 static uint32_t toast_accent_for_type(uint8_t type) {
     switch (type) {
@@ -61,6 +62,18 @@ static const char *toast_icon_for_type(uint8_t type) {
 
 static bool q_empty(void) { return s_count == 0; }
 static bool q_full(void) { return s_count >= TOAST_QUEUE_SIZE; }
+
+static bool toast_matches(const toast_slot_t *slot, const char *text, uint8_t type) {
+    return slot->type == type && strcmp(slot->text, text) == 0;
+}
+
+static bool q_contains(const char *text, uint8_t type) {
+    for (uint8_t i = 0; i < s_count; i++) {
+        const toast_slot_t *slot = &s_queue[(s_head + i) % TOAST_QUEUE_SIZE];
+        if (toast_matches(slot, text, type)) return true;
+    }
+    return false;
+}
 
 static void q_clear(void) {
     s_head = 0;
@@ -191,6 +204,7 @@ static void toast_present_next(void) {
     toast_ensure_objects();
     if (!s_container) return;
     s_showing = true;
+    s_current = slot;
     s_current_duration_ms = slot.duration_ms;
 
     lv_label_set_text(s_label, slot.text);
@@ -253,7 +267,7 @@ static void toast_slide_out(void) {
     lv_anim_set_values(&anim, cur_y, end_y);
     lv_anim_set_time(&anim, TOAST_SLIDE_OUT_MS);
     lv_anim_set_exec_cb(&anim, toast_set_y_anim_cb);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
     lv_anim_set_ready_cb(&anim, slide_out_ready_cb);
     lv_anim_start(&anim);
 }
@@ -264,22 +278,7 @@ typedef struct {
     uint16_t duration_ms;
 } toast_async_arg_t;
 
-static void toast_async_cb(void *arg) {
-    toast_async_arg_t *a = (toast_async_arg_t *)arg;
-    if (!a) return;
-
-    bool was_idle = !s_showing && q_empty();
-    q_push(a->text, a->type, a->duration_ms);
-
-    if (was_idle) {
-        toast_present_next();
-    }
-    free(a);
-}
-
-static void toast_post(const char *text, uint8_t type, uint16_t duration_ms) {
-    if (!text || !text[0]) return;
-
+static void toast_play_haptic(uint8_t type) {
     switch (type) {
         case TOAST_SUCCESS:
             haptic_manager_play(HAPTIC_EFFECT_SUCCESS);
@@ -294,6 +293,30 @@ static void toast_post(const char *text, uint8_t type, uint16_t duration_ms) {
             haptic_manager_play(HAPTIC_EFFECT_NOTIFICATION);
             break;
     }
+}
+
+static void toast_async_cb(void *arg) {
+    toast_async_arg_t *a = (toast_async_arg_t *)arg;
+    if (!a) return;
+
+    if ((s_showing && toast_matches(&s_current, a->text, a->type)) ||
+        q_contains(a->text, a->type)) {
+        free(a);
+        return;
+    }
+
+    bool was_idle = !s_showing && q_empty();
+    q_push(a->text, a->type, a->duration_ms);
+    toast_play_haptic(a->type);
+
+    if (was_idle) {
+        toast_present_next();
+    }
+    free(a);
+}
+
+static void toast_post(const char *text, uint8_t type, uint16_t duration_ms) {
+    if (!text || !text[0]) return;
 
     toast_async_arg_t *a = malloc(sizeof(toast_async_arg_t));
     if (!a) return;

@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
+#include "gui/design_tokens.h"
 
 extern const lv_img_dsc_t tired_50x50;
 extern const lv_img_dsc_t what2_50x50;
@@ -156,9 +157,40 @@ static void save_obfuscated(const char *input) {
 }
 
 static int lockscreen_ghost_bob_offset(void) {
+    static const int8_t sine_tbl[24] = {0, 3, 5, 6, 5, 3, 0, -3, -5, -6, -5, -3,
+                                         0, 3, 5, 6, 5, 3, 0, -3, -5, -6, -5, -3};
     uint32_t phase = (uint32_t)((esp_timer_get_time() / 70000ULL) % 24ULL);
-    int step = (phase < 12U) ? (int)phase : (23 - (int)phase);
-    return (step / 2) - 3;
+    return sine_tbl[phase];
+}
+
+static lv_timer_t *s_shake_timer;
+static int s_shake_remaining;
+
+static void lockscreen_shake_cb(lv_timer_t *timer) {
+    if (!s_dots || !lv_obj_is_valid(s_dots)) {
+        lv_timer_del(timer);
+        s_shake_timer = NULL;
+        return;
+    }
+    if (s_shake_remaining <= 0) {
+        lv_obj_set_x(s_dots, lv_obj_get_x(s_dots) % 2 ? lv_obj_get_x(s_dots) + 1 : lv_obj_get_x(s_dots));
+        lv_timer_del(timer);
+        s_shake_timer = NULL;
+        return;
+    }
+    int offset = (s_shake_remaining % 2) ? GUI_SHAKE_AMPLITUDE : -GUI_SHAKE_AMPLITUDE;
+    lv_obj_set_x(s_dots, lv_obj_get_x(s_dots) + offset);
+    s_shake_remaining--;
+}
+
+static void lockscreen_start_shake(void) {
+    if (s_shake_timer) {
+        lv_timer_del(s_shake_timer);
+        s_shake_timer = NULL;
+    }
+    s_shake_remaining = GUI_SHAKE_CYCLES * 2;
+    s_shake_timer = lv_timer_create(lockscreen_shake_cb, GUI_SHAKE_PERIOD_MS / 2, NULL);
+    lv_timer_set_repeat_count(s_shake_timer, s_shake_remaining + 1);
 }
 
 bool lockscreen_is_configured(void) {
@@ -305,6 +337,7 @@ static void lockscreen_on_wrong(void) {
     s_ghost_state = GHOST_ERROR;
     lockscreen_update_ghost(true);
     lockscreen_set_prompt("Wrong PIN");
+    lockscreen_start_shake();
     lockscreen_clear_input();
 }
 
@@ -504,6 +537,7 @@ static void lockscreen_build_numpad(void) {
 
     for (int i = 0; i < NUMPAD_BTNS; i++) {
         s_numpad_btns[i] = lv_btn_create(s_numpad_cont);
+        gui_apply_pressed_style(s_numpad_btns[i]);
         lv_obj_set_size(s_numpad_btns[i], btn_w, btn_h);
         lv_obj_add_event_cb(s_numpad_btns[i], lockscreen_numpad_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         lv_obj_set_style_bg_color(s_numpad_btns[i], lv_color_hex(0x222222), 0);
@@ -883,6 +917,10 @@ void lockscreen_destroy(void) {
     if (s_unlock_timer) {
         lv_timer_del(s_unlock_timer);
         s_unlock_timer = NULL;
+    }
+    if (s_shake_timer) {
+        lv_timer_del(s_shake_timer);
+        s_shake_timer = NULL;
     }
     lockscreen_destroy_numpad();
     s_touch_started = false;

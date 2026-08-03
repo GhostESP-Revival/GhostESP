@@ -21,6 +21,7 @@
 #include "core/glog.h"
 
 #include "core/dns_server.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
 #include "lwip/err.h"
 #include "lwip/netdb.h"
@@ -38,9 +39,72 @@
 #define SINKHOLE_CACHE_SIZE 16
 #define SINKHOLE_SD_BLOOM_BYTES (8 * 1024)
 
+// Rate limiting for legacy evil-portal DNS mode.  A small fixed table keyed by
+// IPv4 source address avoids per-request heap allocations.  Each bucket allows
+// a short burst and refills continuously at a sustainable rate.  Limits are
+// generous enough for legitimate captive-portal probes but drop obvious floods.
+#define DNS_PORTAL_RATE_LIMIT_TABLE_SIZE 8
+#define DNS_PORTAL_RATE_BURST 8
+#define DNS_PORTAL_RATE_REFILL_INTERVAL_US (100 * 1000)  // 100 ms
+#define DNS_PORTAL_RATE_REFILL_TOKENS 1
+
+typedef struct {
+    uint32_t src_addr;     // IPv4 address in network byte order
+    uint8_t tokens;
+    int64_t last_refill_us;
+} dns_portal_rate_limit_entry_t;
+
 static const char *TAG = "dns_server";
 
 static dns_server_handle_t s_sinkhole_handle = NULL;
+
+static bool dns_portal_rate_limit_allow(dns_portal_rate_limit_entry_t *table,
+                                        uint32_t src_addr, int64_t now_us) {
+    // Find existing entry or an empty slot.
+    dns_portal_rate_limit_entry_t *slot = NULL;
+    dns_portal_rate_limit_entry_t *oldest = NULL;
+    int64_t oldest_time = INT64_MAX;
+    for (int i = 0; i < DNS_PORTAL_RATE_LIMIT_TABLE_SIZE; i++) {
+        if (table[i].src_addr == src_addr) {
+            slot = &table[i];
+            break;
+        }
+        if (table[i].src_addr == 0) {
+            if (!slot) slot = &table[i];  // first empty slot
+        } else if (table[i].last_refill_us < oldest_time) {
+            oldest_time = table[i].last_refill_us;
+            oldest = &table[i];
+        }
+    }
+    if (!slot) {
+        // Recycle the oldest entry.  This keeps the table fixed-size.
+        slot = oldest;
+        slot->src_addr = src_addr;
+        slot->tokens = 0;
+    }
+
+    if (slot->src_addr == 0) {
+        slot->src_addr = src_addr;
+        slot->tokens = DNS_PORTAL_RATE_BURST;
+        slot->last_refill_us = now_us;
+    }
+
+    // Refill tokens based on elapsed time.
+    int64_t elapsed = now_us - slot->last_refill_us;
+    if (elapsed >= DNS_PORTAL_RATE_REFILL_INTERVAL_US) {
+        int64_t refills = elapsed / DNS_PORTAL_RATE_REFILL_INTERVAL_US;
+        int64_t new_tokens = (int64_t)slot->tokens + refills * DNS_PORTAL_RATE_REFILL_TOKENS;
+        if (new_tokens > DNS_PORTAL_RATE_BURST) new_tokens = DNS_PORTAL_RATE_BURST;
+        slot->tokens = (uint8_t)new_tokens;
+        slot->last_refill_us = now_us;
+    }
+
+    if (slot->tokens > 0) {
+        slot->tokens--;
+        return true;
+    }
+    return false;
+}
 
 esp_netif_t *dns_sinkhole_find_netif(esp_netif_ip_info_t *out_ip) {
     static const char * const if_keys[] = {
@@ -1091,6 +1155,7 @@ void dns_server_task(void *pvParameters) {
     } else {
         // --- Legacy evil portal DNS mode ---
         char addr_str[128];
+        dns_portal_rate_limit_entry_t rate_limit_table[DNS_PORTAL_RATE_LIMIT_TABLE_SIZE] = {0};
 
         while (handle->started) {
             struct sockaddr_in dest_addr;
@@ -1117,26 +1182,63 @@ void dns_server_task(void *pvParameters) {
                                    (struct sockaddr *)&source_addr, &socklen);
 
                 if (len < 0) {
+                    // Transient errors should not tear down the socket; doing so
+                    // under a UDP flood recreates sockets repeatedly and exhausts
+                    // LWIP descriptors.  Back off briefly and continue.
+                    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                        continue;
+                    }
+                    ESP_LOGW(TAG, "DNS recvfrom error %d, closing socket", errno);
                     close(sock);
                     break;
-                } else {
-                    if (source_addr.sin6_family == PF_INET) {
-                        inet_ntoa_r(
-                            ((struct sockaddr_in *)&source_addr)->sin_addr.s_addr,
-                            addr_str, sizeof(addr_str) - 1);
-                    } else if (source_addr.sin6_family == PF_INET6) {
-                        inet6_ntoa_r(source_addr.sin6_addr, addr_str,
-                                     sizeof(addr_str) - 1);
-                    }
+                }
 
-                    char reply[DNS_MAX_LEN];
-                    int reply_len = parse_dns_request(rx_buffer, len, reply,
-                                                      DNS_MAX_LEN, handle);
-                    if (reply_len > 0) {
-                        sendto(sock, reply, reply_len, 0,
-                               (struct sockaddr *)&source_addr,
-                               sizeof(source_addr));
+                uint32_t src_addr = 0;
+                if (source_addr.sin6_family == PF_INET) {
+                    src_addr = ((struct sockaddr_in *)&source_addr)->sin_addr.s_addr;
+                    inet_ntoa_r(src_addr, addr_str, sizeof(addr_str) - 1);
+                } else if (source_addr.sin6_family == PF_INET6) {
+                    inet6_ntoa_r(source_addr.sin6_addr, addr_str,
+                                 sizeof(addr_str) - 1);
+                }
+
+                // Apply per-client rate limiting in legacy evil-portal mode.
+                if (src_addr != 0) {
+                    int64_t now = esp_timer_get_time();
+                    if (!dns_portal_rate_limit_allow(rate_limit_table, src_addr, now)) {
+                        ESP_LOGD(TAG, "Dropping DNS query from %s (rate limit)", addr_str);
+                        continue;
                     }
+                    /* Emit a structured event for the qname if we can extract it. */
+                    if (len >= 17) {
+                        char qname[128];
+                        int qpos = 0;
+                        int i = 12;
+                        while (i < len && rx_buffer[i] != 0 && qpos < (int)sizeof(qname) - 1) {
+                            uint8_t lbl = rx_buffer[i++];
+                            if (lbl > 63) break;
+                            for (int k = 0; k < lbl && i < len && qpos < (int)sizeof(qname) - 1; ++k)
+                                qname[qpos++] = rx_buffer[i++];
+                            if (qpos < (int)sizeof(qname) - 1) qname[qpos++] = '.';
+                        }
+                        if (qpos > 0) qname[qpos - 1] = '\0'; else qname[0] = '\0';
+                        if (qname[0]) {
+                            char dns_payload[300];
+                            snprintf(dns_payload, sizeof(dns_payload), "%s|%s",
+                                addr_str, qname);
+                            ghostscript_emit_event_escaped("dns_request", dns_payload);
+                        }
+                    }
+                }
+
+                char reply[DNS_MAX_LEN];
+                int reply_len = parse_dns_request(rx_buffer, len, reply,
+                                                  DNS_MAX_LEN, handle);
+                if (reply_len > 0) {
+                    sendto(sock, reply, reply_len, 0,
+                           (struct sockaddr *)&source_addr,
+                           sizeof(source_addr));
                 }
             }
 

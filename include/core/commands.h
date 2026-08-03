@@ -7,6 +7,7 @@
 #include "sdkconfig.h"
 #include <stdbool.h>
 #include "core/commandline.h"
+#include "core/shell.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,7 @@ void handle_select_cmd(int argc, char **argv);
 void handle_wifi_connection(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
 void handle_wifi_status(int argc, char **argv);
+void handle_wifi_autoreconnect_cmd(int argc, char **argv);
 void handle_ip_lookup(int argc, char **argv);
 void handle_track_ap_cmd(int argc, char **argv);
 void handle_track_sta_cmd(int argc, char **argv);
@@ -53,6 +55,11 @@ void handle_webuiap_cmd(int argc, char **argv);
 void handle_badusb_cmd(int argc, char **argv);
 void handle_usb_kbd_cmd(int argc, char **argv);
 
+#if CONFIG_ENABLE_GHOSTSCRIPT
+// GhostScript
+void handle_script_cmd(int argc, char **argv);
+#endif
+
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 // BLE, AirTag, Flipper, GATT, Chameleon, and BLE spam
 void handle_ble_scan_cmd(int argc, char **argv);
@@ -81,6 +88,7 @@ void handle_scan_ssh(int argc, char **argv);
 void handle_netbios_scan(int argc, char **argv);
 void handle_http_banner_scan(int argc, char **argv);
 void handle_snmp_probe(int argc, char **argv);
+void handle_enum_scan(int argc, char **argv);
 void handle_congestion_cmd(int argc, char **argv);
 void handle_listen_probes_cmd(int argc, char **argv);
 void handle_dhcpstarve_cmd(int argc, char **argv);
@@ -133,6 +141,9 @@ bool wdstream_stop_and_wait(const char *reason);
 void handle_stop_flipper(int argc, char **argv);
 void handle_dial_command(int argc, char **argv);
 void handle_mem_cmd(int argc, char **argv);
+void handle_nfc_cmd(int argc, char **argv);
+void handle_nfctest_cmd(int argc, char **argv);
+bool nfc_cli_stop(void);
 void handle_tp_link_test(int argc, char **argv);
 void handle_status_idle_cmd(int argc, char **argv);
 void handle_unknown_command(const char *cmd);
@@ -222,6 +233,12 @@ void handle_comm_status(int argc, char **argv);
 void handle_comm_disconnect(int argc, char **argv);
 void handle_comm_setpins(int argc, char **argv);
 void cmd_comm_register_callback(void);
+
+// GhostLink peer-flashing commands (see managers/peer_ota_manager.c)
+void handle_otarecv_cmd(int argc, char **argv);
+void handle_otastatus_cmd(int argc, char **argv);
+void handle_otaabort_cmd(int argc, char **argv);
+void handle_otainfo_cmd(int argc, char **argv);
 
 // Aerial and Flock commands
 void handle_aerial_scan_cmd(int argc, char **argv);

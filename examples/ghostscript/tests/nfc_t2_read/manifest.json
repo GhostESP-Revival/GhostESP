@@ -1,0 +1,6 @@
+{
+  "id": "nfc-t2-read-smoke",
+  "name": "NFC Type-2 Read Smoke Test",
+  "entry": "main.gsb",
+  "permissions": ["nfc", "ui"]
+}

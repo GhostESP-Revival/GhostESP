@@ -293,7 +293,9 @@ static void animation_timer_callback(lv_timer_t *timer) {
 }
 
 static void return_to_apps(void) {
-    display_manager_switch_view(&apps_menu_view);
+    /* Reachable from Apps Gallery as well as CLI/serial "startvisualizer"
+     * commands, so back must return to whichever actually opened this. */
+    display_manager_go_back();
 }
 
 static void handle_hardware_input_music_callback(InputEvent *event) {

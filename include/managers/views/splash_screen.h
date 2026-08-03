@@ -32,6 +32,9 @@ extern View splash_view;
  */
 void splash_set_progress(float pct, const char *label);
 
+/* Keep the splash visible until splash_signal_completion() is called. */
+void splash_require_completion(void);
+
 /**
  * @brief Signal that all boot-time background work is complete.
  *

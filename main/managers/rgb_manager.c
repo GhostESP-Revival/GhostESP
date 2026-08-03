@@ -28,6 +28,7 @@
 #endif
 
 static const char *TAG = "RGBManager";
+TaskHandle_t rgb_effect_task_handle = NULL;
 static SemaphoreHandle_t rgb_mutex = NULL;
 static bool rgb_power_transition_active = false;
 static int rgb_power_transition_lock_depth = 0;
@@ -904,6 +905,14 @@ typedef struct {
 // Global flag to signal rainbow task termination
 static volatile bool rainbow_task_should_exit = false;
 
+// Set while pulse_once() is running so flashing/cycling effects (rainbow,
+// knight rider, police siren, strobe) freeze in place instead of racing
+// the pulse for control of the LEDs -- that race produced fast, erratic
+// color changes on top of an already-flashing effect, a real photosensitive
+// epilepsy risk. Effects poll this and hold their last frame until it
+// clears, then resume exactly where they left off.
+static volatile bool rgb_effect_paused = false;
+
 void calculate_matrix_dimensions(int total_leds, int *rows, int *cols) {
   int side = (int)sqrt(total_leds);
 
@@ -1049,7 +1058,6 @@ void police_task(void *pvParameter) {
 
     vTaskDelay(pdMS_TO_TICKS(20));
   }
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1057,6 +1065,7 @@ void police_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 
@@ -1064,7 +1073,6 @@ void strobe_task(void *pvParameter) {
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
   rainbow_task_should_exit = false;
   rgb_manager_strobe_effect(rgb_manager, settings_get_rgb_speed(&G_Settings));
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1072,6 +1080,7 @@ void strobe_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 
@@ -1079,7 +1088,6 @@ void knightrider_task(void *pvParameter) {
   RGBManager_t *rgb_manager = (RGBManager_t *)pvParameter;
   rainbow_task_should_exit = false;
   rgb_manager_knightrider_effect(rgb_manager, settings_get_rgb_speed(&G_Settings));
-  rgb_effect_task_handle = NULL;
   if (rgb_manager->strip) {
     led_strip_clear(rgb_manager->strip);
     led_strip_refresh(rgb_manager->strip);
@@ -1087,6 +1095,7 @@ void knightrider_task(void *pvParameter) {
     rgb_manager_set_color(rgb_manager, -1, 0, 0, 0, false);
   }
   rgb_manager_apply_static_from_settings();
+  rgb_effect_task_handle = NULL;
   vTaskDelete(NULL);
 }
 
@@ -1378,6 +1387,11 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
     return;
   }
 
+  // Freeze any running flashing/cycling effect for the duration of the
+  // pulse so the two don't race for the LEDs. Cleared via pulse_cleanup
+  // below on every exit path, including the error returns.
+  rgb_effect_paused = true;
+
   int brightness = 0;
   int direction = 1;
 
@@ -1397,7 +1411,7 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
                                               adj_green, adj_blue);
           if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set LED %d color", i);
-            return;
+            goto pulse_cleanup;
           }
         }
       } else {
@@ -1405,7 +1419,7 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
                                             adj_green, adj_blue);
         if (ret != ESP_OK) {
           ESP_LOGE(TAG, "Failed to set LED color");
-          return;
+          goto pulse_cleanup;
         }
       }
 
@@ -1446,7 +1460,10 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
       // Restore static color from settings
       rgb_manager_apply_static_from_settings();
     }
-}
+  }
+
+pulse_cleanup:
+  rgb_effect_paused = false;
 }
 
 static void rgb_pulse_task(void *pvParameter) {
@@ -1781,6 +1798,11 @@ void rgb_manager_rainbow_effect_matrix(RGBManager_t *rgb_manager,
     if (rainbow_task_should_exit) {
       return;
     }
+    if (rgb_effect_paused) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      last_wake = xTaskGetTickCount();
+      continue;
+    }
     if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {
       uint32_t pixel_pos_q16 = base_pos_q16;
 
@@ -1854,6 +1876,11 @@ void rgb_manager_rainbow_effect(RGBManager_t *rgb_manager, int delay_ms) {
   while (!rainbow_task_should_exit) {
     if (rainbow_task_should_exit) {
       return;
+    }
+    if (rgb_effect_paused) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      last_wake = xTaskGetTickCount();
+      continue;
     }
     if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {
       uint32_t pixel_pos_q16 = base_pos_q16;
@@ -1930,6 +1957,9 @@ void rgb_manager_policesiren_effect(RGBManager_t *rgb_manager, int delay_ms) {
   bool is_red = true;
   while (1) {
     for (int pulse_step = 0; pulse_step <= 255; pulse_step += 5) {
+      while (rgb_effect_paused) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
       double ratio = ((double)pulse_step) / 255.0;
       uint8_t brightness = (uint8_t)(255 * sin(ratio * (M_PI / 2)));
       if (is_red) {
@@ -1955,6 +1985,10 @@ void rgb_manager_strobe_effect(RGBManager_t *rgb_manager, int delay_ms) {
   const int off_delay = on_delay * 3;
 
   while (!rainbow_task_should_exit) {
+    if (rgb_effect_paused) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
     rgb_manager_set_color(rgb_manager, target, 255, 255, 255, false);
     vTaskDelay(pdMS_TO_TICKS(on_delay));
 
@@ -1983,6 +2017,10 @@ void rgb_manager_knightrider_effect(RGBManager_t *rgb_manager, int delay_ms) {
   while (!rainbow_task_should_exit) {
     if (rainbow_task_should_exit) {
       break;
+    }
+    if (rgb_effect_paused) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
     }
 
     if (xSemaphoreTakeRecursive(rgb_mutex, portMAX_DELAY) == pdTRUE) {

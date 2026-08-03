@@ -23,7 +23,7 @@ GhostESP supports two capture modes:
 
 ### On-device UI
 
-1. Open **SubGHz → Capture** to start scanning on the current frequency.
+1. Open **Menu → SubGHz → Capture** to start scanning on the current frequency.
 2. Press the button on your target remote while the scanner is running.
 3. When a signal is detected, GhostESP will attempt to decode it.
 4. Review the decoded information (protocol, bits, frequency) in the preview.

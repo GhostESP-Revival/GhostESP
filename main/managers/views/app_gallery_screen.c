@@ -1,5 +1,9 @@
 #include "managers/views/app_gallery_screen.h"
 #include "managers/views/ghostchi_screen.h"
+#include "sdkconfig.h"
+#if CONFIG_ENABLE_GHOSTSCRIPT
+#include "managers/views/ghostscript_browser_view.h"
+#endif
 #include "managers/views/main_menu_screen.h"
 #include "managers/views/music_visualizer.h"
 #include "managers/views/plugin_runner_view.h"
@@ -15,6 +19,7 @@
 #include "managers/views/accelerometer_screen.h"
 #endif
 #include "managers/views/clock_screen.h"
+#include "managers/views/cloud_store_screen.h"
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 #include "managers/views/audio_player_screen.h"
 #endif
@@ -28,6 +33,7 @@ LV_IMG_DECLARE(accelerometer_icon);
 #include "gui/accessibility_fonts.h"
 #include "gui/asset_pack.h"
 #include "gui/main_menu_layout.h"
+#include "gui/menu_item_style.h"
 #include "gui/theme_palette_api.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
@@ -59,41 +65,22 @@ static inline bool app_card_bg_enabled(void) {
 }
 
 static inline void apply_app_card_style(lv_obj_t *obj, lv_color_t surface, lv_color_t border, int border_w, int shadow_w) {
-    if (app_card_bg_enabled()) {
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(obj, surface, LV_PART_MAIN);
-        lv_obj_set_style_border_width(obj, border_w, LV_PART_MAIN);
-        lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(obj, shadow_w, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(obj, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(obj, LV_OPA_50, LV_PART_MAIN);
-    } else {
-        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
-    }
+    gui_menu_card_apply(obj, app_card_bg_enabled(), surface, border, border_w, shadow_w);
 }
 
 static inline void apply_app_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
-    if (app_card_bg_enabled()) {
-        lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
-        lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(obj, LV_OPA_30, LV_PART_MAIN);
-    } else {
-        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
-    }
+    gui_menu_card_apply_selected(obj, app_card_bg_enabled(), accent);
 }
 
 static void select_app_item(int index, bool slide_left);
 static void apps_plugin_reload_done(void *arg);
+static void scroll_app_launcher_card_to_view(int index);
 
 lv_obj_t *apps_container;
 static lv_obj_t *apps_root = NULL;
 static lv_obj_t *current_app_obj = NULL;
 static int selected_app_index = 0;
+static bool s_native_apps_psram_warning_shown = false;
 
 typedef struct {
     const char *name;
@@ -141,6 +128,22 @@ static const app_item_t builtin_app_items[] = {
         .palette_index = 1,
         .view = &sd_browser_view,
     },
+#if CONFIG_ENABLE_GHOSTSCRIPT
+    {
+        .name = "GhostScript",
+        .asset_key = NULL,
+        .symbol_icon = LV_SYMBOL_FILE,
+        .palette_index = 5,
+        .view = &ghostscript_browser_view,
+    },
+#endif
+    {
+        .name = "Store",
+        .asset_key = NULL,
+        .symbol_icon = LV_SYMBOL_DOWNLOAD,
+        .palette_index = 3,
+        .view = &cloud_store_view,
+    },
     {
         .name = "Ghostchi",
         .asset_key = "ghost",
@@ -185,17 +188,20 @@ static const app_item_t builtin_app_items[] = {
 };
 
 #define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT * 2 + 12)
+#define BUILTIN_APP_GALLERY_ITEMS ((int)(sizeof(builtin_app_items) / sizeof(builtin_app_items[0])))
 static app_item_t *app_items = NULL;
+static int s_app_items_capacity = 0;
 static int num_apps = 0;
 lv_obj_t *back_button = NULL;
 
 static bool in_submenu = false;
 static char current_category[PLUGIN_APP_CATEGORY_MAX] = "";
-static char s_category_names[PLUGIN_APP_MAX_COUNT][PLUGIN_APP_CATEGORY_MAX];
 
 // Add navigation button objects
 static lv_obj_t *left_nav_btn = NULL;
 static lv_obj_t *right_nav_btn = NULL;
+static lv_obj_t *carousel_prev_obj = NULL;
+static lv_obj_t *carousel_next_obj = NULL;
 static int touch_start_x;
 static int touch_start_y;
 static int touch_last_x;
@@ -212,17 +218,13 @@ static const int DRAG_MAX_STEP = 36;
 
 static bool menu_item_selected = false;
 
-typedef enum {
-    APPS_LAYOUT_CAROUSEL = 0,
-    APPS_LAYOUT_GRID_CARDS = 1,
-    APPS_LAYOUT_LIST = 2
-} AppsLayoutType;
-
-static AppsLayoutType apps_layout = APPS_LAYOUT_CAROUSEL;
+static main_menu_layout_kind_t apps_layout = MAIN_MENU_LAYOUT_CAROUSEL;
 static lv_obj_t **apps_grid_cards = NULL;
 static lv_obj_t **apps_list_buttons = NULL;
 static lv_obj_t *grid_cards_container = NULL;
 static int apps_grid_cols = 1;
+static lv_obj_t *launcher_page_indicator = NULL;
+static int launcher_current_page = -1;
 static lv_color_t apps_bg_color;
 static lv_color_t apps_surface_color;
 static lv_color_t apps_text_color;
@@ -233,13 +235,23 @@ static StaticTask_t *apps_plugin_reload_tcb = NULL;
 
 #define PLUGIN_RELOAD_STACK_BYTES 32768
 
+static bool apps_native_plugins_enabled(void) {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
+}
+
+static int app_items_capacity_for_board(void) {
+    return apps_native_plugins_enabled() ? MAX_APP_GALLERY_ITEMS : (BUILTIN_APP_GALLERY_ITEMS + 1);
+}
+
 static bool ensure_app_items(void) {
+    int capacity = app_items_capacity_for_board();
     if (app_items) return true;
-    app_items = spiram_calloc(MAX_APP_GALLERY_ITEMS, sizeof(*app_items));
+    app_items = spiram_calloc((size_t)capacity, sizeof(*app_items));
     if (!app_items) {
         ESP_LOGE(TAG, "Failed to allocate app gallery items");
         return false;
     }
+    s_app_items_capacity = capacity;
     return true;
 }
 
@@ -305,6 +317,75 @@ static lv_obj_t *create_app_symbol_icon(lv_obj_t *parent, const char *symbol, lv
     return icon;
 }
 
+static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, int x_offset,
+                                        const main_menu_layout_metrics_t *layout) {
+    if (!preview_ptr || !layout || !layout->carousel_show_previews ||
+        app_index < 0 || app_index >= num_apps) return;
+
+    lv_obj_t *preview = *preview_ptr;
+    if (!preview) {
+        preview = lv_obj_create(apps_container);
+        *preview_ptr = preview;
+        lv_obj_clear_flag(preview, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_border_width(preview, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(preview, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(preview, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(preview, GUI_RADIUS_LG, LV_PART_MAIN);
+    } else {
+        lv_obj_clean(preview);
+    }
+
+    lv_obj_set_size(preview, layout->carousel_preview_size, layout->carousel_preview_size);
+    lv_obj_set_style_bg_color(preview, apps_surface_color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(preview, app_card_bg_enabled() ? LV_OPA_50 : LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_opa(preview, app_items[app_index].disabled ? LV_OPA_30 : LV_OPA_60, LV_PART_MAIN);
+    lv_obj_align(preview, LV_ALIGN_CENTER, x_offset, 0);
+
+    const char *symbol = app_item_symbol_icon(app_index);
+    if (symbol) {
+        lv_obj_t *icon = create_app_symbol_icon(preview, symbol, app_items[app_index].border_color,
+                                                &lv_font_montserrat_24);
+        if (icon) lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
+        return;
+    }
+
+    const lv_img_dsc_t *item_icon = app_item_icon(app_index);
+    if (!item_icon) return;
+    lv_obj_t *icon = lv_img_create(preview);
+    lv_img_set_src(icon, item_icon);
+    lv_img_set_antialias(icon, false);
+    gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, 512);
+    if (app_item_icon_should_recolor(app_index, item_icon)) {
+        lv_obj_set_style_img_recolor(icon, app_items[app_index].border_color, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
+    }
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void update_app_carousel_previews(void) {
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
+    if (!layout.carousel_show_previews || num_apps < 2) return;
+
+    int previous = (selected_app_index + num_apps - 1) % num_apps;
+    int next = (selected_app_index + 1) % num_apps;
+    update_app_carousel_preview(&carousel_prev_obj, previous, -layout.carousel_preview_offset, &layout);
+    update_app_carousel_preview(&carousel_next_obj, next, layout.carousel_preview_offset, &layout);
+    if (current_app_obj) lv_obj_move_foreground(current_app_obj);
+}
+
+static bool app_touch_started_and_ended_in(lv_obj_t *obj, const lv_point_t *end) {
+    if (!obj || !end) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return touch_start_x >= area.x1 && touch_start_x <= area.x2 &&
+           touch_start_y >= area.y1 && touch_start_y <= area.y2 &&
+           end->x >= area.x1 && end->x <= area.x2 &&
+           end->y >= area.y1 && end->y <= area.y2;
+}
+
 static void refresh_apps_surface_colors(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     apps_bg_color = lv_color_hex(theme_palette_get_background(theme));
@@ -324,7 +405,7 @@ static bool parse_accent_color(const char *text, lv_color_t *out) {
 }
 
 static void add_back_app_item(void) {
-    if (!app_items || num_apps >= MAX_APP_GALLERY_ITEMS) return;
+    if (!app_items || num_apps >= s_app_items_capacity) return;
     app_items[num_apps].name = "Back";
     app_items[num_apps].icon = NULL;
     app_items[num_apps].palette_index = 0;
@@ -347,6 +428,9 @@ static void add_plugin_app_item(const plugin_app_manifest_t *app) {
 
 static void add_plugin_category_folders(void) {
     if (in_submenu) return;
+    char (*category_names)[PLUGIN_APP_CATEGORY_MAX] =
+        calloc(PLUGIN_APP_MAX_COUNT, sizeof(*category_names));
+    if (!category_names) return;
     bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
     int plugin_count = plugin_manager_count();
 
@@ -359,20 +443,21 @@ static void add_plugin_category_folders(void) {
 
         bool already_seen = false;
         for (int j = 0; j < num_categories; ++j) {
-            if (strcmp(s_category_names[j], app->category) == 0) {
+            if (strcmp(category_names[j], app->category) == 0) {
                 already_seen = true;
                 break;
             }
         }
         if (!already_seen && num_categories < PLUGIN_APP_MAX_COUNT) {
-            strncpy(s_category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
-            s_category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
+            strncpy(category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
+            category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
             num_categories++;
         }
     }
 
-    for (int j = 0; j < num_categories && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++j) {
-        app_items[num_apps].name = s_category_names[j];
+    for (int j = 0; j < num_categories && num_apps < s_app_items_capacity - 1; ++j) {
+        strncpy(app_items[num_apps].category, category_names[j], sizeof(app_items[num_apps].category) - 1);
+        app_items[num_apps].name = app_items[num_apps].category;
         app_items[num_apps].asset_key = NULL;
         app_items[num_apps].symbol_icon = LV_SYMBOL_DIRECTORY;
         app_items[num_apps].icon = NULL;
@@ -380,9 +465,9 @@ static void add_plugin_category_folders(void) {
         app_items[num_apps].view = NULL;
         app_items[num_apps].disabled = false;
         app_items[num_apps].is_category_folder = true;
-        strncpy(app_items[num_apps].category, s_category_names[j], sizeof(app_items[num_apps].category) - 1);
         num_apps++;
     }
+    free(category_names);
 }
 
 static void add_plugin_app_items_flat(void) {
@@ -390,7 +475,7 @@ static void add_plugin_app_items_flat(void) {
     int plugin_count = plugin_manager_count();
 
     if (in_submenu) {
-        for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+        for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
             const plugin_app_manifest_t *app = plugin_manager_get(i);
             if (!app) continue;
             if (app->requires_psram && !has_psram) continue;
@@ -400,7 +485,7 @@ static void add_plugin_app_items_flat(void) {
         return;
     }
 
-    for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+    for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
         if (!app) continue;
         if (app->requires_psram && !has_psram) continue;
@@ -412,7 +497,7 @@ static void add_plugin_app_items_flat(void) {
 static void rebuild_app_items(bool include_loaded_plugins) {
     num_apps = 0;
     if (!ensure_app_items()) return;
-    memset(app_items, 0, sizeof(*app_items) * MAX_APP_GALLERY_ITEMS);
+    memset(app_items, 0, sizeof(*app_items) * (size_t)s_app_items_capacity);
 
     if (in_submenu) {
         add_back_app_item();
@@ -422,7 +507,7 @@ static void rebuild_app_items(bool include_loaded_plugins) {
 
     if (include_loaded_plugins) add_plugin_category_folders();
 
-    for (int i = 0; i < (int)(sizeof(builtin_app_items) / sizeof(builtin_app_items[0])) && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+    for (int i = 0; i < BUILTIN_APP_GALLERY_ITEMS && num_apps < s_app_items_capacity - 1; ++i) {
         app_items[num_apps++] = builtin_app_items[i];
     }
 
@@ -490,10 +575,6 @@ static void anim_set_x(void *obj, int32_t v) {
     lv_obj_set_x(o, (lv_coord_t)v);
 }
 
-static bool colors_equal(lv_color_t a, lv_color_t b) {
-    return a.full == b.full;
-}
-
 static void anim_set_opa(void *obj, int32_t v) {
     lv_obj_t *o = (lv_obj_t *)obj;
     lv_opa_t curr = lv_obj_get_style_opa(o, 0);
@@ -519,149 +600,11 @@ typedef struct {
 
 static apps_carousel_cache_t apps_carousel_cache = {0};
 
-static void apps_carousel_fade_in_ready_cb(lv_anim_t *a);
-
 static void apps_cancel_carousel_anims(void) {
     if (current_app_obj) lv_anim_del(current_app_obj, NULL);
     if (apps_carousel_cache.card && apps_carousel_cache.card != current_app_obj) {
         lv_anim_del(apps_carousel_cache.card, NULL);
     }
-}
-
-static void apps_carousel_fade_out_ready_cb(lv_anim_t *a) {
-    lv_obj_t *obj = (lv_obj_t *)a->var;
-    if (!obj || !lv_obj_is_valid(obj) || !app_items || num_apps <= 0) {
-        apps_is_animating = false;
-        return;
-    }
-    if (selected_app_index < 0 || selected_app_index >= num_apps) {
-        apps_is_animating = false;
-        return;
-    }
-    int start_x = apps_carousel_next_slide_left ? LV_HOR_RES : -LV_HOR_RES;
-
-    apps_carousel_cache.card = obj;
-    int app_idx = selected_app_index;
-
-    lv_color_t new_border = app_items[app_idx].border_color;
-    bool border_changed = !colors_equal(apps_carousel_cache.border_color, new_border);
-    if (border_changed) {
-        lv_obj_set_style_border_color(obj, new_border, LV_PART_MAIN);
-        apps_carousel_cache.border_color = new_border;
-    }
-
-    const char *new_symbol = app_item_symbol_icon(app_idx);
-    const lv_img_dsc_t *new_icon = new_symbol ? NULL : app_item_icon(app_idx);
-    lv_obj_t *icon = apps_carousel_cache.icon;
-    if (new_symbol) {
-        if (!icon || !lv_obj_is_valid(icon) || !apps_carousel_cache.icon_is_symbol) {
-            if (icon && lv_obj_is_valid(icon)) lv_obj_del(icon);
-            icon = create_app_symbol_icon(obj, new_symbol, new_border, &lv_font_montserrat_24);
-            apps_carousel_cache.icon = icon;
-        }
-        if (icon) {
-            lv_label_set_text(icon, new_symbol);
-            lv_obj_set_style_text_color(icon, new_border, 0);
-            lv_obj_align(icon, LV_ALIGN_CENTER, 0, -10);
-            lv_obj_move_to_index(icon, 0);
-        }
-        apps_carousel_cache.icon_src = NULL;
-        apps_carousel_cache.symbol_src = new_symbol;
-        apps_carousel_cache.icon_recolor_enabled = false;
-        apps_carousel_cache.icon_is_symbol = true;
-    } else {
-        if (!icon || !lv_obj_is_valid(icon) || apps_carousel_cache.icon_is_symbol || !lv_obj_check_type(icon, &lv_img_class)) {
-            if (icon && lv_obj_is_valid(icon)) lv_obj_del(icon);
-            icon = lv_img_create(obj);
-            lv_img_set_antialias(icon, false);
-            apps_carousel_cache.icon = icon;
-        }
-        if (icon) {
-            if (apps_carousel_cache.icon_src != new_icon) {
-                if (new_icon) {
-                    lv_img_set_src(icon, new_icon);
-                    lv_obj_clear_flag(icon, LV_OBJ_FLAG_HIDDEN);
-
-                    int btn_size = lv_obj_get_width(obj);
-                    const int icon_size = 50;
-                    lv_coord_t img_w = new_icon->header.w;
-                    lv_coord_t img_h = new_icon->header.h;
-                    if (img_w > 0 && img_h > 0) {
-                        int zoom_w = (icon_size * 256) / img_w;
-                        int zoom_h = (icon_size * 256) / img_h;
-                        int zoom = LV_MIN(zoom_w, zoom_h);
-                        if (zoom > 512) zoom = 512;
-                        lv_img_set_zoom(icon, zoom);
-                    }
-                    int icon_x_offset = -3;
-                    int icon_y_offset = -5;
-                    if (app_items[app_idx].view == &ghostchi_view) icon_x_offset = 9;
-                    int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
-                    int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
-                    lv_obj_align(icon, LV_ALIGN_TOP_LEFT, x_pos, y_pos);
-                    lv_obj_move_to_index(icon, 0);
-                } else {
-                    lv_obj_add_flag(icon, LV_OBJ_FLAG_HIDDEN);
-                }
-            }
-            apps_carousel_cache.icon_src = new_icon;
-
-            if (new_icon) {
-                bool wants_recolor = app_item_icon_should_recolor(app_idx, new_icon);
-                if (wants_recolor) {
-                    if (!apps_carousel_cache.icon_recolor_enabled || border_changed) {
-                        lv_obj_set_style_img_recolor(icon, new_border, 0);
-                        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-                    }
-                } else if (apps_carousel_cache.icon_recolor_enabled) {
-                    lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
-                }
-                apps_carousel_cache.icon_recolor_enabled = wants_recolor;
-            }
-        }
-        apps_carousel_cache.symbol_src = NULL;
-        apps_carousel_cache.icon_is_symbol = false;
-    }
-
-    lv_obj_t *label = apps_carousel_cache.label;
-    if (!label || !lv_obj_is_valid(label) || !lv_obj_check_type(label, &lv_label_class)) {
-        label = (lv_obj_is_valid(obj) && lv_obj_get_child_cnt(obj) > 1) ? lv_obj_get_child(obj, 1) : NULL;
-        if (label && (!lv_obj_is_valid(label) || !lv_obj_check_type(label, &lv_label_class))) label = NULL;
-        apps_carousel_cache.label = label;
-    }
-    const char *new_label = app_items[app_idx].name;
-    if (app_items[app_idx].view == NULL && !app_items[app_idx].is_category_folder) new_label = "< Back";
-    if (label && apps_carousel_cache.label_text != new_label) {
-        lv_label_set_text(label, new_label);
-    }
-    apps_carousel_cache.label_text = new_label;
-    apps_carousel_cache.item_index = selected_app_index;
-
-    lv_obj_set_x(obj, start_x);
-    lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
-
-    lv_anim_t anim_in;
-    lv_anim_init(&anim_in);
-    lv_anim_set_var(&anim_in, obj);
-    lv_anim_set_values(&anim_in, start_x, 0);
-    lv_anim_set_time(&anim_in, ANIM_DURATION);
-    lv_anim_set_path_cb(&anim_in, lv_anim_path_ease_in_out);
-    lv_anim_set_exec_cb(&anim_in, anim_set_x);
-    lv_anim_start(&anim_in);
-
-    lv_anim_t fade_in;
-    lv_anim_init(&fade_in);
-    lv_anim_set_var(&fade_in, obj);
-    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_time(&fade_in, ANIM_DURATION);
-    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
-    lv_anim_set_ready_cb(&fade_in, apps_carousel_fade_in_ready_cb);
-    lv_anim_start(&fade_in);
-}
-
-static void apps_carousel_fade_in_ready_cb(lv_anim_t *a) {
-    (void)a;
-    apps_is_animating = false;
 }
 
 static void apps_cleanup_layout(void) {
@@ -674,60 +617,66 @@ static void apps_cleanup_layout(void) {
         apps_list_buttons = NULL;
     }
     grid_cards_container = NULL;
+    launcher_page_indicator = NULL;
+    launcher_current_page = -1;
+    carousel_prev_obj = NULL;
+    carousel_next_obj = NULL;
 }
 
-static void update_app_item(bool slide_left) {
-    if (!app_items || num_apps <= 0) return;
-    apps_carousel_next_slide_left = slide_left;
-    apps_is_animating = true;
+static void scroll_app_launcher_card_to_view(int index) {
+    if (!grid_cards_container || !apps_grid_cards || index < 0 || index >= num_apps) return;
 
-    if (current_app_obj) {
-        lv_anim_t anim_out;
-        lv_anim_init(&anim_out);
-        lv_anim_set_var(&anim_out, current_app_obj);
-        int end_x = slide_left ? -LV_HOR_RES : LV_HOR_RES;
-        lv_anim_set_values(&anim_out, 0, end_x);
-        lv_anim_set_time(&anim_out, ANIM_DURATION);
-        lv_anim_set_path_cb(&anim_out, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&anim_out, anim_set_x);
-        lv_anim_set_ready_cb(&anim_out, apps_carousel_fade_out_ready_cb);
-        lv_anim_start(&anim_out);
+    lv_obj_t *card = apps_grid_cards[index];
+    if (!card || !lv_obj_is_valid(card)) return;
 
-        lv_anim_t fade_out;
-        lv_anim_init(&fade_out);
-        lv_anim_set_var(&fade_out, current_app_obj);
-        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
-        lv_anim_set_time(&fade_out, ANIM_DURATION);
-        lv_anim_set_exec_cb(&fade_out, anim_set_opa);
-        lv_anim_start(&fade_out);
-        return;
+    /* layout.screen_width/page_capacity come from pure arithmetic on the
+     * screen size, not live geometry, so forcing a full flex relayout of
+     * every page/card here (previously on every navigation press) bought
+     * nothing but cost. */
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    int page = index / layout.page_capacity;
+    bool page_changed = page != launcher_current_page;
+    bool animate = launcher_current_page >= 0 && page_changed &&
+                   !settings_get_reduced_motion(&G_Settings);
+    if (page_changed) {
+        gui_menu_scroll_to_x(grid_cards_container, page * layout.screen_width, animate);
     }
+    launcher_current_page = page;
+    if (launcher_page_indicator && page_changed) {
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        gui_menu_page_indicator_update(launcher_page_indicator, page, layout.page_count,
+                                       lv_color_hex(theme_palette_get_accent(theme)), apps_text_color);
+    }
+}
 
+static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layout,
+                                          int x_offset, lv_opa_t opacity) {
     int app_idx = selected_app_index;
-    current_app_obj = lv_btn_create(apps_container);
-    apps_carousel_cache.card = current_app_obj;
+    lv_obj_t *card = lv_btn_create(apps_container);
+    gui_apply_pressed_style(card);
+    apps_carousel_cache = (apps_carousel_cache_t){0};
+    apps_carousel_cache.card = card;
 
     int card_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
-    apply_app_card_style(current_app_obj, apps_surface_color, app_items[app_idx].border_color, card_border_w, 3);
-    lv_obj_set_style_radius(current_app_obj, 10, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(current_app_obj, 0, LV_PART_MAIN);
-    lv_obj_set_style_clip_corner(current_app_obj, false, 0);
+    apply_app_card_style(card, apps_surface_color, app_items[app_idx].border_color, card_border_w, 8);
+    lv_obj_set_style_radius(card, GUI_RADIUS_LG, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_clip_corner(card, false, 0);
+    lv_obj_set_style_opa(card, opacity, 0);
     apps_carousel_cache.border_color = app_items[app_idx].border_color;
     apps_carousel_cache.item_index = selected_app_index;
 
-    int btn_size = LV_MIN(LV_HOR_RES, LV_VER_RES) * 0.6;
-    if (LV_HOR_RES <= 128 && LV_VER_RES <= 128) {
-        btn_size = 80;
-    }
-    lv_obj_set_size(current_app_obj, btn_size, btn_size);
-    lv_obj_align(current_app_obj, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_size(card, layout->carousel_button_size, layout->carousel_button_size);
+    lv_obj_align(card, LV_ALIGN_CENTER, x_offset, 0);
 
     const char *item_symbol = app_item_symbol_icon(app_idx);
     const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(app_idx);
     if (item_symbol) {
-        lv_obj_t *icon = create_app_symbol_icon(current_app_obj, item_symbol, app_items[app_idx].border_color, &lv_font_montserrat_24);
+        lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[app_idx].border_color,
+                                                &lv_font_montserrat_24);
         if (icon) {
-            lv_obj_align(icon, LV_ALIGN_CENTER, 0, -10);
+            lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->carousel_icon_y_offset);
             apps_carousel_cache.icon = icon;
             apps_carousel_cache.icon_src = NULL;
             apps_carousel_cache.symbol_src = item_symbol;
@@ -735,9 +684,8 @@ static void update_app_item(bool slide_left) {
             apps_carousel_cache.icon_is_symbol = true;
         }
     } else if (item_icon) {
-        lv_obj_t *icon = lv_img_create(current_app_obj);
+        lv_obj_t *icon = lv_img_create(card);
         lv_img_set_src(icon, item_icon);
-        const int icon_size = 50;
         lv_img_set_antialias(icon, false);
         bool recolor_enabled = app_item_icon_should_recolor(app_idx, item_icon);
         if (recolor_enabled) {
@@ -748,23 +696,12 @@ static void update_app_item(bool slide_left) {
         }
         lv_obj_set_style_clip_corner(icon, false, 0);
 
-        lv_coord_t img_width = item_icon->header.w;
-        lv_coord_t img_height = item_icon->header.h;
-        if (img_width > 0 && img_height > 0) {
-            int zoom_w = (icon_size * 256) / img_width;
-            int zoom_h = (icon_size * 256) / img_height;
-            int zoom = LV_MIN(zoom_w, zoom_h);
-            if (zoom > 512) zoom = 512;
-            lv_img_set_zoom(icon, zoom);
-        }
+        gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, 512);
         int icon_x_offset = -3;
-        int icon_y_offset = -5;
         if (app_items[app_idx].view == &ghostchi_view) {
             icon_x_offset = 9;
         }
-        int x_pos = (btn_size - icon_size) / 2 + icon_x_offset;
-        int y_pos = (btn_size - icon_size) / 2 + icon_y_offset;
-        lv_obj_align(icon, LV_ALIGN_TOP_LEFT, x_pos, y_pos);
+        lv_obj_align(icon, LV_ALIGN_CENTER, icon_x_offset, layout->carousel_icon_y_offset);
         apps_carousel_cache.icon = icon;
         apps_carousel_cache.icon_src = item_icon;
         apps_carousel_cache.symbol_src = NULL;
@@ -772,8 +709,8 @@ static void update_app_item(bool slide_left) {
         apps_carousel_cache.icon_is_symbol = false;
     }
 
-    if (LV_HOR_RES > 150) {
-        lv_obj_t *label = lv_label_create(current_app_obj);
+    if (layout->carousel_show_label) {
+        lv_obj_t *label = lv_label_create(card);
         const char *label_text = app_items[app_idx].name;
         if (app_items[app_idx].view == NULL && !app_items[app_idx].is_category_folder) label_text = "< Back";
         lv_label_set_text(label, label_text);
@@ -783,16 +720,98 @@ static void update_app_item(bool slide_left) {
         apps_carousel_cache.label = label;
         apps_carousel_cache.label_text = label_text;
     }
+    return card;
 }
 
-static void create_apps_grid_menu(void) {
+static void apps_carousel_fade_in_ready_cb(lv_anim_t *a) {
+    (void)a;
+    apps_is_animating = false;
+}
+
+static void apps_carousel_fade_out_ready_cb(lv_anim_t *a) {
+    lv_obj_t *old_card = (lv_obj_t *)a->var;
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CARD_GRID, num_apps, &layout);
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
+    int start_x = apps_carousel_next_slide_left ? layout.carousel_transition_distance :
+                                                  -layout.carousel_transition_distance;
+
+    if (old_card && lv_obj_is_valid(old_card)) lv_obj_del(old_card);
+    current_app_obj = create_app_carousel_card(&layout, start_x, LV_OPA_TRANSP);
+    update_app_carousel_previews();
+
+    lv_anim_t move_in;
+    lv_anim_init(&move_in);
+    lv_anim_set_var(&move_in, current_app_obj);
+    lv_anim_set_values(&move_in, start_x, 0);
+    lv_anim_set_time(&move_in, ANIM_DURATION);
+    lv_anim_set_path_cb(&move_in, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&move_in, anim_set_x);
+    lv_anim_start(&move_in);
+
+    lv_anim_t fade_in;
+    lv_anim_init(&fade_in);
+    lv_anim_set_var(&fade_in, current_app_obj);
+    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&fade_in, ANIM_DURATION);
+    lv_anim_set_exec_cb(&fade_in, anim_set_opa);
+    lv_anim_set_ready_cb(&fade_in, apps_carousel_fade_in_ready_cb);
+    lv_anim_start(&fade_in);
+}
+
+static void update_app_item(bool move_left) {
+    if (!app_items || num_apps <= 0) return;
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
+
+    if (!current_app_obj) {
+        current_app_obj = create_app_carousel_card(&layout, 0, LV_OPA_COVER);
+        update_app_carousel_previews();
+        apps_is_animating = false;
+        return;
+    }
+
+    apps_is_animating = true;
+    apps_carousel_next_slide_left = move_left;
+
+    int duration = ANIM_DURATION;
+    if (duration <= 0) {
+        lv_obj_del(current_app_obj);
+        current_app_obj = create_app_carousel_card(&layout, 0, LV_OPA_COVER);
+        update_app_carousel_previews();
+        apps_is_animating = false;
+        return;
+    }
+
+    int end_x = move_left ? -layout.carousel_transition_distance :
+                            layout.carousel_transition_distance;
+    lv_anim_t move_out;
+    lv_anim_init(&move_out);
+    lv_anim_set_var(&move_out, current_app_obj);
+    lv_anim_set_values(&move_out, 0, end_x);
+    lv_anim_set_time(&move_out, duration);
+    lv_anim_set_path_cb(&move_out, lv_anim_path_ease_in_out);
+    lv_anim_set_exec_cb(&move_out, anim_set_x);
+    lv_anim_set_ready_cb(&move_out, apps_carousel_fade_out_ready_cb);
+    lv_anim_start(&move_out);
+
+    lv_anim_t fade_out;
+    lv_anim_init(&fade_out);
+    lv_anim_set_var(&fade_out, current_app_obj);
+    lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_time(&fade_out, duration);
+    lv_anim_set_exec_cb(&fade_out, anim_set_opa);
+    lv_anim_start(&fade_out);
+}
+
+static void create_apps_launcher_menu(void) {
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
 
     int screen_width = layout.screen_width;
     int cols = layout.columns;
     int margin = layout.margin;
-    int avail_height = layout.content_height;
+    int avail_height = layout.content_height - layout.page_indicator_height;
     int card_width = layout.card_width;
     int card_height = layout.card_height;
     apps_grid_cols = cols > 0 ? cols : 1;
@@ -803,29 +822,50 @@ static void create_apps_grid_menu(void) {
     lv_obj_set_size(grid_cards_container, screen_width, avail_height);
     lv_obj_set_style_bg_opa(grid_cards_container, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(grid_cards_container, 0, 0);
-    lv_obj_set_style_pad_all(grid_cards_container, margin, 0);
-    lv_obj_set_style_pad_row(grid_cards_container, margin, 0);
-    lv_obj_set_flex_flow(grid_cards_container, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(grid_cards_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_radius(grid_cards_container, 0, 0);
+    lv_obj_set_style_pad_all(grid_cards_container, 0, 0);
+    lv_obj_set_style_pad_column(grid_cards_container, 0, 0);
     lv_obj_align(grid_cards_container, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_scrollbar_mode(grid_cards_container, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_add_flag(grid_cards_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(grid_cards_container, LV_DIR_VER);
-    lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_MOMENTUM);
     lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_clear_flag(grid_cards_container, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_set_flex_flow(grid_cards_container, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(grid_cards_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(grid_cards_container, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(grid_cards_container, LV_SCROLL_SNAP_CENTER);
+    lv_obj_set_scrollbar_mode(grid_cards_container, LV_SCROLLBAR_MODE_OFF);
 
     apps_grid_cards = calloc(num_apps, sizeof(lv_obj_t *));
     if (!apps_grid_cards) {
-        ESP_LOGE(TAG, "failed to alloc apps grid cards");
+        ESP_LOGE(TAG, "failed to alloc app launcher cards");
         return;
     }
 
-    bool show_borders = settings_get_menu_item_borders(&G_Settings);
     lv_obj_t *current_row = NULL;
+    lv_obj_t *current_page = NULL;
+
+    /* Launcher pages show multiple icons simultaneously, which can exceed the
+     * no-PSRAM icon cache's slot count; reset pins so this pass's icons can
+     * evict anything left pinned by a previous, now-destroyed screen. */
+    asset_pack_reset_icon_pins();
 
     for (int i = 0; i < num_apps; ++i) {
-        if (i % cols == 0) {
-            current_row = lv_obj_create(grid_cards_container);
+        int slot = i % layout.page_capacity;
+        if (slot == 0) {
+            current_page = lv_obj_create(grid_cards_container);
+            lv_obj_set_size(current_page, screen_width, avail_height);
+            lv_obj_set_flex_flow(current_page, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(current_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+            lv_obj_set_style_pad_all(current_page, margin, 0);
+            lv_obj_set_style_pad_row(current_page, margin, 0);
+            lv_obj_set_style_bg_opa(current_page, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(current_page, 0, 0);
+            lv_obj_set_style_radius(current_page, 0, 0);
+            lv_obj_clear_flag(current_page, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        }
+
+        if (slot % cols == 0) {
+            current_row = lv_obj_create(current_page);
             lv_obj_set_width(current_row, LV_PCT(100));
             lv_obj_set_height(current_row, card_height);
             lv_obj_set_flex_flow(current_row, LV_FLEX_FLOW_ROW);
@@ -838,12 +878,12 @@ static void create_apps_grid_menu(void) {
         }
 
         lv_obj_t *card = lv_btn_create(current_row);
+        gui_apply_pressed_style(card);
         apps_grid_cards[i] = card;
         lv_obj_set_width(card, card_width);
         lv_obj_set_height(card, LV_PCT(100));
 
-        int shadow_w = (card_height <= 50 ? 4 : 8);
-        apply_app_card_style(card, apps_surface_color, app_items[i].border_color, show_borders ? 2 : 0, shadow_w);
+        gui_menu_launcher_tile_apply(card, app_card_bg_enabled(), apps_surface_color);
         lv_obj_set_style_radius(card, GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
@@ -903,22 +943,27 @@ static void create_apps_grid_menu(void) {
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
     }
 
+    launcher_page_indicator = lv_obj_create(apps_container);
+    lv_obj_align(launcher_page_indicator, LV_ALIGN_BOTTOM_MID, 0, -1);
+
     if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-        apply_app_card_selection_style(apps_grid_cards[selected_app_index], accent);
-        lv_obj_scroll_to_view(apps_grid_cards[selected_app_index], LV_ANIM_OFF);
+        gui_menu_launcher_tile_apply_selected(apps_grid_cards[selected_app_index], app_card_bg_enabled(), accent);
+        scroll_app_launcher_card_to_view(selected_app_index);
     }
 }
 
 static void create_apps_list_menu(void) {
-    int button_height = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 32 : 44;
-    int icon_target = button_height <= 38 ? 20 : 26;
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LIST, num_apps, &layout);
+    int button_height = layout.list_button_height;
+    int icon_target = layout.list_icon_target;
 
     lv_obj_set_flex_flow(apps_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(apps_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(apps_container, LV_HOR_RES > 200 ? 16 : 10, 0);
-    lv_obj_set_style_pad_row(apps_container, 6, 0);
+    lv_obj_set_style_pad_all(apps_container, layout.list_pad, 0);
+    lv_obj_set_style_pad_row(apps_container, layout.list_row_gap, 0);
     lv_obj_add_flag(apps_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(apps_container, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(apps_container, LV_SCROLLBAR_MODE_AUTO);
@@ -930,8 +975,12 @@ static void create_apps_list_menu(void) {
         return;
     }
 
+    /* List shows every app's icon simultaneously; see create_apps_launcher_menu. */
+    asset_pack_reset_icon_pins();
+
     for (int i = 0; i < num_apps; ++i) {
         lv_obj_t *btn = lv_btn_create(apps_container);
+        gui_apply_pressed_style(btn);
         apps_list_buttons[i] = btn;
         lv_obj_set_width(btn, LV_PCT(100));
         lv_obj_set_height(btn, button_height);
@@ -939,9 +988,9 @@ static void create_apps_list_menu(void) {
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         int btn_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
         apply_app_card_style(btn, apps_surface_color, app_items[i].border_color, btn_border_w, 6);
-        lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
-        lv_obj_set_style_pad_column(btn, 12, LV_PART_MAIN);
+        lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(btn, layout.list_button_pad, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(btn, layout.list_column_gap, LV_PART_MAIN);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
         const char *item_symbol = app_item_symbol_icon(i);
@@ -1007,10 +1056,10 @@ static void render_app_items(void) {
     if (selected_app_index < 0) selected_app_index = 0;
     if (selected_app_index >= num_apps) selected_app_index = num_apps > 0 ? num_apps - 1 : 0;
 
-    if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
-        create_apps_grid_menu();
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+        create_apps_launcher_menu();
         select_app_item(selected_app_index, false);
-    } else if (apps_layout == APPS_LAYOUT_LIST) {
+    } else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
         create_apps_list_menu();
         select_app_item(selected_app_index, false);
     } else {
@@ -1033,15 +1082,16 @@ static void apps_plugin_reload_done(void *arg) {
                          !app_items[selected_app_index].is_category_folder);
     }
 
-    rebuild_app_items(true);
+    bool plugins_enabled = apps_native_plugins_enabled();
+    rebuild_app_items(plugins_enabled);
     init_app_colors();
-    apps_allow_plugin_icon_load = true;
+    apps_allow_plugin_icon_load = plugins_enabled;
     if (selected_back) selected_app_index = num_apps > 0 ? num_apps - 1 : 0;
     render_app_items();
     gui_screen_apply_background(apps_menu_view.root);
 
     int plugin_count = plugin_manager_count();
-    if (plugin_count > 0) {
+    if (plugins_enabled && plugin_count > 0) {
         char msg[48];
         snprintf(msg, sizeof(msg), "%d SD app%s ready", plugin_count, plugin_count == 1 ? "" : "s");
         toast_show_duration(msg, TOAST_SUCCESS, 1000);
@@ -1056,13 +1106,22 @@ static void apps_plugin_reload_done(void *arg) {
  * @brief Creates the apps menu screen view
  */
  void apps_menu_create(void) {
-    plugin_manager_init();
+    bool plugins_enabled = apps_native_plugins_enabled();
+    if (plugins_enabled) plugin_manager_init();
     int boot_count = plugin_manager_count();
-    apps_allow_plugin_icon_load = (boot_count > 0);
-    in_submenu = false;
-    current_category[0] = '\0';
-    rebuild_app_items(boot_count > 0);
-    if (boot_count > 0) {
+    apps_allow_plugin_icon_load = plugins_enabled && (boot_count > 0);
+    /* Only force a fresh top-level entry when actually arriving from the
+     * Main Menu; returning here (e.g. after launching a native app or
+     * plugin) should preserve which category/item was selected instead of
+     * always snapping back to the first icon. */
+    bool fresh_entry = (display_manager_previous_view == &main_menu_view);
+    if (fresh_entry) {
+        in_submenu = false;
+        current_category[0] = '\0';
+        selected_app_index = 0;
+    }
+    rebuild_app_items(plugins_enabled && boot_count > 0);
+    if (plugins_enabled && boot_count > 0) {
         char msg[48];
         snprintf(msg, sizeof(msg), "%d SD app%s ready", boot_count, boot_count == 1 ? "" : "s");
         toast_show_duration(msg, TOAST_SUCCESS, 1000);
@@ -1070,11 +1129,11 @@ static void apps_plugin_reload_done(void *arg) {
     refresh_apps_surface_colors();
     display_manager_fill_screen(apps_bg_color);
 
-#if CONFIG_ENABLE_NATIVE_SD_APPS
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
-        toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 3500);
+    if (!s_native_apps_psram_warning_shown &&
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0) {
+        s_native_apps_psram_warning_shown = true;
+        toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 1500);
     }
-#endif
 
     const char *title = (LV_VER_RES > 320 ? "Apps Menu" : "Apps");
 
@@ -1092,27 +1151,17 @@ static void apps_plugin_reload_done(void *arg) {
 
     init_app_colors();
 
-    uint8_t layout_setting = settings_get_menu_layout(&G_Settings);
-    switch (layout_setting) {
-        case 1:
-            apps_layout = APPS_LAYOUT_GRID_CARDS;
-            break;
-        case 2:
-            apps_layout = APPS_LAYOUT_LIST;
-            break;
-        default:
-            apps_layout = APPS_LAYOUT_CAROUSEL;
-            break;
-    }
+    main_menu_layout_kind_t configured_layout =
+        main_menu_layout_from_setting(settings_get_menu_layout(&G_Settings));
+    apps_layout = main_menu_layout_resolve_for_size(configured_layout, LV_HOR_RES, LV_VER_RES);
 
-    int status_bar_height = GUI_STATUS_BAR_H;
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
+    int status_bar_height = layout.status_bar_height;
     if (apps_container) {
-
-        if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
-            lv_obj_align(apps_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
-            lv_obj_set_size(apps_container, LV_HOR_RES, LV_VER_RES - status_bar_height);
-        } else {
-            lv_obj_align(apps_container, LV_ALIGN_CENTER, 0, status_bar_height / 2);
+        lv_obj_align(apps_container, layout.container_align, layout.container_x, layout.container_y);
+        if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+            lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
         }
     }
 
@@ -1127,23 +1176,21 @@ static void apps_plugin_reload_done(void *arg) {
 #endif
     }
 
-    if (should_show_nav_buttons && (apps_layout == APPS_LAYOUT_GRID_CARDS || apps_layout == APPS_LAYOUT_LIST)) {
+    if (should_show_nav_buttons && apps_layout == MAIN_MENU_LAYOUT_CAROUSEL &&
+        layout.carousel_show_previews) {
+        should_show_nav_buttons = false;
+    }
+    if (should_show_nav_buttons && (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER ||
+                                    apps_layout == MAIN_MENU_LAYOUT_LIST)) {
         should_show_nav_buttons = false;
     }
 
     if (should_show_nav_buttons) {
         left_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(left_nav_btn);
 
-        int btn_size = 52;
-        int btn_margin = 15;
-        int screen_width = lv_disp_get_hor_res(lv_disp_get_default());
-        if (screen_width <= 128) {
-            btn_size = 40;
-            btn_margin = 10;
-        } else if (screen_width >= 320) {
-            btn_size = 60;
-            btn_margin = 20;
-        }
+        int btn_size = layout.nav_button_size;
+        int btn_margin = layout.nav_button_margin;
 
         lv_obj_set_size(left_nav_btn, btn_size, btn_size);
         lv_obj_set_style_bg_opa(left_nav_btn, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -1154,7 +1201,7 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_align(left_nav_btn, LV_ALIGN_LEFT_MID, btn_margin, 0);
 
         lv_obj_t *left_label = lv_label_create(left_nav_btn);
-        lv_label_set_text(left_label, "<");
+        lv_label_set_text(left_label, LV_SYMBOL_LEFT);
         lv_obj_set_style_text_font(left_label, accessibility_get_font_display(), 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(left_label, accessibility_get_font_title(), 0);
@@ -1163,6 +1210,7 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
 
         right_nav_btn = lv_btn_create(lv_scr_act());
+        gui_apply_pressed_style(right_nav_btn);
         lv_obj_set_size(right_nav_btn, btn_size, btn_size);
         lv_obj_set_style_bg_opa(right_nav_btn, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(right_nav_btn, 0, LV_PART_MAIN);
@@ -1172,7 +1220,7 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_align(right_nav_btn, LV_ALIGN_RIGHT_MID, -btn_margin, 0);
 
         lv_obj_t *right_label = lv_label_create(right_nav_btn);
-        lv_label_set_text(right_label, ">");
+        lv_label_set_text(right_label, LV_SYMBOL_RIGHT);
         lv_obj_set_style_text_font(right_label, accessibility_get_font_display(), 0);
         if (btn_size < 40) {
             lv_obj_set_style_text_font(right_label, accessibility_get_font_title(), 0);
@@ -1186,7 +1234,9 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_move_foreground(right_nav_btn);
     }
 
-    selected_app_index = 0;
+    /* render_app_items() clamps selected_app_index against num_apps itself,
+     * so a preserved index that's now out of range (e.g. a native app was
+     * added/removed since we were last here) is handled there. */
     render_app_items();
     gui_screen_apply_background(apps_menu_view.root);
 
@@ -1232,9 +1282,11 @@ void apps_menu_destroy(void) {
         apps_plugin_reload_tcb = NULL;
     }
 
-    selected_app_index = 0;
-    in_submenu = false;
-    current_category[0] = '\0';
+    /* selected_app_index/in_submenu/current_category are deliberately NOT
+     * reset here: they need to survive the destroy() -> create() cycle so
+     * apps_menu_create()'s fresh_entry check can tell "returning from a
+     * launched app" (preserve position) apart from "arriving from the Main
+     * Menu" (reset to the top). */
     touch_started = false;
     touch_dragged = false;
     touch_drag_axis = 0;
@@ -1242,6 +1294,10 @@ void apps_menu_destroy(void) {
     touch_start_y = 0;
     touch_last_x = 0;
     touch_last_y = 0;
+    free(app_items);
+    app_items = NULL;
+    s_app_items_capacity = 0;
+    num_apps = 0;
 }
 
 /**
@@ -1249,28 +1305,27 @@ void apps_menu_destroy(void) {
  */
 static void select_app_item(int index, bool slide_left) {
     if (!app_items || num_apps <= 0) return;
+    if (apps_layout == MAIN_MENU_LAYOUT_CAROUSEL && apps_is_animating) return;
     if (index < 0) index = num_apps - 1;
     if (index >= num_apps) index = 0;
 
-    if (apps_layout == APPS_LAYOUT_GRID_CARDS && apps_grid_cards) {
-        bool show_borders_sel = settings_get_menu_item_borders(&G_Settings);
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER && apps_grid_cards) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
             lv_obj_t *old = apps_grid_cards[selected_app_index];
-            apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
-                                 show_borders_sel ? 2 : 0, 8);
+            gui_menu_launcher_tile_apply(old, app_card_bg_enabled(), apps_surface_color);
         }
         selected_app_index = index;
         if (apps_grid_cards[selected_app_index]) {
             lv_obj_t *card = apps_grid_cards[selected_app_index];
             uint8_t theme = settings_get_menu_theme(&G_Settings);
             lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-            apply_app_card_selection_style(card, accent);
-            lv_obj_scroll_to_view(card, LV_ANIM_OFF);
+            gui_menu_launcher_tile_apply_selected(card, app_card_bg_enabled(), accent);
+            scroll_app_launcher_card_to_view(selected_app_index);
         }
         return;
     }
 
-    if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LIST && apps_list_buttons) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_list_buttons[selected_app_index]) {
             lv_obj_t *old = apps_list_buttons[selected_app_index];
             apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
@@ -1279,12 +1334,9 @@ static void select_app_item(int index, bool slide_left) {
         selected_app_index = index;
         if (apps_list_buttons[selected_app_index]) {
             lv_obj_t *btn = apps_list_buttons[selected_app_index];
-            if (app_card_bg_enabled()) {
-                lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
-                lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-            } else {
-                lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
-            }
+            uint8_t theme = settings_get_menu_theme(&G_Settings);
+            lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+            apply_app_card_selection_style(btn, accent);
             lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
         }
         return;
@@ -1299,7 +1351,7 @@ static void apps_menu_go_back(void) {
         in_submenu = false;
         current_category[0] = '\0';
         selected_app_index = 0;
-        rebuild_app_items(true);
+        rebuild_app_items(apps_native_plugins_enabled());
         init_app_colors();
         render_app_items();
         gui_screen_apply_background(apps_menu_view.root);
@@ -1311,7 +1363,7 @@ static void apps_menu_go_back(void) {
 static void navigate_apps_vertical(int direction) {
     if (direction == 0) return;
 
-    if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
         if (apps_grid_cols <= 0 || num_apps <= 0) return;
 
         int rows = (num_apps + apps_grid_cols - 1) / apps_grid_cols;
@@ -1337,6 +1389,32 @@ static void navigate_apps_vertical(int direction) {
     select_app_item(selected_app_index + (direction > 0 ? 1 : -1), false);
 }
 
+static int apps_grid_horizontal_target(int direction) {
+    if (apps_layout != MAIN_MENU_LAYOUT_LAUNCHER || num_apps <= 0) {
+        return selected_app_index + direction;
+    }
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    if (layout.columns <= 0 || layout.page_capacity <= 0 || layout.page_count <= 0) {
+        return selected_app_index + direction;
+    }
+
+    int page = selected_app_index / layout.page_capacity;
+    int slot = selected_app_index % layout.page_capacity;
+    int col = slot % layout.columns;
+    if (direction > 0 && col < layout.columns - 1 && selected_app_index + 1 < num_apps) {
+        return selected_app_index + 1;
+    }
+    if (direction < 0 && col > 0) return selected_app_index - 1;
+
+    page += direction > 0 ? 1 : -1;
+    if (page < 0) page = layout.page_count - 1;
+    if (page >= layout.page_count) page = 0;
+    int target = page * layout.page_capacity + slot;
+    return target < num_apps ? target : num_apps - 1;
+}
+
 /**
  * @brief Handles the selection of app items
  */
@@ -1347,7 +1425,7 @@ static void handle_app_item_selection(int item_index) {
         strncpy(current_category, app_items[item_index].category, sizeof(current_category) - 1);
         current_category[sizeof(current_category) - 1] = '\0';
         in_submenu = true;
-        rebuild_app_items(true);
+        rebuild_app_items(apps_native_plugins_enabled());
         init_app_colors();
         selected_app_index = (num_apps > 1) ? 1 : 0;
         render_app_items();
@@ -1363,6 +1441,14 @@ static void handle_app_item_selection(int item_index) {
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
 
     if (app_items[item_index].plugin_id[0] != '\0') {
+        const plugin_app_manifest_t *manifest = plugin_manager_find(app_items[item_index].plugin_id);
+        char missing_feature[24];
+        if (!manifest || !plugin_manager_required_features_supported(manifest, missing_feature, sizeof(missing_feature))) {
+            char message[TOAST_MAX_TEXT_LEN + 1];
+            snprintf(message, sizeof(message), "Requires %s", missing_feature[0] ? missing_feature : "unsupported hardware");
+            toast_show(message, TOAST_WARN);
+            return;
+        }
         plugin_runner_set_app(app_items[item_index].plugin_id);
         display_manager_switch_view(&plugin_runner_view);
         return;
@@ -1372,6 +1458,11 @@ static void handle_app_item_selection(int item_index) {
         terminal_set_return_view(&apps_menu_view);
         terminal_set_dualcomm_filter(false);
     }
+#ifdef CONFIG_HAS_AUDIO_PLAYER
+    if (app_items[item_index].view == &audio_player_view) {
+        audio_player_set_return_view(&apps_menu_view);
+    }
+#endif
 
     display_manager_switch_view(app_items[item_index].view);
 }
@@ -1380,22 +1471,22 @@ static void handle_app_item_selection(int item_index) {
  * @brief Handles hardware button presses for app navigation
  */
 static void handle_apps_button_press(int button) {
-    if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
         if (button == 2) {
             navigate_apps_vertical(-1);
         } else if (button == 4) {
             navigate_apps_vertical(1);
         } else if (button == 0) {
-            select_app_item(selected_app_index - 1, true);
+            select_app_item(apps_grid_horizontal_target(-1), false);
         } else if (button == 3) {
-            select_app_item(selected_app_index + 1, false);
+            select_app_item(apps_grid_horizontal_target(1), true);
         } else if (button == 1) {
             handle_app_item_selection(selected_app_index);
         }
         return;
     }
 
-    if (apps_layout == APPS_LAYOUT_LIST) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
         if (button == 2) { // Up
             ESP_LOGD(TAG, "Up button pressed\n");
             select_app_item(selected_app_index - 1, false);
@@ -1414,10 +1505,10 @@ static void handle_apps_button_press(int button) {
 
     if (button == 0) { // Left
         ESP_LOGD(TAG, "Left button pressed\n");
-        select_app_item(selected_app_index - 1, true);
+        select_app_item(selected_app_index - 1, false);
     } else if (button == 3) { // Right
         ESP_LOGD(TAG, "Right button pressed\n");
-        select_app_item(selected_app_index + 1, false);
+        select_app_item(selected_app_index + 1, true);
     } else if (button == 1) { // Select
         ESP_LOGD(TAG, "Select button pressed\n");
         handle_app_item_selection(selected_app_index);
@@ -1435,10 +1526,10 @@ static void handle_keyboard_interactions(int keyValue){
     // Vim keybinds and Cardputer controls
     if (keyValue == LV_KEY_LEFT || keyValue == 44 || keyValue == ',' || keyValue == 'h') { // Left
         ESP_LOGI(TAG, "Left button or 'h' pressed");
-        select_app_item(selected_app_index - 1, true);
+        select_app_item(apps_grid_horizontal_target(-1), false);
     } else if (keyValue == LV_KEY_RIGHT || keyValue == 47 || keyValue == '/' || keyValue == 'l') { // Right
         ESP_LOGI(TAG, "Right button or 'l' pressed");
-        select_app_item(selected_app_index + 1, false);
+        select_app_item(apps_grid_horizontal_target(1), true);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // Up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed");
         navigate_apps_vertical(-1);
@@ -1452,6 +1543,11 @@ static void handle_keyboard_interactions(int keyValue){
         ESP_LOGI(TAG, "Esc or '`' pressed (back)");
         apps_menu_go_back();
     }
+}
+
+static bool apps_keyboard_activation_key(int keyValue) {
+    return keyValue == LV_KEY_ENTER || keyValue == 13 ||
+           keyValue == LV_KEY_ESC || keyValue == 29 || keyValue == '`';
 }
 
 /**
@@ -1484,9 +1580,7 @@ void apps_menu_event_handler(InputEvent *event) {
                 if (touch_dragged && touch_drag_axis == 1) {
                     dy = clamp_drag_delta(dy);
                     if (dy) {
-                        if (apps_layout == APPS_LAYOUT_GRID_CARDS && grid_cards_container) {
-                            display_manager_queue_scroll(grid_cards_container, dy);
-                        } else if (apps_layout == APPS_LAYOUT_LIST && apps_container) {
+                        if (apps_layout == MAIN_MENU_LAYOUT_LIST && apps_container) {
                             display_manager_queue_scroll(apps_container, dy);
                         }
                     }
@@ -1497,7 +1591,24 @@ void apps_menu_event_handler(InputEvent *event) {
             int dy = data->point.y - touch_start_y;
             touch_started = false;
 
-            if (touch_dragged && apps_layout != APPS_LAYOUT_CAROUSEL) {
+            if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER &&
+                abs(dx) > SWIPE_THRESHOLD && abs(dx) > abs(dy)) {
+                main_menu_layout_metrics_t layout;
+                main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+                int page = selected_app_index / layout.page_capacity;
+                int slot = selected_app_index % layout.page_capacity;
+                page += dx < 0 ? 1 : -1;
+                if (page < 0) page = layout.page_count - 1;
+                if (page >= layout.page_count) page = 0;
+                int target = page * layout.page_capacity + slot;
+                if (target >= num_apps) target = num_apps - 1;
+                touch_dragged = false;
+                touch_drag_axis = 0;
+                select_app_item(target, dx < 0);
+                return;
+            }
+
+            if (touch_dragged && apps_layout != MAIN_MENU_LAYOUT_CAROUSEL) {
                 touch_dragged = false;
                 touch_drag_axis = 0;
                 return;
@@ -1505,7 +1616,7 @@ void apps_menu_event_handler(InputEvent *event) {
             touch_dragged = false;
             touch_drag_axis = 0;
 
-            if (apps_layout == APPS_LAYOUT_CAROUSEL) {
+            if (apps_layout == MAIN_MENU_LAYOUT_CAROUSEL) {
                 if (abs(dx) > SWIPE_THRESHOLD && abs(dx) > abs(dy)) {
                     if (dx < 0) {
                         select_app_item(selected_app_index + 1, true);
@@ -1513,6 +1624,16 @@ void apps_menu_event_handler(InputEvent *event) {
                         select_app_item(selected_app_index - 1, false);
                     }
                     return;
+                }
+                if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
+                    if (app_touch_started_and_ended_in(carousel_prev_obj, &data->point)) {
+                        select_app_item(selected_app_index - 1, false);
+                        return;
+                    }
+                    if (app_touch_started_and_ended_in(carousel_next_obj, &data->point)) {
+                        select_app_item(selected_app_index + 1, true);
+                        return;
+                    }
                 }
             }
 
@@ -1527,7 +1648,7 @@ void apps_menu_event_handler(InputEvent *event) {
                                     data->point.y >= left_area.y1 && data->point.y <= left_area.y2);
                 if (start_in_left && end_in_left && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
                     ESP_LOGI(TAG, "Left navigation button tapped (press+release inside)");
-                    select_app_item(selected_app_index - 1, true);
+                    select_app_item(selected_app_index - 1, false);
                     return;
                 }
 
@@ -1537,20 +1658,12 @@ void apps_menu_event_handler(InputEvent *event) {
                                      data->point.y >= right_area.y1 && data->point.y <= right_area.y2);
                 if (start_in_right && end_in_right && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
                     ESP_LOGI(TAG, "Right navigation button tapped (press+release inside)");
-                    select_app_item(selected_app_index + 1, false);
+                    select_app_item(selected_app_index + 1, true);
                     return;
                 }
             }
 
-            if (apps_layout == APPS_LAYOUT_GRID_CARDS && abs(dy) > SWIPE_THRESHOLD && abs(dy) > abs(dx)) {
-                if (grid_cards_container) {
-                    dy = clamp_drag_delta(dy);
-                    if (dy) display_manager_queue_scroll(grid_cards_container, dy);
-                }
-                return;
-            }
-
-            if (apps_layout == APPS_LAYOUT_LIST && abs(dy) > SWIPE_THRESHOLD && abs(dy) > abs(dx)) {
+            if (apps_layout == MAIN_MENU_LAYOUT_LIST && abs(dy) > SWIPE_THRESHOLD && abs(dy) > abs(dx)) {
                 if (apps_container) {
                     dy = clamp_drag_delta(dy);
                     if (dy) display_manager_queue_scroll(apps_container, dy);
@@ -1560,7 +1673,7 @@ void apps_menu_event_handler(InputEvent *event) {
 
             if (abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
                 // Check which app button was actually tapped
-                if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
+                if (apps_layout == MAIN_MENU_LAYOUT_LIST && apps_list_buttons) {
                     for (int i = 0; i < num_apps; i++) {
                         if (apps_list_buttons[i]) {
                             lv_area_t btn_area;
@@ -1573,7 +1686,7 @@ void apps_menu_event_handler(InputEvent *event) {
                             }
                         }
                     }
-                } else if (apps_layout == APPS_LAYOUT_GRID_CARDS && apps_grid_cards) {
+                } else if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER && apps_grid_cards) {
                     for (int i = 0; i < num_apps; i++) {
                         if (apps_grid_cards[i]) {
                             lv_area_t card_area;
@@ -1597,6 +1710,7 @@ void apps_menu_event_handler(InputEvent *event) {
         ESP_LOGI(TAG, "Joystick event");
         handle_apps_button_press(event->data.joystick_index);
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
+        if (event->is_repeat && apps_keyboard_activation_key(event->data.key_value)) return;
         ESP_LOGW(TAG, "keyboard event");
         handle_keyboard_interactions(event->data.key_value);
     } else if (event->type == INPUT_TYPE_ENCODER) {
@@ -1604,9 +1718,9 @@ void apps_menu_event_handler(InputEvent *event) {
             handle_app_item_selection(selected_app_index);
         } else {
             if (event->data.encoder.direction > 0) {
-                select_app_item(selected_app_index + 1, true);
+                select_app_item(apps_grid_horizontal_target(1), true);
             } else {
-                select_app_item(selected_app_index - 1, false);
+                select_app_item(apps_grid_horizontal_target(-1), false);
             }
         }
 #ifdef CONFIG_USE_ENCODER

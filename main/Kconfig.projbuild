@@ -1,6 +1,6 @@
 menu "Ghost ESP Options"
 
-    menu "Device Detials"
+    menu "Device Details"
 
     config BUILD_CONFIG_TEMPLATE
         string "Specify template used to build"
@@ -718,18 +718,23 @@ menu "Ghost ESP Options"
             config NRF24_ANALYZER_SAMPLES_PER_CHANNEL
                 int "Analyzer Samples per Channel"
                 range 1 16
-                default 4
+                default 6
                 depends on HAS_NRF24
                 help
                     Number of RPD samples taken for each channel update.
+                    Higher values give finer level quantization (less
+                    jitter) at the cost of scan speed.
 
             config NRF24_ANALYZER_SETTLE_US
                 int "Analyzer Settle Time (us)"
                 range 130 5000
-                default 200
+                default 250
                 depends on HAS_NRF24
                 help
-                    Delay after setting channel before reading RPD.
+                    Delay after setting channel before reading RPD. Too
+                    short and the PLL hasn't relocked, so RPD can still
+                    reflect the previous channel (reads as jitter/crosstalk
+                    between adjacent channels).
 
             config NRF24_ANALYZER_CHANNELS_PER_TICK
                 int "Analyzer Channels per Tick"
@@ -844,10 +849,48 @@ menu "Ghost ESP Options"
         menu "NFC Options"
 
             config NFC_PN532
-                bool "Enable PN532 NFC"
+                bool "Enable PN532 NFC support"
                 default n
                 help
-                    Enable PN532 NFC support.
+                    Compile PN532 NFC support.
+
+            config NFC_ST25R3916
+                bool "Enable ST25R3916 NFC support"
+                default n
+                help
+                    Compile ST25R3916/ST25R3916B NFC support.
+
+            choice NFC_DEFAULT_BACKEND
+                prompt "Default local NFC backend"
+                depends on NFC_PN532 || NFC_ST25R3916
+                default NFC_DEFAULT_BACKEND_PN532 if NFC_PN532
+                default NFC_DEFAULT_BACKEND_ST25R3916 if NFC_ST25R3916
+                default NFC_DEFAULT_BACKEND_AUTO
+
+                config NFC_DEFAULT_BACKEND_AUTO
+                    bool "Auto"
+
+                config NFC_DEFAULT_BACKEND_PN532
+                    bool "PN532"
+                    depends on NFC_PN532
+
+                config NFC_DEFAULT_BACKEND_ST25R3916
+                    bool "ST25R3916"
+                    depends on NFC_ST25R3916
+            endchoice
+
+
+            choice NFC_ST25R3916_BUS
+                prompt "ST25R3916 bus"
+                depends on NFC_ST25R3916
+                default NFC_ST25R3916_I2C
+
+                config NFC_ST25R3916_I2C
+                    bool "I2C"
+
+                config NFC_ST25R3916_SPI
+                    bool "SPI"
+            endchoice
 
             config NFC_CHAMELEON
                 bool "Enable Chameleon Ultra NFC"
@@ -859,35 +902,75 @@ menu "Ghost ESP Options"
             # Aggregated flag for UI and generic NFC code
             config HAS_NFC
                 bool
-                default y if NFC_PN532 || NFC_CHAMELEON
+                default y if NFC_PN532 || NFC_ST25R3916 || NFC_CHAMELEON
 
             config NFC_SCL_PIN
                 int "NFC Clock Pin (SCL/SCK)"
                 default 22
-                depends on NFC_PN532
+                depends on NFC_PN532 || (NFC_ST25R3916 && NFC_ST25R3916_I2C)
                 help
-                    GPIO for PN532 I2C clock (aka SCL/SCK).
+                    GPIO for NFC I2C clock (SCL).
 
             config NFC_SDA_PIN
                 int "NFC Data Pin (SDA)"
                 default 21
-                depends on NFC_PN532
+                depends on NFC_PN532 || (NFC_ST25R3916 && NFC_ST25R3916_I2C)
                 help
-                    GPIO for PN532 I2C data (SDA).
+                    GPIO for NFC I2C data (SDA).
 
             config NFC_IRQ_PIN
                 int "NFC URQ/IRQ Pin"
                 default -1
-                depends on NFC_PN532
+                depends on NFC_PN532 || NFC_ST25R3916
                 help
-                    GPIO for PN532 IRQ (aka URQ). Use -1 if not connected.
+                    GPIO for NFC IRQ/URQ. Use -1 if not connected.
 
             config NFC_RST_PIN
                 int "NFC RF RST Pin"
                 default -1
-                depends on NFC_PN532
+                depends on NFC_PN532 || NFC_ST25R3916
                 help
-                    GPIO for PN532 reset (RF RST). Use -1 if not connected.
+                    GPIO for NFC reset. Use -1 if not connected.
+
+            config NFC_ST25R3916_I2C_ADDR
+                hex "ST25R3916 I2C address"
+                default 0x50
+                depends on NFC_ST25R3916 && NFC_ST25R3916_I2C
+                help
+                    7-bit ST25R3916 I2C address. The chip uses 0x50..0x53 depending on A0/A1 straps.
+
+            config NFC_ST25R3916_SPI_HOST
+                int "ST25R3916 SPI host"
+                default 1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
+                help
+                    ESP-IDF SPI host index (typically 1 for SPI2_HOST, 2 for SPI3_HOST).
+
+            config NFC_ST25R3916_SPI_MOSI_PIN
+                int "ST25R3916 SPI MOSI pin"
+                default -1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
+
+            config NFC_ST25R3916_SPI_MISO_PIN
+                int "ST25R3916 SPI MISO pin"
+                default -1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
+
+            config NFC_ST25R3916_SPI_SCLK_PIN
+                int "ST25R3916 SPI SCLK pin"
+                default -1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
+
+            config NFC_ST25R3916_SPI_CS_PIN
+                int "ST25R3916 SPI CS pin"
+                default -1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
+
+            config NFC_ST25R3916_SPI_CLOCK_HZ
+                int "ST25R3916 SPI clock (Hz)"
+                default 4000000
+                range 100000 6000000
+                depends on NFC_ST25R3916 && NFC_ST25R3916_SPI
 
         endmenu
 
@@ -1332,6 +1415,7 @@ menu "Ghost ESP Options"
     config ENABLE_NATIVE_SD_APPS
         bool "Enable native apps loaded from SD"
         default y
+        depends on SPIRAM
         depends on IDF_TARGET_ESP32 || IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C61 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32C5
         select ELF_LOADER
         select ELF_DYNAMIC_LOAD_SHARED_OBJECT
@@ -1348,14 +1432,24 @@ menu "Ghost ESP Options"
 
     config NATIVE_SD_APP_MAX_COUNT
         int "Maximum number of SD apps to scan"
-        default 4 if !SPIRAM
         default 32
         range 1 32
         depends on ENABLE_NATIVE_SD_APPS
         help
             Maximum number of native SD apps that can be registered.
-            Lower values save RAM on devices without PSRAM.
-            Default is 8 for no-PSRAM builds, 32 for PSRAM builds.
+            Lower values save PSRAM. The default is 32.
+
+    endmenu
+
+    menu "GhostScript"
+
+    config ENABLE_GHOSTSCRIPT
+        bool "Enable GhostScript Lua scripting"
+        default y
+        help
+            Enable the low-memory Lua scripting runtime loaded from
+            /mnt/ghostesp/scripts. It is available through the browser on
+            screen builds and through the script CLI on headless builds.
 
     endmenu
 
@@ -1414,6 +1508,17 @@ menu "Ghost ESP Options"
         help
             Enable extra TFT/SD SPI bus coordination for boards that share
             MOSI/MISO/CLK between display and SD card.
+
+    config EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI
+        bool "Experimental ESP32-C5 persistent TFT/SD SPI bus"
+        default n
+        depends on IDF_TARGET_ESP32C5 && USING_SPI && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
+        help
+            Keep the TFT and SD card attached to SPI2 simultaneously by routing
+            SPI2 clock and MOSI to both sets of GPIOs. Transactions still share
+            one controller and are serialized by the SPI driver. This currently
+            applies only to the somethingsomething board template. Disable this
+            option to restore the existing JIT mount and display handoff path.
 
     config SD_MMC_D0 
         int "SD Card D0 Pin"

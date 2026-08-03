@@ -67,6 +67,15 @@ esp_err_t pn532_new_driver_i2c(gpio_num_t sda,
     io_handle->pn532_init_extra = NULL;
     io_handle->pn532_is_ready = pn532_is_ready;
 
+    /* Native PN532 backend: high-level ops fall through to built-in pn532.c logic.
+     * Clear any stale dispatch pointers from a prior alternate-frontend session. */
+    io_handle->hl_list_passive_target = NULL;
+    io_handle->hl_read_target_id_ex = NULL;
+    io_handle->hl_data_exchange = NULL;
+    io_handle->hl_communicate_thru = NULL;
+    io_handle->hl_set_passive_activation_retries = NULL;
+    io_handle->hl_mfc_auth_recover = NULL;
+
 #ifdef CONFIG_ENABLE_IRQ_ISR
     io_handle->IRQQueue = NULL;
 #endif

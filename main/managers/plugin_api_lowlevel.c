@@ -939,6 +939,40 @@ bool plugin_api_nfc_get_last_uid(uint8_t *uid, size_t *uid_len) {
     return true;
 }
 
+bool plugin_api_nfc_t2_scan_start(void) {
+    return has_permission(PLUGIN_PERMISSION_NFC) && nfc_view_t2_scan_start();
+}
+
+bool plugin_api_nfc_t2_scan_stop(void) {
+    return has_permission(PLUGIN_PERMISSION_NFC) && nfc_view_t2_scan_stop();
+}
+
+bool plugin_api_nfc_t2_scan_active(void) {
+    return has_permission(PLUGIN_PERMISSION_NFC) && nfc_view_t2_scan_active();
+}
+
+bool plugin_api_nfc_t2_read(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
+                            size_t max_ndef_bytes, size_t *ndef_bytes_out) {
+    if (!has_permission(PLUGIN_PERMISSION_NFC) || !out_info) return false;
+    nfc_view_t2_tag_info_t info = {0};
+    if (!nfc_view_t2_read(&info, ndef_out, max_ndef_bytes, ndef_bytes_out)) return false;
+    memcpy(out_info->uid, info.uid, sizeof(out_info->uid));
+    out_info->uid_len = info.uid_len;
+    memcpy(out_info->model, info.model, sizeof(out_info->model));
+    out_info->user_bytes = info.user_bytes;
+    out_info->ndef_length = info.ndef_length;
+    out_info->ndef_present = info.ndef_present;
+    out_info->read_only = info.read_only;
+    out_info->password_protected = info.password_protected;
+    out_info->static_locked = info.static_locked;
+    out_info->dynamic_locked = info.dynamic_locked;
+    return true;
+}
+
+bool plugin_api_nfc_t2_write_ndef(const uint8_t *ndef, size_t ndef_len) {
+    return has_permission(PLUGIN_PERMISSION_NFC) && nfc_view_t2_write_ndef(ndef, ndef_len);
+}
+
 bool plugin_api_nfc_write_file(const char *app_relative_path) {
     (void)app_relative_path;
     return false;
@@ -1684,6 +1718,7 @@ bool plugin_api_parser_subghz_summary(const char *app_relative_path, char *out, 
 }
 
 void plugin_api_lowlevel_release(void) {
+    nfc_view_t2_scan_stop();
     if (s_wifi_packet_cb || s_wifi_pcap_active) {
         if (s_wifi_pcap_active) {
             pcap_flush_buffer_to_file();

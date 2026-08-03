@@ -77,6 +77,8 @@
  }
  
  esp_err_t pn532_set_passive_activation_retries(pn532_io_handle_t io_handle, uint8_t maxRetries) {
+     if (io_handle && io_handle->hl_set_passive_activation_retries)
+         return io_handle->hl_set_passive_activation_retries(io_handle, maxRetries);
      pn532_packetbuffer[0] = PN532_COMMAND_RFCONFIGURATION;
      pn532_packetbuffer[1] = 5;    // Config item 5 (MaxRetries)
      pn532_packetbuffer[2] = 0xFF; // MxRtyATR (default = 0xFF)
@@ -169,6 +171,8 @@
                                            uint8_t *sak,
                                            int32_t timeout)
  {
+     if (io_handle && io_handle->hl_read_target_id_ex)
+         return io_handle->hl_read_target_id_ex(io_handle, baud_rate_and_card_type, uid, uid_length, atqa, sak, timeout);
      pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
      pn532_packetbuffer[1] = 1; // Support one card
      pn532_packetbuffer[2] = baud_rate_and_card_type;
@@ -274,6 +278,8 @@
                                   uint8_t send_buffer_length,
                                   uint8_t *response,
                                   uint8_t *response_length) {
+     if (io_handle && io_handle->hl_data_exchange)
+         return io_handle->hl_data_exchange(io_handle, send_buffer, send_buffer_length, response, response_length);
      if (send_buffer_length > PN532_COMMAND_BUFFER_LEN - 2) {
        if (!s_quiet) ESP_LOGI(TAG, "APDU length too long for packet buffer");
        return ESP_ERR_INVALID_ARG;
@@ -360,6 +366,8 @@
                                     uint8_t send_buffer_length,
                                     uint8_t *response,
                                     uint8_t *response_length) {
+    if (io_handle && io_handle->hl_communicate_thru)
+        return io_handle->hl_communicate_thru(io_handle, send_buffer, send_buffer_length, response, response_length);
     if (send_buffer_length > PN532_COMMAND_BUFFER_LEN - 1) {
       if (!s_quiet) ESP_LOGI(TAG, "InCommunicateThru APDU too long");
       return ESP_ERR_INVALID_ARG;
@@ -422,6 +430,8 @@ void pn532_set_thru_wait_timeout(int ms) { if (ms > 0) s_thru_wait_ms = ms; }
 void pn532_set_inlist_wait_timeout(int ms) { if (ms > 0) s_inlist_wait_ms = ms; }
 
  esp_err_t pn532_in_list_passive_target(pn532_io_handle_t io_handle) {
+     if (io_handle && io_handle->hl_list_passive_target)
+         return io_handle->hl_list_passive_target(io_handle);
      pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
      pn532_packetbuffer[1] = 1;
      pn532_packetbuffer[2] = 0;
@@ -520,22 +530,20 @@ void pn532_set_inlist_wait_timeout(int ms) { if (ms > 0) s_inlist_wait_ms = ms; 
      return ESP_OK;
  }
  
- esp_err_t ntag2xx_authenticate(pn532_io_handle_t io_handle, uint8_t page, uint8_t *key, uint8_t *uid, uint8_t uid_length) {
-     pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
-     pn532_packetbuffer[1] = 1;
-     pn532_packetbuffer[2] = MIFARE_CMD_AUTH_A;
-     pn532_packetbuffer[3] = page;
- 
-     memcpy(&pn532_packetbuffer[4], key, 6);
-     if (uid_length > 10) {
-         uid_length = 10;
-     }
-     memcpy(&pn532_packetbuffer[10], uid, uid_length);
- 
-     esp_err_t err = pn532_send_command_wait_ack(io_handle, pn532_packetbuffer, 10 + uid_length, PN532_WRITE_TIMEOUT);
- 
-     return err;
- }
+  esp_err_t ntag2xx_authenticate(pn532_io_handle_t io_handle, uint8_t page, uint8_t *key, uint8_t *uid, uint8_t uid_length) {
+      if (!io_handle || !key || !uid) return ESP_ERR_INVALID_ARG;
+      pn532_packetbuffer[0] = MIFARE_CMD_AUTH_A;
+      pn532_packetbuffer[1] = page;
+
+      memcpy(&pn532_packetbuffer[2], key, 6);
+      if (uid_length > 10) {
+          uid_length = 10;
+      }
+      memcpy(&pn532_packetbuffer[8], uid, uid_length);
+
+      uint8_t resp_len = 0;
+      return pn532_in_data_exchange(io_handle, pn532_packetbuffer, 8 + uid_length, NULL, &resp_len);
+  }
  
  esp_err_t ntag2xx_read_page(pn532_io_handle_t io_handle, uint8_t page, uint8_t *buffer, size_t read_len)
  {
@@ -560,53 +568,19 @@ void pn532_set_inlist_wait_timeout(int ms) { if (ms > 0) s_inlist_wait_ms = ms; 
      ESP_LOGD(TAG, "Reading page %d", page);
  #endif
  
-     /* Prepare the command */
-     pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
-     pn532_packetbuffer[1] = 1; /* Card number */
-     pn532_packetbuffer[2] = MIFARE_CMD_READ; /* Mifare Read command = 0x30 */
-     pn532_packetbuffer[3] = page; /* Page Number (0..63 in most cases) */
- 
-     /* Send the command */
-     esp_err_t err = pn532_send_command_wait_ack(io_handle, pn532_packetbuffer, 4, PN532_WRITE_TIMEOUT);
-     if (err != ESP_OK) {
- #ifdef CONFIG_MIFAREDEBUG
-         ESP_LOGD(TAG, "write failed or ACK not received for command");
- #endif
-         return err;
-     }
- 
- #ifdef CONFIG_PN532DEBUG
-     ESP_LOGD(TAG, "ntag2xx_ReadPage(): Waiting for IRQ/ready");
- #endif
-     err = pn532_wait_ready(io_handle, 100);
-     if (ESP_OK != err) {
- #ifdef CONFIG_PN532DEBUG
-         ESP_LOGD(TAG, "ntag2xx_ReadPage(): Timeout occurred");
- #endif
-         return err;
-     }
- 
-     /* Read the response packet */
-     err = pn532_read_data(io_handle, pn532_packetbuffer, 26, PN532_READ_TIMEOUT);
-     if (err != ESP_OK)
-         return err;
+      uint8_t cmd[2] = { MIFARE_CMD_READ, page };
+      uint8_t resp[16] = {0};
+      uint8_t resp_len = sizeof(resp);
+      esp_err_t err = pn532_in_data_exchange(io_handle, cmd, sizeof(cmd), resp, &resp_len);
+      if (err != ESP_OK) return err;
+      if (resp_len < read_len) return ESP_FAIL;
  
  #ifdef CONFIG_MIFAREDEBUG
      ESP_LOGD(TAG, "Received: ");
      ESP_LOG_BUFFER_HEX_LEVEL(TAG, pn532_packetbuffer, 26, ESP_LOG_DEBUG);
  #endif
  
-     uint8_t status = pn532_packetbuffer[7];
-     // check error code of status byte
-     if ((status & 0x3F) == 0x00) {
-         memcpy(buffer, pn532_packetbuffer + 8, read_len);
-     }
-     else {
- #ifdef CONFIG_MIFAREDEBUG
-         ESP_LOGD(TAG, "Status byte indicates an error: 0x%02x", pn532_packetbuffer[7]);
- #endif
-         return ESP_FAIL;
-     }
+      memcpy(buffer, resp, read_len);
  
      /* Display data for debug if requested */
  #ifdef CONFIG_MIFAREDEBUG
@@ -639,34 +613,7 @@ void pn532_set_inlist_wait_timeout(int ms) { if (ms > 0) s_inlist_wait_ms = ms; 
      ESP_LOGD(TAG, "Trying to write 4 byte page %d", page);
  #endif
  
-     /* Prepare the first command */
-     pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
-     pn532_packetbuffer[1] = 1; /* Card number */
-     pn532_packetbuffer[2] = MIFARE_ULTRALIGHT_CMD_WRITE; /* Mifare Ultralight Write command = 0xA2 */
-     pn532_packetbuffer[3] = page; /* Page Number (0..63 for most cases) */
-     memcpy(pn532_packetbuffer + 4, data, 4); /* Data Payload */
- 
-     /* Send the command */
-     esp_err_t err = pn532_send_command_wait_ack(io_handle, pn532_packetbuffer, 8, PN532_WRITE_TIMEOUT);
-     if (err != ESP_OK) {
- #ifdef CONFIG_MIFAREDEBUG
-         ESP_LOGD(TAG, "Failed to receive ACK for write command");
- #endif
-         return err;
-     }
- 
- #ifdef CONFIG_PN532DEBUG
-     ESP_LOGD(TAG, "ntag2xx_WritePage(): Waiting for IRQ/ready");
- #endif
-     err = pn532_wait_ready(io_handle, 100);
-     if (ESP_OK != err) {
- #ifdef CONFIG_PN532DEBUG
-         ESP_LOGD(TAG, "ntag2xx_WritePage(): Timeout occurred");
- #endif
-         return err;
-     }
- 
-     /* Read the response packet */
-     err = pn532_read_data(io_handle, pn532_packetbuffer, 26, PN532_READ_TIMEOUT);
-     return err;
- }
+      uint8_t cmd[6] = { MIFARE_ULTRALIGHT_CMD_WRITE, page, data[0], data[1], data[2], data[3] };
+      uint8_t resp_len = 0;
+      return pn532_in_data_exchange(io_handle, cmd, sizeof(cmd), NULL, &resp_len);
+  }

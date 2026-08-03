@@ -538,6 +538,9 @@ void station_scan_start(void) {
     // Set scan active flag
     scan_active = true;
 
+    // Restart WiFi for promiscuous mode (STA was stopped above)
+    esp_wifi_start();
+
     // Start monitor mode with management + data frame filtering for station discovery
     wifi_promiscuous_filter_t filter = {
         .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA

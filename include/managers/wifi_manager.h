@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include <stddef.h>
 
 #ifndef DNS_SERVER_HANDLE_T_DEFINED
 typedef struct dns_server_handle *dns_server_handle_t;
@@ -125,6 +126,7 @@ typedef void (*wifi_promiscuous_cb_t_t)(void *buf,
 
 // Initialize WiFiManager
 void wifi_manager_init(void);
+void wifi_manager_release_stream_buffer(void);
 
 // Start scanning for available networks
 void wifi_manager_start_scan();
@@ -197,6 +199,7 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password);
 void wifi_manager_cancel_connect(void);
 
 void wifi_manager_stop_reconnect(void);
+void wifi_manager_set_reconnect_hold(bool hold);
 
 void wifi_manager_start_visualizer(bool for_screen);
 
@@ -214,6 +217,7 @@ void wifi_manager_start_station_scan();
 // Wireshark capture channel hopping
 void wifi_manager_start_wireshark_channel_hop(void);
 void wifi_manager_stop_wireshark_channel_hop(void);
+esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, size_t count);
 
 // Set fixed channel for Wireshark capture
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel);
@@ -305,6 +309,11 @@ void wifi_manager_gtk_abuse_display(void);
 void wifi_manager_start_channel_switch_attack(void);
 void wifi_manager_stop_channel_switch_attack(void);
 bool wifi_manager_is_channel_switch_attack_running(void);
+
+// Handshake + Deauth combined attack
+void wifi_manager_start_handshake_deauth(void);
+bool wifi_manager_stop_handshake_deauth(void);
+bool wifi_manager_handshake_deauth_is_running(void);
 
 // HTML buffer functions for evil portal
 void wifi_manager_set_html_from_uart(void);

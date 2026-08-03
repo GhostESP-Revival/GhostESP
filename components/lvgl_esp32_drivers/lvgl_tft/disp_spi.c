@@ -125,8 +125,8 @@ esp_err_t disp_spi_add_device(spi_host_device_t host)
 esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
 {
     int spi_mode = disp_spi_get_mode();
-    ESP_LOGI(TAG, "Adding SPI device");
-    ESP_LOGI(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
+    ESP_LOGD(TAG, "Adding SPI device");
+    ESP_LOGD(TAG, "Clock speed: %dHz, mode: %d, CS pin: %d",
         clock_speed_hz, spi_mode, DISP_SPI_CS);
 
     spi_device_interface_config_t devcfg={
@@ -189,30 +189,24 @@ void disp_spi_change_device_speed(int clock_speed_hz)
     disp_spi_add_device_with_speed(spi_host, clock_speed_hz);
 }
 
-void disp_spi_remove_device()
+esp_err_t disp_spi_remove_device()
 {
     if (spi == NULL) {
-        return;
+        return ESP_OK;
     }
 
     /* Wait for previous pending transaction results */
     disp_wait_for_pending_transactions();
 
     esp_err_t ret=spi_bus_remove_device(spi);
-    assert(ret==ESP_OK);
-    spi = NULL;  // clear handle so it can be reinitialized during resume
-    /* Free DMA transaction pool to release internal DMA memory.
-     * This is critical when the SPI bus is shared with SD card —
-     * the bus will be freed and re-initialized for SD, and without
-     * unusable, causing out-of-memory errors on re-init. */
-    if (TransactionPool != NULL) {
-        spi_transaction_ext_t *pTransaction;
-        while (xQueueReceive(TransactionPool, &pTransaction, 0) == pdTRUE) {
-            heap_caps_free(pTransaction);
-        }
-        vQueueDelete(TransactionPool);
-        TransactionPool = NULL;
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remove display SPI device: %s", esp_err_to_name(ret));
+        return ret;
     }
+    spi = NULL;  // clear handle so it can be reinitialized during resume
+    /* Transaction descriptors contain no bus state; retain them so display
+     * reattachment after an SD mount does not need more DMA-capable RAM. */
+    return ESP_OK;
 }
 
 void disp_spi_transaction(const uint8_t *data, size_t length,

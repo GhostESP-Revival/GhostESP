@@ -14,6 +14,7 @@
 #include <setjmp.h>
 #include <getopt.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <math.h>
@@ -36,6 +37,12 @@ extern double __floatunsidf(unsigned int i);
 extern double __divdf3(double a, double b);
 extern float __divsf3(float a, float b);
 extern double __extendsfdf2(float a);
+extern long long __divdi3(long long a, long long b);
+extern int *__errno(void);
+#ifdef __getreent
+#undef __getreent
+#endif
+extern struct _reent *__getreent(void);
 
 static const char *TAG = "ELF_SYMBOL";
 
@@ -59,6 +66,11 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(strcpy),
     ESP_ELFSYM_EXPORT(strcspn),
     ESP_ELFSYM_EXPORT(strncat),
+    ESP_ELFSYM_EXPORT(strncpy),
+    ESP_ELFSYM_EXPORT(strstr),
+    ESP_ELFSYM_EXPORT(strcasecmp),
+    ESP_ELFSYM_EXPORT(strncasecmp),
+    ESP_ELFSYM_EXPORT(strdup),
 
     /* stdio.h */
 
@@ -71,6 +83,15 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(vfprintf),
     ESP_ELFSYM_EXPORT(fprintf),
     ESP_ELFSYM_EXPORT(fwrite),
+    ESP_ELFSYM_EXPORT(fopen),
+    ESP_ELFSYM_EXPORT(fclose),
+    ESP_ELFSYM_EXPORT(fread),
+    ESP_ELFSYM_EXPORT(fseek),
+    ESP_ELFSYM_EXPORT(ftell),
+    ESP_ELFSYM_EXPORT(ferror),
+    ESP_ELFSYM_EXPORT(fflush),
+    ESP_ELFSYM_EXPORT(sscanf),
+    ESP_ELFSYM_EXPORT(vsnprintf),
 
     /* unistd.h */
 
@@ -78,6 +99,9 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(sleep),
     ESP_ELFSYM_EXPORT(exit),
     ESP_ELFSYM_EXPORT(close),
+    ESP_ELFSYM_EXPORT(mkdir),
+    ESP_ELFSYM_EXPORT(remove),
+    ESP_ELFSYM_EXPORT(rename),
 
     /* stdlib.h */
 
@@ -85,6 +109,8 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(calloc),
     ESP_ELFSYM_EXPORT(realloc),
     ESP_ELFSYM_EXPORT(free),
+    ESP_ELFSYM_EXPORT(atoi),
+    ESP_ELFSYM_EXPORT(atof),
 
     /* time.h */
 
@@ -102,9 +128,12 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
 
     /* newlib */
 
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
     ESP_ELFSYM_EXPORT(__errno),
     ESP_ELFSYM_EXPORT(__getreent),
+    /* ESP32-C5's IDF 6 newlib requires this legacy ctype table. Other RISC-V
+       targets, including ESP32-C6, do not expose the symbol. */
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && defined(CONFIG_IDF_TARGET_ESP32C5)
+    { "_ctype_", (void *)_ctype_ },
 #endif
 #ifdef __HAVE_LOCALE_INFO__
     ESP_ELFSYM_EXPORT(__locale_ctype_ptr),
@@ -121,6 +150,7 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__divdf3),
     ESP_ELFSYM_EXPORT(__divsf3),
     ESP_ELFSYM_EXPORT(__extendsfdf2),
+    ESP_ELFSYM_EXPORT(__divdi3),
     ESP_ELFSYM_EXPORT(sinf),
     ESP_ELFSYM_EXPORT(cosf),
 

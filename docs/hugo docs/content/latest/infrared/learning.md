@@ -18,7 +18,7 @@ weight: 10
 
 3. Confirm the button name. Easy Learn provides a suggested label during learning, otherwise use the on-screen keyboard.
 
-4. Watch the preview popup for carrier frequency, protocol name, and decoded address/command details. Cancel and retry if you receive a raw decode on a known non-raw signal.
+4. Watch the preview popup for carrier frequency, protocol name, and decoded address/command details. If a known protocol decodes as RAW, cancel and retry.
 
 5. Confirm to save. GhostESP will create a new `.ir` file for fresh remotes or append the button to the currently open file automatically.
 

@@ -33,19 +33,19 @@ Upload your wardriving CSV captures to [WiGLE.net](https://wigle.net) to contrib
 
 ### Complete Setup
 
-3. (Recommended) Enable upload on Wi-Fi connect:
+1. (Recommended) Enable upload on Wi-Fi connect:
 
    ```
    wigle auto on
    ```
 
-4. (Recommended) Donate mapped data:
+2. (Recommended) Donate mapped data:
 
    ```
    wigle donate on
    ```
 
-5. Verify settings:
+3. Verify settings:
 
    ```
    wigle show
@@ -62,7 +62,7 @@ Upload your wardriving CSV captures to [WiGLE.net](https://wigle.net) to contrib
 
 ### On-device Display
 
-1. Open **Menu → Settings → Wigle**
+1. Open **Menu → Settings → WiGLE**
 2. Toggle **Auto Upload** to enable automatic uploads when Wi-Fi (STA) connects
 3. Toggle **Donate Data** to share your scans with WiGLE (recommended)
 4. Use **Manual Upload** to browse CSV files in `/mnt/ghostesp/gps/`
@@ -173,7 +173,7 @@ Fetch user stats for the current account:
 wigle stats
 ```
 
-The same stats call is available from **Settings → Wigle → View WiGLE Stats** on display builds.
+The same stats call is available from **Settings → WiGLE → View WiGLE Stats** on display builds.
 
 **Note:** Stats now work with both EncodedForUseToken and legacy APIName:APIToken formats.
 
@@ -221,7 +221,7 @@ You can load WiGLE credentials and WiFi settings from a config file on your SD c
    - **GUI**: Settings → WiGLE → Load Config from SD
    - **CLI**: `loadconfig`
 
-See [SD Card Configuration](../../getting-started/sd-card-config) for complete documentation.
+See [SD Card Configuration]({{< relref "sd-card-config.md" >}}) for complete documentation.
 
 ## Troubleshooting
 

@@ -41,4 +41,30 @@ void snmp_scan_host(const char *target_ip);
  */
 void snmp_scan_cancel(void);
 
+/**
+ * @brief Walk SNMP OID tree on a single host
+ *
+ * Sends GetNextRequest repeatedly to walk the MIB subtree
+ * starting from the given root OID.
+ *
+ * @param target_ip IP address to walk
+ * @param oid_root Root OID string (e.g., "1.3.6.1.2.1.1" for system)
+ */
+void snmp_walk_host(const char *target_ip, const char *oid_root);
+
+/**
+ * @brief Walk SNMP OID tree on the local subnet
+ *
+ * @param oid_root Root OID string to walk
+ */
+void snmp_walk_subnet(const char *oid_root);
+
+/**
+ * @brief Walk SNMP OID tree on a specific subnet prefix
+ *
+ * @param subnet_prefix Subnet prefix (e.g., "192.168.1.")
+ * @param oid_root Root OID string to walk
+ */
+void snmp_walk_subnet_prefix(const char *subnet_prefix, const char *oid_root);
+
 #endif // SNMP_SCAN_H

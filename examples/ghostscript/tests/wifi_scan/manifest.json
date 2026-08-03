@@ -1,0 +1,7 @@
+{
+  "id": "wifi-scan-smoke",
+  "name": "Wi-Fi scan smoke",
+  "entry": "main.gsb",
+  "memory_limit": 24576,
+  "permissions": ["ui", "wifi", "storage"]
+}

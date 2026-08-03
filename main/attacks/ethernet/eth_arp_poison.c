@@ -18,6 +18,7 @@
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
+#include "core/system_manager.h"
 #include "esp_netif.h"
 #include "lwip/netif.h"
 #include "lwip/etharp.h"
@@ -63,11 +64,11 @@ static uint8_t    s_gateway_mac[6];
 static ip4_addr_t s_dns_server;
 static SemaphoreHandle_t s_hosts_mutex = NULL;
 
-static char s_domains[MAX_DOMAINS][MAX_DOMAIN_LEN];
+EXT_RAM_BSS_ATTR static char s_domains[MAX_DOMAINS][MAX_DOMAIN_LEN];
 static int  s_domain_count = 0;
-static char s_cookies[MAX_COOKIES][MAX_COOKIE_LEN];
+EXT_RAM_BSS_ATTR static char s_cookies[MAX_COOKIES][MAX_COOKIE_LEN];
 static int  s_cookie_count = 0;
-static char s_creds[MAX_CREDS][MAX_CRED_LEN];
+EXT_RAM_BSS_ATTR static char s_creds[MAX_CREDS][MAX_CRED_LEN];
 static int  s_cred_count = 0;
 
 static volatile bool s_running     = false;
@@ -855,10 +856,10 @@ esp_err_t eth_arp_poison_start(void)
 
     glog("[ARP Poison] Found %d hosts\n", s_host_count);
 
-    xTaskCreate(arp_poison_task, "arp_poison", 2048, NULL, 5, &s_poison_task);
-    xTaskCreate(dns_proxy_task,  "dns_proxy",  4096, NULL, 6, &s_dns_task);
-    xTaskCreate(packet_forwarder_task, "pkt_fwd", 3072, NULL, 5, &s_fwd_task);
-    xTaskCreate(passive_discovery_task, "passive", 3072, NULL, 4, &s_passive_task);
+    xTaskCreate_psram(arp_poison_task, "arp_poison", 2048, NULL, 5, &s_poison_task);
+    xTaskCreate_psram(dns_proxy_task,  "dns_proxy",  4096, NULL, 6, &s_dns_task);
+    xTaskCreate_psram(packet_forwarder_task, "pkt_fwd", 3072, NULL, 5, &s_fwd_task);
+    xTaskCreate_psram(passive_discovery_task, "passive", 3072, NULL, 4, &s_passive_task);
 
     glog("[ARP Poison] Running — poisoning %d hosts, passive discovery active\n", s_host_count);
     return ESP_OK;

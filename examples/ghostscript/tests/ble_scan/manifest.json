@@ -1,0 +1,7 @@
+{
+  "id": "ble-scan-smoke",
+  "name": "BLE scan smoke",
+  "entry": "main.gsb",
+  "memory_limit": 24576,
+  "permissions": ["ui", "ble", "storage"]
+}

@@ -11,6 +11,7 @@
 #include "gui/ios_toggle.h"
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "gui/design_tokens.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -1073,7 +1074,7 @@ static void universal_transmit_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(150));
             }
         }
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1127,7 +1128,7 @@ static void universal_transmit_task(void *arg) {
     }
     
     printf("universal_transmit_task: finished processing %s\n", path);
-    lv_async_call(cleanup_transmit_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
     universal_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -1164,7 +1165,7 @@ static void universal_transmit_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(150));
             }
         }
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1175,7 +1176,7 @@ static void universal_transmit_task(void *arg) {
     if (!f) {
         printf("universal_transmit_task: fopen failed for %s\n", path);
         if (did) ir_sd_end(susp);
-        lv_async_call(cleanup_transmit_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
         universal_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -1272,7 +1273,7 @@ static void universal_transmit_task(void *arg) {
     fclose(f);
     if (did) ir_sd_end(susp);
     printf("universal_transmit_task: finished processing %s\n", path);
-    lv_async_call(cleanup_transmit_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_transmit_popup, NULL);
     universal_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -1361,7 +1362,7 @@ static void back_event_cb(lv_event_t *e) {
     }
 
     // default: leave view
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 }
 
 void infrared_view_create(void) {
@@ -1434,8 +1435,14 @@ void infrared_view_create(void) {
     ir_add_back_row();
 #endif
     num_ir_items = options_view_get_item_count(g_ir_ov);
-    selected_ir_index = 0;
-    if (num_ir_items > 0) options_view_set_selected(g_ir_ov, 0);
+    /* Root-menu highlight only resets on a genuine fresh entry from the
+     * Main Menu; returning here restores the previously highlighted row. */
+    if (display_manager_previous_view == &main_menu_view) {
+        selected_ir_index = 0;
+    } else if (selected_ir_index < 0 || selected_ir_index >= num_ir_items) {
+        selected_ir_index = 0;
+    }
+    if (num_ir_items > 0) options_view_set_selected(g_ir_ov, selected_ir_index);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     uint8_t ir_theme = settings_get_menu_theme(&G_Settings);
@@ -1452,6 +1459,7 @@ void infrared_view_create(void) {
     lv_obj_clear_flag(ir_touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     ir_scroll_up_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_scroll_up_btn);
     lv_obj_set_size(ir_scroll_up_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_scroll_up_btn, LV_ALIGN_LEFT_MID, IR_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(ir_scroll_up_btn, ir_ctrl, LV_PART_MAIN);
@@ -1466,6 +1474,7 @@ void infrared_view_create(void) {
     lv_obj_add_flag(ir_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     ir_back_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_back_btn);
     lv_obj_set_size(ir_back_btn, IR_SCROLL_BTN_SIZE + 24, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(ir_back_btn, ir_ctrl, LV_PART_MAIN);
@@ -1480,6 +1489,7 @@ void infrared_view_create(void) {
     lv_obj_center(back_label);
 
     ir_scroll_down_btn = lv_btn_create(ir_touch_bar);
+    gui_apply_pressed_style(ir_scroll_down_btn);
     lv_obj_set_size(ir_scroll_down_btn, IR_SCROLL_BTN_SIZE, IR_SCROLL_BTN_SIZE);
     lv_obj_align(ir_scroll_down_btn, LV_ALIGN_RIGHT_MID, -IR_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(ir_scroll_down_btn, ir_ctrl, LV_PART_MAIN);
@@ -1570,7 +1580,9 @@ void infrared_view_destroy(void) {
         lvgl_obj_del_safe(&root);
         list = NULL;
         infrared_view.root = NULL;
-        selected_ir_index = 0;
+        /* selected_ir_index deliberately not reset here -- it needs to
+         * survive the destroy() -> create() cycle so create() can restore
+         * it when returning rather than always resetting to the top. */
         num_ir_items = 0;
     }
 }
@@ -2332,8 +2344,7 @@ static void file_event_open(int idx) {
             if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
             memcpy(path, current_dir, base_len);
             path[base_len] = '\0';
-            if (base_len + 1 < sizeof(path)) strcat(path, "/");
-            strcat(path, ir_file_paths[idx]);
+            snprintf(path + base_len, sizeof(path) - base_len, "/%s", ir_file_paths[idx]);
             // remember for transmit
             strncpy(current_universal_file, path, sizeof(current_universal_file) - 1);
             current_universal_file[sizeof(current_universal_file) - 1] = '\0';
@@ -2813,7 +2824,7 @@ void signal_preview_save_cb(lv_event_t *e)
 {
     // Transition to keyboard view for naming
     status_display_show_status("IR Saving...");
-    lv_async_call(cleanup_signal_preview_popup, NULL);
+    display_manager_lvgl_async_call(cleanup_signal_preview_popup, NULL);
     keyboard_view_set_placeholder("Enter signal name");
     
     // Use different callbacks based on whether we're adding to existing remote, easy learn mode, or creating new
@@ -3507,7 +3518,7 @@ static void ir_learning_task(void *arg) {
     // Ensure manager is initialized
     if (!infrared_manager_rx_init()) {
         ESP_LOGE(TAG, "Failed to init infrared manager RX");
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
         ir_learning_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -3515,7 +3526,7 @@ static void ir_learning_task(void *arg) {
 
     if (!infrared_manager_rx_is_initialized()) {
         ESP_LOGE(TAG, "IR RX not initialized");
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
         ir_learning_task_handle = NULL;
         vTaskDelete(NULL);
         return;
@@ -3537,13 +3548,13 @@ static void ir_learning_task(void *arg) {
 
             // Signal received successfully, show preview popup
             if (is_easy_mode) {
-                lv_async_call(cleanup_easy_learn_popup, NULL);
+                display_manager_lvgl_async_call(cleanup_easy_learn_popup, NULL);
             } else {
-                lv_async_call(cleanup_learning_popup, NULL);
+                display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
             }
 
             // Create and show signal preview popup
-            lv_async_call((lv_async_cb_t)create_signal_preview_popup, NULL);
+            display_manager_lvgl_async_call((lv_async_cb_t)create_signal_preview_popup, NULL);
 
             ir_learning_task_handle = NULL;
             vTaskDelete(NULL);
@@ -3568,7 +3579,7 @@ static void ir_learning_task(void *arg) {
             learned_signal.payload.raw.timings_size = 0;
         }
 
-        lv_async_call(cleanup_learning_popup, NULL);
+        display_manager_lvgl_async_call(cleanup_learning_popup, NULL);
     }
 
     ir_learning_task_handle = NULL;

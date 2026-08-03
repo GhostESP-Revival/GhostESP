@@ -314,6 +314,36 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
         remember_hi20(rela->offset, value);
         break;
     }
+    case R_RISCV_GOT_HI20:
+    {
+        esp_elf_sec_t *got = &elf->sec[ELF_SEC_GOT];
+        uintptr_t target = ELF_RT_REMAP(addr);
+        uintptr_t got_slot = 0;
+
+        for (uint32_t offset = 0; offset + sizeof(uint32_t) <= got->size;
+             offset += sizeof(uint32_t)) {
+            uintptr_t candidate = got->addr + offset;
+            uint32_t candidate_value = read_u32_unaligned((const void *)candidate);
+
+            if (candidate_value == target ||
+                    (sym && sym->shndx != SHN_UNDEF && candidate_value == sym->value)) {
+                got_slot = candidate;
+                break;
+            }
+        }
+        if (!got_slot) {
+            ESP_LOGE(TAG, "failed to find GOT slot for relocation offset 0x%x", rela->offset);
+            return -EINVAL;
+        }
+
+        int32_t value = (int32_t)(got_slot + rela->addend -
+                                  ELF_RT_REMAP((uintptr_t)where));
+        uint32_t insn = read_u32_unaligned(where);
+
+        write_u32_unaligned(where, set_u_type_imm(insn, value));
+        remember_hi20(rela->offset, value);
+        break;
+    }
     case R_RISCV_PCREL_LO12_I:
     case R_RISCV_PCREL_LO12_S:
     {

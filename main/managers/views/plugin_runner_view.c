@@ -10,7 +10,11 @@
 #include "gui/toast.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +25,9 @@ static char s_pending_app_id[PLUGIN_APP_ID_MAX];
 static lv_obj_t *s_root = NULL;
 static lv_obj_t *s_title = NULL;
 static lv_obj_t *s_output = NULL;
-static lv_timer_t *s_tick_timer = NULL;
+static TaskHandle_t s_tick_task = NULL;
+static SemaphoreHandle_t s_tick_stopped = NULL;
+static volatile bool s_tick_stop_requested = false;
 static lv_timer_t *s_launch_timer = NULL;
 /* Heap-allocated so no-PSRAM boards (e.g. CYDMicroUSB) don't put 2 KB of
  * scrollback into .dram0.bss and overflow the region. Allocated on view
@@ -29,7 +35,13 @@ static lv_timer_t *s_launch_timer = NULL;
 #define PLUGIN_RUNNER_OUTPUT_BUF_SIZE 2048
 static char *s_output_buf = NULL;
 static bool s_touch_started = false;
+static bool s_touch_scrolling = false;
 static lv_point_t s_touch_start = {0};
+static lv_point_t s_touch_last = {0};
+static lv_obj_t *s_touch_scroll_target = NULL;
+static bool s_preserve_for_keyboard_input = false;
+static bool s_resume_from_keyboard_input = false;
+static int64_t s_ignore_input_until_us = 0;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
@@ -147,24 +159,74 @@ static bool s_sd_eject_detected = false;
 
 static void plugin_runner_launch_pending(void);
 
-static void plugin_runner_tick_cb(lv_timer_t *timer) {
-    (void)timer;
-    if (s_sd_eject_detected) return;
-    plugin_loaded_app_t *loaded = plugin_loader_current();
-    if (!loaded || !loaded->running || loaded->state != PLUGIN_APP_STATE_RUNNING) return;
-    if (!sd_card_manager.is_initialized) {
-        ESP_LOGW(TAG, "SD card removed while app running, stopping");
-        s_sd_eject_detected = true;
-        if (loaded->app && loaded->app->on_stop) loaded->app->on_stop();
-        loaded->running = false;
-        loaded->state = PLUGIN_APP_STATE_LOADED;
-        display_manager_switch_view(&apps_menu_view);
-        return;
+static uint32_t plugin_runner_tick_interval(const plugin_loaded_app_t *loaded) {
+    if (loaded && loaded->manifest && loaded->manifest->tick_interval_ms) {
+        return loaded->manifest->tick_interval_ms;
     }
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    uint32_t elapsed_ms = loaded->last_tick_ms ? now_ms - loaded->last_tick_ms : PLUGIN_RUNNER_TICK_MS;
-    loaded->last_tick_ms = now_ms;
-    plugin_loader_tick(loaded, elapsed_ms);
+    return PLUGIN_RUNNER_TICK_MS;
+}
+
+static void plugin_runner_go_back_async(void *arg) {
+    (void)arg;
+    display_manager_go_back();
+}
+
+static void plugin_runner_tick_task(void *arg) {
+    plugin_loaded_app_t *loaded = (plugin_loaded_app_t *)arg;
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t interval = pdMS_TO_TICKS(plugin_runner_tick_interval(loaded));
+
+    while (!s_tick_stop_requested && loaded && loaded->running &&
+           loaded->state == PLUGIN_APP_STATE_RUNNING) {
+        if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
+            ESP_LOGW(TAG, "SD card removed while app running, stopping");
+            s_sd_eject_detected = true;
+            display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+            break;
+        }
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        uint32_t elapsed_ms = loaded->last_tick_ms
+                                  ? now_ms - loaded->last_tick_ms
+                                  : plugin_runner_tick_interval(loaded);
+        loaded->last_tick_ms = now_ms;
+        plugin_loader_tick(loaded, elapsed_ms);
+        if (!s_tick_stop_requested) vTaskDelayUntil(&last_wake, interval ? interval : 1);
+    }
+
+    s_tick_task = NULL;
+    if (s_tick_stopped) xSemaphoreGive(s_tick_stopped);
+    vTaskDeleteWithCaps(NULL);
+}
+
+static bool plugin_runner_start_tick(plugin_loaded_app_t *loaded) {
+    if (!loaded || !loaded->app || !loaded->app->on_tick || s_tick_task) return false;
+    if (!s_tick_stopped) s_tick_stopped = xSemaphoreCreateBinary();
+    if (!s_tick_stopped) return false;
+    while (xSemaphoreTake(s_tick_stopped, 0) == pdTRUE) {}
+    s_tick_stop_requested = false;
+    uint32_t stack_size = loaded->manifest && loaded->manifest->stack_size
+                              ? loaded->manifest->stack_size
+                              : 4096;
+    if (stack_size < 4096) stack_size = 4096;
+    bool psram_stack = true;
+    BaseType_t created = xTaskCreateWithCaps(plugin_runner_tick_task, "native_app_tick",
+                                             stack_size, loaded, 2, &s_tick_task,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (created != pdPASS) {
+        psram_stack = false;
+        created = xTaskCreateWithCaps(plugin_runner_tick_task, "native_app_tick",
+                                      stack_size, loaded, 2, &s_tick_task,
+                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (created != pdPASS) {
+        s_tick_task = NULL;
+        ESP_LOGE(TAG, "Failed to create native app tick task (%lu-byte PSRAM stack)",
+                 (unsigned long)stack_size);
+        return false;
+    }
+    ESP_LOGI(TAG, "Started native app tick task with %lu-byte %s stack",
+             (unsigned long)stack_size, psram_stack ? "PSRAM" : "internal");
+    return true;
 }
 
 void plugin_runner_set_app(const char *app_id) {
@@ -192,7 +254,16 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
         case INPUT_TYPE_KEYBOARD:
             out.type = GHOSTESP_INPUT_KEY;
             out.value = event->data.key_value;
-            if (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`') out.type = GHOSTESP_INPUT_BACK;
+            out.pressed = true;
+            switch (event->data.key_value) {
+                case LV_KEY_LEFT: out.type = GHOSTESP_INPUT_LEFT; break;
+                case LV_KEY_RIGHT: out.type = GHOSTESP_INPUT_RIGHT; break;
+                case LV_KEY_UP: out.type = GHOSTESP_INPUT_UP; break;
+                case LV_KEY_DOWN: out.type = GHOSTESP_INPUT_DOWN; break;
+                case LV_KEY_ESC:
+                case '`': out.type = GHOSTESP_INPUT_BACK; break;
+                default: break;
+            }
             break;
         case INPUT_TYPE_TOUCH:
             out.type = GHOSTESP_INPUT_TOUCH;
@@ -203,6 +274,7 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
         case INPUT_TYPE_ENCODER:
             out.type = event->data.encoder.button ? GHOSTESP_INPUT_SELECT : (event->data.encoder.direction > 0 ? GHOSTESP_INPUT_RIGHT : GHOSTESP_INPUT_LEFT);
             out.value = event->data.encoder.direction;
+            out.pressed = true;
             break;
         case INPUT_TYPE_EXIT_BUTTON:
             out.type = GHOSTESP_INPUT_BACK;
@@ -274,13 +346,37 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
 
     const lv_indev_data_t *data = &event->data.touch_data;
     if (data->state == LV_INDEV_STATE_PR) {
-        s_touch_started = true;
-        s_touch_start = data->point;
+        if (!s_touch_started) {
+            s_touch_started = true;
+            s_touch_scrolling = false;
+            s_touch_start = data->point;
+            s_touch_last = data->point;
+            s_touch_scroll_target = NULL;
+            return false;
+        }
+        int total_dx = data->point.x - s_touch_start.x;
+        int total_dy = data->point.y - s_touch_start.y;
+        int dy = data->point.y - s_touch_last.y;
+        s_touch_last = data->point;
+        if ((s_touch_scrolling || (abs(total_dy) > PLUGIN_RUNNER_SCROLL_THRESHOLD && abs(total_dy) >= abs(total_dx))) && dy != 0) {
+            if (!s_touch_scroll_target) s_touch_scroll_target = find_scrollable_at(&s_touch_start);
+            if (!s_touch_scroll_target) s_touch_scroll_target = find_scrollable_at(&data->point);
+            if (s_touch_scroll_target && lv_obj_is_valid(s_touch_scroll_target)) {
+                s_touch_scrolling = true;
+                display_manager_queue_scroll(s_touch_scroll_target, dy);
+                return true;
+            }
+        }
         return false;
     }
 
     if (data->state != LV_INDEV_STATE_REL || !s_touch_started) return false;
     s_touch_started = false;
+    s_touch_scroll_target = NULL;
+    if (s_touch_scrolling) {
+        s_touch_scrolling = false;
+        return true;
+    }
 
     int dx = data->point.x - s_touch_start.x;
     int dy = data->point.y - s_touch_start.y;
@@ -304,9 +400,10 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
 
 static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
+    if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
     if (app_event.type == GHOSTESP_INPUT_BACK) {
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     plugin_loaded_app_t *loaded = plugin_loader_current();
@@ -314,33 +411,35 @@ static void plugin_runner_event_handler(InputEvent *event) {
         switch (event->type) {
             case INPUT_TYPE_JOYSTICK:
                 if (event->data.joystick_index == 0 || event->data.joystick_index == 2) {
-                    display_manager_switch_view(&apps_menu_view);
+                    display_manager_go_back();
                     return;
                 }
                 break;
             case INPUT_TYPE_KEYBOARD:
                 if (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`' ||
                     event->data.key_value == 'q' || event->data.key_value == 'Q') {
-                    display_manager_switch_view(&apps_menu_view);
+                    display_manager_go_back();
                     return;
                 }
                 break;
             case INPUT_TYPE_ENCODER:
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             case INPUT_TYPE_EXIT_BUTTON:
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             case INPUT_TYPE_TOUCH:
                 if (plugin_runner_handle_touch(event)) return;
-                display_manager_switch_view(&apps_menu_view);
+                display_manager_go_back();
                 return;
             default:
                 break;
         }
     }
     if (plugin_runner_handle_touch(event)) return;
-    if (event->type == INPUT_TYPE_ENCODER && !event->data.encoder.button && s_root && lv_obj_is_valid(s_root)) {
+    if (event->type == INPUT_TYPE_ENCODER && !event->data.encoder.button &&
+        (!loaded || !loaded->app || !loaded->app->on_input) &&
+        s_root && lv_obj_is_valid(s_root)) {
         lv_obj_t *scrollable = find_scrollable_descendant(s_root);
         if (scrollable) {
             int dy = event->data.encoder.direction > 0 ? -40 : 40;
@@ -386,20 +485,30 @@ static void plugin_runner_launch_pending(void) {
         runner_show_load_error_toast(err);
         return;
     }
-    if (loaded->app && loaded->app->on_tick && !s_tick_timer) {
-        s_tick_timer = lv_timer_create(plugin_runner_tick_cb, PLUGIN_RUNNER_TICK_MS, NULL);
-    }
+    plugin_runner_start_tick(loaded);
 }
 
 void plugin_runner_view_create(void) {
-    if (s_tick_timer) {
-        lv_timer_del(s_tick_timer);
-        s_tick_timer = NULL;
-    }
+    plugin_runner_stop_tick();
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
     }
+    plugin_loaded_app_t *loaded = plugin_loader_current();
+    if (s_resume_from_keyboard_input && s_root && lv_obj_is_valid(s_root) &&
+        loaded && loaded->running && loaded->state == PLUGIN_APP_STATE_RUNNING) {
+        s_resume_from_keyboard_input = false;
+        s_ignore_input_until_us = esp_timer_get_time() + 350000;
+        s_touch_started = false;
+        s_touch_scrolling = false;
+        s_touch_scroll_target = NULL;
+        plugin_runner_view.root = s_root;
+        display_manager_add_status_bar("SD App");
+        plugin_loader_resume(loaded);
+        plugin_runner_start_tick(loaded);
+        return;
+    }
+    s_resume_from_keyboard_input = false;
     if (!s_output_buf) {
         s_output_buf = malloc(PLUGIN_RUNNER_OUTPUT_BUF_SIZE);
         if (!s_output_buf) return;
@@ -408,6 +517,8 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
+    s_touch_scrolling = false;
+    s_touch_scroll_target = NULL;
     s_root = gui_screen_create_root_default(NULL, "SD App");
     plugin_runner_view.root = s_root;
     display_manager_add_status_bar("SD App");
@@ -449,10 +560,19 @@ void plugin_runner_view_create(void) {
 }
 
 void plugin_runner_stop_tick(void) {
-    if (s_tick_timer) {
-        lv_timer_del(s_tick_timer);
-        s_tick_timer = NULL;
+    TaskHandle_t task = s_tick_task;
+    if (!task) return;
+    if (task == xTaskGetCurrentTaskHandle()) {
+        s_tick_stop_requested = true;
+        return;
     }
+    s_tick_stop_requested = true;
+    if (s_tick_stopped) xSemaphoreTake(s_tick_stopped, portMAX_DELAY);
+    s_tick_task = NULL;
+}
+
+void plugin_runner_preserve_for_keyboard_input(void) {
+    s_preserve_for_keyboard_input = true;
 }
 
 void plugin_runner_view_destroy(void) {
@@ -461,12 +581,23 @@ void plugin_runner_view_destroy(void) {
         s_launch_timer = NULL;
     }
     plugin_runner_stop_tick();
+    if (s_preserve_for_keyboard_input) {
+        s_preserve_for_keyboard_input = false;
+        s_resume_from_keyboard_input = true;
+        plugin_loaded_app_t *loaded = plugin_loader_current();
+        if (loaded && loaded->running && loaded->app && loaded->app->on_pause) {
+            loaded->app->on_pause();
+        }
+        return;
+    }
     plugin_loader_unload(plugin_loader_current());
     plugin_api_set_ui_hooks(NULL, NULL, NULL, NULL);
     lvgl_obj_del_safe(&s_root);
     s_title = NULL;
     s_output = NULL;
     s_touch_started = false;
+    s_touch_scrolling = false;
+    s_touch_scroll_target = NULL;
     free(s_output_buf);
     s_output_buf = NULL;
     plugin_runner_view.root = NULL;

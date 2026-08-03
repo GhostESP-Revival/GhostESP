@@ -30,14 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Maximum WiFi channel based on target
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 // Module tag for logging
 static const char *TAG = "APScan";
@@ -75,6 +68,9 @@ static wifi_ap_record_t selected_ap;
 static wifi_ap_record_t *selected_aps = NULL;
 static int selected_ap_count = 0;
 static bool blocking_scan_in_progress = false;
+static bool async_scan_in_progress = false;
+static int64_t async_scan_start_time = 0;
+static bool scan_results_truncated = false;
 
 // External dependencies
 extern RGBManager_t rgb_manager;
@@ -207,7 +203,13 @@ static void print_ap_entry_formatted(uint16_t idx, const wifi_ap_record_t *rec, 
 // ============================================================================
 
 void ap_scan_start(void) {
+    if (async_scan_in_progress || blocking_scan_in_progress) {
+        ESP_LOGW(TAG, "Cannot start blocking scan while another AP scan is active");
+        return;
+    }
+
     blocking_scan_in_progress = true;
+    scan_results_truncated = false;
     log_heap_status(TAG, "scan_start_pre");
     status_display_show_status("WiFi Scanning...");
 
@@ -308,8 +310,6 @@ cleanup:
     }
 }
 
-static bool async_scan_in_progress = false;
-static int64_t async_scan_start_time = 0;
 #ifdef CONFIG_IDF_TARGET_ESP32C5
 #define MIN_SCAN_TIME_MS 6000
 #else
@@ -317,7 +317,13 @@ static int64_t async_scan_start_time = 0;
 #endif
 
 esp_err_t ap_scan_start_async(void) {
+    if (async_scan_in_progress || blocking_scan_in_progress) {
+        ESP_LOGW(TAG, "Cannot start async scan while another AP scan is active");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     async_scan_in_progress = true;
+    scan_results_truncated = false;
     log_heap_status(TAG, "async_scan_start");
     status_display_show_status("WiFi Scanning...");
     ghostchi_manager_add_xp(3);
@@ -468,6 +474,7 @@ void ap_scan_finish_async(void) {
         printf("Too many APs (%u). Truncating list to first %d\n", initial_ap_count, AP_SCAN_MAX_RESULTS);
         TERMINAL_VIEW_ADD_TEXT("Showing first %d APs (truncated)\n", AP_SCAN_MAX_RESULTS);
         initial_ap_count = AP_SCAN_MAX_RESULTS;
+        scan_results_truncated = true;
     }
 
     if (initial_ap_count > 0) {
@@ -528,6 +535,30 @@ void ap_scan_finish_async(void) {
     log_heap_status(TAG, "async_scan_finished");
 }
 
+void ap_scan_cancel_async(void) {
+    if (!async_scan_in_progress) return;
+
+    esp_err_t err = esp_wifi_scan_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "Async scan cancel returned: %s", esp_err_to_name(err));
+    }
+
+    async_scan_in_progress = false;
+    rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+    esp_wifi_stop();
+    ap_manager_start_services();
+
+    if (rgb_effect_task_handle == NULL) {
+        RGBMode mode = settings_get_rgb_mode(&G_Settings);
+        if (mode != RGB_MODE_RAINBOW && mode != RGB_MODE_STEALTH &&
+            mode != RGB_MODE_KNIGHT_RIDER && mode != RGB_MODE_NORMAL) {
+            rgb_manager_apply_static_from_settings();
+        }
+    }
+
+    log_heap_status(TAG, "async_scan_cancelled");
+}
+
 void ap_scan_stop(void) {
     esp_err_t err;
 
@@ -559,6 +590,7 @@ void ap_scan_stop(void) {
         printf("Too many APs (%u). Truncating list to first %d\n", initial_ap_count, AP_SCAN_MAX_RESULTS);
         TERMINAL_VIEW_ADD_TEXT("Showing first %d APs (truncated)\n", AP_SCAN_MAX_RESULTS);
         initial_ap_count = AP_SCAN_MAX_RESULTS;
+        scan_results_truncated = true;
     }
 
     if (initial_ap_count > 0) {
@@ -883,6 +915,10 @@ bool ap_scan_get_selection(wifi_ap_record_t *ap) {
 
 uint16_t ap_scan_get_count(void) {
     return ap_count;
+}
+
+bool ap_scan_results_truncated(void) {
+    return scan_results_truncated;
 }
 
 bool ap_scan_has_selection(void) {

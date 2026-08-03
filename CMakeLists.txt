@@ -54,6 +54,28 @@ endif()
 add_compile_definitions(GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
 add_compile_definitions(GIT_BRANCH="${GIT_BRANCH}")
 
+# Monotonic build number used by the OTA manifest for version comparisons
+# (esp_app_desc_t's git-describe-derived version isn't guaranteed monotonic).
+# Prefer CI's auto-incrementing run number, since the build job's checkout is
+# shallow and `git rev-list --count` would otherwise always report 1.
+if(DEFINED ENV{GITHUB_RUN_NUMBER})
+    set(GHOSTESP_BUILD_NUMBER $ENV{GITHUB_RUN_NUMBER})
+elseif(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GHOSTESP_BUILD_NUMBER
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT GHOSTESP_BUILD_NUMBER)
+        set(GHOSTESP_BUILD_NUMBER "0")
+    endif()
+else()
+    set(GHOSTESP_BUILD_NUMBER "0")
+endif()
+add_compile_definitions(GHOSTESP_BUILD_NUMBER=${GHOSTESP_BUILD_NUMBER})
+
 # Include project settings
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(Ghost_ESP_IDF)

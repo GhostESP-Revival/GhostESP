@@ -18,6 +18,7 @@
 #include "scans/wifi/netbios_scan.h"
 #include "scans/wifi/http_banner_scan.h"
 #include "scans/wifi/snmp_scan.h"
+#include "scans/wifi/enum4linux_scan.h"
 
 // BLE Scans
 #include "scans/ble/flipper_scan.h"

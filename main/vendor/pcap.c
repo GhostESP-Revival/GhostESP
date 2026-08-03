@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "managers/sd_card_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "gui/toast.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
@@ -31,9 +32,10 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
                                 pcap_capture_type_t capture_type);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
+static void pcap_release_idle_resources(void);
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
-static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = "/mnt/ghostesp/pcaps";
+static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = SD_DIR_PCAPS;
 static volatile pcap_capture_type_t s_capture_type = PCAP_CAPTURE_WIFI;
 static volatile pcap_mode_t s_pcap_mode = PCAP_MODE_FILE;
 static uint8_t *pcap_buffer = NULL;
@@ -457,7 +459,7 @@ static void get_next_pcap_file_name(char *file_name_buffer,
 
 esp_err_t pcap_file_open(const char *base_file_name,
                          pcap_capture_type_t capture_type) {
-  return pcap_file_open_in_dir(base_file_name, "/mnt/ghostesp/pcaps",
+  return pcap_file_open_in_dir(base_file_name, SD_DIR_PCAPS,
                                capture_type);
 }
 
@@ -480,7 +482,7 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
     strncpy(pcap_dir_path, dir_path, sizeof(pcap_dir_path) - 1);
     pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
   } else {
-    strncpy(pcap_dir_path, "/mnt/ghostesp/pcaps", sizeof(pcap_dir_path) - 1);
+    strncpy(pcap_dir_path, SD_DIR_PCAPS, sizeof(pcap_dir_path) - 1);
     pcap_dir_path[sizeof(pcap_dir_path) - 1] = '\0';
   }
 
@@ -543,6 +545,9 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
 
   s_capture_active = true;
   xSemaphoreGive(pcap_mutex);
+  char cap_payload[64];
+  snprintf(cap_payload, sizeof(cap_payload), "%s|%d", pcap_base_name, (int)capture_type);
+  ghostscript_emit_event_escaped("capture_started", cap_payload);
   return ESP_OK;
 }
 
@@ -1051,6 +1056,24 @@ bool pcap_auto_flush_enabled(void) {
   return enabled;
 }
 
+static void pcap_release_idle_resources(void) {
+  SemaphoreHandle_t mutex = pcap_mutex;
+  if (!mutex) return;
+
+  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return;
+  if (s_capture_active || pcap_file != NULL || s_pcap_mode == PCAP_MODE_WIRESHARK) {
+    xSemaphoreGive(mutex);
+    return;
+  }
+
+  free(pcap_buffer);
+  pcap_buffer = NULL;
+  buffer_offset = 0;
+  pcap_mutex = NULL;
+  xSemaphoreGive(mutex);
+  vSemaphoreDelete(mutex);
+}
+
 void pcap_file_close() {
   if (pcap_mutex == NULL) {
     return;
@@ -1076,6 +1099,8 @@ void pcap_file_close() {
     xSemaphoreGive(pcap_mutex);
   }
   cleanup_pcap_queue();
+  pcap_release_idle_resources();
+  ghostscript_emit_event("capture_stopped", pcap_file_path);
 }
 
 void pcap_wireshark_stop(void) {
@@ -1094,4 +1119,5 @@ void pcap_wireshark_stop(void) {
     xSemaphoreGive(pcap_mutex);
   }
   cleanup_pcap_queue();
+  pcap_release_idle_resources();
 }

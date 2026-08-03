@@ -1,4 +1,5 @@
 #include "managers/views/sd_browser_screen.h"
+#include "gui/design_tokens.h"
 
 #include "gui/detail_view.h"
 #include "gui/lvgl_safe.h"
@@ -883,6 +884,7 @@ void sd_browser_create(void) {
     lv_obj_clear_flag(sd_touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     sd_scroll_up_btn = lv_btn_create(sd_touch_bar);
+    gui_apply_pressed_style(sd_scroll_up_btn);
     lv_obj_set_size(sd_scroll_up_btn, SD_SCROLL_BTN_SIZE, SD_SCROLL_BTN_SIZE);
     lv_obj_align(sd_scroll_up_btn, LV_ALIGN_LEFT_MID, SD_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(sd_scroll_up_btn, ctrl_color, LV_PART_MAIN);
@@ -897,6 +899,7 @@ void sd_browser_create(void) {
     lv_obj_add_flag(sd_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     sd_back_btn = lv_btn_create(sd_touch_bar);
+    gui_apply_pressed_style(sd_back_btn);
     lv_obj_set_size(sd_back_btn, SD_SCROLL_BTN_SIZE + 24, SD_SCROLL_BTN_SIZE);
     lv_obj_align(sd_back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(sd_back_btn, ctrl_color, LV_PART_MAIN);
@@ -911,6 +914,7 @@ void sd_browser_create(void) {
     lv_obj_center(back_label);
 
     sd_scroll_down_btn = lv_btn_create(sd_touch_bar);
+    gui_apply_pressed_style(sd_scroll_down_btn);
     lv_obj_set_size(sd_scroll_down_btn, SD_SCROLL_BTN_SIZE, SD_SCROLL_BTN_SIZE);
     lv_obj_align(sd_scroll_down_btn, LV_ALIGN_RIGHT_MID, -SD_SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(sd_scroll_down_btn, ctrl_color, LV_PART_MAIN);

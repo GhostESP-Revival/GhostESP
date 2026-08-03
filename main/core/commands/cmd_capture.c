@@ -5,6 +5,7 @@
 #include "core/commands.h"
 #include "core/glog.h"
 #include "managers/ble_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
@@ -18,13 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 static void capture_resolve_pcap_path(const char *arg, char *out, size_t out_len) {
     if (!arg || !out || out_len == 0) return;
@@ -109,6 +104,9 @@ static void handle_capture_export(const char *arg) {
     }
     glog("Exported %s\nPMKID: %d  M2/M3: %d\n", out_path, pmkid, handshakes);
     status_display_show_status("Export hc22000");
+    char pk_payload[48];
+    snprintf(pk_payload, sizeof(pk_payload), "%d|%d", pmkid, handshakes);
+    ghostscript_emit_event("pmkid_exported", pk_payload);
     if (jit_mounted) sd_card_unmount_after_flush(display_suspended);
 }
 

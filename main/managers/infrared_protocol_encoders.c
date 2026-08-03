@@ -44,6 +44,29 @@ void infrared_encoder_necext_reset(InfraredCommonEncoder* encoder, const Infrare
     encoder->bits_to_encode = encoder->protocol->databit_len[0];
 }
 
+// NEC42 (13-bit address + 13-bit inverse address + 8-bit command + 8-bit inverse command)
+void infrared_encoder_nec42_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
+    infrared_common_encoder_reset(encoder);
+    uint16_t address = message->address & 0x1FFF;
+    uint8_t command = message->command & 0xFF;
+    uint64_t data = (uint64_t)address
+                  | ((uint64_t)(~address & 0x1FFF) << 13)
+                  | ((uint64_t)command << 26)
+                  | ((uint64_t)(uint8_t)~command << 34);
+    for(int i = 0; i < 6; i++) encoder->data[i] = (data >> (8 * i)) & 0xFF;
+    encoder->bits_to_encode = encoder->protocol->databit_len[0];
+}
+
+// NEC42 Extended (26-bit address + 16-bit command, no inverse fields)
+void infrared_encoder_nec42ext_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
+    infrared_common_encoder_reset(encoder);
+    uint32_t address = message->address & 0x3FFFFFF; // 26 bits
+    uint16_t command = message->command & 0xFFFF;    // 16 bits
+    uint64_t data = (uint64_t)address | ((uint64_t)command << 26);
+    for(int i = 0; i < 6; i++) encoder->data[i] = (data >> (8 * i)) & 0xFF;
+    encoder->bits_to_encode = encoder->protocol->databit_len[0];
+}
+
 // Kaseikyo
 void infrared_encoder_kaseikyo_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
     infrared_common_encoder_reset(encoder);
@@ -141,19 +164,39 @@ InfraredStatus infrared_encoder_sirc_encode_repeat(InfraredCommonEncoder* encode
 }
 
 // RC5 protocol encoder
-void infrared_encoder_rc5_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
+//
+// RC5 frame (14 bits, transmitted MSB first on the wire, i.e. LSB first in the
+// data buffer which the common Manchester encoder walks bit 0 -> bit 13):
+//   bit 0  : start bit 1 (always 1)
+//   bit 1  : start bit 2 (1 for RC5, 0/field bit for RC5X)
+//   bit 2  : toggle
+//   bits 3-7  : 5-bit address (MSB first)
+//   bits 8-13 : 6-bit command (MSB first)
+// The bytes are inverted to match the Manchester convention shared with the
+// decoder (which inverts them back before interpreting).
+static void infrared_encoder_rc5_common_reset(
+    InfraredCommonEncoder* encoder, const InfraredMessage* message, bool second_start_bit) {
     infrared_common_encoder_reset(encoder);
-    uint16_t word = 0;
-    word |= (1 << 13); // start bit 1
-    word |= (1 << 12); // start bit 2
-    uint8_t addr = message->address & 0x1F;
-    word |= (uint16_t)addr << 6; // address 5 bits
-    uint8_t cmd = message->command & 0x3F;
-    word |= cmd; // command 6 bits
-    encoder->data[0] = ~(word & 0xFF);
-    encoder->data[1] = ~((word >> 8) & 0xFF);
+    uint16_t v = 0;
+    v |= 0x01;                        // start bit 1
+    if(second_start_bit) v |= 0x02;   // start bit 2 (present for RC5, absent for RC5X)
+    // toggle bit (bit 2) intentionally left at 0
+    v |= (uint16_t)((reverse(message->address & 0x1F) >> 3) << 3); // address, MSB first
+    v |= (uint16_t)((reverse(message->command & 0x3F) >> 2) << 8); // command, MSB first
+    encoder->data[0] = ~(v & 0xFF);
+    encoder->data[1] = ~((v >> 8) & 0xFF);
     encoder->bits_to_encode = encoder->protocol->databit_len[0];
     encoder->bits_encoded = 0;
+}
+
+void infrared_encoder_rc5_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
+    infrared_encoder_rc5_common_reset(encoder, message, true);
+}
+
+// RC5X: identical framing to RC5 but without the second start bit, which the
+// decoder uses to distinguish the two variants.
+void infrared_encoder_rc5x_reset(InfraredCommonEncoder* encoder, const InfraredMessage* message) {
+    infrared_encoder_rc5_common_reset(encoder, message, false);
 }
 InfraredStatus infrared_encoder_rc5_encode(InfraredCommonEncoder* encoder, uint32_t* duration, bool* level) {
     return infrared_common_encode_manchester(encoder, duration, level);

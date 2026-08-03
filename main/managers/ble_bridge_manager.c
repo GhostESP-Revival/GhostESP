@@ -42,6 +42,14 @@
 #define BRIDGE_FRAME_HEADER_LEN 12
 #define BRIDGE_DEFAULT_MTU 128
 #define BRIDGE_PEER_COMMAND_PAYLOAD_MAX 60
+#define BRIDGE_COMMAND_MAX 250
+
+/* CMD flags in header byte 5. A fragmented command starts with FIRST|MORE,
+ * continues with MORE, and finishes with flags=0. FIRST without MORE is also
+ * a complete command. Legacy senders already use flags=0 for one-frame CMDs. */
+#define GB_CMD_FLAG_FIRST 0x01
+#define GB_CMD_FLAG_MORE 0x02
+#define GB_CMD_FLAG_MASK (GB_CMD_FLAG_FIRST | GB_CMD_FLAG_MORE)
 
 #define GB_MAGIC0 0x47
 #define GB_MAGIC1 0x42
@@ -51,6 +59,7 @@ typedef enum {
     GB_TYPE_CMD = 0x01,
     GB_TYPE_ACK = 0x02,
     GB_TYPE_DATA = 0x03,
+    GB_TYPE_END = 0x04,
     GB_TYPE_ERR = 0x05,
     GB_TYPE_HAS_DATA = 0x07,
 } bridge_frame_type_t;
@@ -68,6 +77,11 @@ typedef struct {
     StaticTask_t *task_tcb;
     SemaphoreHandle_t lock;
     uint32_t active_cmd_id;
+    bool active_command;
+    uint32_t reassembly_cmd_id;
+    size_t reassembly_len;
+    bool reassembly_active;
+    char reassembly[BRIDGE_COMMAND_MAX + 1];
     char last_peer[32];
 } ble_bridge_state_t;
 
@@ -274,10 +288,57 @@ static void bridge_send_ack(uint32_t cmd_id) {
     (void)bridge_send_frame(GB_TYPE_ACK, 0, cmd_id, NULL, 0);
 }
 
-static void bridge_send_err(uint32_t cmd_id, const char *msg) {
+static void bridge_send_end(uint32_t cmd_id, uint8_t status) {
+    (void)bridge_send_frame(GB_TYPE_END, status, cmd_id, NULL, 0);
+}
+
+static void bridge_command_end_callback(uint8_t status, void *user_data) {
+    (void)user_data;
+    bridge_lock();
+    bool send_end = s_bridge.running && s_bridge.active_command;
+    uint32_t cmd_id = s_bridge.active_cmd_id;
+    s_bridge.active_command = false;
+    s_bridge.active_cmd_id = 0;
+    bridge_unlock();
+
+    if (send_end) {
+        /* GhostLink identifies no command, so BLE commands must remain
+         * serialized. END marks handler return, not asynchronous completion. */
+        bridge_send_end(cmd_id, status);
+    }
+}
+
+static void bridge_send_terminal_err(uint32_t cmd_id, const char *msg) {
     const uint8_t *payload = (const uint8_t *)(msg ? msg : "error");
     size_t len = strlen((const char *)payload);
     (void)bridge_send_frame(GB_TYPE_ERR, 1, cmd_id, payload, len);
+    bridge_send_end(cmd_id, 1);
+}
+
+static void bridge_reset_reassembly_locked(void) {
+    s_bridge.reassembly_active = false;
+    s_bridge.reassembly_cmd_id = 0;
+    s_bridge.reassembly_len = 0;
+    s_bridge.reassembly[0] = '\0';
+}
+
+static void bridge_reset_reassembly(void) {
+    bridge_lock();
+    bridge_reset_reassembly_locked();
+    bridge_unlock();
+}
+
+static void bridge_reject_fragment(uint32_t cmd_id, const char *msg) {
+    bridge_lock();
+    bool aborted = s_bridge.reassembly_active;
+    uint32_t aborted_cmd_id = s_bridge.reassembly_cmd_id;
+    bridge_reset_reassembly_locked();
+    bridge_unlock();
+
+    if (aborted && aborted_cmd_id != cmd_id) {
+        bridge_send_terminal_err(aborted_cmd_id, "fragment sequence aborted");
+    }
+    bridge_send_terminal_err(cmd_id, msg);
 }
 
 static void bridge_trim_command(char *cmd) {
@@ -315,8 +376,14 @@ static bool bridge_is_local_ctrl(const char *cmd) {
 
 static void bridge_stop_locked(void) {
     s_bridge.running = false;
+    bridge_reset_reassembly();
     esp_comm_manager_set_response_callback(NULL, NULL);
     esp_comm_manager_set_data_callback(NULL, NULL);
+    esp_comm_manager_set_command_end_callback(NULL, NULL);
+    bridge_lock();
+    s_bridge.active_command = false;
+    s_bridge.active_cmd_id = 0;
+    bridge_unlock();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     if (s_bridge.ble_connected && s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
         (void)ble_gap_terminate(s_bridge.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -406,18 +473,14 @@ static void bridge_response_callback(const uint8_t *data, size_t length, void *u
 
 static void bridge_send_cmd_to_peer(uint32_t cmd_id, const char *command) {
     if (!command || command[0] == '\0') {
-        bridge_send_err(cmd_id, "empty command");
+        bridge_send_terminal_err(cmd_id, "empty command");
         return;
     }
-
-    bridge_lock();
-    s_bridge.active_cmd_id = cmd_id;
-    bridge_unlock();
 
     bridge_send_ack(cmd_id);
 
     if (!esp_comm_manager_is_connected()) {
-        bridge_send_err(cmd_id, "comm link down");
+        bridge_send_terminal_err(cmd_id, "comm link down");
         return;
     }
 
@@ -429,7 +492,7 @@ static void bridge_send_cmd_to_peer(uint32_t cmd_id, const char *command) {
     }
     size_t cmd_len = idx;
     if (cmd_len == 0 || cmd_len >= sizeof(cmd)) {
-        bridge_send_err(cmd_id, "command too long");
+        bridge_send_terminal_err(cmd_id, "command too long");
         return;
     }
     memcpy(cmd, command, cmd_len);
@@ -442,13 +505,21 @@ static void bridge_send_cmd_to_peer(uint32_t cmd_id, const char *command) {
 
     const char *data_arg = data[0] ? data : NULL;
     bool sent = false;
+    bridge_lock();
+    s_bridge.active_command = true;
+    s_bridge.active_cmd_id = cmd_id;
+    bridge_unlock();
     if (strlen(command) <= BRIDGE_PEER_COMMAND_PAYLOAD_MAX) {
         sent = esp_comm_manager_send_command(cmd, data_arg);
     } else {
         sent = esp_comm_manager_send_command_line(command);
     }
     if (!sent) {
-        bridge_send_err(cmd_id, "comm send failed");
+        bridge_lock();
+        s_bridge.active_command = false;
+        s_bridge.active_cmd_id = 0;
+        bridge_unlock();
+        bridge_send_terminal_err(cmd_id, "comm send failed");
         return;
     }
     bridge_log("cmd 0x%08lx -> '%s'", (unsigned long)cmd_id, command);
@@ -546,6 +617,8 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
                 s_bridge.ble_connected = true;
                 s_bridge.conn_handle = event->connect.conn_handle;
                 s_bridge.mtu = ble_att_mtu(event->connect.conn_handle);
+                s_bridge.active_command = false;
+                s_bridge.active_cmd_id = 0;
                 bridge_unlock();
                 bridge_log("GATT connected, MTU=%u", (unsigned)s_bridge.mtu);
                 if (s_bridge.last_peer[0] != '\0' && esp_comm_manager_get_state() == COMM_STATE_SCANNING) {
@@ -563,6 +636,9 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             s_bridge.ble_connected = false;
             s_bridge.notify_enabled = false;
             s_bridge.conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            s_bridge.active_command = false;
+            s_bridge.active_cmd_id = 0;
+            bridge_reset_reassembly_locked();
             bridge_unlock();
             bridge_log("GATT disconnected");
             if (s_bridge.running) {
@@ -610,6 +686,8 @@ static void bridge_handle_payload(bool ctrl, const uint8_t *data, size_t len) {
 
     if (len < BRIDGE_FRAME_HEADER_LEN || data[0] != GB_MAGIC0 || data[1] != GB_MAGIC1 || data[2] != GB_VERSION) {
         bridge_log("bad frame (%u bytes)", (unsigned)len);
+        uint32_t cmd_id = len >= 10 ? bridge_read_u32_le(data + 6) : 0;
+        bridge_reject_fragment(cmd_id, "bad frame");
         return;
     }
     uint8_t type = data[3];
@@ -619,20 +697,76 @@ static void bridge_handle_payload(bool ctrl, const uint8_t *data, size_t len) {
         return;
     }
     uint16_t payload_len = (uint16_t)(((uint16_t)data[10]) | ((uint16_t)data[11] << 8));
-    if ((size_t)payload_len + BRIDGE_FRAME_HEADER_LEN > len) {
-        bridge_send_err(cmd_id, "bad frame length");
+    if ((size_t)payload_len + BRIDGE_FRAME_HEADER_LEN != len) {
+        bridge_reject_fragment(cmd_id, "bad frame length");
         return;
     }
 
-    char command[256];
-    size_t copy = payload_len < sizeof(command) - 1 ? payload_len : sizeof(command) - 1;
-    memcpy(command, data + BRIDGE_FRAME_HEADER_LEN, copy);
-    command[copy] = '\0';
+    uint8_t flags = data[5];
+    if ((flags & ~GB_CMD_FLAG_MASK) != 0) {
+        bridge_reject_fragment(cmd_id, "bad fragment flags");
+        return;
+    }
+    if (memchr(data + BRIDGE_FRAME_HEADER_LEN, '\0', payload_len) != NULL) {
+        bridge_reject_fragment(cmd_id, "NUL in command");
+        return;
+    }
+
+    bool first = (flags & GB_CMD_FLAG_FIRST) != 0;
+    bool more = (flags & GB_CMD_FLAG_MORE) != 0;
+    const char *fragment_error = NULL;
+
+    bridge_lock();
+    bool assembling = s_bridge.reassembly_active;
+    if (first && assembling) {
+        fragment_error = "bad fragment flags";
+    } else if (assembling && cmd_id != s_bridge.reassembly_cmd_id) {
+        fragment_error = "interleaved command";
+    } else if (!assembling && more && !first) {
+        fragment_error = "fragment without start";
+    }
+
+    size_t existing = assembling ? s_bridge.reassembly_len : 0;
+    if (!fragment_error && existing + payload_len > BRIDGE_COMMAND_MAX) {
+        fragment_error = "command too long";
+    } else if (!fragment_error && more && payload_len == 0) {
+        fragment_error = "empty fragment";
+    }
+
+    if (fragment_error) {
+        bridge_unlock();
+        bridge_reject_fragment(cmd_id, fragment_error);
+        return;
+    }
+
+    if (more) {
+        if (!s_bridge.reassembly_active) {
+            s_bridge.reassembly_active = true;
+            s_bridge.reassembly_cmd_id = cmd_id;
+            s_bridge.reassembly_len = 0;
+        }
+        memcpy(s_bridge.reassembly + s_bridge.reassembly_len,
+               data + BRIDGE_FRAME_HEADER_LEN, payload_len);
+        s_bridge.reassembly_len += payload_len;
+        s_bridge.reassembly[s_bridge.reassembly_len] = '\0';
+        bridge_unlock();
+        return;
+    }
+
+    char command[BRIDGE_COMMAND_MAX + 1];
+    if (assembling) {
+        memcpy(command, s_bridge.reassembly, existing);
+    }
+    memcpy(command + existing, data + BRIDGE_FRAME_HEADER_LEN, payload_len);
+    command[existing + payload_len] = '\0';
+    bridge_reset_reassembly_locked();
+    bridge_unlock();
     bridge_trim_command(command);
 
     if (ctrl && bridge_is_local_ctrl(command)) {
-        bridge_request_stop("CTRL stop");
         bridge_send_ack(cmd_id);
+        bridge_send_end(cmd_id, 0);
+        bridge_request_stop("CTRL stop");
         return;
     }
 
@@ -677,13 +811,12 @@ static bool bridge_create_task(void) {
         return true;
     }
 
-    size_t stack_words = (BRIDGE_TASK_STACK_BYTES + sizeof(StackType_t) - 1) / sizeof(StackType_t);
     if (!s_bridge.task_stack) {
 #if CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
-        s_bridge.task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_bridge.task_stack = (StackType_t *)heap_caps_malloc(BRIDGE_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #endif
         if (!s_bridge.task_stack) {
-            s_bridge.task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            s_bridge.task_stack = (StackType_t *)heap_caps_malloc(BRIDGE_TASK_STACK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
     }
     if (!s_bridge.task_tcb) {
@@ -693,7 +826,7 @@ static bool bridge_create_task(void) {
         return false;
     }
 
-    s_bridge.task_handle = xTaskCreateStatic(bridge_task, "ble_bridge", stack_words, NULL, 4,
+    s_bridge.task_handle = xTaskCreateStatic(bridge_task, "ble_bridge", BRIDGE_TASK_STACK_BYTES, NULL, 4,
                                              s_bridge.task_stack, s_bridge.task_tcb);
     return s_bridge.task_handle != NULL;
 }
@@ -748,14 +881,18 @@ bool ble_bridge_start(void) {
 
     s_bridge.mtu = BRIDGE_DEFAULT_MTU;
     s_bridge.active_cmd_id = 0;
+    s_bridge.active_command = false;
+    bridge_reset_reassembly();
     s_bridge.running = true;
     esp_comm_manager_set_response_callback(bridge_response_callback, NULL);
     esp_comm_manager_set_data_callback(bridge_data_callback, NULL);
+    esp_comm_manager_set_command_end_callback(bridge_command_end_callback, NULL);
 
     if (!bridge_create_task()) {
         s_bridge.running = false;
         esp_comm_manager_set_response_callback(NULL, NULL);
         esp_comm_manager_set_data_callback(NULL, NULL);
+        esp_comm_manager_set_command_end_callback(NULL, NULL);
         bridge_log("failed to create bridge task");
         return false;
     }
@@ -764,6 +901,7 @@ bool ble_bridge_start(void) {
         s_bridge.running = false;
         esp_comm_manager_set_response_callback(NULL, NULL);
         esp_comm_manager_set_data_callback(NULL, NULL);
+        esp_comm_manager_set_command_end_callback(NULL, NULL);
         return false;
     }
 

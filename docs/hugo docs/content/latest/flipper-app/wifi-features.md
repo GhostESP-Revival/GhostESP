@@ -67,7 +67,7 @@ keywords: ["wifi", "scanning", "capture", "attacks", "beacon spam"]
 
 ## Beacon List Management
 
-1. Navigate to **WiFi** → **Beacon Spam & Attacks** → **Beacon List**
+1. Navigate to **WiFi** → **Attacks** → **Show Beacon List**
 2. Choose action:
    - **Add**: Add new SSID to list
    - **Remove**: Remove SSID from list

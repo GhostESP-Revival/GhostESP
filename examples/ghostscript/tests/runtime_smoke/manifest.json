@@ -1,0 +1,7 @@
+{
+  "id": "runtime-smoke",
+  "name": "Runtime smoke test",
+  "entry": "main.gsb",
+  "memory_limit": 16384,
+  "permissions": ["ui", "storage"]
+}

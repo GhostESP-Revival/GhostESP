@@ -30,6 +30,16 @@
 #define PLUGIN_MANIFEST_MAX_BYTES 8192
 
 static const char *TAG = "PluginManager";
+
+#ifdef CONFIG_NATIVE_SD_APP_MAX_COUNT
+#define PLUGIN_APP_REGISTRY_CAPACITY CONFIG_NATIVE_SD_APP_MAX_COUNT
+#else
+#define PLUGIN_APP_REGISTRY_CAPACITY PLUGIN_APP_MAX_COUNT
+#endif
+
+_Static_assert(PLUGIN_APP_REGISTRY_CAPACITY > 0 &&
+               PLUGIN_APP_REGISTRY_CAPACITY <= PLUGIN_APP_MAX_COUNT,
+               "native app registry capacity is out of range");
 static plugin_app_manifest_t *s_apps = NULL;
 static int s_app_count = 0;
 static char s_last_error[128];
@@ -48,13 +58,12 @@ static bool s_packages_materialized = false;
 
 static bool read_file_to_buffer(const char *path, char **out_buf);
 
+static bool plugin_manager_has_psram(void) {
+    return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+}
+
 static bool plugin_manager_sd_jit_allowed(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0;
-#else
-    return false;
-#endif
+    return sd_card_needs_jit_mount();
 }
 
 static bool write_app_state_by_id(const char *id, uint32_t failure_count, bool quarantined, bool launch_pending, const char *last_error) {
@@ -147,7 +156,37 @@ static plugin_permission_t permission_from_string(const char *value) {
     if (strcmp(value, "settings") == 0) return PLUGIN_PERMISSION_SETTINGS;
     if (strcmp(value, "zigbee") == 0 || strcmp(value, "ieee802154") == 0) return PLUGIN_PERMISSION_ZIGBEE;
     if (strcmp(value, "nrf24") == 0) return PLUGIN_PERMISSION_NRF24;
+    if (strcmp(value, "espnow") == 0 || strcmp(value, "esp_now") == 0) return PLUGIN_PERMISSION_ESPNOW;
     return 0;
+}
+
+static plugin_feature_t feature_from_string(const char *value) {
+    if (!value) return 0;
+    if (strcmp(value, "touchscreen") == 0 || strcmp(value, "touch") == 0) return PLUGIN_FEATURE_TOUCHSCREEN;
+    if (strcmp(value, "dpad") == 0 || strcmp(value, "joystick") == 0) return PLUGIN_FEATURE_DPAD;
+    if (strcmp(value, "encoder") == 0) return PLUGIN_FEATURE_ENCODER;
+    if (strcmp(value, "keyboard") == 0 || strcmp(value, "physical_keyboard") == 0) return PLUGIN_FEATURE_KEYBOARD;
+    return 0;
+}
+
+static const char *feature_name(plugin_feature_t feature) {
+    switch (feature) {
+        case PLUGIN_FEATURE_TOUCHSCREEN: return "touchscreen";
+        case PLUGIN_FEATURE_DPAD: return "D-pad";
+        case PLUGIN_FEATURE_ENCODER: return "encoder";
+        case PLUGIN_FEATURE_KEYBOARD: return "keyboard";
+        default: return "required input";
+    }
+}
+
+static const char *feature_id(plugin_feature_t feature) {
+    switch (feature) {
+        case PLUGIN_FEATURE_TOUCHSCREEN: return "touchscreen";
+        case PLUGIN_FEATURE_DPAD: return "dpad";
+        case PLUGIN_FEATURE_ENCODER: return "encoder";
+        case PLUGIN_FEATURE_KEYBOARD: return "keyboard";
+        default: return "";
+    }
 }
 
 static bool has_gapp_extension(const char *name) {
@@ -272,6 +311,7 @@ static bool materialize_gapp_dir(const char *dir_path) {
 
         if (package_cache_current(cache_path)) continue;
 
+        ESP_LOGI(TAG, "Materializing changed package: %s", entry->d_name);
         esp_err_t err = plugin_installer_extract_gapp_to_dir(package_path, cache_path);
         if (err != ESP_OK) {
             all_ok = false;
@@ -412,6 +452,7 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     out->data_version = copy_json_u32(root, "data_version", PLUGIN_APP_DATA_VERSION_DEFAULT);
     out->memory_limit = copy_json_u32(root, "memory_limit", 0);
     out->stack_size = copy_json_u32(root, "stack_size", 0);
+    out->tick_interval_ms = copy_json_u32(root, "tick_interval_ms", 0);
     out->icon_width = (uint16_t)copy_json_u32(root, "icon_width", 0);
     out->icon_height = (uint16_t)copy_json_u32(root, "icon_height", 0);
     out->requires_psram = copy_json_bool(root, "requires_psram", false);
@@ -429,6 +470,30 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
                 }
                 out->permissions |= permission;
             }
+        }
+    }
+
+    cJSON *required_features = cJSON_GetObjectItemCaseSensitive(root, "requires_features");
+    if (required_features && !cJSON_IsArray(required_features)) {
+        snprintf(out->error, sizeof(out->error), "requires_features must be an array");
+        cJSON_Delete(root);
+        return false;
+    }
+    if (cJSON_IsArray(required_features)) {
+        cJSON *feature = NULL;
+        cJSON_ArrayForEach(feature, required_features) {
+            if (!cJSON_IsString(feature) || !feature->valuestring) {
+                snprintf(out->error, sizeof(out->error), "invalid required feature");
+                cJSON_Delete(root);
+                return false;
+            }
+            plugin_feature_t bit = feature_from_string(feature->valuestring);
+            if (!bit) {
+                snprintf(out->error, sizeof(out->error), "unknown required feature: %.48s", feature->valuestring);
+                cJSON_Delete(root);
+                return false;
+            }
+            out->required_features |= bit;
         }
     }
 
@@ -466,6 +531,10 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
         snprintf(out->error, sizeof(out->error), "manifest version mismatch");
         return false;
     }
+    if (out->tick_interval_ms != 0 && (out->tick_interval_ms < 16 || out->tick_interval_ms > 1000)) {
+        snprintf(out->error, sizeof(out->error), "tick interval must be 16-1000 ms");
+        return false;
+    }
     if (strcmp(out->storage_scope, PLUGIN_APP_STORAGE_SCOPE_APP) != 0 &&
         strcmp(out->storage_scope, PLUGIN_APP_STORAGE_SCOPE_GHOSTESP) != 0) {
         snprintf(out->error, sizeof(out->error), "invalid storage scope");
@@ -488,8 +557,13 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
 }
 
 void plugin_manager_init(void) {
+    if (!plugin_manager_has_psram()) {
+        s_app_count = 0;
+        s_last_error[0] = '\0';
+        return;
+    }
     if (!s_apps) {
-        s_apps = spiram_calloc(PLUGIN_APP_MAX_COUNT, sizeof(*s_apps));
+        s_apps = spiram_calloc(PLUGIN_APP_REGISTRY_CAPACITY, sizeof(*s_apps));
         if (!s_apps) {
             snprintf(s_last_error, sizeof(s_last_error), "failed to allocate app registry");
             return;
@@ -500,7 +574,7 @@ void plugin_manager_init(void) {
 
 bool plugin_manager_target_supported(void) {
 #if CONFIG_ENABLE_NATIVE_SD_APPS
-    return true;
+    return plugin_manager_has_psram();
 #else
     return false;
 #endif
@@ -512,15 +586,42 @@ bool plugin_manager_target_matches(const plugin_app_manifest_t *app) {
     return strcmp(app->target, plugin_api_current_target()) == 0;
 }
 
+bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app, char *missing_feature, size_t missing_feature_len) {
+    if (missing_feature && missing_feature_len > 0) missing_feature[0] = '\0';
+    if (!app) return false;
+
+    const plugin_feature_t features[] = {
+        PLUGIN_FEATURE_TOUCHSCREEN,
+        PLUGIN_FEATURE_DPAD,
+        PLUGIN_FEATURE_ENCODER,
+        PLUGIN_FEATURE_KEYBOARD,
+    };
+    for (size_t i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
+        if (!(app->required_features & features[i])) continue;
+        if (plugin_api_feature_supported(feature_id(features[i]))) continue;
+        if (missing_feature && missing_feature_len > 0) {
+            snprintf(missing_feature, missing_feature_len, "%s", feature_name(features[i]));
+        }
+        return false;
+    }
+    return true;
+}
+
 int plugin_manager_reload(void) {
     int64_t start_us = esp_timer_get_time();
+    if (!plugin_manager_target_supported()) {
+        s_app_count = 0;
+        s_last_error[0] = '\0';
+        if (s_progress_cb) s_progress_cb(100.0f, 0, 0, s_progress_user);
+        return 0;
+    }
     plugin_manager_init();
     if (!s_apps) return -1;
     for (int i = 0; i < s_app_count; ++i) {
         plugin_icon_free(s_apps[i].icon_dsc);
     }
     s_app_count = 0;
-    memset(s_apps, 0, sizeof(*s_apps) * PLUGIN_APP_MAX_COUNT);
+    memset(s_apps, 0, sizeof(*s_apps) * PLUGIN_APP_REGISTRY_CAPACITY);
     s_last_error[0] = '\0';
     if (s_progress_cb) s_progress_cb(0.0f, 0, 0, s_progress_user);
 
@@ -545,7 +646,7 @@ int plugin_manager_reload(void) {
     ESP_LOGI(TAG, "Package materialize check took %lld ms", (long long)((esp_timer_get_time() - materialize_start_us) / 1000));
 
     const char *scan_dirs[] = { PLUGIN_APPS_DIR, PLUGIN_APP_CACHE_DIR };
-    for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_MAX_COUNT; ++scan_i) {
+    for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY; ++scan_i) {
         DIR *dir = opendir(scan_dirs[scan_i]);
         if (!dir) {
             if (scan_i == 0) set_error("failed to open %s", scan_dirs[scan_i]);
@@ -553,7 +654,7 @@ int plugin_manager_reload(void) {
         }
 
         struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL && s_app_count < PLUGIN_APP_MAX_COUNT) {
+        while ((entry = readdir(dir)) != NULL && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY) {
             if (entry->d_name[0] == '.') continue;
             char base_path[PLUGIN_APP_PATH_MAX];
             if (!join_path(base_path, sizeof(base_path), scan_dirs[scan_i], entry->d_name)) {
@@ -583,6 +684,8 @@ int plugin_manager_reload(void) {
             if (join_path(icon_path, sizeof(icon_path), s_apps[i].base_path, s_apps[i].icon)) {
                 if (strcmp(s_apps[i].icon_format, "rgb565a8") == 0) {
                     s_apps[i].icon_dsc = plugin_icon_load_rgb565a8(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
+                } else if (strcmp(s_apps[i].icon_format, "true_color_alpha") == 0) {
+                    s_apps[i].icon_dsc = plugin_icon_load_true_color_alpha(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
                 } else {
                     s_apps[i].icon_dsc = plugin_icon_load_rgb565(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
                 }
@@ -629,6 +732,8 @@ const lv_img_dsc_t *plugin_manager_get_icon(const plugin_app_manifest_t *app) {
     if (!join_path(icon_path, sizeof(icon_path), mutable_app->base_path, mutable_app->icon)) return NULL;
     if (strcmp(mutable_app->icon_format, "rgb565a8") == 0) {
         mutable_app->icon_dsc = plugin_icon_load_rgb565a8(icon_path, mutable_app->icon_width, mutable_app->icon_height);
+    } else if (strcmp(mutable_app->icon_format, "true_color_alpha") == 0) {
+        mutable_app->icon_dsc = plugin_icon_load_true_color_alpha(icon_path, mutable_app->icon_width, mutable_app->icon_height);
     } else {
         mutable_app->icon_dsc = plugin_icon_load_rgb565(icon_path, mutable_app->icon_width, mutable_app->icon_height);
     }

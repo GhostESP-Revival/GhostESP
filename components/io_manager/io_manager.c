@@ -48,7 +48,6 @@ static SemaphoreHandle_t g_i2c_mutex = NULL;
 #define IO_MANAGER_POLL_MS     10
 #define IO_MANAGER_TASK_STACK  3072
 #define IO_MANAGER_TASK_PRIO   5
-#define I2C_LOCK_WARN_INTERVAL_MS 5000
 
 // Global variables
 static io_manager_config_t g_config;
@@ -63,7 +62,6 @@ static int64_t g_last_change_time = 0;
 static TaskHandle_t g_io_task_handle = NULL;
 static StackType_t *g_io_task_stack = NULL;
 static StaticTask_t *g_io_task_buffer = NULL;
-static int64_t g_last_input_lock_warn_ms = 0;
 
 // Forward declarations
 static esp_err_t tca9535_read_port(uint8_t reg, uint8_t *data);
@@ -530,28 +528,13 @@ static esp_err_t tca9535_read_inputs(uint8_t *port0, uint8_t *port1)
         return ESP_ERR_TIMEOUT;
     }
 
-    esp_err_t ret = ESP_FAIL;
-    bool global_locked = i2c_bus_lock(g_config.i2c_port, 60);
-    if (!global_locked) {
-        xSemaphoreGive(g_i2c_mutex);
-        int64_t now_ms = esp_timer_get_time() / 1000;
-        if (now_ms - g_last_input_lock_warn_ms >= I2C_LOCK_WARN_INTERVAL_MS) {
-            g_last_input_lock_warn_ms = now_ms;
-            ESP_LOGW(TAG, "failed to lock shared i2c bus for input read");
-        } else {
-            ESP_LOGD(TAG, "failed to lock shared i2c bus for input read");
-        }
-        return ESP_ERR_TIMEOUT;
-    }
     uint8_t reg = TCA9535_INPUT_PORT0;
     uint8_t values[2] = {0};
-    ret = i2c_master_transmit_receive(g_tca9535_dev, &reg, sizeof(reg), values, sizeof(values), 50);
+    esp_err_t ret = i2c_master_transmit_receive(g_tca9535_dev, &reg, sizeof(reg), values, sizeof(values), 50);
     if (ret == ESP_OK) {
         *port0 = values[0];
         *port1 = values[1];
     }
-    i2c_bus_unlock(g_config.i2c_port);
-
     xSemaphoreGive(g_i2c_mutex);
     return ret;
 }

@@ -292,6 +292,7 @@ void trackpad_view_create(void) {
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
     s_stop_btn = lv_btn_create(bar);
+    gui_apply_pressed_style(s_stop_btn);
     lv_obj_set_size(s_stop_btn, 50, 22);
     lv_obj_set_style_bg_color(s_stop_btn, accent, LV_PART_MAIN);
     lv_obj_set_style_radius(s_stop_btn, 4, LV_PART_MAIN);

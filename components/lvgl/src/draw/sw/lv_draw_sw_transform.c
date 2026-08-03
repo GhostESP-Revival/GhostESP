@@ -55,6 +55,10 @@ static void rgb_no_aa(const uint8_t * src, lv_coord_t src_w, lv_coord_t src_h, l
                       int32_t xs_ups, int32_t ys_ups, int32_t xs_step, int32_t ys_step,
                       int32_t x_end, lv_color_t * cbuf, uint8_t * abuf, lv_img_cf_t cf);
 
+static void alpha4_no_aa(const uint8_t * src, lv_coord_t src_w, lv_coord_t src_h, lv_coord_t src_stride,
+                         int32_t xs_ups, int32_t ys_ups, int32_t xs_step, int32_t ys_step,
+                         int32_t x_end, lv_color_t color, lv_color_t * cbuf, uint8_t * abuf);
+
 #if LV_COLOR_DEPTH == 16
 static void rgb565a8_no_aa(const uint8_t * src, lv_coord_t src_w, lv_coord_t src_h, lv_coord_t src_stride,
                            int32_t xs_ups, int32_t ys_ups, int32_t xs_step, int32_t ys_step,
@@ -125,7 +129,11 @@ void lv_draw_sw_transform(lv_draw_ctx_t * draw_ctx, const lv_area_t * dest_area,
         int32_t xs_ups = xs1_ups + 0x80;
         int32_t ys_ups = ys1_ups + 0x80;
 
-        if(draw_dsc->antialias == 0) {
+        if(cf == LV_IMG_CF_ALPHA_4BIT) {
+            alpha4_no_aa(src_buf, src_w, src_h, src_stride, xs_ups, ys_ups,
+                         xs_step_256, ys_step_256, dest_w, draw_dsc->recolor, cbuf, abuf);
+        }
+        else if(draw_dsc->antialias == 0) {
             switch(cf) {
                 case LV_IMG_CF_TRUE_COLOR_ALPHA:
                     argb_no_aa(src_buf, src_w, src_h, src_stride, xs_ups, ys_ups, xs_step_256, ys_step_256, dest_w, cbuf, abuf);
@@ -156,6 +164,33 @@ void lv_draw_sw_transform(lv_draw_ctx_t * draw_ctx, const lv_area_t * dest_area,
 /**********************
  *   STATIC FUNCTIONS
  **********************/
+
+static void alpha4_no_aa(const uint8_t * src, lv_coord_t src_w, lv_coord_t src_h, lv_coord_t src_stride,
+                         int32_t xs_ups, int32_t ys_ups, int32_t xs_step, int32_t ys_step,
+                         int32_t x_end, lv_color_t color, lv_color_t * cbuf, uint8_t * abuf)
+{
+    int32_t xs_ups_start = xs_ups;
+    int32_t ys_ups_start = ys_ups;
+    lv_coord_t row_bytes = (src_stride + 1) >> 1;
+
+    lv_coord_t x;
+    for(x = 0; x < x_end; x++) {
+        xs_ups = xs_ups_start + ((xs_step * x) >> 8);
+        ys_ups = ys_ups_start + ((ys_step * x) >> 8);
+
+        int32_t xs_int = xs_ups >> 8;
+        int32_t ys_int = ys_ups >> 8;
+        cbuf[x] = color;
+        if(xs_int < 0 || xs_int >= src_w || ys_int < 0 || ys_int >= src_h) {
+            abuf[x] = LV_OPA_TRANSP;
+            continue;
+        }
+
+        uint8_t packed = src[ys_int * row_bytes + (xs_int >> 1)];
+        uint8_t alpha = (xs_int & 1) ? (packed & 0x0F) : (packed >> 4);
+        abuf[x] = (lv_opa_t)(alpha * 17);
+    }
+}
 
 static void rgb_no_aa(const uint8_t * src, lv_coord_t src_w, lv_coord_t src_h, lv_coord_t src_stride,
                       int32_t xs_ups, int32_t ys_ups, int32_t xs_step, int32_t ys_step,

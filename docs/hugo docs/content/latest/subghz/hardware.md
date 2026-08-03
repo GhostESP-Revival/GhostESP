@@ -12,7 +12,6 @@ SubGHz support depends on the board configuration. Check the build configuration
 
 - **CONFIG_HAS_SUBGHZ** - Board has local CC1101 hardware
 - **CONFIG_HAS_SUBGHZ_REMOTE** - Board supports remote SubGHz mode (display/control only)
-.
 
 ## CC1101 module
 

@@ -4,6 +4,7 @@
 
 #include "core/glog.h"
 #include "core/utils.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -68,7 +69,7 @@ typedef struct {
 } BLEDetectTrackingState;
 
 static const char *TAG = "BLEDetect";
-static BLEDetectDevice s_devices[MAX_BLE_DETECT_DEVICES];
+EXT_RAM_BSS_ATTR static BLEDetectDevice s_devices[MAX_BLE_DETECT_DEVICES];
 static int s_device_count = 0;
 static bool s_scan_active = false;
 static BLEDetectTrackingState s_tracking = {0};

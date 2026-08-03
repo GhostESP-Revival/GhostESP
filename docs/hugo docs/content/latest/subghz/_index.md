@@ -49,7 +49,9 @@ SubGHz requires a CC1101-based radio module. Not all GhostESP boards include thi
 
 - [Scanning]({{< relref "scanning.md" >}}) - Monitor radio activity
 - [Capturing Signals]({{< relref "capturing.md" >}}) - Record and decode signals
+- [Waterfall Spectrum Analyzer]({{< relref "waterfall.md" >}}) - Visualize RSSI activity across common bands
 - [Transmitting]({{< relref "transmitting.md" >}}) - Replay captured signals
 - [Frequency Analyzer]({{< relref "freq-analyzer.md" >}}) - Find active frequencies
-- [Waterfall Spectrum Analyzer]({{< relref "waterfall.md" >}}) - Visualize RSSI activity across common bands
 - [Supported Protocols]({{< relref "protocols.md" >}}) - Protocol reference
+- [Files and Management]({{< relref "files.md" >}}) - `.sub` file format and saved signals
+- [Hardware Support]({{< relref "hardware.md" >}}) - Required boards and peripherals

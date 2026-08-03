@@ -1,7 +1,7 @@
 ---
 title: "CLI Reference"
 description: "Common GhostESP CLI commands grouped by category."
-weight: 20
+weight: 80
 toc: true
 ---
 
@@ -40,7 +40,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`sweep [-w wifi_sec] [-b ble_sec]`** — Full environment sweep: scans WiFi APs, stations, and BLE devices, then saves a CSV report to SD (`/mnt/ghostesp/sweeps/sweep_N.csv`).
 - **`list [-a|-s|-airtags]`** — Show AP scan results, associated stations, or AirTags.
 - **`listenprobes [channel|stop]`** — Monitor probe requests and log to PCAP if SD is present.
-- **`wpa3check`** — Run a WPA3 compliance check on the selected AP (`select -a <idx>` first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from WiFi > Scan & Select on-device.
+- **`wpa3check`** — Run a WPA3 compliance check on the selected AP (`select -a <idx>` first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from **WiFi → Scan & Select** on-device.
 
 ### Targeting
 
@@ -168,7 +168,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`sd rm <index|path>`** — Delete a file or empty directory.
 - **`sd tree [path] [depth]`** — Recursive directory listing (default depth: 2, max: 10).
 
-All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `SD:ERR:`, `SD:FILE:[n]`, `SD:DIR:[n]}`, `SD:READ:`, `SD:WRITE:`.
+All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `SD:ERR:`, `SD:FILE:[n]`, `SD:DIR:[n]`, `SD:READ:`, `SD:WRITE:`.
 
 ### Pin Configuration
 
@@ -191,14 +191,18 @@ Available on boards with `CONFIG_HAS_NRF24` or `CONFIG_HAS_NRF24_REMOTE`.
 
 Available on boards with `CONFIG_HAS_SUBGHZ` (CC1101 hardware).
 
-- **`subghz scan`** — Scan the current frequency band and display detected signals.
-- **`subghz scan <frequency>`** — Scan a specific frequency (e.g., `433.92`).
-- **`subghz list`** — List saved SubGHz signal files on SD.
-- **`subghz load <filename>`** — Load a `.sub` signal file for transmission.
-- **`subghz transmit`** — Transmit the loaded signal.
-- **`subghz transmit raw <freq> <data>`** — Transmit raw data on a frequency.
-- **`subghz stop`** — Stop scanning or transmission.
-- **`subghz save <filename>`** — Save the last scan results to a `.sub` file.
+- **`subghz start`** — Start scanning the current frequency band (alias: `subghz waterfall_start` for waterfall mode).
+- **`subghz stop`** — Stop scanning (alias: `subghz waterfall_stop`).
+- **`subghz pause`** / **`subghz resume`** — Pause or resume scanning.
+- **`subghz status`** — Show scanner state, active snapshot, and CC1101 pin configuration.
+- **`subghz cycle_freq`** — Cycle to the next frequency band.
+- **`subghz capture_begin <normal|raw> <frequency_hz>`** — Arm the CC1101 to capture a signal at a frequency (e.g., `subghz capture_begin normal 433920000`).
+- **`subghz capture_on`** / **`subghz capture_off`** — Toggle raw capture mode.
+- **`subghz capture [name_hint]`** — Capture the current signal as a snapshot (optionally hinting a name).
+- **`subghz save [name_hint]`** — Save the active snapshot to `/mnt/ghostesp/subghz/<name>.sub`.
+- **`subghz list`** — List snapshots on SD.
+- **`subghz load <name>`** — Load a snapshot for transmission (defaults to `last`).
+- **`subghz replay`** — Transmit the loaded snapshot.
 
 For protocol documentation, see the [SubGHz Protocols]({{< relref "../subghz/protocols.md" >}}) guide.
 
@@ -206,20 +210,20 @@ For protocol documentation, see the [SubGHz Protocols]({{< relref "../subghz/pro
 
 Available on boards with `CONFIG_HAS_AUDIO_PLAYER` or `CONFIG_HAS_MIC`.
 
-- **`audio play <filename>`** — Play an MP3 file from SD.
-- **`audio stop`** — Stop audio playback.
-- **`audio pause`** — Pause playback.
-- **`audio resume`** — Resume playback.
-- **`audio vol <0-100>`** — Set volume (0-100).
-- **`mic_cal`** — Calibrate the microphone (available on boards with `CONFIG_HAS_MIC`). Runs a calibration routine to set the MIC RGB visualizer baseline.
+- **`audio start`** — Start the audio receiver (boards with `CONFIG_HAS_TLV320DAC_I2S`).
+- **`audio stop`** — Stop the audio receiver.
+- **`audio pause`** — Pause the audio receiver.
+- **`audio flush`** — Flush the audio buffers.
+- **`audio state <width> <height> [played_ms]`** — Report receiver state (used by the companion app over GhostLink).
+- **`mic_cal`** — Restart microphone calibration (boards with `CONFIG_HAS_MIC`). Resets the MIC RGB visualizer baseline.
 
-## Rave Mode
+## Visualizer (Rave Mode)
 
 - **`rave on`** — Enable Rave Mode (display-based LED visualizer synced to music via microphone or line-in).
 - **`rave off`** — Disable Rave Mode.
 - **`raveport`** — Show the Rave UDP receiver port (default: 6677). Note: port-setting is currently a stub.
 
-Rave Mode streams visualization data over UDP. Use the `rave_helper.bat` or `rave_tray.exe` app on your PC to receive and display the visualizer.
+Rave Mode streams visualization data over UDP. Use the `rave_helper.bat` or `rave_tray.exe` app on your PC to receive and display the visualizer. See the [Visualizer app]({{< relref "../apps/visualizer.md" >}}) guide.
 
 ## Screen Mirroring
 
@@ -235,7 +239,7 @@ For wired mirroring, use `python ghost_mirror.py` on your PC with `--baud 460800
 - **`input`** — Show current button/encoder input state.
 - **`identify`** — Display board identification info (model, MAC address, build config).
 - **`time`** — Show current system time.
-- **`settime <YYYY-MM-DD> <HH:MM:SS>`** — Set system time manually.
+- **`settime <unix_timestamp>`** — Set system time manually (seconds since the Unix epoch, e.g., `settime 1704067200`).
 
 ## Flock Detection
 
@@ -336,7 +340,7 @@ On press, the device switches to the terminal view and runs the command. To use 
 
 - **`gpspin [pin]`** — View or set the GPS RX pin for external GPS modules. Without arguments, shows current pin. Setting persists to NVS; restart GPS commands to apply.
 - **`gpsinfo [-s]`** — Stream current fix, satellites, and speed; pass `-s` to stop the display task.
-- **`startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop. Use `--helper` to enable the GhostLink split-channel helper. Use `--channels` to specify a CSV of channels to hop (e.g., `1,6,11`). Use `--hop` to set the channel hop interval in ms (default: 100). Use `--weighted` to enable 5GHz weighted scanning.
+- **`startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]`** — Start wardriving (logs Wi-Fi/GPS to CSV). Use `-s` to stop. Use `--helper` to enable the GhostLink split-channel helper. Use `--channels` to specify a CSV of channels to hop (e.g., `1,6,11`). Use `--hop` to set the channel hop interval in ms (default: 125). Use `--weighted` to enable 5GHz weighted scanning.
 
 ## Ethernet
 *(Requires `CONFIG_WITH_ETHERNET`)*
@@ -354,7 +358,8 @@ On press, the device switches to the terminal view and runs the command. To use 
 - **`etharp`** — Perform ARP scan on local Ethernet network subnet (1-254) to discover active hosts.
 - **`ethping`** — Perform ICMP ping scan on local Ethernet network subnet (1-254) to find alive hosts.
 - **`ethports [ip] [all|start-end]`** — Scan TCP ports on a target IP address.
-  - Without arguments: scans common ports on gateway.
+  - Without arguments: scans common ports on the gateway.
+  - `local`: scan the local device itself.
   - `all`: scan all ports (1-65535).
   - `start-end`: custom port range (e.g., `80-443`).
   - Examples: `ethports`, `ethports 192.168.1.1`, `ethports 192.168.1.1 all`, `ethports 192.168.1.1 80-443`.

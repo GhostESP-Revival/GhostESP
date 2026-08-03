@@ -58,6 +58,33 @@ typedef struct {
     bool tracking;
 } ghostesp_ble_detect_info_t;
 
+typedef struct {
+    uint8_t mac[6];
+    uint8_t addr_type;
+    int8_t rssi;
+    uint8_t event_type;
+    uint32_t seen_count;
+    char name[24];
+    bool has_flags;
+    uint8_t flags;
+    bool has_tx_power;
+    int8_t tx_power;
+    bool has_manufacturer_id;
+    uint16_t manufacturer_id;
+    bool is_ibeacon;
+    char ibeacon_uuid[37];
+    uint16_t ibeacon_major;
+    uint16_t ibeacon_minor;
+    int8_t ibeacon_measured_power;
+    char adv_type[16];
+    char manufacturer[24];
+    char oui_vendor[32];
+    char services[96];
+    char service_data[64];
+    bool has_appearance;
+    uint16_t appearance;
+} ghostesp_ble_adv_info_t;
+
 typedef void *ghostesp_ui_obj_t;
 typedef void (*ghostesp_ui_button_cb_t)(void *user);
 
@@ -142,6 +169,21 @@ typedef struct {
     uint64_t size;
     bool is_directory;
 } ghostesp_storage_stat_t;
+
+#define GHOSTESP_NFC_T2_NDEF_MAX 1024
+
+typedef struct {
+    uint8_t uid[10];
+    uint8_t uid_len;
+    char model[24];
+    uint16_t user_bytes;
+    uint16_t ndef_length;
+    bool ndef_present;
+    bool read_only;
+    bool password_protected;
+    bool static_locked;
+    bool dynamic_locked;
+} ghostesp_nfc_t2_info_t;
 
 typedef struct ghostesp_api {
     uint32_t api_version;
@@ -504,6 +546,22 @@ typedef struct ghostesp_api {
     bool (*has_permission)(const char *permission);
     bool (*has_feature)(const char *feature);
     bool (*subghz_transmit_file)(const char *app_relative_path);
+    void (*ble_adv_scan_start)(void);
+    void (*ble_adv_scan_stop)(void);
+    bool (*ble_adv_scan_active)(void);
+    int (*ble_adv_scan_count)(void);
+    bool (*ble_adv_scan_get)(int index, ghostesp_ble_adv_info_t *out);
+    bool (*ble_adv_scan_track)(int index);
+    void (*ble_adv_scan_stop_tracking)(void);
+    bool (*ble_adv_scan_save_to_sd)(int index);
+
+    bool (*nfc_t2_scan_start)(void);
+    bool (*nfc_t2_scan_stop)(void);
+    bool (*nfc_t2_scan_active)(void);
+    bool (*nfc_t2_read)(ghostesp_nfc_t2_info_t *out_info, uint8_t *ndef_out,
+                        size_t max_ndef_bytes, size_t *ndef_bytes_out);
+    bool (*nfc_t2_write_ndef)(const uint8_t *ndef, size_t ndef_len);
+    bool (*ui_image_set_builtin)(ghostesp_ui_obj_t img, const char *image_name);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

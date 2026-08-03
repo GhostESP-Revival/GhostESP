@@ -44,6 +44,7 @@
 #define MAX_GATT_DEVICES 20
 #define MAX_GATT_SERVICES_PER_DEVICE 8
 #define MAX_CHRS_TO_READ 10
+#define GATT_READ_VALUE_MAX 64
 
 // Name storage: short names inline (16 bytes), longer names use pool
 #define NAME_INLINE_LEN 16
@@ -590,16 +591,16 @@ static void decode_chr_value(uint16_t svc_uuid, uint16_t chr_uuid,
  * @brief Callback for GATT characteristic read operations
  */
 static int gatt_read_chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
-                            struct ble_gatt_attr *attr, void *arg) {
+                             struct ble_gatt_attr *attr, void *arg) {
     uint16_t chr_uuid = (uint16_t)(uintptr_t)arg;
     
     if (error->status == 0 && attr != NULL) {
         uint16_t len = OS_MBUF_PKTLEN(attr->om);
-        uint8_t *data = malloc(len);
-        if (data) {
-            os_mbuf_copydata(attr->om, 0, len, data);
-            decode_chr_value(gatt_read_svc_uuid, chr_uuid, data, len);
-            free(data);
+        uint16_t copy_len = len > GATT_READ_VALUE_MAX ? GATT_READ_VALUE_MAX : len;
+        uint8_t data[GATT_READ_VALUE_MAX];
+        if (copy_len > 0) {
+            os_mbuf_copydata(attr->om, 0, copy_len, data);
+            decode_chr_value(gatt_read_svc_uuid, chr_uuid, data, copy_len);
         }
     } else {
         glog("Read failed for uuid 0x%04x: status=%d\n", chr_uuid, error->status);
@@ -907,7 +908,7 @@ static void gatt_track_scan_callback(struct ble_gap_event *event, size_t len) {
 /**
  * @brief Start scanning for connectable BLE devices
  */
-void gatt_scan_start(void) {
+bool gatt_scan_start(void) {
     if (!ble_is_initialized()) {
         ble_init();
     }
@@ -933,8 +934,16 @@ void gatt_scan_start(void) {
     glog("Please wait for scan to complete...\n");
     status_display_show_status("GATT Scanning");
     
-    ble_register_handler(gatt_scan_callback);
-    ble_start_scanning();
+    if (ble_register_handler(gatt_scan_callback) != ESP_OK) {
+        g_enum_state.scan_active = false;
+        return false;
+    }
+    if (!ble_start_scanning()) {
+        g_enum_state.scan_active = false;
+        ble_unregister_handler(gatt_scan_callback);
+        return false;
+    }
+    return true;
 }
 
 /**

@@ -84,6 +84,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
     {"repeat_speed", ST_U8, OFF(input_repeat_speed), "Display", 0, 0, 2},
     {"high_contrast", ST_BOOL, OFF(high_contrast), "Display", 0, 0, 0},
+    {"sun_mode", ST_BOOL, OFF(sun_mode), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},

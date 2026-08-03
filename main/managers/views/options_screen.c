@@ -13,15 +13,21 @@
 #include "gui/accessibility_fonts.h"
 #include "gui/asset_pack.h"
 #include "gui/theme_palette_api.h"
+#include "esp_attr.h"
 #include "gui/design_tokens.h"
 #include "gui/ios_toggle.h"
 #include "io_manager.h"
 #include "managers/views/airspace_monitor_screen.h"
+#include "managers/views/channel_congestion_screen.h"
+#include "managers/views/packet_monitor_screen.h"
 #include "managers/views/wardriving_screen.h"
 #include "managers/views/ethernet_screen.h"
 #include "managers/wigle_manager.h"
 #include "managers/config_manager.h"
 #include "managers/settings_sd_backup.h"
+#include "managers/ota_manager.h"
+#include "managers/peer_ota_manager.h"
+#include "managers/self_ota_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "gui/popup.h"
@@ -45,6 +51,7 @@
 #include "scans/ble/gatt_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/arp_scan.h"
+#include "scans/wifi/enum4linux_scan.h"
 #include "core/commands.h"
 #include "esp_timer.h"
 #include <stdint.h>
@@ -104,6 +111,7 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 #endif
 #define STA_SCAN_MAX_DURATION_MS 45000
 #define NAV_SCOPE_WIFI_DETAIL_RETURN 0x5744464Cu
+#define NAV_SCOPE_OPTIONS_MENU       0x4F50544Eu
 static paged_menu_t *ap_list_menu = NULL;
 static scan_status_t *ap_scan_status = NULL;
 static detail_view_t *ap_detail_view = NULL;
@@ -139,6 +147,25 @@ static paged_menu_t *ble_gatt_list_menu = NULL;
 static detail_view_t *ble_gatt_detail_view = NULL;
 static lv_timer_t *ble_gatt_poll_timer = NULL;
 static scan_status_t *ble_gatt_status = NULL;
+#if GHOSTESP_OTA_SUPPORTED
+static scan_status_t *ota_status_overlay = NULL;
+static lv_timer_t *ota_status_poll_timer = NULL;
+static popup_confirm_t *ota_result_popup = NULL;
+static int64_t ota_status_started_us = 0;
+static bool ota_status_watch_device = false;
+static bool ota_status_watch_peer = false;
+static bool ota_status_watch_self = false;
+static char ota_last_self_failure_notice[128] = {0};
+typedef enum {
+    OTA_UI_MODE_NONE = 0,
+    OTA_UI_MODE_CHECK,
+    OTA_UI_MODE_INSTALL,
+    OTA_UI_MODE_PEER_CHECK,
+    OTA_UI_MODE_PEER_INSTALL,
+    OTA_UI_MODE_SD_INSTALL,
+} ota_ui_mode_t;
+static ota_ui_mode_t ota_ui_mode = OTA_UI_MODE_NONE;
+#endif
 static char gtk_abuse_ssid[33];
 static scan_status_t *gtk_abuse_status = NULL;
 static detail_view_t *gtk_abuse_detail_view = NULL;
@@ -148,7 +175,7 @@ static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
 static int ble_gatt_last_count = -1;
 static int selected_ble_gatt_index = -1;
-static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
+EXT_RAM_BSS_ATTR static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
 static const char *ble_oui_vendor_options[BLE_OUI_VENDOR_MAX_RESULTS + 2];
 static int ble_oui_vendor_count = 0;
 static int selected_station_index = -1;
@@ -158,6 +185,7 @@ static int sta_scan_last_count = 0;
 static bool sta_scan_stopped_by_user = false;
 static bool scan_all_flow_active = false;
 static bool scan_all_started_station_phase = false;
+static bool station_scan_waiting_for_ap_scan = false;
 
 static bool *g_ap_multi_selected = NULL;
 static int g_ap_multi_count = 0;
@@ -193,6 +221,7 @@ static scan_status_t *arp_scan_status = NULL;
 static detail_view_t *arp_detail_view = NULL;
 static lv_timer_t *arp_scan_poll_timer = NULL;
 static int selected_arp_index = -1;
+static bool arp_scan_cancel_requested = false;
 
 // mDNS discovery flow
 #define MDNS_LIST_PAGE_SIZE 8
@@ -201,6 +230,16 @@ static scan_status_t *mdns_scan_status = NULL;
 static detail_view_t *mdns_detail_view = NULL;
 static lv_timer_t *mdns_scan_poll_timer = NULL;
 static int selected_mdns_index = -1;
+static bool mdns_scan_cancel_requested = false;
+
+// Enum4linux scan flow
+#define ENUM_LIST_PAGE_SIZE 10
+static paged_menu_t *enum_list_menu = NULL;
+static scan_status_t *enum_scan_status = NULL;
+static detail_view_t *enum_detail_view = NULL;
+static lv_timer_t *enum_scan_poll_timer = NULL;
+static int selected_enum_index = -1;
+static bool enum_scan_cancel_requested = false;
 
 // Sweep flow
 static scan_status_t *sweep_scan_status = NULL;
@@ -235,6 +274,13 @@ static void mdns_list_cleanup(void);
 static const char **mdns_list_get_options(void);
 static void show_mdns_detail(int index);
 
+static bool start_enum_scan_flow(void);
+static void enum_scan_poll_timer_cb(lv_timer_t *timer);
+static void enum_scan_complete_callback(void);
+static void enum_list_cleanup(void);
+static const char **enum_list_get_options(void);
+static void show_enum_detail(int index);
+
 static bool start_sweep_flow(void);
 static void sweep_poll_timer_cb(lv_timer_t *timer);
 static void sweep_complete_callback(void);
@@ -246,6 +292,7 @@ static void ap_list_cleanup(void);
 static bool start_scan_all_flow(void);
 static void scanall_list_cleanup(void);
 static bool start_station_scan_flow(void);
+static bool start_station_scan_with_ap_scan(void);
 static void station_scan_poll_timer_cb(lv_timer_t *timer);
 static void station_scan_complete_callback(void);
 static void stop_station_scan_flow(void);
@@ -477,6 +524,22 @@ static bool start_station_scan_flow(void) {
     return true;
 }
 
+static bool start_station_scan_with_ap_scan(void) {
+    if (ap_scan_get_count() > 0) {
+        return start_station_scan_flow();
+    }
+
+    station_list_cleanup();
+    station_scan_clear_results();
+    station_scan_waiting_for_ap_scan = true;
+    if (start_ap_scan_flow()) {
+        return true;
+    }
+
+    station_scan_waiting_for_ap_scan = false;
+    return false;
+}
+
 static void station_scan_poll_timer_cb(lv_timer_t *timer) {
     (void)timer;
 
@@ -615,6 +678,359 @@ extern const lv_img_dsc_t ghostesplogo;
 
 static const char *TAG = "optionsScreen";
 
+#if GHOSTESP_OTA_SUPPORTED
+static void ota_result_dismiss_cb(void *user_data) {
+    (void)user_data;
+}
+
+static void ota_status_start_overlay(ota_ui_mode_t mode, const char *title, const char *subtext);
+static void ota_status_show_result(const char *title, const char *body);
+
+static bool ota_state_busy(OtaState state) {
+    return state == OTA_STATE_CHECKING || state == OTA_STATE_DOWNLOADING ||
+           state == OTA_STATE_VERIFYING;
+}
+
+static bool peer_ota_state_busy(PeerOtaState state) {
+    return state == PEER_OTA_STATE_CHECKING || state == PEER_OTA_STATE_SENDING ||
+           state == PEER_OTA_STATE_WAITING_PEER;
+}
+
+static bool self_ota_state_busy(SelfOtaState state) {
+    return state == SELF_OTA_STATE_CHECKING || state == SELF_OTA_STATE_DOWNLOADING ||
+           state == SELF_OTA_STATE_VERIFYING || state == SELF_OTA_STATE_FLASHING;
+}
+
+static const char *ota_build_relation(long available_build, long current_build) {
+    if (available_build <= 0 || current_build < 0) return "available";
+    if (available_build > current_build) return "newer";
+    if (available_build < current_build) return "older";
+    return "same build";
+}
+
+static void ota_append_available_line(char *body, size_t body_len, const char *label,
+                                      const char *version, long available_build, long current_build) {
+    if (!body || body_len == 0 || !label) return;
+    size_t used = strlen(body);
+    if (used >= body_len - 1) return;
+    int n = snprintf(body + used, body_len - used, "%s%s: %s",
+                     used > 0 ? "\n" : "", label,
+                     (version && version[0]) ? version : "available");
+    if (n < 0) return;
+    used = strlen(body);
+    if (used >= body_len - 1) return;
+    const char *relation = ota_build_relation(available_build, current_build);
+    if (available_build > 0) {
+        snprintf(body + used, body_len - used, " (%s, build %ld)", relation, available_build);
+    } else {
+        snprintf(body + used, body_len - used, " (%s)", relation);
+    }
+}
+
+static void ota_status_close_overlay(void) {
+    if (ota_status_poll_timer) {
+        lv_timer_del(ota_status_poll_timer);
+        ota_status_poll_timer = NULL;
+    }
+    if (ota_status_overlay) {
+        scan_status_close(ota_status_overlay);
+        ota_status_overlay = NULL;
+    }
+    ota_ui_mode = OTA_UI_MODE_NONE;
+    ota_status_started_us = 0;
+    ota_status_watch_device = false;
+    ota_status_watch_peer = false;
+    ota_status_watch_self = false;
+}
+
+static bool ota_status_handle_cancel_input(InputEvent *event) {
+    if (!event || !ota_status_overlay || ota_ui_mode != OTA_UI_MODE_INSTALL ||
+        !ota_status_watch_device) {
+        return false;
+    }
+
+    OtaStatus ota = ota_manager_get_status();
+    if (ota.state != OTA_STATE_DOWNLOADING) {
+        return false;
+    }
+
+    ota_manager_cancel_update();
+    scan_status_set_subtext(ota_status_overlay, "Cancelling update...");
+    ota_status_close_overlay();
+    ota_status_show_result("Update Cancelled", "Firmware download cancelled.");
+    return true;
+}
+
+static void ota_status_show_result(const char *title, const char *body) {
+    popup_confirm_show(&ota_result_popup, lv_layer_top(), title, body, "Close", NULL,
+                       ota_result_dismiss_cb, NULL);
+}
+
+static void ota_start_device_install(void) {
+    if (!ota_manager_is_supported() && !self_ota_manager_is_supported()) {
+        ota_status_show_result("Manual Flash Required", "This board reflashes manually. See the release notes.");
+        return;
+    }
+
+    esp_err_t err = ota_manager_is_supported() ? ota_manager_start_update()
+                                                : self_ota_manager_start_update();
+    if (err != ESP_OK) {
+        ota_status_show_result("No Update Ready", "Check for updates first.");
+    } else if (self_ota_manager_is_supported()) {
+        ota_status_start_overlay(OTA_UI_MODE_INSTALL, "Starting updater...",
+                                 "Rebooting to updater. Keep powered on.");
+    } else {
+        ota_status_start_overlay(OTA_UI_MODE_INSTALL, "Installing update...", "Preparing firmware");
+    }
+}
+
+static void ota_confirm_device_install_cb(void *user_data) {
+    (void)user_data;
+    ota_start_device_install();
+}
+
+static bool ota_sd_install_available(void) {
+    return ota_manager_is_supported();
+}
+
+static void ota_start_sd_install(void) {
+    esp_err_t err = ota_manager_start_update_from_sd();
+    if (err == ESP_ERR_INVALID_STATE) {
+        ota_status_show_result("SD Update", "SD card not mounted.");
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        ota_status_show_result("SD Update Unavailable", "SD card firmware install is not available on this board.");
+    } else if (err == ESP_OK) {
+        ota_status_start_overlay(OTA_UI_MODE_SD_INSTALL, "Checking SD card...", "Looking for firmware_update.bin");
+    } else {
+        ota_status_show_result("SD Update", "Failed to start SD update.");
+    }
+}
+
+static void ota_confirm_sd_install_cb(void *user_data) {
+    (void)user_data;
+    ota_start_sd_install();
+}
+
+static void ota_show_sd_install_confirm(void) {
+    if (!ota_sd_install_available()) {
+        ota_status_show_result("SD Update Unavailable", "SD card firmware install is not available on this board.");
+        return;
+    }
+    if (!sd_card_manager.is_initialized) {
+        ota_status_show_result("SD Update", "SD card not mounted.");
+        return;
+    }
+
+    popup_confirm_show(&settings_confirm_popup, lv_layer_top(), "Install from SD Card?",
+                       "Put firmware.bin in /mnt/ghostesp.\nDo not use merged.bin.\nKeep powered on.",
+                       "Install", "Cancel", ota_confirm_sd_install_cb, NULL);
+}
+
+static void ota_format_device_install_body(char *body, size_t body_len) {
+    if (!body || body_len == 0) return;
+
+    body[0] = '\0';
+    if (ota_manager_is_supported()) {
+        OtaStatus ota = ota_manager_get_status();
+        if (ota.state == OTA_STATE_UPDATE_AVAILABLE) {
+            ota_append_available_line(body, body_len, "Device firmware", ota.latest_version,
+                                      ota.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+        }
+    } else if (self_ota_manager_is_supported()) {
+        SelfOtaStatus self = self_ota_manager_get_status();
+        if (self.state == SELF_OTA_STATE_UPDATE_AVAILABLE) {
+            ota_append_available_line(body, body_len, "Device firmware", self.latest_version,
+                                      self.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
+        }
+    }
+
+    if (body[0] == '\0') {
+        snprintf(body, body_len, "Install firmware update?");
+    }
+
+    size_t used = strlen(body);
+    if (used < body_len - 1) {
+        snprintf(body + used, body_len - used, "\nKeep powered on.");
+    }
+}
+
+static void ota_show_device_install_confirm(void) {
+    if (ota_manager_is_supported()) {
+        // Gate on whether a download target is actually staged, not on the
+        // volatile status enum: a failed download or a background re-check can
+        // move the state out of OTA_STATE_UPDATE_AVAILABLE while the URL from a
+        // successful check is still valid, which otherwise produced the
+        // "checked, saw an update, install says none" mismatch.
+        if (!ota_manager_has_update_ready()) {
+            ota_status_show_result("No Update Ready", "Check for updates first.");
+            return;
+        }
+    }
+
+    char body[256];
+    ota_format_device_install_body(body, sizeof(body));
+    popup_confirm_show(&settings_confirm_popup, lv_layer_top(), "Install Device Update?",
+                       body, "Install", "Cancel", ota_confirm_device_install_cb, NULL);
+}
+
+static void ota_status_show_pending_self_failure(void) {
+    if (!self_ota_manager_is_supported()) return;
+
+    SelfOtaStatus self = self_ota_manager_get_status();
+    if (self.state != SELF_OTA_STATE_FAILED || self.error_msg[0] == '\0') return;
+    if (strncmp(ota_last_self_failure_notice, self.error_msg,
+                sizeof(ota_last_self_failure_notice)) == 0) {
+        return;
+    }
+
+    strncpy(ota_last_self_failure_notice, self.error_msg,
+            sizeof(ota_last_self_failure_notice) - 1);
+    ota_last_self_failure_notice[sizeof(ota_last_self_failure_notice) - 1] = '\0';
+    ota_status_show_result("Update Failed", self.error_msg);
+}
+
+static void ota_status_format_progress(char *out, size_t out_len,
+                                       OtaStatus ota, PeerOtaStatus peer, SelfOtaStatus self) {
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+
+    if (ota_status_watch_device && ota_state_busy(ota.state)) {
+        if (ota.image_size > 0 && ota.bytes_downloaded > 0) {
+            snprintf(out, out_len, "Device firmware\n%u / %u KB",
+                     (unsigned)(ota.bytes_downloaded / 1024), (unsigned)(ota.image_size / 1024));
+        } else {
+            snprintf(out, out_len, "Device firmware");
+        }
+        return;
+    }
+
+    if (ota_status_watch_peer && peer_ota_state_busy(peer.state)) {
+        if (peer.total_bytes > 0 && peer.bytes_sent > 0) {
+            snprintf(out, out_len, "Peer firmware\n%u / %u KB",
+                     (unsigned)(peer.bytes_sent / 1024), (unsigned)(peer.total_bytes / 1024));
+        } else {
+            snprintf(out, out_len, "Peer firmware");
+        }
+        return;
+    }
+
+    if (ota_status_watch_self && self_ota_state_busy(self.state)) {
+        if (self.image_size > 0 && self.bytes_written > 0) {
+            snprintf(out, out_len, "Device firmware\n%u / %u KB",
+                     (unsigned)(self.bytes_written / 1024), (unsigned)(self.image_size / 1024));
+        } else if (self.state == SELF_OTA_STATE_FLASHING) {
+            snprintf(out, out_len, "Starting updater\nScreen will pause during update");
+        } else if (self.state == SELF_OTA_STATE_CHECKING) {
+            snprintf(out, out_len, "Checking device firmware");
+        } else {
+            snprintf(out, out_len, "Device firmware");
+        }
+    }
+}
+
+static void ota_status_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (!ota_status_overlay) return;
+
+    OtaStatus ota = ota_manager_get_status();
+    PeerOtaStatus peer = peer_ota_manager_get_status();
+    SelfOtaStatus self = self_ota_manager_get_status();
+
+    char progress[96];
+    ota_status_format_progress(progress, sizeof(progress), ota, peer, self);
+    if (progress[0]) scan_status_set_subtext(ota_status_overlay, progress);
+
+    bool busy = (ota_status_watch_device && ota_state_busy(ota.state)) ||
+                (ota_status_watch_peer && peer_ota_state_busy(peer.state)) ||
+                (ota_status_watch_self && self_ota_state_busy(self.state));
+    if (busy) return;
+
+    int64_t elapsed_us = esp_timer_get_time() - ota_status_started_us;
+    if (elapsed_us < 1000000) return;
+
+    char body[256];
+    const char *title = "Update Status";
+    body[0] = '\0';
+
+    if (ota_status_watch_device && ota.state == OTA_STATE_FAILED) {
+        title = "Update Failed";
+        snprintf(body, sizeof(body), "%s", ota.error_msg[0] ? ota.error_msg : "Device update failed");
+    } else if (ota_status_watch_peer && peer.state == PEER_OTA_STATE_FAILED) {
+        title = "Peer Update Failed";
+        snprintf(body, sizeof(body), "%s", peer.error_msg[0] ? peer.error_msg : "Peer update failed");
+    } else if (ota_status_watch_self && self.state == SELF_OTA_STATE_FAILED) {
+        title = "Update Failed";
+        snprintf(body, sizeof(body), "%s", self.error_msg[0] ? self.error_msg : "Device update failed");
+    } else if (ota_ui_mode == OTA_UI_MODE_CHECK || ota_ui_mode == OTA_UI_MODE_PEER_CHECK) {
+        bool have_local = (ota_status_watch_device && (ota.state == OTA_STATE_UPDATE_AVAILABLE)) ||
+                          (ota_status_watch_self && (self.state == SELF_OTA_STATE_UPDATE_AVAILABLE));
+        bool have_peer = ota_status_watch_peer && (peer.state == PEER_OTA_STATE_UPDATE_AVAILABLE);
+        if (have_local || have_peer) {
+            const char *device_version = ota_status_watch_device ? ota.latest_version : self.latest_version;
+            long device_build = ota_status_watch_device ? ota.latest_build_number : self.latest_build_number;
+            title = "Firmware Available";
+            if (have_local) {
+                ota_append_available_line(body, sizeof(body), "Device firmware", device_version,
+                                          device_build, (long)GHOSTESP_BUILD_NUMBER);
+            }
+            if (have_peer) {
+                ota_append_available_line(body, sizeof(body), "Peer firmware", peer.peer_version,
+                                          peer.peer_build_number, peer.peer_current_build_number);
+            }
+        } else {
+            title = "No Firmware Found";
+            snprintf(body, sizeof(body), ota_ui_mode == OTA_UI_MODE_PEER_CHECK ?
+                     "No update for peer." :
+                     "No update for this device.");
+        }
+    } else if (ota_status_watch_peer && peer.state == PEER_OTA_STATE_DONE) {
+        title = "Peer Updated";
+        snprintf(body, sizeof(body), "Peer updated. Rebooting.");
+    } else if (ota_status_watch_device && ota.state == OTA_STATE_READY_TO_REBOOT) {
+        title = "Update Installed";
+        snprintf(body, sizeof(body), "Firmware installed. Rebooting into the new image.");
+    } else if (ota_ui_mode == OTA_UI_MODE_INSTALL || ota_ui_mode == OTA_UI_MODE_PEER_INSTALL ||
+               ota_ui_mode == OTA_UI_MODE_SD_INSTALL) {
+        title = "No Update Started";
+        snprintf(body, sizeof(body), "No update running. Check first.");
+    } else {
+        title = "Update Started";
+        snprintf(body, sizeof(body), "Update started. Watch status.");
+    }
+
+    ota_status_close_overlay();
+    ota_status_show_result(title, body);
+}
+
+static void ota_status_start_overlay(ota_ui_mode_t mode, const char *title, const char *subtext) {
+    ota_status_close_overlay();
+    popup_confirm_close(&ota_result_popup);
+    ota_last_self_failure_notice[0] = '\0';
+    ota_ui_mode = mode;
+    ota_status_started_us = esp_timer_get_time();
+    ota_status_watch_device = (mode == OTA_UI_MODE_CHECK || mode == OTA_UI_MODE_INSTALL ||
+                               mode == OTA_UI_MODE_SD_INSTALL) && ota_manager_is_supported();
+    // OTA_UI_MODE_INSTALL is this board's own firmware only -- it never
+    // touches the peer (see SETTING_OTA_INSTALL_UPDATE), so it must not watch
+    // peer state here either. Otherwise a stale peer.state left over from an
+    // unrelated earlier peer check/update (or the automatic background
+    // check at boot) could surface as "Peer Update Failed" on a self-only
+    // install that never went near the peer.
+    ota_status_watch_peer = (mode == OTA_UI_MODE_PEER_CHECK || mode == OTA_UI_MODE_PEER_INSTALL) &&
+                            peer_ota_manager_is_supported();
+    ota_status_watch_self = (mode == OTA_UI_MODE_CHECK || mode == OTA_UI_MODE_INSTALL) &&
+                            self_ota_manager_is_supported();
+    ota_status_overlay = scan_status_create(title ? title : "Firmware Update");
+    if (!ota_status_overlay) {
+        ota_status_close_overlay();
+        ota_status_show_result("Firmware Update", "Update started. Watch status.");
+        return;
+    }
+    if (subtext) scan_status_set_subtext(ota_status_overlay, subtext);
+    ota_status_poll_timer = lv_timer_create(ota_status_poll_timer_cb, 350, NULL);
+}
+#endif
+
 typedef enum {
     SETTINGS_CAT_DISPLAY = 0,
     SETTINGS_CAT_THEME_ASSETS,
@@ -639,6 +1055,9 @@ typedef enum {
     SETTINGS_CAT_LOCKSCREEN,
     SETTINGS_CAT_WARDRIVING,
     SETTINGS_CAT_GPS,
+#if GHOSTESP_OTA_SUPPORTED
+    SETTINGS_CAT_FIRMWARE_UPDATE,
+#endif
     SETTINGS_CAT_COUNT
 } SettingsCategoryId;
 
@@ -704,6 +1123,9 @@ static SettingsCategory settings_categories[] = {
     {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Setup", SETTINGS_CAT_SYSTEM_TOOLS, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Transfer or Reset", SETTINGS_CAT_BACKUP_RESET, SETTINGS_ROOT_SYSTEM, false, NULL},
+#if GHOSTESP_OTA_SUPPORTED
+    {"Firmware Update", SETTINGS_CAT_FIRMWARE_UPDATE, SETTINGS_ROOT_SYSTEM, true, "CONFIG_ESPTOOLPY_FLASHSIZE_8MB or CONFIG_ESPTOOLPY_FLASHSIZE_16MB"},
+#endif
 };
 
 static int current_settings_root = -1;
@@ -933,7 +1355,9 @@ typedef enum {
     WIFI_MENU_ARP_LIST,
     WIFI_MENU_ARP_DETAILS,
     WIFI_MENU_MDNS_LIST,
-    WIFI_MENU_MDNS_DETAILS
+    WIFI_MENU_MDNS_DETAILS,
+    WIFI_MENU_ENUM_LIST,
+    WIFI_MENU_ENUM_DETAILS
 } WifiMenuState;
 
 static WifiMenuState current_wifi_menu_state = WIFI_MENU_MAIN;
@@ -952,21 +1376,19 @@ static void nav_push_wifi_detail_return(WifiMenuState return_state) {
 
 static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
     gui_nav_state_t nav;
-    while (gui_nav_history_pop(&nav)) {
-        if (nav.scope != NAV_SCOPE_WIFI_DETAIL_RETURN) {
-            continue;
-        }
-
-        if (return_state_out) {
-            *return_state_out = (WifiMenuState)nav.value;
-        }
-        return true;
+    if (!gui_nav_history_peek(&nav) || nav.scope != NAV_SCOPE_WIFI_DETAIL_RETURN) {
+        return false;
     }
-    return false;
+    gui_nav_history_pop(&nav);
+    if (return_state_out) {
+        *return_state_out = (WifiMenuState)nav.value;
+    }
+    return true;
 }
 
 static const char * const wifi_attacks_options[] = {
     "Start Deauth Attack",
+    "Start Handshake+Deauth",
     "Start Channel Switch Attack",
     "Beacon Spam - Random",
     "Beacon Spam - Rickroll",
@@ -1001,14 +1423,17 @@ static const char * const wifi_scan_select_options[] = {
 };
 
 static const char * const wifi_environment_options[] = {
-    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion", NULL
+    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion",
+    "Packet Monitor", "Packet Visualizer", NULL
 };
 
 static const char * const wifi_network_options[] = {
     "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
-    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...",
-    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...",
+    "Enum Scan", "SNMP Walk",
+    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...", "Enum Scan Host...",
+    "SNMP Walk Host...",
+    "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...", "SNMP Walk Subnet...",
     NULL
 };
 
@@ -1144,6 +1569,7 @@ static const char * const dual_comm_wifi_options[] = {
 
 static const char * const dual_comm_attacks_options[] = {
     "Start Deauth Attack",
+    "Start Handshake+Deauth",
     "Start EAPOL Logoff",
     "Start DHCP-Starve",
     "Stop DHCP-Starve",
@@ -1264,6 +1690,9 @@ static const char * const idle_animation_options[] = {"Game of Life", "Ghost", "
 static const char * const idle_delay_options[] = {"Never", "5s", "10s", "30s"};
 #endif
 static const char * const action_options[] = {"Press OK"};
+#if GHOSTESP_OTA_SUPPORTED
+static const char * const ota_channel_options[] = {"Stable", "Prerelease"};
+#endif
 static const char *asset_pack_options[ASSET_PACK_INSTALLED_MAX + 1];
 static int asset_pack_option_count = 1;
 static const char * const font_size_options[] = {"Small", "Normal", "Large"};
@@ -1339,12 +1768,13 @@ static SettingsItem settings_items[] = {
     {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Sun Mode", SETTING_SUN_MODE, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
-    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 3, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -1374,6 +1804,7 @@ static SettingsItem settings_items[] = {
     {"AP Password", SETTING_AP_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"STA SSID", SETTING_STA_SSID, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"STA Password", SETTING_STA_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"WiFi Auto-Reconnect", SETTING_WIFI_AUTO_RECONNECT, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Timezone", SETTING_TIMEZONE, timezone_options, 13, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -1386,6 +1817,14 @@ static SettingsItem settings_items[] = {
     {"Export Settings SD", SETTING_EXPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Import Settings SD", SETTING_IMPORT_SETTINGS_SD, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Factory Reset", SETTING_FACTORY_RESET, action_options, 1, 0, SETTINGS_CAT_BACKUP_RESET, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#if GHOSTESP_OTA_SUPPORTED
+    {"Update Channel", SETTING_OTA_CHANNEL, ota_channel_options, 2, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Check Device Update", SETTING_OTA_CHECK_NOW, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Install Update", SETTING_OTA_INSTALL_UPDATE, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Check Peer Update", SETTING_OTA_CHECK_PEER, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Update Peer", SETTING_OTA_UPDATE_PEER, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Install from SD Card", SETTING_OTA_INSTALL_FROM_SD, action_options, 1, 0, SETTINGS_CAT_FIRMWARE_UPDATE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
 
     {"Auto Upload", SETTING_WIGLE_AUTO_UPLOAD, bool_options, 2, 0, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Donate Data", SETTING_WIGLE_DONATE, bool_options, 2, 1, SETTINGS_CAT_WIGLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -1453,11 +1892,37 @@ static const char *settings_item_value_text(SettingsItem *item) {
             const char *cur = settings_get_sta_password(&G_Settings);
             return (cur && cur[0]) ? "********" : "<empty>";
         }
+#if GHOSTESP_OTA_SUPPORTED
+        case SETTING_OTA_CHECK_NOW:
+        case SETTING_OTA_INSTALL_UPDATE:
+        case SETTING_OTA_CHECK_PEER:
+        case SETTING_OTA_UPDATE_PEER:
+        case SETTING_OTA_INSTALL_FROM_SD:
+            return "";
+#endif
         default:
             break;
     }
     if (!item->value_options || !item->value_options[value]) return "";
     return item->value_options[value];
+}
+
+static bool settings_item_is_visible(const SettingsItem *item) {
+    if (!item) return false;
+#if GHOSTESP_OTA_SUPPORTED
+    if (item->setting_type == SETTING_OTA_INSTALL_FROM_SD && !ota_sd_install_available()) {
+        return false;
+    }
+    // Peer (GhostLink relay) update rows only make sense on boards that
+    // actually relay to a peer -- currently only the somethingsomething C5.
+    // Hide them everywhere else instead of showing rows that just error out.
+    if ((item->setting_type == SETTING_OTA_CHECK_PEER ||
+         item->setting_type == SETTING_OTA_UPDATE_PEER) &&
+        !peer_ota_manager_is_supported()) {
+        return false;
+    }
+#endif
+    return true;
 }
 
 #define IO_BTN_EDIT_P10 0x1000
@@ -1598,6 +2063,7 @@ static const int OPT_SWIPE_THRESHOLD_RATIO = 10;
 #endif
 static bool option_fired = false;
 static bool option_invoked = false;
+static int64_t option_input_blocked_until_us = 0;
 static options_view_t *g_options_view = NULL;
 static gui_select_overlay_t *settings_select_overlay = NULL;
 static int settings_select_setting_index = -1;
@@ -1673,6 +2139,116 @@ typedef enum {
 
 static BluetoothMenuState current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
 
+typedef struct {
+    bool valid;
+    EOptionsMenuType menu_type;
+    int selected;
+    lv_coord_t scroll_y;
+    WifiMenuState wifi_state;
+    BluetoothMenuState bluetooth_state;
+    DualCommMenuState dualcomm_state;
+    int settings_root;
+    int settings_category;
+} options_menu_nav_state_t;
+
+static options_menu_nav_state_t s_rendered_menu_state = {0};
+static options_menu_nav_state_t s_resume_menu_state = {0};
+static options_menu_nav_state_t s_pending_restore_state = {0};
+static bool s_skip_history_capture_once = false;
+static bool s_discard_resume_on_destroy = false;
+
+static void rebuild_current_menu(void);
+
+static options_menu_nav_state_t options_menu_capture_nav_state(void) {
+    options_menu_nav_state_t state = {
+        .valid = true,
+        .menu_type = SelectedMenuType,
+        .selected = selected_item_index,
+        .wifi_state = current_wifi_menu_state,
+        .bluetooth_state = current_bluetooth_menu_state,
+        .dualcomm_state = current_dualcomm_menu_state,
+        .settings_root = current_settings_root,
+        .settings_category = current_settings_category,
+    };
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        state.scroll_y = lv_obj_get_scroll_y(menu_container);
+    }
+    return state;
+}
+
+static bool options_menu_nav_states_match(const options_menu_nav_state_t *a,
+                                          const options_menu_nav_state_t *b) {
+    return a && b && a->valid && b->valid &&
+           a->menu_type == b->menu_type &&
+           a->wifi_state == b->wifi_state &&
+           a->bluetooth_state == b->bluetooth_state &&
+           a->dualcomm_state == b->dualcomm_state &&
+           a->settings_root == b->settings_root &&
+           a->settings_category == b->settings_category;
+}
+
+static void options_menu_push_rendered_state(void) {
+    if (!s_rendered_menu_state.valid || s_skip_history_capture_once) {
+        s_skip_history_capture_once = false;
+        return;
+    }
+
+    options_menu_nav_state_t target = options_menu_capture_nav_state();
+    if (options_menu_nav_states_match(&s_rendered_menu_state, &target)) {
+        return;
+    }
+
+    options_menu_nav_state_t source = s_rendered_menu_state;
+    source.selected = selected_item_index;
+    if (menu_container && lv_obj_is_valid(menu_container)) {
+        source.scroll_y = lv_obj_get_scroll_y(menu_container);
+    }
+    gui_nav_state_t nav = {
+        .scope = NAV_SCOPE_OPTIONS_MENU,
+        .value = source.menu_type,
+        .selection = source.selected,
+        .scroll_y = source.scroll_y,
+        .wifi_state = source.wifi_state,
+        .bluetooth_state = source.bluetooth_state,
+        .dualcomm_state = source.dualcomm_state,
+        .settings_root = source.settings_root,
+        .settings_category = source.settings_category,
+    };
+    gui_nav_history_push(&nav);
+}
+
+static bool options_menu_restore_previous_state(void) {
+    gui_nav_state_t nav;
+    if (!gui_nav_history_peek(&nav) || nav.scope != NAV_SCOPE_OPTIONS_MENU) {
+        return false;
+    }
+    gui_nav_history_pop(&nav);
+
+    SelectedMenuType = (EOptionsMenuType)nav.value;
+    current_wifi_menu_state = (WifiMenuState)nav.wifi_state;
+    current_bluetooth_menu_state = (BluetoothMenuState)nav.bluetooth_state;
+    current_dualcomm_menu_state = (DualCommMenuState)nav.dualcomm_state;
+    current_settings_root = nav.settings_root;
+    current_settings_category = nav.settings_category;
+    settings_submenu_depth = current_settings_category >= 0 ? 2 :
+                             (current_settings_root >= 0 ? 1 : 0);
+    is_settings_mode = SelectedMenuType == OT_Settings;
+    s_pending_restore_state = (options_menu_nav_state_t){
+        .valid = true,
+        .menu_type = SelectedMenuType,
+        .selected = nav.selection,
+        .scroll_y = nav.scroll_y,
+        .wifi_state = current_wifi_menu_state,
+        .bluetooth_state = current_bluetooth_menu_state,
+        .dualcomm_state = current_dualcomm_menu_state,
+        .settings_root = current_settings_root,
+        .settings_category = current_settings_category,
+    };
+    s_skip_history_capture_once = true;
+    rebuild_current_menu();
+    return true;
+}
+
 #define OPT_DRAG_AXIS_THRESHOLD 10
 #define OPT_DRAG_AXIS_BIAS 4
 #define OPT_DRAG_DELTA_DEADZONE 1
@@ -1746,6 +2322,7 @@ static void settings_confirm_import_cb(void *user_data);
 static void settings_confirm_factory_reset_cb(void *user_data);
 
 static lv_timer_t *menu_build_timer = NULL;
+static bool s_back_option_added = false;
 static const char * const *current_options_list = NULL;
 static int build_item_index = 0;
 static int button_height_global = 0;
@@ -1794,8 +2371,11 @@ static int arp_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_N
         const arp_host_t *host = arp_scan_get_host(i);
         if (host) {
             char mac_str[18];
+            char vendor[64] = {0};
             format_mac_address(host->mac, mac_str, sizeof(mac_str), true);
-            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s", host->ip, mac_str);
+            ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s",
+                     host->ip, vendor[0] ? vendor : mac_str);
             loaded++;
         }
     }
@@ -1875,15 +2455,51 @@ static void arp_scan_poll_timer_cb(lv_timer_t *timer) {
         lv_timer_del(arp_scan_poll_timer);
         arp_scan_poll_timer = NULL;
         arp_scan_finish_async();
+        if (arp_scan_cancel_requested) {
+            arp_scan_cancel_requested = false;
+            arp_scan_clear_results();
+            return;
+        }
         arp_scan_complete_callback();
+        return;
     }
+    // Update spinner with live progress
+    int pass = 0, total_passes = 0, scanned = 0, total_hosts = 0, found = 0;
+    arp_scan_get_progress(&pass, &total_passes, &scanned, &total_hosts, &found);
+    if (total_hosts > 0 && arp_scan_status) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Pass %d/%d  %d/%d  %d found",
+                 pass, total_passes, scanned, total_hosts, found);
+        scan_status_set_subtext(arp_scan_status, buf);
+    }
+}
+
+static void arp_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (arp_scan_status) {
+        scan_status_close(arp_scan_status);
+        arp_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void arp_scan_cancel_cb(void) {
+    if (arp_scan_cancel_requested) return;
+    arp_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    arp_scan_cancel();
+    lv_async_call(arp_scan_cancel_cleanup, NULL);
 }
 
 static bool start_arp_scan_flow(void) {
     arp_list_cleanup();
+    arp_scan_cancel_requested = false;
     arp_scan_status = scan_status_create("ARP Scanning");
     if (arp_scan_status) {
-        scan_status_set_subtext(arp_scan_status, "Scanning subnet...");
+        scan_status_set_subtext(arp_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(arp_scan_status, arp_scan_cancel_cb);
     }
     esp_err_t err = arp_scan_start_async();
     if (err != ESP_OK) {
@@ -2014,15 +2630,40 @@ static void mdns_scan_poll_timer_cb(lv_timer_t *timer) {
         lv_timer_del(mdns_scan_poll_timer);
         mdns_scan_poll_timer = NULL;
         wifi_manager_ip_lookup_finish_async();
+        if (mdns_scan_cancel_requested) {
+            mdns_scan_cancel_requested = false;
+            wifi_manager_ip_lookup_clear();
+            return;
+        }
         mdns_scan_complete_callback();
     }
 }
 
+static void mdns_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (mdns_scan_status) {
+        scan_status_close(mdns_scan_status);
+        mdns_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void mdns_scan_cancel_cb(void) {
+    if (mdns_scan_cancel_requested) return;
+    mdns_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    lv_async_call(mdns_scan_cancel_cleanup, NULL);
+}
+
 static bool start_mdns_scan_flow(void) {
     mdns_list_cleanup();
+    mdns_scan_cancel_requested = false;
     mdns_scan_status = scan_status_create("mDNS Discovery");
     if (mdns_scan_status) {
-        scan_status_set_subtext(mdns_scan_status, "Querying services...");
+        scan_status_set_subtext(mdns_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(mdns_scan_status, mdns_scan_cancel_cb);
     }
     esp_err_t err = wifi_manager_start_ip_lookup_async();
     if (err != ESP_OK) {
@@ -2033,6 +2674,184 @@ static bool start_mdns_scan_flow(void) {
         return false;
     }
     mdns_scan_poll_timer = lv_timer_create(mdns_scan_poll_timer_cb, 100, NULL);
+    return true;
+}
+
+// ============================================================================
+// Enum4linux Scan Flow
+// ============================================================================
+
+static void enum_list_cleanup(void) {
+    if (enum_scan_poll_timer) {
+        lv_timer_del(enum_scan_poll_timer);
+        enum_scan_poll_timer = NULL;
+    }
+    if (enum_list_menu) {
+        paged_menu_destroy(enum_list_menu);
+        enum_list_menu = NULL;
+    }
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+        enum_detail_view = NULL;
+    }
+    enum_scan_clear_results();
+}
+
+static int enum_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX],
+                              bool *has_more, void *user_data) {
+    (void)user_data;
+    int count = enum_scan_get_count();
+    if (count <= 0) { *has_more = false; return 0; }
+    int loaded = 0;
+    for (int i = offset; i < count && loaded < page_size; i++) {
+        const enum_host_t *host = enum_scan_get_host(i);
+        if (host) {
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s",
+                     host->ip, host->hostname[0] ? host->hostname : "SMB");
+            loaded++;
+        }
+    }
+    *has_more = (offset + loaded) < count;
+    return loaded;
+}
+
+static const char **enum_list_get_options(void) {
+    if (!enum_list_menu) {
+        enum_list_menu = paged_menu_create(ENUM_LIST_PAGE_SIZE, enum_list_load_fn, NULL);
+    }
+    return paged_menu_get_options(enum_list_menu);
+}
+
+static void enum_detail_back_cb(lv_event_t *e) {
+    (void)e;
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+        enum_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_ENUM_LIST;
+    rebuild_current_menu();
+}
+
+static void show_enum_detail(int index) {
+    const enum_host_t *host = enum_scan_get_host(index);
+    if (!host) {
+        error_popup_create("Host not found");
+        return;
+    }
+    selected_enum_index = index;
+
+    if (enum_detail_view) {
+        detail_view_destroy(enum_detail_view);
+    }
+    enum_detail_view = detail_view_create(lv_scr_act(), "Enum Results");
+    reserve_detail_touch_bar_space(enum_detail_view);
+
+    detail_view_add_info(enum_detail_view, "IP", host->ip);
+    if (host->hostname[0])
+        detail_view_add_info(enum_detail_view, "Hostname", host->hostname);
+    if (host->os_version[0])
+        detail_view_add_info(enum_detail_view, "OS", host->os_version);
+    if (host->domain[0])
+        detail_view_add_info(enum_detail_view, "Domain", host->domain);
+
+    if (host->share_count > 0) {
+        detail_view_add_header(enum_detail_view, "Shares");
+        for (int i = 0; i < host->share_count; i++) {
+            detail_view_add_info(enum_detail_view, host->shares[i].name,
+                                 host->shares[i].type);
+        }
+    }
+
+    if (host->user_count > 0) {
+        detail_view_add_header(enum_detail_view, "Users");
+        char user_list[256] = {0};
+        size_t pos = 0;
+        for (int i = 0; i < host->user_count && pos < sizeof(user_list) - 1; i++) {
+            int w = snprintf(&user_list[pos], sizeof(user_list) - pos,
+                             "%s%s", i > 0 ? ", " : "", host->users[i]);
+            if (w > 0) pos += (size_t)w;
+        }
+        detail_view_add_info(enum_detail_view, "Users", user_list);
+    }
+
+    detail_view_add_back(enum_detail_view, enum_detail_back_cb, NULL);
+    current_wifi_menu_state = WIFI_MENU_ENUM_DETAILS;
+}
+
+static void enum_scan_complete_callback(void) {
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    int count = enum_scan_get_count();
+    if (count == 0) {
+        error_popup_create("No SMB hosts found");
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
+        rebuild_current_menu();
+        return;
+    }
+    if (enum_list_menu) {
+        paged_menu_reset(enum_list_menu);
+    }
+    current_wifi_menu_state = WIFI_MENU_ENUM_LIST;
+    rebuild_current_menu();
+}
+
+static void enum_scan_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (enum_scan_check_done()) {
+        lv_timer_del(enum_scan_poll_timer);
+        enum_scan_poll_timer = NULL;
+        enum_scan_finish_async();
+        if (enum_scan_cancel_requested) {
+            enum_scan_cancel_requested = false;
+            enum_scan_clear_results();
+            return;
+        }
+        enum_scan_complete_callback();
+    }
+}
+
+static void enum_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    if (enum_scan_status) {
+        scan_status_close(enum_scan_status);
+        enum_scan_status = NULL;
+    }
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void enum_scan_cancel_cb(void) {
+    if (enum_scan_cancel_requested) return;
+    enum_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    enum_scan_cancel();
+    lv_async_call(enum_scan_cancel_cleanup, NULL);
+}
+
+static bool start_enum_scan_flow(void) {
+    enum_list_cleanup();
+    enum_scan_cancel_requested = false;
+    enum_scan_status = scan_status_create("Enum Scanning");
+    if (enum_scan_status) {
+        scan_status_set_subtext(enum_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(enum_scan_status, enum_scan_cancel_cb);
+    }
+    esp_err_t err = enum_scan_start_async();
+    if (err != ESP_OK) {
+        if (enum_scan_status) {
+            scan_status_close(enum_scan_status);
+            enum_scan_status = NULL;
+        }
+        return false;
+    }
+    enum_scan_poll_timer = lv_timer_create(enum_scan_poll_timer_cb, 100, NULL);
     return true;
 }
 
@@ -2365,6 +3184,9 @@ static void snmp_probe_kb_cb(const char *text);
 static void netbios_subnet_kb_cb(const char *text);
 static void http_banner_subnet_kb_cb(const char *text);
 static void snmp_probe_subnet_kb_cb(const char *text);
+static void enum_scan_kb_cb(const char *text);
+static void snmp_walk_kb_cb(const char *text);
+static void snmp_walk_subnet_kb_cb(const char *text);
 static void dual_comm_netbios_subnet_kb_cb(const char *text);
 static void dual_comm_http_banner_subnet_kb_cb(const char *text);
 static void dual_comm_snmp_probe_subnet_kb_cb(const char *text);
@@ -2637,6 +3459,10 @@ static void close_all_scan_status_overlays(void) {
         close_one_scan_status(&ble_gatt_status);
         close_one_scan_status(&gtk_abuse_status);
     }
+#if GHOSTESP_OTA_SUPPORTED
+    ota_status_close_overlay();
+    popup_confirm_close(&ota_result_popup);
+#endif
 }
 
 static void options_menu_freeze_pre_lock(void) {
@@ -2766,6 +3592,34 @@ void options_menu_create() {
      * destroy/create to avoid expensive LVGL operations and watchdog starvation.
      */
     ESP_LOGI(TAG, "options_menu_create: SelectedMenuType=%d (%s)", SelectedMenuType, options_menu_type_to_string(SelectedMenuType));
+    /* Only restore the captured nav state when the menu state has not been
+     * deliberately changed since the options view was torn down. Keyboard
+     * submit callbacks (e.g. BLE OUI vendor search / prefix, settings) set
+     * their own target state before switching back here; restoring the stale
+     * capture would clobber it and dump the user on the wrong menu. */
+    bool restoring_view = s_resume_menu_state.valid &&
+                          s_resume_menu_state.menu_type == SelectedMenuType &&
+                          s_resume_menu_state.wifi_state == current_wifi_menu_state &&
+                          s_resume_menu_state.bluetooth_state == current_bluetooth_menu_state &&
+                          s_resume_menu_state.dualcomm_state == current_dualcomm_menu_state &&
+                          s_resume_menu_state.settings_root == current_settings_root &&
+                          s_resume_menu_state.settings_category == current_settings_category &&
+                          display_manager_previous_view != &main_menu_view;
+    if (!restoring_view) {
+        s_resume_menu_state.valid = false;
+        s_pending_restore_state.valid = false;
+    }
+    if (restoring_view) {
+        current_wifi_menu_state = s_resume_menu_state.wifi_state;
+        current_bluetooth_menu_state = s_resume_menu_state.bluetooth_state;
+        current_dualcomm_menu_state = s_resume_menu_state.dualcomm_state;
+        current_settings_root = s_resume_menu_state.settings_root;
+        current_settings_category = s_resume_menu_state.settings_category;
+        settings_submenu_depth = current_settings_category >= 0 ? 2 :
+                                 (current_settings_root >= 0 ? 1 : 0);
+        s_pending_restore_state = s_resume_menu_state;
+        s_resume_menu_state.valid = false;
+    }
     settings_select_close();
     s_info_detail_active = false;
     
@@ -2773,7 +3627,7 @@ void options_menu_create() {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
         // Only reset if we're coming from main menu (not from terminal return)
         // This is detected by checking if the options view root is NULL
-        if (!options_menu_view.root && !suppress_wifi_state_reset_once) {
+        if (!restoring_view && !options_menu_view.root && !suppress_wifi_state_reset_once) {
             ESP_LOGI(TAG, "Resetting WiFi menu state to MAIN on fresh entry");
             current_wifi_menu_state = WIFI_MENU_MAIN;
         }
@@ -2879,6 +3733,12 @@ void options_menu_create() {
             case WIFI_MENU_MDNS_DETAILS:
                 options = mdns_list_get_options();
                 break;
+            case WIFI_MENU_ENUM_LIST:
+                options = enum_list_get_options();
+                break;
+            case WIFI_MENU_ENUM_DETAILS:
+                options = enum_list_get_options();
+                break;
         }
         break;
     case OT_Bluetooth:
@@ -2957,9 +3817,11 @@ void options_menu_create() {
         break;
     case OT_Settings: 
         is_settings_mode = true;
-        current_settings_root = -1;
-        current_settings_category = -1;
-        settings_submenu_depth = 0;
+        if (!restoring_view) {
+            current_settings_root = -1;
+            current_settings_category = -1;
+            settings_submenu_depth = 0;
+        }
         {
             int count = asset_pack_get_installed_count();
             if (count <= 0) {
@@ -3038,10 +3900,12 @@ void options_menu_create() {
     if (is_settings_mode) {
         current_options_list = NULL;
         build_item_index = 0;
+        s_back_option_added = false;
         menu_build_timer = lv_timer_create(menu_builder_cb, current_settings_category < 0 ? 20 : 15, NULL);
     } else {
         current_options_list = options;
         build_item_index = 0;
+        s_back_option_added = false;
         // note: when returning from terminal, submenu states are preserved,
         // so we rebuild the correct submenu (e.g., wifi scanning) automatically
         menu_build_timer = lv_timer_create(menu_builder_cb, 15, NULL);
@@ -3064,6 +3928,7 @@ void options_menu_create() {
     lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     scroll_up_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_up_btn);
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_up_btn, control_color, LV_PART_MAIN);
@@ -3078,6 +3943,7 @@ void options_menu_create() {
     lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
     back_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(back_btn);
     lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 24, SCROLL_BTN_SIZE);
     lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(back_btn, control_color, LV_PART_MAIN);
@@ -3092,6 +3958,7 @@ void options_menu_create() {
     lv_obj_center(back_label);
 
     scroll_down_btn = lv_btn_create(touch_bar);
+    gui_apply_pressed_style(scroll_down_btn);
     lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
     lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -SCROLL_BTN_PADDING, 0);
     lv_obj_set_style_bg_color(scroll_down_btn, control_color, LV_PART_MAIN);
@@ -3108,6 +3975,13 @@ void options_menu_create() {
     if (g_freeze_hook_id < 0) {
         g_freeze_hook_id = display_manager_register_freeze_pre_lock(options_menu_freeze_pre_lock);
     }
+
+    // Build the first batch synchronously so short menus appear instantly
+    // (like the dedicated BadUSB/NFC views) instead of crawling in from the
+    // top; the timer only fills overflow rows, keeping big lists responsive.
+    // Done last so touch bar / scroll buttons / final container size exist.
+    menu_builder_cb(NULL);
+
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
 }
 
@@ -3151,6 +4025,9 @@ static void load_current_settings_values(void) {
                 break;
             case SETTING_INVERT_COLORS:
                 settings_items[i].current_value = settings_get_invert_colors(&G_Settings) ? 1 : 0;
+                break;
+            case SETTING_SUN_MODE:
+                settings_items[i].current_value = settings_get_sun_mode(&G_Settings) ? 1 : 0;
                 break;
             case SETTING_WEB_AUTH:
                 settings_items[i].current_value = settings_get_web_auth_enabled(&G_Settings) ? 1 : 0;
@@ -3241,6 +4118,11 @@ static void load_current_settings_values(void) {
             case SETTING_WIGLE_DONATE:
                 settings_items[i].current_value = settings_get_wigle_donate(&G_Settings) ? 1 : 0;
                 break;
+#if GHOSTESP_OTA_SUPPORTED
+            case SETTING_OTA_CHANNEL:
+                settings_items[i].current_value = settings_get_ota_channel(&G_Settings);
+                break;
+#endif
 #if defined(CONFIG_HAS_MIC) || defined(CONFIG_ENABLE_MIC_RGB_VISUALIZER)
             case SETTING_MIC_VISUALIZER_MODE:
                 settings_items[i].current_value = (int)settings_get_mic_visualizer_mode(&G_Settings);
@@ -3332,6 +4214,9 @@ case SETTING_GPS_BAUD_RATE: {
                 // action items; current_value index unused
                 settings_items[i].current_value = 0;
                 break;
+            case SETTING_WIFI_AUTO_RECONNECT:
+                settings_items[i].current_value = settings_get_wifi_auto_reconnect(&G_Settings) ? 1 : 0;
+                break;
             case SETTING_TIMEZONE: {
                 const char *cur_tz = settings_get_timezone_str(&G_Settings);
                 int idx = 0;
@@ -3415,6 +4300,30 @@ static void apply_setting_change(int setting_index, int new_value) {
                 lv_obj_invalidate(touch_bar);
             }
             break;
+        case SETTING_SUN_MODE: {
+            bool enabling = (new_value == 1);
+            settings_set_sun_mode(&G_Settings, enabling);
+            if (enabling) {
+                G_Settings.sun_mode_saved_brightness = settings_get_max_screen_brightness(&G_Settings);
+                settings_set_max_screen_brightness(&G_Settings, 100);
+            } else {
+                uint8_t restored = G_Settings.sun_mode_saved_brightness ? G_Settings.sun_mode_saved_brightness : 100;
+                settings_set_max_screen_brightness(&G_Settings, restored);
+            }
+            set_backlight_brightness(100); // scaled by max brightness
+            display_manager_update_status_bar_color();
+            if (g_options_view) {
+                options_view_refresh_styles(g_options_view);
+                update_settings_arrows_visibility();
+            }
+            for (int j = 0; j < settings_items_count; j++) {
+                if (settings_items[j].setting_type == SETTING_MAX_BRIGHTNESS) {
+                    int bv = (settings_get_max_screen_brightness(&G_Settings) / 10) - 1;
+                    settings_items[j].current_value = (bv < 0) ? 0 : bv;
+                }
+            }
+            break;
+        }
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
             break;
@@ -3576,6 +4485,70 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_WIGLE_DONATE:
             settings_set_wigle_donate(&G_Settings, new_value == 1);
             break;
+#if GHOSTESP_OTA_SUPPORTED
+        case SETTING_OTA_CHANNEL:
+            settings_set_ota_channel(&G_Settings, (uint8_t)new_value);
+            settings_persist_setting(SETTING_OTA_CHANNEL);
+            break;
+        case SETTING_OTA_CHECK_NOW: {
+            bool started = false;
+            if (ota_manager_is_supported()) {
+                started = (ota_manager_check_now() == ESP_OK);
+            } else if (self_ota_manager_is_supported()) {
+                started = (self_ota_manager_check_now() == ESP_OK);
+            }
+            if (started) {
+                ota_status_start_overlay(OTA_UI_MODE_CHECK, "Checking device...", "Contacting update server");
+            } else {
+                ota_status_show_result("Device Update", "Device update check is not available on this board.");
+            }
+            return;
+        }
+        case SETTING_OTA_INSTALL_UPDATE: {
+            // This installs THIS board's own firmware only -- it must never
+            // touch the peer as a side effect. Updating the peer is a
+            // separate, explicit action (SETTING_OTA_UPDATE_PEER) that the
+            // user has to choose on its own.
+            if (!ota_manager_is_supported() && !self_ota_manager_is_supported()) {
+                ota_status_show_result("Manual Flash Required", "This board reflashes manually. See the release notes.");
+                return;
+            }
+            ota_show_device_install_confirm();
+            return;
+        }
+        case SETTING_OTA_CHECK_PEER: {
+            if (!peer_ota_manager_is_supported()) {
+                ota_status_show_result("Peer Update", "No GhostLink peer configured for this board.");
+                return;
+            }
+            esp_err_t err = peer_ota_manager_check_now();
+            if (err == ESP_OK) {
+                ota_status_start_overlay(OTA_UI_MODE_PEER_CHECK, "Checking peer...", "Contacting update server");
+            } else {
+                ota_status_show_result("Peer Update", "GhostLink not connected.");
+            }
+            return;
+        }
+        case SETTING_OTA_UPDATE_PEER: {
+            if (!peer_ota_manager_is_supported()) {
+                ota_status_show_result("Peer Update", "No GhostLink peer configured for this board.");
+                return;
+            }
+            esp_err_t err = peer_ota_manager_start_update();
+            if (err == ESP_ERR_INVALID_STATE) {
+                ota_status_show_result("Peer Update", "GhostLink not connected.");
+            } else if (err == ESP_OK) {
+                ota_status_start_overlay(OTA_UI_MODE_PEER_INSTALL, "Updating peer...", "Streaming firmware over GhostLink");
+            } else {
+                ota_status_show_result("Peer Update", "Failed to start peer update.");
+            }
+            return;
+        }
+        case SETTING_OTA_INSTALL_FROM_SD: {
+            ota_show_sd_install_confirm();
+            return;
+        }
+#endif
         case SETTING_LOAD_CONFIG: {
             // Load config from SD card
             esp_err_t config_err = config_manager_load_from_sd();
@@ -3674,6 +4647,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_set_style_text_font(help_label, accessibility_get_font_small(), 0);
             
             lv_obj_t *close_btn = lv_btn_create(wigle_help_popup);
+            gui_apply_pressed_style(close_btn);
             wigle_help_close_btn = close_btn;
             lv_obj_add_flag(close_btn, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_size(close_btn, 80, 30);
@@ -3855,6 +4829,9 @@ case SETTING_GPS_BAUD_RATE:
             display_manager_switch_view(&keyboard_view);
             return;
         }
+        case SETTING_WIFI_AUTO_RECONNECT:
+            settings_set_wifi_auto_reconnect(&G_Settings, new_value == 1);
+            break;
         case SETTING_TIMEZONE:
             if (new_value >= 0 && new_value < timezone_count) {
                 settings_set_timezone_str(&G_Settings, timezone_values[new_value]);
@@ -4046,35 +5023,47 @@ static bool settings_select_handle_input(InputEvent *event) {
 }
 
 static bool settings_confirm_handle_input(InputEvent *event) {
-    if (!popup_confirm_is_open(settings_confirm_popup)) return false;
+    popup_confirm_t **active_popup = NULL;
+    popup_confirm_t *active = NULL;
+    if (popup_confirm_is_open(settings_confirm_popup)) {
+        active_popup = &settings_confirm_popup;
+        active = settings_confirm_popup;
+    }
+#if GHOSTESP_OTA_SUPPORTED
+    else if (popup_confirm_is_open(ota_result_popup)) {
+        active_popup = &ota_result_popup;
+        active = ota_result_popup;
+    }
+#endif
+    if (!active_popup) return false;
     if (!event) return true;
 
-    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&settings_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(active_popup, &event->data.touch_data);
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        popup_confirm_cancel(&settings_confirm_popup);
+        popup_confirm_cancel(active_popup);
         return true;
     }
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
-        if (button == 1) popup_confirm_select(&settings_confirm_popup);
-        else if (button == 0) popup_confirm_set_selected(settings_confirm_popup, 0);
-        else if (button == 3) popup_confirm_set_selected(settings_confirm_popup, 1);
-        else if (button == 2 || button == 4) popup_confirm_move(settings_confirm_popup, 1);
+        if (button == 1) popup_confirm_select(active_popup);
+        else if (button == 0) popup_confirm_set_selected(active, 0);
+        else if (button == 3) popup_confirm_set_selected(active, 1);
+        else if (button == 2 || button == 4) popup_confirm_move(active, 1);
         return true;
     }
     if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t key = event->data.key_value;
-        if (key == LV_KEY_ENTER || key == 13) popup_confirm_select(&settings_confirm_popup);
-        else if (key == LV_KEY_ESC || key == 29 || key == '`') popup_confirm_cancel(&settings_confirm_popup);
+        if (key == LV_KEY_ENTER || key == 13) popup_confirm_select(active_popup);
+        else if (key == LV_KEY_ESC || key == 29 || key == '`') popup_confirm_cancel(active_popup);
         else if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_UP || key == LV_KEY_DOWN ||
                  key == 'h' || key == 'l' || key == 'k' || key == 'j' || key == ',' || key == '.' || key == ';' || key == '/') {
-            popup_confirm_move(settings_confirm_popup, 1);
+            popup_confirm_move(active, 1);
         }
         return true;
     }
     if (event->type == INPUT_TYPE_ENCODER) {
-        if (event->data.encoder.button) popup_confirm_select(&settings_confirm_popup);
-        else if (event->data.encoder.direction != 0) popup_confirm_move(settings_confirm_popup, event->data.encoder.direction);
+        if (event->data.encoder.button) popup_confirm_select(active_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(active, event->data.encoder.direction);
         return true;
     }
 
@@ -4216,7 +5205,49 @@ static void select_option_item(int index) {
 }
 
 void handle_hardware_button_press_options(InputEvent *event) {
+    if (esp_timer_get_time() < option_input_blocked_until_us) {
+        if (event && event->type == INPUT_TYPE_TOUCH) opt_touch_reset();
+        return;
+    }
+
     if (settings_confirm_handle_input(event)) {
+        return;
+    }
+
+#if GHOSTESP_OTA_SUPPORTED
+    if (ota_status_handle_cancel_input(event)) {
+        return;
+    }
+#endif
+
+    bool arp_overlay_active = arp_scan_status && scan_status_is_active(arp_scan_status);
+    bool mdns_overlay_active = mdns_scan_status && scan_status_is_active(mdns_scan_status);
+    bool enum_overlay_active = enum_scan_status && scan_status_is_active(enum_scan_status);
+    if (arp_overlay_active || mdns_overlay_active || enum_overlay_active) {
+        if (event && event->type == INPUT_TYPE_TOUCH) {
+            /* This display's raw touch path is authoritative. Cancel on press,
+             * then swallow the release so it cannot activate the menu below. */
+            if (event->data.touch_data.state == LV_INDEV_STATE_PR) {
+                if (arp_overlay_active) {
+                    arp_scan_cancel_cb();
+                } else if (mdns_overlay_active) {
+                    mdns_scan_cancel_cb();
+                } else {
+                    enum_scan_cancel_cb();
+                }
+            }
+            opt_touch_reset();
+            return;
+        }
+        if (should_stop_station_scan_on_input(event)) {
+            if (arp_overlay_active) {
+                arp_scan_cancel_cb();
+            } else if (mdns_overlay_active) {
+                mdns_scan_cancel_cb();
+            } else {
+                enum_scan_cancel_cb();
+            }
+        }
         return;
     }
 
@@ -5648,14 +6679,17 @@ static void karma_portal_ssids_cb(const char *input) {
         return;
     }
 
-    // Build full SD path for the chosen portal file (or keep "default").
-    // static: avoids 320 bytes on the LVGL task stack; callbacks are serialised.
-    static char portal_path[320];
+    // Keep this off the small LVGL task stack without reserving permanent DRAM.
+    char *portal_path = malloc(320);
+    if (!portal_path) {
+        error_popup_create("Out of memory.");
+        return;
+    }
     if (strcmp(selected_karma_portal, "default") == 0) {
-        strncpy(portal_path, "default", sizeof(portal_path));
+        strncpy(portal_path, "default", 320);
     } else {
-        snprintf(portal_path, sizeof(portal_path),
-                 "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
+        snprintf(portal_path, 320,
+                  "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
     }
     wifi_manager_set_karma_portal_file(portal_path);
 
@@ -5665,6 +6699,7 @@ static void karma_portal_ssids_cb(const char *input) {
         // Heap-allocate to avoid blowing the LVGL task stack (2 KB+ on-stack otherwise).
         char *ssid_buf = malloc(33 * KARMA_MAX_SSIDS);
         if (!ssid_buf) {
+            free(portal_path);
             error_popup_create("Out of memory.");
             return;
         }
@@ -5698,10 +6733,12 @@ static void karma_portal_ssids_cb(const char *input) {
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom portal: %s\n", portal_path);
+    free(portal_path);
     keyboard_view_set_submit_callback(NULL);
 }
 
 void option_event_cb(lv_event_t *e) {
+    if (esp_timer_get_time() < option_input_blocked_until_us) return;
     if (option_invoked) return;
     option_invoked = true;
     bool view_switched = false;
@@ -6135,6 +7172,12 @@ void option_event_cb(lv_event_t *e) {
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend attack -d");
+            view_switched = true;
+        } else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+            terminal_set_return_view(&options_menu_view);
+            terminal_set_dualcomm_filter(true);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend attack -hsd");
             view_switched = true;
         } else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
             terminal_set_return_view(&options_menu_view);
@@ -7115,6 +8158,38 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
+    else if (current_wifi_menu_state == WIFI_MENU_ENUM_LIST) {
+        if (strcmp(Selected_Option, "No items found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            paged_menu_page_prev(enum_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            paged_menu_page_next(enum_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        int offset = paged_menu_get_page_offset(enum_list_menu);
+        const char **opts = paged_menu_get_options(enum_list_menu);
+        int skip = paged_menu_has_prev(enum_list_menu) ? 1 : 0;
+
+        for (int i = 0; opts[i]; i++) {
+            if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
+                show_enum_detail(offset + (i - skip));
+                break;
+            }
+        }
+        option_invoked = false;
+        return;
+    }
+
     else if (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
         if (strcmp(Selected_Option, "No items found") == 0) {
             option_invoked = false;
@@ -7201,6 +8276,17 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true; 
     }
     
+    else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+        } else {
+            simulateCommand("attack -hsd");
+        }
+        view_switched = true; 
+    }
+    
     else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
@@ -7213,7 +8299,7 @@ void option_event_cb(lv_event_t *e) {
     }
 
     else if (strcmp(Selected_Option, "Scan Stations") == 0) {
-        if (!start_station_scan_flow()) {
+        if (!start_station_scan_with_ap_scan()) {
             error_popup_create("Scan failed to start");
         }
         option_invoked = false;
@@ -7232,7 +8318,7 @@ void option_event_cb(lv_event_t *e) {
             return;
         }
 
-        if (!start_station_scan_flow()) {
+        if (!start_station_scan_with_ap_scan()) {
             error_popup_create("Scan failed to start");
         }
         option_invoked = false;
@@ -7988,6 +9074,33 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "Enum Scan") == 0) {
+        if (!start_enum_scan_flow()) {
+            error_popup_create("Enum scan failed to start");
+        }
+        option_invoked = false;
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Walk") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("snmpprobe walk");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Packet Monitor") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("scanarp monitor");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Packet Visualizer") == 0) {
+        display_manager_switch_view(&packet_monitor_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(ssh_scan_kb_cb);
@@ -8024,6 +9137,24 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "Enum Scan Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(enum_scan_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "SNMP Walk Host...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_walk_kb_cb);
+        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(netbios_subnet_kb_cb);
@@ -8051,6 +9182,15 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    else if (strcmp(Selected_Option, "SNMP Walk Subnet...") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(snmp_walk_subnet_kb_cb);
+        keyboard_view_set_placeholder("Subnet prefix (e.g. 192.168.4.)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Reset AP Credentials") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
@@ -8059,9 +9199,7 @@ void option_event_cb(lv_event_t *e) {
     }
 
     else if (strcmp(Selected_Option, "Channel Congestion") == 0) {
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        simulateCommand("congestion");
+        display_manager_switch_view(&channel_congestion_view);
         view_switched = true;
     }
 
@@ -8193,12 +9331,22 @@ void handle_option_directly(const char *Selected_Option) {
 }
 
 void options_menu_destroy() {
+    if (!s_discard_resume_on_destroy && options_menu_view.root && lv_obj_is_valid(options_menu_view.root)) {
+        s_resume_menu_state = options_menu_capture_nav_state();
+    }
+    s_discard_resume_on_destroy = false;
+    s_rendered_menu_state.valid = false;
     opt_touch_started = false;
     popup_confirm_close(&settings_confirm_popup);
+#if GHOSTESP_OTA_SUPPORTED
+    ota_status_close_overlay();
+    popup_confirm_close(&ota_result_popup);
+#endif
     settings_select_close();
     gui_nav_history_clear();
     scan_all_flow_active = false;
     scan_all_started_station_phase = false;
+    station_scan_waiting_for_ap_scan = false;
     ap_list_cleanup();
     scanall_list_cleanup();
     station_list_cleanup();
@@ -8388,7 +9536,7 @@ static void wigle_test_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_test_result_async, args);
+    display_manager_lvgl_async_call(wigle_test_result_async, args);
 }
 
 static void wigle_manual_upload_result_async(void *data) {
@@ -8413,7 +9561,7 @@ static void wigle_manual_upload_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_manual_upload_result_async, args);
+    display_manager_lvgl_async_call(wigle_manual_upload_result_async, args);
 }
 
 static void wigle_stats_result_async(void *data) {
@@ -8439,7 +9587,7 @@ static void wigle_stats_result_cb(bool success, const char *message) {
     if (!args) return;
     args[0] = success;
     memcpy(&args[1], message, len);
-    lv_async_call(wigle_stats_result_async, args);
+    display_manager_lvgl_async_call(wigle_stats_result_async, args);
 }
 
 static void back_event_cb(lv_event_t *e) {
@@ -8498,6 +9646,9 @@ static void back_event_cb(lv_event_t *e) {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
         portal_page_offset = 0;
         portal_free_cache();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;
         rebuild_current_menu();
         return;
@@ -8507,6 +9658,9 @@ static void back_event_cb(lv_event_t *e) {
         portal_page_offset = 0;
         portal_free_cache();
         selected_karma_portal[0] = '\0';
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_ATTACKS;
         rebuild_current_menu();
         return;
@@ -8529,6 +9683,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in AP list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_LIST) {
         ap_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -8536,6 +9693,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in station list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_LIST) {
         station_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -8543,6 +9703,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in scan-all list view, go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
         scanall_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -8551,6 +9714,9 @@ static void back_event_cb(lv_event_t *e) {
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_CAPTURE_BROWSER) {
         pcap_capture_page_offset = 0;
         pcap_capture_free_cache();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_CAPTURE;
         rebuild_current_menu();
         return;
@@ -8558,6 +9724,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in AP multi-select view, confirm selection and go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_MULTI_SELECT) {
         ap_multi_select_confirm();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -8565,6 +9734,9 @@ static void back_event_cb(lv_event_t *e) {
     // If in station multi-select view, confirm selection and go back to Scan & Select menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_MULTI_SELECT) {
         sta_multi_select_confirm();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -8572,18 +9744,27 @@ static void back_event_cb(lv_event_t *e) {
     // If in a Wi-Fi submenu (but not main), go back to main Wi-Fi menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DOWNLOAD) {
+            if (options_menu_restore_previous_state()) {
+                return;
+            }
             current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
             rebuild_current_menu();
             return;
         }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_FILE_PICK) {
             blocklist_free_cache();
+            if (options_menu_restore_previous_state()) {
+                return;
+            }
             current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
             rebuild_current_menu();
             return;
         }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
             sinkhole_detail_back_cb(NULL);
+            return;
+        }
+        if (options_menu_restore_previous_state()) {
             return;
         }
         current_wifi_menu_state = WIFI_MENU_MAIN;
@@ -8607,18 +9788,27 @@ static void back_event_cb(lv_event_t *e) {
         if (current_bluetooth_menu_state == BLUETOOTH_MENU_OUI_VENDOR_LIST) {
             ble_oui_vendor_clear();
         }
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
         rebuild_current_menu();
         return;
     }
     // If in a Dual Comm submenu (but not main), go back to main Dual Comm menu
     if (SelectedMenuType == OT_DualComm && current_dualcomm_menu_state != DUALCOMM_MENU_MAIN) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_dualcomm_menu_state = DUALCOMM_MENU_MAIN;
         rebuild_current_menu();
         return;
     }
     // If in a settings submenu, go back to category selection
     if (is_settings_mode && current_settings_category >= 0) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_settings_category = -1;
         settings_submenu_depth = 1;
         rebuild_current_menu();
@@ -8626,6 +9816,9 @@ static void back_event_cb(lv_event_t *e) {
     }
     // If in a settings root section, go back to the settings root list
     if (is_settings_mode && current_settings_root >= 0) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
         current_settings_root = -1;
         current_settings_category = -1;
         settings_submenu_depth = 0;
@@ -8633,6 +9826,10 @@ static void back_event_cb(lv_event_t *e) {
         return;
     }
     // Otherwise, go back to main menu
+    s_resume_menu_state.valid = false;
+    s_pending_restore_state.valid = false;
+    s_rendered_menu_state.valid = false;
+    s_discard_resume_on_destroy = true;
     display_manager_switch_view(&main_menu_view);
 }
 
@@ -10530,9 +11727,28 @@ static void ap_deauth_cb(lv_event_t *e) {
             detail_view_destroy(ap_detail_view);
             ap_detail_view = NULL;
         }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("attack -d");
+    }
+}
+
+static void ap_hs_deauth_cb(lv_event_t *e) {
+    (void)e;
+    if (selected_ap_index >= 0) {
+        ap_scan_select(selected_ap_index);
+        wifi_manager_select_ap(selected_ap_index);
+        if (ap_detail_view) {
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("attack -hsd");
     }
 }
 
@@ -10857,6 +12073,7 @@ static void show_ap_detail(int ap_index) {
         detail_view_add_info(ap_detail_view, "Actions:", "");
     }
     detail_view_add_action(ap_detail_view, "Deauth", ap_deauth_cb, NULL);
+    detail_view_add_action(ap_detail_view, "HS+Deauth", ap_hs_deauth_cb, NULL);
     detail_view_add_action(ap_detail_view, "Connect", ap_connect_cb, NULL);
     detail_view_add_action(ap_detail_view, "Track AP", ap_track_cb, NULL);
     detail_view_add_action(ap_detail_view, "Select AP", ap_select_cb, NULL);
@@ -10875,6 +12092,23 @@ static void ap_scan_complete_callback(void) {
     }
     
     uint16_t count = ap_scan_get_count();
+
+    if (station_scan_waiting_for_ap_scan) {
+        station_scan_waiting_for_ap_scan = false;
+        if (count == 0) {
+            error_popup_create("No APs found");
+            current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+            rebuild_current_menu();
+            return;
+        }
+
+        if (!start_station_scan_flow()) {
+            error_popup_create("Station scan failed to start");
+            current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+            rebuild_current_menu();
+        }
+        return;
+    }
 
     if (scan_all_flow_active && !scan_all_started_station_phase) {
         if (count == 0) {
@@ -10928,9 +12162,27 @@ static void station_deauth_cb(lv_event_t *e) {
         detail_view_destroy(sta_detail_view);
         sta_detail_view = NULL;
     }
+    current_wifi_menu_state = WIFI_MENU_STA_LIST;
+    suppress_wifi_state_reset_once = true;
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     simulateCommand("attack -d");
+}
+
+static void station_hs_deauth_cb(lv_event_t *e) {
+    (void)e;
+    if (!station_select_for_action()) {
+        return;
+    }
+    if (sta_detail_view) {
+        detail_view_destroy(sta_detail_view);
+        sta_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_STA_LIST;
+    suppress_wifi_state_reset_once = true;
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand("attack -hsd");
 }
 
 static void station_track_cb(lv_event_t *e) {
@@ -11022,6 +12274,7 @@ static void show_station_detail(int station_index) {
         detail_view_add_info(sta_detail_view, "Actions:", "");
     }
     detail_view_add_action(sta_detail_view, "Deauth", station_deauth_cb, NULL);
+    detail_view_add_action(sta_detail_view, "HS+Deauth", station_hs_deauth_cb, NULL);
     detail_view_add_action(sta_detail_view, "Track Station", station_track_cb, NULL);
     detail_view_add_action(sta_detail_view, "Select Station", station_select_cb, NULL);
     detail_view_add_back(sta_detail_view, station_detail_back_cb, NULL);
@@ -11477,8 +12730,10 @@ static const char **blocklist_load_page(void) {
 }
 
 static void rebuild_current_menu(void) {
+    options_menu_push_rendered_state();
     settings_select_close();
     lvgl_timer_del_safe(&menu_build_timer);
+    s_back_option_added = false;
     
     if (g_options_view) {
         options_view_clear(g_options_view);
@@ -11597,6 +12852,13 @@ static void rebuild_current_menu(void) {
                     timer_period = 25;
                     break;
                 case WIFI_MENU_MDNS_DETAILS:
+                    options = NULL;
+                    break;
+                case WIFI_MENU_ENUM_LIST:
+                    options = enum_list_get_options();
+                    timer_period = 25;
+                    break;
+                case WIFI_MENU_ENUM_DETAILS:
                     options = NULL;
                     break;
             }
@@ -11737,8 +12999,12 @@ static void rebuild_current_menu(void) {
         }
     }
     
-    // start incremental build with longer period for smoother operation
+    // Build the first batch synchronously so short menus (WiFi/BLE mains,
+    // submenus) appear instantly like the dedicated BadUSB/NFC views instead
+    // of crawling in from the top; the timer only fills overflow rows, which
+    // keeps huge lists (AP/STA scans, portals, settings) non-blocking.
     menu_build_timer = lv_timer_create(menu_builder_cb, timer_period, NULL);
+    menu_builder_cb(NULL);
 }
 
 static void switch_to_settings_root(int root_idx) {
@@ -11798,6 +13064,11 @@ static void switch_to_settings_category(int cat_idx) {
     current_settings_category = actual_cat_idx;
     settings_submenu_depth = 2;
     rebuild_current_menu();
+#if GHOSTESP_OTA_SUPPORTED
+    if (settings_categories[actual_cat_idx].id == SETTINGS_CAT_FIRMWARE_UPDATE) {
+        ota_status_show_pending_self_failure();
+    }
+#endif
 }
 
 #ifdef CONFIG_USE_IO_EXPANDER
@@ -11997,6 +13268,51 @@ static void snmp_probe_subnet_kb_cb(const char *text) {
 
     char cmd[96];
     snprintf(cmd, sizeof(cmd), "snmpprobe subnet %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void enum_scan_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "enumscan %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_walk_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a valid IP address");
+        return;
+    }
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "snmpprobe walk %s", text);
+
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void snmp_walk_subnet_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a subnet prefix");
+        return;
+    }
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "snmpprobe walk subnet %s", text);
 
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
@@ -12248,8 +13564,12 @@ static void dual_comm_http_request_kb_cb(const char *text) {
 static void menu_builder_cb(lv_timer_t *t)
 {
     if (!menu_container || !lv_obj_is_valid(menu_container) || !g_options_view) {
-        if (t) lv_timer_del(t);
-        menu_build_timer = NULL;
+        if (t) {
+            lv_timer_del(t);
+            menu_build_timer = NULL;
+        } else {
+            lvgl_timer_del_safe(&menu_build_timer);
+        }
         return;
     }
     const bool is_portal_select =
@@ -12267,7 +13587,7 @@ static void menu_builder_cb(lv_timer_t *t)
     int built_this_tick = 0;
     bool all_current_options_processed = false;
 
-    bool back_option_was_added_in_previous_tick = (bool)(intptr_t)t->user_data;
+    bool back_option_was_added_in_previous_tick = s_back_option_added;
 
     if (!back_option_was_added_in_previous_tick) {
         if (is_settings_mode) {
@@ -12360,14 +13680,14 @@ static void menu_builder_cb(lv_timer_t *t)
                 int items_in_category = 0;
                 
                 for (int i = 0; i < settings_count; i++) {
-                    if (settings_items[i].category_id == category_id) {
+                    if (settings_items[i].category_id == category_id && settings_item_is_visible(&settings_items[i])) {
                         items_in_category++;
                     }
                 }
                 
                 int current_item_in_category = 0;
                 for (int i = 0; i < settings_count && built_this_tick < BATCH; i++) {
-                    if (settings_items[i].category_id == category_id) {
+                    if (settings_items[i].category_id == category_id && settings_item_is_visible(&settings_items[i])) {
                         if (current_item_in_category >= build_item_index) {
                             SettingsItem *item = &settings_items[i];
                             lv_obj_t *btn = NULL;
@@ -12470,22 +13790,41 @@ static void menu_builder_cb(lv_timer_t *t)
                     if (label) lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
                 }
                 num_items++;
-                t->user_data = (void*)1;
+                s_back_option_added = true;
             }
         }
         if (
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
-            (bool)(intptr_t)t->user_data
+            s_back_option_added
 #else
-            need_back_button ? (bool)(intptr_t)t->user_data : true
+            need_back_button ? s_back_option_added : true
 #endif
         ) {
-            lv_timer_del(t);
+            if (t) {
+                lv_timer_del(t);
+            } else {
+                lvgl_timer_del_safe(&menu_build_timer);
+            }
             if (menu_container && lv_obj_is_valid(menu_container)) {
                 update_scroll_buttons_visibility();
                 update_settings_arrows_visibility();
             }
             menu_build_timer = NULL;
+            if (s_pending_restore_state.valid) {
+                int restore_index = s_pending_restore_state.selected;
+                if (num_items > 0) {
+                    if (restore_index < 0) restore_index = 0;
+                    if (restore_index >= num_items) restore_index = num_items - 1;
+                    select_option_item(restore_index);
+                }
+                if (menu_container && lv_obj_is_valid(menu_container)) {
+                    lv_obj_update_layout(menu_container);
+                    lv_obj_scroll_to_y(menu_container, s_pending_restore_state.scroll_y, LV_ANIM_OFF);
+                    update_scroll_buttons_visibility();
+                }
+                s_pending_restore_state.valid = false;
+            }
+            s_rendered_menu_state = options_menu_capture_nav_state();
             options_menu_apply_pending_detail_resume();
         }
     }

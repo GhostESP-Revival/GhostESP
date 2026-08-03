@@ -5,6 +5,7 @@
 #include "core/glog.h"
 #include "managers/settings_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "soc/gpio_periph.h"
 #include "soc/io_mux_reg.h"
 #include "sys/time.h"
@@ -24,26 +25,16 @@
 #include <esp_heap_caps.h>
 #include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
 #include <time.h>
-
-typedef struct {
-    StackType_t *stack;
-    StaticTask_t *tcb;
-    uint32_t stack_words;
-} gps_task_static_res_t;
-
-static gps_task_static_res_t g_gps_check_task_res = {0};
 
 static const char *GPS_TAG = "GPS";
 
 /* Workaround for stale LSP indexers that miss minmea_soft.h prototype. */
 extern esp_err_t minmea_soft_get_last_error(void);
 extern void minmea_soft_get_stats(minmea_soft_stats_t *out_stats);
-/* Keep explicit wardriving dedupe prototypes for toolchains/indexers that miss transitive headers. */
-extern bool csv_wifi_ap_should_log_peek(const char *bssid, int rssi, const char *ssid);
-extern void csv_wifi_ap_log_commit(const char *bssid, int rssi, const char *ssid);
 bool has_valid_cached_date = false;
 gps_date_t cacheddate = {0};
 static bool gps_connection_logged = false;
@@ -72,8 +63,15 @@ static bool gps_peer_preferred = false;
 static volatile TickType_t gps_peer_last_update_tick = 0;
 static volatile bool gps_peer_has_seen_update = false;
 static portMUX_TYPE gps_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE gps_lifecycle_lock = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t gps_lifecycle_owner = NULL;
+static uint32_t gps_lifecycle_depth = 0;
 static gps_t gps_local_snapshot = {0};
 static gps_t gps_peer_fix_snapshot = {0};
+static bool ghostscript_local_fix_known = false;
+static bool ghostscript_local_has_fix = false;
+static bool ghostscript_peer_fix_known = false;
+static bool ghostscript_peer_has_fix = false;
 static gpio_num_t gps_soft_rx_pin = GPIO_NUM_NC;
 static uint32_t gps_soft_baud_rate = 0;
 #ifdef CONFIG_PM_ENABLE
@@ -84,6 +82,35 @@ static void gps_soft_watchdog_task(void *pvParameters);
 static void gps_soft_try_release_rgb_rmt(void);
 static void gps_soft_try_reacquire_rgb_rmt(void);
 static void gps_soft_prepare_rx_pin(void);
+
+static bool gps_lifecycle_begin(const char *operation) {
+    TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool acquired = false;
+
+    taskENTER_CRITICAL(&gps_lifecycle_lock);
+    if (gps_lifecycle_owner == NULL || gps_lifecycle_owner == current) {
+        gps_lifecycle_owner = current;
+        gps_lifecycle_depth++;
+        acquired = true;
+    }
+    taskEXIT_CRITICAL(&gps_lifecycle_lock);
+
+    if (!acquired) {
+        ESP_LOGW(GPS_TAG, "GPS lifecycle busy; skipping %s", operation);
+    }
+    return acquired;
+}
+
+static void gps_lifecycle_end(void) {
+    taskENTER_CRITICAL(&gps_lifecycle_lock);
+    if (gps_lifecycle_owner == xTaskGetCurrentTaskHandle() && gps_lifecycle_depth > 0) {
+        gps_lifecycle_depth--;
+        if (gps_lifecycle_depth == 0) {
+            gps_lifecycle_owner = NULL;
+        }
+    }
+    taskEXIT_CRITICAL(&gps_lifecycle_lock);
+}
 
 #define GPS_SOFT_WATCHDOG_POLL_MS 2000
 #define GPS_SOFT_WATCHDOG_STALL_MS 12000
@@ -340,21 +367,27 @@ static esp_err_t gps_soft_restart_parser(const char *reason, const minmea_soft_s
 }
 
 void gps_manager_set_peer_gps_preferred(bool enabled) {
+    taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_preferred = enabled;
     if (!enabled) {
         gps_peer_last_update_tick = 0;
         gps_peer_has_seen_update = false;
     }
+    taskEXIT_CRITICAL(&gps_state_lock);
 }
 
 bool gps_manager_is_peer_gps_preferred(void) {
-    return gps_peer_preferred;
+    taskENTER_CRITICAL(&gps_state_lock);
+    bool preferred = gps_peer_preferred;
+    taskEXIT_CRITICAL(&gps_state_lock);
+    return preferred;
 }
 
 void gps_manager_clear_peer_fix(void) {
     taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_last_update_tick = 0;
     gps_peer_has_seen_update = false;
+    ghostscript_peer_fix_known = false;
     memset(&gps_peer_fix_snapshot, 0, sizeof(gps_peer_fix_snapshot));
     gps_peer_fix_snapshot.fix = GPS_FIX_INVALID;
     gps_peer_fix_snapshot.fix_mode = GPS_MODE_INVALID;
@@ -366,9 +399,18 @@ void gps_manager_update_local_snapshot(const gps_t *fix) {
         return;
     }
 
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     taskENTER_CRITICAL(&gps_state_lock);
     gps_local_snapshot = *fix;
+    bool fix_changed = !ghostscript_local_fix_known || ghostscript_local_has_fix != has_fix;
+    ghostscript_local_fix_known = true;
+    ghostscript_local_has_fix = has_fix;
     taskEXIT_CRITICAL(&gps_state_lock);
+    char gps_payload[64];
+    snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
+        has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
+    ghostscript_emit_event("gps_update", gps_payload);
+    if (fix_changed) ghostscript_emit_event("gps_fix", gps_payload);
 }
 
 void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
@@ -376,6 +418,7 @@ void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
         return;
     }
 
+    bool has_fix = fix->fix >= GPS_FIX_GPS && fix->fix_mode >= GPS_MODE_2D && fix->sats_in_use >= 3;
     taskENTER_CRITICAL(&gps_state_lock);
     gps_peer_fix_snapshot.latitude = fix->latitude;
     gps_peer_fix_snapshot.longitude = fix->longitude;
@@ -402,7 +445,15 @@ void gps_manager_update_peer_fix(const gps_peer_fix_t *fix) {
 
     gps_peer_last_update_tick = xTaskGetTickCount();
     gps_peer_has_seen_update = true;
+    bool fix_changed = !ghostscript_peer_fix_known || ghostscript_peer_has_fix != has_fix;
+    ghostscript_peer_fix_known = true;
+    ghostscript_peer_has_fix = has_fix;
     taskEXIT_CRITICAL(&gps_state_lock);
+    char gps_payload[64];
+    snprintf(gps_payload, sizeof(gps_payload), "%s|%.6f|%.6f|%.1f|%d",
+        has_fix ? "yes" : "no", fix->latitude, fix->longitude, fix->altitude, fix->sats_in_use);
+    ghostscript_emit_event("gps_update", gps_payload);
+    if (fix_changed) ghostscript_emit_event("gps_fix", gps_payload);
 }
 
 bool gps_manager_get_local_gps_snapshot(gps_t *out_gps) {
@@ -610,6 +661,9 @@ void gps_manager_init(GPSManager *manager) {
         ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_init");
         return;
     }
+    if (!gps_lifecycle_begin("initialization")) {
+        return;
+    }
 
     if (manager->isinitilized || nmea_hdl != NULL || gps_check_task_handle != NULL ||
         gps_soft_watchdog_task_handle != NULL) {
@@ -620,7 +674,7 @@ void gps_manager_init(GPSManager *manager) {
 
     // If there's an existing check task, delete it
     if (gps_check_task_handle != NULL) {
-        vTaskDelete(gps_check_task_handle);
+        vTaskDeleteWithCaps(gps_check_task_handle);
         gps_check_task_handle = NULL;
     }
     if (gps_soft_watchdog_task_handle != NULL) {
@@ -702,6 +756,7 @@ void gps_manager_init(GPSManager *manager) {
     if (current_rx_pin == 0) {
         ESP_LOGE(GPS_TAG, "No GPS RX pin configured. Set one via 'gpspin <gpio>' command or Kconfig.");
         glog("No GPS RX pin configured. Use 'gpspin <gpio>' to set one.\n");
+        gps_lifecycle_end();
         return;
     }
 
@@ -849,6 +904,7 @@ void gps_manager_init(GPSManager *manager) {
             esp_comm_manager_init_with_defaults();
             gps_disabled_comm_for_conflict = false;
         }
+        gps_lifecycle_end();
         return;
     }
     if (!gps_soft_mode_active) {
@@ -870,51 +926,33 @@ void gps_manager_init(GPSManager *manager) {
     manager->isinitilized = true;
     status_display_show_status("GPS Initialized");
 
-    const uint32_t gps_check_stack_words = 4096;
-    if (g_gps_check_task_res.stack_words != gps_check_stack_words || g_gps_check_task_res.stack == NULL ||
-        g_gps_check_task_res.tcb == NULL) {
-        if (g_gps_check_task_res.stack) {
-            heap_caps_free(g_gps_check_task_res.stack);
-            g_gps_check_task_res.stack = NULL;
-        }
-        if (g_gps_check_task_res.tcb) {
-            heap_caps_free(g_gps_check_task_res.tcb);
-            g_gps_check_task_res.tcb = NULL;
-        }
-        g_gps_check_task_res.stack_words = gps_check_stack_words;
-
-        g_gps_check_task_res.stack = (StackType_t *)heap_caps_malloc(
-            gps_check_stack_words * sizeof(StackType_t),
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!g_gps_check_task_res.stack) {
-            g_gps_check_task_res.stack = (StackType_t *)heap_caps_malloc(
-                gps_check_stack_words * sizeof(StackType_t),
-                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        }
-        g_gps_check_task_res.tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-
-    if (g_gps_check_task_res.stack && g_gps_check_task_res.tcb) {
-        gps_check_task_handle = xTaskCreateStatic(check_gps_connection_task,
+    // This task only reports whether the parser receives a fix, then exits.
+    // Capability-aware dynamic task storage is returned at that exit rather
+    // than retaining a 16 KB static stack for the entire GPS session.
+    const uint32_t gps_check_stack_bytes = 4096 * sizeof(StackType_t);
+    UBaseType_t gps_check_caps = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0
+        ? MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        : MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    gps_check_task_handle = NULL;
+    BaseType_t gps_check_rc = xTaskCreateWithCaps(check_gps_connection_task,
                                                   "gps_check",
-                                                  gps_check_stack_words,
+                                                  gps_check_stack_bytes,
                                                   NULL,
                                                   1,
-                                                  g_gps_check_task_res.stack,
-                                                  g_gps_check_task_res.tcb);
-    } else {
-        gps_check_task_handle = NULL;
-    }
+                                                  &gps_check_task_handle,
+                                                  gps_check_caps);
 
-    if (gps_check_task_handle == NULL) {
+    if (gps_check_rc != pdPASS) {
         ESP_LOGW(GPS_TAG,
-                 "Failed to create gps_check task (stack_words=%u free_internal=%u free_heap=%u)",
-                 (unsigned)gps_check_stack_words,
+                 "Failed to create gps_check task (stack_bytes=%u free_internal=%u free_heap=%u)",
+                 (unsigned)gps_check_stack_bytes,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+        gps_check_task_handle = NULL;
         status_display_show_status("GPS Task Fail");
         // proceed without the connection-check task; parser remains initialized
     }
+    gps_lifecycle_end();
 }
 
 static void check_gps_connection_task(void *pvParameters) {
@@ -963,7 +1001,7 @@ static void check_gps_connection_task(void *pvParameters) {
 
             gps_connection_logged = true;
             gps_check_task_handle = NULL;
-            vTaskDelete(NULL);
+            vTaskDeleteWithCaps(NULL);
             return;
         }
 
@@ -995,7 +1033,7 @@ static void check_gps_connection_task(void *pvParameters) {
     glog("GPS Module Connection Timeout\nCheck your connections\n");
     gps_timeout_detected = true;
     gps_check_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static bool is_valid_time(const gps_time_t *tim) {
@@ -1089,31 +1127,23 @@ void gps_manager_deinit(GPSManager *manager) {
         ESP_LOGE(GPS_TAG, "NULL manager passed to gps_manager_deinit");
         return;
     }
+    if (!gps_lifecycle_begin("deinitialization")) {
+        return;
+    }
 
     bool had_gps_resources = manager->isinitilized || nmea_hdl != NULL ||
-                             gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL ||
-                             g_gps_check_task_res.stack != NULL || g_gps_check_task_res.tcb != NULL;
+                             gps_check_task_handle != NULL || gps_soft_watchdog_task_handle != NULL;
 
     if (had_gps_resources) {
         // If there's an existing check task, delete it
         if (gps_check_task_handle != NULL) {
-            vTaskDelete(gps_check_task_handle);
+            vTaskDeleteWithCaps(gps_check_task_handle);
             gps_check_task_handle = NULL;
         }
         if (gps_soft_watchdog_task_handle != NULL) {
             vTaskDelete(gps_soft_watchdog_task_handle);
             gps_soft_watchdog_task_handle = NULL;
         }
-
-        if (g_gps_check_task_res.stack) {
-            heap_caps_free(g_gps_check_task_res.stack);
-            g_gps_check_task_res.stack = NULL;
-        }
-        if (g_gps_check_task_res.tcb) {
-            heap_caps_free(g_gps_check_task_res.tcb);
-            g_gps_check_task_res.tcb = NULL;
-        }
-        g_gps_check_task_res.stack_words = 0;
 
         if (nmea_hdl) {
             if (gps_soft_mode_active) {
@@ -1161,6 +1191,7 @@ void gps_manager_deinit(GPSManager *manager) {
     } else {
         status_display_show_status("GPS Not Init");
     }
+    gps_lifecycle_end();
 }
 
 #define GPS_STATUS_MESSAGE "GPS: %s\nAPs: %lu\nSats: %u/%u\nSpeed: %.1f km/h\nAccuracy: %s\n"
@@ -1168,12 +1199,6 @@ void gps_manager_deinit(GPSManager *manager) {
 
 #define MIN_SPEED_THRESHOLD 0.1   // Minimum 0.1 m/s (~0.36 km/h)
 #define MAX_SPEED_THRESHOLD 340.0 // Maximum 340 m/s (~1224 km/h)
-
-// GPS validity cache - avoid repeated validation on every beacon
-static TickType_t last_gps_valid_tick = 0;
-static bool last_gps_valid_state = false;
-static bool gps_cache_initialized = false;
-#define GPS_VALID_CACHE_MS 200  // Cache validity for 200ms
 
 void gps_manager_note_update(void) {
     gps_last_update_tick = xTaskGetTickCount();
@@ -1194,42 +1219,20 @@ bool gps_manager_has_seen_update(void) {
     return gps_peer_preferred ? gps_peer_has_seen_update : gps_has_seen_update;
 }
 
-esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
+static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
+                                                       const gps_wd_lite_t *gps_snapshot,
+                                                       bool using_peer) {
     if (!data) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    gps_wd_lite_t gps;
-    memset(&gps, 0, sizeof(gps));
-    bool using_peer = false;
-    if (!gps_manager_get_wd_lite(&gps, &using_peer)) {
+    if (!gps_snapshot) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    bool should_commit_wifi_dedupe = false;
-    if (!data->ble_data.is_ble_device) {
-        if (!csv_wifi_ap_should_log_peek(data->bssid, data->rssi, data->ssid)) {
-            return ESP_OK;
-        }
-        should_commit_wifi_dedupe = true;
-    }
-    
-    if (!gps_manager_has_recent_update()) {
-        return ESP_ERR_INVALID_STATE;
-    }
+    gps_wd_lite_t gps = *gps_snapshot;
     
     TickType_t now = xTaskGetTickCount();
-    bool gps_is_valid;
-    
-    if (!gps_cache_initialized || (now - last_gps_valid_tick) > pdMS_TO_TICKS(GPS_VALID_CACHE_MS)) {
-        gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS && 
-                       gps.fix_mode >= GPS_MODE_2D && gps.sats_in_use >= 3;
-        last_gps_valid_state = gps_is_valid;
-        last_gps_valid_tick = now;
-        gps_cache_initialized = true;
-    } else {
-        gps_is_valid = last_gps_valid_state;
-    }
+    bool gps_is_valid = gps.valid && gps.fix >= GPS_FIX_GPS &&
+                        gps.fix_mode >= GPS_MODE_2D && gps.sats_in_use >= 3;
     
     if (!gps_is_valid) {
         return ESP_ERR_INVALID_STATE;
@@ -1352,15 +1355,15 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
 
     esp_err_t ret = csv_write_data_to_buffer(data);
     if (ret != ESP_OK) {
-        ESP_LOGE(GPS_TAG, "Failed to write wardriving data to CSV buffer");
+        if (ret != ESP_ERR_TIMEOUT && ret != ESP_ERR_NO_MEM) {
+            ESP_LOGE(GPS_TAG,
+                     "Failed to write wardriving data to CSV buffer: %s (ble=%d channel=%d)",
+                     esp_err_to_name(ret), data->ble_data.is_ble_device, data->channel);
+        }
         return ret;
     }
 
     ghostchi_manager_add_xp(data->ble_data.is_ble_device ? 3 : 4);
-
-    if (should_commit_wifi_dedupe) {
-        csv_wifi_ap_log_commit(data->bssid, data->rssi, data->ssid);
-    }
 
     static TickType_t last_status_tick = 0;
     if (last_status_tick == 0 || (now - last_status_tick) >= pdMS_TO_TICKS(GPS_STATUS_PERIOD_MS)) {
@@ -1400,6 +1403,61 @@ esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
     }
 
     return ret;
+}
+
+bool gps_manager_get_recent_active_gps_snapshot(gps_t *out_gps, bool *using_peer) {
+    if (!out_gps) return false;
+
+    TickType_t now = xTaskGetTickCount();
+    taskENTER_CRITICAL(&gps_state_lock);
+    bool peer = gps_peer_preferred;
+    TickType_t last_tick = peer ? gps_peer_last_update_tick : gps_last_update_tick;
+    bool available = peer ? gps_peer_has_seen_update : (g_gpsManager.isinitilized && gps_has_seen_update);
+    bool recent = available && last_tick != 0 &&
+                  (now - last_tick) <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS);
+    if (recent) {
+        *out_gps = peer ? gps_peer_fix_snapshot : gps_local_snapshot;
+    }
+    taskEXIT_CRITICAL(&gps_state_lock);
+
+    if (using_peer) *using_peer = peer;
+    return recent;
+}
+
+esp_err_t gps_manager_log_wardriving_data(wardriving_data_t *data) {
+    gps_wd_lite_t gps;
+    memset(&gps, 0, sizeof(gps));
+    bool using_peer = false;
+    if (!gps_manager_get_wd_lite(&gps, &using_peer) || !gps_manager_has_recent_update()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return gps_manager_log_wardriving_data_impl(data, &gps, using_peer);
+}
+
+esp_err_t gps_manager_log_wardriving_data_with_snapshot(wardriving_data_t *data,
+                                                        const gps_t *gps_snapshot,
+                                                        bool using_peer) {
+    if (!gps_snapshot) return ESP_ERR_INVALID_STATE;
+
+    gps_wd_lite_t gps = {
+        .valid = gps_snapshot->valid,
+        .fix = gps_snapshot->fix,
+        .fix_mode = gps_snapshot->fix_mode,
+        .sats_in_use = gps_snapshot->sats_in_use,
+        .sats_in_view = gps_snapshot->sats_in_view,
+        .latitude = gps_snapshot->latitude,
+        .longitude = gps_snapshot->longitude,
+        .altitude = gps_snapshot->altitude,
+        .dop_h = gps_snapshot->dop_h,
+        .dop_p = gps_snapshot->dop_p,
+        .dop_v = gps_snapshot->dop_v,
+        .speed = gps_snapshot->speed,
+        .cog = gps_snapshot->cog,
+        .variation = gps_snapshot->variation,
+        .date = gps_snapshot->date,
+        .tim = gps_snapshot->tim,
+    };
+    return gps_manager_log_wardriving_data_impl(data, &gps, using_peer);
 }
 
 bool gps_is_timeout_detected(void) { return gps_timeout_detected; }

@@ -2,6 +2,7 @@
 
 #include "core/callbacks.h"
 #include "core/utils.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -24,12 +25,12 @@
 #include <time.h>
 
 #define GHOSTCHI_LEARN_MAX 32
-#define GHOSTCHI_DIR "/mnt/ghostesp/ghostchi"
-#define GHOSTCHI_PCAP_DIR "/mnt/ghostesp/ghostchi/pcaps"
-#define GHOSTCHI_LOG_DIR "/mnt/ghostesp/ghostchi/sessions"
-#define GHOSTCHI_LEARN_FILE "/mnt/ghostesp/ghostchi/learn.bin"
-#define GHOSTCHI_LEARN_FILE_LEGACY "/mnt/ghostesp/ghostchi/learn.csv"
-#define GHOSTCHI_STATE_FILE "/mnt/ghostesp/ghostchi/state.bin"
+#define GHOSTCHI_DIR SD_DIR_GHOSTCHI
+#define GHOSTCHI_PCAP_DIR SD_DIR_GHOSTCHI_PCAPS
+#define GHOSTCHI_LOG_DIR SD_DIR_GHOSTCHI_SESSIONS
+#define GHOSTCHI_LEARN_FILE SD_DIR_GHOSTCHI "/learn.bin"
+#define GHOSTCHI_LEARN_FILE_LEGACY SD_DIR_GHOSTCHI "/learn.csv"
+#define GHOSTCHI_STATE_FILE SD_DIR_GHOSTCHI "/state.bin"
 #define GHOSTCHI_LEARN_MAGIC 0x314C4847u
 #define GHOSTCHI_STATE_MAGIC 0x31435447u
 #define GHOSTCHI_LEARN_VERSION 1u
@@ -117,11 +118,11 @@ static bool s_monitor_active = false;
 static bool s_deauth_active = false;
 static bool s_deauth_used = false;
 static ghostchi_snapshot_t s_snapshot;
-static ghostchi_learn_entry_t s_learn[GHOSTCHI_LEARN_MAX];
+EXT_RAM_BSS_ATTR static ghostchi_learn_entry_t s_learn[GHOSTCHI_LEARN_MAX];
 static size_t s_learn_count = 0;
 static bool s_storage_ready = false;
 static char s_session_log_path[128];
-static char s_session_log_buffer[GHOSTCHI_SESSION_LOG_BUFFER_SIZE];
+EXT_RAM_BSS_ATTR static char s_session_log_buffer[GHOSTCHI_SESSION_LOG_BUFFER_SIZE];
 static size_t s_session_log_buffer_len = 0;
 static uint32_t s_phase_deadline_ms = 0;
 static uint32_t s_handshakes_before = 0;

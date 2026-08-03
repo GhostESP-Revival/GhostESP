@@ -28,7 +28,7 @@ The current transport supports:
 
 ## Open the App
 
-From the device UI, open **Apps -> Visualizer**.
+From the device UI, open **Apps → Visualizer**.
 
 You can also open it from CLI:
 
@@ -47,7 +47,7 @@ rave off
 USB is usually the smoothest path for realtime updates.
 
 1. Connect GhostESP over USB
-2. Open **Apps -> Visualizer** on the device
+2. Open **Apps → Visualizer** on the device
 3. Run the launcher:
 
 ```
@@ -60,7 +60,7 @@ rave_helper.bat
 ## Quick Start (Wi-Fi / UDP)
 
 1. Connect GhostESP to Wi-Fi
-2. Open **Apps -> Visualizer**
+2. Open **Apps → Visualizer**
 3. Run the launcher:
 
 ```

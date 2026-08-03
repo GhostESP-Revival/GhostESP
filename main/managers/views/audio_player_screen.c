@@ -12,6 +12,7 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "gui/design_tokens.h"
 #ifdef CONFIG_HAS_TLV320DAC_I2C
 #include "io_manager.h"
 #include "tlv320dac3100.h"
@@ -21,6 +22,16 @@
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 
 static const char *TAG = "AudioPlayer";
+
+/* Audio Player is reachable both from Apps Gallery and directly from the
+ * Main Menu's "Audio" item; back/ESC must return to whichever one actually
+ * opened it, not a fixed destination. Callers set this before switching to
+ * audio_player_view (same convention as terminal_set_return_view). */
+static View *s_return_view = NULL;
+
+void audio_player_set_return_view(View *view) {
+    s_return_view = view;
+}
 
 /* UI element handles */
 static lv_obj_t *s_root = NULL;
@@ -64,7 +75,7 @@ static void on_pause_clicked(lv_event_t *e);
 static void on_prev_clicked(lv_event_t *e);
 static void on_next_clicked(lv_event_t *e);
 static void update_timer_cb(lv_timer_t *timer);
-static void return_to_apps(void);
+static void audio_player_go_back(void);
 static void adjust_volume(int delta);
 static bool play_track_with_toast(int index);
 static bool change_track_with_toast(bool next);
@@ -286,6 +297,7 @@ static void create_file_list(void)
         bool selected = i == s_selected_index;
         bool playing = has_playing && i == playing_index;
         lv_obj_t *btn = lv_btn_create(s_file_list);
+        gui_apply_pressed_style(btn);
         lv_obj_set_width(btn, LV_PCT(100));
         lv_obj_set_height(btn, LV_VER_RES <= 160 ? 30 : 34);
         style_track_row(btn, selected, playing);
@@ -364,7 +376,7 @@ static void update_file_list_selection(void)
     /* Scroll selected into view */
     if (s_selected_index >= 0 && s_selected_index < (int)child_cnt) {
         lv_obj_t *btn = lv_obj_get_child(s_file_list, s_selected_index);
-        if (btn) lv_obj_scroll_to_view(btn, LV_ANIM_ON);
+        if (btn) lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
     }
     update_list_hint();
 }
@@ -437,9 +449,11 @@ static void update_timer_cb(lv_timer_t *timer)
     audio_player_update_status();
 }
 
-static void return_to_apps(void)
+static void audio_player_go_back(void)
 {
-    display_manager_switch_view(&apps_menu_view);
+    View *return_view = s_return_view ? s_return_view : &apps_menu_view;
+    s_return_view = NULL;
+    display_manager_switch_view(return_view);
 }
 
 static void adjust_volume(int delta)
@@ -592,6 +606,7 @@ void audio_player_create(void)
 
     /* Previous button */
     s_prev_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_prev_btn);
     lv_obj_set_size(s_prev_btn, 48, 34);
     lv_obj_align(s_prev_btn, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_set_style_bg_color(s_prev_btn, s_surface_alt_color, 0);
@@ -604,6 +619,7 @@ void audio_player_create(void)
 
     /* Play button */
     s_play_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_play_btn);
     lv_obj_set_size(s_play_btn, 52, 34);
     lv_obj_align(s_play_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_play_btn, s_surface_alt_color, 0);
@@ -616,6 +632,7 @@ void audio_player_create(void)
 
     /* Pause button (initially hidden) */
     s_pause_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_pause_btn);
     lv_obj_set_size(s_pause_btn, 52, 34);
     lv_obj_align(s_pause_btn, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(s_pause_btn, s_surface_alt_color, 0);
@@ -629,6 +646,7 @@ void audio_player_create(void)
 
     /* Next button */
     s_next_btn = lv_btn_create(controls);
+    gui_apply_pressed_style(s_next_btn);
     lv_obj_set_size(s_next_btn, 48, 34);
     lv_obj_align(s_next_btn, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_set_style_bg_color(s_next_btn, s_surface_alt_color, 0);
@@ -844,7 +862,7 @@ static void audio_player_input_handler(InputEvent *event)
         int btn = event->data.joystick_index;
         /* Map joystick: 0=left, 1=select, 2=up, 3=right, 4=down */
         if (btn == 0) { /* Left -> exit */
-            return_to_apps();
+            audio_player_go_back();
         } else if (btn == 2) { /* Up */
             if (s_selected_index > 0) {
                 s_selected_index--;
@@ -883,14 +901,14 @@ static void audio_player_input_handler(InputEvent *event)
     }
 
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        return_to_apps();
+        audio_player_go_back();
         return;
     }
 
     if (event->type == INPUT_TYPE_KEYBOARD) {
         int key = event->data.key_value;
         if (key == LV_KEY_ESC || key == '`') {
-            return_to_apps();
+            audio_player_go_back();
         } else if (key == LV_KEY_UP || key == 'k') {
             if (s_selected_index > 0) {
                 s_selected_index--;

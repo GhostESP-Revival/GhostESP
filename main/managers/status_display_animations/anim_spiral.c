@@ -29,20 +29,22 @@ void status_anim_spiral_step(TickType_t now, int frame, const StatusAnimGfx *gfx
     
     // Rotation speed - complete rotation every ~120 frames
     float rotation_speed = 2.0f * 3.14159265f / 120.0f;
-    float current_angle = frame * rotation_speed;
     
     // Spiral parameters
     float spiral_tightness = 0.25f; // How tight the spiral is (lower = tighter, higher = wider)
     int spiral_thickness = 3; // Thickness of the spiral line
     
+    // Rotate the unit vector incrementally instead of calling sin/cos per radius
+    // (identical math: angle(r) = frame*rotation_speed + r*tightness)
+    float ux = cosf((float)frame * rotation_speed);
+    float uy = sinf((float)frame * rotation_speed);
+    float c = cosf(spiral_tightness);
+    float s = sinf(spiral_tightness);
+    
     // Draw the spiral
     for (int r = 0; r < max_radius; r++) {
-        // Calculate angle for this radius (spiral equation: angle = k * radius)
-        float angle = current_angle + r * spiral_tightness;
-        
-        // Convert polar to cartesian coordinates
-        int x = center_x + (int)(r * cos(angle));
-        int y = center_y + (int)(r * sin(angle));
+        int x = center_x + (int)(r * ux);
+        int y = center_y + (int)(r * uy);
         
         // Draw a thick line by drawing multiple pixels around the point
         for (int dx = -spiral_thickness; dx <= spiral_thickness; dx++) {
@@ -59,6 +61,11 @@ void status_anim_spiral_step(TickType_t now, int frame, const StatusAnimGfx *gfx
                 }
             }
         }
+        
+        // Rotate the unit vector by the per-radius step
+        float nx = ux * c - uy * s;
+        uy = ux * s + uy * c;
+        ux = nx;
     }
 }
 

@@ -26,8 +26,8 @@ void ntag_file_free(ntag_file_image_t *img);
 // Builds a details string similar to scan details. Caller must free.
 char *ntag_file_build_details(const ntag_file_image_t *img);
 
-// Write image to tag using PN532. Returns true on success.
-#ifdef CONFIG_NFC_PN532
+// Write image to tag through the shared pn532-compatible frontend. Returns true on success.
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool ntag_write_to_tag(pn532_io_handle_t io,
                        const ntag_file_image_t *img,
                        bool (*progress_cb)(int current, int total, void *user),

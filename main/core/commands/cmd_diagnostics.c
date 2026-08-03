@@ -3,10 +3,12 @@
 
 #include "core/callbacks.h"
 #include "core/commands.h"
+#include "core/shell.h"
 #include "core/commandline.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
 #include "core/memory_debug.h"
+#include "core/system_manager.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -29,6 +31,7 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
 #include "managers/zigbee_manager.h"
+#include "scans/wifi/arp_scan.h"
 #include "sdkconfig.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
@@ -86,6 +89,11 @@ void wifi_manager_stop_visualizer(void);
 void handle_stop_flipper(int argc, char **argv) {
     bool stopped_any = false;
 
+    if (shell_stop_watch()) {
+        glog("Stopped CLI watch.\n");
+        stopped_any = true;
+    }
+
 #ifdef CONFIG_ENABLE_MIC_RGB_VISUALIZER
     rgb_manager_set_mic_stream_suspended(true);
 #endif
@@ -104,6 +112,13 @@ void handle_stop_flipper(int argc, char **argv) {
         stopped_any = true;
     }
 
+#if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
+    if (nfc_cli_stop()) {
+        glog("Stopped NFC scanner.\n");
+        stopped_any = true;
+    }
+#endif
+
     if (wdstream_stop_and_wait("stop")) {
         stopped_any = true;
     }
@@ -121,6 +136,10 @@ void handle_stop_flipper(int argc, char **argv) {
         stopped_any = true;
     }
     wifi_manager_stop_deauth();
+    if (wifi_manager_stop_handshake_deauth()) {
+        glog("Stopped handshake+deauth attack.\n");
+        stopped_any = true;
+    }
     wifi_manager_stop_channel_switch_attack();
     wifi_manager_cancel_connect();
 
@@ -195,6 +214,7 @@ void handle_stop_flipper(int argc, char **argv) {
     netbios_scan_cancel();
     http_banner_scan_cancel();
     snmp_scan_cancel();
+    arp_scan_stop_passive();
     port_scan_cancel();
     glog("Stopped network scans.\n");
     stopped_any = true;
@@ -286,7 +306,7 @@ void handle_dial_command(int argc, char **argv) {
             dial_manager_set_device_name(argv[i]);
         }
     }
-    BaseType_t rc = xTaskCreate(&discover_task, "discover_task", DISCOVER_TASK_STACK, NULL, 5, NULL);
+    BaseType_t rc = xTaskCreate_psram(&discover_task, "discover_task", DISCOVER_TASK_STACK, NULL, 5, NULL);
     if (rc != pdPASS) {
         glog("Failed to start DIAL discovery task (err=%ld).\n", (long)rc);
     }
@@ -655,4 +675,5 @@ void handle_status_idle_cmd(int argc, char **argv) {
 
 void handle_unknown_command(const char *cmd) {
     glog("Unsupported command: %s\n", cmd);
+    shell_suggest_command(cmd);
 }

@@ -161,8 +161,20 @@ typedef enum {
     SETTING_AP_PASSWORD,
     SETTING_STA_SSID,
     SETTING_STA_PASSWORD,
+    SETTING_WIFI_AUTO_RECONNECT,
     // Timezone quick-edit
     SETTING_TIMEZONE,
+    // OTA firmware update
+    SETTING_OTA_CHANNEL,
+    SETTING_OTA_UPDATE_AVAILABLE,
+    SETTING_OTA_LAST_CHECK_TIME,
+    // OTA UI actions (not NVS-backed -- handled entirely in options_screen.c)
+    SETTING_OTA_CHECK_NOW,
+    SETTING_OTA_INSTALL_UPDATE,
+    SETTING_OTA_CHECK_PEER,
+    SETTING_OTA_UPDATE_PEER,
+    SETTING_OTA_INSTALL_FROM_SD,
+    SETTING_SUN_MODE,
 } SettingsType;
 
 #define GPS_BAUD_AUTO 1U
@@ -233,6 +245,7 @@ typedef struct {
   bool rts_enabled;
   char sta_ssid[65];     // New field for Station SSID (Max 64 + null)
   char sta_password[65]; // New field for Station Password (Max 64 + null)
+  bool wifi_auto_reconnect; // Auto-reconnect to saved STA after involuntary disconnect
 
   // Add RGB pin configuration fields
   int32_t rgb_data_pin; // Single-pin LED data pin, -1 if not used
@@ -278,6 +291,11 @@ typedef struct {
   char wigle_api_key[129];
   bool wigle_auto_upload; // Auto-upload CSVs at boot when WiFi connected
   bool wigle_donate; // Whether to donate uploads to Wigle
+
+  // OTA firmware update (8MB/16MB boards only, see ota_manager)
+  uint8_t ota_channel;          // 0=stable, 1=prerelease
+  bool ota_update_available;    // set by the background update-check task
+  uint32_t ota_last_check_time; // unix timestamp of last background check
   // IO expander programmable buttons (P10, P11, P12) - command to run when pressed, empty = send as joystick
   char io_btn_p10_cmd[129];
   char io_btn_p11_cmd[129];
@@ -308,6 +326,8 @@ typedef struct {
     bool menu_item_borders;          // Borders around main menu items
     bool menu_card_bg;               // Card background fill/shadow on main menu items
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
+    bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
+    uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
 
     // Lockscreen settings
     bool lockscreen_enabled;
@@ -416,6 +436,10 @@ const char *settings_get_sta_ssid(const FSettings *settings);
 void settings_set_sta_password(FSettings *settings, const char *password);
 const char *settings_get_sta_password(const FSettings *settings);
 
+// WiFi auto-reconnect on involuntary disconnect
+void settings_set_wifi_auto_reconnect(FSettings *settings, bool enabled);
+bool settings_get_wifi_auto_reconnect(const FSettings *settings);
+
 // Functions to get/set RGB pin configuration
 void settings_set_rgb_data_pin(FSettings *settings, int32_t pin);
 int32_t settings_get_rgb_data_pin(const FSettings *settings);
@@ -503,6 +527,13 @@ uint8_t settings_get_wifi_country(const FSettings *settings);
 
 void settings_set_wigle_auto_upload(FSettings *settings, bool enabled);
 bool settings_get_wigle_auto_upload(const FSettings *settings);
+
+void settings_set_ota_channel(FSettings *settings, uint8_t channel);
+uint8_t settings_get_ota_channel(const FSettings *settings);
+void settings_set_ota_update_available(FSettings *settings, bool available);
+bool settings_get_ota_update_available(const FSettings *settings);
+void settings_set_ota_last_check_time(FSettings *settings, uint32_t timestamp);
+uint32_t settings_get_ota_last_check_time(const FSettings *settings);
 void settings_set_wigle_donate(FSettings *settings, bool enabled);
 bool settings_get_wigle_donate(const FSettings *settings);
 
@@ -573,6 +604,8 @@ void settings_set_input_repeat_speed(FSettings *settings, uint8_t speed);
 uint8_t settings_get_input_repeat_speed(const FSettings *settings);
 void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
+void settings_set_sun_mode(FSettings *settings, bool enabled);
+bool settings_get_sun_mode(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
 void settings_set_menu_card_bg(FSettings *settings, bool enabled);

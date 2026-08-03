@@ -17,6 +17,8 @@
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "core/system_manager.h"
+#include "managers/ghostscript_runtime.h"
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/settings_manager.h"
@@ -384,7 +386,7 @@ void beacon_spam_start(const char *ssid) {
             ap_manager_init();
             return;
         }
-        BaseType_t rc = xTaskCreate(beacon_spam_task, "beacon_task", 2048, (void *)ssid_copy, 5, &beacon_task_handle);
+        BaseType_t rc = xTaskCreate_psram(beacon_spam_task, "beacon_task", 2048, (void *)ssid_copy, 5, &beacon_task_handle);
         if (rc != pdPASS) {
             glog("Failed to start beacon task (%ld)\n", (long)rc);
             status_display_show_status("Beacon Start Failed");
@@ -396,6 +398,7 @@ void beacon_spam_start(const char *ssid) {
             return;
         }
         rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);
+        ghostscript_emit_event("attack_started", "beacon");
     } else {
         glog("Beacon transmission already running.\n");
         status_display_show_status("Beacon Active");
@@ -441,6 +444,7 @@ void beacon_spam_stop(void) {
         // Now restart services
         ap_manager_init();
         status_display_show_status("Beacon Stopped");
+        ghostscript_emit_event("attack_stopped", "beacon");
     }
 }
 
@@ -462,7 +466,7 @@ void beacon_spam_start_list(void) {
     
     // Launch the beacon list task
     beacon_task_running = true;
-    BaseType_t rc = xTaskCreate(beacon_spam_list_task, "beacon_list", 2048, NULL, 5, &beacon_task_handle);
+    BaseType_t rc = xTaskCreate_psram(beacon_spam_list_task, "beacon_list", 2048, NULL, 5, &beacon_task_handle);
     if (rc != pdPASS) {
         glog("Failed to start beacon list task (%ld)\n", (long)rc);
         status_display_show_status("Beacon Start Failed");

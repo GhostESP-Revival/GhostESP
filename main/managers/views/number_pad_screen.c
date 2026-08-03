@@ -256,6 +256,7 @@ static void number_pad_create(void) {
     for (int i = 0; i < NP_BTN_COUNT; i++) {
         if (!k_labels[i]) continue;
         lv_obj_t *btn = lv_btn_create(numpad_cont);
+        gui_apply_pressed_style(btn);
         numpad_btns[i] = btn;
         lv_obj_set_size(btn, btn_w, btn_h);
         lv_obj_set_style_bg_color(btn, surface, 0);

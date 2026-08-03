@@ -360,6 +360,10 @@ lv_res_t lv_img_decoder_built_in_open(lv_img_decoder_t * decoder, lv_img_decoder
     }
 
     lv_img_cf_t cf = dsc->header.cf;
+    if(cf == LV_IMG_CF_ALPHA_4BIT && dsc->src_type == LV_IMG_SRC_VARIABLE) {
+        dsc->img_data = ((lv_img_dsc_t *)dsc->src)->data;
+        return LV_RES_OK;
+    }
     /*Process A8,  RGB565A8, need load file to ram after https://github.com/lvgl/lvgl/pull/3337*/
     if(cf == LV_IMG_CF_ALPHA_8BIT || cf == LV_IMG_CF_RGB565A8) {
         if(dsc->src_type == LV_IMG_SRC_VARIABLE) {

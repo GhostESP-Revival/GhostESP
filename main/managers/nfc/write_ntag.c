@@ -1,5 +1,5 @@
 #include "managers/nfc/write_ntag.h"
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 #include "pn532.h"
 #endif
 #include "esp_log.h"
@@ -12,12 +12,10 @@
 static const char *TAG = "write_ntag";
 
 static NTAG2XX_MODEL infer_model_from_pages(int pages_total) {
-    switch (pages_total) {
-        case 45: return NTAG2XX_NTAG213;
-        case 135: return NTAG2XX_NTAG215;
-        case 231: return NTAG2XX_NTAG216;
-        default: return NTAG2XX_UNKNOWN;
-    }
+    if (pages_total == (int)ntag_t2_pages_for_model(NTAG2XX_NTAG213)) return NTAG2XX_NTAG213;
+    if (pages_total == (int)ntag_t2_pages_for_model(NTAG2XX_NTAG215)) return NTAG2XX_NTAG215;
+    if (pages_total == (int)ntag_t2_pages_for_model(NTAG2XX_NTAG216)) return NTAG2XX_NTAG216;
+    return NTAG2XX_UNKNOWN;
 }
 
 bool ntag_file_load(const char *path, ntag_file_image_t *out) {
@@ -68,12 +66,7 @@ bool ntag_file_load(const char *path, ntag_file_image_t *out) {
     if (out->pages_total == 0) {
         // try to infer from model
         if (out->model != NTAG2XX_UNKNOWN) {
-            switch (out->model) {
-                case NTAG2XX_NTAG213: out->pages_total = 45; break;
-                case NTAG2XX_NTAG215: out->pages_total = 135; break;
-                case NTAG2XX_NTAG216: out->pages_total = 231; break;
-                default: break;
-            }
+            out->pages_total = ntag_t2_pages_for_model(out->model);
         }
         if (out->pages_total == 0) {
             ESP_LOGE(TAG, "pages_total unknown in file: %s", path);
@@ -130,7 +123,7 @@ char *ntag_file_build_details(const ntag_file_image_t *img) {
     return out;
 }
 
-#ifdef CONFIG_NFC_PN532
+#if defined(CONFIG_NFC_PN532) || defined(CONFIG_NFC_ST25R3916)
 bool ntag_write_to_tag(pn532_io_handle_t io,
                        const ntag_file_image_t *img,
                        bool (*progress_cb)(int current, int total, void *user),
@@ -140,12 +133,36 @@ bool ntag_write_to_tag(pn532_io_handle_t io,
     NTAG2XX_MODEL model = NTAG2XX_UNKNOWN;
     (void)ntag2xx_get_model(io, &model);
 
+    ntag_t2_info_t target = {0};
+    if (!ntag_t2_read_info(io, &target)) {
+        ESP_LOGE(TAG, "failed to read target NTAG metadata");
+        return false;
+    }
+    if (target.model != NTAG2XX_UNKNOWN) model = target.model;
+    uint16_t target_pages = target.pages_total ? target.pages_total : ntag_t2_pages_for_model(model);
+    uint8_t target_last_user = target.last_user_page ? target.last_user_page : ntag_t2_last_user_page_for_model(model);
+    if (target_pages == 0 || target_last_user < 4) {
+        ESP_LOGE(TAG, "unsupported target tag layout");
+        return false;
+    }
+    if (img->pages_total > target_pages) {
+        ESP_LOGE(TAG, "image has %d pages but target has %u", img->pages_total, (unsigned)target_pages);
+        return false;
+    }
+
     int start = img->first_user_page > 0 ? img->first_user_page : 4;
     if (start < 4) start = 4;
-    int total = img->pages_total - start;
+    int end = img->pages_total - 1;
+    if (end > target_last_user) end = target_last_user;
+    int total = end - start + 1;
     if (total <= 0) return false;
 
-    for (int pg = start; pg < img->pages_total; ++pg) {
+    for (int pg = start; pg <= end; ++pg) {
+        char reason[96];
+        if (!ntag_t2_can_write_page(&target, (uint8_t)pg, reason, sizeof(reason))) {
+            ESP_LOGE(TAG, "refusing page %d write: %s", pg, reason);
+            return false;
+        }
         if (progress_cb) {
             if (!progress_cb(pg - start, total, user)) return false;
         }

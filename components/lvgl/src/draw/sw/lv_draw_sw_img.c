@@ -203,7 +203,6 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_img_decoded(struct _lv_draw_ctx_t * draw_c
 static void convert_cb(const lv_area_t * dest_area, const void * src_buf, lv_coord_t src_w, lv_coord_t src_h,
                        lv_coord_t src_stride, const lv_draw_img_dsc_t * draw_dsc, lv_img_cf_t cf, lv_color_t * cbuf, lv_opa_t * abuf)
 {
-    LV_UNUSED(draw_dsc);
     LV_UNUSED(src_h);
     LV_UNUSED(src_w);
 
@@ -293,6 +292,23 @@ static void convert_cb(const lv_area_t * dest_area, const void * src_buf, lv_coo
             lv_memcpy(abuf, src_tmp8, dest_w);
             abuf += dest_w;
             src_tmp8 += src_stride;
+        }
+    }
+    else if(cf == LV_IMG_CF_ALPHA_4BIT) {
+        lv_coord_t row_bytes = (src_stride + 1) >> 1;
+        lv_coord_t dest_h = lv_area_get_height(dest_area);
+        lv_coord_t dest_w = lv_area_get_width(dest_area);
+        for(y = 0; y < dest_h; y++) {
+            lv_coord_t src_y = dest_area->y1 + y;
+            for(x = 0; x < dest_w; x++) {
+                lv_coord_t src_x = dest_area->x1 + x;
+                uint8_t packed = src_tmp8[src_y * row_bytes + (src_x >> 1)];
+                uint8_t alpha = (src_x & 1) ? (packed & 0x0F) : (packed >> 4);
+                cbuf[x] = draw_dsc->recolor;
+                abuf[x] = (lv_opa_t)(alpha * 17);
+            }
+            cbuf += dest_w;
+            abuf += dest_w;
         }
     }
 }

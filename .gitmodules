@@ -1,0 +1,3 @@
+[submodule "doomgeneric"]
+	path = plugins/examples/doom_port/doomgeneric
+	url = https://github.com/GhostESP-Revival/doomgeneric.git

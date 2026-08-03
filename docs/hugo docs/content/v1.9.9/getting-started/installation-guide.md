@@ -22,7 +22,7 @@ Choose one:
 ### Web Flasher Method (Recommended)
 
 1. **Open the flasher**
-   - Go to **[flasher.ghostesp.net](https://flasher.ghostesp.net/)** in Chrome, Brave, or Edge.
+   - Go to **[ghostesp.net/flasher](https://ghostesp.net/flasher)** in Chrome, Brave, or Edge.
    - Close any apps using the serial port.
 
 2. **Enter bootloader mode**

@@ -40,6 +40,7 @@ static lv_anim_t s_progress_indet_anim;
 static bool s_progress_indet_running = false;
 static uint32_t s_splash_start_ms = 0;
 static bool s_splash_done = false;
+static bool s_completion_required = false;
 
 typedef struct {
     float pct;
@@ -57,6 +58,16 @@ static uint32_t min_hold_ms(void);
 static uint32_t elapsed_ms(void);
 static void schedule_fade_check(void);
 
+static void splash_require_completion_apply(void *arg) {
+    (void)arg;
+    schedule_fade_check();
+}
+
+void splash_require_completion(void) {
+    s_completion_required = true;
+    display_manager_run_on_lvgl(splash_require_completion_apply, NULL);
+}
+
 static uint32_t min_hold_ms(void) {
     return settings_get_reduced_motion(&G_Settings) ? SPLASH_MIN_HOLD_MS_REDUCED : SPLASH_MIN_HOLD_MS_NORMAL;
 }
@@ -66,6 +77,8 @@ static uint32_t elapsed_ms(void) {
 }
 
 void splash_create(void) {
+
+  s_completion_required = false;
 
   display_manager_fill_screen(lv_color_black());
 
@@ -243,6 +256,8 @@ static void schedule_fade_check(void) {
         } else {
             delay = min_hold - elapsed;
         }
+    } else if (s_completion_required) {
+        return;
     } else {
         if (elapsed >= SPLASH_TIMEOUT_MS) {
             delay = 0;

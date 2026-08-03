@@ -6,13 +6,7 @@
 #include "managers/views/terminal_screen.h"
 #include "sdkconfig.h"
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -25,7 +19,7 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
@@ -62,9 +56,10 @@ void handle_help(int argc, char **argv) {
         glog("attack\n");
         glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
         glog("    Arguments:\n");
         glog("        -d  : Start deauth attack (supports multiple APs)\n");
+        glog("        -hsd: Start handshake capture + deauth attack (forces handshakes)\n");
         glog("        -c  : Start channel switch attack (supports multiple APs)\n");
         glog("        -e  : Start EAPOL logoff attack\n");
         glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
@@ -126,6 +121,12 @@ void handle_help(int argc, char **argv) {
         glog("connect\n");
         glog("    Description: Connects to Specific WiFi Network and saves credentials.\n");
         glog("    Usage: connect <SSID> [Password]\n\n");
+        glog("autoreconnect\n");
+        glog("    Description: Toggle WiFi station auto-reconnect after involuntary disconnects.\n");
+        glog("    Usage: autoreconnect <on|off>\n");
+        glog("    Arguments:\n");
+        glog("        on  : Reconnect automatically (default)\n");
+        glog("        off : Stay disconnected until manually reconnected\n\n");
         glog("apcred\n");
         glog("    Description: Change or reset the GhostNet AP credentials\n");
         glog("    Usage: apcred <ssid> <password>\n");
@@ -301,6 +302,11 @@ void handle_help(int argc, char **argv) {
         glog("help\n");
         glog("    Description: Display this help message.\n");
         glog("    Usage: help [category]\n\n");
+#if CONFIG_ENABLE_GHOSTSCRIPT
+        glog("script\n");
+        glog("    Description: List, launch, monitor, or stop GhostScripts from the SD card.\n");
+        glog("    Usage: script list | script run <index> | script status | script stop\n\n");
+#endif
         glog("chipinfo\n");
         glog("    Description: Display chip information including model, revision, and features\n");
         glog("    Usage: chipinfo\n");
@@ -351,7 +357,8 @@ void handle_help(int argc, char **argv) {
         glog("        (no range) : Scan common ports (default)\n\n");
         glog("scanarp\n");
         glog("    Description: Perform ARP scan on local network to discover active hosts\n");
-        glog("    Usage: scanarp\n\n");
+        glog("    Usage: scanarp\n");
+        glog("           scanarp monitor [duration-seconds]\n\n");
         glog("scanssh\n");
         glog("    Description: Scan a host or local subnet for SSH services and grab banners\n");
         glog("    Usage: scanssh\n");
@@ -395,6 +402,33 @@ void handle_help(int argc, char **argv) {
         glog("gpspin\n    Set GPS RX pin for external GPS module.\n    Usage: gpspin <pin>\n\n");
         glog("gpsbaud\n    Set GPS baud rate or auto-detect it.\n    Usage: gpsbaud <auto|0|4800|9600|19200|38400|57600|115200>\n\n");
         glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n\n");
+        return;
+    }
+    if (strcmp(category, "shell") == 0) {
+        glog("\nHeadless Shell Commands:\n\n");
+        glog("echo <text>                 Print text; supports \\n and \\t escapes.\n");
+        glog("ifconfig                    Show STA, AP, and Ethernet interfaces.\n");
+        glog("ping <host> [count]         Send ICMP echo requests.\n");
+        glog("version                     Show firmware, build, git, and IDF versions.\n");
+        glog("uuid | macaddr              Show stable device identifiers.\n");
+        glog("uptime | date               Show uptime or current time.\n");
+        glog("whoami | status             Show device identity or a system summary.\n");
+        glog("hostname [name]             View or set the prompt hostname.\n");
+        glog("color [name|0-255|off]      Set ANSI prompt color (also cli_color).\n");
+        glog("banner [on|off|status]      Control the boot banner.\n");
+        glog("clear                       Clear an ANSI terminal.\n");
+        glog("alias [name command]        Create a persistent command shortcut.\n");
+        glog("unalias <name|all>          Remove shortcuts.\n");
+        glog("history [-c]                Show or clear command history.\n");
+        glog("ps | top                   Show FreeRTOS task information.\n");
+        glog("df                         Show /mnt filesystem usage.\n");
+        glog("tail <file> [lines]         Print the end of an SD file.\n");
+        glog("grep <pattern> <file>       Filter an SD file.\n");
+        glog("source <file>               Run CLI commands from an SD file.\n");
+        glog("tee <file> <text>           Append text to an SD file and echo it.\n");
+        glog("env | export NAME=value     View or persist simple shell variables.\n");
+        glog("watch <seconds> <command>  Repeat a command; use watch stop to end it.\n");
+        glog("Unknown commands get a 'Did you mean?' suggestion automatically.\n\n");
         return;
     }
     if (strcmp(category, "wigle") == 0) {
@@ -741,6 +775,7 @@ void handle_help(int argc, char **argv) {
     glog("  help sd        - SD card commands\n");
     glog("  help led       - LED/RGB commands\n");
     glog("  help gps       - GPS commands\n");
+    glog("  help shell     - Headless shell commands\n");
     glog("  help wigle     - WiGLE commands\n");
     glog("  help misc      - Miscellaneous commands\n");
     glog("  help portal    - Evil Portal commands\n");

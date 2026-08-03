@@ -27,24 +27,15 @@ static bool ensure_loaded_slot(void) {
     return s_loaded != NULL;
 }
 
-static bool plugin_loader_sd_jit_allowed(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0;
-#else
-    return false;
-#endif
-}
-
 static bool plugin_loader_sd_begin(bool *display_was_suspended) {
     if (display_was_suspended) *display_was_suspended = false;
     if (sd_card_manager.is_initialized) return false;
-    if (!plugin_loader_sd_jit_allowed()) return false;
-    return sd_card_mount_for_flush(display_was_suspended) == ESP_OK;
+    if (!sd_card_needs_jit_mount()) return false;
+    return sd_card_jit_begin(display_was_suspended, false);
 }
 
 static void plugin_loader_sd_end(bool mounted_here, bool display_was_suspended) {
-    if (mounted_here) sd_card_unmount_after_flush(display_was_suspended);
+    if (mounted_here) sd_card_jit_end(display_was_suspended);
 }
 
 static bool state_path_for_manifest(const plugin_app_manifest_t *manifest, char *out, size_t out_len) {
@@ -162,6 +153,12 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     if (!manifest) return fail_err(ESP_ERR_NOT_FOUND, "app not found");
     if (!plugin_manager_target_supported()) return fail_err(ESP_ERR_NOT_SUPPORTED, "native SD apps disabled or unsupported target");
     if (!plugin_manager_target_matches(manifest)) return fail_err(ESP_ERR_NOT_SUPPORTED, "app target does not match firmware target");
+    char missing_feature[24];
+    if (!plugin_manager_required_features_supported(manifest, missing_feature, sizeof(missing_feature))) {
+        char error[sizeof(s_last_error)];
+        snprintf(error, sizeof(error), "app requires %s", missing_feature[0] ? missing_feature : "unsupported hardware");
+        return fail_err(ESP_ERR_NOT_SUPPORTED, error);
+    }
     if (manifest->memory_limit > 0 && heap_caps_get_free_size(MALLOC_CAP_8BIT) < manifest->memory_limit) {
         return fail_err(ESP_ERR_NO_MEM, "not enough free heap for app memory limit");
     }
@@ -213,6 +210,7 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     }
 
     const ghostesp_api_t *api = plugin_api_get(manifest->id,
+                                               manifest->base_path,
                                                manifest->permissions,
                                                manifest->memory_limit,
                                                manifest->allow_absolute_storage);
@@ -226,6 +224,7 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     const ghostesp_app_t *app = init_fn(api);
     esp_err_t validate_err = validate_app_descriptor(manifest, app);
     if (validate_err != ESP_OK) {
+        plugin_api_release();
         dlclose(handle);
         record_app_failure(manifest, s_last_error);
         plugin_loader_sd_end(mounted_here, display_was_suspended);
@@ -319,13 +318,28 @@ esp_err_t plugin_loader_tick(plugin_loaded_app_t *loaded, uint32_t elapsed_ms) {
 
 esp_err_t plugin_loader_unload(plugin_loaded_app_t *loaded) {
     if (!loaded || !loaded->manifest) return ESP_OK;
+    char id[sizeof(loaded->manifest->id)];
+    strncpy(id, loaded->manifest->id, sizeof(id));
+    id[sizeof(id) - 1] = '\0';
+    size_t internal_free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     plugin_runner_stop_tick();
     plugin_loader_stop(loaded);
 #if CONFIG_ENABLE_NATIVE_SD_APPS
-    if (loaded->handle) dlclose(loaded->handle);
-#endif
     plugin_api_release();
+    if (loaded->handle) dlclose(loaded->handle);
+#else
+    plugin_api_release();
+#endif
     memset(loaded, 0, sizeof(*loaded));
+    size_t internal_free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Unloaded SD app %s: internal_free=%u->%u (freed=%d), psram_free=%u->%u (freed=%d)",
+             id,
+             (unsigned)internal_free_before, (unsigned)internal_free_after,
+             (int)((long)internal_free_after - (long)internal_free_before),
+             (unsigned)psram_free_before, (unsigned)psram_free_after,
+             (int)((long)psram_free_after - (long)psram_free_before));
     return ESP_OK;
 }
 

@@ -6,8 +6,17 @@ weight: 10
 
 ## Prerequisites
 
-- GhostESP firmware compiled with NFC support and a connected PN532 module or chameleon ultra.
+- GhostESP firmware compiled with NFC support and a connected PN532 module, ST25R3916 module, or Chameleon Ultra.
 - (Optional) SD card if you plan to save tag dumps.
+
+## Backend Selection
+
+If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
+
+- **UI:** the NFC menu has a **Backend** row that cycles `auto → pn532 → st25r`.
+- **CLI:** `nfc backend auto`, `nfc backend pn532`, or `nfc backend st25r`.
+
+`auto` tries the PN532 first, then the ST25R3916. For MIFARE Classic dictionary brute-force the PN532 is noticeably faster because it has hardware Crypto1; the ST25R3916 does the same auth in software. Keep that in mind if brute-force feels slow - switch to `pn532` (or `auto`) when you just need a dump.
 
 ## Steps
 
@@ -30,6 +39,15 @@ weight: 10
 - **Caching behavior.** Once a sector unlocks, its blocks and both Key A/Key B values are cached. The title shifts to “Reading sectors...” during the copy. Successful keys are appended back to the user dictionary on the SD card.
 
 - **Magic backdoor tags.** If the card supports the classic backdoor sequence, GhostESP logs the detection and can skip sector authentication, pulling data directly.
+
+- **Nested key recovery (ST25R3916 only).** When at least one key is known and another is missing, the ST25R3916 software Crypto1 path captures encrypted nested nonces and their parity bits, then tests the dictionaries locally against those constraints instead of doing one RF auth per candidate. This is much faster than a plain brute-force when a key exists somewhere on the card. The PRNG is classified weak vs hard automatically:
+
+  - **Weak PRNG** cards need only a couple of samples; decrypted nonces must satisfy the weak 16-bit PRNG relation.
+  - **Hard PRNG** cards require more samples and the recovered candidate is RF-verified before being trusted.
+
+- **Nested log export.** If local recovery cannot fully solve the card, GhostESP writes Momentum-compatible hardnested samples to `/mnt/ghostesp/nfc/.nested.log` so you can finish the crack on a PC with your normal hardnested solver. Each new capture starts with a fresh log: if `.nested.log` already exists, GhostESP deletes any existing `.nested.log.old`, renames `.nested.log` to `.nested.log.old`, then creates a new `.nested.log`. The on-screen summary notes whether the nested log was written.
+
+- **Using cracked keys.** `.nested.log` is output-only; GhostESP does not parse cracked solver output back into keys. Add recovered keys to `/mnt/ghostesp/nfc/mfc_user_dict.nfc` as raw 6-byte hex keys, one per line, such as `A0A1A2A3A4A5`. Do not paste labelled solver/log lines like `Sec 1 key A ...`; only the actual 12 hex digits should be in the user dictionary.
 
 - **Skip option:** Tap **Skip** to bypass dictionaries when you only need public sectors.
 
@@ -58,14 +76,14 @@ weight: 10
 ## Verify
 
 - Confirm the tag type and UID shown on-screen match the physical tag you scanned.
-- For Mifare Classic cards, check the listed sectors to see how many keys were recovered.
+- For MIFARE Classic cards, check the listed sectors to see how many keys were recovered.
 - If you saved the capture, verify a new `<Model>_<UID>.nfc` file was created under `/mnt/ghostesp/nfc/`.
 
 ## Troubleshooting
 
 - **No change from “Scanning NFC...”.** Re-seat the tag and verify PN532 wiring; try another tag to rule out hardware issues.
 
-- **Stuck on “Bruteforcing keys… 0%”.** GhostESP is testing dictionaries. Use the **Skip** button if you only need publicly readable blocks.
+- **Stuck on “Bruteforcing keys… 0%”.** GhostESP is testing dictionaries. On the ST25R3916 this is slower than on the PN532 because auth runs in software; switch the backend to `pn532` or `auto` for faster dictionary attacks, or use the **Skip** button if you only need publicly readable blocks.
 
 - **UID reads but data is empty.** The card may be write-protected or needs a key not present in your dictionaries. You can add it to your user dictionary in `/mnt/ghostesp/nfc/mfc_user_dict.nfc` and then try rescanning.
 

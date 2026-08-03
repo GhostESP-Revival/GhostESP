@@ -112,23 +112,29 @@ static esp_err_t _write_register(uint8_t reg, const uint8_t *data, size_t len) {
 
 esp_err_t rtc_set_datetime(const RTC_Date *datetime) {
   if (rtc_chip == RTC_CHIP_PCF8563) {
+    // PCF8563 register order starting at 0x02: seconds, minutes, hours, days,
+    // weekdays, months/century, years. Weekday is not tracked here but must
+    // occupy register 0x06 so month and year land in their correct slots.
     uint8_t data[7];
     data[0] = _dec_to_bcd(datetime->second) & ~PCF8563_VOL_LOW_MASK;
     data[1] = _dec_to_bcd(datetime->minute);
     data[2] = _dec_to_bcd(datetime->hour);
     data[3] = _dec_to_bcd(datetime->day);
-    data[4] = _dec_to_bcd(datetime->month) |
+    data[4] = 0; // weekday (register 0x06, not tracked)
+    data[5] = _dec_to_bcd(datetime->month) |
               ((datetime->year < 2000) ? PCF8563_CENTURY_MASK : 0);
-    data[5] = _dec_to_bcd(datetime->year % 100);
-    data[6] = 0; // weekday (not used)
+    data[6] = _dec_to_bcd(datetime->year % 100);
     return _write_register(PCF8563_SEC_REG, data, 7);
   } else {
-    // DS1307/DS3231
+    // DS1307/DS3231. Register order at 0x00: seconds, minutes, hours, weekday,
+    // day-of-month, month, year. Weekday is auto-incremented by the chip at
+    // midnight and does not affect date arithmetic, so a fixed valid value is
+    // fine; range is 1-7.
     uint8_t data[7];
     data[0] = _dec_to_bcd(datetime->second) & ~DS1307_CH_MASK;
     data[1] = _dec_to_bcd(datetime->minute);
     data[2] = _dec_to_bcd(datetime->hour);
-    data[3] = _dec_to_bcd(datetime->day % 7); // DS1307 uses day of week (1-7)
+    data[3] = 1; // weekday placeholder (1-7 valid; not tracked)
     data[4] = _dec_to_bcd(datetime->day);
     data[5] = _dec_to_bcd(datetime->month);
     data[6] = _dec_to_bcd(datetime->year % 100);
@@ -144,13 +150,16 @@ esp_err_t rtc_get_datetime(RTC_Date *datetime) {
       return ret;
     }
 
-    bool century = data[5] & PCF8563_CENTURY_MASK;
+    // Register order: 0x02 seconds, 0x03 minutes, 0x04 hours, 0x05 days,
+    // 0x06 weekdays, 0x07 months/century, 0x08 years.
     datetime->second = _bcd_to_dec(data[0] & ~PCF8563_VOL_LOW_MASK);
     datetime->minute = _bcd_to_dec(data[1] & PCF8563_MINUTES_MASK);
     datetime->hour = _bcd_to_dec(data[2] & PCF8563_HOUR_MASK);
     datetime->day = _bcd_to_dec(data[3] & PCF8563_DAY_MASK);
-    datetime->month = _bcd_to_dec(data[4] & PCF8563_MONTH_MASK);
-    datetime->year = (century ? 1900 : 2000) + _bcd_to_dec(data[5]);
+    // data[4] is the weekday register; not tracked.
+    bool century = data[5] & PCF8563_CENTURY_MASK;
+    datetime->month = _bcd_to_dec(data[5] & PCF8563_MONTH_MASK);
+    datetime->year = (century ? 1900 : 2000) + _bcd_to_dec(data[6]);
   } else {
     uint8_t data[7];
     esp_err_t ret = _read_register(DS1307_SEC_REG, data, 7);
