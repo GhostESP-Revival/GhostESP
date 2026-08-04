@@ -31,7 +31,7 @@ Manual USB flashing installs a downloaded release bundle with ESP Huhn Tool. Use
 | Chip | `bootloader.bin` | `partitions.bin` | `firmware.bin` |
 |---|---:|---:|---:|
 | ESP32-S2 | `0x1000` | `0x8000` | `0x10000` |
-| ESP32-S3 / C3 / C6 | `0x0` | `0x8000` | `0x10000` |
+| ESP32-S3 / C3 / C5 / C6 | `0x0` | `0x8000` | `0x10000` |
 
 5. Click **Flash** and wait for it to finish.
 6. Unplug and reconnect the board.

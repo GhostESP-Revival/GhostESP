@@ -4,6 +4,7 @@
 #include "core/callbacks.h"
 #include "core/commands.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "scans/ble/flipper_scan.h"
 #include "attacks/wifi/dhcp_starvation.h"
 #include "esp_timer.h"
@@ -284,7 +285,7 @@ void sweep_start_async(int wifi_seconds, int ble_seconds) {
     g_sweep_ble_seconds = ble_seconds < 1 ? 10 : ble_seconds;
     g_sweep_result.running = true;
     g_sweep_result.total_phases = 6;
-    xTaskCreate(sweep_task, "sweep", 8192, NULL, 5, NULL);
+    xTaskCreate_psram(sweep_task, "sweep", 8192, NULL, 5, NULL);
 }
 
 bool sweep_check_done(void) {

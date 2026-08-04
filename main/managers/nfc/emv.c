@@ -281,23 +281,36 @@ static void emv_prepare_pdol(uint8_t *dest, size_t *dest_len, size_t dest_cap,
 }
 
 // ---- Track 2 equivalent parsing (PAN + expiry, nibble-aligned) ----
-// Format: PAN nibbles, 0xD separator nibble, YYMM expiry nibbles. We look for
-// the byte whose high nibble is 0xD (even-nibble PAN case) and decode from there.
+// Format: PAN nibbles, 0xD separator nibble, YYMM expiry nibbles. The separator
+// nibble may land in the high nibble (odd-length PAN, byte >= 0xD0) or the low
+// nibble (even-length PAN, byte & 0x0F == 0x0D).
 static void emv_parse_track2(const uint8_t *buf, size_t len, EmvApplication *app) {
     for (size_t j = 1; j < len; j++) {
-        if (buf[j] > 0xD0) {
-            if (app->pan_len == 0) {
-                size_t copy = j; // PAN = buf[0..j-1]
-                if (copy > EMV_PAN_LEN) copy = EMV_PAN_LEN;
-                memcpy(app->pan, buf, copy);
-                app->pan_len = copy;
-            }
-            if (j + 2 < len) {
-                app->exp_year  = (uint8_t)((buf[j]     << 4) | (buf[j + 1] >> 4));
-                app->exp_month = (uint8_t)((buf[j + 1] << 4) | (buf[j + 2] >> 4));
-            }
-            return;
+        bool odd_sep  = (buf[j] & 0xF0) == 0xD0; // 0xD in high nibble
+        bool even_sep = (buf[j] & 0x0F) == 0x0D;  // 0xD in low nibble
+        if (!odd_sep && !even_sep) continue;
+
+        if (app->pan_len == 0) {
+            size_t pan_end = odd_sep ? j : j + 1; // even case: high nibble is last PAN digit
+            size_t copy = pan_end;
+            if (copy > EMV_PAN_LEN) copy = EMV_PAN_LEN;
+            memcpy(app->pan, buf, copy);
+            app->pan_len = copy;
         }
+        if (odd_sep) {
+            // expiry starts at buf[j] low nibble, buf[j+1]
+            if (j + 2 <= len) {
+                app->exp_year  = (uint8_t)((buf[j]     << 4) | (buf[j + 1] >> 4));
+                app->exp_month = (uint8_t)((buf[j + 1] << 4) | ((j + 2 < len ? buf[j + 2] : 0) >> 4));
+            }
+        } else {
+            // even case: expiry is full BCD bytes starting at buf[j+1]
+            if (j + 2 < len) {
+                app->exp_year  = buf[j + 1];
+                app->exp_month = buf[j + 2];
+            }
+        }
+        return;
     }
 }
 

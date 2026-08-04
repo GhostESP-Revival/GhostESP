@@ -17,7 +17,7 @@ The app uses a menu-driven interface:
 
 ### Wi-Fi Handshake Capture
 
-1. Navigate to **WiFi** → **Scanning & Probing** → **Scan APs**
+1. Navigate to **WiFi** → **Scanning & Probing** → **Scan: (APs)**
 2. Wait for scan to complete
 3. Select target network from list
 4. Go to **Packet Capture** → **EAPOL**
@@ -26,7 +26,7 @@ The app uses a menu-driven interface:
 
 ### Beacon Spam Attack
 
-1. Navigate to **WiFi** → **Beacon Spam & Attacks** → **Beacon Spam**
+1. Navigate to **WiFi** → **Attacks** → **Beacon Spam (List)**
 2. Select spam mode (List, Random, Rickroll, or Custom)
 3. If using List mode, manage your beacon list first
 4. Start the spam attack
@@ -42,7 +42,7 @@ The app uses a menu-driven interface:
 ### GPS Wardriving
 
 1. Ensure GPS module is connected and receiving signal
-2. Navigate to **GPS** → **Wardriving** → **WiFi Wardriving**
+2. Navigate to **GPS** → **Wardriving** → **Start Wardriving**
 3. Start wardriving session
 4. Drive around to collect data
 5. Stop and export CSV file with GPS coordinates

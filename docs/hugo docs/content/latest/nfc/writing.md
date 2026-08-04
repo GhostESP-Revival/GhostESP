@@ -30,7 +30,7 @@ weight: 30
 
 ## Verify
 
-- Re-scan the card using the **Scan NFC Tags** guide to confirm the UID (if applicable) and data match the source image.
+- Re-scan the card using the [Scanning]({{< relref "scanning.md" >}}) guide to confirm the UID (if applicable) and data match the source image.
 - Check the popup for success messages; any failed page write will trigger an error log with the page number.
 - Optional: load the card in an external reader to confirm the NDEF payload or application data.
 

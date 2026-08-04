@@ -62,7 +62,7 @@ keywords: ["troubleshooting", "issues", "problems", "fix", "error"]
 
 ### App won't launch
 - Verify `.fap` file is compatible with your Flipper firmware version
-- Reinstall the app from app store or latest release
+- Reinstall the app from the [Flipper app catalog](https://lab.flipper.net/apps/ghost_esp) or the latest [release](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases)
 - Check Flipper Zero has sufficient memory
 - Update Flipper Zero firmware if outdated
 
@@ -76,5 +76,5 @@ keywords: ["troubleshooting", "issues", "problems", "fix", "error"]
 ## Credits
 
 - **Original Developer**: Spooky ([Spooks4576](https://github.com/Spooks4576))
-- **Maintainer**: Jay Candel ([GhostESP-Revival](https://github.com/GhostESP-Revival))
+- **Maintainer**: Jay Candel ([jaylikesbunda](https://github.com/jaylikesbunda))
 - **Contributor**: @tototo31 ([tototo31](https://github.com/tototo31))

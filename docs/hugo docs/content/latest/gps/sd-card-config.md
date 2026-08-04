@@ -228,5 +228,5 @@ Donate=true
 ## See Also
 
 - [WiGLE Upload Guide]({{< relref "wigle.md" >}}) - Complete WiGLE integration documentation
-- [SD Card Setup]({{< relref "latest/getting-started/sd-card.md" >}}) - SD card formatting and mounting
+- [SD Card Setup]({{< relref "../getting-started/sd-card.md" >}}) - SD card formatting and mounting
 - [WiFi Configuration]({{< relref "../wifi/_index.md" >}}) - WiFi setup and management

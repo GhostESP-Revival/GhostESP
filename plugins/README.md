@@ -115,6 +115,7 @@ Apps with an `on_tick` callback run every 100 ms by default. Set `"tick_interval
 | `audio` | Reserved for microphone/audio APIs |
 | `settings` | Limited settings read/write/save APIs |
 | `zigbee` | Reserved for IEEE 802.15.4/Zigbee APIs |
+| `espnow` | Nearby ESP-NOW discovery and messaging |
 
 ## Entry Point
 

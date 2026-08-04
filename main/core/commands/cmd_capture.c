@@ -19,13 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 static void capture_resolve_pcap_path(const char *arg, char *out, size_t out_len) {
     if (!arg || !out || out_len == 0) return;

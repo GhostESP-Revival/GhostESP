@@ -92,7 +92,7 @@ Spoof Apple AirTags and other Find My devices to broadcast their location. This 
    - Wait for the scan to complete.
 
 2. **List discovered AirTags**
-   - Open **Menu → Bluetooth → AirTag → List AirTags** or run `list -airtags`.
+   - Open **Menu → Bluetooth → AirTag → List AirTags** or run `listairtags`.
    - You should see a list of discovered AirTags with their index numbers.
 
 3. **Select an AirTag to spoof**

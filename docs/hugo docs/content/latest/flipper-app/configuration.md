@@ -45,7 +45,7 @@ Captured files are stored on your Flipper Zero's SD card:
 | File Type | Location |
 |-----------|----------|
 | PCAP files | `/ext/apps_data/ghost_esp/pcaps/` |
-| CSV files | `/ext/apps_data/ghost_esp/csv/` |
-| Portal HTML | `/ext/apps_data/ghost_esp/portals/` |
+| Wardriving CSV files | `/ext/apps_data/ghost_esp/wardrive/` |
+| Logs | `/ext/apps_data/ghost_esp/logs/` |
 
 Use **qFlipper** or remove the SD card to transfer files to your computer.

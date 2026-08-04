@@ -103,7 +103,7 @@ my_pack/
 | `tiny` | 80x107 | `indexed_4bpp` | Low-memory fallback, scaled to fill |
 | `tile` | 32x32 | `indexed_4bpp` | Last-resort tiled fallback |
 
-The firmware picks `full -> tiny -> tile` on PSRAM boards and `half -> tiny -> tile` on internal-only boards. Scaled `indexed_4bpp` backgrounds are rendered by a custom line scaler, so the 120x160 half variant stays around 9.5 KB in RAM instead of expanding to a full RGB565 copy. The main menu, app gallery, settings-style screens, and other shared-layout views all use the same background.
+The firmware picks `full → tiny → tile` on PSRAM boards and `half → tiny → tile` on internal-only boards. Scaled `indexed_4bpp` backgrounds are rendered by a custom line scaler, so the 120x160 half variant stays around 9.5 KB in RAM instead of expanding to a full RGB565 copy. The main menu, app gallery, settings-style screens, and other shared-layout views all use the same background.
 
 Legacy packs can still provide `bg_tile`; newer packs should prefer the `background` variant source above.
 
@@ -158,7 +158,7 @@ Subsequent boots and pack switches reuse that cached extraction if the archive s
 ## Selecting a Pack
 
 1. Insert SD card with your pack
-2. Go to **Settings > Appearance > Asset Pack**
+2. Go to **Settings → Display & Brightness → Appearance → Asset Pack**
 3. Press **left/right** to cycle through installed packs
 4. The pack loads immediately and the selection is saved
 

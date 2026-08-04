@@ -63,12 +63,7 @@ static bool plugin_manager_has_psram(void) {
 }
 
 static bool plugin_manager_sd_jit_allowed(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0;
-#else
-    return false;
-#endif
+    return sd_card_needs_jit_mount();
 }
 
 static bool write_app_state_by_id(const char *id, uint32_t failure_count, bool quarantined, bool launch_pending, const char *last_error) {
@@ -161,6 +156,7 @@ static plugin_permission_t permission_from_string(const char *value) {
     if (strcmp(value, "settings") == 0) return PLUGIN_PERMISSION_SETTINGS;
     if (strcmp(value, "zigbee") == 0 || strcmp(value, "ieee802154") == 0) return PLUGIN_PERMISSION_ZIGBEE;
     if (strcmp(value, "nrf24") == 0) return PLUGIN_PERMISSION_NRF24;
+    if (strcmp(value, "espnow") == 0 || strcmp(value, "esp_now") == 0) return PLUGIN_PERMISSION_ESPNOW;
     return 0;
 }
 
@@ -688,6 +684,8 @@ int plugin_manager_reload(void) {
             if (join_path(icon_path, sizeof(icon_path), s_apps[i].base_path, s_apps[i].icon)) {
                 if (strcmp(s_apps[i].icon_format, "rgb565a8") == 0) {
                     s_apps[i].icon_dsc = plugin_icon_load_rgb565a8(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
+                } else if (strcmp(s_apps[i].icon_format, "true_color_alpha") == 0) {
+                    s_apps[i].icon_dsc = plugin_icon_load_true_color_alpha(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
                 } else {
                     s_apps[i].icon_dsc = plugin_icon_load_rgb565(icon_path, s_apps[i].icon_width, s_apps[i].icon_height);
                 }
@@ -734,6 +732,8 @@ const lv_img_dsc_t *plugin_manager_get_icon(const plugin_app_manifest_t *app) {
     if (!join_path(icon_path, sizeof(icon_path), mutable_app->base_path, mutable_app->icon)) return NULL;
     if (strcmp(mutable_app->icon_format, "rgb565a8") == 0) {
         mutable_app->icon_dsc = plugin_icon_load_rgb565a8(icon_path, mutable_app->icon_width, mutable_app->icon_height);
+    } else if (strcmp(mutable_app->icon_format, "true_color_alpha") == 0) {
+        mutable_app->icon_dsc = plugin_icon_load_true_color_alpha(icon_path, mutable_app->icon_width, mutable_app->icon_height);
     } else {
         mutable_app->icon_dsc = plugin_icon_load_rgb565(icon_path, mutable_app->icon_width, mutable_app->icon_height);
     }

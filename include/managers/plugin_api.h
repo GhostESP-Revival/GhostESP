@@ -103,6 +103,23 @@ typedef struct {
     uint16_t appearance;
 } ghostesp_ble_adv_info_t;
 
+#define GHOSTESP_ESPNOW_NAME_MAX 24
+#define GHOSTESP_ESPNOW_MESSAGE_MAX 160
+
+typedef struct {
+    uint8_t mac[6];
+    int8_t rssi;
+    uint32_t last_seen_ms;
+    char name[GHOSTESP_ESPNOW_NAME_MAX];
+} ghostesp_espnow_peer_t;
+
+typedef struct {
+    uint8_t sender_mac[6];
+    uint32_t received_at_ms;
+    char sender_name[GHOSTESP_ESPNOW_NAME_MAX];
+    char text[GHOSTESP_ESPNOW_MESSAGE_MAX];
+} ghostesp_espnow_message_t;
+
 typedef void *ghostesp_ui_obj_t;
 typedef void (*ghostesp_ui_button_cb_t)(void *user);
 
@@ -653,6 +670,18 @@ typedef struct ghostesp_api {
        elapses). Returns true when no blit is outstanding — i.e. when the
        buffer passed to the last async blit is safe to overwrite. */
     bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
+    bool (*espnow_start)(uint8_t channel);
+    void (*espnow_stop)(void);
+    bool (*espnow_is_active)(void);
+    uint8_t (*espnow_channel)(void);
+    const char *(*espnow_name)(void);
+    const char *(*espnow_last_error)(void);
+    bool (*espnow_announce)(void);
+    int (*espnow_peer_count)(void);
+    bool (*espnow_get_peer)(int index, ghostesp_espnow_peer_t *out);
+    bool (*espnow_send)(const uint8_t mac[6], const char *text);
+    int (*espnow_message_count)(void);
+    bool (*espnow_receive)(ghostesp_espnow_message_t *out);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

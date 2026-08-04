@@ -9,7 +9,7 @@ The Audio app plays MP3 files stored on the SD card and streams them over GhostL
 
 ## Requirements
 
-- **The Banshee** hardware. Its two-chip audio setup uses the `somethingsomething` and `somethingsomething2` builds.
+- **The Banshee** hardware. Its two-chip audio setup uses the `Banshee_C5` and `Banshee_S3` builds.
 - A GhostLink connection between the Banshee control/display chip and audio receiver chip.
 - MP3 files on the SD card in `/mnt/ghostesp/audio`.
 - MP3 bitrate under `264kbps`. Higher bitrate files are rejected with an on-device toast.
@@ -37,7 +37,7 @@ Recommended encoding:
 On the device UI, open:
 
 ```text
-Apps -> Audio
+Apps → Audio
 ```
 
 If no MP3 files are found, the app shows a toast asking for files in `/mnt/ghostesp/audio`.

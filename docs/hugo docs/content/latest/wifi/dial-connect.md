@@ -1,7 +1,7 @@
 ---
 title: "DIAL Connect"
 description: "Cast YouTube videos to smart TVs on your network."
-weight: 60
+weight: 61
 ---
 
 Cast random YouTube videos to all DIAL-enabled devices (Chromecasts, smart TVs, Roku, etc.) on your network.
@@ -18,7 +18,7 @@ Cast random YouTube videos to all DIAL-enabled devices (Chromecasts, smart TVs, 
 
 ### On-device UI
 
-1. First connect to a Wi-Fi network: **Menu → WiFi → Connect**.
+1. First connect to a Wi-Fi network: **Menu → WiFi → Connection → Connect to WiFi**.
 2. Go to **Menu → WiFi → DIAL Connect**.
 3. The device will discover smart TVs and cast a random YouTube video.
 

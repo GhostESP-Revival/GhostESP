@@ -5,6 +5,7 @@
 #include "managers/status_display_manager.h"
 #include "scans/wifi/ap_scan.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -13,13 +14,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 extern RGBManager_t rgb_manager;
 
@@ -186,7 +181,7 @@ void channel_switch_attack_start(void) {
     csa_stop_requested = false;
     csa_packets_sent = 0;
     
-    BaseType_t rc = xTaskCreate(csa_attack_task, "csa_attack", 3072, NULL, 5, &csa_task_handle);
+    BaseType_t rc = xTaskCreate_psram(csa_attack_task, "csa_attack", 3072, NULL, 5, &csa_task_handle);
     if (rc != pdPASS) {
         glog("Failed to start CSA attack task (%ld)\n", (long)rc);
         status_display_show_status("CSA Start Fail");

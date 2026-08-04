@@ -8,7 +8,7 @@ toc: true
 
 GhostESP supports several firmware update paths. The options shown on your device depend on the board, flash layout, network support, and whether a GhostLink peer is configured.
 
-Open **Settings > Firmware Update** to access update actions.
+Open **Settings → Firmware Update** to access update actions.
 
 ## Update Channel
 
@@ -91,7 +91,7 @@ To use SD-card OTA:
 
 1. Copy the firmware image to the SD card as `/ghostesp/firmware_update.bin`.
 2. Optional: copy a SHA-256 sidecar to `/ghostesp/firmware_update.sha256`.
-3. Open **Settings > Firmware Update > Install from SD Card**.
+3. Open **Settings → Firmware Update → Install from SD Card**.
 4. Confirm the install dialog.
 5. Keep the device powered until it reboots.
 
@@ -108,7 +108,7 @@ What you should expect on a no-PSRAM board during a network update:
 - The `GhostNet` access point disappears as soon as the download starts.
 - The Web UI at `http://192.168.4.1` becomes unreachable.
 - When the new firmware boots successfully, the access point and Web UI come back automatically.
-- The setting **Wi-Fi AP > Enable Access Point** is restored to its previous value (on or off) after the reboot.
+- The setting **Wi-Fi AP → Enable Access Point** is restored to its previous value (on or off) after the reboot.
 
 What happens if the download is interrupted or fails:
 
@@ -118,14 +118,14 @@ What happens if the download is interrupted or fails:
 What you can do if the access point does not come back:
 
 1. Reboot the device. The restore is persisted to NVS, so a normal boot reapplies it.
-2. If it is still off, open **Settings > Wi-Fi > Enable Access Point** and turn it back on.
-3. If a recent OTA install failed, reflash manually with USB using the [Installation Guide]({{< relref "latest/getting-started/installation-guide.md" >}}).
+2. If it is still off, open **Settings → Wi-Fi → Enable Access Point** and turn it back on.
+3. If a recent OTA install failed, reflash manually with USB using the [Installation Guide]({{< relref "installation-guide.md" >}}).
 
-> Manual update checks (from **Settings > Firmware Update > Check Device Update**) are still available on no-PSRAM boards. Only the automatic background check that runs at boot is skipped, so the device stays responsive on a memory-constrained board.
+> Manual update checks (from **Settings → Firmware Update → Check Device Update**) are still available on no-PSRAM boards. Only the automatic background check that runs at boot is skipped, so the device stays responsive on a memory-constrained board.
 
 ## Recovery Tips
 
 - If an update check says no firmware was found, confirm that **Update Channel** is set correctly.
 - If install says no update is ready, run **Check Device Update** first.
 - If a Banshee C5 updater failure is shown on boot, dismiss the popup, check Wi-Fi credentials, and try the update again.
-- If the device cannot boot normal firmware after a failed update, reflash manually with USB using the [Installation Guide]({{< relref "latest/getting-started/installation-guide.md" >}}).
+- If the device cannot boot normal firmware after a failed update, reflash manually with USB using the [Installation Guide]({{< relref "installation-guide.md" >}}).

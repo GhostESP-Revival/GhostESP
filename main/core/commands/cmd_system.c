@@ -81,6 +81,11 @@ void handle_startwd(int argc, char **argv) {
     }
 
     if (stop_flag) {
+        bool stopping_helper = wardriving_is_helper_mode();
+        if (helper_mode && !stopping_helper) {
+            glog("Wardriving helper stop ignored: helper is not active.\n");
+            return;
+        }
         if (!helper_mode && !esp_comm_manager_is_remote_command()) {
             if (esp_comm_manager_is_connected()) {
                 bool peer_stop_ok = esp_comm_manager_send_command("startwd", "-s --helper");
@@ -93,7 +98,7 @@ void handle_startwd(int argc, char **argv) {
 
         stop_wardriving();
         wifi_manager_stop_monitor_mode();
-        if (!helper_mode) {
+        if (!stopping_helper) {
             if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer
                 csv_flush_buffer_to_file();
             }
@@ -108,6 +113,14 @@ void handle_startwd(int argc, char **argv) {
         }
     } else {
         if (helper_mode) {
+            if (csv_file_is_open() && !wardriving_is_helper_mode()) {
+                glog("Wardriving helper refused: a primary CSV session is active.\n");
+                return;
+            }
+            if (wardriving_is_helper_mode()) {
+                glog("Wardriving helper is already running.\n");
+                return;
+            }
             if (helper_channels_set) {
                 if (!wardriving_set_helper_channels_from_csv(helper_channels_csv)) {
                     glog("Wardriving helper: invalid channel list, using default helper channels.\n");
@@ -123,12 +136,21 @@ void handle_startwd(int argc, char **argv) {
                 wardriving_set_helper_weighted_5g(helper_weighted);
             }
 
+            bool helper_initialized_gps = false;
             if (!g_gpsManager.isinitilized) {
                 gps_manager_init(&g_gpsManager);
+                helper_initialized_gps = g_gpsManager.isinitilized;
             }
 
             wifi_manager_start_monitor_mode(wardriving_scan_callback);
-            start_wardriving_helper();
+            if (!start_wardriving_helper()) {
+                stop_wardriving();
+                wifi_manager_stop_monitor_mode();
+                if (helper_initialized_gps) gps_manager_deinit(&g_gpsManager);
+                glog("Wardriving helper failed to start.\n");
+                status_display_show_status("WD Helper Fail");
+                return;
+            }
             glog("Wardriving helper started.\n");
             status_display_show_status("WD Helper Start");
             return;
@@ -146,17 +168,8 @@ void handle_startwd(int argc, char **argv) {
                            esp_comm_manager_is_connected();
 #endif
 
-        if (prefer_peer_only) {
-            gps_manager_set_peer_gps_preferred(true);
-            gps_manager_clear_peer_fix();
-            if (g_gpsManager.isinitilized) {
-                gps_manager_deinit(&g_gpsManager);
-            }
-            glog("Wardriving: peer GPS preferred, local soft GPS disabled.\n");
-        } else {
-            gps_manager_set_peer_gps_preferred(false);
-            gps_manager_init(&g_gpsManager);
-        }
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_init(&g_gpsManager);
         esp_err_t err = csv_file_open("wardriving");
         if (err != ESP_OK) {
             glog("Failed to open CSV for wardriving\n");
@@ -167,31 +180,41 @@ void handle_startwd(int argc, char **argv) {
             return;
         }
         wifi_manager_start_monitor_mode(wardriving_scan_callback);
-        start_wardriving();
+        if (!start_wardriving()) {
+            wifi_manager_stop_monitor_mode();
+            csv_file_close();
+            gps_manager_deinit(&g_gpsManager);
+            glog("Failed to start wardriving observation queue.\n");
+            status_display_show_status("Wardrive Start Fail");
+            return;
+        }
 
         bool peer_helper_ok = false;
         if (!esp_comm_manager_is_remote_command()) {
             if (esp_comm_manager_is_connected()) {
-                char helper_args[256] = "--helper";
+                char helper_command[256];
                 char helper_plan_csv[192] = {0};
                 uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
                 bool weighted = settings_get_wd_weighted_5g(&G_Settings);
                 if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                    snprintf(helper_args, sizeof(helper_args), "--helper --channels %s --hop %u%s",
+                    snprintf(helper_command, sizeof(helper_command),
+                             "startwd --helper --channels %s --hop %u%s",
                              helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
                 } else {
-                    snprintf(helper_args, sizeof(helper_args), "--helper --hop %u%s",
+                    snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
                              (unsigned)hop_ms, weighted ? " --weighted" : "");
                 }
-                peer_helper_ok = esp_comm_manager_send_command("startwd", helper_args);
+                wardriving_expect_peer_assist(true);
+                peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
+                if (!peer_helper_ok) wardriving_expect_peer_assist(false);
                 glog(peer_helper_ok
-                         ? "Wardrive helper started on peer (split-channel).\n"
-                         : "Wardrive helper not started on peer; continuing local only.\n");
+                          ? "Wardrive helper start sent; waiting for ready status.\n"
+                          : "Wardrive helper not started on peer; continuing local only.\n");
             } else {
                 glog("Wardrive helper unavailable: no GhostLink peer connected.\n");
             }
         }
-        wardriving_set_peer_assist(peer_helper_ok);
+        if (!peer_helper_ok) wardriving_set_peer_assist(false);
 
         if (prefer_peer_only && !peer_helper_ok) {
             gps_manager_set_peer_gps_preferred(false);

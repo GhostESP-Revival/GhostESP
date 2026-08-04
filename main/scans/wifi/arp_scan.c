@@ -12,6 +12,7 @@
 #include "core/callbacks.h"
 #include "core/glog.h"
 #include "core/scan_saver.h"
+#include "core/system_manager.h"
 #include "core/utils.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -24,14 +25,6 @@
 #include "lwip/ip4_addr.h"
 #include "lwip/tcpip.h"
 
-// Thread-safe lwIP access: LOCK_TCPIP_CORE is only available when
-// CONFIG_LWIP_TCPIP_CORE_LOCKING is enabled. Provide a no-op fallback
-// so the code compiles either way (the ethernet scan already calls
-// etharp_request without locking, matching the unconfigured behaviour).
-#ifndef LOCK_TCPIP_CORE
-#define LOCK_TCPIP_CORE()
-#define UNLOCK_TCPIP_CORE()
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +64,12 @@ static volatile int g_arp_progress_scanned = 0;
 static volatile int g_arp_progress_total_hosts = 0;
 static volatile int g_arp_progress_found = 0;
 
+typedef struct {
+    const ip4_addr_t *target;
+    uint8_t *mac;
+    arp_scanner_ctx_t *scanner;
+} arp_tcpip_call_t;
+
 // ============================================================================
 // Internal Helpers (Module-specific)
 // ============================================================================
@@ -94,14 +93,6 @@ static void log_host_entry(scan_file_t *sf, size_t index, const char *ip, const 
     if (scan_file_is_open(sf)) {
         scan_file_printf(sf, "%s\n", entry);
     }
-}
-
-/**
- * @brief Report scan progress
- */
-static void report_progress(int scanned, int total, size_t hosts_found) {
-    glog("Progress: %d/%d scanned, %zu hosts found\n", scanned, total, hosts_found);
-    ESP_LOGI(TAG, "Progress: %d/%d, found %zu hosts so far", scanned, total, hosts_found);
 }
 
 // ============================================================================
@@ -157,6 +148,13 @@ void arp_scanner_cleanup(arp_scanner_ctx_t *ctx) {
  * buffer exhaustion) and lets the stack handle retransmits.
  * Technique inspired by DecentLabs/officeAir (MIT-licensed).
  */
+static void arp_request_callback(void *ctx) {
+    arp_tcpip_call_t *request = (arp_tcpip_call_t *)ctx;
+    if (netif_default) {
+        etharp_request(netif_default, request->target);
+    }
+}
+
 bool send_arp_request(const char *target_ip) {
     if (!target_ip) {
         ESP_LOGW(TAG, "send_arp_request: target_ip is NULL");
@@ -169,16 +167,8 @@ bool send_arp_request(const char *target_ip) {
         return false;
     }
 
-    struct netif *nif = netif_default;
-    if (!nif) {
-        ESP_LOGW(TAG, "send_arp_request: netif_default is NULL");
-        return false;
-    }
-
-    LOCK_TCPIP_CORE();
-    err_t result = etharp_request(nif, &target_addr);
-    UNLOCK_TCPIP_CORE();
-    return (result == ERR_OK);
+    arp_tcpip_call_t call = {.target = &target_addr};
+    return tcpip_callback_with_block(arp_request_callback, &call, 1);
 }
 
 /**
@@ -195,23 +185,23 @@ static bool send_arp_request_lwip(const char *target_ip) {
         return false;
     }
 
-    // Get STA network interface
-    struct netif *netif = netif_default;
-    if (!netif) {
-        ESP_LOGW(TAG, "netif_default is NULL");
-        return false;
-    }
-
-    // Send ARP request using lwIP (thread-safe via TCP/IP core lock)
-    LOCK_TCPIP_CORE();
-    err_t result = etharp_request(netif, &target_addr);
-    UNLOCK_TCPIP_CORE();
-    return (result == ERR_OK);
+    arp_tcpip_call_t call = {.target = &target_addr};
+    return tcpip_callback_with_block(arp_request_callback, &call, 1) == ERR_OK;
 }
 
 /**
  * @brief Get ARP table entry for IP address (thread-safe)
  */
+static void arp_lookup_callback(void *ctx) {
+    arp_tcpip_call_t *lookup = (arp_tcpip_call_t *)ctx;
+    struct eth_addr *eth = NULL;
+    const ip4_addr_t *found_ip = NULL;
+    if (etharp_find_addr(NULL, lookup->target, &eth, &found_ip) >= 0 && eth) {
+        memcpy(lookup->mac, eth->addr, 6);
+        lookup->scanner = (arp_scanner_ctx_t *)(uintptr_t)1; // success flag
+    }
+}
+
 bool get_arp_table_entry(const char *ip, uint8_t *mac) {
     if (!ip || !mac) {
         return false;
@@ -223,18 +213,9 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
         return false;
     }
 
-    // Search ARP table using NULL netif (searches all interfaces)
-    struct eth_addr *eth_ret = NULL;
-    const ip4_addr_t *ip_ret = NULL;
-    
-    LOCK_TCPIP_CORE();
-    s8_t arp_idx = etharp_find_addr(NULL, &target_addr, &eth_ret, &ip_ret);
-    if (arp_idx >= 0 && eth_ret) {
-        memcpy(mac, eth_ret->addr, 6);
-    }
-    UNLOCK_TCPIP_CORE();
-
-    return (arp_idx >= 0 && eth_ret != NULL);
+    arp_tcpip_call_t call = {.target = &target_addr, .mac = mac, .scanner = NULL};
+    return tcpip_callback_with_block(arp_lookup_callback, &call, 1) == ERR_OK;
+    return call.scanner != NULL;
 }
 
 // ============================================================================
@@ -356,10 +337,10 @@ static bool is_host_known(const arp_scanner_ctx_t *ctx, const char *ip) {
  * @brief Harvest all entries currently in the lwIP ARP table
  *
  * Called between sub-batches and between passes to pick up early responses.
- * Thread-safe: holds the TCP/IP core lock while iterating the table.
+ * Thread-safe: runs on the TCP/IP core thread while iterating the table.
  */
-static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
-    LOCK_TCPIP_CORE();
+static void harvest_arp_table_callback(void *ctx) {
+    arp_scanner_ctx_t *scanner = (arp_scanner_ctx_t *)ctx;
     for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;
@@ -369,11 +350,16 @@ static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
         char ip_str[16];
         ip4addr_ntoa_r(ip, ip_str, sizeof(ip_str));
 
-        if (!is_host_known(ctx, ip_str)) {
-            add_discovered_host(ctx, ip_str, eth->addr);
+        if (!is_host_known(scanner, ip_str)) {
+            add_discovered_host(scanner, ip_str, eth->addr);
         }
     }
-    UNLOCK_TCPIP_CORE();
+}
+
+static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
+    if (tcpip_callback_with_block(harvest_arp_table_callback, ctx, 1) != ERR_OK) {
+        ESP_LOGW(TAG, "Failed to read ARP table on TCP/IP thread");
+    }
 }
 
 /**
@@ -501,13 +487,13 @@ bool arp_scan_subnet(void) {
     glog("%d-pass scan complete. %zu unique hosts found.\n",
          num_passes, ctx->num_active_hosts);
 
-    // Copy results to persistent storage
-    g_arp_result_count = 0;
+    // Transfer the scanner's bounded result allocation to the public result
+    // owner. This works for both synchronous CLI and asynchronous UI scans.
     int limit = (int)ctx->num_active_hosts;
     if (limit > ARP_SCAN_MAX_RESULTS) limit = ARP_SCAN_MAX_RESULTS;
-    for (int i = 0; i < limit; i++) {
-        memcpy(&g_arp_results[i], &ctx->hosts[i], sizeof(arp_host_t));
-    }
+    free(g_arp_results);
+    g_arp_results = ctx->hosts;
+    ctx->hosts = NULL;
     g_arp_result_count = limit;
 
     // Open scan file for saving results
@@ -529,7 +515,7 @@ bool arp_scan_subnet(void) {
         glog("\nActive hosts:\n");
         
         for (size_t i = 0; i < ctx->num_active_hosts; i++) {
-            log_host_entry(&sf, i + 1, ctx->hosts[i].ip, ctx->hosts[i].mac);
+            log_host_entry(&sf, i + 1, g_arp_results[i].ip, g_arp_results[i].mac);
         }
     } else {
         glog("No active hosts found.\n");
@@ -561,11 +547,6 @@ esp_err_t arp_scan_start_async(void) {
         return ESP_ERR_INVALID_STATE;
     }
     arp_scan_clear_results();
-    g_arp_results = malloc(sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
-    if (!g_arp_results) {
-        return ESP_ERR_NO_MEM;
-    }
-    memset(g_arp_results, 0, sizeof(arp_host_t) * ARP_SCAN_MAX_RESULTS);
     g_arp_scan_running = true;
     g_arp_scan_done = false;
     g_arp_progress_pass = 0;
@@ -573,11 +554,9 @@ esp_err_t arp_scan_start_async(void) {
     g_arp_progress_scanned = 0;
     g_arp_progress_total_hosts = 0;
     g_arp_progress_found = 0;
-    BaseType_t ret = xTaskCreate(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
+    BaseType_t ret = xTaskCreate_psram(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
     if (ret != pdPASS) {
         g_arp_scan_running = false;
-        free(g_arp_results);
-        g_arp_results = NULL;
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -966,7 +945,7 @@ static void poll_passive_arp_table(void) {
     int new_count = 0;
     if (!new_lines) return;
 
-    LOCK_TCPIP_CORE();
+    /* Passive monitor table polling is marshalled separately below. */
     for (size_t i = 0; i < ARP_TABLE_SIZE && new_count < PASSIVE_ARP_MAX_HOSTS; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;

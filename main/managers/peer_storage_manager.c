@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/timers.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,8 +57,6 @@ static SemaphoreHandle_t s_ack_sem = NULL;
 static char s_ack_buf[64];
 static size_t s_ack_len;
 static bool s_waiting_for_ack;
-static bool s_next_packet_is_raw;     /* set by WRITE so the rx cb knows */
-static size_t s_raw_expected;        /* to skip parsing the next packet */
 
 /* ---- peer-side state ---- */
 static peer_storage_slot_t s_peer_slots[PEER_STORAGE_MAX_OPEN];
@@ -128,13 +127,21 @@ static peer_storage_err_t peer_storage_send_raw(const uint8_t *data, size_t len)
            : PEER_STORAGE_ERR_PROTOCOL;
 }
 
-static peer_storage_err_t peer_storage_wait_ack(char *out, size_t out_len) {
+static peer_storage_err_t peer_storage_prepare_ack(void) {
     if (!s_ack_sem) return PEER_STORAGE_ERR_NO_MEM;
-    /* drain stale signal */
     xSemaphoreTake(s_ack_sem, 0);
     s_waiting_for_ack = true;
     s_ack_buf[0] = '\0';
     s_ack_len = 0;
+    return PEER_STORAGE_OK;
+}
+
+static void peer_storage_cancel_ack(void) {
+    s_waiting_for_ack = false;
+}
+
+static peer_storage_err_t peer_storage_wait_ack(char *out, size_t out_len) {
+    if (!s_ack_sem || !s_waiting_for_ack) return PEER_STORAGE_ERR_PROTOCOL;
 
     bool got = xSemaphoreTake(s_ack_sem, pdMS_TO_TICKS(PEER_STORAGE_TIMEOUT_MS)) == pdTRUE;
     s_waiting_for_ack = false;
@@ -254,8 +261,13 @@ peer_storage_err_t peer_storage_open(const char *path, const char *mode,
     int n = snprintf(frame, sizeof(frame), "OPEN|%s|%s", mode, path);
     if (n < 0 || n >= (int)sizeof(frame)) return PEER_STORAGE_ERR_BAD_ARG;
 
-    peer_storage_err_t e = peer_storage_send_frame(frame);
+    peer_storage_err_t e = peer_storage_prepare_ack();
     if (e != PEER_STORAGE_OK) return e;
+    e = peer_storage_send_frame(frame);
+    if (e != PEER_STORAGE_OK) {
+        peer_storage_cancel_ack();
+        return e;
+    }
 
     char ack[32];
     e = peer_storage_wait_ack(ack, sizeof(ack));
@@ -285,19 +297,28 @@ peer_storage_err_t peer_storage_write(int handle, const void *data, size_t len) 
     }
 
     if (len > PEER_STORAGE_MAX_WRITE_PAYLOAD) return PEER_STORAGE_ERR_BAD_ARG;
+    if (len == 0) return PEER_STORAGE_OK;
 
     char frame[PEER_STORAGE_MAX_FRAME];
     int n = snprintf(frame, sizeof(frame), "WRITE|%d|%zu", handle, len);
     if (n < 0 || n >= (int)sizeof(frame)) return PEER_STORAGE_ERR_BAD_ARG;
 
-    peer_storage_err_t e = peer_storage_send_frame(frame);
+    peer_storage_err_t e = peer_storage_prepare_ack();
     if (e != PEER_STORAGE_OK) return e;
+    e = peer_storage_send_frame(frame);
+    if (e != PEER_STORAGE_OK) {
+        peer_storage_cancel_ack();
+        return e;
+    }
 
     /* The packet immediately following carries the raw bytes. The peer's
      * handler sees the WRITE frame first, arms itself to treat the next
      * packet as payload, then receives the bytes. */
     e = peer_storage_send_raw((const uint8_t *)data, len);
-    if (e != PEER_STORAGE_OK) return e;
+    if (e != PEER_STORAGE_OK) {
+        peer_storage_cancel_ack();
+        return e;
+    }
 
     return peer_storage_wait_ack(NULL, 0);
 }
@@ -316,8 +337,13 @@ peer_storage_err_t peer_storage_close(int handle) {
     int n = snprintf(frame, sizeof(frame), "CLOSE|%d", handle);
     if (n < 0 || n >= (int)sizeof(frame)) return PEER_STORAGE_ERR_BAD_ARG;
 
-    peer_storage_err_t e = peer_storage_send_frame(frame);
+    peer_storage_err_t e = peer_storage_prepare_ack();
     if (e != PEER_STORAGE_OK) return e;
+    e = peer_storage_send_frame(frame);
+    if (e != PEER_STORAGE_OK) {
+        peer_storage_cancel_ack();
+        return e;
+    }
     return peer_storage_wait_ack(NULL, 0);
 }
 
@@ -339,8 +365,13 @@ peer_storage_err_t peer_storage_mkdir(const char *path) {
     int n = snprintf(frame, sizeof(frame), "MKDIR|%s", path);
     if (n < 0 || n >= (int)sizeof(frame)) return PEER_STORAGE_ERR_BAD_ARG;
 
-    peer_storage_err_t e = peer_storage_send_frame(frame);
+    peer_storage_err_t e = peer_storage_prepare_ack();
     if (e != PEER_STORAGE_OK) return e;
+    e = peer_storage_send_frame(frame);
+    if (e != PEER_STORAGE_OK) {
+        peer_storage_cancel_ack();
+        return e;
+    }
     return peer_storage_wait_ack(NULL, 0);
 }
 
@@ -416,6 +447,7 @@ static bool s_peer_next_is_raw;
 static int s_peer_raw_handle;
 static size_t s_peer_raw_expected;
 static size_t s_peer_raw_received;
+static TimerHandle_t s_peer_raw_timer;
 
 /* esp_comm_manager_send_stream_wait silently fragments any payload larger
  * than ~58 bytes into multiple STREAM packets with no reassembly of its
@@ -435,6 +467,25 @@ static size_t s_peer_frame_len;
 static bool s_peer_sd_mounted;
 static bool s_peer_display_suspended;
 
+static void peer_storage_abort_peer_state(void);
+
+static void peer_storage_raw_timeout_cb(TimerHandle_t timer) {
+    if (timer != s_peer_raw_timer) return;
+    s_peer_raw_timer = NULL;
+    peer_storage_abort_peer_state();
+    xTimerDelete(timer, 0);
+    ESP_LOGW(PEER_STORAGE_TAG, "WRITE payload timed out; peer session aborted");
+}
+
+static void peer_storage_cancel_raw_timer(void) {
+    TimerHandle_t timer = s_peer_raw_timer;
+    s_peer_raw_timer = NULL;
+    if (timer) {
+        xTimerStop(timer, 0);
+        xTimerDelete(timer, 0);
+    }
+}
+
 static bool peer_storage_peer_mount_sd(void) {
     if (s_peer_sd_mounted) return true;
     bool suspended = false;
@@ -451,6 +502,29 @@ static void peer_storage_peer_unmount_sd(void) {
     sd_card_jit_end(s_peer_display_suspended);
     s_peer_sd_mounted = false;
     s_peer_display_suspended = false;
+}
+
+static void peer_storage_abort_peer_state(void) {
+    peer_storage_cancel_raw_timer();
+    s_peer_next_is_raw = false;
+    s_peer_raw_handle = -1;
+    s_peer_raw_expected = 0;
+    s_peer_raw_received = 0;
+    s_peer_frame_len = 0;
+    for (int i = 0; i < PEER_STORAGE_MAX_OPEN; i++) {
+        if (s_peer_slots[i].in_use && s_peer_slots[i].fp) {
+            fclose(s_peer_slots[i].fp);
+        }
+        s_peer_slots[i].in_use = false;
+        s_peer_slots[i].fp = NULL;
+    }
+    peer_storage_peer_unmount_sd();
+}
+
+void peer_storage_manager_reset(void) {
+    peer_storage_cancel_ack();
+    if (s_ack_sem) xSemaphoreGive(s_ack_sem);
+    peer_storage_abort_peer_state();
 }
 
 static int peer_storage_alloc_slot(void) {
@@ -561,8 +635,11 @@ static void peer_storage_handle_frame(const char *frame) {
             return;
         }
         int handle = atoi(hstr);
-        size_t nbytes = (size_t)strtoul(nstr, NULL, 10);
-        if (!peer_storage_file_for_handle(handle) || nbytes == 0) {
+        char *end = NULL;
+        unsigned long parsed = strtoul(nstr, &end, 10);
+        size_t nbytes = (size_t)parsed;
+        if (!peer_storage_file_for_handle(handle) || !end || *end != '\0' ||
+            nbytes == 0 || nbytes > PEER_STORAGE_MAX_WRITE_PAYLOAD) {
             peer_storage_reply("ERR|badhandle");
             return;
         }
@@ -572,6 +649,13 @@ static void peer_storage_handle_frame(const char *frame) {
         s_peer_raw_handle = handle;
         s_peer_raw_expected = nbytes;
         s_peer_raw_received = 0;
+        s_peer_raw_timer = xTimerCreate("peer_raw", pdMS_TO_TICKS(PEER_STORAGE_TIMEOUT_MS),
+                                       pdFALSE, NULL, peer_storage_raw_timeout_cb);
+        if (!s_peer_raw_timer || xTimerStart(s_peer_raw_timer, 0) != pdPASS) {
+            peer_storage_cancel_raw_timer();
+            peer_storage_abort_peer_state();
+            peer_storage_reply("ERR|nomem");
+        }
         /* Don't ack yet; ack after all raw bytes arrive (possibly spread
          * across several fragmented packets). */
         return;
@@ -618,20 +702,29 @@ static void peer_storage_peer_rx_cb(uint8_t channel, const uint8_t *data,
     if (s_peer_next_is_raw) {
         FILE *fp = peer_storage_file_for_handle(s_peer_raw_handle);
         if (!fp) {
-            s_peer_next_is_raw = false;
+            peer_storage_abort_peer_state();
             peer_storage_reply("ERR|badhandle");
             return;
         }
         size_t remaining = s_peer_raw_expected - s_peer_raw_received;
-        size_t take = length < remaining ? length : remaining;
+        if (length > remaining) {
+            peer_storage_abort_peer_state();
+            peer_storage_reply("ERR|overflow");
+            return;
+        }
+        size_t take = length;
         if (take > 0 && fwrite(data, 1, take, fp) != take) {
-            s_peer_next_is_raw = false;
+            peer_storage_abort_peer_state();
             peer_storage_reply("ERR|write");
             return;
         }
         s_peer_raw_received += take;
         if (s_peer_raw_received >= s_peer_raw_expected) {
             s_peer_next_is_raw = false;
+            peer_storage_cancel_raw_timer();
+            s_peer_raw_handle = -1;
+            s_peer_raw_expected = 0;
+            s_peer_raw_received = 0;
             peer_storage_reply("OK");
         }
         return;
@@ -642,10 +735,18 @@ static void peer_storage_peer_rx_cb(uint8_t channel, const uint8_t *data,
     for (size_t i = 0; i < length; i++) {
         if (s_peer_frame_len < sizeof(s_peer_frame_buf) - 1) {
             s_peer_frame_buf[s_peer_frame_len++] = (char)data[i];
+        } else if (data[i] != '\0') {
+            s_peer_frame_len = sizeof(s_peer_frame_buf);
         }
         if (data[i] == '\0') {
-            peer_storage_handle_frame(s_peer_frame_buf);
-            s_peer_frame_len = 0;
+            if (s_peer_frame_len >= sizeof(s_peer_frame_buf)) {
+                peer_storage_abort_peer_state();
+                peer_storage_reply("ERR|overflow");
+            } else {
+                s_peer_frame_buf[s_peer_frame_len] = '\0';
+                peer_storage_handle_frame(s_peer_frame_buf);
+                s_peer_frame_len = 0;
+            }
         }
     }
 }

@@ -27,24 +27,15 @@ static bool ensure_loaded_slot(void) {
     return s_loaded != NULL;
 }
 
-static bool plugin_loader_sd_jit_allowed(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0;
-#else
-    return false;
-#endif
-}
-
 static bool plugin_loader_sd_begin(bool *display_was_suspended) {
     if (display_was_suspended) *display_was_suspended = false;
     if (sd_card_manager.is_initialized) return false;
-    if (!plugin_loader_sd_jit_allowed()) return false;
-    return sd_card_mount_for_flush(display_was_suspended) == ESP_OK;
+    if (!sd_card_needs_jit_mount()) return false;
+    return sd_card_jit_begin(display_was_suspended, false);
 }
 
 static void plugin_loader_sd_end(bool mounted_here, bool display_was_suspended) {
-    if (mounted_here) sd_card_unmount_after_flush(display_was_suspended);
+    if (mounted_here) sd_card_jit_end(display_was_suspended);
 }
 
 static bool state_path_for_manifest(const plugin_app_manifest_t *manifest, char *out, size_t out_len) {

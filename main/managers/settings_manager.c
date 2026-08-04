@@ -276,8 +276,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
-  settings->wd_hop_primary_ms = 100;
-  settings->wd_hop_helper_ms = 100;
+  settings->wd_hop_primary_ms = 125;
+  settings->wd_hop_helper_ms = 125;
   settings->wd_weighted_5g = true;
 
   // Lockscreen defaults (disabled by default)
@@ -2356,7 +2356,7 @@ void settings_set_wd_hop_primary_ms(FSettings *settings, uint16_t ms) {
   if (settings) settings->wd_hop_primary_ms = ms;
 }
 uint16_t settings_get_wd_hop_primary_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_primary_ms : 100;
+  return settings ? settings->wd_hop_primary_ms : 125;
 }
 void settings_set_wd_hop_helper_ms(FSettings *settings, uint16_t ms) {
   if (ms < 50) ms = 50;
@@ -2364,7 +2364,7 @@ void settings_set_wd_hop_helper_ms(FSettings *settings, uint16_t ms) {
   if (settings) settings->wd_hop_helper_ms = ms;
 }
 uint16_t settings_get_wd_hop_helper_ms(const FSettings *settings) {
-  return settings ? settings->wd_hop_helper_ms : 100;
+  return settings ? settings->wd_hop_helper_ms : 125;
 }
 void settings_set_wd_weighted_5g(FSettings *settings, bool enabled) {
   if (settings) settings->wd_weighted_5g = enabled;

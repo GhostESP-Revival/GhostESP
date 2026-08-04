@@ -1,4 +1,5 @@
 #include "managers/views/ghostchi_screen.h"
+#include "core/ghostchi_identity.h"
 #include "gui/design_tokens.h"
 
 #include "gui/lvgl_safe.h"
@@ -15,7 +16,6 @@
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
 #include "lvgl.h"
 
 #include <stdlib.h>
@@ -28,13 +28,6 @@ static void capitalize_ascii_first(char *text) {
         text[0] = (char)(text[0] - ('a' - 'A'));
     }
 }
-
-static const char s_onsets[] = "bcdfghjklmnprstvwyz";
-static const char s_vowels[] = "aeiou";
-static const char s_soft_codas[] = "lmnrst";
-#define ONSET_COUNT 20
-#define VOWEL_COUNT 5
-#define CODA_COUNT 6
 
 typedef struct {
     unsigned int level;
@@ -51,37 +44,6 @@ static const unsigned int s_ghostchi_level_xp[] = {
     9610, 10240, 10890, 11560, 12250, 12960, 13690, 14440, 15210, 16000,
     16810, 17640, 18490, 19360, 20250, 21160, 22090, 23040, 24010, 25000
 };
-
-static void generate_ghostchi_name(char *buf, size_t buf_len) {
-    uint8_t mac[6] = {0};
-    uint8_t h0, h1, h2, h3, h4, h5;
-    esp_wifi_get_mac(WIFI_IF_STA, mac);
-    h0 = mac[0] ^ mac[1] ^ mac[2];
-    h1 = mac[3] ^ mac[4] ^ mac[5];
-    h2 = (mac[0] ^ mac[3]) + (mac[1] ^ mac[4]) + (mac[2] ^ mac[5]);
-    h3 = (h0 >> 3) ^ (h1 << 2) ^ h2;
-    h4 = mac[1] ^ mac[4] ^ (uint8_t)(h2 + h3);
-    h5 = mac[2] ^ mac[5] ^ (uint8_t)(h0 + h1);
-
-    char c1 = s_onsets[h0 % ONSET_COUNT];
-    char v1 = s_vowels[(h0 >> 4) % VOWEL_COUNT];
-    char c2 = s_onsets[h1 % ONSET_COUNT];
-    char v2 = s_vowels[(h1 >> 4) % VOWEL_COUNT];
-    char c3 = s_onsets[h2 % ONSET_COUNT];
-    char v3 = s_vowels[(h2 >> 4) % VOWEL_COUNT];
-
-    int pattern = h4 % 3;
-    if (pattern == 0) {
-        char coda = s_soft_codas[h5 % CODA_COUNT];
-        snprintf(buf, buf_len, "%c%c%c%c%c", c1, v1, c2, v2, coda);
-    } else if (pattern == 1) {
-        snprintf(buf, buf_len, "%c%c%c%c%c%c", c1, v1, c2, v2, c3, v3);
-    } else {
-        char coda = s_soft_codas[h5 % CODA_COUNT];
-        snprintf(buf, buf_len, "%c%c%c%c%c%c", c1, v1, c2, v2, c3, coda);
-    }
-    capitalize_ascii_first(buf);
-}
 
 static void ghostchi_get_progress(const ghostchi_snapshot_t *snap, ghostchi_progress_t *out) {
     unsigned int xp;
@@ -1160,7 +1122,9 @@ static void update_ui(lv_timer_t *timer) {
         else if (snap.total_sessions > 0) mood = "hopeful";
         else mood = "eager";
         
-        generate_ghostchi_name(ghost_name, sizeof(ghost_name));
+        if (!ghostchi_identity_get_name(ghost_name, sizeof(ghost_name))) {
+            snprintf(ghost_name, sizeof(ghost_name), "Ghost");
+        }
         set_stat(0, "NAME", ghost_name);
         snprintf(buf, sizeof(buf), "%s", mood);
         capitalize_ascii_first(buf);

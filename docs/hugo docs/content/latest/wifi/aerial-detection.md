@@ -75,4 +75,4 @@ aerialspoof DRONE-TEST 37.7749 -122.4194 120
 - **“Wi-Fi suspended” message**: Normal during BLE phase or spoofing. It clears after the command finishes or you run `aerialstop`.
 - **No detections**: Increase scan time (`aerialscan 60`) so each phase lasts longer, or move closer to the suspected drone.
 - **ESP32-S2 board**: Only Wi-Fi detections work; BLE phase is skipped.
-- **Heap errors during repeated scans**: Restart your device
+- **Heap errors during repeated scans**: Restart your device.

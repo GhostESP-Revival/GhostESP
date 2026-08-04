@@ -1,7 +1,7 @@
 #ifndef DEFAULT_PORTAL_H
 #define DEFAULT_PORTAL_H
 
-const char default_portal_html[] = R"rawliteral(
+static const char default_portal_html[] = R"rawliteral(
 <!DOCTYPE html>
 <html>
   <head>

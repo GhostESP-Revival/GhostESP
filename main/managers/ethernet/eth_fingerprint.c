@@ -6,6 +6,7 @@
 #include "managers/ethernet/eth_http.h"
 
 #include "core/glog.h"
+#include "core/system_manager.h"
 
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
@@ -532,7 +533,7 @@ static void eth_fp_task(void *arg) {
 void eth_fingerprint_start_async(void) {
     if (s_fp_running) return;
     s_fp_done = false;
-    xTaskCreate(eth_fp_task, "eth_fp_scan", 6144, NULL, 5, &s_fp_task_handle);
+    xTaskCreate_psram(eth_fp_task, "eth_fp_scan", 6144, NULL, 5, &s_fp_task_handle);
 }
 
 bool eth_fingerprint_scan_is_running(void) { return s_fp_running; }

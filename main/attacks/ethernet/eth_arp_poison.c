@@ -18,6 +18,7 @@
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
+#include "core/system_manager.h"
 #include "esp_netif.h"
 #include "lwip/netif.h"
 #include "lwip/etharp.h"
@@ -855,10 +856,10 @@ esp_err_t eth_arp_poison_start(void)
 
     glog("[ARP Poison] Found %d hosts\n", s_host_count);
 
-    xTaskCreate(arp_poison_task, "arp_poison", 2048, NULL, 5, &s_poison_task);
-    xTaskCreate(dns_proxy_task,  "dns_proxy",  4096, NULL, 6, &s_dns_task);
-    xTaskCreate(packet_forwarder_task, "pkt_fwd", 3072, NULL, 5, &s_fwd_task);
-    xTaskCreate(passive_discovery_task, "passive", 3072, NULL, 4, &s_passive_task);
+    xTaskCreate_psram(arp_poison_task, "arp_poison", 2048, NULL, 5, &s_poison_task);
+    xTaskCreate_psram(dns_proxy_task,  "dns_proxy",  4096, NULL, 6, &s_dns_task);
+    xTaskCreate_psram(packet_forwarder_task, "pkt_fwd", 3072, NULL, 5, &s_fwd_task);
+    xTaskCreate_psram(passive_discovery_task, "passive", 3072, NULL, 4, &s_passive_task);
 
     glog("[ARP Poison] Running — poisoning %d hosts, passive discovery active\n", s_host_count);
     return ESP_OK;

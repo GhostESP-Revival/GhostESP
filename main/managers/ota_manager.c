@@ -932,9 +932,8 @@ esp_err_t ota_manager_start_update(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    StackType_t *stack = heap_caps_malloc(OTA_DOWNLOAD_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    StackType_t *stack = heap_caps_malloc(OTA_DOWNLOAD_TASK_STACK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!stack) {
-        // Fall back to internal RAM if PSRAM isn't available on this target.
         // xTaskCreate's stack-depth argument is in bytes on ESP-IDF's FreeRTOS
         // port (unlike xTaskCreateStatic below, which takes StackType_t words).
         BaseType_t rc = xTaskCreate(ota_download_task, "ota_dl",
@@ -948,7 +947,7 @@ esp_err_t ota_manager_start_update(void) {
         return ESP_ERR_NO_MEM;
     }
     TaskHandle_t handle = xTaskCreateStatic(ota_download_task, "ota_dl",
-                                             OTA_DOWNLOAD_TASK_STACK_BYTES / sizeof(StackType_t), NULL,
+                                             OTA_DOWNLOAD_TASK_STACK_BYTES, NULL,
                                              5, stack, tcb);
     if (!handle) {
         heap_caps_free(stack);

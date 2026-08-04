@@ -10,6 +10,7 @@
 #include "managers/badusb_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/display_manager.h"
+#include "managers/espnow_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/plugin_manager.h"
@@ -60,8 +61,8 @@ static void (*s_ui_print)(const char *text) = NULL;
 static void (*s_ui_clear)(void) = NULL;
 static void (*s_ui_toast)(const char *message) = NULL;
 static char s_app_id[PLUGIN_APP_ID_MAX];
-static char s_app_data_path[PLUGIN_APP_PATH_MAX];
-static char s_app_base_path[PLUGIN_APP_PATH_MAX];
+static char *s_app_data_path;
+static char *s_app_base_path;
 static bool s_asset_session_active;
 static bool s_asset_session_display_suspended;
 static plugin_permission_t s_permissions = 0;
@@ -84,7 +85,7 @@ typedef struct {
     uint32_t offset;
     uint32_t length;
 } plugin_direct_asset_t;
-static char s_direct_gapp_path[PLUGIN_APP_PATH_MAX];
+static char *s_direct_gapp_path;
 static plugin_direct_asset_t *s_direct_assets = NULL;
 static int s_direct_asset_count = 0;
 
@@ -94,7 +95,8 @@ static void plugin_api_direct_index_reset(void) {
         s_direct_assets = NULL;
     }
     s_direct_asset_count = 0;
-    s_direct_gapp_path[0] = '\0';
+    free(s_direct_gapp_path);
+    s_direct_gapp_path = NULL;
 }
 
 static void plugin_api_direct_index_load(const char *base_path) {
@@ -110,17 +112,21 @@ static void plugin_api_direct_index_load(const char *base_path) {
     uint16_t version = 0, gapp_len = 0;
     uint32_t count = 0;
     bool header_ok = fread(magic, 1, 4, f) == 4 && memcmp(magic, "DIDX", 4) == 0 &&
-                      fread(&version, sizeof(version), 1, f) == 1 && version == 1 &&
-                      fread(&gapp_len, sizeof(gapp_len), 1, f) == 1 &&
-                      gapp_len > 0 && gapp_len < sizeof(s_direct_gapp_path) &&
-                      fread(s_direct_gapp_path, 1, gapp_len, f) == gapp_len;
+                     fread(&version, sizeof(version), 1, f) == 1 && version == 1 &&
+                     fread(&gapp_len, sizeof(gapp_len), 1, f) == 1 &&
+                     gapp_len > 0 && gapp_len < PLUGIN_APP_PATH_MAX;
+    if (header_ok) {
+        s_direct_gapp_path = malloc((size_t)gapp_len + 1);
+        header_ok = s_direct_gapp_path && fread(s_direct_gapp_path, 1, gapp_len, f) == gapp_len;
+    }
     if (header_ok) {
         s_direct_gapp_path[gapp_len] = '\0';
         header_ok = fread(&count, sizeof(count), 1, f) == 1 && count > 0 && count <= 256;
     }
     if (!header_ok) {
         fclose(f);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
 
@@ -129,7 +135,8 @@ static void plugin_api_direct_index_load(const char *base_path) {
     if (!entries) entries = malloc(sizeof(plugin_direct_asset_t) * count);
     if (!entries) {
         fclose(f);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
 
@@ -147,7 +154,8 @@ static void plugin_api_direct_index_load(const char *base_path) {
 
     if (loaded != count) {
         free(entries);
-        s_direct_gapp_path[0] = '\0';
+        free(s_direct_gapp_path);
+        s_direct_gapp_path = NULL;
         return;
     }
     s_direct_assets = entries;
@@ -166,7 +174,8 @@ static uint16_t plugin_ap_count = 0;
 static wifi_ap_record_t *plugin_scanned_aps = NULL;
 static volatile bool s_plugin_live_scan_active = false;
 static bool s_plugin_ble_started = false;
-static char s_subghz_loaded_path[PLUGIN_APP_PATH_MAX];
+static bool s_plugin_espnow_started = false;
+static char *s_subghz_loaded_path;
 
 static void plugin_wifi_snapshot_scan_results(void) {
     extern uint16_t ap_count;
@@ -392,16 +401,6 @@ static void plugin_ui_sync_apply(void *arg) {
     if (call && call->done) xSemaphoreGive(call->done);
 }
 
-/* Diagnostic-only: totals how long callers actually block here waiting for
-   the LVGL task to service a cross-task UI call, separate from any time
-   spent inside the callback itself, logged periodically so a slow
-   native-app present/blit path can be attributed correctly instead of
-   assumed to be the callback's own work. */
-static uint32_t s_sync_wait_window_start_ms;
-static uint32_t s_sync_wait_count;
-static uint32_t s_sync_wait_us_total;
-#define PLUGIN_UI_SYNC_LOG_INTERVAL_MS 5000
-
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
     if (!fn) return false;
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
@@ -411,24 +410,12 @@ static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
         .ctx = ctx,
         .done = done,
     };
-    int64_t wait_start_us = esp_timer_get_time();
     display_manager_run_on_lvgl(plugin_ui_sync_apply, &call);
-    bool ok = xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE;
-    s_sync_wait_us_total += (uint32_t)(esp_timer_get_time() - wait_start_us);
-    s_sync_wait_count++;
+    /* The queued call borrows both call and ctx. They must remain alive until
+       LVGL has completed the callback; there is no safe timeout without queue
+       cancellation support from display_manager_run_on_lvgl(). */
+    bool ok = xSemaphoreTake(done, portMAX_DELAY) == pdTRUE;
     vSemaphoreDelete(done);
-
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    if (s_sync_wait_window_start_ms == 0) {
-        s_sync_wait_window_start_ms = now_ms;
-    } else if (now_ms - s_sync_wait_window_start_ms >= PLUGIN_UI_SYNC_LOG_INTERVAL_MS) {
-        ESP_LOGI(TAG, "plugin_ui_run_sync: calls=%u avg_wait=%uus",
-                 (unsigned)s_sync_wait_count,
-                 (unsigned)(s_sync_wait_us_total / s_sync_wait_count));
-        s_sync_wait_window_start_ms = now_ms;
-        s_sync_wait_count = 0;
-        s_sync_wait_us_total = 0;
-    }
     return ok;
 }
 
@@ -486,6 +473,7 @@ static void plugin_ui_style_button(lv_obj_t *obj) {
     lv_obj_set_style_border_color(obj, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(obj, GUI_GRID * 4, LV_PART_MAIN);
     lv_obj_set_style_pad_ver(obj, GUI_GRID * 3, LV_PART_MAIN);
 }
@@ -517,7 +505,8 @@ static bool plugin_api_absolute_storage_allowed(const char *path) {
 }
 
 static bool plugin_api_build_app_path(const char *path, char *out, size_t out_len) {
-    if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) || s_app_data_path[0] == '\0') return false;
+    if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) ||
+        !s_app_data_path || s_app_data_path[0] == '\0') return false;
     if (!path || path[0] == '\0') {
         int n = snprintf(out, out_len, "%s", s_app_data_path);
         return n > 0 && (size_t)n < out_len;
@@ -787,7 +776,7 @@ static int plugin_api_storage_read(const char *path, void *buffer, size_t buffer
 
 static bool plugin_api_build_asset_path(const char *path, char *out, size_t out_len) {
     if (!out || out_len == 0 || !plugin_api_has_permission(PLUGIN_PERMISSION_STORAGE) ||
-        s_app_base_path[0] == '\0' || !path || path[0] == '\0') return false;
+        !s_app_base_path || s_app_base_path[0] == '\0' || !path || path[0] == '\0') return false;
     if (path[0] == '/' || path[0] == '\\' || strstr(path, "..")) return false;
     int n = snprintf(out, out_len, "%s/assets/%s", s_app_base_path, path);
     return n > 0 && (size_t)n < out_len;
@@ -801,14 +790,15 @@ static bool plugin_api_build_asset_path(const char *path, char *out, size_t out_
    active; closed on session end, on a path change, or with no active
    session (matching the original always-close-immediately behavior). */
 static FILE *s_read_cache_file = NULL;
-static char s_read_cache_path[PLUGIN_APP_PATH_MAX];
+static char *s_read_cache_path;
 
 static void plugin_api_read_cache_close(void) {
     if (s_read_cache_file) {
         fclose(s_read_cache_file);
         s_read_cache_file = NULL;
     }
-    s_read_cache_path[0] = '\0';
+    free(s_read_cache_path);
+    s_read_cache_path = NULL;
 }
 
 static int plugin_api_read_at_path(const char *path, uint32_t offset,
@@ -820,22 +810,22 @@ static int plugin_api_read_at_path(const char *path, uint32_t offset,
 
     int result = -1;
     FILE *f;
-    if (s_asset_session_active && s_read_cache_file && strcmp(s_read_cache_path, path) == 0) {
+    if (s_asset_session_active && s_read_cache_file && s_read_cache_path &&
+        strcmp(s_read_cache_path, path) == 0) {
         f = s_read_cache_file;
     } else {
         plugin_api_read_cache_close();
         f = fopen(path, "rb");
         if (f && s_asset_session_active) {
-            s_read_cache_file = f;
-            strncpy(s_read_cache_path, path, sizeof(s_read_cache_path) - 1);
-            s_read_cache_path[sizeof(s_read_cache_path) - 1] = '\0';
+            s_read_cache_path = strdup(path);
+            if (s_read_cache_path) s_read_cache_file = f;
         }
     }
     if (f) {
         if (fseek(f, (long)offset, SEEK_SET) == 0) {
             result = (int)fread(buffer, 1, buffer_len, f);
         }
-        if (!s_asset_session_active) {
+        if (!s_asset_session_active || f != s_read_cache_file) {
             if (f == s_read_cache_file) plugin_api_read_cache_close();
             else fclose(f);
         }
@@ -899,7 +889,7 @@ static const char *plugin_api_app_id(void) {
 }
 
 static const char *plugin_api_app_data_path(void) {
-    return s_app_data_path;
+    return s_app_data_path ? s_app_data_path : "";
 }
 
 static bool plugin_api_app_storage_exists(const char *path) {
@@ -1324,11 +1314,12 @@ static bool plugin_api_subghz_load_snapshot(const char *app_relative_path) {
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
     char full_path[PLUGIN_APP_PATH_MAX];
     if (!plugin_api_build_app_path(app_relative_path, full_path, sizeof(full_path))) return false;
-    s_subghz_loaded_path[0] = '\0';
+    free(s_subghz_loaded_path);
+    s_subghz_loaded_path = NULL;
     bool loaded_snapshot = subghz_remote_manager_load_snapshot(full_path);
     if (loaded_snapshot || sd_card_exists(full_path)) {
-        snprintf(s_subghz_loaded_path, sizeof(s_subghz_loaded_path), "%s", full_path);
-        return true;
+        s_subghz_loaded_path = strdup(full_path);
+        return s_subghz_loaded_path != NULL;
     }
     return false;
 #else
@@ -1341,7 +1332,7 @@ static bool plugin_subghz_transmit_path(const char *full_path);
 static bool plugin_api_subghz_transmit_loaded(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_SUBGHZ)) return false;
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
-    return plugin_subghz_transmit_path(s_subghz_loaded_path);
+    return s_subghz_loaded_path && plugin_subghz_transmit_path(s_subghz_loaded_path);
 #else
     return false;
 #endif
@@ -1577,6 +1568,72 @@ static void plugin_api_wifi_live_scan_stop(void) {
 
 static bool plugin_api_wifi_live_scan_active(void) {
     return s_plugin_live_scan_active;
+}
+
+static bool plugin_api_espnow_start(uint8_t channel) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW)) return false;
+    s_plugin_espnow_started = espnow_manager_start(channel);
+    return s_plugin_espnow_started;
+}
+
+static void plugin_api_espnow_stop(void) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW)) return;
+    espnow_manager_stop();
+    s_plugin_espnow_started = false;
+}
+
+static bool plugin_api_espnow_is_active(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_is_active();
+}
+
+static uint8_t plugin_api_espnow_channel(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_channel() : 0;
+}
+
+static const char *plugin_api_espnow_name(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_name() : "";
+}
+
+static const char *plugin_api_espnow_last_error(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_last_error() : "ESP-NOW permission required";
+}
+
+static bool plugin_api_espnow_announce(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_announce();
+}
+
+static int plugin_api_espnow_peer_count(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_peer_count() : 0;
+}
+
+static bool plugin_api_espnow_get_peer(int index, ghostesp_espnow_peer_t *out) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) || !out) return false;
+    espnow_manager_peer_t peer;
+    if (!espnow_manager_get_peer(index, &peer)) return false;
+    memcpy(out->mac, peer.mac, sizeof(out->mac));
+    out->rssi = peer.rssi;
+    out->last_seen_ms = peer.last_seen_ms;
+    snprintf(out->name, sizeof(out->name), "%s", peer.name);
+    return true;
+}
+
+static bool plugin_api_espnow_send(const uint8_t mac[6], const char *text) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) && espnow_manager_send(mac, text);
+}
+
+static int plugin_api_espnow_message_count(void) {
+    return plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) ? espnow_manager_message_count() : 0;
+}
+
+static bool plugin_api_espnow_receive(ghostesp_espnow_message_t *out) {
+    if (!plugin_api_has_permission(PLUGIN_PERMISSION_ESPNOW) || !out) return false;
+    espnow_manager_message_t message;
+    if (!espnow_manager_receive(&message)) return false;
+    memcpy(out->sender_mac, message.sender_mac, sizeof(out->sender_mac));
+    out->received_at_ms = message.received_at_ms;
+    snprintf(out->sender_name, sizeof(out->sender_name), "%s", message.sender_name);
+    snprintf(out->text, sizeof(out->text), "%s", message.text);
+    return true;
 }
 
 static void plugin_api_app_exit(void) {
@@ -2365,6 +2422,18 @@ static ghostesp_api_t s_api = {
     .asset_storage_size = plugin_api_asset_storage_size,
     .ui_canvas_blit_rgb565_async = plugin_api_ui_canvas_blit_rgb565_async,
     .ui_canvas_blit_async_wait = plugin_api_ui_canvas_blit_async_wait,
+    .espnow_start = plugin_api_espnow_start,
+    .espnow_stop = plugin_api_espnow_stop,
+    .espnow_is_active = plugin_api_espnow_is_active,
+    .espnow_channel = plugin_api_espnow_channel,
+    .espnow_name = plugin_api_espnow_name,
+    .espnow_last_error = plugin_api_espnow_last_error,
+    .espnow_announce = plugin_api_espnow_announce,
+    .espnow_peer_count = plugin_api_espnow_peer_count,
+    .espnow_get_peer = plugin_api_espnow_get_peer,
+    .espnow_send = plugin_api_espnow_send,
+    .espnow_message_count = plugin_api_espnow_message_count,
+    .espnow_receive = plugin_api_espnow_receive,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
@@ -2383,11 +2452,14 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
     s_memory_limit = memory_limit;
     s_memory_used = 0;
     s_app_id[0] = '\0';
-    s_app_data_path[0] = '\0';
-    s_app_base_path[0] = '\0';
+    free(s_app_data_path);
+    free(s_app_base_path);
+    s_app_data_path = NULL;
+    s_app_base_path = NULL;
     s_asset_session_active = false;
     s_asset_session_display_suspended = false;
     s_plugin_ble_started = false;
+    s_plugin_espnow_started = false;
     portENTER_CRITICAL(&s_input_snapshot_mux);
     s_input_held = 0;
     s_input_pressed = 0;
@@ -2404,10 +2476,19 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
         }
         strncpy(s_app_id, app_id, sizeof(s_app_id) - 1);
         s_app_id[sizeof(s_app_id) - 1] = '\0';
-        snprintf(s_app_data_path, sizeof(s_app_data_path), "/mnt/ghostesp/appdata/%s", s_app_id);
-        if (base_path) {
-            strncpy(s_app_base_path, base_path, sizeof(s_app_base_path) - 1);
-            s_app_base_path[sizeof(s_app_base_path) - 1] = '\0';
+        char app_data_path[PLUGIN_APP_PATH_MAX];
+        snprintf(app_data_path, sizeof(app_data_path), "/mnt/ghostesp/appdata/%s", s_app_id);
+        s_app_data_path = strdup(app_data_path);
+        s_app_base_path = strdup(base_path ? base_path : "");
+        if (!s_app_data_path || !s_app_base_path) {
+            free(s_app_data_path);
+            free(s_app_base_path);
+            s_app_data_path = NULL;
+            s_app_base_path = NULL;
+            s_app_id[0] = '\0';
+            plugin_api_unlock();
+            ESP_LOGE(TAG, "plugin_api_get: out of memory for app paths");
+            return NULL;
         }
         sd_card_create_directory("/mnt/ghostesp/appdata");
         sd_card_create_directory(s_app_data_path);
@@ -2460,11 +2541,14 @@ void plugin_api_release(void) {
         esp_wifi_stop();
         ap_manager_start_services();
     }
+    if (s_plugin_espnow_started) {
+        espnow_manager_stop();
+        s_plugin_espnow_started = false;
+    }
     s_plugin_async_scan_active = false;
 
-    /* An async blit still queued here would read the app's pixel buffer
-       after the app is torn down and its memory freed. Drain it first. */
-    plugin_api_ui_canvas_blit_async_wait(1000);
+    /* Async blits own a packed snapshot of the app pixels, so teardown must
+       not block the LVGL task waiting for a callback queued on that task. */
     plugin_api_lowlevel_release();
     s_api_active = false;
     s_permissions = 0;
@@ -2472,8 +2556,12 @@ void plugin_api_release(void) {
     s_memory_limit = 0;
     s_memory_used = 0;
     s_app_id[0] = '\0';
-    s_app_data_path[0] = '\0';
-    s_app_base_path[0] = '\0';
+    free(s_app_data_path);
+    free(s_app_base_path);
+    free(s_subghz_loaded_path);
+    s_app_data_path = NULL;
+    s_app_base_path = NULL;
+    s_subghz_loaded_path = NULL;
     plugin_api_direct_index_reset();
     /* Backstop: normally closed by asset_session_end(), but an app that
        unloads mid-session (crash, forced exit) shouldn't leave an open

@@ -451,7 +451,9 @@ static void update_timer_cb(lv_timer_t *timer)
 
 static void audio_player_go_back(void)
 {
-    display_manager_switch_view(s_return_view ? s_return_view : &apps_menu_view);
+    View *return_view = s_return_view ? s_return_view : &apps_menu_view;
+    s_return_view = NULL;
+    display_manager_switch_view(return_view);
 }
 
 static void adjust_volume(int delta)

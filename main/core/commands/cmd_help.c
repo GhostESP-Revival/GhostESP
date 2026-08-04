@@ -6,13 +6,7 @@
 #include "managers/views/terminal_screen.h"
 #include "sdkconfig.h"
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

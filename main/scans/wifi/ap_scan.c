@@ -30,14 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Maximum WiFi channel based on target
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 // Module tag for logging
 static const char *TAG = "APScan";

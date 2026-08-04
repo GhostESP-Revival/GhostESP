@@ -1137,6 +1137,11 @@ void serial_manager_reacquire_uart(void) {
 int handle_serial_command(const char *input) {
   // Handle peer commands with logging and proper remote flag management
   if (strncmp(input, "peer:", 5) == 0) {
+    static int peer_depth = 0;
+    if (peer_depth >= 4) {
+      glog("peer: command nesting too deep\n");
+      return ESP_FAIL;
+    }
     const char* actual_command = input + 5;
     esp_comm_manager_set_remote_command_flag(true);
     bool quiet_badusb_setting =
@@ -1160,7 +1165,9 @@ int handle_serial_command(const char *input) {
       esp_comm_manager_set_remote_command_flag(false);
       return ESP_OK;
     }
+    peer_depth++;
     int result = handle_serial_command(actual_command);
+    peer_depth--;
     esp_comm_manager_set_remote_command_flag(false);
     return result;
   }

@@ -4,7 +4,7 @@ import shutil
 import sys
 
 from .config import load_manifest
-from .icon import png_to_rgb565, png_to_rgb565a8
+from .icon import png_to_rgb565, png_to_rgb565a8, png_to_true_color_alpha
 from .utils import checksum_bytes, checksum_file, copy_if_exists, write_gapp
 
 
@@ -29,6 +29,8 @@ def _write_icon_from_source(app_path: pathlib.Path, package_dir: pathlib.Path, m
 
     if fmt == "rgb565a8":
         data = png_to_rgb565a8(src, width, height)
+    elif fmt == "true_color_alpha":
+        data = png_to_true_color_alpha(src, width, height)
     elif fmt == "rgb565":
         data = png_to_rgb565(src, width, height)
     else:
@@ -70,8 +72,9 @@ def package_app(
     if target:
         packaged_manifest["target"] = target
     manifest_data = json.dumps(packaged_manifest, indent=2) + "\n"
-    (package_dir / "manifest.json").write_text(manifest_data, encoding="utf-8")
-    checksums["manifest.json"] = f"{checksum_bytes(manifest_data.encode('utf-8')):016x}"
+    manifest_path = package_dir / "manifest.json"
+    manifest_path.write_text(manifest_data, encoding="utf-8")
+    checksums["manifest.json"] = checksum_file(manifest_path)
     copy_if_exists(so_path, package_dir / entry, checksums, entry)
 
     packed_icon = _write_icon_from_source(app_path, package_dir, manifest, checksums)

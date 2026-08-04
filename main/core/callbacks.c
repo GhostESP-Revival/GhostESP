@@ -1,4 +1,5 @@
 #include "core/callbacks.h"
+#include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "managers/gps_manager.h"
 #include "managers/rgb_manager.h"
@@ -26,6 +27,7 @@
 #include <esp_timer.h>  // For esp_timer_get_time
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "gui/toast.h"
 #ifdef CONFIG_HAS_RTC_CLOCK
 #include "vendor/drivers/pcf8563.h"
@@ -51,10 +53,12 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define MIN_SSIDS_FOR_DETECTION 2 // Minimum SSIDs needed to flag as PineAP
 #define MAX_PINEAP_NETWORKS 20
 #define MAX_SSIDS_PER_BSSID 10
+#if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 #define MAX_WIFI_CHANNEL 165
 #else
 #define MAX_WIFI_CHANNEL 13
+#endif
 #endif
 #define CHANNEL_HOP_INTERVAL_MS 100
 #define WARDRIVE_STREAM_VERSION 2
@@ -68,8 +72,15 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define GPS_STREAM_FLAG_FIX 0x02
 #define GPS_STREAM_FLAG_DATE_VALID 0x04
 #define GPS_STREAM_FLAG_TIME_VALID 0x08
+#define WARDRIVE_CONTROL_MARKER 0xF0
+#define WARDRIVE_CONTROL_VERSION 1
+#define WARDRIVE_CONTROL_HELPER_READY 1
+#define WARDRIVE_HELPER_STATUS_TIMEOUT_MS 25000
 #define WARDRIVE_HELPER_DEDUPE_SIZE 128
 #define WARDRIVE_HELPER_REFRESH_MS 2000
+#define WARDRIVE_OBS_QUEUE_PSRAM_LEN 64
+#define WARDRIVE_OBS_QUEUE_INTERNAL_LEN 32
+#define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
 #define RECENT_SSID_COUNT 5
@@ -178,14 +189,50 @@ typedef struct {
     bool used;
 } wardrive_helper_dedupe_t;
 
+typedef enum {
+    WARDRIVE_OBS_LOCAL = 0,
+    WARDRIVE_OBS_HELPER = 1,
+    WARDRIVE_OBS_DRAIN_FENCE = 2,
+} wardrive_obs_source_t;
+
+typedef struct {
+    wardrive_obs_source_t source;
+    bool has_gps_snapshot;
+    bool using_peer_gps;
+    gps_t gps_snapshot;
+    wardriving_data_t data;
+} wardrive_obs_item_t;
+
 static wardrive_role_t wardrive_role = WARDRIVE_ROLE_PRIMARY;
-static bool wardrive_peer_assist_active = false;
+static volatile bool wardrive_peer_assist_active = false;
+static bool wardrive_peer_assist_pending = false;
+static uint32_t wardrive_peer_status_ms = 0;
 static wardrive_helper_dedupe_t wardrive_helper_dedupe[WARDRIVE_HELPER_DEDUPE_SIZE];
 static uint8_t wardrive_helper_dedupe_idx = 0;
 static uint8_t wardrive_forced_helper_channels[WIFI_CHANNELS_MAX] = {0};
 static uint8_t wardrive_forced_helper_channel_count = 0;
 static uint16_t wardrive_helper_hop_override_ms = 0; // 0 = use local setting
 static bool wardrive_weighted_5g_override = false;    // true if primary told us to use weighted
+static QueueHandle_t wardrive_obs_queue = NULL;
+static StaticQueue_t *wardrive_obs_queue_control = NULL;
+static uint8_t *wardrive_obs_queue_storage = NULL;
+static UBaseType_t wardrive_obs_queue_capacity = 0;
+static bool wardrive_obs_queue_in_psram = false;
+static TaskHandle_t wardrive_obs_task_handle = NULL;
+static StaticTask_t *wardrive_obs_task_tcb = NULL;
+static StackType_t *wardrive_obs_task_stack = NULL;
+static SemaphoreHandle_t wardrive_obs_drain_sem = NULL;
+static SemaphoreHandle_t wardrive_obs_lifecycle_mutex = NULL;
+static bool wardrive_obs_accepting = false;
+static uint32_t wardrive_obs_active_producers = 0;
+static uint32_t wardrive_obs_enqueued = 0;
+static uint32_t wardrive_obs_drop_local = 0;
+static uint32_t wardrive_obs_drop_helper = 0;
+static uint32_t wardrive_obs_drop_sink = 0;
+static UBaseType_t wardrive_obs_high_water = 0;
+static portMUX_TYPE wardrive_obs_mux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE wardrive_obs_init_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool wardrive_obs_init_in_progress = false;
 
 static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
 static void gps_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data);
@@ -206,10 +253,246 @@ static bool wardrive_is_valid_date(const gps_date_t *date);
 static bool wardrive_is_valid_time(const gps_time_t *tim);
 static inline uint32_t now_ms_u32(void);
 static bool wardrive_send_peer_gps_stream(void);
+static bool wardrive_send_helper_status(void);
 static void peer_gps_stream_task(void *arg);
 static uint32_t wardrive_get_hop_interval_ms(void);
 static void wardrive_apply_hop_interval(void);
 static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels);
+static bool wardrive_obs_queue_ensure(void);
+static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_source_t source);
+static void wardrive_obs_session_stop_and_drain(void);
+
+static void wardrive_obs_init_done(void) {
+    portENTER_CRITICAL(&wardrive_obs_init_mux);
+    wardrive_obs_init_in_progress = false;
+    portEXIT_CRITICAL(&wardrive_obs_init_mux);
+}
+
+static void wardrive_obs_task(void *arg) {
+    (void)arg;
+    wardrive_obs_item_t item;
+    uint8_t batch_count = 0;
+
+    for (;;) {
+        if (xQueueReceive(wardrive_obs_queue, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        if (item.source == WARDRIVE_OBS_DRAIN_FENCE) {
+            if (wardrive_obs_drain_sem) xSemaphoreGive(wardrive_obs_drain_sem);
+            batch_count = 0;
+            continue;
+        }
+
+        wardrive_log_attempts++;
+        esp_err_t err = ESP_ERR_INVALID_STATE;
+        if (item.has_gps_snapshot) {
+            for (uint8_t attempt = 0; attempt < 5; attempt++) {
+                err = gps_manager_log_wardriving_data_with_snapshot(&item.data, &item.gps_snapshot,
+                                                                    item.using_peer_gps);
+                if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) break;
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+        if (err == ESP_ERR_INVALID_STATE) {
+            wardrive_gps_rejected++;
+        } else if (err == ESP_OK) {
+            wardrive_log_ok++;
+            if (item.source == WARDRIVE_OBS_HELPER) wardrive_helper_merged_ok++;
+        } else {
+            portENTER_CRITICAL(&wardrive_obs_mux);
+            wardrive_obs_drop_sink++;
+            portEXIT_CRITICAL(&wardrive_obs_mux);
+        }
+
+        if (++batch_count >= 8) {
+            batch_count = 0;
+            vTaskDelay(1);
+        }
+    }
+}
+
+static bool wardrive_obs_queue_ensure(void) {
+    for (;;) {
+        portENTER_CRITICAL(&wardrive_obs_init_mux);
+        if (wardrive_obs_queue && wardrive_obs_task_handle) {
+            portEXIT_CRITICAL(&wardrive_obs_init_mux);
+            return true;
+        }
+        if (!wardrive_obs_init_in_progress) {
+            wardrive_obs_init_in_progress = true;
+            portEXIT_CRITICAL(&wardrive_obs_init_mux);
+            break;
+        }
+        portEXIT_CRITICAL(&wardrive_obs_init_mux);
+        vTaskDelay(1);
+    }
+
+    UBaseType_t capacity = WARDRIVE_OBS_QUEUE_PSRAM_LEN;
+    size_t storage_size = capacity * sizeof(wardrive_obs_item_t);
+    uint8_t *storage = heap_caps_malloc(storage_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bool in_psram = storage != NULL;
+    if (!storage) {
+        capacity = WARDRIVE_OBS_QUEUE_INTERNAL_LEN;
+        storage_size = capacity * sizeof(wardrive_obs_item_t);
+        storage = heap_caps_malloc(storage_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    StaticQueue_t *control = heap_caps_calloc(1, sizeof(StaticQueue_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!storage || !control) {
+        if (storage) heap_caps_free(storage);
+        if (control) heap_caps_free(control);
+        wardrive_obs_init_done();
+        return false;
+    }
+
+    QueueHandle_t queue = xQueueCreateStatic(capacity, sizeof(wardrive_obs_item_t), storage, control);
+    if (!queue) {
+        heap_caps_free(storage);
+        heap_caps_free(control);
+        wardrive_obs_init_done();
+        return false;
+    }
+
+    SemaphoreHandle_t drain_sem = xSemaphoreCreateBinary();
+    SemaphoreHandle_t lifecycle_mutex = xSemaphoreCreateRecursiveMutex();
+    if (!drain_sem || !lifecycle_mutex) {
+        if (drain_sem) vSemaphoreDelete(drain_sem);
+        if (lifecycle_mutex) vSemaphoreDelete(lifecycle_mutex);
+        vQueueDelete(queue);
+        heap_caps_free(storage);
+        heap_caps_free(control);
+        wardrive_obs_init_done();
+        return false;
+    }
+
+    StackType_t *stack = NULL;
+#if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
+    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (!stack) {
+        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!stack || !tcb) {
+        if (stack) heap_caps_free(stack);
+        if (tcb) heap_caps_free(tcb);
+        vSemaphoreDelete(drain_sem);
+        vSemaphoreDelete(lifecycle_mutex);
+        vQueueDelete(queue);
+        heap_caps_free(storage);
+        heap_caps_free(control);
+        wardrive_obs_init_done();
+        return false;
+    }
+
+    wardrive_obs_queue = queue;
+    wardrive_obs_queue_control = control;
+    wardrive_obs_queue_storage = storage;
+    wardrive_obs_queue_capacity = capacity;
+    wardrive_obs_queue_in_psram = in_psram;
+    wardrive_obs_task_stack = stack;
+    wardrive_obs_task_tcb = tcb;
+    wardrive_obs_drain_sem = drain_sem;
+    wardrive_obs_lifecycle_mutex = lifecycle_mutex;
+    wardrive_obs_task_handle = xTaskCreateStatic(wardrive_obs_task, "wd_obs", WARDRIVE_OBS_TASK_STACK_BYTES,
+                                                 NULL, 2, stack, tcb);
+    if (!wardrive_obs_task_handle) {
+        wardrive_obs_queue = NULL;
+        vQueueDelete(queue);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
+        heap_caps_free(storage);
+        heap_caps_free(control);
+        vSemaphoreDelete(drain_sem);
+        vSemaphoreDelete(lifecycle_mutex);
+        wardrive_obs_queue_control = NULL;
+        wardrive_obs_queue_storage = NULL;
+        wardrive_obs_task_stack = NULL;
+        wardrive_obs_task_tcb = NULL;
+        wardrive_obs_drain_sem = NULL;
+        wardrive_obs_lifecycle_mutex = NULL;
+        wardrive_obs_queue_capacity = 0;
+        wardrive_obs_init_done();
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Wardrive observation queue: %u entries, %u bytes (%s), stack=%u bytes",
+             (unsigned)capacity, (unsigned)storage_size, in_psram ? "PSRAM" : "internal RAM",
+             (unsigned)WARDRIVE_OBS_TASK_STACK_BYTES);
+    wardrive_obs_init_done();
+    return true;
+}
+
+static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_source_t source) {
+    if (!data || source == WARDRIVE_OBS_DRAIN_FENCE) return false;
+
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    bool accepted = wardrive_obs_accepting && wardrive_obs_queue != NULL;
+    if (accepted) wardrive_obs_active_producers++;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
+    if (!accepted) return false;
+
+    wardrive_obs_item_t item = {.source = source, .data = *data};
+    item.has_gps_snapshot = gps_manager_get_recent_active_gps_snapshot(&item.gps_snapshot,
+                                                                       &item.using_peer_gps);
+    bool queued = xQueueSend(wardrive_obs_queue, &item, 0) == pdTRUE;
+    UBaseType_t depth = queued ? uxQueueMessagesWaiting(wardrive_obs_queue) : 0;
+
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    if (queued) {
+        wardrive_obs_enqueued++;
+        if (depth > wardrive_obs_high_water) wardrive_obs_high_water = depth;
+    } else if (source == WARDRIVE_OBS_HELPER) {
+        wardrive_obs_drop_helper++;
+    } else {
+        wardrive_obs_drop_local++;
+    }
+    wardrive_obs_active_producers--;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
+    return queued;
+}
+
+static void wardrive_obs_session_stop_and_drain(void) {
+    if (!wardrive_obs_lifecycle_mutex) return;
+    xSemaphoreTakeRecursive(wardrive_obs_lifecycle_mutex, portMAX_DELAY);
+
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    bool was_accepting = wardrive_obs_accepting;
+    wardrive_obs_accepting = false;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
+
+    if (!was_accepting) {
+        xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+        return;
+    }
+
+    for (;;) {
+        portENTER_CRITICAL(&wardrive_obs_mux);
+        uint32_t active = wardrive_obs_active_producers;
+        portEXIT_CRITICAL(&wardrive_obs_mux);
+        if (active == 0) break;
+        vTaskDelay(1);
+    }
+
+    if (wardrive_obs_queue && wardrive_obs_task_handle) {
+        wardrive_obs_item_t fence = {.source = WARDRIVE_OBS_DRAIN_FENCE};
+        (void)xSemaphoreTake(wardrive_obs_drain_sem, 0);
+        if (xQueueSend(wardrive_obs_queue, &fence, portMAX_DELAY) == pdTRUE) {
+            xSemaphoreTake(wardrive_obs_drain_sem, portMAX_DELAY);
+        }
+    }
+
+    glog("Wardrive queue: enqueued=%lu high=%u/%u dropped(local/helper/sink)=%lu/%lu/%lu storage=%s\n",
+         (unsigned long)wardrive_obs_enqueued,
+         (unsigned)wardrive_obs_high_water,
+         (unsigned)wardrive_obs_queue_capacity,
+         (unsigned long)wardrive_obs_drop_local,
+         (unsigned long)wardrive_obs_drop_helper,
+         (unsigned long)wardrive_obs_drop_sink,
+         wardrive_obs_queue_in_psram ? "PSRAM" : "internal");
+    xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+}
 
 static uint8_t wardrive_select_auth_code(const char *encryption_type) {
     if (!encryption_type) {
@@ -474,6 +757,9 @@ static bool wardrive_send_peer_gps_stream(void) {
     if (!esp_comm_manager_is_connected()) {
         return false;
     }
+    if (!gps_manager_has_recent_update()) {
+        return false;
+    }
 
     gps_t gps_local = {0};
     if (!gps_manager_get_local_gps_snapshot(&gps_local)) {
@@ -586,12 +872,15 @@ static void peer_gps_stream_task(void *arg) {
             }
 #endif
 
-            if (gps_manager_get_local_gps_snapshot(&gps_local)) {
+            if (gps_manager_has_recent_update() && gps_manager_get_local_gps_snapshot(&gps_local)) {
                 if (wardrive_send_peer_gps_stream()) {
                     peer_gps_stream_tx_ok++;
                 } else {
                     peer_gps_stream_tx_fail++;
                 }
+            }
+            if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+                (void)wardrive_send_helper_status();
             }
         }
 
@@ -615,6 +904,29 @@ static uint32_t wardrive_get_hop_interval_ms(void) {
         interval_ms = 1000;
     }
     return interval_ms;
+}
+
+static bool wardrive_send_helper_status(void) {
+    if (wardrive_role != WARDRIVE_ROLE_HELPER || !wardriving_hopping_active ||
+        !esp_comm_manager_is_connected()) {
+        return false;
+    }
+
+    gps_t gps = {0};
+    bool gps_ready = gps_manager_has_recent_update() && gps_manager_get_local_gps_snapshot(&gps) &&
+                     gps.valid && gps.fix >= GPS_FIX_GPS && gps.fix_mode >= GPS_MODE_2D &&
+                     gps.sats_in_use >= 3;
+    uint16_t hop_ms = (uint16_t)wardrive_get_hop_interval_ms();
+    uint8_t payload[] = {
+        WARDRIVE_CONTROL_MARKER,
+        WARDRIVE_CONTROL_VERSION,
+        WARDRIVE_CONTROL_HELPER_READY,
+        wardrive_channel_count,
+        (uint8_t)(hop_ms & 0xFF),
+        (uint8_t)(hop_ms >> 8),
+        gps_ready ? 1 : 0,
+    };
+    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_WARDRIVE, payload, sizeof(payload));
 }
 
 static void wardrive_apply_hop_interval(void) {
@@ -1094,7 +1406,7 @@ static inline void ensure_pcap_queue_started(void) {
 
     s_pcap_q = xQueueCreate(EAPOL_Q_LEN, sizeof(pcap_q_item_t));
     if (s_pcap_q != NULL && s_pcap_writer_task == NULL) {
-        xTaskCreate(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
+        xTaskCreate_psram(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
     }
 }
 
@@ -1469,8 +1781,16 @@ static void wardrive_hop_timer_callback(void *arg) {
     if (!wardriving_hopping_active)
         return;
 
-    if (wardrive_role == WARDRIVE_ROLE_PRIMARY && wardrive_peer_assist_active && !esp_comm_manager_is_connected()) {
+    uint32_t now_ms = now_ms_u32();
+    bool helper_status_stale = (wardrive_peer_assist_active || wardrive_peer_assist_pending) &&
+                               wardrive_peer_status_ms != 0 &&
+                               (uint32_t)(now_ms - wardrive_peer_status_ms) > WARDRIVE_HELPER_STATUS_TIMEOUT_MS;
+    if (wardrive_role == WARDRIVE_ROLE_PRIMARY &&
+        (wardrive_peer_assist_active || wardrive_peer_assist_pending) &&
+        (!esp_comm_manager_is_connected() || helper_status_stale)) {
         wardrive_peer_assist_active = false;
+        wardrive_peer_assist_pending = false;
+        wardrive_peer_status_ms = 0;
         gps_manager_set_peer_gps_preferred(false);
         gps_manager_clear_peer_fix();
         wardrive_build_channel_list();
@@ -1479,7 +1799,7 @@ static void wardrive_hop_timer_callback(void *arg) {
             wardrive_channel = wardrive_channels[0];
             (void)esp_wifi_set_channel(wardrive_channel, WIFI_SECOND_CHAN_NONE);
         }
-        glog("Wardrive: peer helper link lost, continuing local scan only\n");
+        glog("Wardrive: peer helper unavailable, continuing local scan only\n");
         wardrive_apply_hop_interval();
     }
 
@@ -1522,6 +1842,9 @@ static esp_err_t start_wardrive_channel_hopping(void) {
     err = esp_timer_start_periodic(wardrive_hop_timer, (uint64_t)interval_ms * 1000ULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start wardrive hop timer: %s", esp_err_to_name(err));
+        wardriving_hopping_active = false;
+        esp_timer_delete(wardrive_hop_timer);
+        wardrive_hop_timer = NULL;
         toast_show("Wardrive hop failed", TOAST_ERROR);
         return err;
     }
@@ -1549,6 +1872,10 @@ static void wardrive_heartbeat_cb(void *arg) {
 
     if (!wardriving_hopping_active) {
         return;
+    }
+
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        (void)wardrive_send_helper_status();
     }
 
     gps_t gps_snapshot = {0};
@@ -1600,9 +1927,16 @@ static void wardrive_heartbeat_cb(void *arg) {
     size_t pending = csv_get_pending_bytes();
     size_t heap_free = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     size_t heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    UBaseType_t queue_depth = wardrive_obs_queue ? uxQueueMessagesWaiting(wardrive_obs_queue) : 0;
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    UBaseType_t queue_high_water = wardrive_obs_high_water;
+    uint32_t queue_drop_local = wardrive_obs_drop_local;
+    uint32_t queue_drop_helper = wardrive_obs_drop_helper;
+    uint32_t queue_drop_sink = wardrive_obs_drop_sink;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
 
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
+        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -1625,11 +1959,17 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned long)up_rem_s,
              fix_status,
              (unsigned)sats,
+             (unsigned)queue_depth,
+             (unsigned)wardrive_obs_queue_capacity,
+             (unsigned)queue_high_water,
+             (unsigned long)queue_drop_local,
+             (unsigned long)queue_drop_helper,
+             (unsigned long)queue_drop_sink,
              (unsigned)pending,
              (unsigned)heap_free,
              (unsigned)heap_largest);
     } else {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u pending=%uB heap=%u/%uB\n",
+        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -1645,6 +1985,12 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned long)up_rem_s,
              fix_status,
              (unsigned)sats,
+             (unsigned)queue_depth,
+             (unsigned)wardrive_obs_queue_capacity,
+             (unsigned)queue_high_water,
+             (unsigned long)queue_drop_local,
+             (unsigned long)queue_drop_helper,
+             (unsigned long)queue_drop_sink,
              (unsigned)pending,
              (unsigned)heap_free,
              (unsigned)heap_largest);
@@ -1812,7 +2158,28 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     (void)channel;
     (void)user_data;
 
-    if (!data || length < (1 + 1 + 1 + 1 + 6 + 1)) {
+    if (!data) {
+        return;
+    }
+    if (length >= 7 && data[0] == WARDRIVE_CONTROL_MARKER) {
+        if (data[1] == WARDRIVE_CONTROL_VERSION && data[2] == WARDRIVE_CONTROL_HELPER_READY &&
+            wardriving_hopping_active && wardrive_role == WARDRIVE_ROLE_PRIMARY) {
+            uint16_t hop_ms = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+            wardrive_peer_status_ms = now_ms_u32();
+            if (wardrive_peer_assist_pending && data[3] > 0 && data[6] != 0) {
+                wardrive_peer_assist_pending = false;
+                wardriving_set_peer_assist(true);
+                glog("Wardrive helper ready: channels=%u hop=%ums gps=%s\n",
+                     (unsigned)data[3], (unsigned)hop_ms, data[6] ? "ready" : "waiting");
+            } else if (wardrive_peer_assist_active && (data[3] == 0 || data[6] == 0)) {
+                wardriving_set_peer_assist(false);
+                wardrive_peer_assist_pending = true;
+                glog("Wardrive helper GPS unavailable; using local GPS and full channel plan\n");
+            }
+        }
+        return;
+    }
+    if (length < (1 + 1 + 1 + 1 + 6 + 1)) {
         return;
     }
     if (!wardriving_hopping_active || wardrive_role != WARDRIVE_ROLE_PRIMARY) {
@@ -1915,8 +2282,6 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
                 peer_fix.valid &&
                 peer_fix.latitude >= -90.0f && peer_fix.latitude <= 90.0f &&
                 peer_fix.longitude >= -180.0f && peer_fix.longitude <= 180.0f;
-
-            gps_manager_update_peer_fix(&peer_fix);
         }
     }
 
@@ -1948,14 +2313,7 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
         wardriving_data.accuracy = peer_fix.hdop * 5.0f;
     }
 
-    wardrive_log_attempts++;
-    esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
-    if (err == ESP_ERR_INVALID_STATE) {
-        wardrive_gps_rejected++;
-    } else if (err == ESP_OK) {
-        wardrive_log_ok++;
-        wardrive_helper_merged_ok++;
-    }
+    (void)wardrive_obs_submit(&wardriving_data, WARDRIVE_OBS_HELPER);
 }
 
 static void gps_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length, void *user_data) {
@@ -2166,34 +2524,82 @@ void wardriving_set_helper_weighted_5g(bool enabled) {
     }
 }
 
-void start_wardriving(void) {
+bool start_wardriving(void) {
+    if (!wardrive_obs_queue_ensure()) {
+        ESP_LOGE(TAG, "Failed to create wardrive observation queue");
+        return false;
+    }
+    xSemaphoreTakeRecursive(wardrive_obs_lifecycle_mutex, portMAX_DELAY);
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    bool already_accepting = wardrive_obs_accepting;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
+    if (already_accepting) {
+        xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+        ESP_LOGW(TAG, "Wardrive observation queue already active");
+        return false;
+    }
+
+    xQueueReset(wardrive_obs_queue);
+    portENTER_CRITICAL(&wardrive_obs_mux);
+    wardrive_obs_enqueued = 0;
+    wardrive_obs_drop_local = 0;
+    wardrive_obs_drop_helper = 0;
+    wardrive_obs_drop_sink = 0;
+    wardrive_obs_high_water = 0;
+    wardrive_obs_active_producers = 0;
+    wardrive_obs_accepting = true;
+    portEXIT_CRITICAL(&wardrive_obs_mux);
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
+    wardrive_peer_assist_active = false;
+    wardrive_peer_assist_pending = false;
+    wardrive_peer_status_ms = 0;
     wardrive_forced_helper_channel_count = 0;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
-    start_wardrive_channel_hopping();
+    if (start_wardrive_channel_hopping() != ESP_OK) {
+        wardrive_obs_session_stop_and_drain();
+        xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+        return false;
+    }
     start_wardrive_heartbeat();
+    xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+    return true;
 }
 
-void start_wardriving_helper(void) {
+bool start_wardriving_helper(void) {
     wardrive_role = WARDRIVE_ROLE_HELPER;
     wardrive_peer_assist_active = false;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
-    start_wardrive_channel_hopping();
+    if (start_wardrive_channel_hopping() != ESP_OK) {
+        glog("Wardriving helper failed to start channel hopping.\n");
+        return false;
+    }
     start_wardrive_heartbeat();
+    (void)wardrive_send_helper_status();
+    return true;
 }
 
 void stop_wardriving(void) {
+    if (wardrive_obs_lifecycle_mutex) {
+        xSemaphoreTakeRecursive(wardrive_obs_lifecycle_mutex, portMAX_DELAY);
+    }
+    bool was_primary = wardrive_role == WARDRIVE_ROLE_PRIMARY;
     stop_wardrive_heartbeat();
     stop_wardrive_channel_hopping();
+    if (was_primary) wardrive_obs_session_stop_and_drain();
     wardrive_role = WARDRIVE_ROLE_PRIMARY;
     wardrive_peer_assist_active = false;
+    wardrive_peer_assist_pending = false;
+    wardrive_peer_status_ms = 0;
     wardrive_forced_helper_channel_count = 0;
     wardrive_helper_hop_override_ms = 0;
     wardrive_weighted_5g_override = false;
     gps_manager_set_peer_gps_preferred(false);
     gps_manager_clear_peer_fix();
+    if (wardrive_obs_lifecycle_mutex) {
+        xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+    }
 }
 
 void wardriving_set_peer_assist(bool enabled) {
@@ -2204,6 +2610,9 @@ void wardriving_set_peer_assist(bool enabled) {
         gps_manager_clear_peer_fix();
     }
     if (changed && wardrive_role == WARDRIVE_ROLE_PRIMARY) {
+        if (wardriving_hopping_active && wardrive_hop_timer != NULL) {
+            (void)esp_timer_stop(wardrive_hop_timer);
+        }
         wardrive_build_channel_list();
         wardrive_channel_idx = 0;
         if (wardrive_channel_count > 0) {
@@ -2214,8 +2623,25 @@ void wardriving_set_peer_assist(bool enabled) {
     }
 }
 
+void wardriving_expect_peer_assist(bool enabled) {
+    wardrive_peer_assist_pending = enabled;
+    wardrive_peer_status_ms = enabled ? now_ms_u32() : 0;
+    if (enabled && wardrive_peer_status_ms == 0) wardrive_peer_status_ms = 1;
+    if (!enabled && !wardrive_peer_assist_active) {
+        gps_manager_set_peer_gps_preferred(false);
+    }
+}
+
 bool wardriving_is_helper_mode(void) {
     return wardrive_role == WARDRIVE_ROLE_HELPER;
+}
+
+bool wardriving_is_peer_assist_active(void) {
+    return wardrive_peer_assist_active;
+}
+
+bool wardriving_has_peer_helper(void) {
+    return wardrive_peer_assist_active || wardrive_peer_assist_pending;
 }
 
 uint32_t wardriving_get_ap_count(void) {
@@ -2395,6 +2821,7 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
 
         // Add to recent SSIDs circular buffer
         strncpy(network->recent_ssids[network->recent_ssid_index], ssid, 32);
+        network->recent_ssids[network->recent_ssid_index][32] = '\0';
         network->recent_ssid_index = (network->recent_ssid_index + 1) % RECENT_SSID_COUNT;
 
         // If we detect multiple SSIDs from same BSSID, mark as potential Pineap
@@ -2743,6 +3170,20 @@ rsn_done:
 
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
         const char *tx_ssid = (ssid[0] == '\0') ? "" : ssid;
+        uint32_t hash = wardrive_hash_bssid(bssid);
+        uint8_t changed_idx = wardrive_helper_dedupe_idx;
+        for (uint8_t i = 0; i < WARDRIVE_HELPER_DEDUPE_SIZE; i++) {
+            if (wardrive_helper_dedupe[i].used && wardrive_helper_dedupe[i].hash == hash) {
+                changed_idx = i;
+                break;
+            }
+        }
+        wardrive_helper_dedupe_t previous = wardrive_helper_dedupe[changed_idx];
+        uint8_t previous_next_idx = wardrive_helper_dedupe_idx;
+        uint32_t previous_new = wardrive_helper_tx_new;
+        uint32_t previous_promo = wardrive_helper_tx_ssid_promo;
+        uint32_t previous_rssi = wardrive_helper_tx_rssi;
+        uint32_t previous_refresh = wardrive_helper_tx_refresh;
         if (wardrive_helper_should_send(bssid, (int8_t)rssi, tx_ssid)) {
             bool send_ok = wardrive_send_helper_observation(bssid,
                                                             (uint8_t)channel,
@@ -2752,6 +3193,12 @@ rsn_done:
             if (send_ok) {
                 wardrive_helper_stream_send_ok++;
             } else {
+                wardrive_helper_dedupe[changed_idx] = previous;
+                wardrive_helper_dedupe_idx = previous_next_idx;
+                wardrive_helper_tx_new = previous_new;
+                wardrive_helper_tx_ssid_promo = previous_promo;
+                wardrive_helper_tx_rssi = previous_rssi;
+                wardrive_helper_tx_refresh = previous_refresh;
                 wardrive_helper_stream_send_fail++;
             }
         }
@@ -2770,13 +3217,7 @@ rsn_done:
             sizeof(wardriving_data.encryption_type) - 1);
     wardriving_data.encryption_type[sizeof(wardriving_data.encryption_type) - 1] = '\0';
 
-    wardrive_log_attempts++;
-    esp_err_t err = gps_manager_log_wardriving_data(&wardriving_data);
-    if (err == ESP_ERR_INVALID_STATE) {
-        wardrive_gps_rejected++;
-    } else if (err == ESP_OK) {
-        wardrive_log_ok++;
-    }
+    (void)wardrive_obs_submit(&wardriving_data, WARDRIVE_OBS_LOCAL);
 }
 
 void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {

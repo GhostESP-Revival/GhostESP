@@ -748,17 +748,21 @@ void handle_grep_cmd(int argc, char **argv) {
 
 void handle_source_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: source <file>\n"); return; }
+    static int source_depth = 0;
+    if (source_depth >= 4) { glog("source: max nesting depth reached\n"); return; }
     bool suspended = false;
     if (!sd_card_jit_begin(&suspended, false)) { glog("source: SD unavailable\n"); return; }
     char path[256]; shell_file_path(argv[1], path, sizeof(path));
     FILE *file = fopen(path, "r");
     if (!file) { glog("source: %s: %s\n", path, strerror(errno)); sd_card_jit_end(suspended); return; }
     char line[512];
+    source_depth++;
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\r\n")] = '\0';
         char *p = line; while (isspace((unsigned char)*p)) p++;
         if (*p && *p != '#') handle_serial_command(p);
     }
+    source_depth--;
     fclose(file); sd_card_jit_end(suspended);
 }
 
@@ -846,7 +850,7 @@ void handle_watch_cmd(int argc, char **argv) {
     }
     s_watch_stop = false;
     s_watch_interval = seconds;
-    if (xTaskCreate(shell_watch_task, "CliWatch", 4096, command, 1, &s_watch_task) != pdPASS) {
+    if (xTaskCreate(shell_watch_task, "CliWatch", 12288, command, 1, &s_watch_task) != pdPASS) {
         free(command);
         s_watch_task = NULL;
         glog("watch: failed to start task\n");

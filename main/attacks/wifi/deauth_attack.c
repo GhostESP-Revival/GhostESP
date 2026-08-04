@@ -13,6 +13,7 @@
 
 #include "attacks/wifi/deauth_attack.h"
 #include "managers/wifi_manager.h"
+#include "core/system_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/ghostscript_runtime.h"
@@ -34,14 +35,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-// Maximum WiFi channel
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 // Rate limiting
 #define MAX_PACKETS_PER_SECOND 500
@@ -386,7 +380,7 @@ void deauth_attack_start(void) {
         }
         
         deauth_stop_requested = false;
-        BaseType_t rc = xTaskCreate(deauth_task, "deauth_task", 4096, NULL, 5, &deauth_task_handle);
+        BaseType_t rc = xTaskCreate_psram(deauth_task, "deauth_task", 4096, NULL, 5, &deauth_task_handle);
         if (rc != pdPASS) {
             glog("Failed to start deauth task (%ld)\n", (long)rc);
             status_display_show_status("Deauth Start Fail");
@@ -480,7 +474,7 @@ void deauth_attack_start_station(void) {
          selected_station_local.ap_bssid[0], selected_station_local.ap_bssid[1], selected_station_local.ap_bssid[2], 
          selected_station_local.ap_bssid[3], selected_station_local.ap_bssid[4], selected_station_local.ap_bssid[5]);
     deauth_station_stop_requested = false;
-    BaseType_t station_rc = xTaskCreate(deauth_station_task, "deauth_station", 4096, NULL, 5, &deauth_station_task_handle);
+    BaseType_t station_rc = xTaskCreate_psram(deauth_station_task, "deauth_station", 4096, NULL, 5, &deauth_station_task_handle);
     if (station_rc != pdPASS) {
         glog("Failed to start station deauth task (%ld)\n", (long)station_rc);
         status_display_show_status("Deauth Station Fail");
@@ -786,7 +780,7 @@ void deauth_attack_start_handshake_deauth(void) {
         return;
     }
 
-    BaseType_t rc = xTaskCreate(handshake_deauth_task, "hs_deauth_task", 4096, NULL, 5, &handshake_deauth_task_handle);
+    BaseType_t rc = xTaskCreate_psram(handshake_deauth_task, "hs_deauth_task", 4096, NULL, 5, &handshake_deauth_task_handle);
     if (rc != pdPASS) {
         glog("Failed to start handshake+deauth task (%ld)\n", (long)rc);
         status_display_show_status("HS+Deauth Fail");

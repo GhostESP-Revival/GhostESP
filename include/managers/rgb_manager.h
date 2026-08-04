@@ -139,6 +139,6 @@ void rgb_manager_register_mic_stream_handler(void);
 
 extern RGBManager_t rgb_manager;
 
-TaskHandle_t rgb_effect_task_handle;
+extern TaskHandle_t rgb_effect_task_handle;
 
 #endif // RGB_MANAGER_H

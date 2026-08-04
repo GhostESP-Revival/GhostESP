@@ -50,7 +50,6 @@ static lv_obj_t *compass_needle = NULL;
 static bool wardriving_initialized_gps = false;
 static bool wardriving_scan_mode = false;
 static bool wardriving_ble_mode = false;
-static bool wardriving_peer_helper_active = false;
 static bool wardriving_owns_csv_session = false;
 static bool touch_press_active = false;
 
@@ -475,7 +474,7 @@ static void update_display_cb(lv_timer_t *timer) {
         bool connected = esp_comm_manager_is_connected();
         bool peer_gps_mode = !wardriving_scan_mode && gps_manager_is_peer_gps_preferred();
         bool ghostlink_enabled = connected && !wardriving_is_helper_mode() &&
-                                 ((wardriving_scan_mode && wardriving_peer_helper_active) ||
+                                 ((wardriving_scan_mode && wardriving_has_peer_helper()) ||
                                   peer_gps_mode);
         lv_label_set_text(lbl_link_mode, ghostlink_enabled ? "GhostLink" : "Standalone");
     }
@@ -757,7 +756,6 @@ void wardriving_view_create(void) {
     }
 
     touch_press_active = false;
-    wardriving_peer_helper_active = false;
     wardriving_owns_csv_session = false;
     
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -769,7 +767,6 @@ void wardriving_view_create(void) {
     
     bool peer_connected = esp_comm_manager_is_connected();
     bool peer_only_mode = !wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
-    bool defer_local_for_peer_helper = wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
     bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode) && csv_file_is_open();
 
     if (observing_existing_session) {
@@ -783,22 +780,18 @@ void wardriving_view_create(void) {
         wardriving_initialized_gps = false;
     } else {
         gps_manager_set_peer_gps_preferred(false);
-        if (!defer_local_for_peer_helper) {
-            gps_t local_gps = {0};
-            bool gps_stale_or_missing = g_gpsManager.isinitilized &&
-                                        (!gps_manager_get_local_gps_snapshot(&local_gps) ||
-                                         !gps_manager_has_recent_update());
-            if (gps_stale_or_missing) {
-                ESP_LOGW(TAG, "GPS parser stale/missing on entry; restarting GPS");
-                gps_manager_deinit(&g_gpsManager);
-            }
+        gps_t local_gps = {0};
+        bool gps_stale_or_missing = g_gpsManager.isinitilized &&
+                                    (!gps_manager_get_local_gps_snapshot(&local_gps) ||
+                                     !gps_manager_has_recent_update());
+        if (gps_stale_or_missing) {
+            ESP_LOGW(TAG, "GPS parser stale/missing on entry; restarting GPS");
+            gps_manager_deinit(&g_gpsManager);
+        }
 
-            if (!g_gpsManager.isinitilized) {
-                gps_manager_init(&g_gpsManager);
-                wardriving_initialized_gps = true;
-            }
-        } else {
-            glog("Wardrive: deferring local GPS init until peer helper result.\n");
+        if (!g_gpsManager.isinitilized) {
+            gps_manager_init(&g_gpsManager);
+            wardriving_initialized_gps = true;
         }
     }
 
@@ -816,42 +809,38 @@ void wardriving_view_create(void) {
         csv_ok = (csv_file_open("wardriving") == ESP_OK);
         if (csv_ok) {
             wifi_manager_start_monitor_mode(wardriving_scan_callback);
-            start_wardriving();
+            if (!start_wardriving()) {
+                wifi_manager_stop_monitor_mode();
+                csv_file_close();
+                csv_ok = false;
+                glog("Failed to start wardriving observation queue.\n");
+            }
         }
 
         bool peer_helper_ok = false;
         if (csv_ok && esp_comm_manager_is_connected()) {
-            char helper_args[256] = "--helper";
+            char helper_command[256];
             char helper_plan_csv[192] = {0};
             uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
             bool weighted = settings_get_wd_weighted_5g(&G_Settings);
             if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                snprintf(helper_args, sizeof(helper_args), "--helper --channels %s --hop %u%s",
+                snprintf(helper_command, sizeof(helper_command),
+                         "startwd --helper --channels %s --hop %u%s",
                          helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
             } else {
-                snprintf(helper_args, sizeof(helper_args), "--helper --hop %u%s",
+                snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
                          (unsigned)hop_ms, weighted ? " --weighted" : "");
             }
-            peer_helper_ok = esp_comm_manager_send_command("startwd", helper_args);
+            wardriving_expect_peer_assist(true);
+            peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
+            if (!peer_helper_ok) wardriving_expect_peer_assist(false);
             glog(peer_helper_ok
-                     ? "Wardrive helper started on peer (split-channel).\n"
+                     ? "Wardrive helper start sent; waiting for ready status.\n"
                      : "Wardrive helper not started on peer; continuing local only.\n");
         } else {
             glog("Wardrive helper unavailable: no GhostLink peer connected.\n");
         }
-        wardriving_set_peer_assist(peer_helper_ok);
-        wardriving_peer_helper_active = peer_helper_ok;
-        if (peer_helper_ok && should_prefer_peer_only_in_view() && g_gpsManager.isinitilized) {
-            gps_manager_deinit(&g_gpsManager);
-            wardriving_initialized_gps = false;
-            glog("Wardrive: peer helper active, local soft GPS disabled.\n");
-        } else if (!peer_helper_ok && defer_local_for_peer_helper && !g_gpsManager.isinitilized) {
-            gps_manager_set_peer_gps_preferred(false);
-            gps_manager_clear_peer_fix();
-            gps_manager_init(&g_gpsManager);
-            wardriving_initialized_gps = true;
-            glog("Wardrive: peer helper unavailable, local GPS enabled.\n");
-        }
+        if (!peer_helper_ok) wardriving_set_peer_assist(false);
     }
     wardriving_owns_csv_session = csv_ok && !observing_existing_session &&
                                     (wardriving_scan_mode || wardriving_ble_mode);
@@ -1060,7 +1049,6 @@ void wardriving_view_destroy(void) {
                      : "Wardrive helper stop could not be sent to peer.\n");
         }
         wardriving_set_peer_assist(false);
-        wardriving_peer_helper_active = false;
         wifi_manager_stop_monitor_mode();
         if (csv_buffer_has_pending_data()) {
             csv_flush_buffer_to_file();
@@ -1109,7 +1097,6 @@ void wardriving_view_destroy(void) {
     lbl_link_mode = NULL;
     compass_arc = NULL;
     compass_needle = NULL;
-    wardriving_peer_helper_active = false;
     wardriving_view_ready_us = 0;
     if (owned_csv_session) {
         gps_manager_set_peer_gps_preferred(false);

@@ -88,14 +88,7 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
                                   const char *track_name,
                                   const char *artist_name);
 
-// Defines for Wireshark channel validation
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#elif defined(CONFIG_IDF_TARGET_ESP32C6)
-#define MAX_WIFI_CHANNEL 13
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
+#include "core/network_constants.h"
 
 #define MAX_DEVICES 255
 #define CHUNK_SIZE 4096
@@ -691,7 +684,13 @@ static void wifi_reconnect_timer_stop(void) {
     }
 }
 
+static bool wifi_reconnect_hold = false;
+
 static bool wifi_reconnect_blocked(const char **reason_out) {
+    if (wifi_reconnect_hold) {
+        if (reason_out) *reason_out = "radio reserved";
+        return true;
+    }
     if (wifi_monitor_capture_active) {
         if (reason_out) *reason_out = "monitor mode";
         return true;
@@ -710,6 +709,11 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
     }
 
     return false;
+}
+
+void wifi_manager_set_reconnect_hold(bool hold) {
+    wifi_reconnect_hold = hold;
+    if (hold) wifi_manager_stop_reconnect();
 }
 
 static void wifi_reconnect_reset(void) {
@@ -2293,7 +2297,7 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     if (callback == wifi_beacon_scan_callback || callback == wifi_probe_scan_callback || 
         callback == wifi_deauth_scan_callback || callback == wifi_pwn_scan_callback ||
         callback == wifi_wps_detection_callback || callback == wifi_listen_probes_callback ||
-        callback == wifi_pineap_detector_callback) {
+        callback == wifi_pineap_detector_callback || callback == wardriving_scan_callback) {
         // Management frames only
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
     } else if (callback == wifi_eapol_scan_callback) {

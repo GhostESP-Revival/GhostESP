@@ -33,7 +33,7 @@ PSRAM-enabled configs include:
 - `lolins3pro`
 - `tdeck`
 - `poltergeist`
-- The Banshee (`somethingsomething`)
+- The Banshee (`Banshee_C5` build)
 
 ## How it works
 
@@ -68,7 +68,7 @@ Both paths use a small heap-backed cache for repeated queries.
 ### On-Device UI
 
 1. Connect to a network (WiFi via `connect`, or Ethernet) first.
-2. Open **WiFi → DNS Sinkhole → Start**.
+2. Open **Menu → WiFi → DNS Sinkhole → Start**.
 3. The display will show "Sinkhole On" and the ESP's IP address.
 
 The on-device flow opens a terminal view while the sinkhole is active. Backing out of that terminal stops the sinkhole and restores the normal AP services.
@@ -122,9 +122,9 @@ resolvectl dns <interface> <ESP_IP>
 ## Stopping the sinkhole
 
 ### On-device UI
-Open **WiFi → DNS Sinkhole → Stop**.
+Open **Menu → WiFi → DNS Sinkhole → Stop**.
 
-### Command line
+### Command line (stop)
 ```
 sinkhole stop
 ```

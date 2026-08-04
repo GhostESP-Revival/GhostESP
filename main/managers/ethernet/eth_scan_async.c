@@ -5,6 +5,7 @@
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -524,7 +525,7 @@ void eth_scan_start_arp(void) {
     eth_scan_reset();
     s_results.type = ETH_SCAN_TYPE_ARP;
     s_running = true;
-    xTaskCreate(arp_scan_task, "eth_arp_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(arp_scan_task, "eth_arp_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 void eth_scan_start_port(const char *target_ip, bool scan_all) {
@@ -535,7 +536,7 @@ void eth_scan_start_port(const char *target_ip, bool scan_all) {
         strlcpy(s_results.target_ip, target_ip, sizeof(s_results.target_ip));
     }
     s_running = true;
-    xTaskCreate(port_scan_task, "eth_port_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(port_scan_task, "eth_port_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 void eth_scan_start_ping(void) {
@@ -543,7 +544,7 @@ void eth_scan_start_ping(void) {
     eth_scan_reset();
     s_results.type = ETH_SCAN_TYPE_PING;
     s_running = true;
-    xTaskCreate(ping_scan_task, "eth_ping_scan", 8192, NULL, 5, &s_task_handle);
+    xTaskCreate_psram(ping_scan_task, "eth_ping_scan", 8192, NULL, 5, &s_task_handle);
 }
 
 #endif // CONFIG_WITH_ETHERNET

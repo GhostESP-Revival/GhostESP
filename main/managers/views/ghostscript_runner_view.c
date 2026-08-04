@@ -26,8 +26,10 @@
 #define GS_RUNNER_TOUCH_BTN_SIZE 36
 #define GS_RUNNER_TOUCH_BTN_PADDING 6
 #define GS_RUNNER_TOUCH_BAR_HEIGHT (GS_RUNNER_TOUCH_BTN_SIZE + GS_RUNNER_TOUCH_BTN_PADDING * 2)
+#define GS_RUNNER_TITLE_BUF_SIZE 64
+#define GS_RUNNER_STATUS_BUF_SIZE 96
 
-static char s_pending_path[GHOSTSCRIPT_PATH_MAX];
+static char *s_pending_path;
 static lv_obj_t *s_root;
 static lv_obj_t *s_title;
 static lv_obj_t *s_status;
@@ -209,16 +211,16 @@ done:
 }
 
 static volatile int s_ui_dirty;
-static char s_title_buf[64];
-static char s_status_buf[96];
+static char *s_title_buf;
+static char *s_status_buf;
 static lv_timer_t *s_flush_timer;
 
 static void flush_ui(void *arg) {
     (void)arg;
     s_ui_dirty = 0;
-    if (s_title && lv_obj_is_valid(s_title) && s_title_buf[0])
+    if (s_title && lv_obj_is_valid(s_title) && s_title_buf && s_title_buf[0])
         lv_label_set_text(s_title, s_title_buf);
-    if (s_status && lv_obj_is_valid(s_status) && s_status_buf[0])
+    if (s_status && lv_obj_is_valid(s_status) && s_status_buf && s_status_buf[0])
         lv_label_set_text(s_status, s_status_buf);
     if (s_output && lv_obj_is_valid(s_output) && s_output_buf) {
         if (s_output_mutex && xSemaphoreTake(s_output_mutex, 0) == pdTRUE) {
@@ -236,13 +238,13 @@ static void flush_ui(void *arg) {
  * even when the script doesn't print anything. */
 static void flush_timer_cb(lv_timer_t *t) {
     (void)t;
-    if (s_title && lv_obj_is_valid(s_title) && s_title_buf[0]) {
+    if (s_title && lv_obj_is_valid(s_title) && s_title_buf && s_title_buf[0]) {
         /* Re-set text only if it differs; LVGL won't redraw otherwise. */
         const char *cur = lv_label_get_text(s_title);
         if (!cur || strcmp(cur, s_title_buf) != 0)
             lv_label_set_text(s_title, s_title_buf);
     }
-    if (s_status && lv_obj_is_valid(s_status) && s_status_buf[0]) {
+    if (s_status && lv_obj_is_valid(s_status) && s_status_buf && s_status_buf[0]) {
         const char *cur = lv_label_get_text(s_status);
         if (!cur || strcmp(cur, s_status_buf) != 0)
             lv_label_set_text(s_status, s_status_buf);
@@ -264,13 +266,15 @@ static void flush_timer_cb(lv_timer_t *t) {
 
 static void runner_set_title(const char *title, void *user) {
     (void)user;
-    snprintf(s_title_buf, sizeof(s_title_buf), "%s", title ? title : "GhostScript");
+    if (!s_title_buf) return;
+    snprintf(s_title_buf, GS_RUNNER_TITLE_BUF_SIZE, "%s", title ? title : "GhostScript");
     if (__sync_lock_test_and_set(&s_ui_dirty, 1) == 0)
         display_manager_run_on_lvgl(flush_ui, NULL);
 }
 
 static void runner_set_status(const char *status) {
-    snprintf(s_status_buf, sizeof(s_status_buf), "%s", status ? status : "Idle");
+    if (!s_status_buf) return;
+    snprintf(s_status_buf, GS_RUNNER_STATUS_BUF_SIZE, "%s", status ? status : "Idle");
     if (__sync_lock_test_and_set(&s_ui_dirty, 1) == 0)
         display_manager_run_on_lvgl(flush_ui, NULL);
 }
@@ -372,8 +376,9 @@ static void dispatch_touch_bar_press(const lv_indev_data_t *data) {
 }
 
 void ghostscript_runner_set_script(const char *path) {
-    s_pending_path[0] = '\0';
-    if (path) snprintf(s_pending_path, sizeof(s_pending_path), "%s", path);
+    char *pending_path = path ? strndup(path, GHOSTSCRIPT_PATH_MAX - 1) : NULL;
+    free(s_pending_path);
+    s_pending_path = pending_path;
 }
 
 static void launch_now(void) {
@@ -391,7 +396,7 @@ static void launch_now(void) {
         xSemaphoreGive(s_lifecycle_mutex);
         return;
     }
-    snprintf(task_args->path, sizeof(task_args->path), "%s", s_pending_path);
+    snprintf(task_args->path, sizeof(task_args->path), "%s", s_pending_path ? s_pending_path : "");
     BaseType_t ok = xTaskCreateWithCaps(script_task_fn, "gs_script", GS_RUNNER_TASK_STACK,
                                         task_args, 5, &s_script_task,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -530,6 +535,9 @@ void ghostscript_runner_view_create(void) {
      * demand when the user returns to the browser or app menu. */
     gui_screen_invalidate_bg_cache();
     asset_pack_release_cached_images();
+    if (!s_title_buf) s_title_buf = malloc(GS_RUNNER_TITLE_BUF_SIZE);
+    if (!s_status_buf) s_status_buf = malloc(GS_RUNNER_STATUS_BUF_SIZE);
+    if (!s_title_buf || !s_status_buf) return;
     if (!s_lifecycle_mutex) {
         s_lifecycle_mutex = xSemaphoreCreateMutex();
         if (!s_lifecycle_mutex) return;
@@ -581,12 +589,12 @@ void ghostscript_runner_view_create(void) {
     lv_obj_set_style_pad_all(content, 8, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     s_title = lv_label_create(content);
-    snprintf(s_title_buf, sizeof(s_title_buf), "Loading script...");
+    snprintf(s_title_buf, GS_RUNNER_TITLE_BUF_SIZE, "Loading script...");
     lv_label_set_text(s_title, s_title_buf);
     lv_obj_set_style_text_color(s_title, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_16, 0);
     s_status = lv_label_create(content);
-    snprintf(s_status_buf, sizeof(s_status_buf), "Loading | autoscroll on");
+    snprintf(s_status_buf, GS_RUNNER_STATUS_BUF_SIZE, "Loading | autoscroll on");
     lv_label_set_text(s_status, s_status_buf);
     lv_obj_set_style_text_color(s_status, lv_color_hex(0xAAB0C0), 0);
     lv_obj_set_style_text_font(s_status, &lv_font_montserrat_12, 0);

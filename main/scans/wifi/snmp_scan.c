@@ -30,6 +30,7 @@
 #define SNMP_PORT 161
 #define SNMP_MAX_COMMUNITIES 2
 #define SNMP_BUFFER_SIZE 512
+#define SNMP_WALK_MAX_ENTRIES 10000
 
 // Module tag for logging
 static const char *TAG = "SNMPScan";
@@ -681,7 +682,7 @@ static void snmp_walk_host_internal(const char *target_ip, const char *community
     dest_addr.sin_port = htons(SNMP_PORT);
     inet_pton(AF_INET, target_ip, &dest_addr.sin_addr);
 
-    while (!g_network_scan_cancel) {
+    while (!g_network_scan_cancel && walk_count < SNMP_WALK_MAX_ENTRIES) {
         uint8_t packet[512];
         uint32_t req_id = esp_random() & 0x7FFF;
         size_t pkt_len = build_snmp_getnext_request(packet, sizeof(packet),
@@ -747,6 +748,9 @@ static void snmp_walk_host_internal(const char *target_ip, const char *community
 
     if (walk_count == 0) {
         glog("[SNMP-WALK] %s: No entries under OID %s\n", target_ip, oid_root);
+    } else if (walk_count >= SNMP_WALK_MAX_ENTRIES) {
+        glog("[SNMP-WALK] %s: Reached %d entry limit under OID %s\n",
+             target_ip, SNMP_WALK_MAX_ENTRIES, oid_root);
     }
 }
 

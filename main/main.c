@@ -18,6 +18,7 @@
 #include "managers/peer_ota_manager.h"
 #include "managers/peer_storage_manager.h"
 #include "managers/self_ota_manager.h"
+#include "managers/crash_reporter.h"
 #include "managers/wifi_manager.h"
 #include "gui/asset_pack.h"
 #include "gui/toast.h"
@@ -49,6 +50,7 @@
 #include <string.h>
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
 #include "esp_partition.h"
 #endif
 
@@ -382,24 +384,68 @@ static void coredump_write_summary(const char *summary_path, const char *bin_pat
     if (elf_offset > 0) {
         fprintf(f, "elf_offset=%d\n", elf_offset);
     }
-    fprintf(f, "panic_reason=%s\n", panic_reason && panic_reason[0] ? panic_reason : "not_available");
+    fprintf(f, "panic_reason=%s\n", panic_reason && panic_reason[0] ? panic_reason : "run idf.py coredump-info for decoded panic reason");
     fprintf(f, "decode_hint=idf.py coredump-info -c <file>\n");
     fclose(f);
 }
 
-static void coredump_autosave_on_boot(void) {
+/* Decode the panic reason recorded in the flash coredump, if any. Returns
+ * true and fills out[] with a short human-readable reason. */
+static bool coredump_get_panic_reason_text(char *out, size_t out_len) {
+    if (!out || out_len == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    esp_err_t err = esp_core_dump_get_panic_reason(out, out_len);
+    if (err == ESP_OK && out[0] != '\0') {
+        return true;
+    }
+#if defined(__riscv)
+    static const char *const riscv_causes[] = {
+        "Instruction address misaligned", "Instruction access fault", "Illegal instruction",
+        "Breakpoint", "Load address misaligned", "Load access fault",
+        "Store address misaligned", "Store access fault"
+    };
+    esp_core_dump_summary_t summary;
+    if (esp_core_dump_get_summary(&summary) == ESP_OK) {
+        uint32_t cause = summary.ex_info.mcause;
+        if (cause < sizeof(riscv_causes) / sizeof(riscv_causes[0])) {
+            snprintf(out, out_len, "%s", riscv_causes[cause]);
+        } else {
+            snprintf(out, out_len, "RISC-V exception %lu", (unsigned long)cause);
+        }
+        return true;
+    }
+#endif
+    return false;
+}
+
+/* Returns true if a coredump was found in flash, meaning the previous boot
+ * ended in a crash. The coredump is saved to the SD card when possible. */
+static bool coredump_autosave_on_boot(char *panic_reason, size_t panic_reason_len) {
+    if (panic_reason && panic_reason_len) {
+        panic_reason[0] = '\0';
+    }
     const esp_partition_t *part = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA,
         ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
         NULL);
     if (!part) {
-        return;
+        return false;
     }
 
     int elf_offset = -1;
     uint32_t sig = 0;
     if (!coredump_detect_present_and_sig(part, &elf_offset, &sig)) {
-        return;
+        return false;
+    }
+
+    char decoded_reason[256];
+    if (!coredump_get_panic_reason_text(decoded_reason, sizeof(decoded_reason))) {
+        decoded_reason[0] = '\0';
+    }
+    if (panic_reason && panic_reason_len) {
+        snprintf(panic_reason, panic_reason_len, "%s", decoded_reason);
     }
 
     bool display_was_suspended = false;
@@ -407,7 +453,7 @@ static void coredump_autosave_on_boot(void) {
     if (!sd_card_manager.is_initialized) {
         if (sd_card_mount_for_flush(&display_was_suspended) != ESP_OK) {
             ESP_LOGW(TAG, "Coredump present but SD unavailable for autosave");
-            return;
+            return true;
         }
         did_jit_mount = true;
     }
@@ -446,9 +492,7 @@ static void coredump_autosave_on_boot(void) {
         goto cleanup;
     }
 
-    const char *panic_reason = "run idf.py coredump-info for decoded panic reason";
-
-    coredump_write_summary(summary_path, bin_path, part, elf_offset, panic_reason);
+    coredump_write_summary(summary_path, bin_path, part, elf_offset, decoded_reason);
     coredump_write_saved_sig(sig_id);
     ESP_LOGI(TAG, "Coredump autosaved (%u bytes): %s", (unsigned)bytes_written, bin_path);
 
@@ -465,6 +509,7 @@ cleanup:
     if (did_jit_mount) {
         sd_card_unmount_after_flush(display_was_suspended);
     }
+    return true;
 }
 #endif
 
@@ -572,7 +617,11 @@ static void deferred_sd_init_task(void *arg) {
 #ifdef CONFIG_WITH_SCREEN
     boot_status_set_progress(-1.0f, "Saving core dump...");
 #endif
-    coredump_autosave_on_boot();
+    char panic_reason[256];
+    bool had_crash = coredump_autosave_on_boot(panic_reason, sizeof(panic_reason));
+    if (had_crash) {
+        crash_reporter_set_boot_crash(panic_reason);
+    }
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
@@ -608,6 +657,14 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
+#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN)
+    /* Keep the card deselected before any shared-bus display/touch traffic. */
+    gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
+    gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
+    ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+#endif
+
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
 
@@ -627,11 +684,6 @@ void app_main(void) {
         gpio_set_level(12, 1);
         ESP_LOGI(TAG, "CC1101 SS pin 12 set HIGH");
 
-        // SD Card CS pin
-        gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
-        gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
-        ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
     }
 #endif
 
@@ -909,6 +961,9 @@ void app_main(void) {
     ota_manager_confirm_boot_ok();
     maybe_schedule_self_ota_boot_error_popup();
 #endif
+    // If the previous boot crashed, show a short popup once the boot
+    // screens are gone (Flipper Zero style crash notice).
+    crash_reporter_init();
 #ifdef CONFIG_HAS_DRV2605_HAPTICS
     esp_err_t haptic_err;
     MEASURE_INIT_RAM("Haptic Manager", haptic_err = haptic_manager_init());

@@ -23,13 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(MAX_WIFI_CHANNEL)
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
-#else
-#define MAX_WIFI_CHANNEL 13
-#endif
-#endif
+#include "core/network_constants.h"
 
 static bool normalize_subnet_prefix_arg(const char *arg, char *out, size_t out_len) {
     if (arg == NULL || out == NULL || out_len < 16) {

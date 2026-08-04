@@ -1,6 +1,6 @@
 menu "Ghost ESP Options"
 
-    menu "Device Detials"
+    menu "Device Details"
 
     config BUILD_CONFIG_TEMPLATE
         string "Specify template used to build"

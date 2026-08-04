@@ -64,7 +64,7 @@ Execute commands directly from the browser:
 - View command output in real time
 - Useful for quick diagnostics and file transfers
 
-> **Limitation**: Wi-Fi and BLE commands (e.g., `scanap`, `karma start`, `blescan`) cannot run here because the device's radio is hosting the access point. Running them locally temporarily suspends the AP; to keep GhostNet online, use the Dual Comm tab to send these commands to a paired device instead.
+> **Limitation**: Wi-Fi and BLE commands (e.g., `scanap`, `karma start`, `blescan`) cannot run here because the device's radio is hosting the access point. Running them locally temporarily suspends the AP; to keep GhostNet online, use the GhostLink tab to send these commands to a paired device instead.
 
 ### Help
 

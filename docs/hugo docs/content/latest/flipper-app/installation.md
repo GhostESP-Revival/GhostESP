@@ -2,7 +2,7 @@
 title: "Installation"
 description: "Install the GhostESP companion app on your Flipper Zero device."
 weight: 10
-keywords: ["install", "setup", "app store", "fap"]
+keywords: ["install", "setup", "app catalog", "fap"]
 ---
 
 ## Prerequisites
@@ -11,12 +11,12 @@ keywords: ["install", "setup", "app store", "fap"]
 - GhostESP firmware flashed on an ESP32 device
 - Latest version of the companion app (`.fap` file)
 
-## Method 1: Flipper App Store (Recommended)
+## Method 1: Flipper App Catalog (Recommended)
 
-1. Open the **Flipper App Store** on your Flipper Zero
-2. Search for "GhostESP" or "ghost_esp"
-3. Install the app directly from the store
-4. The app will appear in your Applications menu
+1. Connect your Flipper Zero to your computer (or pair it with the Flipper Mobile App) and open the [Flipper app catalog](https://lab.flipper.net/apps/ghost_esp) in a browser
+2. Search for "Ghost ESP" and open the entry (category: GPIO)
+3. Click **Install** — the app is uploaded to your Flipper Zero automatically
+4. Launch it from **Applications → GPIO** on your Flipper Zero
 
 ## Method 2: Manual Installation
 

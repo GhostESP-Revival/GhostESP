@@ -2344,8 +2344,7 @@ static void file_event_open(int idx) {
             if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
             memcpy(path, current_dir, base_len);
             path[base_len] = '\0';
-            if (base_len + 1 < sizeof(path)) strcat(path, "/");
-            strcat(path, ir_file_paths[idx]);
+            snprintf(path + base_len, sizeof(path) - base_len, "/%s", ir_file_paths[idx]);
             // remember for transmit
             strncpy(current_universal_file, path, sizeof(current_universal_file) - 1);
             current_universal_file[sizeof(current_universal_file) - 1] = '\0';

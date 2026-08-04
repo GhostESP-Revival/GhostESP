@@ -67,6 +67,7 @@ typedef uint32_t plugin_feature_t;
 #define PLUGIN_PERMISSION_SETTINGS     (1ULL << 30)
 #define PLUGIN_PERMISSION_ZIGBEE       (1ULL << 31)
 #define PLUGIN_PERMISSION_NRF24        (1ULL << 32)
+#define PLUGIN_PERMISSION_ESPNOW       (1ULL << 33)
 
 #define PLUGIN_FEATURE_TOUCHSCREEN     (1U << 0)
 #define PLUGIN_FEATURE_DPAD            (1U << 1)

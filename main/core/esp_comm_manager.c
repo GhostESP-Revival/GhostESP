@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
+#include "managers/peer_storage_manager.h"
 
 #define COMM_BUFFER_SIZE 256
 #define UART_RX_BUFFER_SIZE (COMM_BUFFER_SIZE * 2)
@@ -259,9 +260,7 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    const uint32_t stack_words = (stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-
-    res->stack = alloc_task_stack(stack_words * sizeof(StackType_t));
+    res->stack = alloc_task_stack(stack_bytes);
     res->tcb = alloc_task_tcb();
 
     if (!res->stack || !res->tcb) {
@@ -269,7 +268,7 @@ static TaskHandle_t create_task_static(psram_task_resources_t* res,
         return NULL;
     }
 
-    return xTaskCreateStatic(task_fn, name, stack_words, arg, priority, res->stack, res->tcb);
+    return xTaskCreateStatic(task_fn, name, stack_bytes, arg, priority, res->stack, res->tcb);
 }
 
 static StackType_t* alloc_task_stack(size_t stack_bytes) {
@@ -392,9 +391,11 @@ static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t need
         return true;
     }
 
+    free(comm->command_stream_buf);
     char* new_buf = (char*)malloc(COMM_STREAM_COMMAND_MAX + 1);
     if (!new_buf) {
-        reset_command_stream(comm);
+        comm->command_stream_buf = NULL;
+        comm->command_stream_cap = 0;
         return false;
     }
     comm->command_stream_buf = new_buf;
@@ -1453,11 +1454,10 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->initialized = true;
 
     const uint32_t rx_stack_bytes = 4096;
-    const uint32_t rx_stack_words = (rx_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-    s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_words * sizeof(StackType_t));
+    s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_bytes);
     s_comm_manager->rx_task_res.tcb = alloc_task_tcb();
     if (s_comm_manager->rx_task_res.stack && s_comm_manager->rx_task_res.tcb) {
-        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_words,
+        s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_bytes,
                                                            s_comm_manager, 12,
                                                            s_comm_manager->rx_task_res.stack,
                                                            s_comm_manager->rx_task_res.tcb);
@@ -1685,7 +1685,9 @@ bool esp_comm_manager_connect_to_peer(const char* peer_name) {
         return false;
     }
 
-    xTimerStop(s_comm_manager->discovery_timer, 0);
+    if (s_comm_manager->discovery_timer) {
+        xTimerStop(s_comm_manager->discovery_timer, 0);
+    }
     lock_state(s_comm_manager);
     s_comm_manager->state = COMM_STATE_HANDSHAKE;
     s_comm_manager->role = COMM_ROLE_MASTER;
@@ -1732,7 +1734,9 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
         size_t data_len = strlen(data);
         size_t max_data_len = COMM_PACKET_SIZE - packet.length - 4;
         if (data_len > max_data_len) {
-            data_len = max_data_len;
+            printf("Command data too long (%u > %u); use command stream transport\n",
+                   (unsigned)data_len, (unsigned)max_data_len);
+            return false;
         }
         strncpy((char*)packet.data + packet.length, data, data_len);
         packet.length += data_len;
@@ -1902,6 +1906,8 @@ void esp_comm_manager_disconnect(void) {
 void esp_comm_manager_deinit(void) {
     if (!s_comm_manager) return;
 
+    peer_storage_manager_reset();
+
     // Signal shutdown first - tasks check this flag
     s_comm_manager->initialized = false;
 
@@ -2018,6 +2024,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
 
     comm->state = COMM_STATE_SCANNING;
     comm->remote_output_capture = false;
+    peer_storage_manager_reset();
 
     // Stop ping timer; keep it allocated and restart on next connection.
     if (comm->ping_timer) {

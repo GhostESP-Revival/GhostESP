@@ -13,6 +13,7 @@
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "freertos/task.h"
@@ -142,7 +143,7 @@ void dhcp_starvation_start(int threads) {
     // Note: threads parameter is currently ignored - single thread implementation
     (void)threads;
     
-    BaseType_t attack_rc = xTaskCreate(dhcp_starve_task, "dhcp_starve", 4096, NULL, 5, &dhcp_starve_task_handle);
+    BaseType_t attack_rc = xTaskCreate_psram(dhcp_starve_task, "dhcp_starve", 4096, NULL, 5, &dhcp_starve_task_handle);
     if (attack_rc != pdPASS) {
         glog("Failed to start DHCP starvation task (%ld)\n", (long)attack_rc);
         dhcp_starve_running = false;

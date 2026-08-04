@@ -8,7 +8,7 @@ weight: 40
 
 GhostESP's NFC stack focuses on ISO14443A tags. It runs on either a PN532 or an ST25R3916/ST25R3916B frontend (selectable at runtime). This page summarizes current support.
 
-Much of GhostESP's tag decoding is ported from the [Flipper Zero](https://github.com/flipperdevices/flipperzero-firmware) / [Momentum](https://github.com/Next-Flip/Momentum-Firmware) NFC stacks, so behaviour is close to a Flipper. The Flipper wiki is a good companion reference for what each card exposes — see the links throughout this page.
+Much of GhostESP's tag decoding is ported from the [Flipper Zero](https://github.com/flipperdevices/flipperzero-firmware) / [Momentum](https://github.com/Next-Flip/Momentum-Firmware) NFC stacks, so behavior is close to a Flipper. The Flipper wiki is a good companion reference for what each card exposes — see the links throughout this page.
 
 ## NTAG / Ultralight
 

@@ -22,6 +22,12 @@ typedef struct {
     bool sd_ok;
 } HudStats;
 
+static HudStats s_cached_stats;
+static bool s_stats_valid;
+static bool s_cached_ap_enabled;
+static bool s_cached_server_running;
+static int s_cached_sta_count;
+
 static void hud_collect_stats(HudStats *out)
 {
     if (!out) return;
@@ -88,15 +94,33 @@ void status_anim_hud_step(TickType_t now, int frame, const StatusAnimGfx *gfx)
     (void)now;
     if (!gfx || !gfx->draw_text || !gfx->draw_char_rot90_right) return;
 
+    // heap walks and the WiFi STA list are mutex-protected and slow-moving:
+    // collect stats at most every 20 frames (~3s) instead of every frame
     HudStats stats;
-    hud_collect_stats(&stats);
+    if (!s_stats_valid || (frame % 20) == 0) {
+        hud_collect_stats(&stats);
+        s_cached_stats = stats;
+        s_stats_valid = true;
+    } else {
+        stats = s_cached_stats;
+    }
 
     char buf[32], buf1[32], buf2[32];
     
     // AP and WebUI status
     bool ap_enabled = false;
     bool server_running = false;
-    int sta_count = hud_get_webui_sta_count(&ap_enabled, &server_running);
+    int sta_count = 0;
+    if (!s_stats_valid || (frame % 20) == 0) {
+        sta_count = hud_get_webui_sta_count(&ap_enabled, &server_running);
+    } else {
+        ap_enabled = s_cached_ap_enabled;
+        server_running = s_cached_server_running;
+        sta_count = s_cached_sta_count;
+    }
+    s_cached_ap_enabled = ap_enabled;
+    s_cached_server_running = server_running;
+    s_cached_sta_count = sta_count;
     
     if (ap_enabled) {
         snprintf(buf1, sizeof(buf1), "AP:ON");

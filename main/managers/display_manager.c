@@ -37,6 +37,7 @@
 #include "managers/views/lockscreen.h"
 #include "managers/views/splash_screen.h"
 #include "managers/encoder_manager.h"
+#include "managers/crash_reporter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -112,6 +113,7 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 #endif
 
 QueueHandle_tt input_queue = NULL;
+joystick_t joysticks[5];
 
 static volatile bool g_low_i2c_mode = false;
 static bool s_deferred_peripherals_initialized = false;
@@ -220,6 +222,54 @@ lv_obj_t *mainlabel = NULL;
 View *display_manager_previous_view = NULL;
 static View *s_lockscreen_return_view = NULL;
 
+/* Navigation back-stack.
+ *
+ * A single "previous view" pointer cannot represent a navigation hierarchy: as
+ * soon as you go A->B and then Back to A, the pointer flips to B, so pressing
+ * Back again from A returns to B -- an endless two-view bounce (e.g. NFC ->
+ * keyboard -> exit -> NFC -> back -> keyboard...). Instead we keep an explicit
+ * stack of the ancestor views to unwind through. The current view is NOT on the
+ * stack; index 0 is the oldest ancestor, [depth-1] is the immediate parent.
+ *
+ * Forward navigation pushes the view being left. Navigating to a view already
+ * on the stack (an ancestor) unwinds down to it instead of pushing, which
+ * collapses A->B->A style revisits and prevents loops. Views are static
+ * singletons so their pointers are stable and comparable. */
+#define VIEW_HISTORY_MAX 24
+static View *s_view_history[VIEW_HISTORY_MAX];
+static int s_view_history_depth = 0;
+
+/* System views that should never be a Back target (boot splash, lockscreen).
+ * They are not pushed onto the back-stack when navigated away from. */
+static bool view_is_history_excluded(View *view) {
+  return view == &splash_view || view == &lockscreen_view;
+}
+
+/* Update the back-stack for a transition from `from` to `to`. Both may be
+ * NULL/equal; caller holds dm.mutex. */
+static void view_history_record(View *from, View *to) {
+  if (to == NULL || to == from) return;
+
+  /* If the target is already an ancestor, this is a Back/up navigation: unwind
+   * the stack down to (and excluding) that entry rather than pushing. */
+  for (int i = s_view_history_depth - 1; i >= 0; --i) {
+    if (s_view_history[i] == to) {
+      s_view_history_depth = i;
+      return;
+    }
+  }
+
+  /* Forward navigation: remember the view we're leaving so Back returns here. */
+  if (from == NULL || view_is_history_excluded(from)) return;
+  if (s_view_history_depth >= VIEW_HISTORY_MAX) {
+    /* Drop the oldest entry to make room; deep chains are rare. */
+    memmove(&s_view_history[0], &s_view_history[1],
+            (VIEW_HISTORY_MAX - 1) * sizeof(View *));
+    s_view_history_depth = VIEW_HISTORY_MAX - 1;
+  }
+  s_view_history[s_view_history_depth++] = from;
+}
+
 /* True while the lockscreen is shown as a floating overlay (wake / auto-lock)
  * on top of a still-live view. In this mode dm.current_view keeps pointing at
  * the underlying view so its capture/timers keep running; input is routed to
@@ -278,6 +328,8 @@ static TaskHandle_t input_task_handle = NULL;
  * match the existing idempotent suspend/resume semantics. */
 static volatile bool s_lvgl_gate_closed = false;
 static volatile bool s_lvgl_gate_parked = false;
+static volatile bool s_input_gate_closed = false;
+static volatile bool s_input_gate_parked = false;
 /* Serializes every cross-task entry into LVGL's internal timer list/heap
  * (lv_timer_handler() and lv_async_call()); see the creation site for why
  * this must be recursive. */
@@ -289,6 +341,7 @@ static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
 static bool is_backlight_dimmed = false;
 static bool is_backlight_off = false;
+static bool s_switch_backlight_configured = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
@@ -1051,7 +1104,7 @@ lv_color_t hex_to_lv_color(const char *hex_str) {
 }
 
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
-  int batteryPercentage, bool power_save_enabled, bool is_ap_active) {
+  int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging) {
   // Update visibility of status icons
   if (sd_card_mounted) {
     lv_obj_clear_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
@@ -1082,22 +1135,6 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
              (batteryPercentage > 50) ? LV_SYMBOL_BATTERY_3 :
              (batteryPercentage > 25) ? LV_SYMBOL_BATTERY_2 :
              (batteryPercentage > 10) ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
-
-    // Check charging status from available sources
-    bool is_charging = false;
-#ifdef CONFIG_HAS_FUEL_GAUGE
-    // Try fuel gauge first (most accurate)
-    is_charging = fuel_gauge_manager_is_charging();
-#endif
-
-    // Fallback to original logic if fuel gauge not available or failed
-    if (!is_charging) {
-#ifdef CONFIG_HAS_BATTERY
-      is_charging = axp202_is_charging();
-#elif CONFIG_HAS_BATTERY_ADC
-      is_charging = isCharging();
-#endif
-    }
 
     if (is_charging) {
       battery_symbol = LV_SYMBOL_CHARGE;
@@ -1142,22 +1179,6 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     if (battery_label && lv_obj_is_valid(battery_label)) {
       lv_color_t battery_color = default_color;
 
-      // Check charging status from available sources
-      bool is_charging = false;
-#ifdef CONFIG_HAS_FUEL_GAUGE
-      // Try fuel gauge first (most accurate)
-      is_charging = fuel_gauge_manager_is_charging();
-#endif
-
-      // Fallback to original logic if fuel gauge not available or failed
-      if (!is_charging) {
-#ifdef CONFIG_HAS_BATTERY
-        is_charging = axp202_is_charging();
-#elif CONFIG_HAS_BATTERY_ADC
-        is_charging = isCharging();
-#endif
-      }
-
       if (is_charging) {
         battery_color = lv_color_hex(0x22C55E);
       } else if (batteryPercentage <= 20) {
@@ -1195,7 +1216,7 @@ static void status_update_cb(lv_timer_t *timer) {
   // WiFi icon should always be visible - pass true for wifi_enabled
   // Color will be determined by AP state and power saving mode in update_status_bar
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
+                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running, is_charging);
 
   if (level_label && lv_obj_is_valid(level_label)) {
     ghostchi_snapshot_t snap;
@@ -1299,13 +1320,13 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_remove_style_all(left_container);
   lv_obj_set_size(left_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(left_container, LV_FLEX_FLOW_ROW);
-  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_SAFEAREA_HOR, 0);
+  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_GRID, 0);
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, lv_color_hex(theme_palette_get_text(theme)), 0);
   lv_label_set_long_mode(mainlabel, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR * 2);
-  lv_obj_set_style_text_font(mainlabel, accessibility_get_font_body(), 0);
+  lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR);
+  lv_obj_set_style_text_font(mainlabel, accessibility_get_font_small(), 0);
 
   lv_obj_t *right_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(right_container);
@@ -1313,7 +1334,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_set_flex_flow(right_container, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(right_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(right_container, GUI_GRID, 0);
-  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_SAFEAREA_HOR, 0);
+  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_GRID, 0);
   level_label = lv_label_create(right_container);
   lv_label_set_text(level_label, "");
   lv_obj_set_style_text_color(level_label, lv_color_hex(0x666666), 0);
@@ -1323,22 +1344,22 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   sd_label = lv_label_create(right_container);
   lv_label_set_text(sd_label, LV_SYMBOL_SD_CARD);
   lv_obj_set_style_text_color(sd_label, status_text_color, 0);
-  lv_obj_set_style_text_font(sd_label, accessibility_get_font_small(), 0);
+  lv_obj_set_style_text_font(sd_label, accessibility_get_font_icon(), 0);
   lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
   bt_label = lv_label_create(right_container);
   lv_label_set_text(bt_label, LV_SYMBOL_BLUETOOTH);
   lv_obj_set_style_text_color(bt_label, status_text_color, 0);
-  lv_obj_set_style_text_font(bt_label, accessibility_get_font_small(), 0);
+  lv_obj_set_style_text_font(bt_label, accessibility_get_font_icon(), 0);
   lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
   wifi_label = lv_label_create(right_container);
   lv_label_set_text(wifi_label, LV_SYMBOL_WIFI);
   lv_obj_set_style_text_color(wifi_label, status_text_color, 0);
-  lv_obj_set_style_text_font(wifi_label, accessibility_get_font_small(), 0);
+  lv_obj_set_style_text_font(wifi_label, accessibility_get_font_icon(), 0);
   lv_obj_add_flag(wifi_label, LV_OBJ_FLAG_HIDDEN);
   battery_label = lv_label_create(right_container);
   lv_label_set_text(battery_label, "");
   lv_obj_set_style_text_color(battery_label, status_text_color, 0);
-  lv_obj_set_style_text_font(battery_label, accessibility_get_font_small(), 0);
+  lv_obj_set_style_text_font(battery_label, accessibility_get_font_icon(), 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
   bool HasBluetooth;
@@ -1361,7 +1382,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   // WiFi icon should always be visible - pass true for wifi_enabled
   // Color will be determined by AP state and power saving mode in update_status_bar
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running);
+                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running, is_charging);
   if (!status_timer_initialized) {
     status_update_timer = lv_timer_create(status_update_cb, 500, NULL);
     status_timer_initialized = true;
@@ -1898,6 +1919,16 @@ bool display_manager_register_view(View *view) {
   return true;
 }
 
+static lv_obj_t *dm_pressed_obj = NULL;
+
+static void dm_clear_pressed_state(lv_obj_t *obj) {
+    (void)obj;
+    if (dm_pressed_obj) {
+        lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        dm_pressed_obj = NULL;
+    }
+}
+
 static void display_manager_switch_view_internal(View *view) {
   if (view == NULL) return;
 #ifdef CONFIG_JC3248W535EN_LCD
@@ -1908,6 +1939,10 @@ static void display_manager_switch_view_internal(View *view) {
     if (view == &lockscreen_view) {
       display_manager_run_freeze_pre_lock();
     }
+    if (dm.current_view && dm.current_view->root) {
+      dm_clear_pressed_state(dm.current_view->root);
+    }
+    view_history_record(dm.current_view, view);
     if (dm.current_view && dm.current_view->root) {
       display_manager_previous_view = dm.current_view;
       if (dm.current_view->destroy) {
@@ -2048,14 +2083,15 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
 }
 
 void display_manager_go_back(void) {
-  /* display_manager_previous_view is kept up to date on every switch (see
-   * display_manager_switch_view_internal), so this is always "whichever
-   * screen was active right before the current one" regardless of how the
-   * current view was reached -- Apps Gallery, a direct Main Menu item, a
-   * CLI/serial command, or a hardware-button shortcut configured to jump
-   * here from anywhere. Falls back to the main menu if there's nothing
-   * usable (e.g. this is the very first view after boot). */
-  View *target = display_manager_previous_view;
+  /* Walk one level up the navigation back-stack (see view_history_record).
+   * Unlike a single previous-view pointer, this returns to the actual parent
+   * regardless of how the current view was reached -- and switching to that
+   * parent unwinds the stack, so repeated Back presses keep climbing instead
+   * of bouncing between the last two views. Falls back to the main menu when
+   * the stack is empty (e.g. the first view after boot). */
+  View *target = (s_view_history_depth > 0)
+                     ? s_view_history[s_view_history_depth - 1]
+                     : NULL;
   if (!target || target == dm.current_view) {
     target = &main_menu_view;
   }
@@ -2192,8 +2228,9 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
-          strcmp(view_name, "GhostScript Runner") == 0 ||
-          strcmp(view_name, "BadUSB") == 0 ||
+           strcmp(view_name, "GhostScript Runner") == 0 ||
+           strcmp(view_name, "SD App") == 0 ||
+           strcmp(view_name, "BadUSB") == 0 ||
           strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0 ||
           strcmp(view_name, "Cloud Store") == 0 ||
@@ -2223,7 +2260,7 @@ void display_manager_fill_screen(lv_color_t color) {
 }
 
 void display_manager_suspend_lvgl_task(void) {
-  if (!lvgl_task_handle) return;
+  if (!lvgl_task_handle || s_lvgl_gate_closed) return;
   if (xTaskGetCurrentTaskHandle() == lvgl_task_handle) return;
   /* Ask the render task to park itself outside lv_timer_handler(), then wait
    * for the acknowledgment before fully suspending. If it is currently mid-flush
@@ -2251,6 +2288,29 @@ void display_manager_resume_lvgl_task(void) {
   s_lvgl_gate_closed = false;
   if (xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
     vTaskResume(lvgl_task_handle);
+  }
+}
+
+void display_manager_suspend_input_task(void) {
+  if (!input_task_handle || s_input_gate_closed) return;
+  if (xTaskGetCurrentTaskHandle() == input_task_handle) return;
+  s_input_gate_closed = true;
+  TickType_t start = xTaskGetTickCount();
+  while (!s_input_gate_parked) {
+    if (xTaskGetTickCount() - start > pdMS_TO_TICKS(500)) {
+      ESP_LOGW(TAG, "input quiesce timed out; forcing suspend");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  vTaskSuspend(input_task_handle);
+}
+
+void display_manager_resume_input_task(void) {
+  if (!input_task_handle || !s_input_gate_closed) return;
+  s_input_gate_closed = false;
+  if (xTaskGetCurrentTaskHandle() != input_task_handle) {
+    vTaskResume(input_task_handle);
   }
 }
 
@@ -2295,9 +2355,19 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     ESP_LOGD(TAG, "set_backlight_brightness: %d%% (CH422G EXIO2, already on)", percentage);
 #else
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
-        gpio_reset_pin(CONFIG_LV_DISP_PIN_BCKL);
-        gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
+        if (!s_switch_backlight_configured) {
+            gpio_set_direction(CONFIG_LV_DISP_PIN_BCKL, GPIO_MODE_OUTPUT);
+            gpio_set_drive_capability(CONFIG_LV_DISP_PIN_BCKL, GPIO_DRIVE_CAP_3);
+            gpio_sleep_sel_dis(CONFIG_LV_DISP_PIN_BCKL);
+            s_switch_backlight_configured = true;
+        }
+        gpio_hold_dis(CONFIG_LV_DISP_PIN_BCKL);
         gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+        gpio_hold_en(CONFIG_LV_DISP_PIN_BCKL);
+        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (requested=%u%%, scaled=%u%%)",
+                 CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? "ON" : "OFF",
+                 (unsigned)((max_brightness > 0) ? (percentage * 100) / max_brightness : 0),
+                 (unsigned)percentage);
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping switch backlight");
     }
@@ -2542,6 +2612,13 @@ void hardware_input_task(void *pvParameters) {
   ESP_LOGI(TAG, "T-Deck keyboard initialized in raw mode");
 #endif
   while (1) {
+    if (s_input_gate_closed) {
+      s_input_gate_parked = true;
+      while (s_input_gate_closed) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+      s_input_gate_parked = false;
+    }
 #ifdef CONFIG_USE_TDECK
     // Read raw keyboard state for shift key support
     uint8_t raw_data[TDECK_COLS] = {0};
@@ -3229,13 +3306,16 @@ void hardware_input_task(void *pvParameters) {
  #endif
 
     bool enable_touch_polling = false;
-#ifdef CONFIG_USE_TOUCHSCREEN
+#ifdef CONFIG_JC3248W535EN_LCD
+    /* The BSP pointer indev is the sole touch owner on this board. */
+    enable_touch_polling = false;
+#elif defined(CONFIG_USE_TOUCHSCREEN)
     enable_touch_polling = true;
-#endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
         enable_touch_polling = true;
     }
+#endif
 #endif
 
     if (enable_touch_polling) {
@@ -3371,8 +3451,29 @@ void hardware_input_task(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
-void processEvent() {
-  // do not process events until the display manager is up
+static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
+    if (ev->type != INPUT_TYPE_TOUCH || ev->is_touch_move) return;
+    if (ev->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
+        if (dm_pressed_obj) {
+            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        }
+        lv_point_t pt = ev->data.touch_data.point;
+        View *cur = dm.current_view;
+        lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
+        lv_obj_t *found = lv_indev_search_obj(root, &pt);
+        if (found) {
+            lv_obj_add_state(found, LV_STATE_PRESSED);
+            dm_pressed_obj = found;
+        }
+    } else {
+        if (dm_pressed_obj) {
+            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            dm_pressed_obj = NULL;
+        }
+    }
+}
+
+void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
     return;
   }
@@ -3394,6 +3495,11 @@ void processEvent() {
       set_backlight_brightness(100);
       is_backlight_dimmed = false;
       is_backlight_off = false;
+      processed++;
+      continue;
+    }
+    dm_update_manual_touch_pressed_state(&event);
+    if (crash_reporter_handle_input(&event)) {
       processed++;
       continue;
     }
@@ -3467,6 +3573,10 @@ void processEvent() {
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;
+        return;
+      }
+      dm_update_manual_touch_pressed_state(&event);
+      if (crash_reporter_handle_input(&event)) {
         return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {

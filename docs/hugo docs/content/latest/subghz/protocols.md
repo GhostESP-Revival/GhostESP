@@ -96,60 +96,76 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 - **Bit length**: 24 bits
 
 ### Ansonic
+- **Common use**: DIP-switch remote controls
 - **Bit length**: 12 or 24 bits
 - **Encoding**: Fixed-code DIP-style encoding
 
 ### Bett
+- **Common use**: DIP-switch remote controls
 - **Bit length**: 18 bits
 - **Encoding**: Fixed-code DIP-style encoding
 
 ### Clemsa
+- **Common use**: Gate and garage remote controls
 - **Bit length**: 18 bits
 - **Encoding**: Fixed-code DIP-style encoding
 
 ### Dickert MAHS
+- **Common use**: Dickert gate and garage openers
 - **Bit length**: 36 bits
 - **Decoded fields**: Factory code and user code
 
 ### Dooya
+- **Common use**: Dooya motors (roller shutters, blinds, gates)
 - **Bit length**: 40 bits
 - **Decoded fields**: Serial number, channel, and button
 
 ### Elplast
+- **Common use**: DIP-switch remote controls
 - **Bit length**: 18 bits
 - **Encoding**: Fixed-code DIP-style encoding
 
 ### Marantec24
+- **Common use**: Marantec garage door openers
 - **Bit length**: 24 bits
 - **Decoded fields**: Serial number and button
 
 ### Hollarm
+- **Common use**: Hollarm alarm and remote systems
 - **Bit length**: 42 bits
 - **Decoded fields**: Serial number, button, and checksum
 
 ### Hay21
+- **Common use**: Hay21 remote key fobs
 - **Bit length**: 21 bits
 - **Decoded fields**: Serial number, button, and counter
 
 ### Feron
+- **Common use**: Feron garage and gate remotes
 - **Bit length**: 32 bits
 - **Decoded fields**: Serial number and command
 
 ### Roger
+- **Common use**: Roger garage door remotes
 - **Bit length**: 28 bits
 - **Decoded fields**: Serial number and button
 
 ### Treadmill37
+- **Common use**: Treadmill and fitness equipment remotes
 - **Bit length**: 37 bits
 - **Decoded fields**: Serial number and button
 
 ### KeyFinder
+- **Common use**: Key finder tags and locator remotes
 - **Bit length**: 24 bits
 - **Decoded fields**: Serial number and device ID
 
 ### Nord ICE
+- **Common use**: Nord garage remote controls
 - **Bit length**: 33 bits
 - **Decoded fields**: Serial number and button
+
+> **Note**: The newer fixed-code protocols above (Ansonic through Nord ICE) are decoded on any supported band, so a single fixed frequency is not listed.
 
 ## Raw signal fallback
 

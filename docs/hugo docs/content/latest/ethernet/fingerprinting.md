@@ -43,7 +43,7 @@ Service: upnp
 
 ### Via GhostLink Display Menu
 
-1. **Connect** to the Banshee device via GhostLink
+1. **Connect** to the GhostESP device via GhostLink
 2. **Navigate** to `Ethernet` menu
 3. **Select** `Fingerprint Scan`
 4. **Wait** for the scan to complete (approximately 3 seconds)

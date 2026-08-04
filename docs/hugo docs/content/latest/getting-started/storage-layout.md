@@ -49,4 +49,4 @@ The SD card is not encrypted. Review these files before sharing the card or
 the device.
 
 For the complete developer and compatibility contract, see
-[`STORAGE_CONTRACT.md`](https://github.com/spookyorigin/Ghost_ESP/blob/main/STORAGE_CONTRACT.md).
+[`STORAGE_CONTRACT.md`](https://github.com/GhostESP-Revival/GhostESP/blob/main/STORAGE_CONTRACT.md).

@@ -916,6 +916,14 @@ static void keyboard_destroy() {
         input_label = NULL;
         submit_callback = NULL;
         immediate_callback = NULL;
+        /* Clear the return view too. It is global state set by the opener
+         * *before* switching to the keyboard; leaving it stale meant a later
+         * opener that doesn't set its own (e.g. the options-menu keyboards)
+         * inherited the previous target -- most visibly &terminal_view from the
+         * terminal command box -- so pressing Done dumped the user into the
+         * terminal instead of returning to whatever opened the keyboard. Each
+         * opener that needs a return view (NFC, terminal) sets it every time. */
+        keyboard_return_view = NULL;
         input_len = 0;
         input_buffer[0] = '\0';
         is_symbols_mode = false;
@@ -1328,11 +1336,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                     is_symbols_mode = false;
                     recreate_keyboard_buttons();
                 } else if (strcmp(key, "Exit") == 0) {
-                    if (keyboard_return_view) {
-                        display_manager_switch_view(keyboard_return_view);
-                    } else {
-                        display_manager_switch_view(&options_menu_view); // fallback
-                    }
+                    display_manager_go_back();
                 } else if (strcmp(key, "Done") == 0) {
                     submit_text();
                 } else if (strcmp(key, "DEL") == 0) {
@@ -1366,7 +1370,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         char c = (char)event->data.key_value;
         if (c == '`') {
-            display_manager_switch_view(&options_menu_view);
+            display_manager_go_back();
         } else if (c == '\n' || c == '\r' || c == '=') {
             if (immediate_callback) {
                 // Real-time typing mode (e.g. BadUSB): send Enter, don't close
@@ -1475,8 +1479,7 @@ static void key_matrix_event_cb(lv_event_t *e) {
         is_symbols_mode = false;
         build_key_matrix();
     } else if (strcmp(txt, "Exit") == 0) {
-        if (keyboard_return_view) display_manager_switch_view(keyboard_return_view);
-        else display_manager_switch_view(&options_menu_view);
+        display_manager_go_back();
     } else if (strcmp(txt, "Done") == 0) {
         submit_text();
     } else if (strcmp(txt, LV_SYMBOL_BACKSPACE) == 0 || strcmp(txt, "DEL") == 0) {
@@ -1770,11 +1773,7 @@ static void activate_selected_key(void) {
         ensure_valid_cursor();
         apply_selection_highlight();
     } else if (strcmp(key, "Exit") == 0) {
-        if (keyboard_return_view) {
-            display_manager_switch_view(keyboard_return_view);
-        } else {
-            display_manager_switch_view(&options_menu_view);
-        }
+        display_manager_go_back();
     } else if (strcmp(key, "Done") == 0) {
         submit_text();
     } else if (strcmp(key, "DEL") == 0) {

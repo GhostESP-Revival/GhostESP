@@ -1389,6 +1389,32 @@ static void navigate_apps_vertical(int direction) {
     select_app_item(selected_app_index + (direction > 0 ? 1 : -1), false);
 }
 
+static int apps_grid_horizontal_target(int direction) {
+    if (apps_layout != MAIN_MENU_LAYOUT_LAUNCHER || num_apps <= 0) {
+        return selected_app_index + direction;
+    }
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    if (layout.columns <= 0 || layout.page_capacity <= 0 || layout.page_count <= 0) {
+        return selected_app_index + direction;
+    }
+
+    int page = selected_app_index / layout.page_capacity;
+    int slot = selected_app_index % layout.page_capacity;
+    int col = slot % layout.columns;
+    if (direction > 0 && col < layout.columns - 1 && selected_app_index + 1 < num_apps) {
+        return selected_app_index + 1;
+    }
+    if (direction < 0 && col > 0) return selected_app_index - 1;
+
+    page += direction > 0 ? 1 : -1;
+    if (page < 0) page = layout.page_count - 1;
+    if (page >= layout.page_count) page = 0;
+    int target = page * layout.page_capacity + slot;
+    return target < num_apps ? target : num_apps - 1;
+}
+
 /**
  * @brief Handles the selection of app items
  */
@@ -1451,9 +1477,9 @@ static void handle_apps_button_press(int button) {
         } else if (button == 4) {
             navigate_apps_vertical(1);
         } else if (button == 0) {
-            select_app_item(selected_app_index - 1, false);
+            select_app_item(apps_grid_horizontal_target(-1), false);
         } else if (button == 3) {
-            select_app_item(selected_app_index + 1, true);
+            select_app_item(apps_grid_horizontal_target(1), true);
         } else if (button == 1) {
             handle_app_item_selection(selected_app_index);
         }
@@ -1500,10 +1526,10 @@ static void handle_keyboard_interactions(int keyValue){
     // Vim keybinds and Cardputer controls
     if (keyValue == LV_KEY_LEFT || keyValue == 44 || keyValue == ',' || keyValue == 'h') { // Left
         ESP_LOGI(TAG, "Left button or 'h' pressed");
-        select_app_item(selected_app_index - 1, false);
+        select_app_item(apps_grid_horizontal_target(-1), false);
     } else if (keyValue == LV_KEY_RIGHT || keyValue == 47 || keyValue == '/' || keyValue == 'l') { // Right
         ESP_LOGI(TAG, "Right button or 'l' pressed");
-        select_app_item(selected_app_index + 1, true);
+        select_app_item(apps_grid_horizontal_target(1), true);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // Up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed");
         navigate_apps_vertical(-1);
@@ -1692,9 +1718,9 @@ void apps_menu_event_handler(InputEvent *event) {
             handle_app_item_selection(selected_app_index);
         } else {
             if (event->data.encoder.direction > 0) {
-                select_app_item(selected_app_index + 1, true);
+                select_app_item(apps_grid_horizontal_target(1), true);
             } else {
-                select_app_item(selected_app_index - 1, false);
+                select_app_item(apps_grid_horizontal_target(-1), false);
             }
         }
 #ifdef CONFIG_USE_ENCODER

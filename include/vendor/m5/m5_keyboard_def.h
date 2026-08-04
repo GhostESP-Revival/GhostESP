@@ -16,7 +16,7 @@
 
 #include <stdint.h>
 
-const uint8_t _kb_asciimap[128] = {
+static const uint8_t _kb_asciimap[128] = {
     0x00,           // NUL
     0x00,           // SOH
     0x00,           // STX

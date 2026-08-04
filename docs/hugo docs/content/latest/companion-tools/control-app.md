@@ -1,12 +1,12 @@
 ---
 title: "Control App"
-description: "Use the Ghost ESP Commander desktop application to control your device via serial connection."
+description: "Use the Control App desktop application to control your device via serial connection."
 weight: 10
 aliases:
   - "/getting-started/control-app/"
 ---
 
-The **Ghost ESP Commander** is a desktop GUI application that provides comprehensive control over your GhostESP device through a serial connection. It offers WiFi/BLE scanning, packet capture, custom commands, firmware flashing, and more—all from an intuitive graphical interface.
+The **Control App** is a desktop GUI application that provides comprehensive control over your GhostESP device through a serial connection. It offers Wi-Fi/BLE scanning, packet capture, custom commands, firmware flashing, and more—all from an intuitive graphical interface.
 
 ## Overview
 
@@ -69,11 +69,11 @@ Once connected:
 
 ## Main Features
 
-### WiFi Operations
+### Wi-Fi Operations
 
-The **WiFi** tab provides access to wireless network operations:
+The **Wi-Fi** tab provides access to wireless network operations:
 
-- **Scan Access Points**: Discover nearby WiFi networks
+- **Scan Access Points**: Discover nearby Wi-Fi networks
 - **List APs/Stations**: View currently stored access points and stations
 - **Deauth Attacks**: Start or stop deauthentication attacks on selected networks
 - **Beacon Spam**: Send beacon frames with options for:
@@ -92,15 +92,15 @@ The **BLE** tab handles Bluetooth Low Energy scanning:
 
 ### Packet Capture
 
-The **Capture** tab enables WiFi packet monitoring:
+The **Capture** tab enables Wi-Fi packet monitoring:
 
-- **Capture Probes**: Monitor WiFi probe requests
+- **Capture Probes**: Monitor Wi-Fi probe requests
 - **Capture Deauth**: Track deauthentication packets
 - **Capture WPS**: Log WPS (Wi-Fi Protected Setup) packets
 
 ### Portal Management
 
-The **Portal** tab handles evil portal operations:
+The **Portal Files** tab handles evil portal operations:
 
 - **Upload Custom HTML**: Send a local HTML file to use as a custom portal
 - **Progress Indicator**: Visual feedback during file upload
@@ -199,7 +199,7 @@ Shows real-time command feedback with timestamps:
 ### Display Area
 
 Displays structured output for:
-- WiFi scan results
+- Wi-Fi scan results
 - BLE scan results
 - Device status information
 - Formatted command responses
@@ -247,7 +247,7 @@ The command and display areas can be resized by dragging the splitter between th
 ### Command Errors
 
 - **Verify firmware version**: Ensure your device firmware supports the commands you're trying to use
-- **Check command syntax**: Refer to the [Command Line Reference]({{< relref "latest/getting-started/command-line-reference.md" >}}) for correct syntax
+- **Check command syntax**: Refer to the [Command Line Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for correct syntax
 - **View error messages**: Check the log area for detailed error information
 
 ### UI Overlay Covers Controls
@@ -285,8 +285,8 @@ The command and display areas can be resized by dragging the splitter between th
 
 ## Next Steps
 
-- Explore the [Command Line Reference]({{< relref "latest/getting-started/command-line-reference.md" >}}) to learn about all available commands
-- Set up [GhostLink]({{< relref "latest/getting-started/dual-communication.md" >}}) for dual-device operations
+- Explore the [Command Line Reference]({{< relref "../getting-started/command-line-reference.md" >}}) to learn about all available commands
+- Set up [GhostLink]({{< relref "../getting-started/dual-communication.md" >}}) for dual-device operations
 - Review [Wi-Fi Basics]({{< relref "../wifi/basics.md" >}}) to understand wireless attacks
 - Check out [BLE Scanning]({{< relref "../ble/scanning.md" >}}) for Bluetooth operations
 

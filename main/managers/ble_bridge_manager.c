@@ -811,13 +811,12 @@ static bool bridge_create_task(void) {
         return true;
     }
 
-    size_t stack_words = (BRIDGE_TASK_STACK_BYTES + sizeof(StackType_t) - 1) / sizeof(StackType_t);
     if (!s_bridge.task_stack) {
 #if CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
-        s_bridge.task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_bridge.task_stack = (StackType_t *)heap_caps_malloc(BRIDGE_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #endif
         if (!s_bridge.task_stack) {
-            s_bridge.task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            s_bridge.task_stack = (StackType_t *)heap_caps_malloc(BRIDGE_TASK_STACK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
     }
     if (!s_bridge.task_tcb) {
@@ -827,7 +826,7 @@ static bool bridge_create_task(void) {
         return false;
     }
 
-    s_bridge.task_handle = xTaskCreateStatic(bridge_task, "ble_bridge", stack_words, NULL, 4,
+    s_bridge.task_handle = xTaskCreateStatic(bridge_task, "ble_bridge", BRIDGE_TASK_STACK_BYTES, NULL, 4,
                                              s_bridge.task_stack, s_bridge.task_tcb);
     return s_bridge.task_handle != NULL;
 }

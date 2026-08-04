@@ -2,6 +2,41 @@
 
 ## Revival v2.1.0
 
+### TL;DR
+
+**NFC:**
+- GhostESP now supports a second NFC chip, the ST25R3916.
+- GhostESP can now read more card types, including EMV payment cards, full DESFire application and file trees, PicoPass/iCLASS cards, and transit cards such as Opal, myki, ITSO, and Gallagher.
+- MIFARE Classic keys can now be recovered with nested attacks, and you can create NDEF tags and read NTAG metadata.
+
+**Updates and apps:**
+- You can now update the firmware from GhostESP itself. You can update over Wi-Fi, from the SD card, or through a paired GhostLink peer.
+- A new Cloud Store App lets you browse and install apps, scripts, and asset packs directly on the board through a connected wifi connection.
+- GhostScript adds a sandboxed Lua runtime to run scripts from the SD card. 
+- Native SD apps can now send ESP-NOW messages. This release adds three new apps: a Doom port, HackChat (an ESP-NOW messaging app), and a QR Generator.
+
+**Wi-Fi:**
+- GhostESP can now run a combined handshake and deauth attack. 
+- In 2.1 we also added SMB and SNMP enumeration and a live packet visualizer.
+- The Airspace Monitor can now detect more attack types. Before, it could only show that traffic was suspicious.
+- Wi-Fi can now reconnect to your saved network automatically (Settings > Connectivity), and a new Channel Congestion chart shows how busy each channel is.
+
+**Ethernet:**
+- Ethernet scans are about three times faster and now export their results to the SD card automatically.
+
+**Command line:**
+- The terminal gained OS-style commands (echo, ifconfig, ping, version, uptime), persistent aliases, command scripts, environment variables, and typo suggestions.
+
+**Reliability:**
+- Wardriving now handles heavy load better.
+- Before, Ethernet scans always used a /24 subnet size. Now they use the real subnet size.
+- The Banshee C5 display and SD card no longer block each other. Before, they had to share the same SPI bus one at a time.
+- Boards without an SD slot (like the Banshee S3) can now save files to their paired GhostLink peer's SD card.
+- A long list of stability bugs was fixed: the external RTC keeps correct time across reboots, station scans no longer silently capture nothing, and several under-sized task stacks (OTA updates, BLE bridge, CLI watch) were fixed.
+
+**UI:** This release fixes an old timing bug. The LVGL tick task used a fixed 10ms step, not the real frame time. This made animations play too slowly when a frame took a long time to draw. The tick now uses the actual time that has passed. This fix makes menu navigation and scrolling smoother. The main menu and Apps layouts were also reworked (Carousel, Grid, and List views), scrolling is animated and smoother throughout, and more screens remember where you were when you go back.
+
+
 ### NFC
 - Added ST25R3916/ST25R3916B NFC support over SPI or I2C, plus an `auto` / `pn532` / `st25r` backend selector in UI and CLI
 - Added more NFC tag tools: MIFARE Classic nested recovery, PicoPass/iCLASS reads, NDEF creation, NTAG metadata, and DESFire summaries, with credits to [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), [Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), [@noproto](https://github.com/noproto), [bettse/picopass](https://github.com/bettse/picopass), and loclass ([proxmark3](https://github.com/RfidResearchGroup/proxmark3))
@@ -25,14 +60,18 @@
 
 ### Native SD Apps & SDK
 - Added RGB565 canvas blits and per-app tick intervals for high-frame-rate native apps
+- Added HackChat for nearby ESP-NOW messaging with deterministic Ghostchi identities
+- Added permission-gated ESP-NOW discovery and messaging APIs for native apps
 - Added ESP32-C5 GOT relocation support and build-time relocation validation for larger native apps
 - Added offset-based native app data and packaged-asset reads for streaming large files on JIT-mounted SD boards
 - Added the joystick-required Doom Port native app with a bundled, directly streamed Freedoom IWAD
 - Added the QR Generator native SD app with a compact menu, responsive full-screen QR preview, and touch, keyboard, encoder, and D-pad controls
 - Fixed native app keyboard dialogs preserving the loaded app across the keyboard view, preventing callbacks into unloaded apps after submission
+- Added live bounded touch scrolling to native apps without full-screen redraws
 - Normalized physical keyboard arrow keys for native SD app navigation
 - Added manifest input requirements that keep incompatible apps visible and prevent unsupported launches with a toast
 - Added stable `ui_image_set_builtin` SDK access to bundled Ghostchi images
+- Added interleaved true-color-alpha app icons and fixed GAPP manifest checksums on Windows
 
 ### GhostScript
 - Added the GhostScript sandboxed Lua 5.4 runtime for running precompiled `.gsb` scripts from the SD card, including devices without PSRAM
@@ -55,6 +94,10 @@
 
 ### Wardriving
 - Refactored CSV logging to drain bounded batches asynchronously, keeping Wi-Fi, BLE, and GhostLink capture paths responsive during storage writes
+- Added helper readiness, GPS freshness, link-loss fallback, and retry-safe GhostLink forwarding for split wardriving
+- Added a PSRAM-backed observation queue with GPS-at-capture snapshots, graceful draining, backpressure retries, and drop/high-water telemetry
+- Changed the default primary/helper channel-hop interval to 125 ms and kept weighted common-channel 5 GHz coverage enabled by default
+- Reduced wardriving callback load with management-frame hardware filtering
 - Fixed WiGLE headers for UART/JIT SD output, reliable JIT SD finalization, and hidden/32-byte/UTF-8 SSID handling
 - Fixed AP entries being silently dropped when a malformed beacon's DS Parameter Set IE reported a garbage channel number, now falls back to the radio's own channel instead
 - Removed console log spam on every UART-streamed CSV chunk during active wardriving
@@ -62,7 +105,6 @@
 
 ### Infrared
 - Added transmit support for the NEC42, NEC42ext, and RC5X protocols, so all of Flipper's IR protocols can now be sent as well as learned
-- Fixed the RC5 transmit encoder laying out bits in reverse order, so RC5 signals now transmit and re-decode correctly
 
 ### Ethernet
 - Fixed `ethping`/ping sweep and `etharp`/ARP scan (CLI and GhostLink peer-relayed UI) always scanning a hardcoded /24 instead of the real DHCP netmask, missing hosts on smaller VLAN subnets
@@ -107,28 +149,60 @@
 - Added a generic `display_manager_go_back()` so views reachable from more than one place (Apps Gallery, a direct menu item, a CLI command, or a hardware-button shortcut that can fire from any screen) return to wherever they were actually opened from, instead of a single hardcoded destination — fixes back navigation on NFC, Infrared, BadUSB, SubGHz, Compass, ENV-III, Accelerometer, Clock, Ghostchi, the plugin/GhostScript runners, and the music visualizer
 - Fixed Apps Gallery, NFC, Infrared, BadUSB, and SubGHz always resetting to the first item/root menu on re-entry instead of restoring the previous selection: their `destroy()` handlers were clearing state that `create()` needed to restore it
 
+### Fixed
+- Fixed stack buffer overflow in infrared universal file path construction when SD card filenames exceeded available space
+- Fixed memory leak in DIAL manager session binding when HTTPS response buffer allocation fails
+- Fixed memory leak in DESFire application tree read when realloc fails mid-enumeration
+- Fixed memory leak in ESP command stream buffer reallocation (old buffer was not freed before replacement)
+- Consolidated `MAX_WIFI_CHANNEL` into `network_constants.h` and removed nine duplicate definitions across the codebase
+- Fixed `MAX_WIFI_CHANNEL` incorrectly set to 165 for ESP32-C6 (which does not support 5 GHz)
+- Fixed `SERIAL_BUFFER_SIZE` conflicting macro definitions (512 vs 528) between serial manager and AP manager
+- Added `static` to `const` arrays in four headers (`ghost_esp_site_gz.h`, `m5_keyboard_def.h`, `default_portal.h`, `keyboard_handler.h`) to prevent multiple-definition linker errors and save flash
+- Fixed `rgb_effect_task_handle` declared without `extern` in header, causing tentative definitions on every include
+- Fixed `strncpy` not null-terminating when SSID is exactly 32 bytes in PineAP detection
+- Fixed include guard mismatches: `commandline.h` used `COMMAND_H`, `gps_logger.h` used `WARDRIVING_CSV_H`
+- Fixed Kconfig typo: "Device Detials" to "Device Details"
+- Replaced hardcoded GPIO pin 24 with `CONFIG_INFRARED_LED_PIN` in infrared manager (poltergeist template)
+- Fixed status bar view titles and the Ghostchi level text clipping: the title now sits further left in a smaller font, and the level label can no longer be squeezed out by the status icons
+- Fixed RC5/RC5X transmit sending no data: `send_rmt` hardcoded mark/space levels, discarding the encoder's Manchester-encoded level sequence; added per-timing level pass-through so RC5, RC5X, and RC6 signals transmit and decode correctly
+- Fixed OTA download task stack 4× under-sized (3 KB effective instead of 12 KB) on PSRAM boards: ESP-IDF FreeRTOS treats `xTaskCreateStatic` depth as bytes, not words
+- Fixed peer OTA rx worker stack 4× under-sized (1.5 KB effective instead of 6 KB), same root cause
+- Fixed BLE bridge task stack 4× under-sized from the same word/byte confusion
+- Fixed `arp_scan` NULL-pointer dereference when printing results after transferring `ctx->hosts` to `g_arp_results`
+- Fixed `ndef_builder_vcard` stack buffer overflow when combined name+phone+email exceeds 384 bytes (snprintf size underflow on unsigned subtraction)
+- Fixed standalone station scan silently capturing nothing: `esp_wifi_stop()` was called before `esp_wifi_set_promiscuous(true)` without a matching `esp_wifi_start()`
+- Fixed SNMP walk infinite loop against a responder that repeats its OID: added 10,000-entry iteration cap
+- Fixed CLI `watch` task deterministic stack overflow (4 KB task calling `handle_tail_cmd` which needs 8 KB+); increased to 12 KB
+- Fixed unbounded `source` script recursion crashing the console task (~4 nested levels overflow the serial stack); added depth cap of 4
+- Fixed unbounded `peer:` command prefix recursion in `handle_serial_command` (~7 nested prefixes overflow the stack); added depth cap of 4
+- Fixed EMV Track 2 separator detection missing byte 0xD0 exactly and all even-nibble PAN cases; now handles both odd-nibble (0xD in high nibble) and even-nibble (0xD in low nibble) separator alignments
+- Added JSON string escaping for all attacker-controlled fields (hostname, fingerprint name/device_type/protocol/service/os, poison domain/cookie/cred) in Ethernet JSONL scan exports
+- Moved scan, attack, cloud, and pcap-writer task stacks to PSRAM-preferred allocation via `xTaskCreate_psram()` helper (PSRAM first, internal fallback), freeing ~120 KB of internal RAM on PSRAM boards
+- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
+- Fixed display resume crashes after shared SPI SD mounts on C5 boards
+- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
+- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
+- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
+- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
+- Fixed wardriving screen GPS speed flickering to 0 when using peer GPS: the wardrive stream handler was clobbering the peer fix snapshot with speed=0 on every WiFi observation, racing with the GPS stream that carried the real speed
+- Reduced status bar icon sizes and increased spacing between icons for a cleaner look
+
 ### Other Changes
 - Added a "Sun Mode" toggle in Settings > Display for outdoor visibility: switches to a white background with black text and forces max brightness, restoring your previous brightness when turned back off
 - Smoothed NRF24 frequency analyzer channel levels (local and GhostLink peer scans) to reduce graph jitter from the RPD carrier-detect readings
 - Reduced heap fragmentation in packet monitoring, Cardputer keyboard input, BLE GATT reads, mDNS, and SD directory browsing
-- Potentially fixed intermittent Banshee C5 white-screen or reboot-loop failures during shared display/SD SPI handoff
-- Fixed display resume crashes after shared SPI SD mounts on C5 boards
 - Shared terminal and WebUI history to remove the duplicate AP log buffer
 - Freed the wardriving CSV line buffer when logging stops
 - Freed PCAP staging resources when capture stops
 - Freed the HTTP streaming buffer when the web server stops
 - Show the native SD-app PSRAM warning only once per boot
 - Coalesce duplicate toast notifications and their haptic feedback
-- Fixed asset pack icons showing as blank/corrupted on no-PSRAM boards when a screen displayed more distinct icons than the icon cache could hold
 - Asset pack icon cache now dedupes by image content instead of file path, so packs reusing the same artwork across icons use a single cache slot
-- Fixed asset pack switch crashing the Cardputer with a stack overflow in the `pack_switch` task
 - Converted eight built-in menu icons to compact A4 masks and added scaled A4 rendering support
 - Shortened "Native SD apps require PSRAM" toast duration so it dismisses faster
 - Moved large scan and UI buffers to PSRAM to free internal RAM on PSRAM boards
 - Reduced Terminal memory use on no-PSRAM boards by sharing CLI history with the rendered line cache
 - Reduced SD card SPI DMA and VFS memory footprint for no-PSRAM boards
-- Fixed external RTC time persistence on boards with `CONFIG_HAS_RTC_CLOCK`: PCF8563 month/year were written to the wrong registers (corrupting stored dates), boot restore treated UTC time as local (shifting the clock by the timezone offset), and GPS fixes weren't saved to the RTC at all
-- Fixed CYD display freezes after a missing SD card probe by retaining the SD SPI3 bus on classic ESP32 boards
 - Hardened Evil Portal request handling against malformed and high-rate client traffic
 - Added per-client rate limiting for Evil Portal DNS and HTTP requests to prevent floods from exhausting heap or socket descriptors
 - Shortened Evil Portal socket timeouts and downgraded verbose portal logs to debug level

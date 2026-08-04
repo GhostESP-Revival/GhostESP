@@ -55,6 +55,7 @@
 static void handle_menu_item_selection(int item_index);
 static void scroll_launcher_card_to_view(int item_index);
 static int visible_index_to_menu_index(int visible_index, bool dual_comm_connected);
+static void select_menu_item_with_scroll(int index, bool slide_left, lv_anim_enable_t scroll_anim);
 
 uint32_t theme_palette_get_background(uint8_t theme);
 uint32_t theme_palette_get_surface(uint8_t theme);
@@ -538,10 +539,11 @@ static void update_menu_item(bool move_left) {
 }
 
 // Move selection vertically for list and launcher layouts; direction: -1 up, +1 down.
-static void navigate_vertical(int direction) {
+static void navigate_vertical(int direction, lv_anim_enable_t scroll_anim) {
     if (direction == 0) return;
     if (current_layout == MAIN_MENU_LAYOUT_LIST) {
-        select_menu_item(selected_item_index + (direction > 0 ? 1 : -1), false);
+        select_menu_item_with_scroll(selected_item_index + (direction > 0 ? 1 : -1), false,
+                                     scroll_anim);
         return;
     }
     if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
@@ -616,10 +618,10 @@ void handle_keyboard_interactions(int keyValue){
         select_menu_item(grid_horizontal_target(1), inverted ? false : true);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed\n");
-        navigate_vertical(-1);
+        navigate_vertical(-1, LV_ANIM_ON);
     } else if (keyValue == LV_KEY_DOWN || keyValue == 'j' || keyValue == '.') { // down
         ESP_LOGI(TAG, "Down arrow or 'j' pressed\n");
-        navigate_vertical(1);
+        navigate_vertical(1, LV_ANIM_ON);
     } else if (keyValue == LV_KEY_ENTER || keyValue == 13) { // enter/select
         ESP_LOGI(TAG, "Enter pressed\n");
         handle_menu_item_selection(selected_item_index);
@@ -869,13 +871,13 @@ static void menu_item_event_handler(InputEvent *event) {
 void handle_hardware_button_press(int ButtonPressed) {
     const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     if (ButtonPressed == 0) {
-        select_menu_item(grid_horizontal_target(-1), inverted ? true : false);
+        select_menu_item_with_scroll(grid_horizontal_target(-1), inverted ? true : false, LV_ANIM_OFF);
     } else if (ButtonPressed == 3) {
-        select_menu_item(grid_horizontal_target(1), inverted ? false : true);
+        select_menu_item_with_scroll(grid_horizontal_target(1), inverted ? false : true, LV_ANIM_OFF);
     } else if (ButtonPressed == 2) { // up
-        navigate_vertical(-1);
+        navigate_vertical(-1, LV_ANIM_OFF);
     } else if (ButtonPressed == 4) { // down
-        navigate_vertical(1);
+        navigate_vertical(1, LV_ANIM_OFF);
     } else if (ButtonPressed == 1) {
         handle_menu_item_selection(selected_item_index);
     }
@@ -887,6 +889,10 @@ void handle_hardware_button_press(int ButtonPressed) {
  * @brief Selects a menu item and updates the display.
  */
 void select_menu_item(int index, bool slide_left) {
+    select_menu_item_with_scroll(index, slide_left, LV_ANIM_ON);
+}
+
+static void select_menu_item_with_scroll(int index, bool slide_left, lv_anim_enable_t scroll_anim) {
     if (is_animating) return; // Block input during animation
     if (index < 0) index = num_items - 1;
     if (index >= num_items) index = 0;
@@ -933,7 +939,7 @@ void select_menu_item(int index, bool slide_left) {
                 uint8_t theme = settings_get_menu_theme(&G_Settings);
                 lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
                 apply_card_selection_style(btn, accent);
-                lv_obj_scroll_to_view(btn, LV_ANIM_ON);
+                lv_obj_scroll_to_view(btn, scroll_anim);
             }
         }
     }
@@ -1218,7 +1224,11 @@ static void create_list_menu(void) {
     lv_obj_set_style_pad_row(menu_container, layout.list_row_gap, 0);
     lv_obj_add_flag(menu_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(menu_container, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_AUTO);
+    // No elastic spring-back and no scrollbar: scrolling redraws only the
+    // moved rows instead of stretch frames plus a scrollbar strip, which
+    // keeps drag/flick scrolling smooth on low-refresh displays.
+    lv_obj_clear_flag(menu_container, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_set_scrollbar_mode(menu_container, LV_SCROLLBAR_MODE_OFF);
 
     if (list_buttons) {
         free(list_buttons);
@@ -1244,8 +1254,10 @@ static void create_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        // Shadow-free rows: per-pixel shadow blending on every row is the
+        // dominant cost when scrolling; the accent border keeps focus visible.
         apply_card_style(btn, menu_surface_color, menu_items[menu_index].border_color,
-                         show_borders ? 2 : 0, 6);
+                         show_borders ? 2 : 0, 0);
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, layout.list_button_pad, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, layout.list_column_gap, LV_PART_MAIN);

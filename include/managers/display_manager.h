@@ -195,7 +195,7 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 
 // Status Bar Functions
 
-void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active);
+void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
 void display_manager_raise_status_bar(void);
@@ -208,6 +208,8 @@ bool display_manager_is_low_i2c_mode(void);
 
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
+void display_manager_suspend_input_task(void);
+void display_manager_resume_input_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
 
@@ -269,7 +271,7 @@ LV_IMG_DECLARE(nfc_icon);
 LV_IMG_DECLARE(compass);
 LV_IMG_DECLARE(usb);
 
-joystick_t joysticks[5];
+extern joystick_t joysticks[5];
 #ifdef CONFIG_USE_ENCODER
 #endif
 
