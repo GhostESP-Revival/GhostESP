@@ -197,6 +197,12 @@ jobs:
           else
             BOOT_OFFSET=0x0
           fi
+          # The app offset is NOT always 0x10000: the OTA tables put otadata
+          # there and the first app slot at 0x20000 or above. Read the real
+          # offset out of the partition table this build produced.
+          APP_OFFSET=$(python3 scripts/partition_app_offset.py "$ARTIFACT_DIR/partitions.bin") \
+            || { echo "Failed to read app offset from partition table"; exit 1; }
+          echo "App offset for ${{ matrix.target.name }}: $APP_OFFSET"
           python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
             --flash_mode "$FLASH_MODE" \
@@ -205,7 +211,7 @@ jobs:
             --target-offset 0x0 \
             "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
-            0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+            "$APP_OFFSET" "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
 
           zip -j "$ZIP_FILE" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_FILE"; exit 1; }
           ls -lh "$ZIP_FILE"
