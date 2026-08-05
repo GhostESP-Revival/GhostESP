@@ -39,7 +39,7 @@ For best results, wait for a valid 2D/3D fix before expecting CSV growth. Indoor
 ### Wi-Fi
 
 ```bash
-startwd
+startwd [--hop <ms>] [--weighted]
 ```
 
 Stop:
@@ -104,7 +104,7 @@ An observation is logged when at least one condition is true:
 
 - First time this `BSSID` is seen
 - Previous SSID was hidden/empty and now SSID is known
-- RSSI improves by more than `3 dBm` vs best seen value
+- RSSI differs by more than `3 dBm` vs best seen value (triggers on both improvement and degradation)
 
 ### BLE dedupe (`MAC` key)
 
@@ -184,3 +184,5 @@ In helper mode, status lines include helper transmit counters (`tx(...)`) and st
 ## Next Step
 
 After capture, see [WiGLE Upload](/latest/gps/wigle/) to upload CSV files.
+
+For wardriving without a GPS module on your GhostESP device, see [Companion Phone GPS Wardriving](/latest/gps/companion-phone-wardriving/).

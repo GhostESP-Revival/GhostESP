@@ -143,7 +143,7 @@ Detected types appear in brackets when listing devices, e.g., `[AirTag]`.
 
 ## Service UUID Recognition
 
-GhostESP automatically identifies hundreds of known GATT services:
+GhostESP automatically identifies known GATT services:
 
 ### Standard BLE Services (0x18xx)
 
@@ -151,24 +151,22 @@ GhostESP automatically identifies hundreds of known GATT services:
 |------|--------------|
 | 0x1800 | Generic Access |
 | 0x1801 | Generic Attribute |
+| 0x1805 | Current Time Service |
 | 0x180A | Device Information |
-| 0x180D | Heart Rate |
 | 0x180F | Battery Service |
+| 0x1811 | Alert Notification |
 | 0x1812 | Human Interface Device (HID) |
-| 0x1826 | Fitness Machine |
+| 0x1802 | Immediate Alert |
+| 0x1803 | Link Loss |
+| 0x1804 | Tx Power |
 
 ### Vendor Services
 
 GhostESP recognizes services from:
-- **Apple** — AirDrop, HomeKit, Siri, AirPlay, AirPods, Nearby
-- **Google** — Fast Pair, Chromecast, Eddystone, Nearby
-- **Samsung** — SmartThings, Gear
-- **Tile** — Core, Ring, Identity, Firmware
-- **Nordic** — UART Service (serial over BLE)
-- **Flipper Zero** — Custom serial service
-- **Fitbit** — Fitness tracker services
-- **Xiaomi** — MiHome, Amazfit
-- **Others** — Sonos, Meta/Oculus, Spotify, Tesla, Amazon Alexa
+- **Huawei** — 0xFEE0, 0xFEE1
+- **Tencent** — 0xFEE7
+- **Xiaomi** — 0xFEE8
+- **Tile** — 0xFEED, 0xFEEC
 
 Unknown services display their raw UUID for manual lookup.
 

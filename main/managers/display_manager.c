@@ -23,7 +23,9 @@
 #include "managers/views/compass_screen.h"
 #include "managers/views/enviii_screen.h"
 #include "managers/views/accelerometer_screen.h"
+#if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
+#endif
 #include "managers/views/nfc_view.h"
 #include "managers/views/badusb_view.h"
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
@@ -217,10 +219,64 @@ lv_obj_t *mainlabel = NULL;
 View *display_manager_previous_view = NULL;
 static View *s_lockscreen_return_view = NULL;
 
+/* True while the lockscreen is shown as a floating overlay (wake / auto-lock)
+ * on top of a still-live view. In this mode dm.current_view keeps pointing at
+ * the underlying view so its capture/timers keep running; input is routed to
+ * the lockscreen instead, and the auto-lock/wake paths must not re-trigger. */
+static volatile bool s_lockscreen_overlay_active = false;
+
+/* Lets views clean transient UI before the lockscreen destroys/rebuilds them. */
+typedef struct {
+    void (*fn)(void);
+    int id; /* monotonically increasing; <0 disables; 0 reserved */
+} freeze_pre_lock_cb_t;
+
+static freeze_pre_lock_cb_t s_freeze_cbs[4];
+static int s_freeze_cb_next_id = 1;
+
+int display_manager_register_freeze_pre_lock(void (*fn)(void)) {
+    if (!fn) return -1;
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].fn == NULL) {
+            int id = s_freeze_cb_next_id++;
+            if (s_freeze_cb_next_id < 0) s_freeze_cb_next_id = 1;
+            s_freeze_cbs[i].fn = fn;
+            s_freeze_cbs[i].id = id;
+            return id;
+        }
+    }
+    return -1;
+}
+
+void display_manager_unregister_freeze_pre_lock(int id) {
+    if (id <= 0) return;
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].id == id) {
+            s_freeze_cbs[i].fn = NULL;
+            s_freeze_cbs[i].id = 0;
+            return;
+        }
+    }
+}
+
+static void display_manager_run_freeze_pre_lock(void) {
+    for (size_t i = 0; i < sizeof(s_freeze_cbs) / sizeof(s_freeze_cbs[0]); ++i) {
+        if (s_freeze_cbs[i].fn) s_freeze_cbs[i].fn();
+    }
+}
+
 bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
 static TaskHandle_t input_task_handle = NULL;
+/* Cooperative quiesce gate for the LVGL render task. On shared-SPI boards the
+ * SD path must free the SPI bus, but it can only do that safely while the render
+ * task is OUTSIDE lv_timer_handler() (i.e. not mid-flush). The suspender raises
+ * s_lvgl_gate_closed and waits for the render task to acknowledge via
+ * s_lvgl_gate_parked before tearing the bus down. Plain bool (not a counter) to
+ * match the existing idempotent suspend/resume semantics. */
+static volatile bool s_lvgl_gate_closed = false;
+static volatile bool s_lvgl_gate_parked = false;
 static lv_timer_t *status_update_timer = NULL;
 static lv_timer_t *rainbow_timer = NULL;
 static uint16_t rainbow_hue = 0;
@@ -231,8 +287,10 @@ static bool is_backlight_off = false;
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
-static joystick_t enc_button; // we'll treat the push-switch like any other button
-static joystick_t exit_button; // IO6 exit button
+static joystick_t enc_button;
+static joystick_t exit_button;
+static TaskHandle_t encoder_poll_task_handle = NULL;
+static void encoder_poll_task(void *pvParameters);
 #endif
 
 #define FADE_DURATION_MS GUI_ANIM_TRANSITION
@@ -279,6 +337,51 @@ static inline uint32_t get_tdeck_repeat_rate(void) {
 }
 
 static uint16_t original_beacon_interval = 100;
+
+// Global keyboard key repeat: re-injects the last pressed key while held.
+// Uses the same input_repeat_speed setting as joystick repeat.
+static uint8_t s_kb_repeat_key = 0;
+static esp_timer_handle_t s_kb_repeat_timer = NULL;
+
+static void kb_repeat_fire_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    InputEvent ev;
+    ev.type = INPUT_TYPE_KEYBOARD;
+    ev.data.key_value = s_kb_repeat_key;
+    ev.is_touch_move = false;
+    ev.is_repeat = true;
+    xQueueSend(input_queue, &ev, 0);
+}
+
+static void kb_repeat_start(uint8_t key) {
+    s_kb_repeat_key = key;
+    if (!s_kb_repeat_timer) return;
+    if (esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+    // First repeat uses the initial delay, then switch to interval
+    esp_timer_start_once(s_kb_repeat_timer, get_joystick_repeat_initial_delay() * 1000);
+}
+
+static void kb_repeat_stop(void) {
+    s_kb_repeat_key = 0;
+    if (s_kb_repeat_timer && esp_timer_is_active(s_kb_repeat_timer)) {
+        esp_timer_stop(s_kb_repeat_timer);
+    }
+}
+
+// Called after initial delay fires — switch to periodic repeat
+static void kb_repeat_initial_cb(void *arg) {
+    (void)arg;
+    if (!s_kb_repeat_key) return;
+    // Inject the first repeat immediately
+    kb_repeat_fire_cb(NULL);
+    // Start periodic repeat at the interval rate
+    if (s_kb_repeat_timer && s_kb_repeat_key) {
+        esp_timer_start_periodic(s_kb_repeat_timer, get_joystick_repeat_interval() * 1000);
+    }
+}
 
 #define BACKLIGHT_SLEEP_POLL_MS 50   // Poll slower when dimmed
 
@@ -1284,8 +1387,10 @@ void apply_power_management_config(bool power_save_enabled) {
       .freq_hz = 5000, // 5 kHz
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Auto-select best clock for current power mode
   };
-  ledc_timer_config(&ledc_timer);
-  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s", power_save_enabled ? "enabled" : "disabled");
+  esp_err_t timer_err = ledc_timer_config(&ledc_timer);
+  uint32_t current_duty = ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s, timer_err=%s, current_duty=%lu",
+           power_save_enabled ? "enabled" : "disabled", esp_err_to_name(timer_err), (unsigned long)current_duty);
 #endif
 
   // control ap based on power save mode and AP enabled setting
@@ -1508,8 +1613,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   buf1_pixels = CONFIG_TFT_WIDTH * 10;
 #else
-  buf1_pixels = CONFIG_TFT_WIDTH * 20;
-  buf2_pixels = CONFIG_TFT_WIDTH * 20;
+  buf1_pixels = CONFIG_TFT_WIDTH * 10;
+  buf2_pixels = CONFIG_TFT_WIDTH * 10;
 #endif
   size_t buf1_bytes = buf1_pixels * sizeof(*buf1);
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
@@ -1578,7 +1683,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_draw_buf_init(&disp_buf, buf1, NULL, width * 10);
 #else
   /* default: double buffer for smoother drawing */
-  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, width * 5);
+  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, buf1_pixels);
 #endif
 
   /* Initialize the display */
@@ -1658,6 +1763,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
 
+    // Run encoder sampling at 1 kHz for cleaner quadrature decoding
+    if (xTaskCreate(encoder_poll_task, "EncPoll", 2048, NULL,
+                    HARDWARE_INPUT_TASK_PRIORITY, &encoder_poll_task_handle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create encoder poll task");
+    }
+
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     // GPIO 6 exit button is TEmbed C1101 only
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
@@ -1701,6 +1812,15 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   display_manager_init_success = true;
   last_touch_time = xTaskGetTickCount();
+
+  // Create global keyboard repeat timer (used by all views for held-key repeat)
+  if (!s_kb_repeat_timer) {
+      esp_timer_create_args_t args = {
+          .callback = kb_repeat_initial_cb,
+          .name = "kb_repeat",
+      };
+      esp_timer_create(&args, &s_kb_repeat_timer);
+  }
   is_backlight_dimmed = false;
 
   // Keep the panel dark until the first real view has been drawn.
@@ -1758,6 +1878,9 @@ static void display_manager_switch_view_internal(View *view) {
 #endif
   if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
     ESP_LOGI(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
+    if (view == &lockscreen_view) {
+      display_manager_run_freeze_pre_lock();
+    }
     if (dm.current_view && dm.current_view->root) {
       display_manager_previous_view = dm.current_view;
       if (dm.current_view->destroy) {
@@ -1884,10 +2007,15 @@ void display_manager_init_deferred_peripherals(void) {
 #ifdef CONFIG_HAS_RTC_CLOCK
   rtc_chip_type_t chip_type = (rtc_chip_type_t)CONFIG_RTC_CHIP_TYPE;
   const char* chip_names[] = {"PCF8563", "DS1307", "DS3231"};
-  rtc_init(CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS, chip_type);
-  ESP_LOGI(TAG, "RTC initialized: %s on I2C port %d at address 0x%02X (SDA: %d, SCL: %d)",
-           chip_names[CONFIG_RTC_CHIP_TYPE], CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS,
-           CONFIG_RTC_I2C_SDA_PIN, CONFIG_RTC_I2C_SCL_PIN);
+  esp_err_t rtc_ret = ghost_rtc_init(CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS, chip_type);
+  if (rtc_ret == ESP_OK) {
+    ESP_LOGI(TAG, "RTC initialized: %s on I2C port %d at address 0x%02X (SDA: %d, SCL: %d)",
+             chip_names[CONFIG_RTC_CHIP_TYPE], CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS,
+             CONFIG_RTC_I2C_SDA_PIN, CONFIG_RTC_I2C_SCL_PIN);
+  } else {
+    ESP_LOGW(TAG, "RTC init failed on I2C port %d at address 0x%02X: %s",
+             CONFIG_RTC_I2C_PORT, CONFIG_RTC_I2C_ADDRESS, esp_err_to_name(rtc_ret));
+  }
 #endif
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
@@ -1899,14 +2027,75 @@ void display_manager_init_deferred_peripherals(void) {
 #endif
 }
 
+/* While an overlay lock is up, the shared status bar (normally on lv_scr_act)
+ * would be hidden under the opaque top-layer overlay. Lift it onto the top
+ * layer above the overlay so battery/clock/icons stay live and the lock looks
+ * like a real screen; restore it verbatim on unlock. */
+static char s_pre_lock_status_title[48];
+
+static void dm_raise_status_bar_for_overlay(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  if (mainlabel && lv_obj_is_valid(mainlabel)) {
+    const char *t = lv_label_get_text(mainlabel);
+    strncpy(s_pre_lock_status_title, t ? t : "", sizeof(s_pre_lock_status_title) - 1);
+    s_pre_lock_status_title[sizeof(s_pre_lock_status_title) - 1] = '\0';
+    lv_label_set_text(mainlabel, "Locked");
+  }
+  lv_obj_set_parent(status_bar, lv_layer_top());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+}
+
+static void dm_restore_status_bar_after_overlay(void) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  lv_obj_set_parent(status_bar, lv_scr_act());
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_move_foreground(status_bar);
+  if (mainlabel && lv_obj_is_valid(mainlabel)) {
+    lv_label_set_text(mainlabel, s_pre_lock_status_title);
+  }
+}
+
+static void dm_lockscreen_overlay_create_cb(void *arg) {
+  (void)arg;
+  /* Runs on the LVGL task: build the lockscreen on the top layer without
+   * touching dm.current_view, so the view underneath keeps running. */
+  lockscreen_create();
+  dm_raise_status_bar_for_overlay();
+}
+
 void display_manager_show_lockscreen(void) {
+  /* Already locked (overlay up) — don't stack a second one. */
+  if (s_lockscreen_overlay_active) return;
+
+  /* The wake / auto-lock flow locks on top of whatever is running. Keep the
+   * current view alive and float the lockscreen over it as an overlay so an
+   * active capture (wardriving, sniffing, ...) is never torn down by locking. */
   if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
     s_lockscreen_return_view = dm.current_view;
-  } else {
-    s_lockscreen_return_view = NULL;
+    lockscreen_reset_input();
+    lockscreen_set_overlay_mode(true);
+    s_lockscreen_overlay_active = true;
+    display_manager_run_on_lvgl(dm_lockscreen_overlay_create_cb, NULL);
+    return;
   }
+
+  /* No live view to preserve (e.g. boot) — fall back to a plain view switch. */
+  s_lockscreen_return_view = NULL;
   lockscreen_reset_input();
   display_manager_switch_view(&lockscreen_view);
+}
+
+bool display_manager_is_lockscreen_active(void) {
+  return s_lockscreen_overlay_active;
+}
+
+void display_manager_clear_lockscreen_overlay(void) {
+  /* Called on the LVGL task from the lockscreen once it has torn its overlay
+   * down. Put the status bar back where the live view expects it. */
+  dm_restore_status_bar_after_overlay();
+  s_lockscreen_overlay_active = false;
+  s_lockscreen_return_view = NULL;
 }
 
 View *display_manager_get_lockscreen_return_view(void) {
@@ -1940,7 +2129,10 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Audio Player") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
-          strcmp(view_name, "SD Browser") == 0);
+          strcmp(view_name, "SD Browser") == 0 ||
+          strcmp(view_name, "BadUSB") == 0 ||
+          strcmp(view_name, "WardrivingView") == 0 ||
+          strcmp(view_name, "Trackpad") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {
@@ -1968,11 +2160,31 @@ void display_manager_fill_screen(lv_color_t color) {
 void display_manager_suspend_lvgl_task(void) {
   if (!lvgl_task_handle) return;
   if (xTaskGetCurrentTaskHandle() == lvgl_task_handle) return;
+  /* Ask the render task to park itself outside lv_timer_handler(), then wait
+   * for the acknowledgment before fully suspending. If it is currently mid-flush
+   * the ack is delayed until that flush completes — exactly the guarantee the
+   * shared-SPI teardown needs. A timeout falls back to the old hard-suspend
+   * behavior so a wedged render task can never deadlock the caller. */
+  s_lvgl_gate_closed = true;
+  TickType_t start = xTaskGetTickCount();
+  while (!s_lvgl_gate_parked) {
+    if (xTaskGetTickCount() - start > pdMS_TO_TICKS(500)) {
+      ESP_LOGW(TAG, "lvgl quiesce timed out; forcing suspend");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
   vTaskSuspend(lvgl_task_handle);
 }
 
 void display_manager_resume_lvgl_task(void) {
-  if (lvgl_task_handle) vTaskResume(lvgl_task_handle);
+  if (!lvgl_task_handle) return;
+  /* Clear the gate first so the task leaves its park loop on resume, then undo
+   * the suspend. vTaskResume on a non-suspended task is a harmless no-op, so
+   * unbalanced resume calls (e.g. the lightweight shared-SPI guard path) are
+   * safe. */
+  s_lvgl_gate_closed = false;
+  vTaskResume(lvgl_task_handle);
 }
 
 static void display_manager_set_backlight_raw(uint8_t percentage) {
@@ -1994,11 +2206,15 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
+        ESP_LOGI(TAG, "BL PWM: scaled_pct=%d, raw_duty=%lu", percentage, (unsigned long)duty);
 #if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
         duty = ((1 << LEDC_TIMER_10_BIT) - 1) - duty;
+        if (duty == 0) duty = 1;
+        ESP_LOGI(TAG, "BL PWM: active-low inverted, final_duty=%lu", (unsigned long)duty);
 #endif
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        esp_err_t err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        ESP_LOGI(TAG, "BL PWM: ledc_update_duty returned %s", esp_err_to_name(err));
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping PWM backlight");
     }
@@ -2033,9 +2249,10 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
 }
 
 void set_backlight_brightness(uint8_t percentage) {
+    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
+    ESP_LOGI(TAG, "set_backlight_brightness: input=%d%%, max_brightness_setting=%d%%", percentage, max_brightness);
     display_manager_set_backlight_raw(percentage);
 
-    uint8_t max_brightness = settings_get_max_screen_brightness(&G_Settings);
     percentage = (percentage * max_brightness) / 100;
     if (percentage > 100) percentage = 100;
 
@@ -2093,6 +2310,7 @@ void set_backlight_brightness(uint8_t percentage) {
         // Lockscreen on wake
         if (was_off && settings_get_lockscreen_enabled(&G_Settings) &&
             settings_get_lockscreen_wake_lock(&G_Settings) &&
+            !s_lockscreen_overlay_active &&
             dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
             display_manager_show_lockscreen();
         }
@@ -2190,6 +2408,19 @@ static char tdeck_raw_to_char(int col, int row, bool shift, bool symbol) {
 #endif
 
 
+
+#ifdef CONFIG_USE_ENCODER
+static void encoder_poll_task(void *pvParameters)
+{
+    (void)pvParameters;
+    const TickType_t sample_interval = pdMS_TO_TICKS(1);
+    while (1) {
+        encoder_tick(&g_encoder);
+        vTaskDelay(sample_interval);
+    }
+    vTaskDelete(NULL);
+}
+#endif
 
 void hardware_input_task(void *pvParameters) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
@@ -2355,8 +2586,12 @@ void hardware_input_task(void *pvParameters) {
 #endif
 
 #ifdef CONFIG_USE_ENCODER
-    /* 1 kHz poll; cheap */
+#ifdef CONFIG_USE_IO_EXPANDER
+    /* IO expander encoder: poll at hardware_input_task rate (100 Hz) */
     encoder_tick(&g_encoder);
+#else
+    /* Direct GPIO encoder: sampled at 1 kHz in encoder_poll_task; just drain events here */
+#endif
 
     /* direction events */
     if (encoder_peek_direction(&g_encoder) != ENCODER_DIR_NONE) {
@@ -2430,8 +2665,8 @@ void hardware_input_task(void *pvParameters) {
         // Check for 7-second hold to enter deep sleep
         if (joystick_get_button_state(&exit_button) && exit_button.pressed) {
         uint32_t elapsed = (esp_timer_get_time() / 1000) - exit_button.hold_init;
-        if (elapsed >= 7000 && !exit_button.deep_sleep_triggered) { // 7 seconds
-            ESP_LOGI("DeepSleep", "IO6 held for 7 seconds, preparing for deep sleep");
+        if (elapsed >= 4000 && !exit_button.deep_sleep_triggered) { // 4 seconds
+            ESP_LOGI("DeepSleep", "IO6 held for 4 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
 
             // Pull IO15 low before sleep (TEmbed C1101 power control)
@@ -2537,6 +2772,7 @@ void hardware_input_task(void *pvParameters) {
 
           if (!skip_event) {
             InputEvent event;
+            event.is_touch_move = false; // press event (release is emitted separately)
             // event.type will be set inside the switch for specific keys
 
             if (shift_count > shift_count_before_caps && !caps_latch){ // toggle caps if weve been holding shift long enough without intteruption
@@ -2575,6 +2811,30 @@ void hardware_input_task(void *pvParameters) {
 
         }
       }
+      }
+      // Emit release events for keys that were down last poll but are now up,
+      // so the global key-repeat timer gets cancelled. Without this the matrix
+      // path only ever sends presses and the repeat spams forever (the ADV/TCA8418
+      // path emits releases explicitly, which is why it doesn't have this bug).
+      for (size_t k = 0; k < last_pressed_len; ++k) {
+        bool still_down = false;
+        for (size_t i = 0; i < gkeyboard.key_list_buffer_len; ++i) {
+          if (gkeyboard.key_list_buffer[i].x == last_pressed_keys[k].x &&
+              gkeyboard.key_list_buffer[i].y == last_pressed_keys[k].y) {
+            still_down = true;
+            break;
+          }
+        }
+        if (still_down) continue;
+        uint8_t rel_value = keyboard_get_key(&gkeyboard, last_pressed_keys[k]);
+        if (rel_value == 0) continue;
+        InputEvent rel_event;
+        rel_event.type = INPUT_TYPE_KEYBOARD;
+        rel_event.data.key_value = rel_value;
+        rel_event.is_touch_move = true; // release
+        if (xQueueSend(input_queue, &rel_event, 0) != pdTRUE) {
+          ESP_LOGD(TAG, "Failed to queue keyboard release event\n");
+        }
       }
       // update last pressed cache (cap to 16)
       last_pressed_len = gkeyboard.key_list_buffer_len;
@@ -2747,7 +3007,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
@@ -2799,7 +3061,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
@@ -2851,7 +3115,9 @@ void hardware_input_task(void *pvParameters) {
                         } else if (strcmp(cmd, "view:nfc") == 0) {
                             display_manager_switch_view(&nfc_view);
                         } else if (strcmp(cmd, "view:ir") == 0) {
+#if CONFIG_HAS_INFRARED
                             display_manager_switch_view(&infrared_view);
+#endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
                             display_manager_switch_view(&badusb_view);
                         } else if (strcmp(cmd, "view:gps") == 0) {
@@ -3005,6 +3271,15 @@ void hardware_input_task(void *pvParameters) {
       else if (is_backlight_dimmed && !is_backlight_off &&
                (now - last_dim_time > pdMS_TO_TICKS(INTERMEDIATE_DIM_DURATION_MS))) {
         ESP_LOGI(TAG, "Intermediate dim duration elapsed, turning backlight off");
+        /* Build the wake-lock overlay now, while the screen is still dark, so
+         * it is already the top frame when the backlight comes back — avoids a
+         * visible flash of the underlying view on wake. */
+        if (settings_get_lockscreen_enabled(&G_Settings) &&
+            settings_get_lockscreen_wake_lock(&G_Settings) &&
+            !s_lockscreen_overlay_active &&
+            dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+          display_manager_show_lockscreen();
+        }
         set_backlight_brightness(0);
         is_backlight_off = true;
       }
@@ -3054,6 +3329,8 @@ void processEvent() {
       set_backlight_brightness(100);
       is_backlight_dimmed = false;
       is_backlight_off = false;
+      processed++;
+      continue;
     }
     if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
       View *current = dm.current_view;
@@ -3067,6 +3344,14 @@ void processEvent() {
         ESP_LOGW(TAG, "Current view is NULL in input_processing_task\n");
       }
 
+      /* While the lockscreen overlay is up, the underlying view is still the
+       * "current" view (so its capture keeps running) but all input belongs to
+       * the lockscreen. */
+      if (s_lockscreen_overlay_active) {
+        input_callback = lockscreen_view.input_callback;
+        view_name = lockscreen_view.name;
+      }
+
       xSemaphoreGive(dm.mutex);
 
       ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
@@ -3075,12 +3360,27 @@ void processEvent() {
         processed++;
         continue;
       }
-      // Joystick release events are only meaningful in the keyboard view.
+      // Joystick release events are only meaningful in the keyboard view and trackpad view.
       // All other views only check joystick_index and would double-fire on release.
       if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-          strcmp(view_name, "Keyboard Screen") != 0) {
+          strcmp(view_name, "Keyboard Screen") != 0 &&
+          strcmp(view_name, "Trackpad") != 0) {
         processed++;
         continue;
+      }
+      // Global keyboard repeat: start on press, stop on release.
+      // Release events are consumed here for all views except Trackpad
+      // (which needs them for tap/hold click detection).
+      if (event.type == INPUT_TYPE_KEYBOARD) {
+          if (event.is_touch_move) {
+              kb_repeat_stop();
+              if (strcmp(view_name, "Trackpad") != 0) {
+                  processed++;
+                  continue;
+              }
+          } else {
+              kb_repeat_start(event.data.key_value);
+          }
       }
       if (input_callback) input_callback(&event);
     }
@@ -3101,6 +3401,7 @@ void processEvent() {
         set_backlight_brightness(100);
         is_backlight_dimmed = false;
         is_backlight_off = false;
+        return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
         View *current = dm.current_view;
@@ -3114,6 +3415,12 @@ void processEvent() {
           ESP_LOGW(TAG, "Current view is NULL in input_processing_task\n");
         }
 
+        /* See note above: lockscreen overlay owns input while it's up. */
+        if (s_lockscreen_overlay_active) {
+          input_callback = lockscreen_view.input_callback;
+          view_name = lockscreen_view.name;
+        }
+
         xSemaphoreGive(dm.mutex);
 
         ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
@@ -3121,10 +3428,22 @@ void processEvent() {
         if (event.type == INPUT_TYPE_TOUCH && event.is_touch_move && !accepts_touch_move) {
           // drop live move samples for views that still treat pressed touches as clicks
         } else if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
-            strcmp(view_name, "Keyboard Screen") != 0) {
-          // drop release event for non-keyboard views
-        } else if (input_callback) {
-          input_callback(&event);
+            strcmp(view_name, "Keyboard Screen") != 0 &&
+            strcmp(view_name, "Trackpad") != 0) {
+          // drop release event for non-keyboard/non-trackpad views
+        } else if (event.type == INPUT_TYPE_KEYBOARD && event.is_touch_move) {
+          // keyboard release: stop global repeat, forward only to Trackpad
+          kb_repeat_stop();
+          if (strcmp(view_name, "Trackpad") != 0) {
+              // drop for all other views
+          } else if (input_callback) {
+              input_callback(&event);
+          }
+        } else {
+          if (event.type == INPUT_TYPE_KEYBOARD && !event.is_touch_move) {
+              kb_repeat_start(event.data.key_value);
+          }
+          if (input_callback) input_callback(&event);
         }
       }
     }
@@ -3267,6 +3586,17 @@ void lvgl_tick_task(void *arg) {
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
   TickType_t last_mon = 0;
   while (1) {
+      /* Cooperative quiesce point: if a shared-SPI consumer (SD) has asked us
+       * to park, acknowledge here — outside any flush — and spin without
+       * touching the panel until the bus is handed back. This guarantees the
+       * suspender never frees the SPI bus mid-transaction. */
+      if (s_lvgl_gate_closed) {
+          s_lvgl_gate_parked = true;
+          while (s_lvgl_gate_closed) {
+              vTaskDelay(pdMS_TO_TICKS(5));
+          }
+          s_lvgl_gate_parked = false;
+      }
       processEvent();
       lv_timer_handler();
       lv_tick_inc(10);
@@ -3285,7 +3615,8 @@ void lvgl_tick_task(void *arg) {
           uint16_t auto_lock_sec = settings_get_lockscreen_timeout_sec(&G_Settings);
           if (auto_lock_sec > 0) {
               if (now - last_touch_time > pdMS_TO_TICKS(auto_lock_sec * 1000u)) {
-                  if (dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
+                  if (!s_lockscreen_overlay_active &&
+                      dm.current_view && dm.current_view != &lockscreen_view && dm.current_view != &splash_view) {
                       display_manager_show_lockscreen();
                   }
               }

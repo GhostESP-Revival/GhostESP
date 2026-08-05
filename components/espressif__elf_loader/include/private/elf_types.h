@@ -262,6 +262,17 @@ typedef struct esp_elf {
     uint32_t        mmu_num;            /*!< MMU unit total number */
 #endif
 
+#ifdef CONFIG_ELF_LOADER_C5_FLASH_XIP
+    /* Flash-XIP state: .text is staged in RAM (ptext), relocated, then
+     * programmed into the "napps" flash partition and executed in place from
+     * xip_vaddr. text_off = xip_vaddr - ptext, so the shared SET_MMU remap math
+     * resolves runtime .text symbols to the flash mapping unchanged. */
+    const void     *xip_vaddr;          /*!< instruction-mapped flash vaddr of .text */
+    void           *xip_map_handle;     /*!< spi_flash mmap handle (for munmap) */
+    size_t          xip_code_size;      /*!< bytes of .plt+.text programmed to flash */
+    uint8_t         xip_committed;      /*!< non-zero once flash holds the relocated image */
+#endif
+
 #ifdef CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
     uint16_t        num;                /*!< number of symbols in the dynamic object */
     esp_symtab_t    *symtab;            /*!< symbol table of dynamic object pointer */

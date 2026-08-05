@@ -8,6 +8,8 @@
 #include "managers/ap_manager.h"
 #include "managers/display_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "managers/ghostchi_mood.h"
+#include "managers/haptic_manager.h"
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
@@ -23,6 +25,7 @@
 #include <stdlib.h>
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 #include "managers/ble_manager.h"
+#include "managers/ble_bridge_manager.h"
 #endif
 #include <esp_log.h>
 #include "esp_random.h"
@@ -31,6 +34,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "esp_heap_caps.h"
 #include "managers/usb_keyboard_manager.h"
 #include "managers/subghz_remote_manager.h"
@@ -62,6 +66,7 @@
 #ifdef CONFIG_WITH_SCREEN
 #include "managers/views/splash_screen.h"
 #include "managers/views/main_menu_screen.h"
+#include "managers/views/tdongle_status_screen.h"
 #include "gui/screen_layout.h"
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 #include "managers/views/nrf24_analyzer_view.h"
@@ -78,6 +83,32 @@
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
+static bool use_tdongle_status_startup(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-S3") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+#else
+    return false;
+#endif
+}
+
+static void boot_status_set_progress(float pct, const char *label) {
+    if (use_tdongle_status_startup()) {
+        (void)pct;
+        tdongle_status_show_status(label ? label : "Booting");
+        return;
+    }
+    splash_set_progress(pct, label);
+}
+
+static void boot_status_signal_completion(void) {
+    if (use_tdongle_status_startup()) {
+        tdongle_status_show_status("Ready");
+        return;
+    }
+    splash_signal_completion();
+}
+
 static void apply_main_menu_background_cb(void *arg) {
     (void)arg;
     gui_screen_apply_background(main_menu_view.root);
@@ -85,7 +116,7 @@ static void apply_main_menu_background_cb(void *arg) {
 
 static void splash_asset_pack_progress_cb(float pct, const char *stage, void *user) {
     (void)user;
-    splash_set_progress(pct, stage);
+    boot_status_set_progress(pct, stage);
 }
 
 static void splash_plugin_progress_cb(float pct, int files_scanned, int files_total, void *user) {
@@ -93,9 +124,9 @@ static void splash_plugin_progress_cb(float pct, int files_scanned, int files_to
     (void)files_total;
     (void)user;
     if (pct < 0.0f) {
-        splash_set_progress(-1.0f, "Checking apps");
+        boot_status_set_progress(-1.0f, "Checking apps");
     } else {
-        splash_set_progress(pct, "Checking apps");
+        boot_status_set_progress(pct, "Checking apps");
     }
 }
 #endif
@@ -387,8 +418,8 @@ static void splash_boot_step_done(uint32_t step) {
     now = s_boot_done_mask;
     portEXIT_CRITICAL(&s_boot_done_mux);
     if (now == BOOT_DONE_ALL) {
-        splash_set_progress(100.0f, "Ready");
-        splash_signal_completion();
+        boot_status_set_progress(100.0f, "Ready");
+        boot_status_signal_completion();
     }
 }
 #endif
@@ -399,7 +430,7 @@ static void boot_app_discovery_task(void *arg) {
     (void)arg;
 #ifdef CONFIG_WITH_SCREEN
     plugin_manager_set_progress_cb(splash_plugin_progress_cb, NULL);
-    splash_set_progress(-1.0f, "Checking apps...");
+    boot_status_set_progress(-1.0f, "Checking apps...");
 #endif
     if (plugin_manager_reload() < 0) {
         ESP_LOGW(TAG, "Boot plugin reload failed: %s", plugin_manager_last_error());
@@ -429,13 +460,13 @@ static void deferred_sd_init_task(void *arg) {
     ESP_LOGI(TAG, "Deferred SD Card init starting");
 
 #ifdef CONFIG_WITH_SCREEN
-    splash_set_progress(-1.0f, "Mounting SD card...");
+    boot_status_set_progress(-1.0f, "Mounting SD card...");
 #endif
     if (sd_card_init() != ESP_OK) {
         ESP_LOGW(TAG, "Deferred SD Card init failed, skipping coredump autosave");
 #ifdef CONFIG_WITH_SCREEN
-        splash_set_progress(100.0f, "SD unavailable");
-        splash_signal_completion();
+        boot_status_set_progress(100.0f, "SD unavailable");
+        boot_status_signal_completion();
 #endif
         vTaskDelete(NULL);
         return;
@@ -447,14 +478,14 @@ static void deferred_sd_init_task(void *arg) {
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #ifdef CONFIG_WITH_SCREEN
-    splash_set_progress(-1.0f, "Saving core dump...");
+    boot_status_set_progress(-1.0f, "Saving core dump...");
 #endif
     coredump_autosave_on_boot();
 #endif
 
 #ifdef CONFIG_WITH_SCREEN
     asset_pack_set_progress_cb(splash_asset_pack_progress_cb, NULL);
-    splash_set_progress(0.0f, "Loading asset pack...");
+    boot_status_set_progress(0.0f, "Loading asset pack...");
     esp_err_t asset_err = asset_pack_load_active();
     asset_pack_set_progress_cb(NULL, NULL);
     if (asset_err != ESP_OK && asset_err != ESP_ERR_NOT_FOUND) {
@@ -477,6 +508,8 @@ static void deferred_sd_init_task(void *arg) {
 
 void app_main(void) {
     memory_debug_start_boot_trace();
+    ghostchi_mood_init();
+    ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
     // Reduce NimBLE log verbosity (keep warnings/errors only)
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
@@ -552,8 +585,15 @@ void app_main(void) {
         gpio_set_direction(15, GPIO_MODE_OUTPUT);
         
         // Check if we woke up from deep sleep
-        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-        
+        uint32_t wakeup_causes = esp_sleep_get_wakeup_causes();
+        esp_sleep_wakeup_cause_t wakeup_reason = ESP_SLEEP_WAKEUP_UNDEFINED;
+        for (unsigned i = 0; i < 32; i++) {
+            if (wakeup_causes & (1U << i)) {
+                wakeup_reason = (esp_sleep_wakeup_cause_t)i;
+                break;
+            }
+        }
+
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_UNDEFINED:
                 ESP_LOGI("Main", "Normal startup (not from deep sleep), IO15 set high");
@@ -632,13 +672,25 @@ void app_main(void) {
         int32_t comm_tx = G_Settings.esp_comm_tx_pin;
         int32_t comm_rx = G_Settings.esp_comm_rx_pin;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 && comm_tx == 6 && comm_rx == 7) {
+        if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0 &&
+            comm_tx == 6 && comm_rx == 7) {
             comm_tx = 11;
             comm_rx = 12;
+        } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
+                   strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0) {
+            comm_tx = UART_PIN_NO_CHANGE;
+            comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
-        MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
+        if (comm_tx != UART_PIN_NO_CHANGE || comm_rx != UART_PIN_NO_CHANGE) {
+            MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
+        } else {
+            ESP_LOGI(TAG, "Comm Manager disabled for this build");
+        }
     }
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+    MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
+#endif
     wardriving_register_stream_handler();
     usb_keyboard_manager_register_stream_handler();
 #ifdef CONFIG_HAS_BADUSB
@@ -708,15 +760,31 @@ void app_main(void) {
 #endif
     ESP_LOGI(TAG, "Initializing display manager");
     MEASURE_INIT_RAM("Display Manager", display_manager_init() );
-    ESP_LOGI(TAG, "Presenting splash screen");
-    bool splash_ready = false;
-    MEASURE_INIT_RAM("Switch to splash view", splash_ready = display_manager_switch_view_and_wait_for_refresh(&splash_view));
-    if (splash_ready) {
+    ESP_LOGI(TAG, "Presenting startup screen");
+    bool startup_ready = false;
+    View *startup_view = &splash_view;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-S3") == 0 ||
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0) {
+        startup_view = &tdongle_status_view;
+    }
+#endif
+    MEASURE_INIT_RAM("Switch to startup view", startup_ready = display_manager_switch_view_and_wait_for_refresh(startup_view));
+    if (startup_ready) {
         set_backlight_brightness(100);
     } else {
-        ESP_LOGW(TAG, "Splash first refresh did not complete; leaving backlight off");
+        ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
     }
     MEASURE_INIT_RAM("Deferred display peripherals", display_manager_init_deferred_peripherals());
+#ifdef CONFIG_HAS_DRV2605_HAPTICS
+    esp_err_t haptic_err;
+    MEASURE_INIT_RAM("Haptic Manager", haptic_err = haptic_manager_init());
+    if (haptic_err == ESP_OK) {
+        haptic_manager_play(HAPTIC_EFFECT_SUCCESS);
+    } else {
+        ESP_LOGW(TAG, "Haptic manager failed to initialize: %s", esp_err_to_name(haptic_err));
+    }
+#endif
     if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_RAINBOW) {
         display_manager_set_rainbow_mode(true);
     }
@@ -748,7 +816,13 @@ void app_main(void) {
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
         if (rgb_led_count <= 0) {
-            rgb_led_count = CONFIG_NUM_LEDS;
+            if (rgb_manager.num_leds > 0) {
+                rgb_led_count = rgb_manager.num_leds;
+            } else if (CONFIG_NUM_LEDS > 0) {
+                rgb_led_count = CONFIG_NUM_LEDS;
+            } else {
+                rgb_led_count = 1;
+            }
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);

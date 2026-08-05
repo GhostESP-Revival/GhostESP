@@ -4,7 +4,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "gui/screen_layout.h"
 #include "managers/display_manager.h"
@@ -429,13 +428,16 @@ static esp_err_t select_pack_for_load(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    char name[32] = "active";
+    char name[32] = "None";
     char archive_path_buf[192];
     bool archive = false;
 
     char saved[32];
     if (load_saved_active_name(saved)) snprintf(name, sizeof(name), "%s", saved);
     if (strcmp(name, "None") == 0) {
+        snprintf(s_active_name, sizeof(s_active_name), "None");
+        s_active_is_archive = false;
+        snprintf(s_pack_dir, sizeof(s_pack_dir), "%s", ACTIVE_PACK_DIR);
         ESP_LOGI(TAG, "asset pack disabled (None)");
         return ESP_ERR_NOT_FOUND;
     }
@@ -696,6 +698,40 @@ static lv_img_cf_t gimg_cf(uint8_t fmt) {
     return LV_IMG_CF_TRUE_COLOR;
 }
 
+static void premultiply_indexed4_palette(lv_img_dsc_t *dsc) {
+    if (!dsc || dsc->header.cf != LV_IMG_CF_INDEXED_4BIT || !dsc->data || dsc->data_size < 64) return;
+
+    lv_color32_t *palette = (lv_color32_t *)dsc->data;
+    for (int i = 0; i < 16; ++i) {
+        uint8_t alpha = palette[i].ch.alpha;
+        if (alpha == 255) continue;
+        palette[i].ch.red = (uint8_t)(((uint16_t)palette[i].ch.red * alpha + 127) / 255);
+        palette[i].ch.green = (uint8_t)(((uint16_t)palette[i].ch.green * alpha + 127) / 255);
+        palette[i].ch.blue = (uint8_t)(((uint16_t)palette[i].ch.blue * alpha + 127) / 255);
+        palette[i].ch.alpha = 255;
+    }
+}
+
+/* lgfx_tinfl_decompressor is ~11 KB. Keep it off task stacks and make it
+ * per-call so boot, deferred preload, and pack switching cannot share state. */
+static size_t tinfl_decompress_heap(void *out, size_t out_len,
+                                    const void *src, size_t src_len, int flags) {
+    lgfx_tinfl_decompressor *decomp = heap_caps_malloc(sizeof(*decomp),
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!decomp) decomp = malloc(sizeof(*decomp));
+    if (!decomp) return TINFL_DECOMPRESS_MEM_TO_MEM_FAILED;
+
+    lgfx_tinfl_init(decomp);
+    size_t in_len = src_len;
+    size_t dst_len = out_len;
+    lgfx_tinfl_status st = lgfx_tinfl_decompress(decomp,
+        (const lgfx_mz_uint8 *)src, &in_len,
+        (lgfx_mz_uint8 *)out, (lgfx_mz_uint8 *)out, &dst_len,
+        (flags & ~TINFL_FLAG_HAS_MORE_INPUT) | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    free(decomp);
+    return (st != TINFL_STATUS_DONE) ? TINFL_DECOMPRESS_MEM_TO_MEM_FAILED : dst_len;
+}
+
 static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, lv_img_dsc_t *out_dsc, uint8_t **out_data) {
     *out_data = NULL;
     memset(out_dsc, 0, sizeof(*out_dsc));
@@ -793,7 +829,7 @@ static esp_err_t load_gimg(const char *path, bool psram_only, uint32_t max_raw, 
             return ESP_ERR_NO_MEM;
         }
 
-        size_t out_len = lgfx_tinfl_decompress_mem_to_mem(raw, raw_size, payload, payload_size, 0);
+        size_t out_len = tinfl_decompress_heap(raw, raw_size, payload, payload_size, 0);
         free(payload);
         if (out_len == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || out_len != raw_size) {
             free(raw);
@@ -971,7 +1007,7 @@ static esp_err_t extract_gtheme_to_dir(const char *archive_path, const char *out
             if (!raw) raw = malloc(raw_size ? raw_size : 1);
             if (!raw) err = ESP_ERR_NO_MEM;
             else {
-                size_t out_len = lgfx_tinfl_decompress_mem_to_mem(raw, raw_size, payload, payload_size, 0);
+                size_t out_len = tinfl_decompress_heap(raw, raw_size, payload, payload_size, 0);
                 if (out_len == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || out_len != raw_size) err = ESP_FAIL;
             }
         } else {
@@ -1402,7 +1438,7 @@ static void scan_installed_packs(void) {
     }
     closedir(dir);
 
-    for (int i = 0; i < s_installed_count - 1; ++i) {
+    for (int i = 1; i < s_installed_count - 1; ++i) {
         for (int j = i + 1; j < s_installed_count; ++j) {
             if (strcmp(s_installed_names[i], s_installed_names[j]) > 0) {
                 char tmp[ASSET_PACK_NAME_MAX];
@@ -1421,6 +1457,9 @@ esp_err_t asset_pack_select_by_index(int index) {
 
     if (index == 0) {
         save_active_name("None");
+        snprintf(s_active_name, sizeof(s_active_name), "None");
+        s_active_is_archive = false;
+        snprintf(s_pack_dir, sizeof(s_pack_dir), "%s", ACTIVE_PACK_DIR);
         clear_runtime();
         return ESP_OK;
     }
@@ -1536,7 +1575,10 @@ const lv_img_dsc_t *asset_pack_get_app_icon(const lv_img_dsc_t *fallback) {
 
 const lv_img_dsc_t *asset_pack_get_background_tile(void) {
     if (!s_loaded || !s_bg_tile[0]) return NULL;
-    if (s_bg_tile_data) return &s_bg_tile_dsc;
+    if (s_bg_tile_data) {
+        premultiply_indexed4_palette(&s_bg_tile_dsc);
+        return &s_bg_tile_dsc;
+    }
 
     while (s_bg_tile[0]) {
         char path[192];
@@ -1574,6 +1616,7 @@ const lv_img_dsc_t *asset_pack_get_background_tile(void) {
             if (select_next_bg_candidate()) continue;
             return NULL;
         }
+        premultiply_indexed4_palette(&s_bg_tile_dsc);
         ESP_LOGI(TAG, "background loaded: %s %ux%u cf=%u scale=%d",
                  path, s_bg_tile_dsc.header.w, s_bg_tile_dsc.header.h,
                  (unsigned)s_bg_tile_dsc.header.cf, s_bg_scale_to_fill ? 1 : 0);
@@ -1586,12 +1629,21 @@ bool asset_pack_background_should_scale(void) {
     return s_bg_scale_to_fill;
 }
 
-/* One-time bake of the small tile into a fullscreen RGB565 PSRAM buffer.
+/* One-time bake of the source into a fullscreen RGB565 PSRAM buffer.
  * Result: a single LV_IMG_CF_TRUE_COLOR desc sized to LV_HOR_RES x LV_VER_RES
- * that LVGL can blit with no per-frame tiling math. */
+ * that LVGL can blit with no per-frame scaling math.
+ *
+ * Scaling is cover-fit: aspect ratio is preserved, the source is scaled by
+ * a uniform factor so it fully covers the destination on at least one axis,
+ * and the excess on the other axis is center-cropped. This is the standard
+ * "background image fills the screen" behavior and avoids the aspect-ratio
+ * distortion that LVGL's non-uniform zoom would produce. */
 static esp_err_t bake_background_fullscreen(void) {
     if (s_bg_fullscreen_data) return ESP_OK;
     if (!s_bg_tile_data) return ESP_ERR_INVALID_STATE;
+    /* Indexed formats are rendered per-frame in screen_layout.c
+     * (indexed_scaled_bg_draw_cb) which understands the 4bpp palette. */
+    if (s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) return ESP_ERR_NOT_SUPPORTED;
 
     int sw = s_bg_tile_dsc.header.w;
     int sh = s_bg_tile_dsc.header.h;
@@ -1606,17 +1658,37 @@ static esp_err_t bake_background_fullscreen(void) {
     if (!buf) return ESP_ERR_NO_MEM;
 
     const uint8_t *src = s_bg_tile_data;
-    for (int y = 0; y < dh; y++) {
-        int src_y = y % sh;
-        uint8_t *dst_row = buf + (size_t)y * dw * 2;
-        const uint8_t *src_row = src + (size_t)src_y * sw * 2;
-        int x = 0;
-        while (x + sw <= dw) {
-            memcpy(dst_row + x * 2, src_row, (size_t)sw * 2);
-            x += sw;
+
+    /* Pick the larger of dw/sw and dh/sh so the scaled source fully covers
+     * the destination on at least one axis. Center-crop the other axis. */
+    int scaled_w, scaled_h, offset_x, offset_y;
+    if ((uint32_t)dw * sh >= (uint32_t)dh * sw) {
+        scaled_w = dw;
+        scaled_h = (int)((uint32_t)sh * (uint32_t)dw / (uint32_t)sw);
+        offset_x = 0;
+        offset_y = (scaled_h - dh) / 2;
+    } else {
+        scaled_h = dh;
+        scaled_w = (int)((uint32_t)sw * (uint32_t)dh / (uint32_t)sh);
+        offset_x = (scaled_w - dw) / 2;
+        offset_y = 0;
+    }
+    if (scaled_w < dw) scaled_w = dw;
+    if (scaled_h < dh) scaled_h = dh;
+
+    for (int dy = 0; dy < dh; dy++) {
+        int sy = ((dy + offset_y) * sh + scaled_h / 2) / scaled_h;
+        if (sy < 0) sy = 0;
+        if (sy >= sh) sy = sh - 1;
+        const uint8_t *src_row = src + (size_t)sy * sw * 2;
+        uint8_t *dst_row = buf + (size_t)dy * dw * 2;
+        for (int dx = 0; dx < dw; dx++) {
+            int sx = ((dx + offset_x) * sw + scaled_w / 2) / scaled_w;
+            if (sx < 0) sx = 0;
+            if (sx >= sw) sx = sw - 1;
+            dst_row[dx * 2]     = src_row[sx * 2];
+            dst_row[dx * 2 + 1] = src_row[sx * 2 + 1];
         }
-        int rem = dw - x;
-        if (rem > 0) memcpy(dst_row + x * 2, src_row, (size_t)rem * 2);
     }
 
     s_bg_fullscreen_dsc = s_bg_tile_dsc;
@@ -1625,7 +1697,7 @@ static esp_err_t bake_background_fullscreen(void) {
     s_bg_fullscreen_dsc.data_size = (uint32_t)size;
     s_bg_fullscreen_dsc.data = buf;
     s_bg_fullscreen_data = buf;
-    ESP_LOGI(TAG, "baked fullscreen bg: %dx%d (%u bytes) from %dx%d tile",
+    ESP_LOGI(TAG, "baked fullscreen bg: %dx%d (%u bytes) cover-scaled from %dx%d",
              dw, dh, (unsigned)size, sw, sh);
     return ESP_OK;
 }
@@ -1637,7 +1709,10 @@ const lv_img_dsc_t *asset_pack_get_background_fullscreen(void) {
     if (s_bg_tile_dsc.header.w == (uint16_t)LV_HOR_RES && s_bg_tile_dsc.header.h == (uint16_t)LV_VER_RES) {
         return &s_bg_tile_dsc;
     }
-    if (s_bg_scale_to_fill || s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) {
+    /* Indexed sources bypass the bake: LVGL can't blit a pre-baked
+     * INDEXED_4BIT desc, so they're rendered per-frame with nearest-
+     * neighbor scaling in screen_layout.c. */
+    if (s_bg_tile_dsc.header.cf != LV_IMG_CF_TRUE_COLOR) {
         return &s_bg_tile_dsc;
     }
     if (bake_background_fullscreen() != ESP_OK) {
@@ -1647,12 +1722,7 @@ const lv_img_dsc_t *asset_pack_get_background_fullscreen(void) {
     return &s_bg_fullscreen_dsc;
 }
 
-typedef struct {
-    int index;
-} switch_msg_t;
-
-static QueueHandle_t s_switch_queue = NULL;
-static TaskHandle_t s_switch_worker = NULL;
+static volatile bool s_switch_running = false;
 
 static void switch_pack_ui_refresh(void *arg) {
     (void)arg;
@@ -1679,43 +1749,29 @@ static esp_err_t switch_pack_run(int index) {
 }
 
 static void switch_pack_worker(void *arg) {
-    (void)arg;
-    switch_msg_t msg;
-    while (true) {
-        if (xQueueReceive(s_switch_queue, &msg, portMAX_DELAY) != pdTRUE) continue;
-        esp_err_t err = switch_pack_run(msg.index);
-        if (err == ESP_OK) {
-            display_manager_run_on_lvgl(switch_pack_ui_refresh, NULL);
-            ESP_LOGI(TAG, "switch_pack_worker: UI refresh scheduled via version counter");
-        }
+    int index = (int)(intptr_t)arg;
+    esp_err_t err = switch_pack_run(index);
+    if (err == ESP_OK) {
+        display_manager_run_on_lvgl(switch_pack_ui_refresh, NULL);
+        ESP_LOGI(TAG, "switch_pack_worker: UI refresh scheduled via version counter");
     }
+    s_switch_running = false;
+    vTaskDelete(NULL);
 }
 
 void asset_pack_switch_task(int index) {
-    ESP_LOGI(TAG, "asset_pack_switch_task: queue pack index %d", index);
-    if (!s_switch_queue) {
-        s_switch_queue = xQueueCreate(1, sizeof(switch_msg_t));
-        if (!s_switch_queue) {
-            ESP_LOGW(TAG, "asset_pack_switch_task: no memory for switch queue; switching inline");
-            esp_err_t err = switch_pack_run(index);
-            if (err == ESP_OK) switch_pack_ui_refresh(NULL);
-            return;
-        }
+    ESP_LOGI(TAG, "asset_pack_switch_task: start pack index %d", index);
+    if (s_switch_running) {
+        ESP_LOGW(TAG, "asset_pack_switch_task: switch already running; ignoring pack index %d", index);
+        return;
     }
 
-    if (!s_switch_worker) {
-        BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096, NULL, 6, &s_switch_worker);
-        if (ok != pdPASS) {
-            ESP_LOGW(TAG, "asset_pack_switch_task: failed to create worker task; switching inline");
-            esp_err_t err = switch_pack_run(index);
-            if (err == ESP_OK) switch_pack_ui_refresh(NULL);
-            return;
-        }
-    }
-
-    switch_msg_t msg = {.index = index};
-    if (xQueueOverwrite(s_switch_queue, &msg) != pdTRUE) {
-        ESP_LOGW(TAG, "asset_pack_switch_task: switch queue send failed; switching inline");
+    s_switch_running = true;
+    BaseType_t ok = xTaskCreate(switch_pack_worker, "pack_switch", 4096,
+                                (void *)(intptr_t)index, 6, NULL);
+    if (ok != pdPASS) {
+        s_switch_running = false;
+        ESP_LOGW(TAG, "asset_pack_switch_task: failed to create worker task; switching inline");
         esp_err_t err = switch_pack_run(index);
         if (err == ESP_OK) switch_pack_ui_refresh(NULL);
     }

@@ -80,7 +80,7 @@ void main_menu_layout_get_metrics(main_menu_layout_kind_t kind, int item_count, 
         metrics->margin = 6;
     }
     metrics->card_width = (screen_width - (columns + 1) * metrics->margin) / columns;
-    metrics->card_height = (content_height - (metrics->visible_rows - 1) * metrics->margin) / metrics->visible_rows;
+    metrics->card_height = (content_height - (metrics->visible_rows + 1) * metrics->margin) / metrics->visible_rows;
     if (metrics->card_width < 1) metrics->card_width = 1;
     if (metrics->card_height < 1) metrics->card_height = 1;
 

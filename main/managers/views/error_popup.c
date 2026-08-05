@@ -228,7 +228,8 @@ void error_popup_create_persistent(const char *message) {
     error_popup_root = lv_obj_create(lv_layer_top());
     lv_obj_clear_flag(error_popup_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    int popup_width = LV_HOR_RES * 0.8;
+    int max_popup_width = LV_HOR_RES * 0.8;
+    int min_popup_width = LV_HOR_RES * 0.5;
     int padding = (LV_HOR_RES <= 128) ? 5 : GUI_GRID * 2;
     const lv_font_t *font = (LV_HOR_RES <= 128) ? &lv_font_montserrat_8 : accessibility_get_font_small();
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -243,7 +244,7 @@ void error_popup_create_persistent(const char *message) {
     // Create label with better alignment
     error_popup_label = lv_label_create(error_popup_root);
     lv_label_set_long_mode(error_popup_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(error_popup_label, popup_width - 2 * padding);
+    lv_obj_set_width(error_popup_label, max_popup_width - 2 * padding);
     lv_obj_set_style_text_color(error_popup_label, theme_palette_is_bright(theme) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(error_popup_label, font, 0);
     lv_obj_set_style_text_align(error_popup_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -252,8 +253,11 @@ void error_popup_create_persistent(const char *message) {
     lv_txt_get_size(&txt_size, message, font,
                     lv_obj_get_style_text_letter_space(error_popup_label, 0),
                     lv_obj_get_style_text_line_space(error_popup_label, 0),
-                    popup_width - 2 * padding,
+                    max_popup_width - 2 * padding,
                     LV_TEXT_FLAG_NONE);
+    int popup_width = txt_size.x + 2 * padding;
+    if (popup_width > max_popup_width) popup_width = max_popup_width;
+    if (popup_width < min_popup_width) popup_width = min_popup_width;
     lv_obj_set_size(error_popup_label, popup_width - 2 * padding, txt_size.y);
     lv_obj_set_size(error_popup_root, popup_width, txt_size.y + 2 * padding);
     lv_obj_align(error_popup_root, LV_ALIGN_CENTER, 0, 0);

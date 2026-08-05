@@ -258,6 +258,19 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
+/* CYD 2.4" keeps display+touch on SPI2 while SD owns SPI3 by itself. On the
+ * classic ESP32, tearing the SPI3 bus down with spi_bus_free() disturbs the
+ * live SPI2 display and freezes it. So on this board we leave SD's bus
+ * initialized instead of freeing it (a later (re)mount reuses it via
+ * ESP_ERR_INVALID_STATE, already handled). Every other board frees as before. */
+static bool sd_keep_spi_bus_for_board(void) {
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "CYD2USB2.4Inch") == 0;
+#else
+  return false;
+#endif
+}
+
 static void sd_spi_bus_release_if_tracked(void) {
   ESP_LOGD(TAG, "sd_spi_bus_release_if_tracked: s_spi_bus_initialized=%d, s_spi_host_id=%d",
            s_spi_bus_initialized, s_spi_host_id);
@@ -440,8 +453,12 @@ esp_err_t sd_card_init(void) {
     return ESP_OK;
   }
 
-  /* Clean up stale tracked SPI state before a fresh init attempt. */
-  if (s_mount_type == MOUNT_SPI && s_spi_bus_initialized) {
+  /* Clean up stale tracked SPI state before a fresh init attempt. On the
+   * CYD 2.4" we deliberately keep SD's bus alive (see
+   * sd_keep_spi_bus_for_board); freeing it here would freeze the live
+   * display. A reused bus is fine — the mount below handles INVALID_STATE. */
+  if (s_mount_type == MOUNT_SPI && s_spi_bus_initialized &&
+      !sd_keep_spi_bus_for_board()) {
     sd_spi_bus_release_if_tracked();
   }
   sd_card_manager.card = NULL;
@@ -586,6 +603,9 @@ esp_err_t sd_card_init(void) {
   display_rebind_required = display_spi_requires_rebind_for_sd();
   ESP_LOGI(TAG, "display_rebind_required=%d", display_rebind_required);
   if (is_shared_display_sd_spi() && !display_rebind_required) {
+    /* Pins match the display, so the display's SPI device is still attached
+     * to the shared host. Pause LVGL and defer panel detach to the
+     * gating/rebind block below before SD claims the bus. */
     shared_spi_guard_active = true;
     ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
     display_manager_suspend_lvgl_task();
@@ -599,12 +619,27 @@ esp_err_t sd_card_init(void) {
 #endif
 
   bool gating_template = false;
+  /* On the CYD 2.4" the display+touch live on SPI2 while SD gets SPI3 to
+   * itself, so SD genuinely *owns* the SPI3 bus (bus_init_success == true).
+   * Other CYDs share SD's host with touch, so SD only reuses an already-init
+   * bus and never frees it. See sd_keep_spi_bus_for_board() for why freeing it
+   * freezes the display; keep the bus alive on mount failure (no card) here. */
+  bool keep_bus_on_failure = sd_keep_spi_bus_for_board();
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+                     strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
 #endif
   bool display_was_suspended = false;
+  /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
+   * the panel. Same-pin shared SPI boards like TEmbedC1101 keep the old path. */
   if (gating_template || display_rebind_required) {
     display_was_suspended = display_spi_suspend_for_sd();
+    if (display_was_suspended) {
+      /* Full suspend removed the panel device. Do not resume the LVGL task via
+       * the lightweight guard; display_spi_resume_after_sd() must re-add the
+       * panel first and then resume LVGL. */
+      shared_spi_guard_active = false;
+    }
   }
 
 
@@ -729,7 +764,10 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       s_spi_bus_initialized = true;
       s_spi_host_id = SPI2_HOST;
-    } else if (bus_ret != ESP_ERR_INVALID_STATE) {
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
+      s_spi_host_id = SPI2_HOST;
+    } else {
       shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
@@ -852,13 +890,9 @@ esp_err_t sd_card_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGI(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-    if (bus_init_success) {
+    if (bus_init_success && !keep_bus_on_failure) {
       sd_spi_bus_release_if_tracked();
     }
-#else
-    (void)bus_init_success;
-#endif
     if (display_was_suspended) {
       ESP_LOGI(TAG, "Calling display_spi_resume_after_sd()");
       display_spi_resume_after_sd();
@@ -991,7 +1025,9 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
                                   &sd_card_manager.card);
   }
   if (ret != ESP_OK) {
-    sd_spi_bus_release_if_tracked();
+    if (!sd_keep_spi_bus_for_board()) {
+      sd_spi_bus_release_if_tracked();
+    }
     if (display_was_suspended && *display_was_suspended) display_spi_resume_after_sd();
     xSemaphoreGiveRecursive(jit_mutex);
     return ret;
@@ -1045,6 +1081,49 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
   }
 }
 
+bool sd_card_needs_jit_mount(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    /* Boards where the SD card shares SPI pins/host with the LVGL display
+     * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).
+     * Force JIT mount/unmount so the display is restored between SD use. */
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+           strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0;
+#else
+    return false;
+#endif
+}
+
+bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {
+    if (display_was_suspended) *display_was_suspended = false;
+
+    if (!sd_card_needs_jit_mount()) {
+        return true;
+    }
+
+    esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
+    if (mount_err != ESP_OK) {
+        ESP_LOGE(TAG, "sd_card_jit_begin: mount failed: %s", esp_err_to_name(mount_err));
+        return false;
+    }
+
+    if (ensure_dirs) {
+        esp_err_t dir_err = sd_card_setup_directory_structure();
+        if (dir_err != ESP_OK) {
+            ESP_LOGW(TAG, "sd_card_jit_begin: setup_directory_structure failed: %s",
+                     esp_err_to_name(dir_err));
+        }
+    }
+
+    return true;
+}
+
+void sd_card_jit_end(bool display_was_suspended) {
+    if (!sd_card_needs_jit_mount()) {
+        return;
+    }
+    sd_card_unmount_after_flush(display_was_suspended);
+}
+
 void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #ifdef CONFIG_IS_S3TWATCH
   if (s_virtual_storage_mounted) {
@@ -1078,7 +1157,7 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #if SOC_SDMMC_HOST_SUPPORTED && SOC_SDMMC_USE_GPIO_MATRIX
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
-    if (s_mount_type == MOUNT_SPI) {
+    if (s_mount_type == MOUNT_SPI && !sd_keep_spi_bus_for_board()) {
       sd_spi_bus_release_if_tracked();
     }
     if (context != SD_UNMOUNT_CONTEXT_JIT) {
@@ -1112,7 +1191,9 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 #else
   if (sd_card_manager.is_initialized) {
     esp_vfs_fat_sdcard_unmount("/mnt", sd_card_manager.card);
-    sd_spi_bus_release_if_tracked();
+    if (!sd_keep_spi_bus_for_board()) {
+      sd_spi_bus_release_if_tracked();
+    }
     if (context != SD_UNMOUNT_CONTEXT_JIT) {
       printf("SD card unmounted\n");
     }

@@ -63,6 +63,33 @@ typedef struct {
     bool tracking;
 } ghostesp_ble_detect_info_t;
 
+typedef struct {
+    uint8_t mac[6];
+    uint8_t addr_type;
+    int8_t rssi;
+    uint8_t event_type;
+    uint32_t seen_count;
+    char name[24];
+    bool has_flags;
+    uint8_t flags;
+    bool has_tx_power;
+    int8_t tx_power;
+    bool has_manufacturer_id;
+    uint16_t manufacturer_id;
+    bool is_ibeacon;
+    char ibeacon_uuid[37];
+    uint16_t ibeacon_major;
+    uint16_t ibeacon_minor;
+    int8_t ibeacon_measured_power;
+    char adv_type[16];
+    char manufacturer[24];
+    char oui_vendor[32];
+    char services[96];
+    char service_data[64];
+    bool has_appearance;
+    uint16_t appearance;
+} ghostesp_ble_adv_info_t;
+
 typedef void *ghostesp_ui_obj_t;
 typedef void (*ghostesp_ui_button_cb_t)(void *user);
 
@@ -543,6 +570,15 @@ typedef struct ghostesp_api {
     bool (*has_permission)(const char *permission);
     bool (*has_feature)(const char *feature);
     bool (*subghz_transmit_file)(const char *app_relative_path);
+
+    void (*ble_adv_scan_start)(void);
+    void (*ble_adv_scan_stop)(void);
+    bool (*ble_adv_scan_active)(void);
+    int (*ble_adv_scan_count)(void);
+    bool (*ble_adv_scan_get)(int index, ghostesp_ble_adv_info_t *out);
+    bool (*ble_adv_scan_track)(int index);
+    void (*ble_adv_scan_stop_tracking)(void);
+    bool (*ble_adv_scan_save_to_sd)(int index);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

@@ -108,6 +108,7 @@ void* infrared_common_encoder_alloc(const InfraredCommonProtocolSpec* protocol) 
     }
     size_t alloc = sizeof(InfraredCommonEncoder) + (max_bits + 7) / 8;
     InfraredCommonEncoder* e = malloc(alloc);
+    if (!e) return NULL;
     memset(e, 0, alloc);
     e->protocol = protocol;
     return e;

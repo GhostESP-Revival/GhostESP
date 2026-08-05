@@ -11,8 +11,8 @@ The Audio app plays MP3 files stored on the SD card and streams them over GhostL
 
 - **The Banshee** hardware. Its two-chip audio setup uses the `somethingsomething` and `somethingsomething2` builds.
 - A GhostLink connection between the Banshee control/display chip and audio receiver chip.
-- MP3 files on the SD card in `/audio`.
-- MP3 bitrate under `200kbps`. Higher bitrate files are rejected with an on-device toast.
+- MP3 files on the SD card in `/mnt/ghostesp/audio`.
+- MP3 bitrate under `264kbps`. Higher bitrate files are rejected with an on-device toast.
 - For headphone output, the TLV320DAC3100 route is detected once before playback starts.
 
 ## File Setup
@@ -20,7 +20,7 @@ The Audio app plays MP3 files stored on the SD card and streams them over GhostL
 Create this folder on the SD card:
 
 ```text
-/audio
+/mnt/ghostesp/audio
 ```
 
 Copy `.mp3` files into that folder. The Audio app scans the folder when it opens and lists the tracks alphabetically.
@@ -29,7 +29,7 @@ Recommended encoding:
 
 - MP3, constant bitrate when possible.
 - `128kbps` or `160kbps` for best reliability.
-- Under `200kbps`; `200kbps` and higher is not accepted.
+- Under `264kbps`; `264kbps` and higher is not accepted.
 - Standard sample rates such as `44.1kHz`.
 
 ## Opening the App
@@ -40,7 +40,7 @@ On the device UI, open:
 Apps -> Audio
 ```
 
-If no MP3 files are found, the app shows a toast asking for files in `/audio`.
+If no MP3 files are found, the app shows a toast asking for files in `/mnt/ghostesp/audio`.
 
 ## Controls
 
@@ -84,8 +84,8 @@ audio state <fill_bytes> <capacity_bytes> <played_ms>
 ## Troubleshooting
 
 - **Audio app is missing:** Audio playback is currently Banshee-only. Make sure both Banshee chips are flashed with the correct paired builds.
-- **No files shown:** Check that the SD card contains `.mp3` files in `/audio`.
-- **Bitrate toast appears:** Re-encode the file below `200kbps`; `128kbps` or `160kbps` is recommended.
+- **No files shown:** Check that the SD card contains `.mp3` files in `/mnt/ghostesp/audio`.
+- **Bitrate toast appears:** Re-encode the file below `264kbps`; `128kbps` or `160kbps` is recommended.
 - **Playback underruns or stutters:** Try a lower bitrate file and confirm GhostLink is connected with no other streaming app active.
 - **No headphone output:** Reconnect headphones before starting playback so one-shot route detection can select the right output path.
 - **Progress looks wrong:** Some VBR files do not expose accurate duration data. CBR files produce more stable estimates.

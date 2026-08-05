@@ -81,7 +81,7 @@ Navigate to **Ghost ESP Options** in menuconfig:
 - **GPS Configuration** — UART RX pin and baud rate
 - **NFC Options** — PN532 or Chameleon Ultra
 - **NRF24 Options** — SPI pins for NRF24L01 module
-- **Misc Options** — Joystick, battery ADC, BadUSB, ethernet, infrared
+- **Misc Options** — Joystick, battery ADC, BadUSB, ethernet, infrared, NRF24
 
 ### LVGL Display Driver
 

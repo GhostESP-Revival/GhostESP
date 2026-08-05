@@ -37,6 +37,19 @@ void *esp_elf_malloc(uint32_t n, bool exec)
 
 #if CONFIG_IDF_TARGET_ESP32C5
     if (exec) {
+#ifdef CONFIG_ELF_LOADER_C5_FLASH_XIP
+        /* Flash-XIP: the "executable" buffer is only a writable staging area for
+         * relocation. The relocated image is later programmed to flash and run
+         * from the flash MMU mapping, so staging never needs MALLOC_CAP_EXEC and
+         * is allocated PSRAM-first to avoid spending scarce internal RAM. */
+        void *stage = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!stage) {
+            stage = heap_caps_malloc(n, MALLOC_CAP_8BIT);
+        }
+        ESP_LOGI(TAG, "xip stage alloc %"PRIu32" -> %p internal=%d", n, stage,
+                 stage ? esp_ptr_internal(stage) : 0);
+        return stage;
+#endif
 #ifdef MALLOC_CAP_EXEC
         uint32_t exec_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_EXEC;
 

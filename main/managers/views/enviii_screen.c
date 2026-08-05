@@ -7,12 +7,14 @@
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "lvgl.h"
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "i2c_bus_lock.h"
+#include "i2c_shared.h"
 #include <math.h>
 
 #ifdef CONFIG_HAS_ENVIII
@@ -20,6 +22,7 @@
 static const char *TAG = "ENVIIIScreen";
 
 static lv_obj_t *enviii_container = NULL;
+static lv_obj_t *enviii_content = NULL;
 static lv_obj_t *temp_label = NULL;
 static lv_obj_t *comfort_label = NULL;
 static lv_obj_t *feels_like_label = NULL;
@@ -45,6 +48,8 @@ static uint32_t card_color = 0x1A1A1A;
 static uint32_t text_color = 0xFFFFFF;
 static uint32_t dim_color = 0x888888;
 
+static void enviii_scroll_content(int dir);
+
 #ifdef CONFIG_USE_TOUCHSCREEN
 static int enviii_touch_bar_height(void) {
     return (LV_VER_RES <= 160 ? 26 : 30) + 8;
@@ -67,6 +72,25 @@ static bool enviii_touch_hits_back_button(const lv_point_t *p) {
 #endif
 #define ENVIII_I2C_PORT CONFIG_ENVIII_I2C_PORT
 
+#ifndef CONFIG_I2C_MANAGER_0_SDA
+#define CONFIG_I2C_MANAGER_0_SDA (-1)
+#endif
+#ifndef CONFIG_I2C_MANAGER_0_SCL
+#define CONFIG_I2C_MANAGER_0_SCL (-1)
+#endif
+#ifndef CONFIG_I2C_MANAGER_0_PULLUPS
+#define CONFIG_I2C_MANAGER_0_PULLUPS 0
+#endif
+#ifndef CONFIG_I2C_MANAGER_1_SDA
+#define CONFIG_I2C_MANAGER_1_SDA (-1)
+#endif
+#ifndef CONFIG_I2C_MANAGER_1_SCL
+#define CONFIG_I2C_MANAGER_1_SCL (-1)
+#endif
+#ifndef CONFIG_I2C_MANAGER_1_PULLUPS
+#define CONFIG_I2C_MANAGER_1_PULLUPS 0
+#endif
+
 #ifndef CONFIG_ENVIII_SHT30_I2C_ADDR
 #define CONFIG_ENVIII_SHT30_I2C_ADDR 0x44
 #endif
@@ -76,6 +100,44 @@ static bool enviii_touch_hits_back_button(const lv_point_t *p) {
 #define CONFIG_ENVIII_QMP6988_I2C_ADDR 0x70
 #endif
 #define QMP6988_I2C_ADDR CONFIG_ENVIII_QMP6988_I2C_ADDR
+
+static esp_err_t enviii_get_bus(i2c_master_bus_handle_t *bus) {
+    if (!bus) return ESP_ERR_INVALID_ARG;
+
+    esp_err_t ret = i2c_master_get_bus_handle(ENVIII_I2C_PORT, bus);
+    if (ret == ESP_OK) return ESP_OK;
+
+    gpio_num_t sda = GPIO_NUM_NC;
+    gpio_num_t scl = GPIO_NUM_NC;
+    bool pullups = false;
+
+    if (ENVIII_I2C_PORT == 0) {
+        sda = (gpio_num_t)CONFIG_I2C_MANAGER_0_SDA;
+        scl = (gpio_num_t)CONFIG_I2C_MANAGER_0_SCL;
+        pullups = CONFIG_I2C_MANAGER_0_PULLUPS;
+    } else if (ENVIII_I2C_PORT == 1) {
+        sda = (gpio_num_t)CONFIG_I2C_MANAGER_1_SDA;
+        scl = (gpio_num_t)CONFIG_I2C_MANAGER_1_SCL;
+        pullups = CONFIG_I2C_MANAGER_1_PULLUPS;
+    }
+
+    if (sda == GPIO_NUM_NC || scl == GPIO_NUM_NC) {
+        ESP_LOGE(TAG, "I2C bus %d unavailable and pins are not configured", ENVIII_I2C_PORT);
+        return ret;
+    }
+
+    bool created = false;
+    ret = i2c_shared_get_or_create_bus((i2c_port_num_t)ENVIII_I2C_PORT,
+                                       sda,
+                                       scl,
+                                       pullups,
+                                       bus,
+                                       &created);
+    if (ret == ESP_OK && created) {
+        ESP_LOGI(TAG, "Created ENV-III I2C bus %d (SDA=%d, SCL=%d)", ENVIII_I2C_PORT, sda, scl);
+    }
+    return ret;
+}
 
 /* -------------------------------------------------------------------------- */
 /* SHT30                                                                      */
@@ -97,7 +159,7 @@ static esp_err_t sht30_get_device(void) {
     if (s_sht30_dev) return ESP_OK;
 
     i2c_master_bus_handle_t bus = NULL;
-    esp_err_t ret = i2c_master_get_bus_handle(ENVIII_I2C_PORT, &bus);
+    esp_err_t ret = enviii_get_bus(&bus);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C bus %d unavailable: %s", ENVIII_I2C_PORT, esp_err_to_name(ret));
         return ret;
@@ -231,7 +293,7 @@ static esp_err_t qmp6988_get_device(void) {
     if (s_qmp6988_dev) return ESP_OK;
 
     i2c_master_bus_handle_t bus = NULL;
-    esp_err_t ret = i2c_master_get_bus_handle(ENVIII_I2C_PORT, &bus);
+    esp_err_t ret = enviii_get_bus(&bus);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C bus %d unavailable: %s", ENVIII_I2C_PORT, esp_err_to_name(ret));
         return ret;
@@ -619,9 +681,25 @@ static void enviii_event_handler(InputEvent *event) {
         return;
     }
 #endif
-    if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == LV_KEY_UP || key == ';' || key == 'k') {
+            enviii_scroll_content(-1);
+        } else if (key == LV_KEY_DOWN || key == '.' || key == 'j') {
+            enviii_scroll_content(1);
+        } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`') {
+            display_manager_switch_view(&main_menu_view);
+        }
+    } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {
         display_manager_switch_view(&main_menu_view);
     }
+}
+
+static void enviii_scroll_content(int dir) {
+    if (!enviii_content) return;
+    lv_coord_t step = lv_obj_get_height(enviii_content) / 2;
+    if (step < 24) step = 24;
+    lv_obj_scroll_by_bounded(enviii_content, 0, dir > 0 ? -step : step, LV_ANIM_OFF);
 }
 
 static void get_enviii_callback(void **callback) {
@@ -726,10 +804,14 @@ void enviii_create(void) {
     enviii_view.root = enviii_container;
 
     lv_obj_t *content = gui_screen_create_content(enviii_container, GUI_STATUS_BAR_HEIGHT);
+    enviii_content = content;
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int touch_bar_h = enviii_touch_bar_height();
     lv_obj_set_size(content, LV_HOR_RES, LV_VER_RES - GUI_STATUS_BAR_HEIGHT - touch_bar_h);
 #endif
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_text_color(content, lv_color_hex(text_color), 0);
     lv_obj_set_style_pad_all(content, 4, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
@@ -828,6 +910,7 @@ void enviii_destroy(void) {
         enviii_container = NULL;
         enviii_view.root = NULL;
     }
+    enviii_content = NULL;
     temp_label = NULL;
     comfort_label = NULL;
     feels_like_label = NULL;

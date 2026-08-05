@@ -636,7 +636,6 @@ void infrared_manager_poltergeist_hold_io24_end(void) {
 bool infrared_manager_transmit(const infrared_signal_t *signal) {
     if (!signal) return false;
     ESP_LOGI(TAG_IR_MANAGER, "transmitting IR signal (name: %s)", signal->name);
-    ghostchi_manager_add_xp(4);
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     bool poltergeist_local_hold = false;
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
@@ -715,7 +714,9 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
 
     rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
     ESP_LOGI(TAG_IR_MANAGER, "ir signal transmission complete (name: %s, status: %s)", signal->name, ok ? "OK" : "FAIL");
-    toast_show(ok ? "IR sent" : "IR send failed", ok ? TOAST_SUCCESS : TOAST_ERROR);
+    if (!ok) {
+        toast_show("IR send failed", TOAST_ERROR);
+    }
     return ok;
 }
 
@@ -728,6 +729,7 @@ bool infrared_manager_bruteforce(const char *path, uint32_t delay_ms) {
         ESP_LOGE(TAG_IR_MANAGER, "failed to read IR list for brute force from file: %s", path);
         return false;
     }
+    ghostchi_manager_add_xp(1);
     for (size_t i = 0; i < count; i++) {
         infrared_manager_transmit(&signals[i]);
         vTaskDelay(pdMS_TO_TICKS(delay_ms));

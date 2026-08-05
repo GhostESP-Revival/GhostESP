@@ -42,8 +42,8 @@ list(APPEND app_sources
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona.c"
     "${CMAKE_SOURCE_DIR}/main/managers/nfc/flipper_parsers/zolotaya_korona_online.c"
 )
-# Explicitly include infrared view implementation
-list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+# Exclude infrared view from glob; conditionally included below when IR is enabled
+list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/settings_sd_backup.c")
 list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/gui/fonts/font_helper.c")
 # Exclude i80_display.c from the glob as it's conditionally included later
@@ -51,6 +51,10 @@ list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/vendor/i80_display.c")
 # Exclude camera managers until camera support is enabled.
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/motion_detector_manager.c")
 list(REMOVE_ITEM app_sources "${CMAKE_SOURCE_DIR}/main/managers/camera_stream_manager.c")
+# Add infrared view back when IR support is enabled
+if(CONFIG_HAS_INFRARED)
+    list(APPEND app_sources "${CMAKE_SOURCE_DIR}/main/managers/views/infrared_view.c")
+endif()
 file(GLOB_RECURSE image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/*.c")
 list(APPEND image_sources "${CMAKE_SOURCE_DIR}/main/vendor/images/lock.c")
 list(REMOVE_DUPLICATES image_sources)
@@ -153,7 +157,7 @@ list(APPEND required_components tlv320dac3100)
 # Add audio codec component for audio receiver headers/libraries.
 list(APPEND required_components esp_audio_codec)
 
-set(embed_files_list "core/ouis.json")
+set(embed_files_list "core/ouis.bin")
 
 if(CONFIG_HAS_NFC)
     idf_component_register(SRCS ${sources}

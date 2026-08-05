@@ -309,6 +309,36 @@ static void plugin_runner_event_handler(InputEvent *event) {
         display_manager_switch_view(&apps_menu_view);
         return;
     }
+    plugin_loaded_app_t *loaded = plugin_loader_current();
+    if (!loaded || !loaded->running) {
+        switch (event->type) {
+            case INPUT_TYPE_JOYSTICK:
+                if (event->data.joystick_index == 0 || event->data.joystick_index == 2) {
+                    display_manager_switch_view(&apps_menu_view);
+                    return;
+                }
+                break;
+            case INPUT_TYPE_KEYBOARD:
+                if (event->data.key_value == LV_KEY_ESC || event->data.key_value == '`' ||
+                    event->data.key_value == 'q' || event->data.key_value == 'Q') {
+                    display_manager_switch_view(&apps_menu_view);
+                    return;
+                }
+                break;
+            case INPUT_TYPE_ENCODER:
+                display_manager_switch_view(&apps_menu_view);
+                return;
+            case INPUT_TYPE_EXIT_BUTTON:
+                display_manager_switch_view(&apps_menu_view);
+                return;
+            case INPUT_TYPE_TOUCH:
+                if (plugin_runner_handle_touch(event)) return;
+                display_manager_switch_view(&apps_menu_view);
+                return;
+            default:
+                break;
+        }
+    }
     if (plugin_runner_handle_touch(event)) return;
     if (event->type == INPUT_TYPE_ENCODER && !event->data.encoder.button && s_root && lv_obj_is_valid(s_root)) {
         lv_obj_t *scrollable = find_scrollable_descendant(s_root);
@@ -317,7 +347,6 @@ static void plugin_runner_event_handler(InputEvent *event) {
             lv_obj_scroll_by_bounded(scrollable, 0, dy, LV_ANIM_ON);
         }
     }
-    plugin_loaded_app_t *loaded = plugin_loader_current();
     if (loaded && loaded->running && loaded->app && loaded->app->on_input) {
         loaded->app->on_input(&app_event);
     }
@@ -349,7 +378,6 @@ static void plugin_runner_launch_pending(void) {
 
     runner_set_title_now(loaded->manifest && loaded->manifest->valid ? loaded->manifest->name : "SD App");
     ESP_LOGI(TAG, "Starting app %s", s_pending_app_id);
-    toast_show_duration("Starting app...", TOAST_INFO, 1000);
     err = plugin_loader_start(loaded);
     if (err != ESP_OK) {
         runner_set_title_now("Start Failed");
@@ -380,7 +408,7 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
-    s_root = gui_screen_create_root(NULL, "SD App", lv_color_hex(0x121212), LV_OPA_COVER);
+    s_root = gui_screen_create_root_default(NULL, "SD App");
     plugin_runner_view.root = s_root;
     display_manager_add_status_bar("SD App");
 

@@ -12,6 +12,7 @@
 #include "scans/wifi/airspace_monitor.h"
 #include "lvgl.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static lv_obj_t *root_container = NULL;
@@ -31,6 +32,8 @@ static lv_obj_t *lbl_counts_1 = NULL;
 static lv_obj_t *lbl_counts_2 = NULL;
 static lv_obj_t *counts_card = NULL;
 static lv_obj_t *content_scroller = NULL;
+static lv_obj_t *pps_line = NULL;
+static lv_point_t *pps_points = NULL;  /* persistent: lv_line stores this pointer, no copy */
 
 static uint32_t accent_color = 0x00FFFF;
 static uint32_t bg_color = 0x0A0A0A;
@@ -41,13 +44,6 @@ static uint32_t warn_color = 0xFFAA00;
 static uint32_t error_color = 0xFF4444;
 static uint32_t good_color = 0x00FF00;
 
-static uint32_t last_insight_ms = 0;
-static uint32_t prev_pps = 0;
-static uint32_t prev_kick = 0;
-static uint8_t prev_tx = 0;
-static airspace_threat_level_t insight_level = AIRSPACE_THREAT_QUIET;
-static char insight_text[96] = "Learning normal activity";
-static char advice_text[96] = "Monitor for 30 seconds to build context";
 static bool touch_active = false;
 static bool touch_moved = false;
 static int16_t touch_last_y = 0;
@@ -121,73 +117,6 @@ static uint32_t color_for_level(airspace_threat_level_t level) {
     }
 }
 
-static void reset_insight_state(void) {
-    last_insight_ms = 0;
-    prev_pps = 0;
-    prev_kick = 0;
-    prev_tx = 0;
-    insight_level = AIRSPACE_THREAT_QUIET;
-    snprintf(insight_text, sizeof(insight_text), "Learning normal activity");
-    snprintf(advice_text, sizeof(advice_text), "Monitor for 30 seconds to build context");
-}
-
-static void update_insight(const airspace_monitor_snapshot_t *snap) {
-    if (!snap) return;
-
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    uint32_t kick = snap->deauth_per_sec + snap->disassoc_per_sec;
-    if (last_insight_ms != 0 && (uint32_t)(now_ms - last_insight_ms) < 1800U) {
-        return;
-    }
-
-    if (last_insight_ms == 0) {
-        snprintf(insight_text, sizeof(insight_text), "Watching for sudden changes");
-        snprintf(advice_text, sizeof(advice_text), "Let it run briefly for a baseline");
-        insight_level = AIRSPACE_THREAT_QUIET;
-    } else if (kick >= prev_kick + 3 && kick >= 3) {
-        snprintf(insight_text, sizeof(insight_text), "Kick spike: clients may be forced off");
-        snprintf(advice_text, sizeof(advice_text), "Watch suspect MAC and channel now");
-        insight_level = AIRSPACE_THREAT_ATTACK_LIKELY;
-    } else if (prev_kick >= 3 && kick == 0) {
-        snprintf(insight_text, sizeof(insight_text), "Kick traffic stopped");
-        snprintf(advice_text, sizeof(advice_text), "Keep monitoring; attack may resume");
-        insight_level = AIRSPACE_THREAT_BUSY;
-    } else if (snap->packets_per_sec >= (prev_pps * 2U + 20U) && snap->packets_per_sec >= 30U) {
-        snprintf(insight_text, sizeof(insight_text), "Traffic surge: many frames appeared");
-        snprintf(advice_text, sizeof(advice_text), "Look for a rising suspect device");
-        insight_level = AIRSPACE_THREAT_SUSPICIOUS;
-    } else if (prev_pps >= 30U && (snap->packets_per_sec * 2U + 10U) < prev_pps) {
-        snprintf(insight_text, sizeof(insight_text), "Traffic dropped: air is quieter");
-        snprintf(advice_text, sizeof(advice_text), "Likely normal if no kick frames");
-        insight_level = AIRSPACE_THREAT_BUSY;
-    } else if (snap->unique_devices >= prev_tx + 5 && snap->unique_devices >= 8) {
-        snprintf(insight_text, sizeof(insight_text), "New devices appeared quickly");
-        snprintf(advice_text, sizeof(advice_text), "Busy area or clients reconnecting");
-        insight_level = AIRSPACE_THREAT_BUSY;
-    } else if (prev_tx >= snap->unique_devices + 5 && prev_tx >= 8) {
-        snprintf(insight_text, sizeof(insight_text), "Several devices went quiet");
-        snprintf(advice_text, sizeof(advice_text), "Could be channel hop or clients left");
-        insight_level = AIRSPACE_THREAT_BUSY;
-    } else if (snap->packets_per_sec < 3 && kick == 0) {
-        snprintf(insight_text, sizeof(insight_text), "Very quiet airspace");
-        snprintf(advice_text, sizeof(advice_text), "No action needed");
-        insight_level = AIRSPACE_THREAT_QUIET;
-    } else if (kick == 0) {
-        snprintf(insight_text, sizeof(insight_text), "Normal chatter, no kick pattern");
-        snprintf(advice_text, sizeof(advice_text), "Healthy unless suspect appears");
-        insight_level = AIRSPACE_THREAT_QUIET;
-    } else {
-        snprintf(insight_text, sizeof(insight_text), "Some kick frames seen; watching trend");
-        snprintf(advice_text, sizeof(advice_text), "A few kick frames can be normal");
-        insight_level = AIRSPACE_THREAT_SUSPICIOUS;
-    }
-
-    prev_pps = snap->packets_per_sec;
-    prev_kick = kick;
-    prev_tx = snap->unique_devices;
-    last_insight_ms = now_ms;
-}
-
 static void scroll_airspace(int dir) {
     if (!content_scroller) return;
     lv_coord_t step = lv_obj_get_height(content_scroller) / 2;
@@ -200,7 +129,6 @@ static void update_display_cb(lv_timer_t *timer) {
 
     airspace_monitor_snapshot_t snap = {0};
     airspace_monitor_get_snapshot(&snap);
-    update_insight(&snap);
 
     if (lbl_status) {
         lv_label_set_text(lbl_status, airspace_monitor_threat_label(snap.threat_level));
@@ -231,10 +159,28 @@ static void update_display_cb(lv_timer_t *timer) {
                                           (unsigned long)(snap.uptime_s / 60),
                                           (unsigned long)(snap.uptime_s % 60));
     if (lbl_insight) {
-        lv_label_set_text(lbl_insight, insight_text);
-        lv_obj_set_style_text_color(lbl_insight, lv_color_hex(color_for_level(insight_level)), 0);
+        lv_label_set_text(lbl_insight, snap.insight);
+        lv_obj_set_style_text_color(lbl_insight, lv_color_hex(color_for_level(snap.insight_level)), 0);
     }
-    if (lbl_advice) lv_label_set_text(lbl_advice, advice_text);
+    if (lbl_advice) lv_label_set_text(lbl_advice, snap.advice);
+
+    if (pps_line && pps_points) {
+        lv_coord_t w = lv_obj_get_content_width(pps_line);
+        lv_coord_t h = lv_obj_get_height(pps_line);
+        if (w < 8) w = LV_HOR_RES - 16;  // layout not settled yet on first tick
+        if (h < 6) h = compact_layout() ? 24 : 40;
+        uint16_t maxv = snap.pps_history_max;
+        if (maxv < 10) maxv = 10;  // floor so a quiet line stays near the bottom
+        int32_t pad = (int32_t)AIRSPACE_PPS_HISTORY - (int32_t)snap.pps_history_count;
+        for (uint8_t i = 0; i < AIRSPACE_PPS_HISTORY; i++) {
+            int32_t src = (int32_t)i - pad;  // right-align newest sample
+            uint16_t v = (src >= 0 && src < snap.pps_history_count) ? snap.pps_history[src] : 0;
+            pps_points[i].x = (lv_coord_t)((uint32_t)i * (w - 1) / (AIRSPACE_PPS_HISTORY - 1));
+            pps_points[i].y = (lv_coord_t)((h - 1) - ((uint32_t)v * (h - 1) / maxv));
+        }
+        lv_obj_set_style_line_color(pps_line, lv_color_hex(color_for_level(snap.threat_level)), 0);
+        lv_line_set_points(pps_line, pps_points, AIRSPACE_PPS_HISTORY);
+    }
 
     for (uint8_t i = 0; i < AIRSPACE_MAX_SUSPECTS; i++) {
         if (!suspect_cards[i]) continue;
@@ -356,7 +302,6 @@ void airspace_monitor_view_create(void) {
     card_color = theme_palette_get_surface_alt(theme);
     text_color = theme_palette_get_text(theme);
     dim_color = theme_palette_get_text_muted(theme);
-    reset_insight_state();
 
     airspace_monitor_reset();
     wifi_manager_start_monitor_mode(wifi_airspace_monitor_callback);
@@ -413,12 +358,31 @@ void airspace_monitor_view_create(void) {
         lv_label_set_long_mode(lbl_counts_2, LV_LABEL_LONG_SCROLL_CIRCULAR);
     }
 
+    if (!tiny_layout()) {
+        pps_points = malloc(sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
+        if (pps_points) {
+            memset(pps_points, 0, sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
+            lv_obj_t *chart_card = create_card(content, 100);
+            if (!compact_layout()) {
+                create_card_title(chart_card, "Activity (pkt/s)");
+            }
+            pps_line = lv_line_create(chart_card);
+            lv_obj_set_width(pps_line, LV_PCT(100));
+            lv_obj_set_height(pps_line, compact_layout() ? 24 : 40);
+            lv_obj_set_style_line_width(pps_line, 2, 0);
+            lv_obj_set_style_line_color(pps_line, lv_color_hex(accent_color), 0);
+            lv_obj_set_style_line_rounded(pps_line, false, 0);
+            lv_obj_clear_flag(pps_line, LV_OBJ_FLAG_SCROLLABLE);
+            lv_line_set_points(pps_line, pps_points, AIRSPACE_PPS_HISTORY);
+        }
+    }
+
     lv_obj_t *insight_card = create_card(content, 100);
     if (!compact_layout()) {
         create_card_title(insight_card, "Insight");
     }
     lbl_insight = lv_label_create(insight_card);
-    lv_label_set_text(lbl_insight, insight_text);
+    lv_label_set_text(lbl_insight, "Learning normal activity");
     lv_obj_set_style_text_font(lbl_insight, body_font(), 0);
     lv_obj_set_width(lbl_insight, LV_PCT(100));
     lv_label_set_long_mode(lbl_insight, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -429,7 +393,7 @@ void airspace_monitor_view_create(void) {
             create_card_title(advice_card, "Advice");
         }
         lbl_advice = lv_label_create(advice_card);
-        lv_label_set_text(lbl_advice, advice_text);
+        lv_label_set_text(lbl_advice, "Hold steady; building a baseline");
         lv_obj_set_style_text_font(lbl_advice, body_font(), 0);
         lv_obj_set_style_text_color(lbl_advice, lv_color_hex(dim_color), 0);
         lv_obj_set_width(lbl_advice, LV_PCT(100));
@@ -505,6 +469,9 @@ void airspace_monitor_view_destroy(void) {
     lbl_counts_2 = NULL;
     counts_card = NULL;
     content_scroller = NULL;
+    pps_line = NULL;
+    free(pps_points);
+    pps_points = NULL;
     touch_active = false;
     touch_moved = false;
 }

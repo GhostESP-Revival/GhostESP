@@ -12,14 +12,12 @@
 #include "scans/ble/device_detect_scan.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
-#include "gui/fonts/font_helper.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "core/i18n.h"
 
 extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
@@ -29,12 +27,24 @@ static View *terminal_return_view = NULL;
 
 #include "lvgl.h"
 #include "managers/settings_manager.h"
+#include "core/i18n.h"
+#include "gui/accessibility_fonts.h"
+#include "gui/theme_palette_api.h"
 
 // Function declarations
 static void submit_text();
 static void add_char_to_buffer(char c);
 static void update_input_label();
 static void keyboard_input_callback(const char *text);
+
+static const lv_font_t *terminal_font(void) {
+    uint8_t size = settings_get_terminal_font_size(&G_Settings);
+    switch (size) {
+        case 0: return &lv_font_montserrat_10;
+        case 2: return &lv_font_montserrat_14;
+        default: return &lv_font_montserrat_12;
+    }
+}
 
 static const char *TAG = "Terminal";
 static lv_obj_t *terminal_scroller = NULL;
@@ -50,8 +60,8 @@ static bool terminal_dualcomm_only = false;
 #define PROCESSING_INTERVAL_MS 10
 #define PROCESSING_INTERVAL_FAST_MS 5
 #define MIN_SCREEN_SIZE 239
-#define BUTTON_SIZE 40
-#define BUTTON_PADDING 5
+#define BUTTON_SIZE 28
+#define BUTTON_PADDING 3
 
 static lv_obj_t *back_btn = NULL;
 static lv_obj_t *input_label = NULL;
@@ -95,6 +105,8 @@ static void scroll_terminal_up(void);
 static void scroll_terminal_down(void);
 static void stop_all_operations(void);
 static bool terminal_is_near_bottom(void);
+static bool terminal_is_dualcomm_line(const char *text);
+static const char *terminal_dualcomm_display_text(const char *text);
 
 // Additional function predefs
 static void recalc_layout_if_needed(void);
@@ -121,6 +133,7 @@ static lv_obj_t *terminal_canvas = NULL;
 typedef struct {
   char *text;
   uint16_t pxh; // cached pixel height at last layout width
+  bool is_dualcomm; // precomputed at insert time, read in draw callback
 } TermLine;
 
 static TermLine term_lines[MAX_TERMINAL_LINES];
@@ -301,6 +314,7 @@ static void append_line(const char *line, size_t len) {
   uint16_t idx = (term_line_head + term_line_count) % MAX_TERMINAL_LINES;
   term_lines[idx].text = copy;
   term_lines[idx].pxh = 0; // recalc lazily
+  term_lines[idx].is_dualcomm = terminal_is_dualcomm_line(copy);
   term_line_count++;
   term_text_bytes += len;
 }
@@ -345,8 +359,7 @@ static void terminal_push_incoming(const char *data, size_t len) {
   }
 }
 
-static bool terminal_is_dualcomm_line(const char *text);
-static const char *terminal_dualcomm_display_text(const char *text);
+
 
 static bool terminal_should_use_split_view(void) {
     return terminal_dualcomm_only && settings_get_ghostlink_split_view(&G_Settings);
@@ -452,12 +465,12 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
       TermLine *L = &term_lines[idx];
       lv_coord_t h = L->pxh;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
-      if (terminal_is_dualcomm_line(txt)) {
+      if (L->is_dualcomm) {
         continue; // skip Dual Comm lines in left column
       }
       if ((y_left + h) < local_top) { y_left += h; continue; }
       if (y_left > local_bottom) break;
+      const char *txt = (L->text && L->text[0]) ? L->text : " ";
       lv_area_t a;
       a.x1 = obj_coords.x1;
       a.y1 = obj_coords.y1 + y_left;
@@ -473,12 +486,12 @@ static void terminal_canvas_draw_event(lv_event_t *e) {
       uint16_t idx = (term_line_head + i) % MAX_TERMINAL_LINES;
       TermLine *L = &term_lines[idx];
       lv_coord_t h = L->pxh;
-      const char *txt = (L->text && L->text[0]) ? L->text : " ";
-      if (!terminal_is_dualcomm_line(txt)) {
+      if (!L->is_dualcomm) {
         continue; // skip non-Dual lines in right column
       }
       if ((y_right + h) < local_top) { y_right += h; continue; }
       if (y_right > local_bottom) break;
+      const char *txt = (L->text && L->text[0]) ? L->text : " ";
       const char *s = terminal_dualcomm_display_text(txt);
       lv_area_t b;
       b.x1 = obj_coords.x1 + col_w;
@@ -614,9 +627,6 @@ static void stop_all_operations(void) {
 }
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
 void text_box_click_cb(lv_event_t *e){
-  ESP_LOGI(TAG, "Text box clicked");
-  printf("Text box clicked\n");
-
   keyboard_view_set_return_view(&terminal_view);
   keyboard_view_set_start_caps(false);
   display_manager_switch_view(&keyboard_view);
@@ -652,9 +662,13 @@ void terminal_view_create(void) {
 
     terminal_view.root = gui_screen_create_root(NULL, "Terminal", lv_color_black(), LV_OPA_COVER);
 
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t control_bg = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t control_text = lv_color_hex(theme_palette_get_text(theme));
+
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
-    const int padding = 5;
-    const int textbox_height = 40;
+    const int padding = 3;
+    const int textbox_height = 28;
 
     int back_button_height = 0;
     bool show_back_btn = false;
@@ -711,7 +725,7 @@ void terminal_view_create(void) {
     lv_obj_set_style_border_width(terminal_canvas, 0, 0);
     // Match previous label style
     lv_obj_set_style_text_color(terminal_canvas, lv_color_hex(settings_get_terminal_text_color(&G_Settings)), 0);
-    lv_obj_set_style_text_font(terminal_canvas, FONT_10, 0);
+    lv_obj_set_style_text_font(terminal_canvas, terminal_font(), 0);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_draw_event, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(terminal_canvas, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
     lv_obj_add_event_cb(terminal_scroller, terminal_canvas_size_event, LV_EVENT_SIZE_CHANGED, NULL);
@@ -722,13 +736,14 @@ void terminal_view_create(void) {
         back_btn = lv_btn_create(terminal_view.root);
         lv_obj_set_size(back_btn, BUTTON_SIZE, BUTTON_SIZE);
         lv_obj_align(back_btn, LV_ALIGN_BOTTOM_LEFT, BUTTON_PADDING, -BUTTON_PADDING);
-        lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(back_btn, control_bg, LV_PART_MAIN);
         lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
         lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
         lv_obj_t *back_label = lv_label_create(back_btn);
         lv_label_set_text(back_label, LV_SYMBOL_LEFT);
+        lv_obj_set_style_text_color(back_label, control_text, 0);
         lv_obj_center(back_label);
 
         lv_obj_update_layout(terminal_view.root);
@@ -750,18 +765,19 @@ void terminal_view_create(void) {
 
         input_label = lv_label_create(terminal_view.root);
         lv_obj_set_size(input_label, textbox_width, textbox_height);
-        lv_obj_set_style_bg_color(input_label, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_bg_color(input_label, control_bg, 0);
         lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
-        lv_obj_set_style_text_color(input_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(input_label, control_text, 0);
         lv_obj_set_style_pad_all(input_label, padding, 0);
-        lv_obj_set_style_radius(input_label, 0, 0);
+        lv_obj_set_style_radius(input_label, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_text_align(input_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_border_width(input_label, 0, 0);
         lv_obj_set_style_shadow_width(input_label, 0, 0);
         lv_obj_align(input_label, LV_ALIGN_BOTTOM_RIGHT, -padding, -padding);
         lv_obj_add_event_cb(input_label, text_box_click_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_add_flag(input_label, LV_OBJ_FLAG_CLICKABLE);
         lv_label_set_long_mode(input_label, LV_LABEL_LONG_CLIP);
-        lv_label_set_text(input_label, "Type Command...");
+        lv_label_set_text(input_label, i18n_text(I18N_KEY_TYPE_COMMAND));
         // Center vertically by adjusting vertical padding
         const lv_font_t *current_font = lv_obj_get_style_text_font(input_label, 0);
         int font_height = lv_font_get_line_height(current_font);

@@ -87,6 +87,7 @@ static TaskHandle_t csv_flush_task = NULL;
 static volatile bool csv_flush_requested = false;
 static volatile bool csv_closing = false;
 static bool csv_header_pending_uart = false;
+static char *csv_data_line = NULL;
 
 static void csv_request_flush(void) {
     csv_flush_requested = true;
@@ -753,10 +754,18 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
              time_to_use.minute,
              time_to_use.second);
 
-    static char data_line[CSV_GPS_BUFFER_SIZE];
     int len;
 
     if (csv_mutex) xSemaphoreTake(csv_mutex, portMAX_DELAY);
+
+    if (!csv_data_line) {
+        csv_data_line = (char *)malloc(CSV_GPS_BUFFER_SIZE);
+        if (!csv_data_line) {
+            if (csv_mutex) xSemaphoreGive(csv_mutex);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    char *data_line = csv_data_line;
 
     if (data->ble_data.is_ble_device) {
         uint32_t hash = wd_hash_mac(data->ble_data.ble_mac);
@@ -1149,8 +1158,8 @@ static void format_coordinates(double lat, double lon, char *lat_str, char *lon_
     int lon_deg = (int)fabs(lon);
     double lon_min = (fabs(lon) - lon_deg) * 60;
 
-    sprintf(lat_str, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
-    sprintf(lon_str, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
+    snprintf(lat_str, 20, "%ddeg %.4f'%c", lat_deg, lat_min, lat >= 0 ? 'N' : 'S');
+    snprintf(lon_str, 20, "%ddeg %.4f'%c", lon_deg, lon_min, lon >= 0 ? 'E' : 'W');
 }
 
 float get_accuracy_percentage(float hdop) {

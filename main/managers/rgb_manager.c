@@ -32,6 +32,18 @@ static SemaphoreHandle_t rgb_mutex = NULL;
 static bool rgb_power_transition_active = false;
 static int rgb_power_transition_lock_depth = 0;
 
+typedef struct {
+  RGBManager_t *manager;
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+  volatile bool pending;
+  TaskHandle_t task;
+} RGBPulseState;
+
+static RGBPulseState rgb_pulse_state = {0};
+static SemaphoreHandle_t rgb_pulse_mutex = NULL;
+
 // MIC Visualizer stream handling
 static volatile uint8_t mic_last_amplitude = 0;
 static volatile uint8_t mic_last_bands[4] = {0, 0, 0, 0};
@@ -1435,6 +1447,77 @@ void pulse_once(RGBManager_t *rgb_manager, uint8_t red, uint8_t green,
       rgb_manager_apply_static_from_settings();
     }
 }
+}
+
+static void rgb_pulse_task(void *pvParameter) {
+  (void)pvParameter;
+
+  while (true) {
+    RGBManager_t *manager = NULL;
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 0;
+
+    if (rgb_pulse_mutex && xSemaphoreTake(rgb_pulse_mutex, portMAX_DELAY) == pdTRUE) {
+      if (!rgb_pulse_state.pending) {
+        rgb_pulse_state.task = NULL;
+        xSemaphoreGive(rgb_pulse_mutex);
+        vTaskDelete(NULL);
+        return;
+      }
+
+      manager = rgb_pulse_state.manager;
+      red = rgb_pulse_state.red;
+      green = rgb_pulse_state.green;
+      blue = rgb_pulse_state.blue;
+      rgb_pulse_state.pending = false;
+      xSemaphoreGive(rgb_pulse_mutex);
+    }
+
+    if (manager != NULL) {
+      pulse_once(manager, red, green, blue);
+    }
+  }
+}
+
+void rgb_manager_pulse_async(RGBManager_t *rgb_manager, uint8_t red,
+                             uint8_t green, uint8_t blue) {
+  if (!rgb_manager) {
+    return;
+  }
+
+  if (settings_get_rgb_mode(&G_Settings) == RGB_MODE_STEALTH ||
+      settings_get_rgb_mode(&G_Settings) == RGB_MODE_MIC_VISUALIZER) {
+    return;
+  }
+
+  if (rgb_pulse_mutex == NULL) {
+    rgb_pulse_mutex = xSemaphoreCreateMutex();
+    if (rgb_pulse_mutex == NULL) {
+      return;
+    }
+  }
+
+  if (xSemaphoreTake(rgb_pulse_mutex, portMAX_DELAY) != pdTRUE) {
+    return;
+  }
+
+  rgb_pulse_state.manager = rgb_manager;
+  rgb_pulse_state.red = red;
+  rgb_pulse_state.green = green;
+  rgb_pulse_state.blue = blue;
+  rgb_pulse_state.pending = true;
+
+  if (rgb_pulse_state.task == NULL) {
+    BaseType_t ok = xTaskCreate(rgb_pulse_task, "rgb_pulse", 3072, NULL,
+                                RGB_EFFECT_TASK_PRIORITY, &rgb_pulse_state.task);
+    if (ok != pdPASS) {
+      rgb_pulse_state.task = NULL;
+      rgb_pulse_state.pending = false;
+    }
+  }
+
+  xSemaphoreGive(rgb_pulse_mutex);
 }
 
 esp_err_t rgb_manager_set_color(RGBManager_t *rgb_manager, int led_idx,

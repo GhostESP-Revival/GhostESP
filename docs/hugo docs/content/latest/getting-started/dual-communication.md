@@ -86,3 +86,7 @@ Commands sent via the menu automatically open this view.
 - The device with the "larger" name becomes master, but commands can be sent from both directions.
 - Auto-reconnect is enabled; the connection will automatically restore if interrupted.
 - Physical wired connection is required.
+
+## See also
+
+- [BLE Bridge]({{< relref "ble-bridge.md" >}}) — use one of these wired boards as a Bluetooth proxy to the Android companion app.

@@ -93,6 +93,12 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
 #define MDNS_NAME_BUF_LEN 65
 #define ARP_DELAY_MS 500
 
+// Persistent mDNS result storage (heap-allocated)
+static mdns_device_t *g_mdns_results = NULL;
+static int g_mdns_result_count = 0;
+static volatile bool g_mdns_scan_running = false;
+static volatile bool g_mdns_scan_done = false;
+
 #define BEACON_LIST_MAX 16
 #define BEACON_SSID_MAX_LEN 32
 
@@ -135,6 +141,7 @@ static volatile bool wifi_connect_cancel_requested = false;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
 static int wifi_reconnect_count = 0;
 static volatile bool wifi_monitor_capture_active = false;
+static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
@@ -487,7 +494,7 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
         return true;
     }
 
-    if (ap_scan_is_running()) {
+    if (ap_scan_is_running() || wifi_timed_scan_active) {
         if (reason_out) *reason_out = "AP scan active";
         return true;
     }
@@ -3138,45 +3145,40 @@ void wifi_manager_start_ip_lookup() {
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK || ap_info.rssi == 0) {
         printf("Not connected to an Access Point.\n");
-        TERMINAL_VIEW_ADD_TEXT("Not connected to an Access Point.\n");
         return;
     }
+
+    g_mdns_result_count = 0;
+    bool store_results = (g_mdns_results != NULL);
+    bool was_running = g_mdns_scan_running;
+    g_mdns_scan_running = true;
 
     esp_netif_ip_info_t ip_info;
     if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) ==
         ESP_OK) {
-        printf("Connected.\nProceeding with IP lookup...\n");
-        TERMINAL_VIEW_ADD_TEXT("Connected.\nProceeding with IP lookup...\n");
-
-        int device_count = 0;
-        struct DeviceInfo devices[MAX_DEVICES];
-        (void)devices;
+        printf("Connected. Proceeding with IP lookup...\n");
 
         for (int s = 0; s < NUM_SERVICES; s++) {
+            if (!g_mdns_scan_running) break;
+
             int retries = 0;
             mdns_result_t *mdnsresult = NULL;
 
-            if (mdnsresult == NULL) {
-                while (retries < 5 && mdnsresult == NULL) {
-                    esp_err_t qret = mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
-
-                    if (mdnsresult == NULL) {
-                        retries++;
-                        TERMINAL_VIEW_ADD_TEXT("Retrying mDNS query for service: %s (Attempt %d)\n",
-                                               services[s].query, retries);
-                        printf("Retrying mDNS query for service: %s (Attempt %d)\n",
-                               services[s].query, retries);
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                    }
+            while (retries < 5 && mdnsresult == NULL && g_mdns_scan_running) {
+                mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
+                if (mdnsresult == NULL) {
+                    retries++;
+                    printf("Retrying mDNS query for service: %s (Attempt %d)\n",
+                           services[s].query, retries);
+                    vTaskDelay(pdMS_TO_TICKS(500));
                 }
             }
 
             if (mdnsresult != NULL) {
                 printf("mDNS query succeeded for service: %s\n", services[s].query);
-                TERMINAL_VIEW_ADD_TEXT("mDNS query succeeded for service: %s\n", services[s].query);
 
                 mdns_result_t *current_result = mdnsresult;
-                while (current_result != NULL && device_count < MAX_DEVICES) {
+                while (current_result != NULL) {
                     char ip_str[INET_ADDRSTRLEN] = {0};
                     mdns_ip_addr_t *addr_item = current_result->addr;
                     bool has_v4 = false;
@@ -3192,15 +3194,31 @@ void wifi_manager_start_ip_lookup() {
                         strncpy(ip_str, "0.0.0.0", sizeof(ip_str));
                     }
 
+                    if (store_results && g_mdns_result_count < MDNS_MAX_DEVICES) {
+                        bool duplicate = false;
+                        for (int d = 0; d < g_mdns_result_count; d++) {
+                            if (strcmp(g_mdns_results[d].ip, ip_str) == 0) {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            mdns_device_t *dev = &g_mdns_results[g_mdns_result_count];
+                            memset(dev, 0, sizeof(mdns_device_t));
+                            if (current_result->hostname) {
+                                strncpy(dev->hostname, current_result->hostname, sizeof(dev->hostname) - 1);
+                            }
+                            strncpy(dev->ip, ip_str, sizeof(dev->ip) - 1);
+                            dev->port = current_result->port;
+                            strncpy(dev->service_type, services[s].type, sizeof(dev->service_type) - 1);
+                            g_mdns_result_count++;
+                        }
+                    }
+
                     printf("Device at: %s\n", ip_str);
                     printf("  Name: %s\n", current_result->hostname);
                     printf("  Type: %s\n", services[s].type);
                     printf("  Port: %u\n", current_result->port);
-                    TERMINAL_VIEW_ADD_TEXT("Device at: %s\n", ip_str);
-                    TERMINAL_VIEW_ADD_TEXT("  Name: %s\n", current_result->hostname);
-                    TERMINAL_VIEW_ADD_TEXT("  Type: %s\n", services[s].type);
-                    TERMINAL_VIEW_ADD_TEXT("  Port: %u\n", current_result->port);
-                    device_count++;
 
                     current_result = current_result->next;
                 }
@@ -3209,17 +3227,76 @@ void wifi_manager_start_ip_lookup() {
             } else {
                 printf("Failed to find devices for service: %s after %d retries\n",
                        services[s].query, retries);
-                TERMINAL_VIEW_ADD_TEXT("Failed to find devices for service: %s after %d retries\n",
-                                       services[s].query, retries);
             }
         }
     } else {
-        printf("Can't recieve network interface info.\n");
-        TERMINAL_VIEW_ADD_TEXT("Can't recieve network interface info.\n");
+        printf("Can't get network interface info.\n");
     }
 
-    printf("IP Scan Done.\n");
-    TERMINAL_VIEW_ADD_TEXT("IP Scan Done...\n");
+    printf("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
+    if (!was_running) {
+        g_mdns_scan_running = false;
+    }
+}
+
+static void wifi_manager_ip_lookup_task(void *pvParameters) {
+    (void)pvParameters;
+    wifi_manager_start_ip_lookup();
+    g_mdns_scan_done = true;
+    vTaskDelete(NULL);
+}
+
+esp_err_t wifi_manager_start_ip_lookup_async(void) {
+    if (g_mdns_scan_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    wifi_manager_ip_lookup_clear();
+    g_mdns_results = malloc(sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
+    if (!g_mdns_results) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(g_mdns_results, 0, sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
+    g_mdns_scan_running = true;
+    g_mdns_scan_done = false;
+    BaseType_t ret = xTaskCreate(wifi_manager_ip_lookup_task, "mdns_scan", 8192, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        g_mdns_scan_running = false;
+        free(g_mdns_results);
+        g_mdns_results = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+bool wifi_manager_ip_lookup_check_done(void) {
+    return g_mdns_scan_done;
+}
+
+void wifi_manager_ip_lookup_finish_async(void) {
+    g_mdns_scan_running = false;
+}
+
+bool wifi_manager_ip_lookup_is_running(void) {
+    return g_mdns_scan_running && !g_mdns_scan_done;
+}
+
+int wifi_manager_ip_lookup_get_count(void) {
+    return g_mdns_result_count;
+}
+
+const mdns_device_t* wifi_manager_ip_lookup_get_device(int index) {
+    if (index < 0 || index >= g_mdns_result_count) {
+        return NULL;
+    }
+    return &g_mdns_results[index];
+}
+
+void wifi_manager_ip_lookup_clear(void) {
+    g_mdns_result_count = 0;
+    if (g_mdns_results) {
+        free(g_mdns_results);
+        g_mdns_results = NULL;
+    }
 }
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     if (ssid == NULL || ssid[0] == '\0') {
@@ -3419,6 +3496,12 @@ void wifi_manager_get_scan_results_data(uint16_t *count, wifi_ap_record_t **aps)
 esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     ap_manager_stop_services();
 
+    // Mark a timed scan as active so the auto-reconnect timer defers instead of
+    // reconfiguring STA mid-scan (which aborts the scan -> 0 results). This path
+    // calls esp_wifi_scan_start() directly and never touches the ap_scan module,
+    // so ap_scan_is_running() alone wouldn't cover it.
+    wifi_timed_scan_active = true;
+
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
         printf("Failed to set WiFi mode for timed scan: %s\n", esp_err_to_name(err));
@@ -3443,7 +3526,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
     TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n");
+    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n", seconds);
 
     err = esp_wifi_scan_start(&scan_config, false);
     if (err != ESP_OK) {
@@ -3462,47 +3545,9 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     }
 
 cleanup:
+    wifi_timed_scan_active = false;
     ap_manager_start_services();
     return err;
-}
-
-    err = esp_wifi_start();
-    if (err != ESP_OK) {
-        printf("Failed to start WiFi for timed scan: %s\n", esp_err_to_name(err));
-        return err;
-    }
-
-    wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true
-    };
-
-    rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
-
-    printf("WiFi Scan started\n");
-    printf("Please wait %d Seconds...\n", seconds);
-    TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-    TERMINAL_VIEW_ADD_TEXT("Please wait %d Seconds...\n", seconds);
-
-    err = esp_wifi_scan_start(&scan_config, false);
-    if (err != ESP_OK) {
-        printf("WiFi scan failed to start: %s\n", esp_err_to_name(err));
-        TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
-        return err;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(seconds * 1000));
-
-    wifi_manager_stop_scan();
-    err = esp_wifi_stop();
-    if (err != ESP_OK) {
-        printf("Failed to stop WiFi after timed scan: %s\n", esp_err_to_name(err));
-        return err;
-    }
-    // ESP_ERROR_CHECK(ap_manager_start_services()); // Removed: Rely on caller (handle_combined_scan) to restart AP services
-    return ESP_OK;
 }
 
 // Station scan channel hopping functions moved to station_scan.c module
@@ -3692,23 +3737,54 @@ void wifi_manager_stop_wireshark_channel_hop(void) {
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
     // Validate channel range based on target
     uint8_t max_channel = MAX_WIFI_CHANNEL;
-    
+
     if (channel < 1 || channel > max_channel) {
         ESP_LOGE(TAG, "Invalid channel %d. Must be between 1 and %d", channel, max_channel);
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     // Stop any existing channel hopping
     wifi_manager_stop_wireshark_channel_hop();
-    
+
     // Set the fixed channel
     esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set channel %d: %s", channel, esp_err_to_name(err));
         return err;
     }
-    
+
     ESP_LOGI(TAG, "Wireshark capture locked to channel %d", channel);
+    return ESP_OK;
+}
+
+esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel) {
+    // Validate channel range based on target
+    uint8_t max_channel = MAX_WIFI_CHANNEL;
+
+    if (channel < 1 || channel > max_channel) {
+        ESP_LOGE(TAG, "Invalid capture channel %d. Must be between 1 and %d", channel, max_channel);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Stop any active scan/capture channel hopping first so monitor mode stays locked.
+    if (station_scan_is_active()) {
+        station_scan_stop();
+    }
+    if (live_ap_hopping_active) {
+        stop_live_ap_channel_hopping();
+    }
+    wifi_manager_stop_wireshark_channel_hop();
+    if (airspace_monitor_is_active()) {
+        airspace_monitor_stop();
+    }
+
+    esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to lock capture to channel %d: %s", channel, esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Capture locked to channel %d", channel);
     return ESP_OK;
 }
 
@@ -4283,6 +4359,7 @@ static volatile bool sta_tracking_active = false;
 static int8_t tracking_last_rssi = 0;
 static int8_t tracking_min_rssi = 0;
 static int8_t tracking_max_rssi = -127;
+static int64_t tracking_last_rx_us = 0; // timestamp of last matched packet (signal freshness)
 
 static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) return;
@@ -4335,6 +4412,22 @@ static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     
     glog("%s %d dBm (min:%d max:%d)%s\n", bar_str, rssi, tracking_min_rssi, tracking_max_rssi, direction);
     tracking_last_rssi = rssi;
+    tracking_last_rx_us = esp_timer_get_time();
+}
+
+bool wifi_manager_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!ap_tracking_active && !sta_tracking_active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = tracking_last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // Consider the reading "live" if a matching packet arrived recently.
+        *out_fresh = (tracking_last_rx_us != 0) && ((now - tracking_last_rx_us) < 1500000);
+    }
+    return true;
 }
 
 void wifi_manager_track_ap(void) {
@@ -4356,6 +4449,7 @@ void wifi_manager_track_ap(void) {
     tracking_last_rssi = selected_ap.rssi;
     tracking_min_rssi = selected_ap.rssi;
     tracking_max_rssi = selected_ap.rssi;
+    tracking_last_rx_us = esp_timer_get_time();
     ap_tracking_active = true;
     sta_tracking_active = false;
     
@@ -4393,6 +4487,7 @@ void wifi_manager_track_sta(void) {
     tracking_last_rssi = -100;
     tracking_min_rssi = -100;
     tracking_max_rssi = -127;
+    tracking_last_rx_us = 0; // no station packet seen yet
     ap_tracking_active = false;
     sta_tracking_active = true;
     

@@ -164,6 +164,27 @@ static uint32_t set_s_type_imm(uint32_t insn, int32_t value)
     return (insn & 0x01fff07fU) | ((imm & 0x1fU) << 7) | ((imm & 0xfe0U) << 20);
 }
 
+#ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+/*
+ * Remap an executable code address from where it was staged (and relocated) to
+ * where it actually runs (+text_off). Unlike elf_remap_text, this covers the
+ * WHOLE programmed code image [ptext .. end of .text], which includes the .plt
+ * stubs that sit before .text. PLT stubs are real code that also moved to flash
+ * on the C5 XIP path, so their addresses must shift too. Addresses outside the
+ * code image (RAM data/GOT, imported firmware symbols) are returned unchanged.
+ * Valid only before commit() frees the staging buffer, i.e. during relocation.
+ */
+static inline uintptr_t elf_rt_code_remap(esp_elf_t *elf, uintptr_t a)
+{
+    uintptr_t lo = (uintptr_t)elf->ptext;
+    uintptr_t hi = elf->sec[ELF_SEC_TEXT].addr + elf->sec[ELF_SEC_TEXT].size;
+    if (lo && a >= lo && a < hi) {
+        return a + elf->text_off;
+    }
+    return a;
+}
+#endif
+
 static int get_mapped_delta(esp_elf_t *elf, const elf32_rela_t *rela,
                             const elf32_sym_t *sym, int32_t *delta)
 {
@@ -177,6 +198,13 @@ static int get_mapped_delta(esp_elf_t *elf, const elf32_rela_t *rela,
         ESP_LOGE(TAG, "failed to map relocation symbol 0x%x", (unsigned int)original);
         return -EINVAL;
     }
+
+#ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+    /* ADD32/SUB32 build switch jump-table entries as (target - table_base). The
+     * runtime base is the table's real address, so the target term must resolve
+     * to where .text actually executes (flash on the C5 XIP path), not staging. */
+    mapped = elf_rt_code_remap(elf, mapped);
+#endif
 
     *delta = (int32_t)(mapped - original);
     return 0;
@@ -202,7 +230,14 @@ static void patch_plt_slot(esp_elf_t *elf, const elf32_rela_t *rela, void *got_s
     }
 
     void *plt_entry = (void *)(plt->addr + plt_offset);
-    int32_t value = (int32_t)((uintptr_t)got_slot - (uintptr_t)plt_entry);
+    /* The PLT stub's auipc/addi run from the .text runtime mapping (flash on the
+     * C5 XIP path), so the PC used for the got-slot delta must be the remapped
+     * address even though we still write into the staging copy at plt_entry. */
+    uintptr_t plt_pc = (uintptr_t)plt_entry;
+#ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+    plt_pc = elf_rt_code_remap(elf, plt_pc);
+#endif
+    int32_t value = (int32_t)((uintptr_t)got_slot - plt_pc);
 
     write_u32_unaligned(plt_entry, set_u_type_imm(read_u32_unaligned(plt_entry), value));
     write_u32_unaligned((uint8_t *)plt_entry + 4,
@@ -235,13 +270,25 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
     ESP_LOGD(TAG, "type: %d, where=%p offset=0x%x",
              ELF_R_TYPE(rela->info), where, (int)rela->offset);
 
+    /* When the .text runtime mapping differs from where relocation writes (the
+     * C5 flash-XIP path: code is staged in RAM but executes from flash at
+     * +text_off), every baked-in runtime address must be remapped. elf_remap_text
+     * shifts only addresses inside .text, leaving RAM data/GOT targets untouched.
+     * Without CACHE_OFFSET this is identity, so non-XIP RISC-V targets are
+     * unaffected. */
+#ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+#define ELF_RT_REMAP(a) elf_rt_code_remap(elf, (uintptr_t)(a))
+#else
+#define ELF_RT_REMAP(a) ((uintptr_t)(a))
+#endif
+
     /* Do relocation based on relocation type */
 
     switch (ELF_R_TYPE(rela->info)) {
     case R_RISCV_NONE:
         break;
     case R_RISCV_32:
-        write_u32_unaligned(where, addr + rela->addend);
+        write_u32_unaligned(where, (Elf32_Addr)ELF_RT_REMAP(addr + rela->addend));
         break;
     case R_RISCV_RELATIVE:
     {
@@ -250,16 +297,17 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
             ESP_LOGE(TAG, "failed to map relative addend 0x%x", rela->addend);
             return -EINVAL;
         }
-        write_u32_unaligned(where, (Elf32_Addr)mapped);
+        write_u32_unaligned(where, (Elf32_Addr)ELF_RT_REMAP(mapped));
         break;
     }
     case R_RISCV_JUMP_SLOT:
-        write_u32_unaligned(where, addr);
+        write_u32_unaligned(where, (Elf32_Addr)ELF_RT_REMAP(addr));
         patch_plt_slot(elf, rela, where);
         break;
     case R_RISCV_PCREL_HI20:
     {
-        int32_t value = (int32_t)(addr + rela->addend - (uintptr_t)where);
+        int32_t value = (int32_t)(ELF_RT_REMAP(addr + rela->addend) -
+                                  ELF_RT_REMAP((uintptr_t)where));
         uint32_t insn = read_u32_unaligned(where);
 
         write_u32_unaligned(where, set_u_type_imm(insn, value));
@@ -316,6 +364,8 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
         ESP_LOGE(TAG, "info=%d is not supported\n", ELF_R_TYPE(rela->info));
         return -EINVAL;
     }
+
+#undef ELF_RT_REMAP
 
     return 0;
 }

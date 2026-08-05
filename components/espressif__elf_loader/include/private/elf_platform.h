@@ -94,6 +94,19 @@ int esp_elf_arch_init_mmu(esp_elf_t *elf);
 void esp_elf_arch_deinit_mmu(esp_elf_t *elf);
 #endif
 
+#ifdef CONFIG_ELF_LOADER_C5_FLASH_XIP
+/**
+ * @brief Program the relocated staging image into the app-XIP flash partition
+ *        and invalidate the instruction cache so it can be executed in place.
+ *        Called once, after relocation completes.
+ *
+ * @param elf - ELF object pointer
+ *
+ * @return 0 on success or a negative errno value on failure.
+ */
+int esp_elf_c5_xip_commit(esp_elf_t *elf);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

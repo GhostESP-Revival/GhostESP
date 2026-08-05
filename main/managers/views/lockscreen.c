@@ -1,10 +1,11 @@
 #include "managers/views/lockscreen.h"
 #include "managers/settings_manager.h"
+#include "managers/ghostchi_mood.h"
 #include "managers/views/main_menu_screen.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
-#include "esp_wifi.h"
+#include "esp_mac.h"
 #include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
@@ -14,6 +15,9 @@ extern const lv_img_dsc_t what2_50x50;
 extern const lv_img_dsc_t angry_50x50;
 extern const lv_img_dsc_t happy_50x50;
 extern const lv_img_dsc_t love_50x50;
+extern const lv_img_dsc_t evil_50x50;
+extern const lv_img_dsc_t sleep_50x50;
+extern const lv_img_dsc_t surpised_50x50;
 
 #define MAX_INPUT_LEN 31
 #define STORED_PIN_MARKER 0x80
@@ -59,10 +63,13 @@ static bool s_touch_started;
 static int s_touch_pressed_idx;
 static int s_suppress_click_idx;
 static int64_t s_suppress_click_until_ms;
+static int64_t s_ignore_input_until_ms;
 static char s_input[MAX_INPUT_LEN + 1];
 static uint8_t s_input_len;
 static bool s_setup_mode;
 static bool s_setup_confirm;
+static bool s_no_pin_mode;
+static bool s_overlay_mode;
 static char s_setup_first[MAX_INPUT_LEN + 1];
 static GhostState s_ghost_state;
 static int s_ghost_base_y;
@@ -78,6 +85,8 @@ static void lockscreen_update_ghost(bool immediate);
 static void lockscreen_apply_ghost_bob(void);
 static void lockscreen_set_prompt(const char *text);
 static void lockscreen_build_numpad(void);
+static void lockscreen_build_companion_layout(int content_w, int content_h);
+static const lv_img_dsc_t *lockscreen_companion_sprite(void);
 static void lockscreen_idle_cb(lv_timer_t *timer);
 static void lockscreen_bob_cb(lv_timer_t *timer);
 static void lockscreen_unlock_cb(lv_timer_t *timer);
@@ -89,7 +98,7 @@ static void lockscreen_move_focus(int dx, int dy);
 
 static void derive_key(uint8_t *out, size_t len) {
     uint8_t mac[6] = {0};
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
         for (size_t i = 0; i < len; i++) {
             out[i] = mac[i % 6] ^ (uint8_t)(0xA5 + i);
         }
@@ -100,19 +109,34 @@ static void derive_key(uint8_t *out, size_t len) {
     }
 }
 
-static bool verify_input(const char *input) {
-    uint8_t key[32];
-    derive_key(key, sizeof(key));
+static void derive_legacy_fallback_key(uint8_t *out, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        out[i] = (uint8_t)(0x42 + i);
+    }
+}
+
+static bool verify_with_key(const char *input, const uint8_t *key, size_t key_len) {
     const uint8_t *stored = (const uint8_t *)G_Settings.lockscreen_obfuscated;
     if ((stored[0] & STORED_PIN_MARKER) == 0) return false;
     size_t stored_len = stored[0] & STORED_PIN_LEN_MASK;
     size_t in_len = strlen(input);
     if (in_len != stored_len) return false;
     for (size_t i = 0; i < in_len; i++) {
-        char decrypted = (char)(stored[i + 1] ^ key[i % 32]);
+        char decrypted = (char)(stored[i + 1] ^ key[i % key_len]);
         if (decrypted != input[i]) return false;
     }
     return true;
+}
+
+static bool verify_input(const char *input) {
+    uint8_t key[32];
+    derive_key(key, sizeof(key));
+    if (verify_with_key(input, key, sizeof(key))) {
+        return true;
+    }
+
+    derive_legacy_fallback_key(key, sizeof(key));
+    return verify_with_key(input, key, sizeof(key));
 }
 
 static void save_obfuscated(const char *input) {
@@ -149,6 +173,8 @@ void lockscreen_reset_input(void) {
     s_input_len = 0;
     s_setup_mode = false;
     s_setup_confirm = false;
+    s_no_pin_mode = false;
+    s_overlay_mode = false;
     s_setup_first[0] = '\0';
     s_ghost_state = GHOST_SLEEPING;
     s_focus_idx = 0;
@@ -156,11 +182,16 @@ void lockscreen_reset_input(void) {
     s_touch_pressed_idx = -1;
     s_suppress_click_idx = -1;
     s_suppress_click_until_ms = 0;
+    s_ignore_input_until_ms = (esp_timer_get_time() / 1000) + 350;
 }
 
 void lockscreen_enter_setup(void) {
     lockscreen_reset_input();
     s_setup_mode = true;
+}
+
+void lockscreen_set_overlay_mode(bool on) {
+    s_overlay_mode = on;
 }
 
 static void lockscreen_clear_input(void) {
@@ -216,14 +247,14 @@ static void lockscreen_update_ghost(bool immediate) {
     if (!s_ghost || !lv_obj_is_valid(s_ghost)) return;
     const lv_img_dsc_t *src = &tired_50x50;
     switch (s_ghost_state) {
-        case GHOST_SLEEPING:  src = &tired_50x50; break;
+        case GHOST_SLEEPING:  src = s_no_pin_mode ? lockscreen_companion_sprite() : &tired_50x50; break;
         case GHOST_TYPING:    src = &what2_50x50; break;
         case GHOST_ERROR:     src = &angry_50x50; break;
         case GHOST_UNLOCKED:  src = &happy_50x50; break;
     }
     lv_img_set_src(s_ghost, src);
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
-    if (LV_HOR_RES > LV_VER_RES && content_h <= 146) {
+    if (!s_no_pin_mode && LV_HOR_RES > LV_VER_RES && content_h <= 146) {
         int ghost_sz = 60;
         lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
     }
@@ -252,6 +283,16 @@ static void lockscreen_bob_cb(lv_timer_t *timer) {
 static void lockscreen_unlock_cb(lv_timer_t *timer) {
     s_unlock_timer = NULL;
     lv_timer_del(timer);
+
+    /* Overlay mode: the view underneath was never destroyed and is still
+     * running (e.g. wardriving). Just tear down the floating lockscreen and
+     * hand input back to it — no view switch, no capture restart. */
+    if (s_overlay_mode) {
+        lockscreen_destroy();
+        display_manager_clear_lockscreen_overlay();
+        return;
+    }
+
     View *return_view = display_manager_get_lockscreen_return_view();
     if (return_view == NULL || return_view == &lockscreen_view) {
         return_view = &main_menu_view;
@@ -279,9 +320,17 @@ static void lockscreen_on_correct(void) {
 }
 
 static void lockscreen_submit(void) {
-    if (s_input_len == 0) return;
-
     if (s_setup_mode) {
+        if (s_input_len == 0) {
+            save_obfuscated("");
+            s_setup_mode = false;
+            s_setup_confirm = false;
+            s_setup_first[0] = '\0';
+            lockscreen_set_prompt("No PIN saved");
+            lockscreen_on_correct();
+            return;
+        }
+
         if (!s_setup_confirm) {
             // First entry
             strncpy(s_setup_first, s_input, sizeof(s_setup_first) - 1);
@@ -310,6 +359,13 @@ static void lockscreen_submit(void) {
             }
         }
     }
+
+    if (s_no_pin_mode) {
+        lockscreen_on_correct();
+        return;
+    }
+
+    if (s_input_len == 0) return;
 
     if (verify_input(s_input)) {
         lockscreen_on_correct();
@@ -469,6 +525,71 @@ static void lockscreen_build_numpad(void) {
     lockscreen_focus_btn(0);
 }
 
+static void lockscreen_build_companion_layout(int content_w, int content_h) {
+    const int ghost_base_sz = 50;
+    int ghost_sz = 72;
+    if (content_h <= 120) {
+        ghost_sz = 64;
+    } else if (content_h >= 220) {
+        ghost_sz = 96;
+    }
+    if (ghost_sz > content_w - 16) ghost_sz = content_w - 16;
+    if (ghost_sz < 50) ghost_sz = 50;
+
+    int ghost_y = (content_h - ghost_base_sz) / 2;
+    if (ghost_y < 0) ghost_y = 0;
+    s_ghost_base_y = ghost_y;
+
+    s_ghost = lv_img_create(s_content);
+    lv_img_set_src(s_ghost, lockscreen_companion_sprite());
+    lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
+    lv_obj_set_pos(s_ghost, (content_w - ghost_base_sz) / 2, s_ghost_base_y + lockscreen_ghost_bob_offset());
+
+    s_prompt = lv_label_create(s_content);
+    lv_obj_set_style_text_font(s_prompt, gui_font_caption(), 0);
+    lv_obj_set_style_text_color(s_prompt, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_color(s_prompt, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_prompt, LV_OPA_60, 0);
+    lv_obj_set_style_radius(s_prompt, 3, 0);
+    lv_obj_set_style_pad_hor(s_prompt, 6, 0);
+    lv_obj_set_style_pad_ver(s_prompt, 1, 0);
+    int prompt_y = ghost_y + ghost_base_sz + ((ghost_sz - ghost_base_sz) / 2) + 10;
+    if (prompt_y > content_h - 18) prompt_y = content_h - 18;
+    if (prompt_y < 0) prompt_y = 0;
+    lv_obj_align(s_prompt, LV_ALIGN_TOP_MID, 0, prompt_y);
+
+    s_dots = NULL;
+}
+
+static const lv_img_dsc_t *lockscreen_companion_sprite(void) {
+    ghostchi_mood_snapshot_t mood = {0};
+    ghostchi_mood_get_snapshot(&mood);
+    switch (mood.mood) {
+        case GHOSTCHI_MOOD_CELEBRATE:
+        case GHOSTCHI_MOOD_LOVE:
+            return &love_50x50;
+        case GHOSTCHI_MOOD_HAPPY:
+        case GHOSTCHI_MOOD_EXCITED:
+            return &happy_50x50;
+        case GHOSTCHI_MOOD_FOCUSED:
+        case GHOSTCHI_MOOD_SURPRISED:
+            return &surpised_50x50;
+        case GHOSTCHI_MOOD_AGGRESSIVE:
+            return &evil_50x50;
+        case GHOSTCHI_MOOD_ANGRY:
+            return &angry_50x50;
+        case GHOSTCHI_MOOD_TIRED:
+            return &tired_50x50;
+        case GHOSTCHI_MOOD_SLEEPY:
+            return &sleep_50x50;
+        case GHOSTCHI_MOOD_CONFUSED:
+            return &what2_50x50;
+        case GHOSTCHI_MOOD_NEUTRAL:
+        default:
+            return &love_50x50;
+    }
+}
+
 static void lockscreen_destroy_numpad(void) {
     if (s_numpad_cont && lv_obj_is_valid(s_numpad_cont)) {
         lv_obj_del(s_numpad_cont);
@@ -512,6 +633,18 @@ static void lockscreen_normalize_input(InputEvent *event, bool *up, bool *down, 
 }
 
 static void lockscreen_input_handler(InputEvent *event) {
+    if ((esp_timer_get_time() / 1000) < s_ignore_input_until_ms) {
+        return;
+    }
+
+    if (s_no_pin_mode) {
+        if (event->type != INPUT_TYPE_TOUCH || event->data.touch_data.state == LV_INDEV_STATE_REL) {
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_WAKE, 4);
+            lockscreen_on_correct();
+        }
+        return;
+    }
+
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
         if (data->state == LV_INDEV_STATE_PR) {
@@ -594,10 +727,24 @@ static void lockscreen_input_handler(InputEvent *event) {
 void lockscreen_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
-    display_manager_fill_screen(bg_color);
 
-    s_root = gui_screen_create_root(NULL, "Locked", bg_color, LV_OPA_COVER);
-    lockscreen_view.root = s_root;
+    s_no_pin_mode = !s_setup_mode && !lockscreen_is_configured();
+
+    /* Overlay mode floats above the still-live view on the top layer; we must
+     * not paint the active screen (that belongs to the view underneath) and we
+     * leave the shared status bar alone by passing a NULL title. The opaque
+     * full-screen root hides everything below it on its own. */
+    if (!s_overlay_mode) {
+        display_manager_fill_screen(bg_color);
+    }
+    lv_obj_t *root_parent = s_overlay_mode ? lv_layer_top() : NULL;
+    const char *root_title = s_overlay_mode ? NULL : (s_no_pin_mode ? "Ghostchi" : "Locked");
+    s_root = gui_screen_create_root(root_parent, root_title, bg_color, LV_OPA_COVER);
+    /* Only register as the live view when we ARE the view; an overlay must not
+     * masquerade as the current view in the view system. */
+    if (!s_overlay_mode) {
+        lockscreen_view.root = s_root;
+    }
     s_content = gui_screen_create_content(s_root, GUI_STATUS_BAR_H);
 
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
@@ -605,13 +752,16 @@ void lockscreen_create(void) {
     if (content_w <= 0) content_w = LV_HOR_RES;
     bool landscape = (content_w > content_h && content_h <= 146);
 
-    if (landscape) {
+    if (s_no_pin_mode) {
+        lockscreen_build_companion_layout(content_w, content_h);
+    } else if (landscape) {
         int left_col_w = content_w / 2;
         int ghost_sz = 60;
         int ghost_x = (left_col_w - ghost_sz) / 2;
         int group_h = ghost_sz + 8 + 13 + 4 + 17;
         int group_y = (content_h - group_h) / 2;
         if (group_y < 0) group_y = 0;
+        group_y += 8;
         s_ghost_base_y = group_y;
 
         s_ghost = lv_img_create(s_content);
@@ -689,17 +839,21 @@ void lockscreen_create(void) {
         lv_obj_align(s_dots, LV_ALIGN_TOP_MID, 0, dots_y_offset);
     }
 
-    // Check if we need setup mode
-    if (!lockscreen_is_configured() || s_setup_mode) {
+    // Explicit PIN setup is separate from the no-PIN companion lockscreen.
+    if (s_setup_mode) {
         s_setup_mode = true;
         s_setup_confirm = false;
         s_setup_first[0] = '\0';
-        lockscreen_set_prompt("Set PIN");
+        lockscreen_set_prompt("Set PIN/OK none");
+    } else if (s_no_pin_mode) {
+        lockscreen_set_prompt("Press to unlock");
     } else {
         lockscreen_set_prompt("Enter PIN");
     }
 
-    lockscreen_build_numpad();
+    if (!s_no_pin_mode) {
+        lockscreen_build_numpad();
+    }
 
     lockscreen_update_dots();
     s_ghost_state = GHOST_SLEEPING;
@@ -735,6 +889,8 @@ void lockscreen_destroy(void) {
     s_touch_pressed_idx = -1;
     s_suppress_click_idx = -1;
     s_suppress_click_until_ms = 0;
+    s_no_pin_mode = false;
+    s_overlay_mode = false;
     lvgl_obj_del_safe(&s_root);
     lockscreen_view.root = NULL;
     s_content = NULL;

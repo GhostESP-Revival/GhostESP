@@ -795,6 +795,48 @@ bool (*ble_detect_start_tracking)(int index);
 bool (*ble_detect_start_airtag_spoof)(int index);
 ```
 
+### BLE Advertiser Scan
+
+```c
+typedef struct {
+    uint8_t  mac[6];
+    uint8_t  addr_type;            // 0 = Public, 1 = Random, other = Unknown
+    int8_t   rssi;
+    uint8_t  event_type;
+    uint32_t seen_count;
+    char     name[24];
+    bool     has_flags;
+    uint8_t  flags;
+    bool     has_tx_power;
+    int8_t   tx_power;
+    bool     has_manufacturer_id;
+    uint16_t manufacturer_id;
+    bool     is_ibeacon;
+    char     ibeacon_uuid[37];
+    uint16_t ibeacon_major;
+    uint16_t ibeacon_minor;
+    int8_t   ibeacon_measured_power;
+    char     adv_type[16];
+    char     manufacturer[24];
+    char     oui_vendor[32];      // Empty if MAC has no recognized OUI
+    char     services[96];        // Comma-separated 16-bit service UUIDs
+    char     service_data[64];    // Includes Eddystone frame hints
+    bool     has_appearance;
+    uint16_t appearance;
+} ghostesp_ble_adv_info_t;
+
+void (*ble_adv_scan_start)(void);
+void (*ble_adv_scan_stop)(void);
+bool (*ble_adv_scan_active)(void);
+int  (*ble_adv_scan_count)(void);
+bool (*ble_adv_scan_get)(int index, ghostesp_ble_adv_info_t *out);
+bool (*ble_adv_scan_track)(int index);
+void (*ble_adv_scan_stop_tracking)(void);
+bool (*ble_adv_scan_save_to_sd)(int index);
+```
+
+`ble_adv_scan_start` begins a parsed BLE advertisement scan that does not require a connection. Use `ble_adv_scan_get` to enumerate results, `ble_adv_scan_track` to follow a single advertiser's RSSI on the terminal, and `ble_adv_scan_save_to_sd` to write the parsed record(s) to `/mnt/ghostesp/scans/ble_advertiser*.txt`. Pass `index < 0` to save the full list as `ble_advertisers_*.txt`. Requires the `ble` permission. Not available on ESP32-S2.
+
 ### NRF24
 
 ```c
@@ -972,6 +1014,10 @@ The load will fail with `ELC: exec alloc N -> 0x0 internal=0 exec=0` if the app'
 **Practical limits** for executable data on C5 vary by firmware build, but a rough guideline is ~20-30 KB of internal heap available for ELF loading after firmware init. Apps with large `.text` sections or many translation units may need to:
 - Use `memory_limit` in `manifest.json` conservatively (the tracked limit covers `app_malloc`/`app_calloc` usage, but the .so's executable sections consume separate internal heap).
 - Reduce code size (link-time optimization, strip unused functions, enable `-Os`).
+
+### Flash-XIP on ESP32-C5 (>4 MB flash)
+
+C5 firmware builds with a dedicated `napps` flash partition (boards with more than 4 MB of flash) lift the internal-RAM ceiling entirely. The loader stages relocation in RAM, programs the relocated `.text` into the `napps` partition, and executes it **in place** from the flash mapping. `.data`/`.bss`/`.got` still live in RAM, but the app's executable footprint in internal SRAM drops to near zero — a typical app consumes only a few hundred bytes of internal heap regardless of code size. An identical relocated image already resident in the partition is reused on subsequent launches, so repeat loads do not re-erase flash. This is on by default on supported C5 boards; 4 MB C5 boards have no room for the partition and fall back to the internal-RAM exec path above.
 
 ### Non-Executable Data PSRAM Preference
 

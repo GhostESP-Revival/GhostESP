@@ -20,8 +20,10 @@
 #include "esp_system.h"
 #include "esp_mac.h"
 #include "esp_heap_caps.h"
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
 
@@ -41,8 +43,10 @@
 #define PACKET_CHECKSUM_SIZE 1
 #define PACKET_MAX_PAYLOAD (COMM_PACKET_SIZE - 4)
 #define RESPONSE_LOG_PREFIX "RX: "
+#define COMM_STREAM_COMMAND_MAX 250
 // flags for PACKET_TYPE_RESPONSE framing
 #define RESP_FLAG_LINE_START 0x01
+
 
 // sizes for fields embedded in packets
 #define CHIP_ID_LEN 6
@@ -95,6 +99,7 @@ typedef struct {
 typedef struct {
     char command[33];
     char data[COMM_PACKET_SIZE];
+    char* dynamic_data;
 } comm_command_t;
 
 typedef struct {
@@ -125,8 +130,10 @@ typedef struct {
     
     volatile bool initialized;
     bool is_executing_remote_cmd;
+    bool remote_output_capture;
     bool uart_driver_installed;
     bool use_crc;
+
 
     uint32_t tx_dropped_packets;
     uint32_t rx_queue_dropped_packets;
@@ -157,11 +164,19 @@ typedef struct {
 
     comm_stream_callback_t stream_handlers[COMM_MAX_STREAM_CHANNELS];
     void* stream_user_data[COMM_MAX_STREAM_CHANNELS];
+    char* command_stream_buf;
+    size_t command_stream_len;
+    size_t command_stream_cap;
+    bool command_stream_discarding;
 } esp_comm_manager_t;
 
 static esp_comm_manager_t* s_comm_manager = NULL;
 static comm_command_callback_t s_pending_callback = NULL;
 static void* s_pending_callback_user_data = NULL;
+static comm_response_callback_t s_response_callback = NULL;
+static void* s_response_callback_user_data = NULL;
+static comm_data_callback_t s_data_callback = NULL;
+static void* s_data_callback_user_data = NULL;
 static uart_port_t s_uart_num = UART_NUM_1; /* selected UART for dualcomm */
 
 // Forward declarations for functions referenced before their definitions
@@ -177,6 +192,9 @@ static void send_handshake_request(const char* peer_name);
 static void send_handshake_ack(void);
 static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t* packet);
 static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason);
+static bool queue_received_command(esp_comm_manager_t* comm, const char* command, const char* data);
+static void drain_command_queue(QueueHandle_t queue);
+static void reset_command_stream(esp_comm_manager_t* comm);
 
 static inline void lock_state(esp_comm_manager_t* comm) {
     if (comm && comm->state_mutex) {
@@ -276,6 +294,184 @@ static void free_task_resources(psram_task_resources_t* res) {
     if (res->tcb) {
         heap_caps_free(res->tcb);
         res->tcb = NULL;
+    }
+}
+
+static bool ensure_command_executor(esp_comm_manager_t* comm) {
+    if (!comm || !comm->command_callback) {
+        return false;
+    }
+    if (!comm->command_queue) {
+        comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+    }
+    if (comm->command_queue && !comm->command_executor_task_handle) {
+        TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
+                                            "comm_cmd_exec_task", 3072, comm, 5);
+        if (!t) {
+            printf("E: failed to create command executor task\n");
+            free_task_resources(&comm->command_task_res);
+        }
+        comm->command_executor_task_handle = t;
+    }
+    return comm->command_queue != NULL;
+}
+
+static void free_command_payload(comm_command_t* cmd) {
+    if (cmd && cmd->dynamic_data) {
+        free(cmd->dynamic_data);
+        cmd->dynamic_data = NULL;
+    }
+}
+
+static void drain_command_queue(QueueHandle_t queue) {
+    if (!queue) {
+        return;
+    }
+    comm_command_t pending;
+    while (xQueueReceive(queue, &pending, 0) == pdPASS) {
+        free_command_payload(&pending);
+    }
+}
+
+static bool queue_received_command(esp_comm_manager_t* comm, const char* command, const char* data) {
+    if (!comm || !command || !ensure_command_executor(comm)) {
+        return false;
+    }
+
+    comm_command_t cmd_to_queue;
+    memset(&cmd_to_queue, 0, sizeof(comm_command_t));
+    strncpy(cmd_to_queue.command, command, MAX_CMD_LEN);
+    cmd_to_queue.command[MAX_CMD_LEN] = '\0';
+
+    if (data && data[0] != '\0') {
+        size_t data_len = strlen(data);
+        if (data_len < sizeof(cmd_to_queue.data)) {
+            memcpy(cmd_to_queue.data, data, data_len + 1);
+        } else {
+            cmd_to_queue.dynamic_data = (char*)malloc(data_len + 1);
+            if (!cmd_to_queue.dynamic_data) {
+                printf("Command data allocation failed for: %s\n", command);
+                return false;
+            }
+            memcpy(cmd_to_queue.dynamic_data, data, data_len + 1);
+        }
+    }
+
+    if (xQueueSend(comm->command_queue, &cmd_to_queue, pdMS_TO_TICKS(10)) != pdPASS) {
+        printf("Command queue full, dropped command: %s\n", cmd_to_queue.command);
+        free_command_payload(&cmd_to_queue);
+        return false;
+    }
+    return true;
+}
+
+static void reset_command_stream(esp_comm_manager_t* comm) {
+    if (!comm) {
+        return;
+    }
+    if (comm->command_stream_buf) {
+        free(comm->command_stream_buf);
+        comm->command_stream_buf = NULL;
+    }
+    comm->command_stream_len = 0;
+    comm->command_stream_cap = 0;
+    comm->command_stream_discarding = false;
+}
+
+static bool ensure_command_stream_capacity(esp_comm_manager_t* comm, size_t needed) {
+    if (!comm || needed > COMM_STREAM_COMMAND_MAX + 1) {
+        return false;
+    }
+    if (needed <= comm->command_stream_cap) {
+        return true;
+    }
+
+    size_t new_cap = comm->command_stream_cap ? comm->command_stream_cap : 64;
+    while (new_cap < needed && new_cap < COMM_STREAM_COMMAND_MAX + 1) {
+        new_cap *= 2;
+    }
+    if (new_cap > COMM_STREAM_COMMAND_MAX + 1) {
+        new_cap = COMM_STREAM_COMMAND_MAX + 1;
+    }
+
+    char* new_buf = (char*)realloc(comm->command_stream_buf, new_cap);
+    if (!new_buf) {
+        reset_command_stream(comm);
+        return false;
+    }
+    comm->command_stream_buf = new_buf;
+    comm->command_stream_cap = new_cap;
+    return true;
+}
+
+static bool queue_command_line(esp_comm_manager_t* comm, char* line) {
+    if (!comm || !line) {
+        return false;
+    }
+
+    while (*line && isspace((unsigned char)*line)) {
+        line++;
+    }
+    size_t len = strlen(line);
+    while (len > 0 && isspace((unsigned char)line[len - 1])) {
+        line[--len] = '\0';
+    }
+    if (len == 0) {
+        return false;
+    }
+
+    size_t cmd_len = 0;
+    while (line[cmd_len] && !isspace((unsigned char)line[cmd_len])) {
+        cmd_len++;
+    }
+    if (cmd_len == 0 || cmd_len > MAX_CMD_LEN) {
+        printf("Stream command name too long\n");
+        return false;
+    }
+
+    char command[MAX_CMD_LEN + 1];
+    memcpy(command, line, cmd_len);
+    command[cmd_len] = '\0';
+
+    char* data = line + cmd_len;
+    while (*data && isspace((unsigned char)*data)) {
+        data++;
+    }
+    return queue_received_command(comm, command, data[0] ? data : NULL);
+}
+
+static void handle_command_stream_data(esp_comm_manager_t* comm, const uint8_t* payload, size_t payload_len) {
+    if (!comm || !payload || payload_len == 0) {
+        return;
+    }
+
+    for (size_t i = 0; i < payload_len; ++i) {
+        uint8_t b = payload[i];
+        if (b == '\0' || b == '\n') {
+            if (comm->command_stream_len > 0 && comm->command_stream_buf) {
+                comm->command_stream_buf[comm->command_stream_len] = '\0';
+                comm->remote_output_capture = true;
+                if (!queue_command_line(comm, comm->command_stream_buf)) {
+                    printf("Stream command dropped\n");
+                }
+            }
+            reset_command_stream(comm);
+            continue;
+        }
+        if (b == '\r') {
+            continue;
+        }
+        if (comm->command_stream_discarding) {
+            continue;
+        }
+        if (comm->command_stream_len >= COMM_STREAM_COMMAND_MAX ||
+            !ensure_command_stream_capacity(comm, comm->command_stream_len + 2)) {
+            printf("Stream command too long\n");
+            reset_command_stream(comm);
+            comm->command_stream_discarding = true;
+            continue;
+        }
+        comm->command_stream_buf[comm->command_stream_len++] = (char)b;
     }
 }
 
@@ -383,7 +579,7 @@ static bool send_packet_internal(const comm_packet_t* packet, TickType_t wait) {
 
 static bool send_packet(const comm_packet_t* packet) {
     TickType_t wait = (packet && packet->type == PACKET_TYPE_RESPONSE)
-        ? pdMS_TO_TICKS(30)
+        ? pdMS_TO_TICKS(100)
         : pdMS_TO_TICKS(5);
     return send_packet_internal(packet, wait);
 }
@@ -661,6 +857,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->rx_expected_seq = 0;
                     comm->rx_drop_until_newline = false;
                     comm->last_rx_tick = xTaskGetTickCount();
+                    comm->remote_output_capture = false;
                     if (comm->handshake_timer) {
                         xTimerStop(comm->handshake_timer, 0);
                     }
@@ -717,6 +914,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 comm->rx_expected_seq = 0;
                 comm->rx_drop_until_newline = false;
                 comm->last_rx_tick = xTaskGetTickCount();
+                comm->remote_output_capture = false;
                 if (comm->handshake_timer) {
                     xTimerStop(comm->handshake_timer, 0);
                 }
@@ -776,36 +974,24 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
 
         case PACKET_TYPE_COMMAND:
             if (comm->state == COMM_STATE_CONNECTED && comm->command_callback) {
-                if (!comm->command_queue) {
-                    comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
-                    if (comm->command_queue && !comm->command_executor_task_handle) {
-                        TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
-                                                           "comm_cmd_exec_task", 3072, comm, 5);
-                        if (!t) {
-                            printf("E: failed to create command executor task\n");
-                            free_task_resources(&comm->command_task_res);
-                        }
-                        comm->command_executor_task_handle = t;
-                    }
-                }
-                comm_command_t cmd_to_queue;
-                memset(&cmd_to_queue, 0, sizeof(comm_command_t));
-                strncpy(cmd_to_queue.command, (char*)packet->data, MAX_CMD_LEN);
-                cmd_to_queue.command[MAX_CMD_LEN] = '\0';
-                size_t cmd_len = strlen(cmd_to_queue.command);
+                comm->remote_output_capture = true;
+                char command[MAX_CMD_LEN + 1];
+                strncpy(command, (char*)packet->data, MAX_CMD_LEN);
+                command[MAX_CMD_LEN] = '\0';
+                size_t cmd_len = strlen(command);
                 size_t data_start = cmd_len + 1;
+                char data[COMM_PACKET_SIZE];
+                data[0] = '\0';
                 if (packet->length > data_start) {
                     size_t data_len = packet->length - data_start;
-                    if (data_len > sizeof(cmd_to_queue.data) - 1) {
-                        data_len = sizeof(cmd_to_queue.data) - 1;
+                    if (data_len > sizeof(data) - 1) {
+                        data_len = sizeof(data) - 1;
                     }
-                    strncpy(cmd_to_queue.data, (char*)packet->data + data_start, data_len);
-                    cmd_to_queue.data[data_len] = '\0';
+                    memcpy(data, (char*)packet->data + data_start, data_len);
+                    data[data_len] = '\0';
                 }
 
-                if (comm->command_queue && xQueueSend(comm->command_queue, &cmd_to_queue, pdMS_TO_TICKS(10)) != pdPASS) {
-                    printf("Command queue full, dropped command: %s\n", cmd_to_queue.command);
-                }
+                (void)queue_received_command(comm, command, data[0] ? data : NULL);
             }
             break;
 
@@ -825,13 +1011,18 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     break;
                 }
                 comm_stream_callback_t cb = comm->stream_handlers[channel];
-                if (!cb) {
-                    printf("STREAM packet ignored: no handler for channel %d\n", channel);
-                    break;
-                }
                 const uint8_t* payload = packet->data + 1;
                 size_t payload_len = packet->length - 1;
-                cb(channel, payload, payload_len, comm->stream_user_data[channel]);
+                if (channel == COMM_STREAM_CHANNEL_COMMAND) {
+                    handle_command_stream_data(comm, payload, payload_len);
+                    break;
+                }
+                if (s_data_callback && payload_len > 0) {
+                    s_data_callback(payload, payload_len, s_data_callback_user_data);
+                }
+                if (cb) {
+                    cb(channel, payload, payload_len, comm->stream_user_data[channel]);
+                }
             }
             break;
 
@@ -938,6 +1129,9 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         cap = sizeof(comm->response_assembly);
                     }
                     size_t to_copy = (rem < cap) ? rem : cap;
+                    if (s_response_callback && to_copy > 0) {
+                        s_response_callback(p, to_copy, s_response_callback_user_data);
+                    }
                     memcpy(comm->response_assembly + comm->response_assembly_len, p, to_copy);
                     comm->response_assembly_len += to_copy;
                     p += to_copy;
@@ -992,13 +1186,15 @@ static void command_executor_task(void* arg) {
     while (comm->initialized) {
         if (xQueueReceive(comm->command_queue, &received_cmd, pdMS_TO_TICKS(100)) == pdPASS) {
             if (comm->command_callback) {
+                const char* data = received_cmd.dynamic_data ? received_cmd.dynamic_data : received_cmd.data;
                 // Temporarily set the remote command flag to indicate this is a remote command
                 bool was_remote = esp_comm_manager_is_remote_command();
                 esp_comm_manager_set_remote_command_flag(true);
-                comm->command_callback(received_cmd.command, received_cmd.data, comm->callback_user_data);
+                comm->command_callback(received_cmd.command, data, comm->callback_user_data);
                 // Restore the previous remote command flag state
                 esp_comm_manager_set_remote_command_flag(was_remote);
             }
+            free_command_payload(&received_cmd);
         }
     }
 
@@ -1051,12 +1247,20 @@ void esp_comm_manager_init_with_defaults(void) {
 }
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
-    ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes", 
+    ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (s_comm_manager) {
         printf("Already initialized\n");
         return;
     }
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
+        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0) {
+        printf("ESP Comm Manager disabled on %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
+        return;
+    }
+#endif
 
     uart_port_t desired_uart = UART_NUM_1;
     gpio_num_t resolved_tx = tx_pin;
@@ -1097,6 +1301,13 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_11;
             resolved_rx = GPIO_NUM_12;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0) {
+        desired_uart = UART_NUM_1;
+        if (((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) ||
+            ((int)tx_pin == 6 && (int)rx_pin == 7)) {
+            resolved_tx = GPIO_NUM_11;
+            resolved_rx = GPIO_NUM_12;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }
@@ -1124,6 +1335,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->state = COMM_STATE_IDLE;
     s_comm_manager->role = COMM_ROLE_MASTER;
     s_comm_manager->is_executing_remote_cmd = false;
+    s_comm_manager->remote_output_capture = false;
     s_comm_manager->uart_driver_installed = false;
     s_comm_manager->use_crc = true;
     s_comm_manager->parse_state = PARSE_STATE_IDLE;
@@ -1166,13 +1378,20 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     return;
 #endif
 
-    // Don't deinitialize serial manager on TDECK to avoid UART conflicts
+    bool keep_serial_manager = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    keep_serial_manager = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+#endif
+
+    // Don't deinitialize serial manager on boards whose CLI runs over USB-JTAG.
 #ifndef CONFIG_USE_TDECK
-    if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
-        serial_manager_deinit();
-    } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
-        if ((int)resolved_tx == U0TXD_GPIO_NUM || (int)resolved_rx == U0RXD_GPIO_NUM) {
+    if (!keep_serial_manager) {
+        if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
             serial_manager_deinit();
+        } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
+            if ((int)resolved_tx == U0TXD_GPIO_NUM || (int)resolved_rx == U0RXD_GPIO_NUM) {
+                serial_manager_deinit();
+            }
         }
     }
 #endif
@@ -1288,6 +1507,21 @@ bool esp_comm_manager_send_stream(uint8_t channel, const uint8_t* data, size_t l
     return esp_comm_manager_send_stream_wait(channel, data, length, 0);
 }
 
+bool esp_comm_manager_send_command_line(const char* command_line) {
+    if (!command_line || command_line[0] == '\0') {
+        return false;
+    }
+    size_t len = strlen(command_line);
+    if (len > COMM_STREAM_COMMAND_MAX) {
+        printf("Command line too long for stream transport\n");
+        return false;
+    }
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_COMMAND,
+                                            (const uint8_t*)command_line,
+                                            len + 1,
+                                            10);
+}
+
 bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callback_t callback, void* user_data) {
     if (!s_comm_manager || channel >= COMM_MAX_STREAM_CHANNELS) {
         return false;
@@ -1321,13 +1555,20 @@ bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
     s_comm_manager->tx_pin = tx_pin;
     s_comm_manager->rx_pin = rx_pin;
 
-    // Don't deinitialize serial manager on TDECK to avoid UART conflicts
+    bool keep_serial_manager = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    keep_serial_manager = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0);
+#endif
+
+    // Don't deinitialize serial manager on boards whose CLI runs over USB-JTAG.
 #ifndef CONFIG_USE_TDECK
-    if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
-        serial_manager_deinit();
-    } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
-        if ((int)tx_pin == U0TXD_GPIO_NUM || (int)rx_pin == U0RXD_GPIO_NUM) {
+    if (!keep_serial_manager) {
+        if (serial_manager_get_uart_num() == (int)UART_NUM_1) {
             serial_manager_deinit();
+        } else if (serial_manager_get_uart_num() == (int)UART_NUM_0) {
+            if ((int)tx_pin == U0TXD_GPIO_NUM || (int)rx_pin == U0RXD_GPIO_NUM) {
+                serial_manager_deinit();
+            }
         }
     }
 #endif
@@ -1379,9 +1620,11 @@ bool esp_comm_manager_start_discovery(void) {
         s_comm_manager->rx_packet_queue = NULL;
     }
     if (s_comm_manager->command_queue) {
+        drain_command_queue(s_comm_manager->command_queue);
         vQueueDelete(s_comm_manager->command_queue);
         s_comm_manager->command_queue = NULL;
     }
+    reset_command_stream(s_comm_manager);
     if (s_comm_manager->tx_task_handle) {
         vTaskDelete(s_comm_manager->tx_task_handle);
         s_comm_manager->tx_task_handle = NULL;
@@ -1555,6 +1798,16 @@ void esp_comm_manager_set_command_callback(comm_command_callback_t callback, voi
     }
 }
 
+void esp_comm_manager_set_response_callback(comm_response_callback_t callback, void* user_data) {
+    s_response_callback = callback;
+    s_response_callback_user_data = user_data;
+}
+
+void esp_comm_manager_set_data_callback(comm_data_callback_t callback, void* user_data) {
+    s_data_callback = callback;
+    s_data_callback_user_data = user_data;
+}
+
 void esp_comm_manager_set_remote_command_flag(bool is_remote) {
     if (s_comm_manager) {
         s_comm_manager->is_executing_remote_cmd = is_remote;
@@ -1565,6 +1818,32 @@ bool esp_comm_manager_is_remote_command(void) {
     return s_comm_manager && s_comm_manager->is_executing_remote_cmd;
 }
 
+bool esp_comm_manager_should_forward_output(void) {
+    return s_comm_manager && (s_comm_manager->is_executing_remote_cmd || s_comm_manager->remote_output_capture);
+}
+
+bool esp_comm_manager_get_peer_name(char* out, size_t out_len) {
+    if (!s_comm_manager || !out || out_len == 0 || s_comm_manager->peer.chip_name[0] == '\0') {
+        return false;
+    }
+    strncpy(out, s_comm_manager->peer.chip_name, out_len - 1);
+    out[out_len - 1] = '\0';
+    return true;
+}
+
+bool esp_comm_manager_get_pins(gpio_num_t* tx_pin, gpio_num_t* rx_pin) {
+    if (!s_comm_manager) {
+        return false;
+    }
+    if (tx_pin) {
+        *tx_pin = s_comm_manager->tx_pin;
+    }
+    if (rx_pin) {
+        *rx_pin = s_comm_manager->rx_pin;
+    }
+    return true;
+}
+
 void esp_comm_manager_disconnect(void) {
     if (s_comm_manager) {
         comm_state_t previous_state = s_comm_manager->state;
@@ -1573,6 +1852,7 @@ void esp_comm_manager_disconnect(void) {
         }
         lock_state(s_comm_manager);
         s_comm_manager->state = COMM_STATE_IDLE;
+        s_comm_manager->remote_output_capture = false;
         if (s_comm_manager->handshake_timer) {
             xTimerStop(s_comm_manager->handshake_timer, 0);
         }
@@ -1663,8 +1943,10 @@ void esp_comm_manager_deinit(void) {
         vQueueDelete(s_comm_manager->tx_queue);
     }
     if (s_comm_manager->command_queue) {
+        drain_command_queue(s_comm_manager->command_queue);
         vQueueDelete(s_comm_manager->command_queue);
     }
+    reset_command_stream(s_comm_manager);
     if (s_comm_manager->state_mutex) {
         vSemaphoreDelete(s_comm_manager->state_mutex);
     }
@@ -1710,6 +1992,7 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
     terminal_view_add_text("W: Connection lost, restarting discovery\n");
 
     comm->state = COMM_STATE_SCANNING;
+    comm->remote_output_capture = false;
 
     // Stop ping timer; keep it allocated and restart on next connection.
     if (comm->ping_timer) {
@@ -1722,8 +2005,10 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         xQueueReset(comm->rx_packet_queue);
     }
     if (comm->command_queue) {
+        drain_command_queue(comm->command_queue);
         xQueueReset(comm->command_queue);
     }
+    reset_command_stream(comm);
     if (comm->tx_queue) {
         xQueueReset(comm->tx_queue);
     }

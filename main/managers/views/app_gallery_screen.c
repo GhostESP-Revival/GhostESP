@@ -54,6 +54,39 @@ static inline int get_app_anim_duration(void) {
 
 #define ANIM_DURATION get_app_anim_duration()
 
+static inline bool app_card_bg_enabled(void) {
+    return settings_get_menu_card_bg(&G_Settings);
+}
+
+static inline void apply_app_card_style(lv_obj_t *obj, lv_color_t surface, lv_color_t border, int border_w, int shadow_w) {
+    if (app_card_bg_enabled()) {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(obj, surface, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, border_w, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, shadow_w, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_50, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
+static inline void apply_app_card_selection_style(lv_obj_t *obj, lv_color_t accent) {
+    if (app_card_bg_enabled()) {
+        lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
+        lv_obj_set_style_border_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(obj, accent, LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_30, LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    }
+}
+
 static void select_app_item(int index, bool slide_left);
 static void apps_plugin_reload_done(void *arg);
 
@@ -73,6 +106,8 @@ typedef struct {
     char plugin_id[PLUGIN_APP_ID_MAX];
     char accent_color[PLUGIN_APP_ACCENT_COLOR_MAX];
     bool disabled;
+    bool is_category_folder;
+    char category[PLUGIN_APP_CATEGORY_MAX];
 } app_item_t;
 
 static const app_item_t builtin_app_items[] = {
@@ -149,10 +184,14 @@ static const app_item_t builtin_app_items[] = {
 #endif
 };
 
-#define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT + 9)
+#define MAX_APP_GALLERY_ITEMS (PLUGIN_APP_MAX_COUNT * 2 + 12)
 static app_item_t *app_items = NULL;
 static int num_apps = 0;
 lv_obj_t *back_button = NULL;
+
+static bool in_submenu = false;
+static char current_category[PLUGIN_APP_CATEGORY_MAX] = "";
+static char s_category_names[PLUGIN_APP_MAX_COUNT][PLUGIN_APP_CATEGORY_MAX];
 
 // Add navigation button objects
 static lv_obj_t *left_nav_btn = NULL;
@@ -293,22 +332,80 @@ static void add_back_app_item(void) {
     num_apps++;
 }
 
-static void add_loaded_plugin_app_items(void) {
+static void add_plugin_app_item(const plugin_app_manifest_t *app) {
+    app_items[num_apps].name = app->name;
+    app_items[num_apps].asset_key = NULL;
+    app_items[num_apps].icon = &GESPAppGallery;
+    app_items[num_apps].palette_index = 3;
+    app_items[num_apps].view = &plugin_runner_view;
+    app_items[num_apps].disabled = false;
+    strncpy(app_items[num_apps].plugin_id, app->id, sizeof(app_items[num_apps].plugin_id) - 1);
+    strncpy(app_items[num_apps].accent_color, app->accent_color, sizeof(app_items[num_apps].accent_color) - 1);
+    strncpy(app_items[num_apps].category, app->category, sizeof(app_items[num_apps].category) - 1);
+    num_apps++;
+}
+
+static void add_plugin_category_folders(void) {
+    if (in_submenu) return;
     bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
     int plugin_count = plugin_manager_count();
+
+    int num_categories = 0;
+    for (int i = 0; i < plugin_count; ++i) {
+        const plugin_app_manifest_t *app = plugin_manager_get(i);
+        if (!app) continue;
+        if (app->requires_psram && !has_psram) continue;
+        if (app->category[0] == '\0') continue;
+
+        bool already_seen = false;
+        for (int j = 0; j < num_categories; ++j) {
+            if (strcmp(s_category_names[j], app->category) == 0) {
+                already_seen = true;
+                break;
+            }
+        }
+        if (!already_seen && num_categories < PLUGIN_APP_MAX_COUNT) {
+            strncpy(s_category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
+            s_category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
+            num_categories++;
+        }
+    }
+
+    for (int j = 0; j < num_categories && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++j) {
+        app_items[num_apps].name = s_category_names[j];
+        app_items[num_apps].asset_key = NULL;
+        app_items[num_apps].symbol_icon = LV_SYMBOL_DIRECTORY;
+        app_items[num_apps].icon = NULL;
+        app_items[num_apps].palette_index = 1;
+        app_items[num_apps].view = NULL;
+        app_items[num_apps].disabled = false;
+        app_items[num_apps].is_category_folder = true;
+        strncpy(app_items[num_apps].category, s_category_names[j], sizeof(app_items[num_apps].category) - 1);
+        num_apps++;
+    }
+}
+
+static void add_plugin_app_items_flat(void) {
+    bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
+    int plugin_count = plugin_manager_count();
+
+    if (in_submenu) {
+        for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
+            const plugin_app_manifest_t *app = plugin_manager_get(i);
+            if (!app) continue;
+            if (app->requires_psram && !has_psram) continue;
+            if (strcmp(app->category, current_category) != 0) continue;
+            add_plugin_app_item(app);
+        }
+        return;
+    }
+
     for (int i = 0; i < plugin_count && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
         if (!app) continue;
         if (app->requires_psram && !has_psram) continue;
-        app_items[num_apps].name = app->name;
-        app_items[num_apps].asset_key = NULL;
-        app_items[num_apps].icon = &GESPAppGallery;
-        app_items[num_apps].palette_index = 3;
-        app_items[num_apps].view = &plugin_runner_view;
-        app_items[num_apps].disabled = false;
-        strncpy(app_items[num_apps].plugin_id, app->id, sizeof(app_items[num_apps].plugin_id) - 1);
-        strncpy(app_items[num_apps].accent_color, app->accent_color, sizeof(app_items[num_apps].accent_color) - 1);
-        num_apps++;
+        if (app->category[0] != '\0') continue;
+        add_plugin_app_item(app);
     }
 }
 
@@ -317,11 +414,19 @@ static void rebuild_app_items(bool include_loaded_plugins) {
     if (!ensure_app_items()) return;
     memset(app_items, 0, sizeof(*app_items) * MAX_APP_GALLERY_ITEMS);
 
+    if (in_submenu) {
+        add_back_app_item();
+        if (include_loaded_plugins) add_plugin_app_items_flat();
+        return;
+    }
+
+    if (include_loaded_plugins) add_plugin_category_folders();
+
     for (int i = 0; i < (int)(sizeof(builtin_app_items) / sizeof(builtin_app_items[0])) && num_apps < MAX_APP_GALLERY_ITEMS - 1; ++i) {
         app_items[num_apps++] = builtin_app_items[i];
     }
 
-    if (include_loaded_plugins) add_loaded_plugin_app_items();
+    if (include_loaded_plugins) add_plugin_app_items_flat();
     add_back_app_item();
 }
 
@@ -525,7 +630,7 @@ static void apps_carousel_fade_out_ready_cb(lv_anim_t *a) {
         apps_carousel_cache.label = label;
     }
     const char *new_label = app_items[app_idx].name;
-    if (app_items[app_idx].view == NULL) new_label = "< Back";
+    if (app_items[app_idx].view == NULL && !app_items[app_idx].is_category_folder) new_label = "< Back";
     if (label && apps_carousel_cache.label_text != new_label) {
         lv_label_set_text(label, new_label);
     }
@@ -602,11 +707,8 @@ static void update_app_item(bool slide_left) {
     current_app_obj = lv_btn_create(apps_container);
     apps_carousel_cache.card = current_app_obj;
 
-    lv_obj_set_style_bg_color(current_app_obj, apps_surface_color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(current_app_obj, 3, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(current_app_obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_border_width(current_app_obj, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(current_app_obj, app_items[app_idx].border_color, LV_PART_MAIN);
+    int card_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
+    apply_app_card_style(current_app_obj, apps_surface_color, app_items[app_idx].border_color, card_border_w, 3);
     lv_obj_set_style_radius(current_app_obj, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(current_app_obj, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(current_app_obj, false, 0);
@@ -673,7 +775,7 @@ static void update_app_item(bool slide_left) {
     if (LV_HOR_RES > 150) {
         lv_obj_t *label = lv_label_create(current_app_obj);
         const char *label_text = app_items[app_idx].name;
-        if (app_items[app_idx].view == NULL) label_text = "< Back";
+        if (app_items[app_idx].view == NULL && !app_items[app_idx].is_category_folder) label_text = "< Back";
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_font(label, accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
@@ -740,32 +842,29 @@ static void create_apps_grid_menu(void) {
         lv_obj_set_width(card, card_width);
         lv_obj_set_height(card, LV_PCT(100));
 
-        lv_obj_set_style_bg_color(card, apps_surface_color, LV_PART_MAIN);
         int shadow_w = (card_height <= 50 ? 4 : 8);
-        lv_obj_set_style_shadow_width(card, shadow_w, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(card, LV_OPA_50, LV_PART_MAIN);
-        lv_obj_set_style_border_width(card, show_borders ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(card, app_items[i].border_color, LV_PART_MAIN);
+        apply_app_card_style(card, apps_surface_color, app_items[i].border_color, show_borders ? 2 : 0, shadow_w);
         lv_obj_set_style_radius(card, GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
-        int reserved_for_label = (card_height <= 50 ? 14 : 20);
-        int avail_w = (int)(card_width * 0.78f);
-        int avail_h = (int)((card_height - reserved_for_label) * 0.78f);
-        if (avail_h < 10) avail_h = card_height - reserved_for_label;
+        int reserved_for_label = (card_height <= 70 ? 12 : 20);
+        int icon_area_h = card_height - reserved_for_label;
+        if (icon_area_h < 10) icon_area_h = card_height - reserved_for_label;
+        int icon_target = LV_MIN((int)(card_width * 0.78f), (int)(icon_area_h * 0.78f));
+        if (icon_target < 16) icon_target = LV_MIN(card_width - 4, icon_area_h);
 
         const char *item_symbol = app_item_symbol_icon(i);
         const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
         if (item_symbol) {
             lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
             if (icon) {
-                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 4);
+                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
             }
         } else if (item_icon) {
             lv_obj_t *icon = lv_img_create(card);
             lv_img_set_src(icon, item_icon);
             lv_img_set_antialias(icon, false);
+            lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
             if (strcmp(app_items[i].name, "Flap") && app_item_icon_should_recolor(i, item_icon)) {
                 lv_obj_set_style_img_recolor(icon, app_items[i].border_color, 0);
                 lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -774,23 +873,23 @@ static void create_apps_grid_menu(void) {
             }
             lv_coord_t img_w = item_icon->header.w;
             lv_coord_t img_h = item_icon->header.h;
-            int zoom_w = img_w > 0 ? (avail_w * 256) / img_w : 256;
-            int zoom_h = img_h > 0 ? (avail_h * 256) / img_h : 256;
+            int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
+            int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
             int zoom = LV_MIN(zoom_w, zoom_h);
             if (zoom > 256) zoom = 256;
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
+            lv_obj_refresh_self_size(icon);
 
-            int icon_draw_h = (img_h * zoom) / 256;
-            int icon_area_h = card_height - reserved_for_label;
-            int top_offset = (icon_area_h - icon_draw_h) / 2 - (card_height <= 50 ? 15 : 18);
+            int displayed_h = (img_h * zoom) / 256;
+            int top_offset = (icon_area_h - displayed_h) / 2;
             if (top_offset < 0) top_offset = 0;
             lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
         }
 
         lv_obj_t *label = lv_label_create(card);
         const char *label_text = app_items[i].name;
-        if (app_items[i].view == NULL) {
+        if (app_items[i].view == NULL && !app_items[i].is_category_folder) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
@@ -807,11 +906,7 @@ static void create_apps_grid_menu(void) {
     if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-        lv_obj_set_style_border_color(apps_grid_cards[selected_app_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_border_width(apps_grid_cards[selected_app_index], 3, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(apps_grid_cards[selected_app_index], 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(apps_grid_cards[selected_app_index], accent, LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(apps_grid_cards[selected_app_index], LV_OPA_30, LV_PART_MAIN);
+        apply_app_card_selection_style(apps_grid_cards[selected_app_index], accent);
         lv_obj_scroll_to_view(apps_grid_cards[selected_app_index], LV_ANIM_OFF);
     }
 }
@@ -842,15 +937,11 @@ static void create_apps_list_menu(void) {
         lv_obj_set_height(btn, button_height);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, apps_surface_color, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, app_items[i].border_color, LV_PART_MAIN);
+        int btn_border_w = settings_get_menu_item_borders(&G_Settings) ? 2 : 0;
+        apply_app_card_style(btn, apps_surface_color, app_items[i].border_color, btn_border_w, 6);
         lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_column(btn, 12, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn, 6, LV_PART_MAIN);
-        lv_obj_set_style_shadow_color(btn, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_set_style_shadow_opa(btn, LV_OPA_40, LV_PART_MAIN);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
         const char *item_symbol = app_item_symbol_icon(i);
@@ -884,7 +975,7 @@ static void create_apps_list_menu(void) {
 
         lv_obj_t *label = lv_label_create(btn);
         const char *label_text = app_items[i].name;
-        if (app_items[i].view == NULL) {
+        if (app_items[i].view == NULL && !app_items[i].is_category_folder) {
             label_text = "< Back";
         }
         lv_label_set_text(label, label_text);
@@ -938,7 +1029,8 @@ static void apps_plugin_reload_done(void *arg) {
 
     bool selected_back = false;
     if (app_items && selected_app_index >= 0 && selected_app_index < num_apps) {
-        selected_back = app_items[selected_app_index].view == NULL;
+        selected_back = (app_items[selected_app_index].view == NULL &&
+                         !app_items[selected_app_index].is_category_folder);
     }
 
     rebuild_app_items(true);
@@ -967,6 +1059,8 @@ static void apps_plugin_reload_done(void *arg) {
     plugin_manager_init();
     int boot_count = plugin_manager_count();
     apps_allow_plugin_icon_load = (boot_count > 0);
+    in_submenu = false;
+    current_category[0] = '\0';
     rebuild_app_items(boot_count > 0);
     if (boot_count > 0) {
         char msg[48];
@@ -1139,6 +1233,8 @@ void apps_menu_destroy(void) {
     }
 
     selected_app_index = 0;
+    in_submenu = false;
+    current_category[0] = '\0';
     touch_started = false;
     touch_dragged = false;
     touch_drag_axis = 0;
@@ -1160,22 +1256,15 @@ static void select_app_item(int index, bool slide_left) {
         bool show_borders_sel = settings_get_menu_item_borders(&G_Settings);
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
             lv_obj_t *old = apps_grid_cards[selected_app_index];
-            lv_obj_set_style_border_width(old, show_borders_sel ? 2 : 0, LV_PART_MAIN);
-            lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(old, 8, LV_PART_MAIN);
-            lv_obj_set_style_shadow_color(old, lv_color_hex(0x000000), LV_PART_MAIN);
-            lv_obj_set_style_shadow_opa(old, LV_OPA_50, LV_PART_MAIN);
+            apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
+                                 show_borders_sel ? 2 : 0, 8);
         }
         selected_app_index = index;
         if (apps_grid_cards[selected_app_index]) {
             lv_obj_t *card = apps_grid_cards[selected_app_index];
             uint8_t theme = settings_get_menu_theme(&G_Settings);
             lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-            lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
-            lv_obj_set_style_border_color(card, accent, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(card, 12, LV_PART_MAIN);
-            lv_obj_set_style_shadow_color(card, accent, LV_PART_MAIN);
-            lv_obj_set_style_shadow_opa(card, LV_OPA_30, LV_PART_MAIN);
+            apply_app_card_selection_style(card, accent);
             lv_obj_scroll_to_view(card, LV_ANIM_OFF);
         }
         return;
@@ -1184,14 +1273,18 @@ static void select_app_item(int index, bool slide_left) {
     if (apps_layout == APPS_LAYOUT_LIST && apps_list_buttons) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_list_buttons[selected_app_index]) {
             lv_obj_t *old = apps_list_buttons[selected_app_index];
-            lv_obj_set_style_border_width(old, settings_get_menu_item_borders(&G_Settings) ? 2 : 0, LV_PART_MAIN);
-            lv_obj_set_style_border_color(old, app_items[selected_app_index].border_color, LV_PART_MAIN);
+            apply_app_card_style(old, apps_surface_color, app_items[selected_app_index].border_color,
+                                 settings_get_menu_item_borders(&G_Settings) ? 2 : 0, 6);
         }
         selected_app_index = index;
         if (apps_list_buttons[selected_app_index]) {
             lv_obj_t *btn = apps_list_buttons[selected_app_index];
-            lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
-            lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+            if (app_card_bg_enabled()) {
+                lv_obj_set_style_border_width(btn, 4, LV_PART_MAIN);
+                lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+            } else {
+                lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+            }
             lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
         }
         return;
@@ -1201,23 +1294,75 @@ static void select_app_item(int index, bool slide_left) {
     update_app_item(slide_left);
 }
 
+static void apps_menu_go_back(void) {
+    if (in_submenu) {
+        in_submenu = false;
+        current_category[0] = '\0';
+        selected_app_index = 0;
+        rebuild_app_items(true);
+        init_app_colors();
+        render_app_items();
+        gui_screen_apply_background(apps_menu_view.root);
+        return;
+    }
+    display_manager_switch_view(&main_menu_view);
+}
+
+static void navigate_apps_vertical(int direction) {
+    if (direction == 0) return;
+
+    if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
+        if (apps_grid_cols <= 0 || num_apps <= 0) return;
+
+        int rows = (num_apps + apps_grid_cols - 1) / apps_grid_cols;
+        if (rows <= 0) return;
+
+        int row = selected_app_index / apps_grid_cols;
+        int col = selected_app_index % apps_grid_cols;
+
+        for (int tries = 0; tries < rows; ++tries) {
+            row = (row + (direction > 0 ? 1 : -1) + rows) % rows;
+            int base = row * apps_grid_cols;
+            int candidate = base + col;
+            if (candidate >= num_apps) {
+                candidate = num_apps - 1;
+                if (candidate < base) continue;
+            }
+            select_app_item(candidate, false);
+            return;
+        }
+        return;
+    }
+
+    select_app_item(selected_app_index + (direction > 0 ? 1 : -1), false);
+}
+
 /**
  * @brief Handles the selection of app items
  */
 static void handle_app_item_selection(int item_index) {
     if (item_index < 0 || item_index >= num_apps) return;
 
+    if (app_items[item_index].is_category_folder) {
+        strncpy(current_category, app_items[item_index].category, sizeof(current_category) - 1);
+        current_category[sizeof(current_category) - 1] = '\0';
+        in_submenu = true;
+        rebuild_app_items(true);
+        init_app_colors();
+        selected_app_index = (num_apps > 1) ? 1 : 0;
+        render_app_items();
+        gui_screen_apply_background(apps_menu_view.root);
+        return;
+    }
+
     if (app_items[item_index].view == NULL) {
-        display_manager_switch_view(&main_menu_view);
+        apps_menu_go_back();
         return;
     }
 
     ESP_LOGI(TAG, "Launching app: %s (index %d)\n", app_items[item_index].name, item_index);
 
     if (app_items[item_index].plugin_id[0] != '\0') {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Opening %.52s...", app_items[item_index].name);
-        toast_show_duration(msg, TOAST_INFO, 1200);
         plugin_runner_set_app(app_items[item_index].plugin_id);
         display_manager_switch_view(&plugin_runner_view);
         return;
@@ -1237,9 +1382,9 @@ static void handle_app_item_selection(int item_index) {
 static void handle_apps_button_press(int button) {
     if (apps_layout == APPS_LAYOUT_GRID_CARDS) {
         if (button == 2) {
-            select_app_item(selected_app_index - apps_grid_cols, false);
+            navigate_apps_vertical(-1);
         } else if (button == 4) {
-            select_app_item(selected_app_index + apps_grid_cols, false);
+            navigate_apps_vertical(1);
         } else if (button == 0) {
             select_app_item(selected_app_index - 1, true);
         } else if (button == 3) {
@@ -1262,7 +1407,7 @@ static void handle_apps_button_press(int button) {
             handle_app_item_selection(selected_app_index);
         } else if (button == 0) { // Back/Left
             ESP_LOGD(TAG, "Back button pressed\n");
-            display_manager_switch_view(&main_menu_view);
+            apps_menu_go_back();
         }
         return;
     }
@@ -1278,7 +1423,7 @@ static void handle_apps_button_press(int button) {
         handle_app_item_selection(selected_app_index);
     } else if (button == 2) { // Back
         ESP_LOGD(TAG, "Back button pressed\n");
-        display_manager_switch_view(&main_menu_view);
+        apps_menu_go_back();
     }
 }
 
@@ -1296,16 +1441,16 @@ static void handle_keyboard_interactions(int keyValue){
         select_app_item(selected_app_index + 1, false);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // Up
         ESP_LOGI(TAG, "Up arrow or 'k' pressed");
-        select_app_item(selected_app_index - 1, true);
+        navigate_apps_vertical(-1);
     } else if (keyValue == LV_KEY_DOWN || keyValue == 'j' || keyValue == '.') { // Down
         ESP_LOGI(TAG, "Down arrow or 'j' pressed");
-        select_app_item(selected_app_index + 1, false);
+        navigate_apps_vertical(1);
     } else if (keyValue == LV_KEY_ENTER || keyValue == 13) { // Select
         ESP_LOGI(TAG, "Enter pressed (select)");
         handle_app_item_selection(selected_app_index);
     } else if (keyValue == LV_KEY_ESC || keyValue == 29 || keyValue == '`') { // Back
         ESP_LOGI(TAG, "Esc or '`' pressed (back)");
-        display_manager_switch_view(&main_menu_view);
+        apps_menu_go_back();
     }
 }
 
@@ -1467,7 +1612,7 @@ void apps_menu_event_handler(InputEvent *event) {
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        apps_menu_go_back();
 #endif
     }
 }

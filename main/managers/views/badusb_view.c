@@ -5,6 +5,7 @@
 #include "managers/views/badusb_view.h"
 #include "managers/display_manager.h"
 #include "managers/views/main_menu_screen.h"
+#include "managers/views/trackpad_view.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "gui/options_view.h"
@@ -39,31 +40,12 @@ static const char *TAG = "badusb_view";
 // JIT SD helpers for configs that unmount SD after init (e.g. somethingsomething)
 static bool badusb_sd_begin(bool *display_was_suspended)
 {
-    if (display_was_suspended) *display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
-        esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
-        if (mount_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(mount_err));
-            return false;
-        }
-        return true;
-    }
-#endif
-    return true;
+    return sd_card_jit_begin(display_was_suspended, false);
 }
 
 static void badusb_sd_end(bool display_was_suspended)
 {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
-        sd_card_unmount_after_flush(display_was_suspended);
-    }
-#else
-    (void)display_was_suspended;
-#endif
+    sd_card_jit_end(display_was_suspended);
 }
 
 typedef enum {
@@ -78,6 +60,7 @@ static const char *badusb_main_options[] = {
     "Run Script",
     "USB Keyboard",
     "Mouse Jiggler",
+    "Trackpad",
     "Settings",
     "< Back",
     NULL
@@ -117,24 +100,25 @@ static lv_obj_t *menu_container = NULL;
 static int selected_item_index = 0;
 static int num_items = 0;
 
-static int touch_start_x = 0;
-static int touch_start_y = 0;
-static bool touch_started = false;
+#ifdef CONFIG_USE_TOUCHSCREEN
+static touch_drag_t badusb_touch_drag = {0};
 #if CONFIG_LV_TOUCH_CONTROLLER_XPT2046
-static const int SWIPE_THRESHOLD_RATIO = 1;
+static const int BADUSB_SWIPE_THRESHOLD_RATIO = 1;
 #else
-static const int SWIPE_THRESHOLD_RATIO = 10;
+static const int BADUSB_SWIPE_THRESHOLD_RATIO = 10;
+#endif
 #endif
 
 static lv_obj_t *scroll_up_btn = NULL;
 static lv_obj_t *scroll_down_btn = NULL;
 static lv_obj_t *back_btn = NULL;
-#define SCROLL_BTN_SIZE 40
-#define SCROLL_BTN_PADDING 5
+#define SCROLL_BTN_SIZE 28
+#define SCROLL_BTN_PADDING 3
 
 static lv_obj_t *badusb_running_popup = NULL;
 static lv_obj_t *badusb_popup_title_lbl = NULL;
 static lv_obj_t *badusb_popup_body_lbl = NULL;
+static popup_confirm_t *badusb_confirm_popup = NULL;
 static lv_timer_t *vsense_poll_timer = NULL;
 static char vsense_pending_script[MAX_SCRIPT_NAME];
 
@@ -153,6 +137,15 @@ static void select_item(int index) {
     if (g_ov) {
         options_view_set_selected(g_ov, selected_item_index);
     }
+}
+
+static void handle_option(const char *option);
+static bool badusb_confirm_handle_input(InputEvent *event);
+static void badusb_reset_defaults_confirm_cb(void *user_data);
+
+static void on_option_click(lv_event_t *e) {
+    const char *opt = (const char *)lv_event_get_user_data(e);
+    if (opt) handle_option(opt);
 }
 
 static void populate_script_list(void) {
@@ -188,18 +181,11 @@ static void populate_script_list(void) {
     script_options[script_count + 1] = NULL;
 }
 
-static void add_items_with_userdata(options_view_t *ov, const char **labels) {
+static void add_options_items(options_view_t *ov, const char **labels) {
     if (!ov || !labels) return;
     for (int i = 0; labels[i]; i++) {
-        lv_obj_t *btn = options_view_add_item(ov, labels[i], NULL, NULL);
-        if (btn) {
-            lv_obj_set_user_data(btn, (void *)labels[i]);
-        }
+        options_view_add_item(ov, labels[i], on_option_click, (void *)labels[i]);
     }
-}
-
-static void on_item_click(lv_event_t *e) {
-    (void)e;
 }
 
 static void scroll_up_cb(lv_event_t *e) {
@@ -243,6 +229,53 @@ static void update_scroll_buttons_visibility(void) {
 
 static void rebuild_menu(void);
 static void go_back(void);
+
+static bool badusb_confirm_handle_input(InputEvent *event) {
+    if (!popup_confirm_is_open(badusb_confirm_popup)) return false;
+    if (!event) return true;
+
+    if (event->type == INPUT_TYPE_TOUCH) return popup_confirm_handle_touch(&badusb_confirm_popup, &event->data.touch_data);
+    if (event->type == INPUT_TYPE_EXIT_BUTTON) {
+        popup_confirm_cancel(&badusb_confirm_popup);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int button = event->data.joystick_index;
+        if (button == 1) popup_confirm_select(&badusb_confirm_popup);
+        else if (button == 0) popup_confirm_set_selected(badusb_confirm_popup, 0);
+        else if (button == 3) popup_confirm_set_selected(badusb_confirm_popup, 1);
+        else if (button == 2 || button == 4) popup_confirm_move(badusb_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint8_t key = event->data.key_value;
+        if (key == 13 || key == LV_KEY_ENTER) popup_confirm_select(&badusb_confirm_popup);
+        else if (key == 27 || key == 29 || key == LV_KEY_ESC || key == '`') popup_confirm_cancel(&badusb_confirm_popup);
+        else if (key == 'h' || key == 'l' || key == 'k' || key == 'j' || key == ',' || key == '.' || key == ';' || key == '/' ||
+                 key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_UP || key == LV_KEY_DOWN) popup_confirm_move(badusb_confirm_popup, 1);
+        return true;
+    }
+    if (event->type == INPUT_TYPE_ENCODER) {
+        if (event->data.encoder.button) popup_confirm_select(&badusb_confirm_popup);
+        else if (event->data.encoder.direction != 0) popup_confirm_move(badusb_confirm_popup, event->data.encoder.direction);
+        return true;
+    }
+
+    return true;
+}
+
+static void badusb_reset_defaults_confirm_cb(void *user_data) {
+    (void)user_data;
+    settings_reset_badusb_defaults(&G_Settings);
+    settings_persist_setting(SETTING_BADUSB_VID);
+    settings_persist_setting(SETTING_BADUSB_PID);
+    settings_persist_setting(SETTING_BADUSB_MANUFACTURER);
+    settings_persist_setting(SETTING_BADUSB_PRODUCT);
+    settings_persist_setting(SETTING_BADUSB_RANDOMIZE);
+    settings_persist_setting(SETTING_BADUSB_KB_LAYOUT);
+    populate_settings_labels();
+    rebuild_menu();
+}
 
 static void back_btn_cb(lv_event_t *e) {
     (void)e;
@@ -305,6 +338,8 @@ static void badusb_key_immediate_cb(char c) {
     char cmd[32];
     if (c == '\b') {
         snprintf(cmd, sizeof(cmd), "keysend 0 0x2A");
+    } else if (c == '\n' || c == '\r') {
+        snprintf(cmd, sizeof(cmd), "keysend 0 0x28");  // Enter key
     } else {
         snprintf(cmd, sizeof(cmd), "type_char %u", (unsigned char)c);
     }
@@ -312,6 +347,7 @@ static void badusb_key_immediate_cb(char c) {
     esp_comm_manager_send_command("badusb", cmd);
 #elif defined(CONFIG_HAS_BADUSB)
     if (c == '\b') badusb_manager_send_keypress(0, 0x2A);
+    else if (c == '\n' || c == '\r') badusb_manager_send_keypress(0, 0x28);
     else {
         char one[2] = {c, '\0'};
         badusb_manager_send_text(one);
@@ -365,7 +401,7 @@ static void show_running_popup_ex(const char *script_name, bool waiting_for_usb)
         popup_h = (LV_VER_RES <= 240) ? 130 : 140;
     }
 
-    badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset);
+    badusb_running_popup = popup_create_container_with_offset(lv_scr_act(), popup_w, popup_h, y_offset, true);
 
     const lv_font_t *title_font = (LV_VER_RES <= 240) ? accessibility_get_font_body() : accessibility_get_font_title();
     const lv_font_t *body_font = (LV_VER_RES <= 240) ? accessibility_get_font_small() : accessibility_get_font_body();
@@ -469,6 +505,15 @@ void badusb_view_update_status(const char *status) {
         }
     } else if (strcmp(status, "keyboard") == 0) {
         // Keyboard mode uses keyboard_view directly; do not cover it with a popup.
+        if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
+            lv_obj_del(badusb_running_popup);
+            badusb_running_popup = NULL;
+        }
+        badusb_popup_title_lbl = NULL;
+        badusb_popup_body_lbl = NULL;
+    } else if (strcmp(status, "trackpad") == 0) {
+        // Trackpad mode is driven by the remote view itself; do not pop a
+        // popup over it. This status is informational only.
         if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
             lv_obj_del(badusb_running_popup);
             badusb_running_popup = NULL;
@@ -690,6 +735,32 @@ static void handle_option(const char *option) {
                 show_running_popup_ex("Mouse Jiggler", false);
 #endif
             }
+        } else if (strcmp(option, "Trackpad") == 0) {
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_TOUCHSCREEN) && !defined(CONFIG_USE_CARDPUTER) && !defined(CONFIG_USE_CARDPUTER_ADV) && !defined(CONFIG_USE_TDECK) && !defined(CONFIG_USE_JOYSTICK)
+            error_popup_create("No trackpad input");
+            return;
+#else
+            if (remote && !esp_comm_manager_is_connected()) {
+                error_popup_create("Not connected to peer");
+                return;
+            }
+            trackpad_view_set_return_view(&badusb_view);
+            if (remote) {
+#ifdef CONFIG_HAS_BADUSB_REMOTE
+                esp_comm_manager_send_command("badusb", "trackpad_start");
+                display_manager_switch_view(&trackpad_view);
+#endif
+            } else {
+#ifdef CONFIG_HAS_BADUSB
+                esp_err_t ret = badusb_manager_trackpad_start();
+                if (ret != ESP_OK) {
+                    error_popup_create("Failed to start trackpad");
+                    return;
+                }
+                display_manager_switch_view(&trackpad_view);
+#endif
+            }
+#endif
         } else if (strcmp(option, "< Back") == 0) {
             go_back();
         }
@@ -724,15 +795,9 @@ static void handle_option(const char *option) {
             snprintf(settings_labels[5], 80, "Randomize: %s", enabled ? "On" : "Off");
             options_view_update_item_text(g_ov, 5, settings_labels[5]);
         } else if (strcmp(option, "Reset To Defaults") == 0) {
-            settings_reset_badusb_defaults(&G_Settings);
-            settings_persist_setting(SETTING_BADUSB_VID);
-            settings_persist_setting(SETTING_BADUSB_PID);
-            settings_persist_setting(SETTING_BADUSB_MANUFACTURER);
-            settings_persist_setting(SETTING_BADUSB_PRODUCT);
-            settings_persist_setting(SETTING_BADUSB_RANDOMIZE);
-            settings_persist_setting(SETTING_BADUSB_KB_LAYOUT);
-            populate_settings_labels();
-            rebuild_menu();
+            popup_confirm_show(&badusb_confirm_popup, lv_layer_top(), "Reset Defaults?",
+                               "Reset BadUSB settings to firmware defaults?",
+                               "Reset", "Cancel", badusb_reset_defaults_confirm_cb, NULL);
         } else if (strcmp(option, "< Back") == 0) {
             go_back();
         }
@@ -816,7 +881,7 @@ static void rebuild_menu(void) {
 
     if (options) {
         options_view_set_title(g_ov, title);
-        add_items_with_userdata(g_ov, options);
+        add_options_items(g_ov, options);
         for (const char **p = options; *p; p++) num_items++;
     }
 
@@ -831,10 +896,10 @@ static void rebuild_menu(void) {
 }
 
 void badusb_view_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x121212));
+    display_manager_fill_screen(lv_color_hex(GUI_DEFAULT_BG_COLOR));
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
 
-    root = gui_screen_create_root(NULL, NULL, lv_color_hex(0x121212), LV_OPA_COVER);
+    root = gui_screen_create_root_default(NULL, NULL);
     badusb_view.root = root;
 
     g_ov = options_view_create(root, "BadUSB");
@@ -854,49 +919,65 @@ void badusb_view_create(void) {
     num_items = 0;
 
     const char **options = badusb_main_options;
-    add_items_with_userdata(g_ov, options);
+    add_options_items(g_ov, options);
     for (const char **p = options; *p; p++) num_items++;
     if (num_items > 0) select_item(0);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
-    scroll_up_btn = lv_btn_create(root);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
+
+    lv_obj_t *touch_bar = lv_obj_create(root);
+    lv_obj_remove_style_all(touch_bar);
+    lv_obj_set_size(touch_bar, LV_HOR_RES, SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2);
+    lv_obj_align(touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(touch_bar, bg_color, 0);
+    lv_obj_set_style_bg_opa(touch_bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    scroll_up_btn = lv_btn_create(touch_bar);
     lv_obj_set_size(scroll_up_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
-    lv_obj_align(scroll_up_btn, LV_ALIGN_BOTTOM_LEFT, SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_up_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_align(scroll_up_btn, LV_ALIGN_LEFT_MID, SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(scroll_up_btn, ctrl_color, LV_PART_MAIN);
     lv_obj_set_style_radius(scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroll_up_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(scroll_up_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(scroll_up_btn, scroll_up_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *up_label = lv_label_create(scroll_up_btn);
     lv_label_set_text(up_label, LV_SYMBOL_UP);
+    lv_obj_set_style_text_color(up_label, ctrl_text, 0);
     lv_obj_center(up_label);
     lv_obj_add_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
 
-    scroll_down_btn = lv_btn_create(root);
+    back_btn = lv_btn_create(touch_bar);
+    lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 24, SCROLL_BTN_SIZE);
+    lv_obj_align(back_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(back_btn, ctrl_color, LV_PART_MAIN);
+    lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(back_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_set_style_text_color(back_label, ctrl_text, 0);
+    lv_obj_center(back_label);
+
+    scroll_down_btn = lv_btn_create(touch_bar);
     lv_obj_set_size(scroll_down_btn, SCROLL_BTN_SIZE, SCROLL_BTN_SIZE);
-    lv_obj_align(scroll_down_btn, LV_ALIGN_BOTTOM_RIGHT, -SCROLL_BTN_PADDING, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(scroll_down_btn, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_align(scroll_down_btn, LV_ALIGN_RIGHT_MID, -SCROLL_BTN_PADDING, 0);
+    lv_obj_set_style_bg_color(scroll_down_btn, ctrl_color, LV_PART_MAIN);
     lv_obj_set_style_radius(scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroll_down_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(scroll_down_btn, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(scroll_down_btn, scroll_down_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *down_label = lv_label_create(scroll_down_btn);
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
-
-    back_btn = lv_btn_create(root);
-    lv_obj_set_size(back_btn, SCROLL_BTN_SIZE + 20, SCROLL_BTN_SIZE);
-    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -SCROLL_BTN_PADDING);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x555555), LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, 5, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(back_btn, 10, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
-    lv_obj_center(back_label);
 
     update_scroll_buttons_visibility();
 #endif
@@ -913,6 +994,7 @@ void badusb_view_destroy(void) {
     }
     badusb_popup_title_lbl = NULL;
     badusb_popup_body_lbl = NULL;
+    popup_confirm_close(&badusb_confirm_popup);
 
     if (g_ov) {
         options_view_destroy(g_ov);
@@ -935,6 +1017,10 @@ static void get_badusb_callback(void **callback) {
 }
 
 void badusb_view_input_cb(InputEvent *event) {
+    if (badusb_confirm_handle_input(event)) {
+        return;
+    }
+
     if (badusb_running_popup && lv_obj_is_valid(badusb_running_popup)) {
         if (event->type == INPUT_TYPE_KEYBOARD) {
             uint8_t key = event->data.key_value;
@@ -958,22 +1044,23 @@ void badusb_view_input_cb(InputEvent *event) {
 
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
+#ifdef CONFIG_USE_TOUCHSCREEN
         if (data->state == LV_INDEV_STATE_PR) {
-            if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn)) {
+            if (scroll_up_btn && lv_obj_is_valid(scroll_up_btn) && !lv_obj_has_flag(scroll_up_btn, LV_OBJ_FLAG_HIDDEN)) {
                 lv_area_t area; lv_obj_get_coords(scroll_up_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     scroll_up_cb(NULL);
-                    touch_started = false;
+                    touch_drag_reset(&badusb_touch_drag);
                     return;
                 }
             }
-            if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn)) {
+            if (scroll_down_btn && lv_obj_is_valid(scroll_down_btn) && !lv_obj_has_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN)) {
                 lv_area_t area; lv_obj_get_coords(scroll_down_btn, &area);
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     scroll_down_cb(NULL);
-                    touch_started = false;
+                    touch_drag_reset(&badusb_touch_drag);
                     return;
                 }
             }
@@ -982,87 +1069,112 @@ void badusb_view_input_cb(InputEvent *event) {
                 if (data->point.x >= area.x1 && data->point.x <= area.x2 &&
                     data->point.y >= area.y1 && data->point.y <= area.y2) {
                     go_back();
-                    touch_started = false;
+                    touch_drag_reset(&badusb_touch_drag);
                     return;
                 }
             }
-            if (!touch_started) {
-                touch_started = true;
-                touch_start_x = data->point.x;
-                touch_start_y = data->point.y;
+            if (!badusb_touch_drag.started) {
+                touch_drag_begin(&badusb_touch_drag, data);
+            } else {
+                lv_area_t cont_area;
+                if (menu_container && lv_obj_is_valid(menu_container)) {
+                    lv_obj_get_coords(menu_container, &cont_area);
+                    bool started_in_container = (badusb_touch_drag.start_x >= cont_area.x1 && badusb_touch_drag.start_x <= cont_area.x2 &&
+                                                 badusb_touch_drag.start_y >= cont_area.y1 && badusb_touch_drag.start_y <= cont_area.y2);
+                    if (started_in_container) {
+                        touch_drag_update(&badusb_touch_drag, data, menu_container);
+                    }
+                }
             }
             return;
         }
 
         if (data->state == LV_INDEV_STATE_REL) {
-            if (!touch_started) return;
-            touch_started = false;
+            if (!badusb_touch_drag.started) return;
 
-            int dx = data->point.x - touch_start_x;
-            int dy = data->point.y - touch_start_y;
-            int thr_y = LV_VER_RES / SWIPE_THRESHOLD_RATIO;
-            int thr_x = LV_HOR_RES / SWIPE_THRESHOLD_RATIO;
+            if (!menu_container || !lv_obj_is_valid(menu_container)) {
+                touch_drag_reset(&badusb_touch_drag);
+                return;
+            }
 
-            if (!menu_container) return;
+            int thr_x = LV_HOR_RES / BADUSB_SWIPE_THRESHOLD_RATIO;
+            int dx = data->point.x - badusb_touch_drag.start_x;
+
+            int saved_start_x = badusb_touch_drag.start_x;
+            int saved_start_y = badusb_touch_drag.start_y;
+            bool was_dragged = touch_drag_release(&badusb_touch_drag, data);
+            if (was_dragged) {
+                display_manager_flush_pending_scroll();
+                update_scroll_buttons_visibility();
+                return;
+            }
+
             lv_area_t cont_area;
             lv_obj_get_coords(menu_container, &cont_area);
-            bool started_in_container = (touch_start_x >= cont_area.x1 && touch_start_x <= cont_area.x2 &&
-                                         touch_start_y >= cont_area.y1 && touch_start_y <= cont_area.y2);
+            bool started_in_container = (saved_start_x >= cont_area.x1 && saved_start_x <= cont_area.x2 &&
+                                          saved_start_y >= cont_area.y1 && saved_start_y <= cont_area.y2);
             if (!started_in_container) return;
+            if (abs(dx) > thr_x) return;
 
             if (settings_get_thirds_control_enabled(&G_Settings)) {
                 int container_h = (int)(cont_area.y2 - cont_area.y1);
                 if (container_h > 0) {
                     int y_rel = (int)data->point.y - (int)cont_area.y1;
                     if (y_rel < container_h / 3) {
-                        select_item(selected_item_index - 1);
+                        if (g_ov) options_view_move_selection(g_ov, -1);
+                        selected_item_index = g_ov ? options_view_get_selected(g_ov) : 0;
+                        return;
                     } else if (y_rel > (container_h * 2) / 3) {
-                        select_item(selected_item_index + 1);
-                    } else {
-                        lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
-                        if (sel) {
-                            const char *opt = (const char *)lv_obj_get_user_data(sel);
-                            if (opt) handle_option(opt);
-                        }
+                        if (g_ov) options_view_move_selection(g_ov, 1);
+                        selected_item_index = g_ov ? options_view_get_selected(g_ov) : 0;
+                        return;
                     }
-                    return;
                 }
             }
 
-            if (abs(dy) > thr_y) {
-                lv_obj_scroll_by_bounded(menu_container, 0, dy, LV_ANIM_OFF);
-                return;
-            }
-            if (abs(dx) > thr_x) return;
-
             for (int i = 0; i < num_items; i++) {
                 lv_obj_t *btn = lv_obj_get_child(menu_container, i);
+                if (!btn) continue;
                 lv_area_t btn_area;
                 lv_obj_get_coords(btn, &btn_area);
                 if (data->point.x >= btn_area.x1 && data->point.x <= btn_area.x2 &&
                     data->point.y >= btn_area.y1 && data->point.y <= btn_area.y2) {
                     select_item(i);
-                    const char *opt = (const char *)lv_obj_get_user_data(btn);
-                    if (opt) handle_option(opt);
+                    lv_event_send(btn, LV_EVENT_CLICKED, NULL);
                     return;
                 }
             }
+            return;
         }
-        return;
+#else
+        if (data->state == LV_INDEV_STATE_PR) return;
+        if (!menu_container || !g_ov) return;
+        int cnt = options_view_get_item_count(g_ov);
+        for (int i = 0; i < cnt; i++) {
+            lv_obj_t *btn = lv_obj_get_child(menu_container, i);
+            if (!btn) continue;
+            lv_area_t a;
+            lv_obj_get_coords(btn, &a);
+            if (data->point.x >= a.x1 && data->point.x <= a.x2 &&
+                data->point.y >= a.y1 && data->point.y <= a.y2) {
+                select_item(i);
+                lv_event_send(btn, LV_EVENT_CLICKED, NULL);
+                return;
+            }
+        }
+        go_back();
+#endif
     }
 
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
         if (button == 2) {
-            select_item(selected_item_index - 1);
+            if (g_ov) { options_view_move_selection(g_ov, -1); selected_item_index = options_view_get_selected(g_ov); }
         } else if (button == 4) {
-            select_item(selected_item_index + 1);
+            if (g_ov) { options_view_move_selection(g_ov, 1); selected_item_index = options_view_get_selected(g_ov); }
         } else if (button == 1) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
-            if (selected_obj) {
-                const char *opt = (const char *)lv_obj_get_user_data(selected_obj);
-                if (opt) handle_option(opt);
-            }
+            if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
         } else if (button == 0) {
             go_back();
         }
@@ -1072,20 +1184,15 @@ void badusb_view_input_cb(InputEvent *event) {
     if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t keyValue = event->data.key_value;
 
-        if (keyValue == 'k' || keyValue == 59 || keyValue == ';') {
-            select_item(selected_item_index - 1);
-        } else if (keyValue == 'j' || keyValue == 46 || keyValue == '.') {
-            select_item(selected_item_index + 1);
-        } else if (keyValue == 'h' || keyValue == 44 || keyValue == ',') {
-            select_item(selected_item_index - 1);
-        } else if (keyValue == 'l' || keyValue == 47 || keyValue == '/') {
-            select_item(selected_item_index + 1);
+        if (keyValue == 'k' || keyValue == 59 || keyValue == ';' ||
+            keyValue == 'h' || keyValue == 44 || keyValue == ',') {
+            if (g_ov) { options_view_move_selection(g_ov, -1); selected_item_index = options_view_get_selected(g_ov); }
+        } else if (keyValue == 'j' || keyValue == 46 || keyValue == '.' ||
+                   keyValue == 'l' || keyValue == 47 || keyValue == '/') {
+            if (g_ov) { options_view_move_selection(g_ov, 1); selected_item_index = options_view_get_selected(g_ov); }
         } else if (keyValue == 13) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
-            if (selected_obj) {
-                const char *opt = (const char *)lv_obj_get_user_data(selected_obj);
-                if (opt) handle_option(opt);
-            }
+            if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
         } else if (keyValue == 29 || keyValue == '`') {
             go_back();
         }
@@ -1095,15 +1202,11 @@ void badusb_view_input_cb(InputEvent *event) {
     if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
             lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
-            if (selected_obj) {
-                const char *opt = (const char *)lv_obj_get_user_data(selected_obj);
-                if (opt) handle_option(opt);
-            }
+            if (selected_obj) lv_event_send(selected_obj, LV_EVENT_CLICKED, NULL);
         } else {
-            if (event->data.encoder.direction > 0) {
-                select_item(selected_item_index + 1);
-            } else {
-                select_item(selected_item_index - 1);
+            if (g_ov) {
+                options_view_move_selection(g_ov, event->data.encoder.direction > 0 ? 1 : -1);
+                selected_item_index = options_view_get_selected(g_ov);
             }
         }
         return;

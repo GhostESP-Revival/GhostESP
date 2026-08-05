@@ -17,6 +17,12 @@ if(CONFIG_ELF_LOADER)
         endif()
     elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
         list(APPEND srcs "src/arch/esp_elf_riscv.c")
+
+        # ESP32-C5 flash-XIP: program app .text into a flash partition and map it
+        # instruction-executable in place (breaks the internal-RAM exec ceiling).
+        if(CONFIG_ELF_LOADER_C5_FLASH_XIP)
+            list(APPEND srcs "src/soc/esp_elf_esp32c5.c")
+        endif()
     endif()
 
     if(CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT)
@@ -28,7 +34,12 @@ if(CONFIG_ELF_LOADER)
     set(ldfragments "linker.lf")
 endif()
 
-set(priv_req spi_flash esp_mm)
+# esp_partition is required by the C5 flash-XIP backend (esp_elf_esp32c5.c).
+# Listed unconditionally: component requirements are gathered in an early CMake
+# expansion pass where CONFIG_* values are not reliably set, so a config-guarded
+# PRIV_REQUIRES would be silently dropped. Always-requiring esp_partition is
+# harmless for builds that don't compile the C5 backend.
+set(priv_req spi_flash esp_mm esp_partition)
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${include_dirs}

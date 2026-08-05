@@ -66,19 +66,22 @@ static bool is_symbols_mode = false;
 static bool is_capslock = false;
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
 static lv_obj_t *encoder_cont = NULL;
+static lv_obj_t *encoder_selector = NULL;
+static int encoder_selector_w = 0;
+static int encoder_selector_h = 0;
 static lv_obj_t *encoder_labels[50];
 static const char *encoder_alpha_items[41] = {
     "Aa","A","B","C","D","E","F","G","H","I","J",
     "K","L","M","N","O","P","Q","R","S","T",
     "U","V","W","X","Y","Z","0","1","2","3",
-    "4","5","6","7","8","9","SPA","SYM","<-","ENT"
+    "4","5","6","7","8","9","SPA","SYM",LV_SYMBOL_BACKSPACE,LV_SYMBOL_NEW_LINE
 };
 static const int encoder_alpha_count = 41;
 static const char *encoder_sym_items[40] = {
     "1","2","3","4","5","6","7","8","9","0",
     "!","@","#","$","%","^","&","*","(",")",
     "-","_","=","+","[","]","{","}","\\","|",
-    ";",":","'","\"","<",">","?","/","ABC","ENT"
+    ";",":","'","\"","<",">","?","/","ABC",LV_SYMBOL_NEW_LINE
 };
 static const int encoder_sym_count = 40;
 static const char **encoder_items = NULL;
@@ -89,6 +92,12 @@ static int encoder_screen_width = 0;
 static int encoder_offset_x = 0;
 static bool encoder_sym_mode = false;
 static bool encoder_uppercase = true;
+
+static void encoder_set_item_text(int i);
+static void encoder_set_item_style(int i);
+static void encoder_position_item(int i);
+static void encoder_position_selector(void);
+static int encoder_scroll_x_for_index(int i);
 #endif
 
 static char placeholder[64] = "Enter text...";
@@ -685,6 +694,53 @@ static void keyboard_build_step(lv_timer_t *t) {
 #endif
 }
 
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
+static void encoder_set_item_text(int i) {
+    const char *txt = encoder_items[i];
+    if (!encoder_sym_mode && strlen(txt) == 1 && isalpha((unsigned char)txt[0])) {
+        char tmp[2] = { encoder_uppercase ? (char)toupper((unsigned char)txt[0]) : (char)tolower((unsigned char)txt[0]), '\0' };
+        lv_label_set_text(encoder_labels[i], tmp);
+    } else {
+        lv_label_set_text(encoder_labels[i], txt);
+    }
+}
+
+static void encoder_set_item_style(int i) {
+    if (i == encoder_sel_idx) {
+        lv_obj_set_style_text_color(encoder_labels[i], kb_text(), 0);
+        lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_title(), 0);
+    } else {
+        lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
+        lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_body(), 0);
+    }
+}
+
+static void encoder_position_item(int i) {
+    int cont_h = lv_obj_get_height(encoder_cont);
+    int slot_center_x = encoder_offset_x + i * encoder_item_spacing;
+    int lbl_w = lv_obj_get_width(encoder_labels[i]);
+    int lbl_h = lv_obj_get_height(encoder_labels[i]);
+    if (lbl_w <= 0) lbl_w = encoder_item_spacing / 2;
+    if (lbl_h <= 0) lbl_h = cont_h;
+    lv_obj_set_pos(encoder_labels[i],
+        slot_center_x - lbl_w / 2,
+        (cont_h - lbl_h) / 2);
+}
+
+static void encoder_position_selector(void) {
+    if (!encoder_selector) return;
+    int cont_h = lv_obj_get_height(encoder_cont);
+    int slot_center_x = encoder_offset_x + encoder_sel_idx * encoder_item_spacing;
+    lv_obj_set_pos(encoder_selector,
+        slot_center_x - encoder_selector_w / 2,
+        cont_h - encoder_selector_h - 2);
+}
+
+static int encoder_scroll_x_for_index(int i) {
+    return encoder_offset_x + i * encoder_item_spacing - encoder_screen_width / 2;
+}
+#endif
+
 static void destroy_key_buttons(void) {
 #if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
     for (int r = 0; r < num_rows; r++) {
@@ -777,36 +833,43 @@ static void keyboard_create() {
     encoder_item_count = encoder_alpha_count;
     encoder_sym_mode = false;
     encoder_sel_idx = 0;
+    encoder_uppercase = true;
     encoder_screen_width = LV_HOR_RES;
-    encoder_item_spacing = display_height;
-    encoder_offset_x = (encoder_screen_width / 2) - (encoder_item_spacing / 2);
+    // Slot width: wider than the container so the title-font's widest glyph
+    // (e.g. "W", "M") still leaves a visible gap to its neighbors.
+    encoder_item_spacing = LV_MAX(display_height + 8, 48);
+    // First slot's center sits one half-spacing from the container's left edge.
+    encoder_offset_x = encoder_item_spacing / 2;
     lv_obj_set_scroll_dir(encoder_cont, LV_DIR_LEFT | LV_DIR_RIGHT);
     lv_obj_set_scrollbar_mode(encoder_cont, LV_SCROLLBAR_MODE_OFF);
-    // pad right to allow last items to center
+    // pad right so the last slot can scroll all the way to center
     lv_obj_set_style_pad_right(encoder_cont, encoder_screen_width, 0);
-    // create and position each item label (centered, avoid clipping)
-    for(int i = 0; i < encoder_item_count; i++) {
+
+    // selection indicator: thin underline beneath the active slot
+    encoder_selector_w = LV_MAX(display_height / 3, 14);
+    encoder_selector_h = 2;
+    encoder_selector = lv_obj_create(encoder_cont);
+    lv_obj_remove_style_all(encoder_selector);
+    lv_obj_set_style_bg_color(encoder_selector, kb_accent(), 0);
+    lv_obj_set_style_bg_opa(encoder_selector, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(encoder_selector, 1, 0);
+    lv_obj_set_size(encoder_selector, encoder_selector_w, encoder_selector_h);
+
+    // create each label with its final text + style
+    for (int i = 0; i < encoder_item_count; i++) {
         encoder_labels[i] = lv_label_create(encoder_cont);
-        const char *txt = encoder_items[i];
-        if(!encoder_sym_mode && strlen(txt)==1 && isalpha((unsigned char)txt[0])) {
-            char tmp[2] = { encoder_uppercase ? toupper((unsigned char)txt[0]) : tolower((unsigned char)txt[0]), '\0' };
-            lv_label_set_text(encoder_labels[i], tmp);
-        } else {
-            lv_label_set_text(encoder_labels[i], txt);
-        }
-        if(i == encoder_sel_idx) {
-            lv_obj_set_style_text_color(encoder_labels[i], kb_text(), 0);
-            lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_title(), 0);
-        } else {
-            lv_obj_set_style_text_color(encoder_labels[i], lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
-            lv_obj_set_style_text_font(encoder_labels[i], accessibility_get_font_body(), 0);
-        }
-        int lbl_w = lv_obj_get_width(encoder_labels[i]);
-        int lbl_h = 24; // font height
-        lv_obj_set_pos(encoder_labels[i],
-            encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2,
-            (display_height - lbl_h) / 2);
+        encoder_set_item_text(i);
+        encoder_set_item_style(i);
     }
+    // flush layout so lv_obj_get_width/height return real values
+    lv_obj_update_layout(encoder_cont);
+    // position every label centered within its slot
+    for (int i = 0; i < encoder_item_count; i++) {
+        encoder_position_item(i);
+    }
+    encoder_position_selector();
+    lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
+
     // ensure encoder builds unhide the root and restore radii
     if (radius_override_active) {
         lv_style_set_radius(&style_key_btn, saved_key_radius);
@@ -855,6 +918,7 @@ static void keyboard_destroy() {
         is_capslock = false;
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
         encoder_cont = NULL;
+        encoder_selector = NULL;
         encoder_item_count = 0;
         encoder_screen_width = 0;
         encoder_item_spacing = 0;
@@ -898,26 +962,29 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;
-        int scroll_x = encoder_sel_idx * encoder_item_spacing;
-        lv_obj_scroll_to_x(encoder_cont, scroll_x, LV_ANIM_OFF);
+        lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
         if (prev >= 0 && prev < encoder_item_count) {
-            lv_obj_set_style_text_color(encoder_labels[prev], lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
-            lv_obj_set_style_text_font(encoder_labels[prev], accessibility_get_font_body(), 0);
+            encoder_set_item_style(prev);
+            // re-position the de-selected label: the body font may have a
+            // different measured width than the title font it had moments ago,
+            // so it needs to be re-centered in its slot.
+            encoder_position_item(prev);
         }
-        lv_obj_set_style_text_color(encoder_labels[encoder_sel_idx], kb_text(), 0);
-        lv_obj_set_style_text_font(encoder_labels[encoder_sel_idx], accessibility_get_font_title(), 0);
+        encoder_set_item_style(encoder_sel_idx);
+        encoder_position_item(encoder_sel_idx);
+        encoder_position_selector();
         if (event->data.encoder.button) {
             const char *sel = encoder_items[encoder_sel_idx];
             if(strcmp(sel, "Aa") == 0) {
                 // toggle case
                 encoder_uppercase = !encoder_uppercase;
-                // update labels
-                for(int j = 0; j < encoder_item_count; j++) {
-                    const char *t = encoder_items[j];
-                    if(!encoder_sym_mode && strlen(t)==1 && isalpha((unsigned char)t[0])) {
-                        char tmp2[2] = { encoder_uppercase ? toupper((unsigned char)t[0]) : tolower((unsigned char)t[0]), '\0' };
-                        lv_label_set_text(encoder_labels[j], tmp2);
-                    }
+                // refresh text on every alpha item
+                for (int j = 0; j < encoder_item_count; j++) {
+                    encoder_set_item_text(j);
+                }
+                lv_obj_update_layout(encoder_cont);
+                for (int j = 0; j < encoder_item_count; j++) {
+                    encoder_position_item(j);
                 }
                 return;
             }
@@ -928,17 +995,17 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 encoder_item_count = encoder_sym_count;
                 encoder_sym_mode = true;
                 encoder_sel_idx = 0;
-                // rebuild labels for symbol mode
                 for (int i = 0; i < encoder_item_count; i++) {
                     encoder_labels[i] = lv_label_create(encoder_cont);
-                    lv_label_set_text(encoder_labels[i], encoder_items[i]);
-                    bool sel_i = (i == encoder_sel_idx);
-                    lv_obj_set_style_text_color(encoder_labels[i], sel_i ? kb_text() : lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? accessibility_get_font_title() : accessibility_get_font_body(), 0);
-                    int lbl_w = lv_obj_get_width(encoder_labels[i]);
-                    int enc_h = lv_obj_get_height(encoder_cont);
-                    lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);
+                    encoder_set_item_text(i);
+                    encoder_set_item_style(i);
                 }
+                lv_obj_update_layout(encoder_cont);
+                for (int i = 0; i < encoder_item_count; i++) {
+                    encoder_position_item(i);
+                }
+                encoder_position_selector();
+                lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
             } else if (encoder_sym_mode && strcmp(sel, "ABC") == 0) {
                 // switch back to alpha mode
                 for (int i = 0; i < encoder_item_count; i++) lv_obj_del(encoder_labels[i]);
@@ -946,22 +1013,22 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 encoder_item_count = encoder_alpha_count;
                 encoder_sym_mode = false;
                 encoder_sel_idx = 0;
-                // rebuild labels for alpha mode
                 for (int i = 0; i < encoder_item_count; i++) {
                     encoder_labels[i] = lv_label_create(encoder_cont);
-                    lv_label_set_text(encoder_labels[i], encoder_items[i]);
-                    bool sel_i = (i == encoder_sel_idx);
-                    lv_obj_set_style_text_color(encoder_labels[i], sel_i ? kb_text() : lv_color_hex(theme_palette_get_text_muted(settings_get_menu_theme(&G_Settings))), 0);
-                    lv_obj_set_style_text_font(encoder_labels[i], sel_i ? accessibility_get_font_title() : accessibility_get_font_body(), 0);
-                    int lbl_w = lv_obj_get_width(encoder_labels[i]);
-                    int enc_h = lv_obj_get_height(encoder_cont);
-                    lv_obj_set_pos(encoder_labels[i], encoder_offset_x + i * encoder_item_spacing + (encoder_item_spacing - lbl_w) / 2, (enc_h - 24) / 2);
+                    encoder_set_item_text(i);
+                    encoder_set_item_style(i);
                 }
+                lv_obj_update_layout(encoder_cont);
+                for (int i = 0; i < encoder_item_count; i++) {
+                    encoder_position_item(i);
+                }
+                encoder_position_selector();
+                lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
             } else if (strcmp(sel, "SPA") == 0) {
                 add_char_to_buffer(' ');
-            } else if (strcmp(sel, "<-") == 0) {
+            } else if (strcmp(sel, LV_SYMBOL_BACKSPACE) == 0) {
                 remove_char_from_buffer();
-            } else if (strcmp(sel, "ENT") == 0) {
+            } else if (strcmp(sel, LV_SYMBOL_NEW_LINE) == 0) {
                 submit_text();
             } else {
                 char c = sel[0];
@@ -1296,8 +1363,14 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         if (c == '`') {
             display_manager_switch_view(&options_menu_view);
         } else if (c == '\n' || c == '\r' || c == '=') {
-            submit_text();
+            if (immediate_callback) {
+                // Real-time typing mode (e.g. BadUSB): send Enter, don't close
+                immediate_callback('\n');
+            } else {
+                submit_text();
+            }
         } else if (c == '\b') {
+            if (input_len == 0 && immediate_callback) immediate_callback('\b');
             remove_char_from_buffer();
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);

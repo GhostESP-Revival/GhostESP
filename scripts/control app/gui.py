@@ -1530,7 +1530,7 @@ class ESP32ControlGUI(QMainWindow):
 
         theme = QComboBox()
         theme.addItems([
-            "Default", "Pastel", "Dark", "Bright", "Solarized", "Monochrome",
+            "OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome",
             "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk",
             "Ocean", "Sunset", "Forest"
         ])

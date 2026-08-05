@@ -44,7 +44,7 @@ Broadcast fake BLE advertisements to simulate nearby devices.
 1. Open the GhostESP terminal.
 2. Run `blespam [TYPE]` where the type is one of the modes below (for example, `blespam -apple`).
    The device will start broadcasting.
-3. Run `stop` when you're done.
+3. Run `blespam -s` or `stop` when you're done.
    The device will stop and show a summary.
 
 ### Spam modes
@@ -115,7 +115,7 @@ Spoof Apple AirTags and other Find My devices to broadcast their location. This 
 - Spam attacks and spoofing are mutually exclusive; starting one will stop the other.
 - The device broadcasts continuously until you explicitly stop it.
 - Spam packet counts are logged every 5 seconds to the terminal.
-- Apple spam uses different advertising intervals (~100ms) than other spam types for better compatibility.
+- Apple spam uses different advertising intervals (~30-40ms) than other spam types for better compatibility.
 - Spoofing captures the full AirTag advertisement payload during scanning for accurate reproduction.
 
 

@@ -25,6 +25,7 @@ typedef enum {
 typedef struct {
   InputType type;
   bool is_touch_move;
+  bool is_repeat;                 // true for auto-repeated keyboard events
   union {
     struct {
       int joystick_index;
@@ -102,8 +103,41 @@ void display_manager_init_deferred_peripherals(void);
 
 /**
  * @brief Switch to the lockscreen and remember the current view for unlock.
+ *
+ * Runs registered freeze hooks before swapping the current view out for the
+ * lockscreen.
  */
 void display_manager_show_lockscreen(void);
+
+/**
+ * @brief Register a callback invoked at the start of display_manager_show_lockscreen.
+ * The callback runs before the current view is destroyed, so it can capture or
+ * tear down transient UI drawn outside the view root. Maximum of 4 callbacks
+ * are supported at once.
+ * @return token id (>0) to use with display_manager_unregister_freeze_pre_lock,
+ *         or -1 if registration failed (table full or fn is NULL).
+ */
+int display_manager_register_freeze_pre_lock(void (*fn)(void));
+
+/**
+ * @brief Unregister a previously registered freeze-pre-lock callback.
+ * @param id token returned from display_manager_register_freeze_pre_lock.
+ */
+void display_manager_unregister_freeze_pre_lock(int id);
+
+/**
+ * @brief True while the lockscreen is shown as a floating overlay (wake /
+ * auto-lock) on top of a still-live view. Used to keep the underlying view's
+ * capture running and to gate input to the lockscreen.
+ */
+bool display_manager_is_lockscreen_active(void);
+
+/**
+ * @brief Clear the lockscreen-overlay state after an overlay unlock. Called by
+ * the lockscreen once it has torn its overlay down; does not touch the view
+ * underneath, which was never destroyed.
+ */
+void display_manager_clear_lockscreen_overlay(void);
 
 /**
  * @brief Return view captured when entering the lockscreen, or NULL.

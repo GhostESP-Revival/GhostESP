@@ -102,7 +102,7 @@ XP sources:
 | Wardriving WiFi AP logged | 4 |
 | WiFi AP scan started | 3 |
 | WiFi STA connected | 3 |
-| Target attempt (ghostchi) | 3 |
+| Target attempt (ghostchi) | 3 (aggressive mode) / 1 (passive mode) |
 | Wardriving BLE logged | 3 |
 | Station scan started | 3 |
 | Port scan started | 3 |
