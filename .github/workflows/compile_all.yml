@@ -198,10 +198,34 @@ jobs:
             BOOT_OFFSET=0x0
           fi
           # The app offset is NOT always 0x10000: the OTA tables put otadata
-          # there and the first app slot at 0x20000 or above. Read the real
-          # offset out of the partition table this build produced.
-          APP_OFFSET=$(python3 scripts/partition_app_offset.py "$ARTIFACT_DIR/partitions.bin") \
-            || { echo "Failed to read app offset from partition table"; exit 1; }
+          # there and the first app slot at 0x20000 or above, so a hardcoded
+          # offset writes the app over otadata and leaves every app slot empty
+          # ("No bootable app partitions"). Read the real offset out of the
+          # partition table this build produced -- factory if present, else the
+          # lowest OTA slot, which is what the bootloader falls back to when
+          # otadata is blank (as it is on a fresh flash).
+          APP_OFFSET=$(python3 - "$ARTIFACT_DIR/partitions.bin" <<'PY'
+          import pathlib, struct, sys
+          FMT = "<2sBBLL16sL"
+          SZ = struct.calcsize(FMT)
+          table = pathlib.Path(sys.argv[1]).read_bytes()
+          factory, ota = None, {}
+          for pos in range(0, len(table) - SZ + 1, SZ):
+              magic, ptype, subtype, offset, _size, _label, _flags = struct.unpack(
+                  FMT, table[pos:pos + SZ])
+              if magic != bytes((0xAA, 0x50)):
+                  break  # end of table (MD5 entry or padding)
+              if ptype != 0x00:  # not an app partition
+                  continue
+              if subtype == 0x00 and factory is None:
+                  factory = offset
+              elif 0x10 <= subtype <= 0x1F:
+                  ota.setdefault(subtype, offset)
+          if factory is None and not ota:
+              sys.exit("no factory or ota app partition in table")
+          print("0x%x" % (factory if factory is not None else ota[min(ota)]))
+          PY
+          ) || { echo "Failed to read app offset from partition table"; exit 1; }
           echo "App offset for ${{ matrix.target.name }}: $APP_OFFSET"
           python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
