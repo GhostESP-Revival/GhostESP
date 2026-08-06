@@ -1628,6 +1628,10 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "I80 display initialization failed: %s", esp_err_to_name(ret));
     return;
   }
+  /* The I80 path skips lvgl_driver_init(), so the touch driver (CST820) must
+   * be initialized here or its device handle stays NULL and every read fails
+   * with "i2c handle not initialized". */
+  touch_driver_init();
 #else
   lvgl_driver_init();
 #endif

@@ -1,5 +1,10 @@
 # Ghost ESP Changelog
 
+## Revival v2.1.1
+
+- Fixed merged binary creation in GitHub workflow
+- Fixed TDisplayS3-Touch touch input not working since ESP-IDF v6.0 i2c migration
+
 ## Revival v2.1.0
 
 ### TL;DR
