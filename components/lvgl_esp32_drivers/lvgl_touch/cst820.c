@@ -12,7 +12,7 @@
 #include "i2c_shared.h"
 
 #define TAG "CST820"
-#define I2C_MASTER_TIMEOUT_MS 1000
+#define I2C_MASTER_TIMEOUT_MS 50
 #define I2C_MASTER_FREQ_HZ 400000
 
 static i2c_master_bus_handle_t s_cst820_bus = NULL;
@@ -63,6 +63,13 @@ static void cst820_reset_pins(void) {
         vTaskDelay(pdMS_TO_TICKS(1));
         gpio_set_level(TOUCH_INT_PIN, 0);
         vTaskDelay(pdMS_TO_TICKS(1));
+#if CONFIG_USE_TDISPLAY_S3
+        /* The CST816S drives INT as an open-drain output. Hand the pin back
+         * to the IC instead of leaving it forced high, or its interrupt
+         * (and test) pulses get shorted. */
+        gpio_set_direction(TOUCH_INT_PIN, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(TOUCH_INT_PIN, GPIO_PULLUP_ONLY);
+#endif
     }
     if (GPIO_IS_VALID_GPIO(TOUCH_RST_PIN)) {
         gpio_set_direction(TOUCH_RST_PIN, GPIO_MODE_OUTPUT);
@@ -106,9 +113,19 @@ void cst820_init(void) {
     }
 
     if (s_cst820_dev != NULL) {
+        /* disSleep: a non-zero value keeps the IC out of its low-power
+         * standby. While in standby it stops ACKing/returns garbage on I2C,
+         * which a poller turns into phantom touches. */
         esp_err_t err = cst820_i2c_write(0xFE, 0xFF);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Touch IC soft reset write failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Touch IC disSleep write failed: %s", esp_err_to_name(err));
+        }
+        /* Exit gesture mode: swipes and double taps are reported by the IC
+         * as fake finger-down events (with zero/stale coordinates) that the
+         * UI would otherwise decode as phantom taps. */
+        err = cst820_i2c_write(0xD0, 0x00);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Touch IC gesture disable write failed: %s", esp_err_to_name(err));
         }
     }
 }
@@ -117,7 +134,7 @@ static void convert_raw_xy(int16_t raw_x, int16_t raw_y, int16_t *x, int16_t *y)
     *x = raw_y;
     *y = 170 - raw_x;
     // rotate 90 degrees
-    ESP_LOGI(TAG, "Raw: x=%d, y=%d, Converted: x=%d, y=%d", raw_x, raw_y, *x, *y);
+    ESP_LOGV(TAG, "Raw: x=%d, y=%d, Converted: x=%d, y=%d", raw_x, raw_y, *x, *y);
 #else
     *x = raw_x;
     *y = raw_y;
@@ -127,39 +144,69 @@ static void convert_raw_xy(int16_t raw_x, int16_t raw_y, int16_t *x, int16_t *y)
 bool cst820_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     static int16_t last_x = 0;
     static int16_t last_y = 0;
-    uint8_t touch_points = 0;
+    static int16_t pending_x = 0;
+    static int16_t pending_y = 0;
+    static uint8_t press_samples = 0;
+    static uint8_t release_samples = 0;
+    static bool pressed = false;
 
-    if (cst820_i2c_read(0x02, &touch_points, 1) != ESP_OK) {
+    uint8_t buf[8];
+    bool valid = false;
+
+    /* Atomic burst read: gesture, finger count and coordinates are snapshotted
+     * by the IC in one transaction. Reading the count (0x02) and the data
+     * (0x03) in separate transactions can interleave with the IC's scan cycle
+     * and pair a fresh count with stale/zero coordinates. */
+    if (cst820_i2c_read(0x01, buf, sizeof(buf)) == ESP_OK) {
+        uint8_t finger = buf[1] & 0x0F;             // 0x02: touch points [3:0]
+        uint8_t event_flag = (buf[2] & 0xC0) >> 6;  // 0x03 bits 7:6: 0=down, 1=up, 2=contact
+        int16_t raw_x = (int16_t)(((buf[2] & 0x0F) << 8) | buf[3]);
+        int16_t raw_y = (int16_t)(((buf[4] & 0x0F) << 8) | buf[5]);
+
+        /* An idle or sleeping IC can report 0xFF in the finger-count register.
+         * Only exactly one finger, on a down/contact event, is a real touch;
+         * anything else (including release reports and garbage) is invalid. */
+        if (finger == 1 && event_flag != 1) {
+            int16_t x, y;
+            convert_raw_xy(raw_x, raw_y, &x, &y);
+            if (x >= 0 && x < LV_HOR_RES && y >= 0 && y <= LV_VER_RES) {
+                pending_x = x;
+                pending_y = y;
+                valid = true;
+            }
+        }
+    }
+
+    if (valid) {
+        release_samples = 0;
+        /* Require two consecutive valid samples before claiming a press so a
+         * one-off glitch can never become a phantom tap. Real touches last
+         * far longer than the 10 ms poll period. */
+        if (!pressed && ++press_samples >= 2) {
+            pressed = true;
+            press_samples = 0;
+        }
+    } else {
+        press_samples = 0;
+        /* Symmetric debounce on release so a single dropped sample during a
+         * drag does not cut the touch short. */
+        if (pressed && ++release_samples >= 2) {
+            pressed = false;
+            release_samples = 0;
+        }
+    }
+
+    if (pressed) {
+        last_x = pending_x;
+        last_y = pending_y;
+        data->point.x = pending_x;
+        data->point.y = pending_y;
+        data->state = LV_INDEV_STATE_PR;
+    } else {
         data->point.x = last_x;
         data->point.y = last_y;
         data->state = LV_INDEV_STATE_REL;
-        return false;
     }
 
-    if (!touch_points) {
-        data->point.x = last_x;
-        data->point.y = last_y;
-        data->state = LV_INDEV_STATE_REL;
-        return false;
-    }
-
-    uint8_t touch_data[4];
-    if (cst820_i2c_read(0x03, touch_data, 4) != ESP_OK) {
-        return false;
-    }
-
-    int16_t raw_x = ((touch_data[0] & 0x0f) << 8) | touch_data[1];
-    int16_t raw_y = ((touch_data[2] & 0x0f) << 8) | touch_data[3];
-    
-    int16_t x, y;
-    convert_raw_xy(raw_x, raw_y, &x, &y);
-
-    last_x = x;
-    last_y = y;
-    data->point.x = x;
-    data->point.y = y;
-    data->state = LV_INDEV_STATE_PR;
-
-    ESP_LOGV(TAG, "Touch: x=%d, y=%d", x, y);
     return false;
 }
