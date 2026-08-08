@@ -121,16 +121,26 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_img_decoded(struct _lv_draw_ctx_t * draw_c
         /*Create buffers and masks*/
         uint32_t buf_size = buf_w * buf_h;
 
-        lv_color_t * rgb_buf = lv_mem_buf_get(buf_size * sizeof(lv_color_t));
+        /*Single-colour images (ALPHA_4BIT/8BIT) are blended directly from the
+         *recolor colour and an alpha mask, no intermediate RGB buffer needed.*/
+        bool alpha_only = (cf == LV_IMG_CF_ALPHA_4BIT || cf == LV_IMG_CF_ALPHA_8BIT) &&
+                          !transform;
+
+        lv_color_t * rgb_buf = NULL;
+        if(!alpha_only) {
+            rgb_buf = lv_mem_buf_get(buf_size * sizeof(lv_color_t));
+        }
         lv_opa_t * mask_buf = lv_mem_buf_get(buf_size);
         blend_dsc.mask_buf = mask_buf;
         blend_dsc.mask_area = &blend_area;
         blend_dsc.mask_res = LV_DRAW_MASK_RES_CHANGED;
-        blend_dsc.src_buf = rgb_buf;
+        blend_dsc.src_buf = rgb_buf;   /*NULL -> fill path used, colour from blend_dsc.color*/
+        blend_dsc.color = draw_dsc->recolor;
         lv_coord_t y_last = blend_area.y2;
         blend_area.y2 = blend_area.y1 + buf_h - 1;
 
-        lv_draw_mask_res_t mask_res_def = (cf != LV_IMG_CF_TRUE_COLOR || draw_dsc->angle ||
+        lv_draw_mask_res_t mask_res_def = (alpha_only) ||
+                                          (cf != LV_IMG_CF_TRUE_COLOR || draw_dsc->angle ||
                                            draw_dsc->zoom != LV_IMG_ZOOM_NONE) ?
                                           LV_DRAW_MASK_RES_CHANGED : LV_DRAW_MASK_RES_FULL_COVER;
         blend_dsc.mask_res = mask_res_def;
@@ -144,12 +154,40 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_img_decoded(struct _lv_draw_ctx_t * draw_c
                 lv_draw_transform(draw_ctx, &transform_area, src_buf, src_w, src_h, src_w,
                                   draw_dsc, cf, rgb_buf, mask_buf);
             }
+            else if(alpha_only) {
+                /*Expand only the alpha channel into the mask buffer. The colour
+                 *is constant and already set as blend_dsc.color (FILL_NORMAL).*/
+                if(cf == LV_IMG_CF_ALPHA_8BIT) {
+                    lv_coord_t y;
+                    for(y = 0; y < buf_h; y++) {
+                        lv_coord_t src_y = transform_area.y1 + y;
+                        const uint8_t * src_tmp = (const uint8_t *)src_buf + src_y * src_w + transform_area.x1;
+                        lv_memcpy(mask_buf + y * buf_w, src_tmp, buf_w);
+                    }
+                }
+                else {
+                    lv_coord_t row_bytes = (src_w + 1) >> 1;
+                    lv_coord_t y;
+                    lv_coord_t x;
+                    for(y = 0; y < buf_h; y++) {
+                        lv_coord_t src_y = transform_area.y1 + y;
+                        for(x = 0; x < buf_w; x++) {
+                            lv_coord_t src_x = transform_area.x1 + x;
+                            uint8_t packed = src_buf[src_y * row_bytes + (src_x >> 1)];
+                            uint8_t alpha = (src_x & 1) ? (packed & 0x0F) : (packed >> 4);
+                            mask_buf[y * buf_w + x] = (lv_opa_t)(alpha * 17);
+                        }
+                    }
+                }
+            }
             else {
                 convert_cb(&transform_area, src_buf, src_w, src_h, src_w, draw_dsc, cf, rgb_buf, mask_buf);
             }
 
-            /*Apply recolor*/
-            if(draw_dsc->recolor_opa > LV_OPA_MIN) {
+            /*Apply recolor
+             *For alpha only images the recolor is the only colour, mixing it with
+             *itself is a mathematical no-op, so skip it on the fast path.*/
+            if(!alpha_only && draw_dsc->recolor_opa > LV_OPA_MIN) {
                 uint16_t premult_v[3];
                 lv_opa_t recolor_opa = draw_dsc->recolor_opa;
                 lv_color_t recolor = draw_dsc->recolor;
@@ -191,7 +229,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_img_decoded(struct _lv_draw_ctx_t * draw_c
         }
 
         lv_mem_buf_release(mask_buf);
-        lv_mem_buf_release(rgb_buf);
+        if(rgb_buf) lv_mem_buf_release(rgb_buf);
     }
 }
 

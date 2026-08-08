@@ -4,6 +4,7 @@
 
 - Fixed merged binary creation in GitHub workflow
 - Fixed TDisplayS3-Touch touch input not working since ESP-IDF v6.0 i2c migration
+- Various small optimisations to the ALPHA_8BIT LVGL rendering path
 
 ## Revival v2.1.0
 

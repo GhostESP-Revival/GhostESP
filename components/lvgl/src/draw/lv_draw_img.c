@@ -247,21 +247,15 @@ static lv_res_t LV_ATTRIBUTE_FAST_MEM decode_and_draw(lv_draw_ctx_t * draw_ctx,
 
     if(cdsc == NULL) return LV_RES_INV;
 
-    lv_img_cf_t cf;
+lv_img_cf_t cf;
     if(lv_img_cf_is_chroma_keyed(cdsc->dec_dsc.header.cf)) cf = LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED;
     else if(LV_IMG_CF_ALPHA_8BIT == cdsc->dec_dsc.header.cf) cf = LV_IMG_CF_ALPHA_8BIT;
     else if(LV_IMG_CF_ALPHA_4BIT == cdsc->dec_dsc.header.cf) cf = LV_IMG_CF_ALPHA_4BIT;
     else if(LV_IMG_CF_RGB565A8 == cdsc->dec_dsc.header.cf) cf = LV_IMG_CF_RGB565A8;
     else if(lv_img_cf_has_alpha(cdsc->dec_dsc.header.cf)) cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
     else cf = LV_IMG_CF_TRUE_COLOR;
-
-    if(cf == LV_IMG_CF_ALPHA_8BIT) {
-        if(draw_dsc->angle || draw_dsc->zoom != LV_IMG_ZOOM_NONE) {
-            /* resume normal method */
-            cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
-            cdsc->dec_dsc.img_data = NULL;
-        }
-    }
+    /*Note: ALPHA_8BIT is NOT demoted here even when transformed. The software
+     *transform stage has a dedicated cheap single-channel path for it.*/
 
     if(cdsc->dec_dsc.error_msg != NULL) {
         LV_LOG_WARN("Image draw error");
