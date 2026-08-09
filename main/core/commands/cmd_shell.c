@@ -1,6 +1,5 @@
 // cmd_shell.c
 // Small headless-shell conveniences shared by the serial and WebUI consoles.
-
 #include "core/commandline.h"
 #include "core/glog.h"
 #include "core/serial_manager.h"
@@ -39,14 +38,12 @@
 #include <time.h>
 #include <unistd.h>
 #include "nvs.h"
-
 #ifndef GIT_COMMIT_HASH
 #define GIT_COMMIT_HASH "unknown"
 #endif
 #ifndef GIT_BRANCH
 #define GIT_BRANCH "unknown"
 #endif
-
 #define SHELL_NVS_NAMESPACE "cli"
 #define CLI_ALIAS_COUNT 8
 #define CLI_ALIAS_NAME_LEN 32
@@ -54,7 +51,6 @@
 #define CLI_ENV_COUNT 8
 #define CLI_ENV_NAME_LEN 24
 #define CLI_ENV_VALUE_LEN 96
-
 typedef struct {
     char hostname[CLI_ALIAS_NAME_LEN];
     char color[8];
@@ -64,7 +60,6 @@ typedef struct {
     char env_names[CLI_ENV_COUNT][CLI_ENV_NAME_LEN];
     char env_values[CLI_ENV_COUNT][CLI_ENV_VALUE_LEN];
 } shell_state_t;
-
 static shell_state_t *s_shell;
 static bool s_shell_loaded;
 #define s_hostname     (s_shell->hostname)
@@ -77,26 +72,22 @@ static bool s_shell_loaded;
 static TaskHandle_t s_watch_task;
 static volatile bool s_watch_stop;
 static int s_watch_interval;
-
 static bool shell_load(void) {
     if (s_shell_loaded) return true;
     s_shell = calloc(1, sizeof(*s_shell));
     if (!s_shell) return false;
-    strcpy(s_hostname, "ghost");
+    strcpy(s_hostname, "phantom");
     strcpy(s_color, "36");
     s_banner = true;
     s_shell_loaded = true;
-
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return true;
-
     size_t len = sizeof(s_hostname);
     (void)nvs_get_str(nvs, "hostname", s_hostname, &len);
     len = sizeof(s_color);
     (void)nvs_get_str(nvs, "color", s_color, &len);
     uint8_t banner = 1;
     if (nvs_get_u8(nvs, "banner", &banner) == ESP_OK) s_banner = banner != 0;
-
     for (int i = 0; i < CLI_ALIAS_COUNT; ++i) {
         char key[8];
         char value[CLI_ALIAS_VALUE_LEN];
@@ -109,7 +100,6 @@ static bool shell_load(void) {
         strncpy(s_alias_names[i], value, sizeof(s_alias_names[i]) - 1);
         strncpy(s_alias_values[i], separator, sizeof(s_alias_values[i]) - 1);
     }
-
     for (int i = 0; i < CLI_ENV_COUNT; ++i) {
         char key[8];
         char value[CLI_ENV_NAME_LEN + CLI_ENV_VALUE_LEN];
@@ -125,7 +115,6 @@ static bool shell_load(void) {
     nvs_close(nvs);
     return true;
 }
-
 static bool shell_save_string(const char *key, const char *value) {
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) return false;
@@ -134,7 +123,6 @@ static bool shell_save_string(const char *key, const char *value) {
     nvs_close(nvs);
     return err == ESP_OK;
 }
-
 static bool shell_save_u8(const char *key, uint8_t value) {
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) return false;
@@ -143,11 +131,10 @@ static bool shell_save_u8(const char *key, uint8_t value) {
     nvs_close(nvs);
     return err == ESP_OK;
 }
-
 void shell_get_prompt(char *output, size_t output_len) {
     if (!output || output_len == 0) return;
     if (!shell_load()) {
-        snprintf(output, output_len, "ghost> ");
+        snprintf(output, output_len, "phantom> ");
         return;
     }
     if (strcmp(s_color, "off") == 0) {
@@ -156,41 +143,34 @@ void shell_get_prompt(char *output, size_t output_len) {
         snprintf(output, output_len, "\033[38;5;%sm%s\033[0m> ", s_color, s_hostname);
     }
 }
-
 void shell_set_hostname(const char *hostname) {
     if (!shell_load()) return;
     strncpy(s_hostname, hostname, sizeof(s_hostname) - 1);
     s_hostname[sizeof(s_hostname) - 1] = '\0';
     shell_save_string("hostname", s_hostname);
 }
-
 bool shell_get_banner_enabled(void) {
     return shell_load() && s_banner;
 }
-
 void shell_set_banner_enabled(bool enabled) {
     if (!shell_load()) return;
     s_banner = enabled;
     shell_save_u8("banner", enabled ? 1 : 0);
 }
-
 void shell_set_color(const char *color) {
     if (!shell_load()) return;
     strncpy(s_color, color, sizeof(s_color) - 1);
     s_color[sizeof(s_color) - 1] = '\0';
     shell_save_string("color", s_color);
 }
-
 const char *shell_get_color(void) {
     return shell_load() ? s_color : "36";
 }
-
 bool shell_stop_watch(void) {
     if (!s_watch_task) return false;
     s_watch_stop = true;
     return true;
 }
-
 static int alias_index(const char *name) {
     if (!shell_load()) return -1;
     for (int i = 0; i < CLI_ALIAS_COUNT; ++i) {
@@ -198,7 +178,6 @@ static int alias_index(const char *name) {
     }
     return -1;
 }
-
 static bool valid_name(const char *name, size_t max_len) {
     if (!name || !name[0] || strlen(name) >= max_len) return false;
     for (const char *p = name; *p; ++p) {
@@ -206,7 +185,6 @@ static bool valid_name(const char *name, size_t max_len) {
     }
     return true;
 }
-
 static bool alias_save(int index) {
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) return false;
@@ -219,7 +197,6 @@ static bool alias_save(int index) {
     nvs_close(nvs);
     return err == ESP_OK;
 }
-
 static void alias_remove(int index) {
     if (index < 0 || index >= CLI_ALIAS_COUNT || !shell_load()) return;
     nvs_handle_t nvs;
@@ -233,7 +210,6 @@ static void alias_remove(int index) {
     s_alias_names[index][0] = '\0';
     s_alias_values[index][0] = '\0';
 }
-
 static const char *env_value(const char *name) {
     if (!shell_load()) return NULL;
     if (strcasecmp(name, "HOSTNAME") == 0) return s_hostname;
@@ -244,7 +220,6 @@ static const char *env_value(const char *name) {
     }
     return NULL;
 }
-
 bool shell_expand_command(const char *input, char *output, size_t output_len) {
     if (!input || !output || output_len == 0) return false;
     if (!shell_load()) return false;
@@ -261,7 +236,6 @@ bool shell_expand_command(const char *input, char *output, size_t output_len) {
         first[first_len] = '\0';
         index = alias_index(first);
     }
-
     if (index >= 0) {
         snprintf(expanded, sizeof(expanded), "%s%s%s", s_alias_values[index],
                  (*end ? " " : ""), end);
@@ -269,7 +243,6 @@ bool shell_expand_command(const char *input, char *output, size_t output_len) {
         strncpy(expanded, input, sizeof(expanded) - 1);
         expanded[sizeof(expanded) - 1] = '\0';
     }
-
     /* Expand only simple $NAME variables. This deliberately does not interpret shell syntax. */
     size_t out = 0;
     for (size_t i = 0; expanded[i] && out + 1 < output_len; ++i) {
@@ -297,7 +270,6 @@ bool shell_expand_command(const char *input, char *output, size_t output_len) {
     output[out] = '\0';
     return index >= 0;
 }
-
 static int edit_distance(const char *a, const char *b) {
     int previous[64] = {0};
     int current[64] = {0};
@@ -318,7 +290,6 @@ static int edit_distance(const char *a, const char *b) {
     }
     return previous[blen];
 }
-
 void shell_suggest_command(const char *command) {
     if (!command || !command[0]) return;
     int best_distance = 99;
@@ -334,7 +305,6 @@ void shell_suggest_command(const char *command) {
     }
     if (best && best_distance <= 3) glog("Did you mean '%s'?\n", best);
 }
-
 void shell_print_command_help(const char *command) {
     static const struct {
         const char *name;
@@ -359,7 +329,6 @@ void shell_print_command_help(const char *command) {
     }
     glog("Use 'help <category>' for command details. Try 'help shell' for headless commands.\n");
 }
-
 static void print_ip_info(const char *label, esp_netif_t *netif, bool active) {
     esp_netif_ip_info_t info;
     uint8_t mac[6] = {0};
@@ -377,7 +346,6 @@ static void print_ip_info(const char *label, esp_netif_t *netif, bool active) {
     glog("  inet %s  netmask %s  gateway %s\n", ip, mask, gw);
     if (has_mac) glog("  ether %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
-
 void handle_echo_cmd(int argc, char **argv) {
     char text[512];
     size_t out = 0;
@@ -399,7 +367,6 @@ void handle_echo_cmd(int argc, char **argv) {
     text[out] = '\0';
     glog("%s\n", text);
 }
-
 void handle_ifconfig_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     wifi_mode_t mode = WIFI_MODE_NULL;
@@ -411,7 +378,6 @@ void handle_ifconfig_cmd(int argc, char **argv) {
     print_ip_info("ETH", ethernet_manager_get_netif(), ethernet_manager_is_connected());
 #endif
 }
-
 static uint16_t icmp_checksum(const void *data, size_t len) {
     const uint16_t *words = (const uint16_t *)data;
     uint32_t sum = 0;
@@ -420,7 +386,6 @@ static uint16_t icmp_checksum(const void *data, size_t len) {
     while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
     return (uint16_t)~sum;
 }
-
 void handle_ping_cmd(int argc, char **argv) {
     if (argc < 2 || argc > 3) {
         glog("Usage: ping <host> [count]\n");
@@ -428,7 +393,6 @@ void handle_ping_cmd(int argc, char **argv) {
     }
     int count = argc == 3 ? atoi(argv[2]) : 4;
     if (count < 1 || count > 20) { glog("ping: count must be 1-20\n"); return; }
-
     struct addrinfo hints = {0};
     hints.ai_family = AF_INET;
     struct addrinfo *result = NULL;
@@ -438,7 +402,6 @@ void handle_ping_cmd(int argc, char **argv) {
     }
     struct sockaddr_in target = *(struct sockaddr_in *)result->ai_addr;
     freeaddrinfo(result);
-
     int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sock < 0) { glog("ping: raw socket unavailable (%d)\n", errno); return; }
     struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
@@ -446,7 +409,6 @@ void handle_ping_cmd(int argc, char **argv) {
     char ip[16];
     inet_ntoa_r(target.sin_addr, ip, sizeof(ip));
     glog("PING %s (%s):\n", argv[1], ip);
-
     int received = 0;
     for (int seq = 0; seq < count; ++seq) {
         struct {
@@ -484,7 +446,6 @@ void handle_ping_cmd(int argc, char **argv) {
     glog("%d packets transmitted, %d received, %d%% packet loss\n", count, received,
          count ? ((count - received) * 100) / count : 0);
 }
-
 void handle_version_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     const esp_app_desc_t *app = esp_app_get_description();
@@ -494,13 +455,11 @@ void handle_version_cmd(int argc, char **argv) {
     if (app) glog("App: %s\n", app->version);
     glog("IDF: %s\n", esp_get_idf_version());
 }
-
 static void print_mac_for_type(esp_mac_type_t type, const char *label) {
     uint8_t mac[6];
     if (esp_read_mac(mac, type) != ESP_OK) { glog("%s: unavailable\n", label); return; }
     glog("%s: %02x:%02x:%02x:%02x:%02x:%02x\n", label, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
-
 void handle_macaddr_cmd(int argc, char **argv) {
     const char *type = argc > 1 ? argv[1] : "all";
     if (strcmp(type, "all") == 0) {
@@ -512,7 +471,6 @@ void handle_macaddr_cmd(int argc, char **argv) {
     else if (strcmp(type, "ap") == 0) print_mac_for_type(ESP_MAC_WIFI_SOFTAP, "AP");
     else glog("Usage: macaddr [all|sta|ap]\n");
 }
-
 void handle_uuid_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     uint8_t mac[6];
@@ -521,7 +479,6 @@ void handle_uuid_cmd(int argc, char **argv) {
          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1],
          mac[2], mac[3], mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
-
 void handle_uptime_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     uint64_t seconds = (uint64_t)(esp_timer_get_time() / 1000000ULL);
@@ -529,7 +486,6 @@ void handle_uptime_cmd(int argc, char **argv) {
          (unsigned long long)((seconds / 3600) % 24), (unsigned long long)((seconds / 60) % 60),
          (unsigned long long)(seconds % 60));
 }
-
 void handle_whoami_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     if (!shell_load()) return;
@@ -539,7 +495,6 @@ void handle_whoami_cmd(int argc, char **argv) {
     handle_uptime_cmd(0, NULL);
     handle_ifconfig_cmd(0, NULL);
 }
-
 void handle_status_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     glog("GhostESP status\n");
@@ -553,14 +508,12 @@ void handle_status_cmd(int argc, char **argv) {
 #endif
     glog("  portal: %s\n", wifi_manager_is_evil_portal_active() ? "active" : "inactive");
 }
-
 void handle_clear_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     const char clear[] = "\033[2J\033[H";
     serial_manager_write_bytes(clear, sizeof(clear) - 1);
     terminal_view_clear_history();
 }
-
 void handle_hostname_cmd(int argc, char **argv) {
     if (!shell_load()) { glog("hostname: unavailable\n"); return; }
     if (argc == 1) { glog("%s\n", s_hostname); return; }
@@ -571,7 +524,6 @@ void handle_hostname_cmd(int argc, char **argv) {
     shell_set_hostname(argv[1]);
     glog("hostname: %s\n", argv[1]);
 }
-
 static const char *color_code(const char *name) {
     if (strcasecmp(name, "black") == 0) return "0";
     if (strcasecmp(name, "red") == 0) return "196";
@@ -583,7 +535,6 @@ static const char *color_code(const char *name) {
     if (strcasecmp(name, "white") == 0) return "15";
     return NULL;
 }
-
 void handle_color_cmd(int argc, char **argv) {
     if (argc == 1) { glog("cli color: %s\n", shell_get_color()); return; }
     if (argc != 2) { glog("Usage: color [off|black|red|green|yellow|blue|magenta|cyan|white|0-255]\n"); return; }
@@ -602,7 +553,6 @@ void handle_color_cmd(int argc, char **argv) {
     shell_set_color(color);
     glog("cli color: %s\n", color);
 }
-
 void handle_banner_cmd(int argc, char **argv) {
     if (argc == 1 || strcmp(argv[1], "status") == 0) {
         glog("banner: %s\n", shell_get_banner_enabled() ? "on" : "off");
@@ -615,7 +565,6 @@ void handle_banner_cmd(int argc, char **argv) {
     shell_set_banner_enabled(strcmp(argv[1], "on") == 0);
     glog("banner: %s\n", argv[1]);
 }
-
 void handle_alias_cmd(int argc, char **argv) {
     if (!shell_load()) { glog("alias: unavailable\n"); return; }
     if (argc == 1) {
@@ -651,7 +600,6 @@ void handle_alias_cmd(int argc, char **argv) {
     if (!alias_save(index)) glog("alias: failed to save\n");
     else glog("alias %s='%s'\n", name, value);
 }
-
 void handle_unalias_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: unalias <name|all>\n"); return; }
     if (!shell_load()) { glog("unalias: unavailable\n"); return; }
@@ -665,18 +613,15 @@ void handle_unalias_cmd(int argc, char **argv) {
     alias_remove(index);
     glog("unalias %s\n", argv[1]);
 }
-
 void handle_history_cmd(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "-c") == 0) { command_history_init(); glog("history cleared\n"); return; }
     if (argc > 1) { glog("Usage: history [-c]\n"); return; }
     command_history_print();
 }
-
 void handle_didyoumean_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: didyoumean <command>\n"); return; }
     shell_suggest_command(argv[1]);
 }
-
 void handle_ps_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     glog("Tasks: %u, free heap: %u bytes\n", (unsigned)uxTaskGetNumberOfTasks(), (unsigned)esp_get_free_heap_size());
@@ -688,7 +633,6 @@ void handle_ps_cmd(int argc, char **argv) {
     glog("Task details are disabled in this build.\n");
 #endif
 }
-
 void handle_df_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
     struct statvfs stats;
@@ -699,13 +643,11 @@ void handle_df_cmd(int argc, char **argv) {
     glog("/mnt       %llu KiB  %llu KiB  %llu KiB\n", total / 1024,
          total >= free_bytes ? (total - free_bytes) / 1024 : 0, free_bytes / 1024);
 }
-
 static void shell_file_path(const char *path, char *out, size_t out_len) {
     if (path[0] == '/') strncpy(out, path, out_len - 1);
     else snprintf(out, out_len, "/mnt/%s", path);
     out[out_len - 1] = '\0';
 }
-
 void handle_tail_cmd(int argc, char **argv) {
     if (argc < 2 || argc > 3) { glog("Usage: tail <file> [lines]\n"); return; }
     int requested = argc == 3 ? atoi(argv[2]) : 10;
@@ -725,7 +667,6 @@ void handle_tail_cmd(int argc, char **argv) {
     for (int i = start; i < count; ++i) glog("%s", lines[i % requested]);
     fclose(file); sd_card_jit_end(suspended);
 }
-
 void handle_grep_cmd(int argc, char **argv) {
     if (argc != 3) { glog("Usage: grep <pattern> <file>\n"); return; }
     bool suspended = false;
@@ -737,27 +678,21 @@ void handle_grep_cmd(int argc, char **argv) {
     while (fgets(line, sizeof(line), file)) if (strstr(line, argv[1])) glog("%s", line);
     fclose(file); sd_card_jit_end(suspended);
 }
-
 void handle_source_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: source <file>\n"); return; }
-    static int source_depth = 0;
-    if (source_depth >= 4) { glog("source: max nesting depth reached\n"); return; }
     bool suspended = false;
     if (!sd_card_jit_begin(&suspended, false)) { glog("source: SD unavailable\n"); return; }
     char path[256]; shell_file_path(argv[1], path, sizeof(path));
     FILE *file = fopen(path, "r");
     if (!file) { glog("source: %s: %s\n", path, strerror(errno)); sd_card_jit_end(suspended); return; }
     char line[512];
-    source_depth++;
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\r\n")] = '\0';
         char *p = line; while (isspace((unsigned char)*p)) p++;
         if (*p && *p != '#') handle_serial_command(p);
     }
-    source_depth--;
     fclose(file); sd_card_jit_end(suspended);
 }
-
 void handle_tee_cmd(int argc, char **argv) {
     if (argc < 3) { glog("Usage: tee <file> <text>\n"); return; }
     char path[256]; shell_file_path(argv[1], path, sizeof(path));
@@ -770,7 +705,6 @@ void handle_tee_cmd(int argc, char **argv) {
     for (int i = 2; i < argc; ++i) glog("%s%s", i == 2 ? "" : " ", argv[i]);
     glog("\n");
 }
-
 static bool env_save(int index) {
     nvs_handle_t nvs;
     if (nvs_open(SHELL_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) return false;
@@ -782,7 +716,6 @@ static bool env_save(int index) {
     nvs_close(nvs);
     return err == ESP_OK;
 }
-
 void handle_env_cmd(int argc, char **argv) {
     (void)argv;
     if (argc != 1) { glog("Usage: env\n"); return; }
@@ -790,7 +723,6 @@ void handle_env_cmd(int argc, char **argv) {
     glog("HOSTNAME=%s\nCLI_COLOR=%s\nCLI_BANNER=%s\n", s_hostname, s_color, s_banner ? "on" : "off");
     for (int i = 0; i < CLI_ENV_COUNT; ++i) if (s_env_names[i][0]) glog("%s=%s\n", s_env_names[i], s_env_values[i]);
 }
-
 void handle_export_cmd(int argc, char **argv) {
     if (argc != 2) { glog("Usage: export NAME=value\n"); return; }
     char *equals = strchr(argv[1], '=');
@@ -808,7 +740,6 @@ void handle_export_cmd(int argc, char **argv) {
     strncpy(s_env_values[index], equals + 1, sizeof(s_env_values[index]) - 1);
     if (!env_save(index)) glog("export: failed to save\n");
 }
-
 static void shell_watch_task(void *argument) {
     char *command = (char *)argument;
     while (!s_watch_stop) {
@@ -820,7 +751,6 @@ static void shell_watch_task(void *argument) {
     glog("watch stopped\n");
     vTaskDelete(NULL);
 }
-
 void handle_watch_cmd(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
         if (!shell_stop_watch()) glog("watch: no active watch\n");
@@ -842,7 +772,7 @@ void handle_watch_cmd(int argc, char **argv) {
     }
     s_watch_stop = false;
     s_watch_interval = seconds;
-    if (xTaskCreate(shell_watch_task, "CliWatch", 12288, command, 1, &s_watch_task) != pdPASS) {
+    if (xTaskCreate(shell_watch_task, "CliWatch", 4096, command, 1, &s_watch_task) != pdPASS) {
         free(command);
         s_watch_task = NULL;
         glog("watch: failed to start task\n");
