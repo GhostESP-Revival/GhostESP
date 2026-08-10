@@ -59,7 +59,7 @@ static int clamp_paddle(int x) {
 static void request_exit(void) {
     if (exit_requested) return;
     exit_requested = true;
-    api->request_exit();
+    GH_VOID(api, app_exit);
 }
 
 static void touch_back(void *user) {
@@ -197,7 +197,7 @@ static void pong_start(void) {
 
     if (!api->ui_canvas_create || !api->ui_canvas_blit_rgb565 ||
         !api->ui_screen_get_content_width || !api->ui_screen_get_content_height ||
-        !api->request_exit) {
+        !api->app_exit) {
         if (api->toast) api->toast("Pong requires the RGB565 canvas API");
         request_exit();
         return;
@@ -301,6 +301,6 @@ static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(
 );
 
 #define PONG_REQUIRED_API_SIZE \
-    (offsetof(ghostesp_api_t, request_exit) + sizeof(((ghostesp_api_t *)0)->request_exit))
+    (offsetof(ghostesp_api_t, ui_canvas_blit_rgb565) + sizeof(((ghostesp_api_t *)0)->ui_canvas_blit_rgb565))
 
 GHOSTESP_APP_INIT_WITH_API(app, api, "pong", PONG_REQUIRED_API_SIZE)
