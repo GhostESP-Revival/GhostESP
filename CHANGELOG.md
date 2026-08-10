@@ -6,6 +6,7 @@
 - Fixed TDisplayS3-Touch touch input not working since ESP-IDF v6.0 i2c migration
 - Fixed recurring "Wrong I2C status" errors on shared I2C buses: the shared I2C layer now caches device handles instead of adding/removing them per transaction
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
+- Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
 
 ## Revival v2.1.0
 
