@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/statvfs.h>
+#include "ff.h"
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -691,10 +691,18 @@ void handle_ps_cmd(int argc, char **argv) {
 
 void handle_df_cmd(int argc, char **argv) {
     (void)argc; (void)argv;
-    struct statvfs stats;
-    if (statvfs("/mnt", &stats) != 0) { glog("df: /mnt unavailable\n"); return; }
-    unsigned long long total = (unsigned long long)stats.f_blocks * stats.f_frsize;
-    unsigned long long free_bytes = (unsigned long long)stats.f_bavail * stats.f_frsize;
+    FATFS *fs = NULL;
+    DWORD free_clusters = 0;
+    if (f_getfree("0:", &free_clusters, &fs) != FR_OK || !fs) {
+        glog("df: /mnt unavailable\n");
+        return;
+    }
+    unsigned long long sector_size = FF_MAX_SS;
+#if FF_MAX_SS != FF_MIN_SS
+    sector_size = fs->ssize;
+#endif
+    unsigned long long total = (unsigned long long)(fs->n_fatent - 2) * fs->csize * sector_size;
+    unsigned long long free_bytes = (unsigned long long)free_clusters * fs->csize * sector_size;
     glog("Filesystem      Total       Used       Free\n");
     glog("/mnt       %llu KiB  %llu KiB  %llu KiB\n", total / 1024,
          total >= free_bytes ? (total - free_bytes) / 1024 : 0, free_bytes / 1024);

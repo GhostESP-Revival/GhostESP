@@ -19,6 +19,10 @@
 */
 
 #include <esp_log.h>
+#include <string.h>
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include <lvgl.h>
 #else
@@ -70,6 +74,25 @@ void ft6x06_init(uint16_t dev_addr) {
     current_dev_addr = dev_addr;
     uint8_t data_buf;
     esp_err_t ret;
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ES3C28P") == 0) {
+        const gpio_num_t touch_rst = GPIO_NUM_18;
+        const gpio_num_t touch_int = GPIO_NUM_17;
+
+        gpio_reset_pin(touch_int);
+        gpio_set_direction(touch_int, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(touch_int, GPIO_PULLUP_ONLY);
+
+        gpio_reset_pin(touch_rst);
+        gpio_set_direction(touch_rst, GPIO_MODE_OUTPUT);
+        gpio_set_level(touch_rst, 0);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        gpio_set_level(touch_rst, 1);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+#endif
+
     ESP_LOGI(TAG, "Found touch panel controller");
     if ((ret = ft6x06_i2c_read8(dev_addr, FT6X36_PANEL_ID_REG, &data_buf) != ESP_OK))
         ESP_LOGE(TAG, "Error reading from device: %s",

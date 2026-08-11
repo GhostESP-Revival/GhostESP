@@ -622,6 +622,8 @@ static uint8_t tdeck_voltage_to_percent(int mv) {
 
 #elif CONFIG_USE_TDISPLAY_S3
 #define _batAdcCh ADC1_GPIO4_CHANNEL
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_ADC_BATTERY_PIN == 9
+#define _batAdcCh ADC1_GPIO9_CHANNEL
 #endif
 
 #ifndef CONFIG_USE_TDECK

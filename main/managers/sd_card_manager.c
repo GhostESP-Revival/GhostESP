@@ -53,6 +53,7 @@ static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
 static TickType_t s_next_unmount_tick = 0;
+static TickType_t s_last_sd_mount_fail_toast = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
 
@@ -632,6 +633,43 @@ static void sdmmc_card_print_info(const sdmmc_card_t *card) {
   }
 }
 
+static bool sd_card_is_es3c28p(void) {
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ES3C28P") == 0;
+#else
+  return false;
+#endif
+}
+
+static void sd_card_apply_board_defaults(void) {
+  if (sd_card_is_es3c28p()) {
+    sd_card_manager.clkpin = 38;
+    sd_card_manager.cmdpin = 40;
+    sd_card_manager.d0pin = 39;
+    sd_card_manager.d1pin = 41;
+    sd_card_manager.d2pin = 48;
+    sd_card_manager.d3pin = 47;
+  }
+}
+
+static void sd_card_report_mount_failure(const char *mode, esp_err_t err) {
+  char msg[96];
+  if (err == ESP_FAIL) {
+    snprintf(msg, sizeof(msg), "SD %s FS fail: use FAT32", mode);
+  } else {
+    snprintf(msg, sizeof(msg), "SD %s fail: %s", mode, esp_err_to_name(err));
+  }
+  ESP_LOGE(TAG, "%s", msg);
+  status_display_show_status(msg);
+
+  TickType_t now = xTaskGetTickCount();
+  if (s_last_sd_mount_fail_toast == 0 ||
+      now - s_last_sd_mount_fail_toast > pdMS_TO_TICKS(5000)) {
+    toast_show_duration(msg, TOAST_ERROR, 3000);
+    s_last_sd_mount_fail_toast = now;
+  }
+}
+
 esp_err_t sd_card_init(void) {
   esp_err_t ret = ESP_FAIL;
 
@@ -673,6 +711,7 @@ esp_err_t sd_card_init(void) {
 
   // Load configuration from NVS first
   sd_card_load_config();
+  sd_card_apply_board_defaults();
   sd_card_print_config(); // Print loaded/default config
 
   // Backup current config in case init fails
@@ -694,6 +733,9 @@ esp_err_t sd_card_init(void) {
   gpio_set_pull_mode(CONFIG_SD_MMC_D0, GPIO_PULLUP_ONLY);  // CLK
   gpio_set_pull_mode(CONFIG_SD_MMC_CLK, GPIO_PULLUP_ONLY); // CMD
   gpio_set_pull_mode(CONFIG_SD_MMC_CMD, GPIO_PULLUP_ONLY); // D0
+  if (sd_card_is_es3c28p()) {
+    gpio_set_pull_mode(GPIO_NUM_47, GPIO_PULLUP_ONLY); // DAT3/CD must idle high on this board
+  }
 
   slot_config.gpio_cd = GPIO_NUM_NC; // Disable Card Detect pin
   slot_config.gpio_wp = GPIO_NUM_NC; // Disable Write Protect pin
@@ -733,7 +775,12 @@ esp_err_t sd_card_init(void) {
   printf("Initializing SD card in SDMMC mode (4-bit) using configured pins...\n");
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.flags = SDMMC_HOST_FLAG_4BIT;
+  host.max_freq_khz = SDMMC_FREQ_PROBING;
+
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+  slot_config.width = 4;
+  slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
   slot_config.clk = sd_card_manager.clkpin;
   slot_config.cmd = sd_card_manager.cmdpin; // SDMMC_CMD -> GPIO 16
@@ -741,8 +788,6 @@ esp_err_t sd_card_init(void) {
   slot_config.d1 = sd_card_manager.d1pin;   // SDMMC_D1  -> GPIO 17
   slot_config.d2 = sd_card_manager.d2pin;   // SDMMC_D2  -> GPIO 21
   slot_config.d3 = sd_card_manager.d3pin;   // SDMMC_D3  -> GPIO 18
-
-  host.flags = SDMMC_HOST_FLAG_4BIT;
 
   gpio_set_pull_mode(sd_card_manager.clkpin, GPIO_PULLUP_ONLY); // CLK
   gpio_set_pull_mode(sd_card_manager.cmdpin, GPIO_PULLUP_ONLY); // CMD
@@ -754,6 +799,15 @@ esp_err_t sd_card_init(void) {
   slot_config.gpio_cd = GPIO_NUM_NC; // Disable Card Detect pin
   slot_config.gpio_wp = GPIO_NUM_NC; // Disable Write Protect pin
 
+  ESP_LOGI(TAG, "ES3C28P SDMMC pins clk=%d cmd=%d d0=%d d1=%d d2=%d d3=%d DAT3_level=%d",
+           sd_card_manager.clkpin,
+           sd_card_manager.cmdpin,
+           sd_card_manager.d0pin,
+           sd_card_manager.d1pin,
+           sd_card_manager.d2pin,
+           sd_card_manager.d3pin,
+           gpio_get_level(sd_card_manager.d3pin));
+
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
       .format_if_mount_failed = false,
       .max_files = 3,
@@ -762,6 +816,49 @@ esp_err_t sd_card_init(void) {
   ret = esp_vfs_fat_sdmmc_mount("/mnt", &host, &slot_config, &mount_config,
                                 &sd_card_manager.card);
   if (ret != ESP_OK) {
+    esp_err_t ret_4bit = ret;
+    sd_card_manager.card = NULL;
+
+    if (sd_card_is_es3c28p()) {
+      ESP_LOGW(TAG, "ES3C28P SDMMC 4-bit mount failed (%s), retrying 1-bit", esp_err_to_name(ret_4bit));
+      status_display_show_status("SD retry 1-bit");
+
+      sdmmc_host_t host_1bit = SDMMC_HOST_DEFAULT();
+      host_1bit.flags = SDMMC_HOST_FLAG_1BIT;
+      host_1bit.max_freq_khz = SDMMC_FREQ_PROBING;
+
+      sdmmc_slot_config_t slot_1bit = SDMMC_SLOT_CONFIG_DEFAULT();
+      slot_1bit.width = 1;
+      slot_1bit.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+      slot_1bit.clk = sd_card_manager.clkpin;
+      slot_1bit.cmd = sd_card_manager.cmdpin;
+      slot_1bit.d0 = sd_card_manager.d0pin;
+      slot_1bit.gpio_cd = GPIO_NUM_NC;
+      slot_1bit.gpio_wp = GPIO_NUM_NC;
+
+      gpio_set_pull_mode(sd_card_manager.clkpin, GPIO_PULLUP_ONLY);
+      gpio_set_pull_mode(sd_card_manager.cmdpin, GPIO_PULLUP_ONLY);
+      gpio_set_pull_mode(sd_card_manager.d0pin, GPIO_PULLUP_ONLY);
+      gpio_set_pull_mode(sd_card_manager.d3pin, GPIO_PULLUP_ONLY);
+
+      ret = esp_vfs_fat_sdmmc_mount("/mnt", &host_1bit, &slot_1bit, &mount_config,
+                                    &sd_card_manager.card);
+      if (ret == ESP_OK) {
+        sd_card_manager.is_initialized = true;
+        s_mount_type = MOUNT_SDMMC;
+        sdmmc_card_print_info(sd_card_manager.card);
+        printf("SD card initialized successfully in 1-bit fallback mode\n");
+        status_display_show_status("SD 1-bit OK");
+        toast_show_duration("SD mounted 1-bit", TOAST_SUCCESS, 1800);
+
+        sd_card_setup_directory_structure();
+
+        return ESP_OK;
+      }
+
+      ESP_LOGE(TAG, "ES3C28P SDMMC 1-bit fallback failed: %s", esp_err_to_name(ret));
+    }
+
     if (ret == ESP_FAIL) {
       printf("Failed to mount filesystem. If you want the card to be "
              "formatted, set format_if_mount_failed = true.\n");
@@ -771,11 +868,12 @@ esp_err_t sd_card_init(void) {
              esp_err_to_name(ret));
     }
     sd_card_manager.card = NULL;
-    toast_show("SD mount failed", TOAST_ERROR);
+    sd_card_report_mount_failure(sd_card_is_es3c28p() ? "1-bit" : "4-bit", ret);
     return ret;
   }
 
   sd_card_manager.is_initialized = true;
+  s_mount_type = MOUNT_SDMMC;
   sdmmc_card_print_info(sd_card_manager.card);
   printf("SD card initialized successfully\n");
 

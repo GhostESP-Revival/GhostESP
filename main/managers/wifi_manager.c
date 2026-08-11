@@ -63,6 +63,7 @@
 #include "core/commandline.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/private/ecp.h"
 #include "mbedtls/private/ctr_drbg.h"
@@ -70,6 +71,7 @@
 #include "mbedtls/private/sha256.h"
 #include "mbedtls/private/hmac_drbg.h"
 #include "mbedtls/private/bignum.h"
+#endif
 #include "core/serial_manager.h"
 #include "attacks/wifi/deauth_attack.h"
 #include "attacks/wifi/beacon_spam.h"
@@ -140,6 +142,7 @@ bool manual_disconnect = false;
 static volatile bool wifi_connect_cancel_requested = false;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
 static int wifi_reconnect_count = 0;
+static TickType_t wifi_last_lost_toast = 0;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
@@ -982,7 +985,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         } else {
             glog("WiFi disconnected: %s (reason %d)\n", reason_str, disconnected->reason);
             status_display_show_status("WiFi Lost");
-            toast_show("WiFi lost", TOAST_WARN);
+            TickType_t now = xTaskGetTickCount();
+            if (wifi_last_lost_toast == 0 ||
+                now - wifi_last_lost_toast > pdMS_TO_TICKS(30000)) {
+                char wifi_lost_msg[48];
+                snprintf(wifi_lost_msg, sizeof(wifi_lost_msg), "WiFi lost: %s", reason_str);
+                toast_show_duration(wifi_lost_msg, TOAST_WARN, 1800);
+                wifi_last_lost_toast = now;
+            }
 
             if (!settings_get_wifi_auto_reconnect(&G_Settings)) {
                 glog("Auto-reconnect disabled; not retrying\n");

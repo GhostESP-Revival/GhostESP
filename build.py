@@ -346,6 +346,17 @@ def setup_esp_idf_environment(idf_path: str) -> Tuple[Dict[str, str], str]:
                 if '=' in line:
                     key, value = line.split('=', 1)
                     env[key] = value
+
+            extra_tool_paths = [
+                "/opt/homebrew/opt/cmake/bin",
+                "/opt/homebrew/bin",
+                "/usr/local/bin",
+            ]
+            existing_path = env.get('PATH', '')
+            for tool_path in reversed(extra_tool_paths):
+                if os.path.isdir(tool_path) and tool_path not in existing_path.split(os.pathsep):
+                    existing_path = f"{tool_path}{os.pathsep}{existing_path}" if existing_path else tool_path
+            env['PATH'] = existing_path
                     
         except subprocess.CalledProcessError:
             print("ERROR: Failed to initialize ESP-IDF environment")
@@ -387,6 +398,7 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "JCMK_DevBoardPro", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.JCMK_DevBoardPro", "zip_name": "JCMK_DevBoardPro.zip"},
         {"name": "RabbitLabs_Minion", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.minion", "zip_name": "RabbitLabs_Minion.zip"},
         {"name": "Lolin_S3_Pro", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.lolins3pro", "zip_name": "Lolin_S3_Pro.zip"},
+        {"name": "ES3C28P", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.ES3C28P", "zip_name": "ES3C28P.zip"},
         {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"},
         {"name": "Marauder V8", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.MarauderV8", "zip_name": "MarauderV8.zip"},
         {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"}
@@ -740,14 +752,21 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
         flash_freq = _resolved_cfg("CONFIG_ESPTOOLPY_FLASHFREQ") or "40m"
         flash_size = _resolved_cfg("CONFIG_ESPTOOLPY_FLASHSIZE") or "4MB"
 
+        idf_python_env = env.get("IDF_PYTHON_ENV_PATH")
+        python_executable = (
+            os.path.join(idf_python_env, "bin", "python")
+            if idf_python_env
+            else sys.executable
+        )
+
         merge_cmd = [
-            sys.executable, "-m", "esptool", 
+            python_executable, "-m", "esptool",
             "--chip", target['idf_target'],
-            "merge-bin",
-            "-o", merged_bin_path,
-            "--flash-mode", flash_mode,
-            "--flash-freq", flash_freq,
-            "--flash-size", flash_size,
+            "merge_bin",
+            "--output", merged_bin_path,
+            "--flash_mode", flash_mode,
+            "--flash_freq", flash_freq,
+            "--flash_size", flash_size,
             boot_offset, bootloader_bin,
             partition_offset, partition_bin,
             firmware_offset, firmware_bin

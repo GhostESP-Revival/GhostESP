@@ -129,6 +129,7 @@ typedef enum {
 static track_source_t track_source = TRACK_SRC_NONE;
 static int selected_ap_index = -1;
 static char ap_connect_ssid[64] = {0};
+static char manual_connect_ssid[64] = {0};
 static lv_timer_t *ap_scan_poll_timer = NULL;
 static int64_t ap_scan_ui_start_time = 0;
 static paged_menu_t *scanall_list_menu = NULL;
@@ -9219,8 +9220,9 @@ void option_event_cb(lv_event_t *e) {
 
     else if (strcmp(Selected_Option, "Connect to WiFi") == 0) {
         keyboard_view_set_submit_callback(wifi_connect_kb_cb);
+        keyboard_view_set_placeholder("WiFi SSID");
+        keyboard_view_set_initial_text("");
         display_manager_switch_view(&keyboard_view);
-        keyboard_view_set_placeholder("\"SSID\" \"PASSWORD\"");
         view_switched = true;
     }
 
@@ -13429,28 +13431,50 @@ static void zigbee_capture_kb_cb(const char *text) {
 #endif
 
 
-static void wifi_connect_kb_cb(const char *text){
-    const char *p=text;
-    while(*p && *p!='\"') p++;
-    if(!*p){error_popup_create("format: \"SSID\" \"PASSWORD\""); return;}
-    p++; const char *start=p;
-    while(*p && *p!='\"') p++;
-    if(!*p){error_popup_create("format: \"SSID\" \"PASSWORD\""); return;}
-    size_t len=p-start; if(len==0||len>=64){error_popup_create("ssid too long"); return;}
-    char ssid[64]={0}; memcpy(ssid,start,len); ssid[len]='\0';
-    p++; while(*p==' '){p++;}
-    char pass[64]={0};
-    if(*p=='\"'){
-        p++; start=p; while(*p && *p!='\"') p++; if(!*p){error_popup_create("format: \"SSID\" \"PASSWORD\""); return;}
-        len=p-start; if(len>=64){error_popup_create("pass too long"); return;}
-        memcpy(pass,start,len); pass[len]='\0';
+static void wifi_connect_password_kb_cb(const char *text) {
+    if (manual_connect_ssid[0] == '\0') {
+        error_popup_create("SSID unavailable");
+        keyboard_view_set_submit_callback(NULL);
+        return;
     }
+
+    const char *pass = text ? text : "";
+    if (strlen(pass) >= 64) {
+        error_popup_create("pass too long");
+        return;
+    }
+
     char cmd[256];
-    snprintf(cmd,sizeof(cmd),"connect \"%s\" \"%s\"",ssid,pass);
+    snprintf(cmd, sizeof(cmd), "connect \"%s\" \"%s\"", manual_connect_ssid, pass);
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     simulateCommand(cmd);
+
+    manual_connect_ssid[0] = '\0';
     keyboard_view_set_submit_callback(NULL);
+}
+
+static void wifi_connect_kb_cb(const char *text) {
+    if (!text || text[0] == '\0') {
+        error_popup_create("Enter SSID");
+        return;
+    }
+
+    if (strlen(text) >= sizeof(manual_connect_ssid)) {
+        error_popup_create("ssid too long");
+        return;
+    }
+
+    strncpy(manual_connect_ssid, text, sizeof(manual_connect_ssid) - 1);
+    manual_connect_ssid[sizeof(manual_connect_ssid) - 1] = '\0';
+
+    char placeholder[64];
+    snprintf(placeholder, sizeof(placeholder), "Password for %.24s", manual_connect_ssid);
+    keyboard_view_set_return_view(&options_menu_view);
+    keyboard_view_set_submit_callback(wifi_connect_password_kb_cb);
+    keyboard_view_set_placeholder(placeholder);
+    keyboard_view_set_initial_text("");
+    display_manager_switch_view(&keyboard_view);
 }
 
 static void dual_comm_wifi_connect_kb_cb(const char *text) {

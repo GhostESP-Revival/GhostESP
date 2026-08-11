@@ -75,8 +75,8 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
-#include "mbedtls/private/entropy.h"
-#include "mbedtls/private/ctr_drbg.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
 
 // Forward declaration - esp_netif_get_netif_impl is not in public API but exists internally

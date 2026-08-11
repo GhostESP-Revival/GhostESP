@@ -16,7 +16,7 @@
 #include "esp_flash_partitions.h"
 #include "esp_rom_md5.h"
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
-#include "mbedtls/private/sha256.h"
+#include "mbedtls/sha256.h"
 #include "nvs.h"
 
 #include "freertos/FreeRTOS.h"

@@ -7,13 +7,12 @@
  * Uses ESP-IDF's bundled mbedTLS for all crypto primitives.
  */
 
-#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "core/wpa_crypto.h"
 #include "core/glog.h"
 #include "mbedtls/md.h"
-#include "mbedtls/private/sha256.h"
-#include "mbedtls/private/aes.h"
-#include "mbedtls/private/pkcs5.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/aes.h"
+#include "mbedtls/pkcs5.h"
 #include <string.h>
 
 static const char *TAG = "WpaCrypto";

@@ -1,6 +1,11 @@
 # get IDF version for comparison
 set(idf_version "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
 
+if(NOT CONFIG_HAS_CAMERA)
+  idf_component_register()
+  return()
+endif()
+
 # set conversion sources
 set(srcs
   conversions/yuv.c
