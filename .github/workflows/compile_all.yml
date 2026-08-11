@@ -130,6 +130,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import os
           import re
 
           idf = Path.home() / "esp-idf"
@@ -143,24 +144,25 @@ jobs:
               source = helper_guard.sub("#if 1", source)
               gdbstub.write_text(source, encoding="utf-8")
 
-          xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
-          source = xtensa.read_text(encoding="utf-8")
-          source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
-          source, writer_count = re.subn(
-              r"#if\s+XCHAL_HAVE_FP\s+(?=static\s+void\s+gdbstub_write_fpu_regs)",
-              "#if 0\n",
-              source,
-          )
-          source, call_count = re.subn(
-              r"#if\s+XCHAL_HAVE_FP\s+(?=gdbstub_write_fpu_regs\s*\()",
-              "#if 0\n    ",
-              source,
-          )
-          if writer_count != 1 or call_count != 1:
-              raise SystemExit(
-                  f"unexpected Xtensa FPU patch counts: writer={writer_count}, call={call_count}"
+          if os.environ["IDF_TARGET"] in {"esp32", "esp32s2", "esp32s3"}:
+              xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
+              source = xtensa.read_text(encoding="utf-8")
+              source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
+              source, writer_count = re.subn(
+                  r"#if\s+(?:XCHAL_HAVE_FP|0)\s+(?=static\s+void\s+gdbstub_write_fpu_regs)",
+                  "#if 0\n",
+                  source,
               )
-          xtensa.write_text(source, encoding="utf-8")
+              source, call_count = re.subn(
+                  r"#if\s+(?:XCHAL_HAVE_FP|0)\s+(?=gdbstub_write_fpu_regs\s*\()",
+                  "#if 0\n    ",
+                  source,
+              )
+              if writer_count != 1 or call_count != 1:
+                  raise SystemExit(
+                      f"unexpected Xtensa FPU patch counts: writer={writer_count}, call={call_count}"
+                  )
+              xtensa.write_text(source, encoding="utf-8")
           PY
 
       - name: Clean and Build Project
