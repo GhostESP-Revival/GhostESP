@@ -146,16 +146,20 @@ jobs:
           xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
           source = xtensa.read_text(encoding="utf-8")
           source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
-          fpu_writer = "#if XCHAL_HAVE_FP\nstatic void gdbstub_write_fpu_regs"
-          source = source.replace(
-              fpu_writer,
-              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_ENABLED\nstatic void gdbstub_write_fpu_regs",
+          source, writer_count = re.subn(
+              r"#if\s+XCHAL_HAVE_FP\s+(?=static\s+void\s+gdbstub_write_fpu_regs)",
+              "#if 0\n",
+              source,
           )
-          fpu_call = "#if XCHAL_HAVE_FP\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);"
-          source = source.replace(
-              fpu_call,
-              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_ENABLED\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);",
+          source, call_count = re.subn(
+              r"#if\s+XCHAL_HAVE_FP\s+(?=gdbstub_write_fpu_regs\s*\()",
+              "#if 0\n    ",
+              source,
           )
+          if writer_count != 1 or call_count != 1:
+              raise SystemExit(
+                  f"unexpected Xtensa FPU patch counts: writer={writer_count}, call={call_count}"
+              )
           xtensa.write_text(source, encoding="utf-8")
           PY
 
