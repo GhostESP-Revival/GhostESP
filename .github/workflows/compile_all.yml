@@ -96,9 +96,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.0.2-${{ runner.os }}-v1
-          restore-keys: |
-            esp-idf-v6.0.2-${{ runner.os }}-
+          key: esp-idf-v6.0.2-${{ runner.os }}-v2
 
       - name: Install ESP-IDF Dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
@@ -132,30 +130,28 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           idf = Path.home() / "esp-idf"
 
           gdbstub = idf / "components/esp_gdbstub/src/gdbstub.c"
           source = gdbstub.read_text(encoding="utf-8")
-          helper_guard = "#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)"
-          if helper_guard not in source:
-              raise SystemExit(f"Expected gdbstub guard not found: {gdbstub}")
-          source = source.replace(helper_guard, "#if 1")
-          gdbstub.write_text(source, encoding="utf-8")
+          helper_guard = re.compile(
+              r"#if\s*\(?\s*CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME\s*\|\|\s*CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\s*\)?"
+          )
+          if helper_guard.search(source):
+              source = helper_guard.sub("#if 1", source)
+              gdbstub.write_text(source, encoding="utf-8")
 
           xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
           source = xtensa.read_text(encoding="utf-8")
           source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
           fpu_writer = "#if XCHAL_HAVE_FP\nstatic void gdbstub_write_fpu_regs"
-          if fpu_writer not in source:
-              raise SystemExit(f"Expected FPU writer not found: {xtensa}")
           source = source.replace(
               fpu_writer,
               "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\nstatic void gdbstub_write_fpu_regs",
           )
           fpu_call = "#if XCHAL_HAVE_FP\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);"
-          if fpu_call not in source:
-              raise SystemExit(f"Expected FPU call not found: {xtensa}")
           source = source.replace(
               fpu_call,
               "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);",
