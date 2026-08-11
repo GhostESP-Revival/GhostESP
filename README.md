@@ -592,7 +592,7 @@ Ghost ESP is intended solely for educational and ethical security research. Unau
 
 > **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
 
-For guidelines on using the GhostESP name and logo, please see [BRAND GUIDELINES](BRAND_GUIDELINES.md).
+For guidelines on using the GhostESP name and logo, please see the [Brand Guidelines](https://ghostesp.net/brand-guidelines). Brand assets are available at [ghostesp.net/brand-assets](https://ghostesp.net/brand-assets).
 
 Interested in becoming an official partner? Email `partners@ghostesp.net`.
 
