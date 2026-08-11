@@ -1,7 +1,7 @@
 {
   "id": "pong",
   "name": "Pong",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "GhostESP",
   "description": "Classic Pong with a responsive CPU opponent and touch, keyboard, encoder, or D-pad controls.",
   "category": "Games",
@@ -18,9 +18,15 @@
   "icon_format": "rgb565a8",
   "icon_width": 50,
   "icon_height": 50,
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "Pong gameplay with score, center line, player and CPU paddles, and a touch Back button"
+    }
+  ],
+  "assets": ["screenshot.webp"],
   "permissions": ["ui", "input", "time"],
   "memory_limit": 0,
   "stack_size": 4096,
-  "tick_interval_ms": 16,
   "requires_psram": false
 }

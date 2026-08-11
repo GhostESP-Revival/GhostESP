@@ -27,6 +27,7 @@
 static const ghostesp_api_t *api;
 static ghostesp_ui_obj_t canvas;
 static ghostesp_ui_obj_t touch_bar;
+static ghostesp_ui_timer_t frame_timer;
 static int canvas_width;
 static int canvas_height;
 static int canvas_left;
@@ -35,6 +36,7 @@ static size_t framebuffer_size;
 static ghostesp_touch_state_t touch_state;
 static uint32_t rng_state;
 static uint32_t frame_accumulator;
+static uint32_t last_frame_ms;
 static int player_x;
 static int cpu_x;
 static int ball_x;
@@ -50,6 +52,8 @@ static bool left_held;
 static bool right_held;
 static bool touch_active;
 static bool exit_requested;
+
+static void pong_frame(void *user);
 
 static uint32_t pong_random(void) {
     uint32_t x = rng_state;
@@ -236,7 +240,7 @@ static void pong_start(void) {
 
     if (!api->ui_canvas_create || !api->ui_canvas_blit_rgb565 ||
         !api->ui_screen_get_content_width || !api->ui_screen_get_content_height ||
-        !api->request_exit) {
+        !api->ui_timer_create || !api->ui_timer_delete || !api->request_exit) {
         if (api->toast) api->toast("Pong requires the RGB565 canvas API");
         request_exit();
         return;
@@ -277,9 +281,14 @@ static void pong_start(void) {
     if (!rng_state) rng_state = 0x504F4E47u;
     reset_game();
     present();
+    last_frame_ms = api->system_uptime_ms ? api->system_uptime_ms() : 0;
+    frame_timer = api->ui_timer_create(pong_frame, FRAME_MS, NULL);
+    if (!frame_timer) request_exit();
 }
 
 static void pong_stop(void) {
+    if (frame_timer && api->ui_timer_delete) api->ui_timer_delete(frame_timer);
+    frame_timer = NULL;
     canvas = NULL;
     touch_bar = NULL;
     free(framebuffer);
@@ -322,8 +331,12 @@ static void pong_input(const ghostesp_input_event_t *event) {
     }
 }
 
-static void pong_tick(uint32_t elapsed_ms) {
+static void pong_frame(void *user) {
+    (void)user;
     if (exit_requested || !canvas) return;
+    uint32_t now_ms = api->system_uptime_ms ? api->system_uptime_ms() : 0;
+    uint32_t elapsed_ms = last_frame_ms && now_ms ? now_ms - last_frame_ms : FRAME_MS;
+    last_frame_ms = now_ms;
     frame_accumulator += elapsed_ms;
     if (frame_accumulator > FRAME_MS * 4) frame_accumulator = FRAME_MS * 4;
     while (frame_accumulator >= FRAME_MS) {
@@ -336,7 +349,7 @@ static void pong_tick(uint32_t elapsed_ms) {
 }
 
 static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(
-    "pong", "Pong", pong_start, pong_stop, pong_input, pong_tick
+    "pong", "Pong", pong_start, pong_stop, pong_input, NULL
 );
 
 #define PONG_REQUIRED_API_SIZE \
