@@ -149,12 +149,12 @@ jobs:
           fpu_writer = "#if XCHAL_HAVE_FP\nstatic void gdbstub_write_fpu_regs"
           source = source.replace(
               fpu_writer,
-              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\nstatic void gdbstub_write_fpu_regs",
+              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_ENABLED\nstatic void gdbstub_write_fpu_regs",
           )
           fpu_call = "#if XCHAL_HAVE_FP\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);"
           source = source.replace(
               fpu_call,
-              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);",
+              "#if XCHAL_HAVE_FP && CONFIG_ESP_GDBSTUB_ENABLED\n    gdbstub_write_fpu_regs(frame, reg_index, value_ptr);",
           )
           xtensa.write_text(source, encoding="utf-8")
           PY
