@@ -4,7 +4,9 @@
 // No vendor (ST SLA0044) or other third-party driver source is used.
 
 #include "hb_nfc_bus.h"
+#ifdef CONFIG_NFC_ST25R3916_SPI
 #include "hb_nfc_spi.h"
+#endif
 
 #include "esp_log.h"
 
@@ -18,6 +20,7 @@ esp_err_t hb_nfc_bus_init(const st25r3916_hw_config_t *config) {
   }
 
   if (config->bus == ST25R3916_BUS_I2C) {
+#ifdef CONFIG_NFC_ST25R3916_I2C
     esp_err_t err = hb_nfc_i2c_init(config);
     if (err != ESP_OK) {
       return err;
@@ -25,8 +28,12 @@ esp_err_t hb_nfc_bus_init(const st25r3916_hw_config_t *config) {
     s_ops = &hb_nfc_i2c_ops;
     ESP_LOGI(TAG, "transport=I2C port=%d addr=0x%02X", config->i2c_port, config->i2c_addr);
     return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
   }
 
+#ifdef CONFIG_NFC_ST25R3916_SPI
   hb_nfc_spi_config_t spi_cfg = {
       .spi_host = config->spi_host,
       .pin_mosi = config->pin_mosi,
@@ -43,6 +50,9 @@ esp_err_t hb_nfc_bus_init(const st25r3916_hw_config_t *config) {
   s_ops = &hb_nfc_spi_ops;
   ESP_LOGI(TAG, "transport=SPI host=%d cs=%d", config->spi_host, config->pin_cs);
   return ESP_OK;
+#else
+  return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 void hb_nfc_bus_deinit(void) {

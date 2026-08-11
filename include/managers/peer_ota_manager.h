@@ -47,6 +47,9 @@ void peer_ota_manager_background_check(void);
 // background task; poll peer_ota_manager_get_status() for the result.
 esp_err_t peer_ota_manager_check_now(void);
 
+// Blocking variant for an existing background worker.
+esp_err_t peer_ota_manager_check_now_blocking(void);
+
 // Explicit user-confirmed relay: fetch the peer's firmware from R2, stage +
 // verify it locally, then stream it to the peer over GhostLink. Requires an
 // active GhostLink connection. Spawns a background task; poll

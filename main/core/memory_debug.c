@@ -7,12 +7,97 @@
 #include "esp_heap_trace.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 #define MEMORY_DEBUG_TRACE_RECORDS 256
 #define MEMORY_DEBUG_TRACE_TOP_COUNT 12
+#define MEMORY_DEBUG_MONITOR_INTERVAL_MS 60000
+#define MEMORY_DEBUG_MONITOR_STACK_BYTES 3072
 
 static const char *TAG = "memory_debug";
+static TaskHandle_t s_monitor_task;
+static volatile uint32_t s_failed_alloc_count;
+static volatile size_t s_last_failed_alloc_size;
+static volatile uint32_t s_last_failed_alloc_caps;
+static const char *volatile s_last_failed_alloc_function;
+
+static void memory_debug_failed_alloc(size_t size, uint32_t caps, const char *function_name) {
+    s_failed_alloc_count++;
+    s_last_failed_alloc_size = size;
+    s_last_failed_alloc_caps = caps;
+    s_last_failed_alloc_function = function_name;
+    ESP_EARLY_LOGE(TAG, "allocation failed: size=%u caps=0x%08x function=%s count=%u",
+                   (unsigned)size, (unsigned)caps,
+                   function_name ? function_name : "unknown",
+                   (unsigned)s_failed_alloc_count);
+}
+
+void memory_debug_init(void) {
+    esp_err_t err = heap_caps_register_failed_alloc_callback(memory_debug_failed_alloc);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed-allocation callback registration failed: %s", esp_err_to_name(err));
+    }
+}
+
+void memory_debug_log_snapshot(const char *reason) {
+    multi_heap_info_t internal = {0};
+    multi_heap_info_t dma = {0};
+    multi_heap_info_t psram = {0};
+    heap_caps_get_info(&internal, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    heap_caps_get_info(&dma, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    ESP_LOGI(TAG,
+             "RAM[%s] int free=%u largest=%u min=%u blocks=%u; dma free=%u largest=%u min=%u; psram free=%u largest=%u min=%u; tasks=%u alloc_fail=%u",
+             reason ? reason : "snapshot",
+             (unsigned)internal.total_free_bytes,
+             (unsigned)internal.largest_free_block,
+             (unsigned)internal.minimum_free_bytes,
+             (unsigned)internal.free_blocks,
+             (unsigned)dma.total_free_bytes,
+             (unsigned)dma.largest_free_block,
+             (unsigned)dma.minimum_free_bytes,
+             (unsigned)psram.total_free_bytes,
+             (unsigned)psram.largest_free_block,
+             (unsigned)psram.minimum_free_bytes,
+             (unsigned)uxTaskGetNumberOfTasks(),
+             (unsigned)s_failed_alloc_count);
+
+    if (s_failed_alloc_count > 0) {
+        ESP_LOGW(TAG, "last allocation failure: size=%u caps=0x%08x function=%s",
+                 (unsigned)s_last_failed_alloc_size,
+                 (unsigned)s_last_failed_alloc_caps,
+                 s_last_failed_alloc_function ? s_last_failed_alloc_function : "unknown");
+    }
+}
+
+static void memory_debug_monitor_task(void *arg) {
+    (void)arg;
+    TickType_t last_wake = xTaskGetTickCount();
+    while (true) {
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(MEMORY_DEBUG_MONITOR_INTERVAL_MS));
+        memory_debug_log_snapshot("periodic");
+    }
+}
+
+esp_err_t memory_debug_start_periodic_monitor(void) {
+    if (s_monitor_task) {
+        return ESP_OK;
+    }
+
+    BaseType_t rc = xTaskCreateWithCaps(memory_debug_monitor_task, "mem_monitor",
+                                        MEMORY_DEBUG_MONITOR_STACK_BYTES, NULL,
+                                        tskIDLE_PRIORITY, &s_monitor_task,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rc != pdPASS) {
+        rc = xTaskCreate(memory_debug_monitor_task, "mem_monitor",
+                         MEMORY_DEBUG_MONITOR_STACK_BYTES, NULL,
+                         tskIDLE_PRIORITY, &s_monitor_task);
+    }
+    return rc == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+}
 
 static void print_heap_caps(const char *name, uint32_t caps) {
     multi_heap_info_t info = {0};

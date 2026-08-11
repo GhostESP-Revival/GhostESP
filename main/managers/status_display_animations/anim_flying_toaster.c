@@ -4,6 +4,7 @@
 
 #include "managers/status_display_animations.h"
 #include "managers/status_anim_utils.h"
+#include "esp_attr.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -37,7 +38,7 @@ typedef struct {
     int vy;
 } Ghost;
 
-static Ghost s_ghosts[MAX_GHOSTS];
+EXT_RAM_BSS_ATTR static Ghost s_ghosts[MAX_GHOSTS];
 static bool s_initialized = false;
 
 void status_anim_flying_ghosts_reset(void)

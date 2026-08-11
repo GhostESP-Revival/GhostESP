@@ -57,9 +57,13 @@ esp_err_t hb_nfc_bus_direct_cmd(uint8_t cmd);
 esp_err_t hb_nfc_bus_raw_xfer(const uint8_t *tx, uint8_t *rx, size_t len);
 
 /* Backend ops tables and init hooks (implemented in hb_nfc_spi.c / hb_nfc_i2c.c). */
+#ifdef CONFIG_NFC_ST25R3916_SPI
 extern const hb_nfc_bus_ops_t hb_nfc_spi_ops;
+#endif
+#ifdef CONFIG_NFC_ST25R3916_I2C
 extern const hb_nfc_bus_ops_t hb_nfc_i2c_ops;
 esp_err_t hb_nfc_i2c_init(const st25r3916_hw_config_t *config);
+#endif
 
 #ifdef __cplusplus
 }

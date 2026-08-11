@@ -143,7 +143,6 @@ static int wifi_reconnect_count = 0;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
-#define WIFI_OTA_AUTO_CHECK_TIMEOUT_MS 30000
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
 static volatile bool ota_auto_check_running = false;
@@ -867,57 +866,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data);
 static void wifi_retry_timer_callback(void* arg);
 
-static bool wait_for_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        OtaStatus status = ota_manager_get_status();
-        if (status.state == OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
-static bool wait_for_self_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        SelfOtaStatus status = self_ota_manager_get_status();
-        if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == SELF_OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
-static bool wait_for_peer_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        PeerOtaStatus status = peer_ota_manager_get_status();
-        if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == PEER_OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
 static void ota_auto_check_task(void *arg) {
     (void)arg;
 
@@ -929,21 +877,27 @@ static void ota_auto_check_task(void *arg) {
     return;
 #endif
 
+    // Avoid TLS allocation while app_main, display, SD, and plugin discovery
+    // are simultaneously consuming their boot-time internal/DMA peaks.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
     bool update_available = false;
 
     if (ota_manager_is_supported()) {
-        if (ota_manager_check_now() == ESP_OK && wait_for_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (ota_manager_check_now_blocking() == ESP_OK) {
             OtaStatus status = ota_manager_get_status();
-            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+            if (status.state == OTA_STATE_UPDATE_AVAILABLE &&
+                status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
                 glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
                      status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
                 update_available = true;
             }
         }
     } else if (self_ota_manager_is_supported()) {
-        if (self_ota_manager_check_now() == ESP_OK && wait_for_self_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (self_ota_manager_check_now_blocking() == ESP_OK) {
             SelfOtaStatus status = self_ota_manager_get_status();
-            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+            if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE &&
+                status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
                 glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
                      status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
                 update_available = true;
@@ -952,9 +906,10 @@ static void ota_auto_check_task(void *arg) {
     }
 
     if (peer_ota_manager_is_supported() && esp_comm_manager_is_connected()) {
-        if (peer_ota_manager_check_now() == ESP_OK && wait_for_peer_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (peer_ota_manager_check_now_blocking() == ESP_OK) {
             PeerOtaStatus status = peer_ota_manager_get_status();
-            if (status.peer_current_build_number >= 0 &&
+            if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE &&
+                status.peer_current_build_number >= 0 &&
                 status.peer_build_number > status.peer_current_build_number) {
                 glog("There is a new update available: GhostLink peer firmware %s (build %ld > %ld)\n",
                      status.peer_version, status.peer_build_number, status.peer_current_build_number);

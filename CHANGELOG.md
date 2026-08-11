@@ -7,6 +7,14 @@
 - Fixed recurring "Wrong I2C status" errors on shared I2C buses: the shared I2C layer now caches device handles instead of adding/removing them per transaction
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
+- Fixed OTA and Cloud Store manifest fetches failing when CDN requests were redirected from HTTP to HTTPS
+- Various PSRAM optimisations
+  - Moved the LVGL heap to PSRAM
+  - Moved UI and NFC buffers to PSRAM
+  - Moved GhostLink queues to PSRAM
+  - Removed unused NFC SPI buffers
+  - Removed a redundant OTA task
+  - Increased idle internal RAM from ~37 KB to ~75 KB
 
 ## Revival v2.1.0
 

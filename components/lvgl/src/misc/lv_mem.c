@@ -13,6 +13,11 @@
 #include "lv_assert.h"
 #include "lv_log.h"
 
+#ifdef ESP_PLATFORM
+    #include "esp_heap_caps.h"
+    #include <stdlib.h>
+#endif
+
 #if LV_MEM_CUSTOM != 0
     #include LV_MEM_CUSTOM_INCLUDE
 #endif
@@ -57,6 +62,9 @@
     static lv_tlsf_t tlsf;
     static uint32_t cur_used;
     static uint32_t max_used;
+#ifdef ESP_PLATFORM
+    static MEM_UNIT * work_mem_esp;
+#endif
 #endif
 
 static uint32_t zero_mem = ZERO_MEM_SENTINEL; /*Give the address of this variable if 0 byte should be allocated*/
@@ -91,9 +99,24 @@ void lv_mem_init(void)
 #ifdef LV_MEM_POOL_ALLOC
     tlsf = lv_tlsf_create_with_pool((void *)LV_MEM_POOL_ALLOC(LV_MEM_SIZE), LV_MEM_SIZE);
 #else
+#ifdef ESP_PLATFORM
+    if(work_mem_esp == NULL) {
+        work_mem_esp = heap_caps_malloc(LV_MEM_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if(work_mem_esp == NULL) {
+            LV_LOG_WARN("PSRAM allocation for LVGL pool failed; using internal RAM");
+            work_mem_esp = heap_caps_malloc(LV_MEM_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        if(work_mem_esp == NULL) {
+            LV_LOG_ERROR("Unable to allocate LVGL memory pool");
+            abort();
+        }
+    }
+    tlsf = lv_tlsf_create_with_pool((void *)work_mem_esp, LV_MEM_SIZE);
+#else
     /*Allocate a large array to store the dynamically allocated data*/
     static LV_ATTRIBUTE_LARGE_RAM_ARRAY MEM_UNIT work_mem_int[LV_MEM_SIZE / sizeof(MEM_UNIT)];
     tlsf = lv_tlsf_create_with_pool((void *)work_mem_int, LV_MEM_SIZE);
+#endif
 #endif
 #else
     tlsf = lv_tlsf_create_with_pool((void *)LV_MEM_ADR, LV_MEM_SIZE);

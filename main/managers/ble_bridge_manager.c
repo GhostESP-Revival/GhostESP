@@ -78,6 +78,9 @@ typedef enum {
 typedef struct {
     uint8_t *data;
     size_t length;
+    uint16_t conn_handle;
+    uint16_t tx_handle;
+    uint32_t connection_generation;
 } bridge_notify_item_t;
 
 typedef struct {
@@ -93,6 +96,7 @@ typedef struct {
     StaticTask_t *task_tcb;
     SemaphoreHandle_t lock;
     QueueHandle_t notify_queue;
+    uint32_t connection_generation;
     uint32_t active_cmd_id;
     bool active_command;
     uint32_t reassembly_cmd_id;
@@ -226,7 +230,8 @@ static void bridge_clear_notify_queue(void) {
     }
 }
 
-static bool bridge_notify_item(const bridge_notify_item_t *item) {
+/* 1 = sent, 0 = current transport failed, -1 = item belongs to an old connection. */
+static int bridge_notify_item(const bridge_notify_item_t *item) {
     if (!item || !item->data || item->length == 0) {
         return false;
     }
@@ -234,18 +239,19 @@ static bool bridge_notify_item(const bridge_notify_item_t *item) {
     for (int attempt = 0; attempt < BRIDGE_NOTIFY_RETRY_COUNT; ++attempt) {
         bridge_lock();
         bool can_notify = s_bridge.ble_connected && s_bridge.notify_enabled &&
-                          s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE &&
-                          s_bridge.tx_val_handle != 0;
-        uint16_t conn_handle = s_bridge.conn_handle;
-        uint16_t tx_handle = s_bridge.tx_val_handle;
+                          s_bridge.conn_handle == item->conn_handle &&
+                          s_bridge.connection_generation == item->connection_generation &&
+                          s_bridge.tx_val_handle == item->tx_handle;
+        bool stale = s_bridge.conn_handle != item->conn_handle ||
+                     s_bridge.connection_generation != item->connection_generation;
         bridge_unlock();
         if (!can_notify) {
-            return false;
+            return stale ? -1 : 0;
         }
 
         struct os_mbuf *om = ble_hs_mbuf_from_flat(item->data, item->length);
         if (om) {
-            int rc = ble_gatts_notify_custom(conn_handle, tx_handle, om);
+            int rc = ble_gatts_notify_custom(item->conn_handle, item->tx_handle, om);
             if (rc == 0) {
                 return true;
             }
@@ -258,10 +264,10 @@ static bool bridge_notify_item(const bridge_notify_item_t *item) {
     return false;
 }
 
-static void bridge_fail_transport(const char *reason) {
+static void bridge_fail_transport(uint16_t conn_handle, uint32_t generation, const char *reason) {
     bridge_lock();
-    uint16_t conn_handle = s_bridge.conn_handle;
-    bool connected = s_bridge.ble_connected && conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    bool connected = s_bridge.ble_connected && s_bridge.conn_handle == conn_handle &&
+                     s_bridge.connection_generation == generation;
     bridge_unlock();
 
     ESP_LOGE(TAG, "BLE transport failed: %s", reason ? reason : "unknown error");
@@ -280,6 +286,9 @@ static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
     bool can_notify = s_bridge.running && s_bridge.ble_connected && s_bridge.notify_enabled &&
                       s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE && s_bridge.tx_val_handle != 0;
     QueueHandle_t notify_queue = s_bridge.notify_queue;
+    uint16_t conn_handle = s_bridge.conn_handle;
+    uint16_t tx_handle = s_bridge.tx_val_handle;
+    uint32_t connection_generation = s_bridge.connection_generation;
     bridge_unlock();
 
     if (!can_notify || !notify_queue) {
@@ -308,10 +317,13 @@ static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
     bridge_notify_item_t item = {
         .data = frame,
         .length = frame_len,
+        .conn_handle = conn_handle,
+        .tx_handle = tx_handle,
+        .connection_generation = connection_generation,
     };
     if (xQueueSend(notify_queue, &item, pdMS_TO_TICKS(BRIDGE_NOTIFY_QUEUE_WAIT_MS)) != pdTRUE) {
         free(frame);
-        bridge_fail_transport("notification queue full");
+        bridge_fail_transport(conn_handle, connection_generation, "notification queue full");
         return false;
     }
     return true;
@@ -625,12 +637,13 @@ static void bridge_task(void *arg) {
         bridge_notify_item_t item = {0};
         if (xQueueReceive(s_bridge.notify_queue, &item, pdMS_TO_TICKS(100)) == pdTRUE) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-            bool notified = bridge_notify_item(&item);
+            int notify_result = bridge_notify_item(&item);
 #endif
             free(item.data);
 #ifndef CONFIG_IDF_TARGET_ESP32S2
-            if (!notified) {
-                bridge_fail_transport("notification retries exhausted");
+            if (notify_result == 0) {
+                bridge_fail_transport(item.conn_handle, item.connection_generation,
+                                      "notification retries exhausted");
             }
 #endif
             continue;
@@ -724,7 +737,9 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             if (event->connect.status == 0) {
                 bridge_lock();
                 s_bridge.ble_connected = true;
+                s_bridge.notify_enabled = false;
                 s_bridge.conn_handle = event->connect.conn_handle;
+                s_bridge.connection_generation++;
                 s_bridge.mtu = ble_att_mtu(event->connect.conn_handle);
                 s_bridge.active_command = false;
                 s_bridge.active_cmd_id = 0;
@@ -742,6 +757,10 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_DISCONNECT:
             bridge_lock();
+            if (event->disconnect.conn.conn_handle != s_bridge.conn_handle) {
+                bridge_unlock();
+                return 0;
+            }
             s_bridge.ble_connected = false;
             s_bridge.notify_enabled = false;
             s_bridge.conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -749,7 +768,6 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             s_bridge.active_cmd_id = 0;
             bridge_reset_reassembly_locked();
             bridge_unlock();
-            bridge_clear_notify_queue();
             bridge_log("GATT disconnected");
             if (s_bridge.running) {
                 (void)bridge_start_advertising();
@@ -757,7 +775,8 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             return 0;
 
         case BLE_GAP_EVENT_SUBSCRIBE:
-            if (event->subscribe.attr_handle == s_bridge.tx_val_handle) {
+            if (event->subscribe.conn_handle == s_bridge.conn_handle &&
+                event->subscribe.attr_handle == s_bridge.tx_val_handle) {
                 bridge_lock();
                 s_bridge.notify_enabled = event->subscribe.cur_notify;
                 bridge_unlock();
@@ -767,6 +786,10 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_MTU:
             bridge_lock();
+            if (event->mtu.conn_handle != s_bridge.conn_handle) {
+                bridge_unlock();
+                return 0;
+            }
             s_bridge.mtu = event->mtu.value;
             bridge_unlock();
             bridge_log("MTU=%u", (unsigned)event->mtu.value);

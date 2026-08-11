@@ -1134,7 +1134,7 @@ static int settings_submenu_depth = 0;
 
 // Cached chip-info cards for the read-only custom Info page.
 #define OPTIONS_INFO_CARDS_MAX 3
-static chip_info_card_t s_info_cards[OPTIONS_INFO_CARDS_MAX];
+EXT_RAM_BSS_ATTR static chip_info_card_t s_info_cards[OPTIONS_INFO_CARDS_MAX];
 static bool             s_info_detail_active = false;
 static lv_obj_t        *s_info_scroll = NULL;
 static lv_obj_t        *s_info_saved_menu_container = NULL;
