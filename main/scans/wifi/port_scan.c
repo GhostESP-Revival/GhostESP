@@ -208,7 +208,7 @@ void port_scan_scan_tcp_ports(const char *target_ip, port_scan_result_t *result)
     fd_set fdset;
     int flags;
 
-    strcpy(result->ip, target_ip);
+    snprintf(result->ip, sizeof(result->ip), "%s", target_ip);
     result->num_open_ports = 0;
 
     server_addr.sin_family = AF_INET;
@@ -231,7 +231,7 @@ void port_scan_scan_tcp_ports(const char *target_ip, port_scan_result_t *result)
         server_addr.sin_port = htons(port);
         scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
-        if (scan_result < 0 && errno == EINPROGRESS) {
+        if (scan_result == 0 || (scan_result < 0 && errno == EINPROGRESS)) {
             timeout.tv_sec = SCAN_TIMEOUT_MS / 1000;
             timeout.tv_usec = (SCAN_TIMEOUT_MS % 1000) * 1000;
 
@@ -367,7 +367,7 @@ static bool udp_port_is_open(const char *target_ip, uint16_t port, uint32_t wait
  * @brief Scan common UDP ports on a host
  */
 void port_scan_scan_udp_ports(const char *target_ip, port_scan_result_t *result) {
-    strcpy(result->ip, target_ip);
+    snprintf(result->ip, sizeof(result->ip), "%s", target_ip);
     result->num_open_ports = 0;
 
     glog("Scanning UDP ports on %s...\n", target_ip);
@@ -398,7 +398,7 @@ void port_scan_ssh(const char *target_ip, port_scan_result_t *result) {
     
     ESP_LOGI(TAG, "Starting SSH scan on host: %s", target_ip);
     
-    strcpy(result->ip, target_ip);
+    snprintf(result->ip, sizeof(result->ip), "%s", target_ip);
     result->num_open_ports = 0;
     
     server_addr.sin_family = AF_INET;
@@ -430,7 +430,7 @@ void port_scan_ssh(const char *target_ip, port_scan_result_t *result) {
         ESP_LOGD(TAG, "Attempting connection to %s:%d", target_ip, port);
         scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
         
-        if (scan_result < 0 && errno == EINPROGRESS) {
+        if (scan_result == 0 || (scan_result < 0 && errno == EINPROGRESS)) {
             timeout.tv_sec = 3;
             timeout.tv_usec = 0;
             
@@ -492,9 +492,13 @@ void port_scan_ssh(const char *target_ip, port_scan_result_t *result) {
  * @brief Scan a specific IP address for open TCP ports (range)
  */
 bool port_scan_ip_range(const char *target_ip, uint16_t start_port, uint16_t end_port) {
+    if (start_port > end_port) {
+        glog("Invalid port range: %d-%d\n", start_port, end_port);
+        return false;
+    }
     // Use local result - no need for context allocation
     port_scan_result_t result;
-    strcpy(result.ip, target_ip);
+    snprintf(result.ip, sizeof(result.ip), "%s", target_ip);
     result.num_open_ports = 0;
 
     struct sockaddr_in server_addr;
@@ -503,16 +507,18 @@ bool port_scan_ip_range(const char *target_ip, uint16_t start_port, uint16_t end
 
     glog("Scanning %s TCP ports %d-%d\n", target_ip, start_port, end_port);
 
-    uint16_t ports_scanned = 0;
-    uint16_t total_ports = end_port - start_port + 1;
+    uint32_t ports_scanned = 0;
+    uint32_t total_ports = (uint32_t)end_port - start_port + 1;
 
-    for (uint16_t port = start_port; port <= end_port; port++) {
+    for (uint32_t p = (uint32_t)start_port; p <= (uint32_t)end_port; p++) {
+        uint16_t port = (uint16_t)p;
         if (result.num_open_ports >= PORT_SCAN_MAX_OPEN_PORTS)
             break;
 
         ports_scanned++;
         if (ports_scanned % 100 == 0) {
-            glog("Progress: %d/%d ports (%.1f%%)\n", ports_scanned, total_ports,
+            glog("Progress: %lu/%lu ports (%.1f%%)\n",
+                 (unsigned long)ports_scanned, (unsigned long)total_ports,
                  (float)ports_scanned / total_ports * 100);
         }
 
@@ -526,7 +532,7 @@ bool port_scan_ip_range(const char *target_ip, uint16_t start_port, uint16_t end
         server_addr.sin_port = htons(port);
         int scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
-        if (scan_result < 0 && errno == EINPROGRESS) {
+        if (scan_result == 0 || (scan_result < 0 && errno == EINPROGRESS)) {
             struct timeval timeout = {.tv_sec = SCAN_TIMEOUT_MS / 1000,
                                       .tv_usec = (SCAN_TIMEOUT_MS % 1000) * 1000};
             fd_set fdset;
@@ -557,21 +563,27 @@ bool port_scan_ip_range(const char *target_ip, uint16_t start_port, uint16_t end
  * @brief Scan a specific IP address for open UDP ports (range)
  */
 bool port_scan_udp_ip_range(const char *target_ip, uint16_t start_port, uint16_t end_port) {
+    if (start_port > end_port) {
+        glog("Invalid port range: %d-%d\n", start_port, end_port);
+        return false;
+    }
     // Use local result - no need for context allocation
     port_scan_result_t result;
-    strcpy(result.ip, target_ip);
+    snprintf(result.ip, sizeof(result.ip), "%s", target_ip);
     result.num_open_ports = 0;
 
     glog("Scanning %s UDP ports %d-%d\n", target_ip, start_port, end_port);
 
-    uint16_t ports_scanned = 0;
-    uint16_t total_ports = end_port - start_port + 1;
+    uint32_t ports_scanned = 0;
+    uint32_t total_ports = (uint32_t)end_port - start_port + 1;
 
-    for (uint16_t port = start_port; port <= end_port; port++) {
+    for (uint32_t p = (uint32_t)start_port; p <= (uint32_t)end_port; p++) {
+        uint16_t port = (uint16_t)p;
         if (result.num_open_ports >= PORT_SCAN_MAX_OPEN_PORTS) break;
         ports_scanned++;
         if (ports_scanned % 200 == 0) {
-            glog("Progress: %d/%d ports (%.1f%%)\n", ports_scanned, total_ports,
+            glog("Progress: %lu/%lu ports (%.1f%%)\n",
+                 (unsigned long)ports_scanned, (unsigned long)total_ports,
                  (float)ports_scanned / total_ports * 100);
         }
         if (udp_port_is_open(target_ip, port, 40)) {

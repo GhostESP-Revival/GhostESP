@@ -65,10 +65,15 @@ static volatile int g_arp_progress_total_hosts = 0;
 static volatile int g_arp_progress_found = 0;
 
 typedef struct {
-    const ip4_addr_t *target;
+    ip4_addr_t target;          /* by value: owned by the heap struct */
     uint8_t *mac;
     arp_scanner_ctx_t *scanner;
 } arp_tcpip_call_t;
+
+typedef struct {
+    arp_scanner_ctx_t *scanner;
+    volatile bool done;
+} arp_harvest_req_t;
 
 // ============================================================================
 // Internal Helpers (Module-specific)
@@ -151,8 +156,9 @@ void arp_scanner_cleanup(arp_scanner_ctx_t *ctx) {
 static void arp_request_callback(void *ctx) {
     arp_tcpip_call_t *request = (arp_tcpip_call_t *)ctx;
     if (netif_default) {
-        etharp_request(netif_default, request->target);
+        etharp_request(netif_default, &request->target);
     }
+    free(request);
 }
 
 bool send_arp_request(const char *target_ip) {
@@ -167,8 +173,19 @@ bool send_arp_request(const char *target_ip) {
         return false;
     }
 
-    arp_tcpip_call_t call = {.target = &target_addr};
-    return tcpip_callback_with_block(arp_request_callback, &call, 1);
+    arp_tcpip_call_t *call = malloc(sizeof(arp_tcpip_call_t));
+    if (!call) {
+        ESP_LOGW(TAG, "send_arp_request: out of memory");
+        return false;
+    }
+    call->target = target_addr;
+
+    if (tcpip_callback_with_block(arp_request_callback, call, 1) == ERR_MEM) {
+        free(call);  /* not queued: the callback will never run */
+        ESP_LOGW(TAG, "send_arp_request: callback queue full");
+        return false;
+    }
+    return true;  /* queued (or already executed); the callback frees it */
 }
 
 /**
@@ -185,8 +202,17 @@ static bool send_arp_request_lwip(const char *target_ip) {
         return false;
     }
 
-    arp_tcpip_call_t call = {.target = &target_addr};
-    return tcpip_callback_with_block(arp_request_callback, &call, 1) == ERR_OK;
+    arp_tcpip_call_t *call = malloc(sizeof(arp_tcpip_call_t));
+    if (!call) {
+        return false;
+    }
+    call->target = target_addr;
+
+    if (tcpip_callback_with_block(arp_request_callback, call, 1) == ERR_MEM) {
+        free(call);  /* not queued: the callback will never run */
+        return false;
+    }
+    return true;  /* queued; the callback frees it */
 }
 
 /**
@@ -196,10 +222,11 @@ static void arp_lookup_callback(void *ctx) {
     arp_tcpip_call_t *lookup = (arp_tcpip_call_t *)ctx;
     struct eth_addr *eth = NULL;
     const ip4_addr_t *found_ip = NULL;
-    if (etharp_find_addr(NULL, lookup->target, &eth, &found_ip) >= 0 && eth) {
+    if (etharp_find_addr(NULL, &lookup->target, &eth, &found_ip) >= 0 && eth) {
         memcpy(lookup->mac, eth->addr, 6);
         lookup->scanner = (arp_scanner_ctx_t *)(uintptr_t)1; // success flag
     }
+    free(lookup);
 }
 
 bool get_arp_table_entry(const char *ip, uint8_t *mac) {
@@ -213,9 +240,19 @@ bool get_arp_table_entry(const char *ip, uint8_t *mac) {
         return false;
     }
 
-    arp_tcpip_call_t call = {.target = &target_addr, .mac = mac, .scanner = NULL};
-    return tcpip_callback_with_block(arp_lookup_callback, &call, 1) == ERR_OK;
-    return call.scanner != NULL;
+    arp_tcpip_call_t *call = malloc(sizeof(arp_tcpip_call_t));
+    if (!call) {
+        return false;
+    }
+    call->target = target_addr;
+    call->mac = mac;
+    call->scanner = NULL;
+
+    if (tcpip_callback_with_block(arp_lookup_callback, call, 1) == ERR_MEM) {
+        free(call);  /* not queued: the callback will never run */
+        return false;
+    }
+    return true;  /* queued; the callback writes the MAC and frees the struct */
 }
 
 // ============================================================================
@@ -340,7 +377,8 @@ static bool is_host_known(const arp_scanner_ctx_t *ctx, const char *ip) {
  * Thread-safe: runs on the TCP/IP core thread while iterating the table.
  */
 static void harvest_arp_table_callback(void *ctx) {
-    arp_scanner_ctx_t *scanner = (arp_scanner_ctx_t *)ctx;
+    arp_harvest_req_t *req = (arp_harvest_req_t *)ctx;
+    arp_scanner_ctx_t *scanner = req->scanner;
     for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;
@@ -354,12 +392,31 @@ static void harvest_arp_table_callback(void *ctx) {
             add_discovered_host(scanner, ip_str, eth->addr);
         }
     }
+    __sync_synchronize();
+    req->done = true;
 }
 
 static void harvest_arp_table(arp_scanner_ctx_t *ctx) {
-    if (tcpip_callback_with_block(harvest_arp_table_callback, ctx, 1) != ERR_OK) {
-        ESP_LOGW(TAG, "Failed to read ARP table on TCP/IP thread");
+    arp_harvest_req_t *req = malloc(sizeof(arp_harvest_req_t));
+    if (!req) {
+        ESP_LOGW(TAG, "Failed to allocate ARP table harvest request");
+        return;
     }
+    req->scanner = ctx;
+    req->done = false;
+
+    if (tcpip_callback_with_block(harvest_arp_table_callback, req, 1) == ERR_MEM) {
+        free(req);  /* not queued: the callback will never run */
+        ESP_LOGW(TAG, "Failed to read ARP table on TCP/IP thread");
+        return;
+    }
+    /* The tcpip thread runs at higher priority, so this bounded spin ends
+     * as soon as the callback completes. */
+    while (!req->done) {
+        taskYIELD();
+    }
+    __sync_synchronize();
+    free(req);
 }
 
 /**
@@ -636,6 +693,9 @@ typedef struct {
 static passive_arp_host_t *g_passive_hosts = NULL;
 static passive_arp_line_t *g_passive_new_lines = NULL;
 static int g_passive_host_count = 0;
+static volatile bool g_passive_poll_pending = false;
+static volatile bool g_passive_poll_ready = false;
+static volatile int g_passive_poll_count = 0;
 
 // Simple OUI vendor lookup table (top vendors)
 typedef struct {
@@ -938,14 +998,10 @@ static bool passive_neighbor_is_new(uint32_t ip_addr, const uint8_t *mac) {
     return true;
 }
 
-static void poll_passive_arp_table(void) {
-    // Collect new neighbors under the lock, log after releasing it
-    // to avoid blocking the lwIP thread with UART/file I/O.
-    passive_arp_line_t *new_lines = g_passive_new_lines;
+/* Runs on the tcpip thread: the ARP table read is inherently serialized. */
+static void passive_arp_table_poll_callback(void *ctx) {
+    (void)ctx;
     int new_count = 0;
-    if (!new_lines) return;
-
-    /* Passive monitor table polling is marshalled separately below. */
     for (size_t i = 0; i < ARP_TABLE_SIZE && new_count < PASSIVE_ARP_MAX_HOSTS; i++) {
         ip4_addr_t *ip = NULL;
         struct netif *entry_netif = NULL;
@@ -958,21 +1014,40 @@ static void poll_passive_arp_table(void) {
         format_short_mac(eth->addr, short_mac);
         const char *vendor = lookup_oui_vendor(eth->addr);
         if (vendor) {
-            snprintf(new_lines[new_count].line, sizeof(new_lines[0].line),
+            snprintf(g_passive_new_lines[new_count].line, sizeof(g_passive_new_lines[0].line),
                      "NBR %u.%u %s %.16s",
                      (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3],
                      short_mac, vendor);
         } else {
-            snprintf(new_lines[new_count].line, sizeof(new_lines[0].line),
+            snprintf(g_passive_new_lines[new_count].line, sizeof(g_passive_new_lines[0].line),
                      "NBR %u.%u %s",
                      (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3], short_mac);
         }
         new_count++;
     }
-    UNLOCK_TCPIP_CORE();
+    __sync_synchronize();
+    g_passive_poll_count = new_count;
+    g_passive_poll_ready = true;
+    g_passive_poll_pending = false;
+}
 
-    for (int i = 0; i < new_count; i++) {
-        glog("%s\n", new_lines[i].line);
+static void poll_passive_arp_table(void) {
+    if (!g_passive_new_lines) return;
+
+    if (g_passive_poll_ready) {  /* drain results of the previous poll */
+        int count = g_passive_poll_count;
+        __sync_synchronize();
+        for (int i = 0; i < count; i++) {
+            glog("%s\n", g_passive_new_lines[i].line);
+        }
+        g_passive_poll_ready = false;
+        return;
+    }
+    if (g_passive_poll_pending) return;  /* one request in flight */
+
+    g_passive_poll_pending = true;
+    if (tcpip_callback(passive_arp_table_poll_callback, NULL) != ERR_OK) {
+        g_passive_poll_pending = false;
     }
 }
 
@@ -1088,12 +1163,19 @@ void arp_scan_start_passive(int duration_sec) {
     wifi_manager_stop_monitor_mode();
     wifi_callbacks_set_pcap_enabled(true);
     g_passive_running = false;
+
+    /* Drain any in-flight ARP table poll before freeing the buffers: the
+     * callback runs on the tcpip thread and touches g_passive_new_lines. */
+    while (g_passive_poll_pending) taskYIELD();
+
     free(g_passive_hosts);
     free(g_passive_new_lines);
     free(g_monitor_ring);
     g_passive_hosts = NULL;
     g_passive_new_lines = NULL;
     g_monitor_ring = NULL;
+    g_passive_poll_ready = false;
+    g_passive_poll_count = 0;
 
     glog("\nPacket Monitor: Stopped (%lup %da %luP)\n",
          (unsigned long)g_passive_data_frames,

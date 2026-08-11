@@ -420,7 +420,17 @@ void handle_sd_cmd(int argc, char **argv) {
                     break;
                 }
                 b64[written] = '\0';
-                glog("SD:READ:DATA:%s\n", b64);
+                /* glog truncates output at 511 bytes, so a 1024-char base64 line
+                 * would be cut mid-character. Emit 4-aligned pieces that each fit
+                 * the glog buffer; the host parser decodes and concatenates them. */
+                const size_t b64_line_max = 480; /* multiple of 4, 13 + 480 + 1 < 512 */
+                size_t pos = 0;
+                while (pos < written) {
+                    size_t piece = written - pos;
+                    if (piece > b64_line_max) piece = b64_line_max;
+                    glog("SD:READ:DATA:%.*s\n", (int)piece, b64 + pos);
+                    pos += piece;
+                }
             } else {
                 size_t out_written = fwrite(buf, 1, to_write, stdout);
                 if (out_written != to_write) {

@@ -564,9 +564,7 @@ void ap_scan_stop(void) {
 
     log_heap_status(TAG, "scan_stop_pre");
     err = esp_wifi_scan_stop();
-    if (err == ESP_ERR_WIFI_NOT_STARTED) {
-        return;
-    } else if (err != ESP_OK) {
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
         printf("Failed to stop WiFi scan: %s\n", esp_err_to_name(err));
         TERMINAL_VIEW_ADD_TEXT("Failed to stop WiFi scan\n");
         return;

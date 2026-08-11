@@ -5,9 +5,23 @@
 - Fixed merged binary creation in GitHub workflow
 - Fixed TDisplayS3-Touch touch input not working since ESP-IDF v6.0 i2c migration
 - Fixed recurring "Wrong I2C status" errors on shared I2C buses: the shared I2C layer now caches device handles instead of adding/removing them per transaction
+- Fixed `sd read --base64` downloads sending truncated data
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
 - Fixed OTA and Cloud Store manifest fetches failing when CDN requests were redirected from HTTP to HTTPS
+
+- WiFi attack and scan fixes:
+  - Fixed the Channel Switch attack broadcasting beacons to the AP's own MAC instead of broadcast and transmitting them on the wrong channel
+  - Fixed EAPOL Logoff never starting in the STA-only boot configuration
+  - Fixed a 2-byte over-length beacon frame in Beacon Spam
+  - Fixed a stack buffer overflow and dropped packets in the BLE Samsung Buds spam payload
+  - Fixed stack overflows in the SNMP walk when formatting long OIDs
+  - Fixed the port scan looping forever and dividing by zero on a full 1-65535 port range, and missing ports that connect instantly
+  - Fixed the AP scan dropping valid results after a blocking scan
+  - Fixed use-after-free of ARP scan callback contexts on the lwIP thread and the packet monitor's unbalanced core-lock call
+  - Fixed the ARP poisoning ICMP sweep never running
+  - Fixed the SSH host scan ignoring a pending scan cancellation
+
 - Various PSRAM optimisations
   - Moved the LVGL heap to PSRAM
   - Moved UI and NFC buffers to PSRAM
