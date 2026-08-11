@@ -274,6 +274,8 @@ static void ble_suspend_networking(void) {
         return;
     }
 
+    wifi_manager_set_reconnect_hold(true);
+
     bool server_running = false;
     ap_manager_get_status(&server_running, NULL, NULL);
     wifi_mode_t cur_mode = WIFI_MODE_NULL;
@@ -284,14 +286,20 @@ static void ble_suspend_networking(void) {
     if (server_running) {
         ESP_LOGI(TAG_BLE, "Suspending GhostNet AP before BLE init");
         TERMINAL_VIEW_ADD_TEXT("Suspending AP for BLE\n");
+#ifdef CONFIG_SPIRAM
+        ap_manager_stop_services();
+#else
         ap_manager_deinit();
+#endif
         ble_ap_suspended = true;
         ble_wifi_suspended = false;
         ble_prev_wifi_mode = WIFI_MODE_AP;
     } else if (cur_mode != WIFI_MODE_NULL) {
         ESP_LOGI(TAG_BLE, "Stopping Wi-Fi (mode=%d) before BLE init", cur_mode);
         esp_wifi_stop();
+#ifndef CONFIG_SPIRAM
         esp_wifi_deinit();
+#endif
         ble_wifi_suspended = true;
         ble_prev_wifi_mode = cur_mode;
         ble_ap_suspended = false;
@@ -311,16 +319,23 @@ static void ble_resume_networking(void) {
         ble_stack_ready = false;
 
         if (ble_initialized) {
+            wifi_manager_set_reconnect_hold(false);
             return;
         }
 
+#ifdef CONFIG_SPIRAM
+        esp_err_t err = ap_manager_start_services();
+#else
         esp_err_t err = ap_manager_init();
         if (err == ESP_OK) {
             wifi_manager_configure_sta_from_settings();
             (void)ap_manager_start_services();
-        } else {
+        }
+#endif
+        if (err != ESP_OK) {
             ESP_LOGE(TAG_BLE, "Failed to reinit AP manager: 0x%X", (unsigned int)err);
         }
+        wifi_manager_set_reconnect_hold(false);
     } else if (ble_wifi_suspended) {
         ESP_LOGI(TAG_BLE, "Restoring Wi-Fi (mode=%d) after BLE deinit", ble_prev_wifi_mode);
         ble_wifi_suspended = false;
@@ -331,14 +346,16 @@ static void ble_resume_networking(void) {
         size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         ESP_LOGI(TAG_BLE, "Pre Wi-Fi init heap: free=%u, largest=%u", (unsigned)free_heap, (unsigned)largest_block);
 
+        esp_err_t err = ESP_OK;
+#ifndef CONFIG_SPIRAM
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         if (largest_block < 40000) {
             cfg.static_rx_buf_num = 4;
             cfg.dynamic_rx_buf_num = 8;
             ESP_LOGW(TAG_BLE, "Heap fragmented, using reduced Wi-Fi buffers");
         }
-
-        esp_err_t err = esp_wifi_init(&cfg);
+        err = esp_wifi_init(&cfg);
+#endif
         if (err == ESP_OK) {
             wifi_mode_t mode = (ble_prev_wifi_mode == WIFI_MODE_NULL) ? WIFI_MODE_STA : ble_prev_wifi_mode;
             if (mode == WIFI_MODE_APSTA) {
@@ -360,6 +377,9 @@ static void ble_resume_networking(void) {
                      esp_err_to_name(err), (unsigned)free_heap, (unsigned)largest_block);
         }
         ble_prev_wifi_mode = WIFI_MODE_NULL;
+        wifi_manager_set_reconnect_hold(false);
+    } else {
+        wifi_manager_set_reconnect_hold(false);
     }
 }
 

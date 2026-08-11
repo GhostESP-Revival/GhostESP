@@ -9,8 +9,10 @@
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
 - Fixed OTA and Cloud Store manifest fetches failing when CDN requests were redirected from HTTP to HTTPS
+- Fixed WiFi auto-reconnect attempts during intentional WiFi shutdowns
+- BLE manager now only deinits WiFi before init for non-PSRAM configs
 
-- WiFi attack and scan fixes:
+- Various WiFi attack and scan fixes:
   - Fixed the Channel Switch attack broadcasting beacons to the AP's own MAC instead of broadcast and transmitting them on the wrong channel
   - Fixed EAPOL Logoff never starting in the STA-only boot configuration
   - Fixed a 2-byte over-length beacon frame in Beacon Spam

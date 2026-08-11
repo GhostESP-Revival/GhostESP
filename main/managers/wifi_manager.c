@@ -140,6 +140,7 @@ bool manual_disconnect = false;
 static volatile bool wifi_connect_cancel_requested = false;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
 static int wifi_reconnect_count = 0;
+static volatile bool wifi_driver_started = false;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
@@ -718,6 +719,12 @@ static void wifi_reconnect_reset(void) {
 }
 
 static void wifi_reconnect_timer_cb(void *arg) {
+    if (wifi_reconnect_hold || !wifi_driver_started) {
+        ESP_LOGI(TAG, "Skipping auto-reconnect while Wi-Fi is reserved or stopped");
+        wifi_reconnect_count = 0;
+        return;
+    }
+
     const char *reason = NULL;
     if (wifi_reconnect_blocked(&reason)) {
         ESP_LOGI(TAG, "Skipping auto-reconnect while %s", reason ? reason : "busy");
@@ -942,7 +949,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        wifi_driver_started = true;
         ESP_LOGD(TAG, "STA started; saved-network connect is explicit/reconnect-only");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
+        wifi_driver_started = false;
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
         
@@ -966,7 +976,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         
         // Clean, single-line disconnect logging
         const char *reason = NULL;
-        if (wifi_reconnect_blocked(&reason)) {
+        if (wifi_reconnect_hold) {
+            glog("WiFi disconnected while radio reserved\n");
+            manual_disconnect = false;
+            wifi_reconnect_reset();
+        } else if (wifi_reconnect_blocked(&reason)) {
             glog("WiFi disconnected while %s\n", reason ? reason : "busy");
             manual_disconnect = false;
             if (wifi_reconnect_count == 0) {
@@ -2509,6 +2523,15 @@ void wifi_manager_init(void) {
 void wifi_manager_configure_sta_from_settings(void) {
     wifi_reconnect_reset();
 
+    if (!wifi_driver_started) {
+        esp_err_t start_err = esp_wifi_start();
+        if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_STATE) {
+            printf("Failed to start WiFi for STA connection: %s\n", esp_err_to_name(start_err));
+            return;
+        }
+        wifi_driver_started = true;
+    }
+
     // Configure STA with saved credentials for boot-time connection
     const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
     const char *saved_password = settings_get_sta_password(&G_Settings);
@@ -2533,6 +2556,13 @@ void wifi_manager_configure_sta_from_settings(void) {
             TERMINAL_VIEW_ADD_TEXT("Connecting to saved network: %s\n", saved_ssid);
             
             esp_err_t connect_err = esp_wifi_connect();
+            if (connect_err == ESP_ERR_WIFI_NOT_STARTED) {
+                esp_err_t start_err = esp_wifi_start();
+                if (start_err == ESP_OK || start_err == ESP_ERR_WIFI_STATE) {
+                    wifi_driver_started = true;
+                    connect_err = esp_wifi_connect();
+                }
+            }
             if (connect_err != ESP_OK) {
                 printf("Failed to initiate connection: %s\n", esp_err_to_name(connect_err));
                 TERMINAL_VIEW_ADD_TEXT("Failed to connect to saved network\n");
