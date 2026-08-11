@@ -148,9 +148,14 @@ jobs:
               xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
               source = xtensa.read_text(encoding="utf-8")
               source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
-              source, writer_count = re.subn(
-                  r"#if\s+(?:XCHAL_HAVE_FP|0)\s+(?=static\s+void\s+gdbstub_write_fpu_regs)",
-                  "#if 0\n",
+              source, tcb_count = re.subn(
+                  r"const\s+StaticTask_t\s*\*\s*tcb\s*;",
+                  "void *tcb = NULL;",
+                  source,
+              )
+              source, lookup_count = re.subn(
+                  r"tcb\s*=\s*esp_gdbstub_find_tcb_by_frame\s*\(frame\)\s*;",
+                  "",
                   source,
               )
               source, call_count = re.subn(
@@ -158,9 +163,9 @@ jobs:
                   "#if 0\n    ",
                   source,
               )
-              if (writer_count, call_count) not in {(0, 0), (1, 1)}:
+              if tcb_count != lookup_count or tcb_count not in {0, 1}:
                   raise SystemExit(
-                      f"unexpected Xtensa FPU patch counts: writer={writer_count}, call={call_count}"
+                      f"unexpected Xtensa FPU patch counts: tcb={tcb_count}, lookup={lookup_count}"
                   )
               xtensa.write_text(source, encoding="utf-8")
           PY
