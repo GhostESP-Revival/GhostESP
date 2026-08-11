@@ -1,19 +1,28 @@
-/* Native Pong for GhostESP. The game renders at 64x96 and scales to the
-   available display, keeping frame transfers small on single-core targets. */
+/* Native Pong for GhostESP. The game renders to a compact high-resolution
+   framebuffer and scales to the complete available display. */
 #include "../../../sdk/ghostesp_plugin_api.h"
 #include "../../../sdk/ghostesp_helpers.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define GAME_W 64
-#define GAME_H 96
-#define PADDLE_W 14
-#define CPU_Y 4
-#define PLAYER_Y 90
+#define GAME_W 96
+#define GAME_H 144
+#define PADDLE_W 22
+#define PADDLE_H 3
+#define CPU_Y 7
+#define PLAYER_Y 134
 #define MOVE_STEP 2
-#define FRAME_MS 24
+#define FRAME_MS 16
 #define TOUCH_BAR_HEIGHT 34
+
+#define COLOR_COURT 0x0841
+#define COLOR_LINE 0x39E7
+#define COLOR_WHITE 0xFFFF
+#define COLOR_PLAYER 0x07FF
+#define COLOR_CPU 0xFD20
+#define COLOR_BALL_GLOW 0x7BEF
 
 static const ghostesp_api_t *api;
 static ghostesp_ui_obj_t canvas;
@@ -21,7 +30,8 @@ static ghostesp_ui_obj_t touch_bar;
 static int canvas_width;
 static int canvas_height;
 static int canvas_left;
-static uint16_t framebuffer[GAME_W * GAME_H];
+static uint16_t *framebuffer;
+static size_t framebuffer_size;
 static ghostesp_touch_state_t touch_state;
 static uint32_t rng_state;
 static uint32_t frame_accumulator;
@@ -59,7 +69,7 @@ static int clamp_paddle(int x) {
 static void request_exit(void) {
     if (exit_requested) return;
     exit_requested = true;
-    GH_VOID(api, app_exit);
+    GH_VOID(api, request_exit);
 }
 
 static void touch_back(void *user) {
@@ -83,9 +93,29 @@ static void reset_game(void) {
     serve_ball((pong_random() & 1u) ? 1 : -1);
 }
 
-static void set_pixel(int x, int y) {
-    if (x >= 0 && x < GAME_W && y >= 0 && y < GAME_H)
-        framebuffer[y * GAME_W + x] = 0xFFFF;
+static void fill_rect(int x, int y, int width, int height, uint16_t color) {
+    int x2 = x + width;
+    int y2 = y + height;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x2 > GAME_W) x2 = GAME_W;
+    if (y2 > GAME_H) y2 = GAME_H;
+    if (x >= x2 || y >= y2) return;
+
+    int left = x * canvas_width / GAME_W;
+    int right = x2 * canvas_width / GAME_W;
+    int top = y * canvas_height / GAME_H;
+    int bottom = y2 * canvas_height / GAME_H;
+    if (right <= left) right = left + 1;
+    if (bottom <= top) bottom = top + 1;
+    for (int row = top; row < bottom; row++) {
+        uint16_t *destination = framebuffer + (size_t)row * canvas_width + left;
+        for (int column = left; column < right; column++) *destination++ = color;
+    }
+}
+
+static void set_pixel(int x, int y, uint16_t color) {
+    fill_rect(x, y, 1, 1, color);
 }
 
 static void draw_digit(int digit, int x, int y_offset) {
@@ -98,32 +128,41 @@ static void draw_digit(int digit, int x, int y_offset) {
     for (int y = 0; y < 5; y++)
         for (int bit = 0; bit < 3; bit++)
             if (glyphs[digit][y] & (1u << (2 - bit))) {
-                set_pixel(x + bit * 2, y_offset + y * 2);
-                set_pixel(x + bit * 2 + 1, y_offset + y * 2);
-                set_pixel(x + bit * 2, y_offset + y * 2 + 1);
-                set_pixel(x + bit * 2 + 1, y_offset + y * 2 + 1);
+                fill_rect(x + bit * 2, y_offset + y * 2, 2, 2, COLOR_WHITE);
             }
 }
 
 static void present(void) {
-    memset(framebuffer, 0, sizeof(framebuffer));
-    for (int x = 2; x < GAME_W - 2; x += 4) {
-        set_pixel(x, GAME_H / 2);
-        set_pixel(x + 1, GAME_H / 2);
+    memset(framebuffer, 0, framebuffer_size);
+    for (int y = 1; y < GAME_H - 1; y++) {
+        set_pixel(1, y, COLOR_COURT);
+        set_pixel(GAME_W - 2, y, COLOR_COURT);
     }
-    for (int x = 0; x < PADDLE_W; x++) {
-        set_pixel(player_x + x, PLAYER_Y);
-        set_pixel(cpu_x + x, CPU_Y);
+    for (int x = 2; x < GAME_W - 2; x += 6) {
+        fill_rect(x, GAME_H / 2, 3, 1, COLOR_LINE);
     }
-    for (int y = -2; y <= 1; y++) {
-        int x_start = (y == -2 || y == 1) ? -1 : -2;
-        int x_end = (y == -2 || y == 1) ? 0 : 1;
-        for (int x = x_start; x <= x_end; x++) set_pixel(ball_x + x, ball_y + y);
+    for (int y = GAME_H / 2 - 8; y <= GAME_H / 2 + 8; y++) {
+        int dx = y - GAME_H / 2;
+        if (dx < 0) dx = -dx;
+        if (dx == 8 || dx == 7) {
+            set_pixel(GAME_W / 2 - 2, y, COLOR_COURT);
+            set_pixel(GAME_W / 2 + 2, y, COLOR_COURT);
+        }
     }
-    draw_digit(cpu_score, GAME_W / 2 - 3, 14);
-    draw_digit(player_score, GAME_W / 2 - 3, GAME_H - 24);
-    api->ui_canvas_blit_rgb565(canvas, framebuffer, GAME_W, GAME_H, GAME_W,
-                               0, 0, canvas_width, canvas_height);
+    fill_rect(player_x, PLAYER_Y, PADDLE_W, PADDLE_H, COLOR_PLAYER);
+    fill_rect(player_x + 2, PLAYER_Y, PADDLE_W - 4, 1, COLOR_WHITE);
+    fill_rect(cpu_x, CPU_Y, PADDLE_W, PADDLE_H, COLOR_CPU);
+    fill_rect(cpu_x + 2, CPU_Y + PADDLE_H - 1, PADDLE_W - 4, 1, COLOR_WHITE);
+
+    fill_rect(ball_x - 2, ball_y - 1, 5, 3, COLOR_BALL_GLOW);
+    fill_rect(ball_x - 1, ball_y - 2, 3, 5, COLOR_BALL_GLOW);
+    fill_rect(ball_x - 1, ball_y - 1, 3, 3, COLOR_WHITE);
+    draw_digit(cpu_score, GAME_W / 2 - 3, 22);
+    draw_digit(player_score, GAME_W / 2 - 3, GAME_H - 34);
+
+    api->ui_canvas_blit_rgb565(canvas, framebuffer,
+                              canvas_width, canvas_height, canvas_width,
+                              0, 0, canvas_width, canvas_height);
 }
 
 static void update_player(void) {
@@ -163,16 +202,16 @@ static void update_ball(void) {
         ball_dx = -ball_dx;
         next_x = ball_x + ball_dx;
     }
-    if (ball_dy > 0 && next_y + 1 >= PLAYER_Y && ball_y + 1 <= PLAYER_Y &&
+    if (ball_dy > 0 && next_y + 2 >= PLAYER_Y && ball_y + 2 <= PLAYER_Y &&
         next_x >= player_x - 1 && next_x <= player_x + PADDLE_W) {
         ball_dy = -MOVE_STEP;
         ball_dx = next_x < player_x + PADDLE_W / 2 ? -MOVE_STEP : MOVE_STEP;
-        next_y = PLAYER_Y - 4;
-    } else if (ball_dy < 0 && next_y <= CPU_Y + 1 && ball_y >= CPU_Y &&
+        next_y = PLAYER_Y - 3;
+    } else if (ball_dy < 0 && next_y - 2 <= CPU_Y + PADDLE_H && ball_y >= CPU_Y &&
                next_x >= cpu_x - 1 && next_x <= cpu_x + PADDLE_W) {
         ball_dy = MOVE_STEP;
         ball_dx = next_x < cpu_x + PADDLE_W / 2 ? -MOVE_STEP : MOVE_STEP;
-        next_y = CPU_Y + 4;
+        next_y = CPU_Y + PADDLE_H + 2;
         cpu_aim_offset = ((int)(pong_random() % 9u) - 4) * MOVE_STEP;
     }
     ball_x = next_x;
@@ -197,7 +236,7 @@ static void pong_start(void) {
 
     if (!api->ui_canvas_create || !api->ui_canvas_blit_rgb565 ||
         !api->ui_screen_get_content_width || !api->ui_screen_get_content_height ||
-        !api->app_exit) {
+        !api->request_exit) {
         if (api->toast) api->toast("Pong requires the RGB565 canvas API");
         request_exit();
         return;
@@ -207,6 +246,7 @@ static void pong_start(void) {
     if (!screen) { request_exit(); return; }
     api->ui_obj_set_scrollable(screen, false);
     api->ui_obj_set_bg_color(screen, 0x000000);
+    GH_VOID(api, ui_obj_set_pad, screen, 0, 0, 0, 0);
     GH_VOID(api, ui_obj_set_flex_flow, screen, GHOSTESP_FLEX_FLOW_NONE);
     touch_bar = gh_touch_bar(api, true, touch_back, NULL);
 
@@ -214,16 +254,10 @@ static void pong_start(void) {
     int height = api->ui_screen_get_content_height();
     api->ui_obj_set_size(screen, width, height);
 
-    /* Fill the content area while preserving the portrait 2:3 court. */
+    /* The canvas owns the complete play area, avoiding uncovered side strips. */
     int usable_height = height - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
-    int play_height = usable_height;
-    if (play_height < GAME_H) play_height = GAME_H;
     canvas_width = width;
-    canvas_height = width * 3 / 2;
-    if (canvas_height > play_height) {
-        canvas_height = play_height;
-        canvas_width = play_height * 2 / 3;
-    }
+    canvas_height = usable_height;
     if (canvas_width < GAME_W || canvas_height < GAME_H) {
         canvas_width = GAME_W;
         canvas_height = GAME_H;
@@ -231,9 +265,12 @@ static void pong_start(void) {
 
     canvas = api->ui_canvas_create(screen, canvas_width, canvas_height);
     if (!canvas) { request_exit(); return; }
+    framebuffer_size = (size_t)canvas_width * canvas_height * sizeof(*framebuffer);
+    framebuffer = malloc(framebuffer_size);
+    if (!framebuffer) { request_exit(); return; }
     api->ui_canvas_fill(canvas, 0x000000);
-    int canvas_y = (usable_height - canvas_height) / 2;
-    canvas_left = (width - canvas_width) / 2;
+    int canvas_y = 0;
+    canvas_left = 0;
     if (api->ui_obj_set_pos)
         api->ui_obj_set_pos(canvas, canvas_left, canvas_y);
     rng_state = api->system_uptime_us ? (uint32_t)api->system_uptime_us() : 0x504F4E47u;
@@ -245,7 +282,9 @@ static void pong_start(void) {
 static void pong_stop(void) {
     canvas = NULL;
     touch_bar = NULL;
-    memset(framebuffer, 0, sizeof(framebuffer));
+    free(framebuffer);
+    framebuffer = NULL;
+    framebuffer_size = 0;
 }
 
 static void pong_input(const ghostesp_input_event_t *event) {
@@ -301,6 +340,6 @@ static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(
 );
 
 #define PONG_REQUIRED_API_SIZE \
-    (offsetof(ghostesp_api_t, ui_canvas_blit_rgb565) + sizeof(((ghostesp_api_t *)0)->ui_canvas_blit_rgb565))
+    (offsetof(ghostesp_api_t, request_exit) + sizeof(((ghostesp_api_t *)0)->request_exit))
 
 GHOSTESP_APP_INIT_WITH_API(app, api, "pong", PONG_REQUIRED_API_SIZE)
