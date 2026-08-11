@@ -92,7 +92,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
-    {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 2},
+    {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 3},
     {"infrared_easy", ST_BOOL, OFF(infrared_easy_mode), "System", 0, 0, 0},
     {"web_auth", ST_BOOL, OFF(web_auth_enabled), "System", 0, 0, 0},
     {"rts_enabled", ST_BOOL, OFF(rts_enabled), "System", 0, 0, 0},
@@ -504,7 +504,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    power_save        - Power save mode (true/false)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
-        glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List)\n");
+        glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact)\n");
         glog("    infrared_easy     - Infrared easy mode (true/false)\n");
         glog("    web_auth          - Web authentication (true/false)\n");
         glog("    rts_enabled       - RTS enabled (true/false)\n");

@@ -1934,12 +1934,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 2) layout = 1;
+    if (layout > 3) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 2 ? settings->menu_layout : 1;
+    return settings->menu_layout <= 3 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {

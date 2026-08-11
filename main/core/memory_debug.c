@@ -28,10 +28,6 @@ static void memory_debug_failed_alloc(size_t size, uint32_t caps, const char *fu
     s_last_failed_alloc_size = size;
     s_last_failed_alloc_caps = caps;
     s_last_failed_alloc_function = function_name;
-    ESP_EARLY_LOGE(TAG, "allocation failed: size=%u caps=0x%08x function=%s count=%u",
-                   (unsigned)size, (unsigned)caps,
-                   function_name ? function_name : "unknown",
-                   (unsigned)s_failed_alloc_count);
 }
 
 void memory_debug_init(void) {
