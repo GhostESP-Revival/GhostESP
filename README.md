@@ -523,8 +523,6 @@ Special thanks to:
       </a><br/>
       <sub>Reference deauthentication code</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/Spooks4576">
         <img src="https://github.com/Spooks4576.png" width="80" height="80" style="border-radius: 50%;" alt="Spooks4576"/><br/>
@@ -532,6 +530,8 @@ Special thanks to:
       </a><br/>
       <sub>Original GhostESP Developer</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/tototo31">
         <img src="https://github.com/tototo31.png" width="80" height="80" style="border-radius: 50%;" alt="Tototo31"/><br/>
@@ -553,8 +553,6 @@ Special thanks to:
       </a><br/>
       <sub>Core IR &amp; NFC implementation (flipperdevices/flipperzero-firmware &amp; contributors)</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/Garag">
         <img src="https://github.com/Garag.png" width="80" height="80" style="border-radius: 50%;" alt="Garag"/><br/>
@@ -569,6 +567,8 @@ Special thanks to:
       </a><br/>
       <sub><a href="https://github.com/connornishijima/SensoryBridge">SensoryBridge</a> - MIC RGB visualizer algorithms &amp; inspiration</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/DarkFlippers">
         <img src="https://github.com/DarkFlippers.png" width="80" height="80" style="border-radius: 50%;" alt="DarkFlippers"/><br/>
@@ -588,10 +588,8 @@ Special thanks to:
         <img src="https://github.com/DecentLabs.png" width="80" height="80" style="border-radius: 50%;" alt="DecentLabs"/><br/>
         <b>DecentLabs</b>
       </a><br/>
-      <sub><a href="https://github.com/DecentLabs/officeAir">officeAir</a> — multi-pass ARP scanning &amp; lwIP thread-safety techniques</sub>
+      <sub><a href="https://github.com/DecentLabs/officeAir">officeAir</a> - multi-pass ARP scanning &amp; lwIP thread-safety techniques</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/jaylikesbunda">
         <img src="https://github.com/jaylikesbunda.png" width="80" height="80" style="border-radius: 50%;" alt="jaylikesbunda"/><br/>
@@ -606,6 +604,8 @@ Special thanks to:
       </a><br/>
       <sub>WiGLE upload &amp; IO expander support</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/the1anonlypr3">
         <img src="https://github.com/the1anonlypr3.png" width="80" height="80" style="border-radius: 50%;" alt="the1anonlypr3"/><br/>
@@ -620,14 +620,12 @@ Special thanks to:
       </a><br/>
       <sub>Audio &amp; ENV-III sensor support</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/Next-Flip">
         <img src="https://github.com/Next-Flip.png" width="80" height="80" style="border-radius: 50%;" alt="Next-Flip"/><br/>
         <b>Next-Flip</b>
       </a><br/>
-      <sub>Momentum-Firmware — NFC parser base (EMV, DESFire, hardnested, transit parsers; Gallagher by Nick Mooney)</sub>
+      <sub>Momentum-Firmware - NFC parser base (EMV, DESFire, hardnested, transit parsers; Gallagher by Nick Mooney)</sub>
     </td>
     <td align="center">
       <a href="https://github.com/noproto">
@@ -643,15 +641,15 @@ Special thanks to:
       </a><br/>
       <sub>EMV payment-card parser</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/bettse">
         <img src="https://github.com/bettse.png" width="80" height="80" style="border-radius: 50%;" alt="bettse"/><br/>
         <b>bettse</b>
       </a><br/>
-      <sub><a href="https://github.com/bettse/picopass">picopass</a> — PicoPass / iCLASS support</sub>
+      <sub><a href="https://github.com/bettse/picopass">picopass</a> - PicoPass / iCLASS support</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/micolous">
         <img src="https://github.com/micolous.png" width="80" height="80" style="border-radius: 50%;" alt="micolous"/><br/>
@@ -671,14 +669,14 @@ Special thanks to:
         <img src="https://github.com/holiman.png" width="80" height="80" style="border-radius: 50%;" alt="holiman"/><br/>
         <b>holiman</b>
       </a><br/>
-      <sub>loclass — MIFARE key recovery algorithms</sub>
+      <sub>loclass - MIFARE key recovery algorithms</sub>
     </td>
     <td align="center">
       <a href="https://github.com/RfidResearchGroup">
         <img src="https://github.com/RfidResearchGroup.png" width="80" height="80" style="border-radius: 50%;" alt="RfidResearchGroup"/><br/>
         <b>RfidResearchGroup</b>
       </a><br/>
-      <sub>proxmark3 — RFID research tooling</sub>
+      <sub>proxmark3 - RFID research tooling</sub>
     </td>
   </tr>
 </table>
