@@ -1,6 +1,6 @@
 <img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
 
-**Turn a $10–20 ESP32 board into a Flipper Zero–class wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
+**Turn a $10–20 ESP32 board into a wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
 
 **New to GhostESP?** Grab a [compatible device](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) - no drivers, no build toolchain.
 
