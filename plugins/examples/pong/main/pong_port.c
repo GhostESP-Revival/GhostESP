@@ -46,6 +46,12 @@ static int ball_dy;
 static int cpu_aim_offset;
 static int player_score;
 static int cpu_score;
+static int rendered_player_x;
+static int rendered_cpu_x;
+static int rendered_ball_x;
+static int rendered_ball_y;
+static int rendered_player_score;
+static int rendered_cpu_score;
 static int touch_target;
 static bool snapshot_input;
 static bool left_held;
@@ -136,7 +142,7 @@ static void draw_digit(int digit, int x, int y_offset) {
             }
 }
 
-static void present(void) {
+static void render_frame(void) {
     memset(framebuffer, 0, framebuffer_size);
     for (int y = 1; y < GAME_H - 1; y++) {
         set_pixel(1, y, COLOR_COURT);
@@ -164,9 +170,62 @@ static void present(void) {
     draw_digit(cpu_score, GAME_W / 2 - 3, 22);
     draw_digit(player_score, GAME_W / 2 - 3, GAME_H - 34);
 
+}
+
+static void blit_game_region(int x, int y, int width, int height) {
+    int left = x * canvas_width / GAME_W;
+    int top = y * canvas_height / GAME_H;
+    int right = (x + width) * canvas_width / GAME_W;
+    int bottom = (y + height) * canvas_height / GAME_H;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > canvas_width) right = canvas_width;
+    if (bottom > canvas_height) bottom = canvas_height;
+    if (left >= right || top >= bottom) return;
+
+    api->ui_canvas_blit_rgb565(canvas, framebuffer + (size_t)top * canvas_width + left,
+                              right - left, bottom - top, canvas_width,
+                              left, top, right - left, bottom - top);
+}
+
+static void present(void) {
+    render_frame();
     api->ui_canvas_blit_rgb565(canvas, framebuffer,
                               canvas_width, canvas_height, canvas_width,
                               0, 0, canvas_width, canvas_height);
+    rendered_player_x = player_x;
+    rendered_cpu_x = cpu_x;
+    rendered_ball_x = ball_x;
+    rendered_ball_y = ball_y;
+    rendered_player_score = player_score;
+    rendered_cpu_score = cpu_score;
+}
+
+static void present_dirty(void) {
+    render_frame();
+
+    int left = rendered_player_x < player_x ? rendered_player_x : player_x;
+    int right = rendered_player_x > player_x ? rendered_player_x : player_x;
+    blit_game_region(left, PLAYER_Y, right - left + PADDLE_W, PADDLE_H);
+
+    left = rendered_cpu_x < cpu_x ? rendered_cpu_x : cpu_x;
+    right = rendered_cpu_x > cpu_x ? rendered_cpu_x : cpu_x;
+    blit_game_region(left, CPU_Y, right - left + PADDLE_W, PADDLE_H);
+
+    left = rendered_ball_x < ball_x ? rendered_ball_x : ball_x;
+    right = rendered_ball_x > ball_x ? rendered_ball_x : ball_x;
+    int top = rendered_ball_y < ball_y ? rendered_ball_y : ball_y;
+    int bottom = rendered_ball_y > ball_y ? rendered_ball_y : ball_y;
+    blit_game_region(left - 2, top - 2, right - left + 5, bottom - top + 5);
+
+    if (rendered_cpu_score != cpu_score) blit_game_region(GAME_W / 2 - 3, 22, 6, 10);
+    if (rendered_player_score != player_score) blit_game_region(GAME_W / 2 - 3, GAME_H - 34, 6, 10);
+    rendered_player_x = player_x;
+    rendered_cpu_x = cpu_x;
+    rendered_ball_x = ball_x;
+    rendered_ball_y = ball_y;
+    rendered_player_score = player_score;
+    rendered_cpu_score = cpu_score;
 }
 
 static void update_player(void) {
@@ -339,13 +398,15 @@ static void pong_frame(void *user) {
     last_frame_ms = now_ms;
     frame_accumulator += elapsed_ms;
     if (frame_accumulator > FRAME_MS * 4) frame_accumulator = FRAME_MS * 4;
+    bool updated = false;
     while (frame_accumulator >= FRAME_MS) {
         frame_accumulator -= FRAME_MS;
         update_player();
         update_cpu();
         update_ball();
+        updated = true;
     }
-    present();
+    if (updated) present_dirty();
 }
 
 static const ghostesp_app_t app = GHOSTESP_APP_DEFINE(

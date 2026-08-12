@@ -212,6 +212,7 @@ void display_manager_suspend_input_task(void);
 void display_manager_resume_input_task(void);
 
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+bool display_manager_is_lvgl_task(void);
 
 /* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
  * heap are not thread-safe, and the render task calls lv_timer_handler() on a

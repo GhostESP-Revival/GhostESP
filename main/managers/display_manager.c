@@ -2050,9 +2050,13 @@ static void dm_run_on_lvgl_async_cb(void *param) {
   free(call);
 }
 
+bool display_manager_is_lvgl_task(void) {
+  return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
+}
+
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
   if (!fn) return;
-  if (lvgl_task_handle && xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
+  if (!display_manager_is_lvgl_task()) {
     dm_lvgl_call_t *call = malloc(sizeof(*call));
     if (!call) return;
     call->fn = fn;
