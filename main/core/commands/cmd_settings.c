@@ -384,22 +384,38 @@ void handle_timezone_cmd(int argc, char **argv) {
 }
 
 void handle_web_auth_cmd(int argc, char **argv) {
-    if (argc != 2) {
-        glog("Usage: webauth <on|off>\n");
+    bool enabled = settings_get_web_auth_enabled(&G_Settings);
+
+    if (argc == 1) {
+        enabled = !enabled;
+        settings_set_web_auth_enabled(&G_Settings, enabled);
+        settings_save(&G_Settings);
+        glog("Web authentication %s.\n", enabled ? "enabled" : "disabled");
         return;
     }
 
-    if (strcmp(argv[1], "on") == 0) {
-        settings_set_web_auth_enabled(&G_Settings, true);
+    if (argc == 2) {
+        if (strcmp(argv[1], "on") == 0) {
+            enabled = true;
+        } else if (strcmp(argv[1], "off") == 0) {
+            enabled = false;
+        } else if (strcmp(argv[1], "toggle") == 0) {
+            enabled = !enabled;
+        } else if (strcmp(argv[1], "status") == 0) {
+            glog("Web authentication is %s.\n", enabled ? "enabled" : "disabled");
+            return;
+        } else {
+            glog("Usage: webauth [on|off|toggle|status]\n");
+            return;
+        }
+
+        settings_set_web_auth_enabled(&G_Settings, enabled);
         settings_save(&G_Settings);
-        glog("Web authentication enabled.\n");
-    } else if (strcmp(argv[1], "off") == 0) {
-        settings_set_web_auth_enabled(&G_Settings, false);
-        settings_save(&G_Settings);
-        glog("Web authentication disabled.\n");
-    } else {
-        glog("Usage: webauth <on|off>\n");
+        glog("Web authentication %s.\n", enabled ? "enabled" : "disabled");
+        return;
     }
+
+    glog("Usage: webauth [on|off|toggle|status]\n");
 }
 
 void handle_webuiap_cmd(int argc, char **argv) {
