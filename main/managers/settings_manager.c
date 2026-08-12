@@ -272,7 +272,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->sun_mode = false;
   settings->sun_mode_saved_brightness = 100;
   settings->menu_item_borders = false;
-  settings->menu_card_bg = true;
+  settings->menu_card_bg = false;
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
