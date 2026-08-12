@@ -1,4 +1,4 @@
-<img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
+<img width="800" alt="ghostesp_logo_white_transparent_2x_shine" src="https://github.com/user-attachments/assets/36005ffd-9cfc-433e-a306-1606feb18107" />
 
 **Turn a $10–20 ESP32 board into a wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
 
