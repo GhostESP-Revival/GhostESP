@@ -1,8 +1,8 @@
 <img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
 
-**Turn a $10–20 ESP32 board into a Flipper Zero–class wireless research tool.** WiFi, BLE, NFC, IR, and SubGHz, with a full touchscreen UI — no soldering, no Arduino IDE.
+**Turn a $10–20 ESP32 board into a Flipper Zero–class wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
 
-**New to GhostESP?** Grab a [Cardputer](https://ghostesp.net/boards) or [CYD](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) — no drivers, no build toolchain.
+**New to GhostESP?** Grab a [compatible device](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) - no drivers, no build toolchain.
 
 > **The open-source wireless research platform for ESP32.**
 > Built on ESP-IDF v6.0. **v2.0** turns GhostESP into a full graphical, extensible, multi-radio environment.
