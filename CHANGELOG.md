@@ -31,6 +31,7 @@
 ### UI & Rendering
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
+- The Banshee display is now double buffered
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM
