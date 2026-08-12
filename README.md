@@ -1,5 +1,8 @@
-
 <img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
+
+**Turn a $10–20 ESP32 board into a Flipper Zero–class wireless research tool.** WiFi, BLE, NFC, IR, and SubGHz, with a full touchscreen UI — no soldering, no Arduino IDE.
+
+**New to GhostESP?** Grab a [Cardputer](https://ghostesp.net/boards) or [CYD](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) — no drivers, no build toolchain.
 
 > **The open-source wireless research platform for ESP32.**
 > Built on ESP-IDF v6.0. **v2.0** turns GhostESP into a full graphical, extensible, multi-radio environment.
@@ -60,13 +63,30 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 A few things set GhostESP apart from every other ESP32 firmware:
 
-- **Native SD App ecosystem**: Create, package, discover, launch, inspect, and stop SD-loaded apps with permissions and scoped storage. Build your own with `gbt`.
-- **ESP-IDF-native architecture**: built directly on Espressif's SDK instead of Arduino/PlatformIO, giving GhostESP tighter control over Wi-Fi, Bluetooth, USB, memory, and low-level hardware features.
-- **GhostLink**: dual-ESP32 command/display interface with remote radio, remote keyboard, BLE bridging, and split-channel wardriving.
+- **Deepest NFC stack of any ESP32 firmware**: EMV payment-card reads, full MIFARE DESFire application/file trees, PicoPass/iCLASS, and transit-card parsers (Opal, myki, ITSO, Gallagher) — nothing else in this space touches contactless cards this thoroughly.
+- **Native SD App ecosystem**: Create, package, discover, launch, inspect, and stop SD-loaded apps with permissions and scoped storage. Build your own with `gbt`, install community apps/scripts from the Cloud Store, or run sandboxed Lua scripts via GhostScript.
+- **GhostLink**: dual-ESP32 command/display interface with remote radio, remote keyboard, BLE bridging, and split-channel wardriving — pair a display-less board with a capable one instead of buying up.
 - **Multi-interface control**: use GhostESP from the on-device UI, Flipper Zero app, serial CLI, WebUI, Android companion app, or GhostLink-connected devices.
 - **Broad hardware and radio coverage**: Wi-Fi, BLE, NFC, IR, SubGHz, NRF24, Ethernet, GPS, USB HID, and 802.15.4/Zigbee across 46 board targets.
 - **Research-ready capture workflows**: PCAP, hc22000, WiGLE CSV, sweep captures, Wireshark streaming, SD browsing, and on-device export tools.
 - **Full graphical UI platform**: carousel, grid, and list layouts with themes, asset packs, touch/keyboard/encoder support, and accessibility options.
+- **ESP-IDF-native architecture**: built directly on Espressif's SDK instead of Arduino/PlatformIO, giving GhostESP tighter control over Wi-Fi, Bluetooth, USB, memory, and low-level hardware features.
+
+---
+
+## Why GhostESP over the alternatives?
+
+The short version — see the [full 130+ row comparison](#esp32-firmware-comparison) below for everything else.
+
+| | GhostESP | Others |
+| --- | --- | --- |
+| EMV / payment-card reading | ✓ | — |
+| MIFARE DESFire tree reads | ✓ | — |
+| Transit card parsers (Opal, myki, ITSO, Gallagher) | ✓ | — |
+| Native app ecosystem + Cloud Store + Lua sandbox | ✓ | — |
+| Dual-ESP32 GhostLink (remote radio, BLE bridge) | ✓ | — |
+| Full LVGL graphical UI (carousel/grid/list) | ✓ | Partial or none |
+| Board targets in CI | 46 | 1–42 |
 
 ---
 
@@ -255,7 +275,6 @@ A few things set GhostESP apart from every other ESP32 firmware:
 - Reduced-motion animations
 - SD config backup / restore
 </details>
-
 
 ---
 
@@ -486,8 +505,7 @@ This comparison is based on GhostESP's feature set and publicly available source
 
 </details>
 
-
-
+---
 
 ## Credits
 
@@ -680,6 +698,17 @@ Special thanks to:
     </td>
   </tr>
 </table>
+
+---
+
+## Contributing
+
+GhostESP welcomes contributions — from a one-line board config to a new feature.
+
+- **Adding a board**: copy the closest existing config in [`configs/`](configs/), adjust pins/display/GPS as needed, add it to [`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml), and open a PR — most board additions are a single config file.
+- **Fixing a bug or adding a feature**: check [open issues](https://github.com/GhostESP-Revival/GhostESP/issues) — anything tagged `good first issue` is a solid place to start.
+- **Building a native app**: see the `gbt` (Ghost Build Tool) docs and example apps (Device Inspector, ESP32Finder) for the SDK pattern.
+- Questions before you start? Ask in [Discord](https://discord.gg/5cyNmUMgwh) — the team is responsive.
 
 ---
 
