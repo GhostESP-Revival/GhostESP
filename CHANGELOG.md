@@ -46,7 +46,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Removed a redundant OTA task
 - Increased idle internal RAM from ~37 KB to ~75 KB
 
-## Revival v2.1.0
+## Revival v2.1.0 - 2026-08-03
 
 ### TL;DR
 
@@ -269,7 +269,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed the GhostScript browser selecting a different script after returning from a run
 - Freed about 1 KiB of Apps gallery storage before launching apps and fixed accumulating options-view style allocations
 
-## Revival v2.0.0
+## Revival v2.0.0 - 2026-06-29
 
 ### Added
 
