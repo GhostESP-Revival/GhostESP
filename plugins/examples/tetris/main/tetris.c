@@ -12,6 +12,8 @@
 #define NEXT_COUNT 5
 #define TOUCH_BAR_HEIGHT 34
 #define TIMER_MS 16
+#define DAS_DELAY_MS 150
+#define DAS_REPEAT_MS 45
 
 #define C_BG 0x0000
 #define C_PANEL 0x1082
@@ -44,6 +46,10 @@ static piece_t active;
 static uint32_t rng_state, last_tick, fall_accumulator;
 static int score, lines, level;
 static bool hold_used, paused, game_over, exit_requested;
+static bool snapshot_input;
+static uint32_t das_dir, das_next_ms;
+static bool das_repeating;
+static bool needs_render;
 static ghostesp_touch_state_t touch_state;
 static bool touch_moved;
 
@@ -170,10 +176,36 @@ static void render(void) {
     api->ui_canvas_blit_rgb565(canvas,framebuffer,screen_w,screen_h,screen_w,0,0,screen_w,screen_h);
 }
 
+static void poll_held_moves(uint32_t now) {
+    if (paused || game_over || !snapshot_input) return;
+    ghostesp_input_snapshot_t snap;
+    if (!api->input_snapshot || !api->input_snapshot(&snap)) return;
+    uint32_t dir = 0;
+    if (snap.held & GHOSTESP_BUTTON_LEFT) dir = 1;
+    else if (snap.held & GHOSTESP_BUTTON_RIGHT) dir = 2;
+    else if (snap.held & GHOSTESP_BUTTON_DOWN) dir = 3;
+    if (dir != das_dir) {
+        das_dir = dir;
+        das_repeating = false;
+        das_next_ms = now + DAS_DELAY_MS;
+        if (!dir) return;
+    } else if (!dir || now < das_next_ms) {
+        return;
+    }
+    bool moved = false;
+    if (dir == 1) moved = move_piece(-1, 0);
+    else if (dir == 2) moved = move_piece(1, 0);
+    else if (dir == 3) { moved = move_piece(0, 1); if (moved) ++score; }
+    if (moved) needs_render = true;
+    das_next_ms = now + (das_repeating ? DAS_REPEAT_MS : DAS_DELAY_MS);
+    das_repeating = true;
+}
+
 static void game_tick(void *user) {
     (void)user;if(exit_requested||!canvas)return;uint32_t now=api->system_uptime_ms?api->system_uptime_ms():last_tick+TIMER_MS;uint32_t elapsed=last_tick?now-last_tick:TIMER_MS;last_tick=now;
-    if(!paused&&!game_over){fall_accumulator+=elapsed;if(fall_accumulator>=(uint32_t)fall_delay()){fall_accumulator=0;if(!move_piece(0,1))lock_piece();}}
-    render();
+    if(!paused&&!game_over){fall_accumulator+=elapsed;if(fall_accumulator>=(uint32_t)fall_delay()){fall_accumulator=0;if(move_piece(0,1))needs_render=true;else{lock_piece();needs_render=true;}}}
+    poll_held_moves(now);
+    if(needs_render){needs_render=false;render();}
 }
 
 static void layout(void) {
@@ -184,7 +216,7 @@ static void layout(void) {
 }
 
 static void tetris_start(void) {
-    exit_requested=false;touch_moved=false;gh_touch_reset(&touch_state);
+    exit_requested=false;touch_moved=false;gh_touch_reset(&touch_state);snapshot_input=api->input_snapshot!=NULL;das_dir=0;das_repeating=false;needs_render=false;
     if(!api->ui_canvas_create||!api->ui_canvas_blit_rgb565||!api->ui_screen_get_content_width||!api->ui_screen_get_content_height||!api->ui_timer_create||!api->request_exit){request_exit();return;}
     ghostesp_ui_obj_t screen=api->ui_screen_create("Tetris");if(!screen){request_exit();return;}api->ui_obj_set_scrollable(screen,false);api->ui_obj_set_bg_color(screen,C_BG);GH_VOID(api,ui_obj_set_pad,screen,0,0,0,0);GH_VOID(api,ui_obj_set_flex_flow,screen,GHOSTESP_FLEX_FLOW_NONE);
     touch_bar=gh_touch_bar(api,true,touch_back,NULL);screen_w=api->ui_screen_get_content_width();screen_h=api->ui_screen_get_content_height()-(touch_bar?TOUCH_BAR_HEIGHT:0);layout();canvas=api->ui_canvas_create(screen,screen_w,screen_h);if(!canvas){request_exit();return;}if(api->ui_obj_set_pos)api->ui_obj_set_pos(canvas,0,0);
@@ -205,16 +237,22 @@ static void tetris_input(const ghostesp_input_event_t *event) {
             if(ax>=16||ay>=16){
                 if(ax>=ay){if(dx>0)move_piece(1,0);else move_piece(-1,0);}
                 else if(dy>0)hard_drop();else rotate_piece(1);
-                touch_state.start_x=event->x;touch_state.start_y=event->y;touch_moved=true;render();
+                touch_state.start_x=event->x;touch_state.start_y=event->y;touch_moved=true;needs_render=true;
             }
             return;
         }
         if(touch_state.started&&!touch_moved)rotate_piece(1);
-        touch_moved=false;gh_touch_reset(&touch_state);render();return;
+        touch_moved=false;gh_touch_reset(&touch_state);needs_render=true;return;
     }
     if(!event->pressed)return;
-    if(game_over&&(event->type==GHOSTESP_INPUT_SELECT||event->type==GHOSTESP_INPUT_UP)){new_game();render();return;}
-    if(event->type==GHOSTESP_INPUT_LEFT)move_piece(-1,0);else if(event->type==GHOSTESP_INPUT_RIGHT)move_piece(1,0);else if(event->type==GHOSTESP_INPUT_DOWN){if(move_piece(0,1))++score;}else if(event->type==GHOSTESP_INPUT_UP)hard_drop();else if(event->type==GHOSTESP_INPUT_SELECT)rotate_piece(1);else if(event->type==GHOSTESP_INPUT_KEY){int k=event->value;if(k==27||k=='q'||k=='Q')request_exit();else if(k=='z'||k=='Z')rotate_piece(-1);else if(k=='x'||k=='X')rotate_piece(1);else if(k=='c'||k=='C')hold();else if(k=='p'||k=='P')paused=!paused;else if(k==' '||k=='\r')hard_drop();else if(k=='r'||k=='R')new_game();}render();
+    if(game_over&&(event->type==GHOSTESP_INPUT_SELECT||event->type==GHOSTESP_INPUT_UP)){new_game();needs_render=true;return;}
+    if(event->type==GHOSTESP_INPUT_LEFT){if(!snapshot_input)move_piece(-1,0);}
+    else if(event->type==GHOSTESP_INPUT_RIGHT){if(!snapshot_input)move_piece(1,0);}
+    else if(event->type==GHOSTESP_INPUT_DOWN){if(!snapshot_input&&move_piece(0,1))++score;}
+    else if(event->type==GHOSTESP_INPUT_UP)hard_drop();
+    else if(event->type==GHOSTESP_INPUT_SELECT)rotate_piece(1);
+    else if(event->type==GHOSTESP_INPUT_KEY){int k=event->value;if(k==27||k=='q'||k=='Q')request_exit();else if(k=='z'||k=='Z')rotate_piece(-1);else if(k=='x'||k=='X')rotate_piece(1);else if(k=='c'||k=='C')hold();else if(k=='p'||k=='P')paused=!paused;else if(k==' '||k=='\r')hard_drop();else if(k=='r'||k=='R')new_game();}
+    needs_render=true;
 }
 
 static const ghostesp_app_t app=GHOSTESP_APP_DEFINE("tetris","Tetris",tetris_start,tetris_stop,tetris_input,NULL);

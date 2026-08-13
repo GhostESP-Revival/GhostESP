@@ -1,7 +1,7 @@
 {
   "id": "tetris",
   "name": "Tetris",
-  "version": "1.0",
+  "version": "1.1",
   "author": "GhostESP",
   "description": "Adaptive full-featured falling-block puzzle game with hold, ghost piece, seven-bag randomizer, levels, and scoring.",
   "category": "Games",
