@@ -403,6 +403,10 @@ static void plugin_ui_sync_apply(void *arg) {
 
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
     if (!fn) return false;
+    if (display_manager_is_lvgl_task()) {
+        fn(ctx);
+        return true;
+    }
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
     if (!done) return false;
     plugin_ui_sync_call_t call = {

@@ -3,8 +3,15 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "esp_crt_bundle.h"
+
 bool proxy_should_use(const char *url) {
     return url && strncmp(url, "https://", 8) == 0;
+}
+
+static bool proxy_is_first_party(const char *url) {
+    return strncmp(url, "https://gesp.fuckyourcdn.com/", 29) == 0 ||
+           strncmp(url, "https://gespota.fuckyourcdn.com/", 32) == 0;
 }
 
 static bool is_unreserved(char c) {
@@ -12,19 +19,6 @@ static bool is_unreserved(char c) {
            (c >= 'a' && c <= 'z') ||
            (c >= '0' && c <= '9') ||
            c == '-' || c == '_' || c == '.' || c == '~';
-}
-
-static bool proxy_can_use_plain_http(const char *url) {
-    return strncmp(url, "https://gesp.fuckyourcdn.com/", 29) == 0 ||
-           strncmp(url, "https://gespota.fuckyourcdn.com/", 32) == 0;
-}
-
-static esp_err_t build_plain_http_url(const char *orig_url, char *out, size_t out_len) {
-    if (!orig_url || !out || out_len == 0) return ESP_ERR_INVALID_ARG;
-    if (strlen(orig_url) >= out_len) return ESP_ERR_INVALID_SIZE;
-    memcpy(out, "http://", 7);
-    strcpy(out + 7, orig_url + 8);
-    return ESP_OK;
 }
 
 esp_err_t proxy_build_url(const char *orig_url, char *out, size_t out_len) {
@@ -60,14 +54,15 @@ esp_err_t proxy_apply(esp_http_client_config_t *cfg, char *url_buf, size_t url_b
 
     if (!proxy_should_use(cfg->url)) return ESP_OK;
 
-    esp_err_t err = proxy_can_use_plain_http(cfg->url)
-        ? build_plain_http_url(cfg->url, url_buf, url_buf_len)
-        : proxy_build_url(cfg->url, url_buf, url_buf_len);
-    if (err != ESP_OK) return err;
-
-    cfg->url = url_buf;
-    cfg->cert_pem = NULL;
-    cfg->crt_bundle_attach = NULL;
-    cfg->transport_type = 0;
+    // First-party CDN URLs support the C5's reduced TLS record size directly.
+    // External hosts use the HTTPS proxy to avoid larger certificate records.
+    if (!proxy_is_first_party(cfg->url)) {
+        esp_err_t err = proxy_build_url(cfg->url, url_buf, url_buf_len);
+        if (err != ESP_OK) return err;
+        cfg->url = url_buf;
+    }
+    if (!cfg->cert_pem && !cfg->crt_bundle_attach) {
+        cfg->crt_bundle_attach = esp_crt_bundle_attach;
+    }
     return ESP_OK;
 }

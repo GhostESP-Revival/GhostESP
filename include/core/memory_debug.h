@@ -10,6 +10,9 @@
 void memory_debug_print_heap_summary(void);
 void memory_debug_print_heap_regions(void);
 bool memory_debug_check_heap_integrity(void);
+void memory_debug_init(void);
+void memory_debug_log_snapshot(const char *reason);
+esp_err_t memory_debug_start_periodic_monitor(void);
 void memory_debug_start_boot_trace(void);
 esp_err_t memory_debug_trace_start(bool leaks_only);
 esp_err_t memory_debug_trace_stop(void);

@@ -332,7 +332,7 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: timezone <TZ_STRING>\n\n");
         glog("webauth\n");
         glog("    Description: Enable/disable web authentication.\n");
-        glog("    Usage: webauth <enable|disable>\n\n");
+        glog("    Usage: webauth [on|off|toggle|status]\n\n");
         glog("pineap\n");
         glog("    Description: Start/Stop detecting WiFi Pineapples.\n");
         glog("    Usage: pineap [-s]\n");

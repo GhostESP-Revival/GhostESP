@@ -11,9 +11,12 @@ if(CONFIG_NFC_ST25R3916)
         src/crypto1.c
         src/st25r3916_adapter.c
         hal/hb_nfc_bus.c
-        hal/hb_nfc_spi.c
-        hal/hb_nfc_i2c.c
     )
+    if(CONFIG_NFC_ST25R3916_SPI)
+        list(APPEND st25r3916_sources hal/hb_nfc_spi.c)
+    else()
+        list(APPEND st25r3916_sources hal/hb_nfc_i2c.c)
+    endif()
 endif()
 
 idf_component_register(

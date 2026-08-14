@@ -1,0 +1,32 @@
+{
+  "id": "breakout",
+  "name": "Breakout",
+  "version": "1.0",
+  "author": "GhostESP",
+  "description": "Classic brick-breaking action with escalating levels and touch, keyboard, encoder, or D-pad controls.",
+  "category": "Games",
+  "entry": "breakout.so",
+  "target": "esp32c5",
+  "api_version": 1,
+  "manifest_version": 1,
+  "package_version": 1,
+  "data_version": 1,
+  "storage_scope": "app",
+  "accent_color": "#FF8A2A",
+  "icon": "icon.rgb565",
+  "icon_source": "breakout.png",
+  "icon_format": "rgb565a8",
+  "icon_width": 50,
+  "icon_height": 50,
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "Breakout ready screen with rainbow brick rows, paddle, score, level, and lives"
+    }
+  ],
+  "assets": ["screenshot.webp"],
+  "permissions": ["ui", "input", "time"],
+  "memory_limit": 0,
+  "stack_size": 4096,
+  "requires_psram": false
+}

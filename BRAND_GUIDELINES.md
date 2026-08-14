@@ -52,7 +52,7 @@ The GhostESP logo, the "GhostESP" handwriting wordmarks, and associated artwork 
 
 ## Content Creators & Press
 
-Cover GhostESP however you like. Tutorials, reviews, teardowns, comparisons, no worries. See the [press kit](press%20kit/) for high-res assets. Credit "GhostESP: Revival" and link to [ghostesp.net](https://ghostesp.net).
+Cover GhostESP however you like. Tutorials, reviews, teardowns, comparisons, no worries. See the [brand assets](https://ghostesp.net/brand-assets) for high-res assets. Credit "GhostESP: Revival" and link to [ghostesp.net](https://ghostesp.net).
 
 ## Community Projects & Forks
 

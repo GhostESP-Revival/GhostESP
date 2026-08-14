@@ -558,10 +558,10 @@ static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
             size_t out_pos = 0;
             for (size_t i = 0; i < val_len && out_pos < out_value_size - 1; i++) {
                 uint8_t b = buf[pos + i];
+                int w;
                 if (i == 0) {
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     "%d.%d", b / 40, b % 40);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 "%d.%d", b / 40, b % 40);
                 } else if (b & 0x80) {
                     uint32_t val = b & 0x7F;
                     while (i + 1 < val_len && (buf[pos + i + 1] & 0x80)) {
@@ -569,13 +569,17 @@ static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
                         val = (val << 7) | (buf[pos + i] & 0x7F);
                     }
                     if (i + 1 < val_len) { i++; val = (val << 7) | buf[pos + i]; }
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     ".%lu", (unsigned long)val);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 ".%lu", (unsigned long)val);
                 } else {
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     ".%u", b);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 ".%u", b);
+                }
+                if (w >= 0 && (size_t)w < out_value_size - out_pos) {
+                    out_pos += (size_t)w;
+                } else {
+                    out_pos = out_value_size - 1;
+                    break;
                 }
             }
             out_value[out_pos] = '\0';
@@ -602,18 +606,22 @@ static void format_oid(const uint8_t *oid, size_t oid_len, char *out, size_t out
     }
     size_t pos = 0;
     for (size_t i = 0; i < oid_len && pos < out_size - 1; i++) {
+        int w;
         if (i == 0) {
-            int w = snprintf(&out[pos], out_size - pos, "%d.%d", oid[0] / 40, oid[0] % 40);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, "%d.%d", oid[0] / 40, oid[0] % 40);
         } else if (oid[i] & 0x80) {
             uint32_t val = oid[i] & 0x7F;
             while (i + 1 < oid_len && (oid[i + 1] & 0x80)) { i++; val = (val << 7) | (oid[i] & 0x7F); }
             if (i + 1 < oid_len) { i++; val = (val << 7) | oid[i]; }
-            int w = snprintf(&out[pos], out_size - pos, ".%lu", (unsigned long)val);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, ".%lu", (unsigned long)val);
         } else {
-            int w = snprintf(&out[pos], out_size - pos, ".%u", oid[i]);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, ".%u", oid[i]);
+        }
+        if (w >= 0 && (size_t)w < out_size - pos) {
+            pos += (size_t)w;
+        } else {
+            pos = out_size - 1;
+            break;
         }
     }
     out[pos] = '\0';

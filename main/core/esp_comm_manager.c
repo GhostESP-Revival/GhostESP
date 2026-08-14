@@ -15,6 +15,7 @@
 #include "core/uart_share.h"
 #include "soc/uart_pins.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
@@ -103,6 +104,32 @@ typedef struct {
     char data[COMM_PACKET_SIZE];
     char* dynamic_data;
 } comm_command_t;
+
+#define COMM_TX_QUEUE_DEPTH 16
+#define COMM_RX_QUEUE_DEPTH 64
+#define COMM_COMMAND_QUEUE_DEPTH 4
+
+EXT_RAM_BSS_ATTR static uint8_t s_tx_queue_storage[COMM_TX_QUEUE_DEPTH * sizeof(comm_packet_t)];
+EXT_RAM_BSS_ATTR static uint8_t s_rx_queue_storage[COMM_RX_QUEUE_DEPTH * sizeof(comm_packet_t)];
+EXT_RAM_BSS_ATTR static uint8_t s_command_queue_storage[COMM_COMMAND_QUEUE_DEPTH * sizeof(comm_command_t)];
+static StaticQueue_t s_tx_queue_control;
+static StaticQueue_t s_rx_queue_control;
+static StaticQueue_t s_command_queue_control;
+
+static QueueHandle_t create_tx_queue(void) {
+    return xQueueCreateStatic(COMM_TX_QUEUE_DEPTH, sizeof(comm_packet_t),
+                              s_tx_queue_storage, &s_tx_queue_control);
+}
+
+static QueueHandle_t create_rx_queue(void) {
+    return xQueueCreateStatic(COMM_RX_QUEUE_DEPTH, sizeof(comm_packet_t),
+                              s_rx_queue_storage, &s_rx_queue_control);
+}
+
+static QueueHandle_t create_command_queue(void) {
+    return xQueueCreateStatic(COMM_COMMAND_QUEUE_DEPTH, sizeof(comm_command_t),
+                              s_command_queue_storage, &s_command_queue_control);
+}
 
 typedef struct {
     gpio_num_t tx_pin;
@@ -304,7 +331,7 @@ static bool ensure_command_executor(esp_comm_manager_t* comm) {
         return false;
     }
     if (!comm->command_queue) {
-        comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+        comm->command_queue = create_command_queue();
     }
     if (comm->command_queue && !comm->command_executor_task_handle) {
         TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
@@ -850,7 +877,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         xTimerStart(comm->handshake_timer, 0);
                     }
                     if (comm->command_callback && !comm->command_queue) {
-                        comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+                        comm->command_queue = create_command_queue();
                         if (comm->command_queue && !comm->command_executor_task_handle) {
                             TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
                                                                "comm_cmd_exec_task", 3072, comm, 5);
@@ -885,7 +912,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         xTimerStart(comm->ping_timer, 0);
                     }
                     if (!comm->tx_queue) {
-                        comm->tx_queue = xQueueCreate(16, sizeof(comm_packet_t));
+                        comm->tx_queue = create_tx_queue();
                     }
                     if (!comm->tx_task_handle && comm->tx_queue) {
                         TaskHandle_t t = create_task_static(&comm->tx_task_res, tx_task,
@@ -897,7 +924,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->tx_task_handle = t;
                     }
                     if (!comm->rx_packet_queue) {
-                        comm->rx_packet_queue = xQueueCreate(64, sizeof(comm_packet_t));
+                        comm->rx_packet_queue = create_rx_queue();
                     }
                     if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                         TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,
@@ -930,7 +957,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     xTimerStop(comm->handshake_timer, 0);
                 }
                 if (comm->command_callback && !comm->command_queue) {
-                    comm->command_queue = xQueueCreate(4, sizeof(comm_command_t));
+                    comm->command_queue = create_command_queue();
                     if (comm->command_queue && !comm->command_executor_task_handle) {
                         TaskHandle_t t = create_task_static(&comm->command_task_res, command_executor_task,
                                                            "comm_cmd_exec_task", 3072, comm, 5);
@@ -953,7 +980,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     xTimerStart(comm->ping_timer, 0);
                 }
                 if (!comm->tx_queue) {
-                    comm->tx_queue = xQueueCreate(16, sizeof(comm_packet_t));
+                    comm->tx_queue = create_tx_queue();
                 }
                 if (!comm->tx_task_handle && comm->tx_queue) {
                     TaskHandle_t t = create_task_static(&comm->tx_task_res, tx_task,
@@ -965,7 +992,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->tx_task_handle = t;
                 }
                 if (!comm->rx_packet_queue) {
-                    comm->rx_packet_queue = xQueueCreate(64, sizeof(comm_packet_t));
+                    comm->rx_packet_queue = create_rx_queue();
                 }
                 if (!comm->protocol_task_handle && comm->rx_packet_queue) {
                     TaskHandle_t t = create_task_static(&comm->protocol_task_res, protocol_task,

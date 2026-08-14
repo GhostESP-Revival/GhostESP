@@ -1,6 +1,7 @@
 #include "managers/cloud_store_manager.h"
 
 #include "cJSON.h"
+#include "core/memory_debug.h"
 #include "core/system_manager.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -108,6 +109,7 @@ typedef struct {
 typedef struct {
     cloud_store_item_type_t type;
     char id[CLOUD_STORE_ID_MAX];
+    bool caps_task;
 } install_request_t;
 
 typedef struct {
@@ -328,18 +330,21 @@ static esp_err_t fetch_url_text(const char *url, char **out_text) {
         free(resp.buffer);
         return proxy_err;
     }
+    memory_debug_log_snapshot("cloud catalog before");
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
         free(resp.buffer);
-        return ESP_FAIL;
+        memory_debug_log_snapshot("cloud catalog client alloc failed");
+        return ESP_ERR_NO_MEM;
     }
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    memory_debug_log_snapshot("cloud catalog after");
     if (err != ESP_OK || status != 200) {
         ESP_LOGW(TAG, "catalog fetch failed url=%s err=%s http=%d", url, esp_err_to_name(err), status);
         free(resp.buffer);
-        return ESP_FAIL;
+        return err != ESP_OK ? err : ESP_FAIL;
     }
     if (!resp.buffer) {
         resp.buffer = strdup("");
@@ -1253,7 +1258,7 @@ bool cloud_store_apps_available(void) {
 }
 
 static void refresh_task(void *arg) {
-    (void)arg;
+    bool caps_task = arg != NULL;
     cloud_store_pause_ap_if_needed();
     esp_err_t err = refresh_manifest();
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
@@ -1270,7 +1275,11 @@ static void refresh_task(void *arg) {
     }
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
-    vTaskDelete(NULL);
+    if (caps_task) {
+        vTaskDeleteWithCaps(NULL);
+    } else {
+        vTaskDelete(NULL);
+    }
 }
 
 esp_err_t cloud_store_refresh_async(void) {
@@ -1289,7 +1298,11 @@ esp_err_t cloud_store_refresh_async(void) {
     s_ctx->status.error[0] = '\0';
     xSemaphoreGive(s_ctx->mutex);
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreate_psram(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
+    BaseType_t rc = xTaskCreateWithCaps(refresh_task, "cloud_refresh", 8192, (void *)1, 5,
+                                        NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rc != pdPASS) {
+        rc = xTaskCreate(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
+    }
     if (rc != pdPASS) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
         s_ctx->task_running = false;
@@ -1372,7 +1385,11 @@ static void install_task(void *arg) {
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
-    vTaskDelete(NULL);
+    if (req.caps_task) {
+        vTaskDeleteWithCaps(NULL);
+    } else {
+        vTaskDelete(NULL);
+    }
 }
 
 esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id) {
@@ -1395,14 +1412,24 @@ esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id
     xSemaphoreGive(s_ctx->mutex);
 
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreate_psram(install_task, "cloud_install", CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL);
+    req->caps_task = true;
+    BaseType_t rc = xTaskCreateWithCaps(install_task, "cloud_install",
+                                        CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (rc != pdPASS && CLOUD_INSTALL_TASK_STACK_BYTES != CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES) {
         ESP_LOGW(TAG, "install task stack allocation failed (%u bytes; free=%u largest=%u); retrying with %u bytes",
                  (unsigned)CLOUD_INSTALL_TASK_STACK_BYTES,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES);
-        rc = xTaskCreate_psram(install_task, "cloud_install", CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
+        rc = xTaskCreateWithCaps(install_task, "cloud_install",
+                                 CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL,
+                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (rc != pdPASS) {
+        req->caps_task = false;
+        rc = xTaskCreate(install_task, "cloud_install",
+                         CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
     }
     if (rc != pdPASS) {
         ESP_LOGE(TAG, "install task failed to start (free=%u largest=%u)",

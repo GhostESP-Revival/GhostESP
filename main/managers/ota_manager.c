@@ -6,6 +6,7 @@
 #include "managers/settings_manager.h"
 #include "managers/sd_card_manager.h"
 #include "core/glog.h"
+#include "core/memory_debug.h"
 #include "managers/status_display_manager.h"
 
 #include "cJSON.h"
@@ -170,6 +171,7 @@ static bool ota_wait_for_valid_time(uint32_t timeout_ms) {
 }
 
 static SemaphoreHandle_t s_status_mutex;
+static SemaphoreHandle_t s_manifest_mutex;
 static OtaStatus s_status;
 
 // Discovered by the manifest check, consumed by the download task.
@@ -312,6 +314,12 @@ esp_err_t ota_manager_init(void) {
     if (!s_status_mutex) {
         s_status_mutex = xSemaphoreCreateMutex();
         if (!s_status_mutex) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_manifest_mutex) {
+        s_manifest_mutex = xSemaphoreCreateMutex();
+        if (!s_manifest_mutex) {
             return ESP_ERR_NO_MEM;
         }
     }
@@ -543,18 +551,27 @@ esp_err_t ota_manager_fetch_manifest_entry(const char *board_key, uint8_t channe
         glog("OTA manifest proxy URL failed: %s\n", esp_err_to_name(proxy_err));
         return proxy_err;
     }
+    if (!s_manifest_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_manifest_mutex, portMAX_DELAY);
+    memory_debug_log_snapshot("ota manifest before");
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
-        return ESP_FAIL;
+        memory_debug_log_snapshot("ota manifest client alloc failed");
+        xSemaphoreGive(s_manifest_mutex);
+        return ESP_ERR_NO_MEM;
     }
 
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    memory_debug_log_snapshot("ota manifest after");
+    xSemaphoreGive(s_manifest_mutex);
 
     if (err != ESP_OK || status != 200) {
         glog("OTA manifest fetch failed (err=%s, http=%d)\n", esp_err_to_name(err), status);
-        return ESP_FAIL;
+        return err != ESP_OK ? err : ESP_FAIL;
     }
 
     if (ctx.found) {
@@ -621,25 +638,33 @@ static esp_err_t ota_fetch_and_parse_manifest(bool *out_update_available) {
 #endif
 }
 
-static void ota_check_task(void *pv) {
-    (void)pv;
+esp_err_t ota_manager_check_now_blocking(void) {
+    if (!ota_manager_is_supported() || !ota_manager_board_has_network()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     vTaskDelay(pdMS_TO_TICKS(5000));
     ota_set_state(OTA_STATE_CHECKING);
 
     if (!ota_wait_for_valid_time(20000)) {
         ota_set_state(OTA_STATE_IDLE);
-        vTaskDelete(NULL);
-        return;
+        return ESP_ERR_TIMEOUT;
     }
 
     bool update_available = false;
-    ota_fetch_and_parse_manifest(&update_available);
+    esp_err_t err = ota_fetch_and_parse_manifest(&update_available);
 
     settings_set_ota_update_available(&G_Settings, update_available);
     settings_persist_setting(SETTING_OTA_UPDATE_AVAILABLE);
     settings_set_ota_last_check_time(&G_Settings, (uint32_t)time(NULL));
     settings_persist_setting(SETTING_OTA_LAST_CHECK_TIME);
 
+    return err;
+}
+
+static void ota_check_task(void *pv) {
+    (void)pv;
+    (void)ota_manager_check_now_blocking();
     vTaskDelete(NULL);
 }
 
@@ -1196,6 +1221,7 @@ esp_err_t ota_manager_start_update_from_sd(void) {
 bool ota_manager_is_supported(void) { return false; }
 esp_err_t ota_manager_init(void) { return ESP_OK; }
 esp_err_t ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ota_manager_check_now_blocking(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t ota_manager_background_check(void) { return ESP_ERR_NOT_SUPPORTED; }
 bool ota_manager_has_update_ready(void) { return false; }
 esp_err_t ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }

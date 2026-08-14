@@ -18,6 +18,13 @@
   "icon_width": 50,
   "icon_height": 50,
   "accent_color": "#7C5CFC",
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "QR Generator menu with actions to edit text, show a QR code, reset the URL, or go Back"
+    }
+  ],
+  "assets": ["screenshot.webp"],
   "permissions": ["ui", "lvgl", "input", "display"],
   "memory_limit": 0,
   "stack_size": 8192,

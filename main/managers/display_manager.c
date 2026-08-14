@@ -1663,10 +1663,19 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Keep the C5 SPI flush buffer in DMA-capable internal RAM. PSRAM draw
+  /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
-     time, which is fragile once WiFi/LVGL have fragmented internal RAM. */
+     time, which is fragile once WiFi/LVGL have fragmented internal RAM.
+     Only somethingsomething gets a second buffer: LVGL renders the next
+     chunk while the SPI DMA flushes the previous one, hiding render time
+     behind the transfer. Other C5 boards stay single-buffered to save
+     internal RAM. */
   buf1_pixels = (size_t)width * 5;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    buf2_pixels = (size_t)width * 5;
+  }
+#endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
   buf1_pixels = (size_t)width * 5;
 #elif defined(CONFIG_IDF_TARGET_ESP32)
@@ -1705,6 +1714,18 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     }
   }
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (!buf1) {
+    ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
+    free(buf2);
+    buf2 = NULL;
+    return;
+  }
+  if (!buf2) {
+    ESP_LOGW(TAG, "display_manager: buf2 allocation failed, falling back to single buffer");
+    buf2_pixels = 0;
+  }
+#else
   if (!buf1 || (buf2_pixels > 0 && !buf2)) {
     ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
     free(buf1);
@@ -1713,6 +1734,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = NULL;
     return;
   }
+#endif
   ESP_LOGI(TAG, "display_manager: draw buffers allocated, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -2028,9 +2050,13 @@ static void dm_run_on_lvgl_async_cb(void *param) {
   free(call);
 }
 
+bool display_manager_is_lvgl_task(void) {
+  return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
+}
+
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
   if (!fn) return;
-  if (lvgl_task_handle && xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
+  if (!display_manager_is_lvgl_task()) {
     dm_lvgl_call_t *call = malloc(sizeof(*call));
     if (!call) return;
     call->fn = fn;

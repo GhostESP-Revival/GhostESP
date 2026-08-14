@@ -189,7 +189,7 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
         he_capabilities_ie[11] = 0x00; // Even more PHY capabilities
         he_capabilities_ie[12] = 0x01; // Final PHY capabilities (Wi-Fi 6 capabilities set)
 
-        size_t packet_size = (38 + ssid_len + 12 + 3 + 13); // Adjust packet size
+        size_t packet_size = (38 + ssid_len + 10 + 3 + 13); // Adjust packet size
 
         esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
         if (err != ESP_OK) {
@@ -269,7 +269,7 @@ esp_err_t beacon_spam_broadcast_karma(const char *ssid) {
     he_capabilities_ie[11] = 0x00;
     he_capabilities_ie[12] = 0x01; // Wi-Fi 6 capabilities
 
-    size_t packet_size = (38 + ssid_len + 12 + 3 + 13);
+    size_t packet_size = (38 + ssid_len + 10 + 3 + 13);
 
     // If AP has connected client, only send on current channel
     if (ap_sta_has_ip) {

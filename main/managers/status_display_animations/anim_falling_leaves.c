@@ -3,6 +3,7 @@
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 
 #include "managers/status_display_animations.h"
+#include "esp_attr.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -20,9 +21,9 @@ typedef struct {
     uint8_t age;  // Age counter for landed leaves (for visual variety)
 } Leaf;
 
-static Leaf s_leaves[MAX_LEAVES];
+EXT_RAM_BSS_ATTR static Leaf s_leaves[MAX_LEAVES];
 static bool s_initialized = false;
-static uint8_t s_pile_height[128];  // Track pile height at each x position (max width 128)
+EXT_RAM_BSS_ATTR static uint8_t s_pile_height[128];  // Track pile height at each x position (max width 128)
 
 void status_anim_falling_leaves_reset(void)
 {

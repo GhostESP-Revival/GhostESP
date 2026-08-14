@@ -13,6 +13,8 @@ main_menu_layout_kind_t main_menu_layout_from_setting(uint8_t setting) {
             return MAIN_MENU_LAYOUT_LAUNCHER;
         case 2:
             return MAIN_MENU_LAYOUT_LIST;
+        case 3:
+            return MAIN_MENU_LAYOUT_COMPACT;
         default:
             return MAIN_MENU_LAYOUT_CAROUSEL;
     }
@@ -97,6 +99,10 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
 
     bool portrait = screen_height > screen_width;
     int columns = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 : 2;
+    if (kind == MAIN_MENU_LAYOUT_COMPACT) {
+        columns = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 :
+                  (screen_width >= 160) ? 2 : 1;
+    }
     if (item_count > 0 && columns > item_count) columns = item_count;
     if (columns <= 0) columns = 1;
 
@@ -115,6 +121,12 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->visible_rows = page_content_height >= 360 ? 4 :
                                 page_content_height >= 240 ? 3 :
                                 page_content_height >= 120 ? 2 : 1;
+    } else if (kind == MAIN_MENU_LAYOUT_COMPACT) {
+        /* Compact is intentionally a single-screen layout: use as many rows
+         * as the item count needs instead of creating another page. */
+        metrics->page_indicator_height = 0;
+        metrics->visible_rows = item_count > 0 ?
+                                (item_count + columns - 1) / columns : 1;
     }
 
     int card_area_height = content_height - metrics->page_indicator_height;
@@ -125,8 +137,19 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->card_height = (card_area_height - (metrics->visible_rows + 1) * metrics->margin) / metrics->visible_rows;
     if (metrics->card_width < 1) metrics->card_width = 1;
     if (metrics->card_height < 1) metrics->card_height = 1;
+    if (kind == MAIN_MENU_LAYOUT_COMPACT) {
+        int compact_height = screen_width <= 160 || content_height <= 120 ? 22 :
+                             screen_width >= 320 ? 32 : 28;
+        metrics->margin = screen_width <= 160 || content_height <= 120 ? 2 : 4;
+        metrics->card_width = (screen_width - (columns + 1) * metrics->margin) / columns;
+        metrics->card_height = (card_area_height - (metrics->visible_rows + 1) * metrics->margin) /
+                               metrics->visible_rows;
+        if (metrics->card_width < 1) metrics->card_width = 1;
+        if (metrics->card_height < 1) metrics->card_height = 1;
+        if (metrics->card_height > compact_height) metrics->card_height = compact_height;
+    }
 
-    if (kind == MAIN_MENU_LAYOUT_LAUNCHER) {
+    if (kind == MAIN_MENU_LAYOUT_LAUNCHER || kind == MAIN_MENU_LAYOUT_COMPACT) {
         metrics->container_align = LV_ALIGN_TOP_MID;
         metrics->container_y = status_bar_height;
     }

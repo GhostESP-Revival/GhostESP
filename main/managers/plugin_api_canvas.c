@@ -561,7 +561,13 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
         }
     }
-    lv_obj_invalidate(canvas);
+    lv_area_t area;
+    lv_obj_get_coords(canvas, &area);
+    area.x1 += left;
+    area.y1 += top;
+    area.x2 = area.x1 + (right - left) - 1;
+    area.y2 = area.y1 + (bottom - top) - 1;
+    lv_obj_invalidate_area(canvas, &area);
     ctx->result = true;
 }
 

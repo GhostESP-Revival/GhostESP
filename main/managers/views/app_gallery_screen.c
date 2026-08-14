@@ -233,6 +233,20 @@ static bool apps_allow_plugin_icon_load = false;
 static StackType_t *apps_plugin_reload_stack = NULL;
 static StaticTask_t *apps_plugin_reload_tcb = NULL;
 
+static inline bool apps_is_compact_layout(void) {
+    return apps_layout == MAIN_MENU_LAYOUT_COMPACT;
+}
+
+static void apply_compact_app_tile(lv_obj_t *obj, bool selected) {
+    if (!obj) return;
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+    lv_color_t accent_text = theme_palette_is_bright(theme) ? lv_color_black() : lv_color_white();
+    lv_obj_t *label = lv_obj_get_child(obj, 0);
+    gui_menu_compact_tile_apply(obj, label, selected, app_card_bg_enabled(),
+                                apps_surface_color, apps_text_color, accent, accent_text);
+}
+
 #define PLUGIN_RELOAD_STACK_BYTES 32768
 
 static bool apps_native_plugins_enabled(void) {
@@ -634,7 +648,7 @@ static void scroll_app_launcher_card_to_view(int index) {
      * every page/card here (previously on every navigation press) bought
      * nothing but cost. */
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
     int page = index / layout.page_capacity;
     bool page_changed = page != launcher_current_page;
     bool animate = launcher_current_page >= 0 && page_changed &&
@@ -806,7 +820,7 @@ static void update_app_item(bool move_left) {
 
 static void create_apps_launcher_menu(void) {
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
 
     int screen_width = layout.screen_width;
     int cols = layout.columns;
@@ -887,44 +901,46 @@ static void create_apps_launcher_menu(void) {
         lv_obj_set_style_radius(card, GUI_RADIUS_MD, LV_PART_MAIN);
         lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
 
-        int reserved_for_label = (card_height <= 70 ? 12 : 20);
-        int icon_area_h = card_height - reserved_for_label;
-        if (icon_area_h < 10) icon_area_h = card_height - reserved_for_label;
-        int icon_target = LV_MIN((int)(card_width * 0.78f), (int)(icon_area_h * 0.78f));
-        if (icon_target < 16) icon_target = LV_MIN(card_width - 4, icon_area_h);
+        if (!apps_is_compact_layout()) {
+            int reserved_for_label = (card_height <= 70 ? 12 : 20);
+            int icon_area_h = card_height - reserved_for_label;
+            if (icon_area_h < 10) icon_area_h = card_height - reserved_for_label;
+            int icon_target = LV_MIN((int)(card_width * 0.78f), (int)(icon_area_h * 0.78f));
+            if (icon_target < 16) icon_target = LV_MIN(card_width - 4, icon_area_h);
 
-        const char *item_symbol = app_item_symbol_icon(i);
-        const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
-        if (item_symbol) {
-            lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
-            if (icon) {
-                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
-            }
-        } else if (item_icon) {
-            lv_obj_t *icon = lv_img_create(card);
-            lv_img_set_src(icon, item_icon);
-            lv_img_set_antialias(icon, false);
-            lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
-            if (strcmp(app_items[i].name, "Flap") && app_item_icon_should_recolor(i, item_icon)) {
-                lv_obj_set_style_img_recolor(icon, app_items[i].border_color, 0);
-                lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-            } else {
-                lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
-            }
-            lv_coord_t img_w = item_icon->header.w;
-            lv_coord_t img_h = item_icon->header.h;
-            int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
-            int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
-            int zoom = LV_MIN(zoom_w, zoom_h);
-            if (zoom > 256) zoom = 256;
-            if (zoom < 64) zoom = 64;
-            lv_img_set_zoom(icon, zoom);
-            lv_obj_refresh_self_size(icon);
+            const char *item_symbol = app_item_symbol_icon(i);
+            const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
+            if (item_symbol) {
+                lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
+                if (icon) {
+                    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
+                }
+            } else if (item_icon) {
+                lv_obj_t *icon = lv_img_create(card);
+                lv_img_set_src(icon, item_icon);
+                lv_img_set_antialias(icon, false);
+                lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
+                if (strcmp(app_items[i].name, "Flap") && app_item_icon_should_recolor(i, item_icon)) {
+                    lv_obj_set_style_img_recolor(icon, app_items[i].border_color, 0);
+                    lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+                } else {
+                    lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
+                }
+                lv_coord_t img_w = item_icon->header.w;
+                lv_coord_t img_h = item_icon->header.h;
+                int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
+                int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
+                int zoom = LV_MIN(zoom_w, zoom_h);
+                if (zoom > 256) zoom = 256;
+                if (zoom < 64) zoom = 64;
+                lv_img_set_zoom(icon, zoom);
+                lv_obj_refresh_self_size(icon);
 
-            int displayed_h = (img_h * zoom) / 256;
-            int top_offset = (icon_area_h - displayed_h) / 2;
-            if (top_offset < 0) top_offset = 0;
-            lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
+                int displayed_h = (img_h * zoom) / 256;
+                int top_offset = (icon_area_h - displayed_h) / 2;
+                if (top_offset < 0) top_offset = 0;
+                lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, top_offset);
+            }
         }
 
         lv_obj_t *label = lv_label_create(card);
@@ -938,18 +954,25 @@ static void create_apps_launcher_menu(void) {
         lv_obj_set_style_text_color(label, apps_text_color, 0);
 
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(label, card_width - 8);
+        lv_obj_set_width(label, card_width - (apps_is_compact_layout() ? 12 : 8));
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        if (apps_is_compact_layout()) apply_compact_app_tile(card, false);
     }
 
-    launcher_page_indicator = lv_obj_create(apps_container);
-    lv_obj_align(launcher_page_indicator, LV_ALIGN_BOTTOM_MID, 0, -1);
+    if (!apps_is_compact_layout()) {
+        launcher_page_indicator = lv_obj_create(apps_container);
+        lv_obj_align(launcher_page_indicator, LV_ALIGN_BOTTOM_MID, 0, -1);
+    }
 
     if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
         uint8_t theme = settings_get_menu_theme(&G_Settings);
         lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-        gui_menu_launcher_tile_apply_selected(apps_grid_cards[selected_app_index], app_card_bg_enabled(), accent);
+        if (apps_is_compact_layout()) {
+            apply_compact_app_tile(apps_grid_cards[selected_app_index], true);
+        } else {
+            gui_menu_launcher_tile_apply_selected(apps_grid_cards[selected_app_index], app_card_bg_enabled(), accent);
+        }
         scroll_app_launcher_card_to_view(selected_app_index);
     }
 }
@@ -1056,7 +1079,7 @@ static void render_app_items(void) {
     if (selected_app_index < 0) selected_app_index = 0;
     if (selected_app_index >= num_apps) selected_app_index = num_apps > 0 ? num_apps - 1 : 0;
 
-    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
         create_apps_launcher_menu();
         select_app_item(selected_app_index, false);
     } else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
@@ -1160,7 +1183,7 @@ static void apps_plugin_reload_done(void *arg) {
     int status_bar_height = layout.status_bar_height;
     if (apps_container) {
         lv_obj_align(apps_container, layout.container_align, layout.container_x, layout.container_y);
-        if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+        if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
         }
     }
@@ -1181,6 +1204,7 @@ static void apps_plugin_reload_done(void *arg) {
         should_show_nav_buttons = false;
     }
     if (should_show_nav_buttons && (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER ||
+                                    apps_layout == MAIN_MENU_LAYOUT_COMPACT ||
                                     apps_layout == MAIN_MENU_LAYOUT_LIST)) {
         should_show_nav_buttons = false;
     }
@@ -1309,17 +1333,25 @@ static void select_app_item(int index, bool slide_left) {
     if (index < 0) index = num_apps - 1;
     if (index >= num_apps) index = 0;
 
-    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER && apps_grid_cards) {
+    if ((apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) && apps_grid_cards) {
         if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
             lv_obj_t *old = apps_grid_cards[selected_app_index];
-            gui_menu_launcher_tile_apply(old, app_card_bg_enabled(), apps_surface_color);
+            if (apps_is_compact_layout()) {
+                apply_compact_app_tile(old, false);
+            } else {
+                gui_menu_launcher_tile_apply(old, app_card_bg_enabled(), apps_surface_color);
+            }
         }
         selected_app_index = index;
         if (apps_grid_cards[selected_app_index]) {
             lv_obj_t *card = apps_grid_cards[selected_app_index];
             uint8_t theme = settings_get_menu_theme(&G_Settings);
             lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
-            gui_menu_launcher_tile_apply_selected(card, app_card_bg_enabled(), accent);
+            if (apps_is_compact_layout()) {
+                apply_compact_app_tile(card, true);
+            } else {
+                gui_menu_launcher_tile_apply_selected(card, app_card_bg_enabled(), accent);
+            }
             scroll_app_launcher_card_to_view(selected_app_index);
         }
         return;
@@ -1363,7 +1395,7 @@ static void apps_menu_go_back(void) {
 static void navigate_apps_vertical(int direction) {
     if (direction == 0) return;
 
-    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
         if (apps_grid_cols <= 0 || num_apps <= 0) return;
 
         int rows = (num_apps + apps_grid_cols - 1) / apps_grid_cols;
@@ -1390,12 +1422,15 @@ static void navigate_apps_vertical(int direction) {
 }
 
 static int apps_grid_horizontal_target(int direction) {
-    if (apps_layout != MAIN_MENU_LAYOUT_LAUNCHER || num_apps <= 0) {
+    if (apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
+        return selected_app_index + direction;
+    }
+    if ((apps_layout != MAIN_MENU_LAYOUT_LAUNCHER && apps_layout != MAIN_MENU_LAYOUT_COMPACT) || num_apps <= 0) {
         return selected_app_index + direction;
     }
 
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
     if (layout.columns <= 0 || layout.page_capacity <= 0 || layout.page_count <= 0) {
         return selected_app_index + direction;
     }
@@ -1471,7 +1506,7 @@ static void handle_app_item_selection(int item_index) {
  * @brief Handles hardware button presses for app navigation
  */
 static void handle_apps_button_press(int button) {
-    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER) {
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
         if (button == 2) {
             navigate_apps_vertical(-1);
         } else if (button == 4) {
@@ -1591,10 +1626,14 @@ void apps_menu_event_handler(InputEvent *event) {
             int dy = data->point.y - touch_start_y;
             touch_started = false;
 
-            if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER &&
+            if ((apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) &&
                 abs(dx) > SWIPE_THRESHOLD && abs(dx) > abs(dy)) {
                 main_menu_layout_metrics_t layout;
-                main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_LAUNCHER, num_apps, &layout);
+                if (apps_is_compact_layout()) {
+                    select_app_item(selected_app_index + (dx < 0 ? 1 : -1), dx < 0);
+                    return;
+                }
+                main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
                 int page = selected_app_index / layout.page_capacity;
                 int slot = selected_app_index % layout.page_capacity;
                 page += dx < 0 ? 1 : -1;
@@ -1686,7 +1725,7 @@ void apps_menu_event_handler(InputEvent *event) {
                             }
                         }
                     }
-                } else if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER && apps_grid_cards) {
+                } else if ((apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) && apps_grid_cards) {
                     for (int i = 0; i < num_apps; i++) {
                         if (apps_grid_cards[i]) {
                             lv_area_t card_area;

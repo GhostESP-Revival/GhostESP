@@ -3,6 +3,7 @@
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 
 #include "managers/status_display_animations.h"
+#include "esp_attr.h"
 
 #include <stdint.h>
 
@@ -14,7 +15,7 @@ typedef struct {
     uint8_t tail;
 } MatrixCol;
 
-static MatrixCol s_cols[MATRIX_COLS];
+EXT_RAM_BSS_ATTR static MatrixCol s_cols[MATRIX_COLS];
 static bool s_matrix_inited;
 static const char s_matrix_chars[] = "0123456789ABCDEF";
 static const int MATRIX_GLYPH_W = 3;

@@ -455,15 +455,17 @@ static size_t build_fastpair_adv(uint8_t *buf) {
 // ============================================================================
 
 /**
- * Samsung Buds popup — 31-byte packet
- * (EasysetupTypeBuds in reference)
+ * Samsung Buds popup — 28-byte packet
+ * (EasysetupTypeBuds in reference; the malformed truncated second AD
+ * record is dropped so the packet fits 31 bytes together with the
+ * 3-byte Flags record prepended by spam_task)
  */
 static size_t build_samsung_buds_adv(uint8_t *buf) {
     uint32_t model = samsung_buds_models[esp_random() % SAMSUNG_BUDS_MODEL_COUNT];
 
     uint8_t i = 0;
 
-    // First AD record: 27 bytes of Samsung manufacturer data
+    // Single AD record: 27 bytes of Samsung manufacturer data
     buf[i++] = 27;    // length
     buf[i++] = 0xFF;  // Manufacturer Specific
     buf[i++] = 0x75;  // Samsung Electronics Co. Ltd.
@@ -493,13 +495,7 @@ static size_t build_samsung_buds_adv(uint8_t *buf) {
     buf[i++] = 0xC7;
     buf[i++] = 0x00;
 
-    // Second AD record: truncated Samsung header (Android fills rest with zeros)
-    buf[i++] = 16;    // length
-    buf[i++] = 0xFF;  // Manufacturer Specific
-    buf[i++] = 0x75;  // Samsung Electronics Co. Ltd.
-    // intentionally truncated — Android fills the rest
-
-    return i; // 31
+    return i; // 28
 }
 
 /**
