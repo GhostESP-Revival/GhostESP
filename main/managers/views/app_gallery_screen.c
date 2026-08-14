@@ -730,6 +730,13 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_font(label, accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
+        if (asset_pack_is_loaded()) {
+            lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
+            lv_obj_set_style_radius(label, 3, 0);
+            lv_obj_set_style_pad_hor(label, 6, 0);
+            lv_obj_set_style_pad_ver(label, 1, 0);
+        }
         lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -5);
         apps_carousel_cache.label = label;
         apps_carousel_cache.label_text = label_text;

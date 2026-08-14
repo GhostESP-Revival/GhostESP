@@ -47,6 +47,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Replaced the old splash logo on the TDeck
 - Touch now doesn't affect row styling behind a settings popup when open
 - Moved the Timezone settings option to it's own 'Date & Time' category
+- Carousel labels now use a 60% opaque black background when an asset pack is enabled
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM
