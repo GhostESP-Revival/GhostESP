@@ -14,6 +14,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 ### Storage & Updates
 - Fixed `sd read --base64` downloads sending truncated data
 - Fixed OTA and Cloud Store manifest fetches failing when CDN requests were redirected from HTTP to HTTPS
+- Fixed Cloud Store fetches failing TLS verification via the HTTPS proxy by enabling cross-signed certificate bundle verification on all boards
 
 ### GhostLink & BLE
 - Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
@@ -31,6 +32,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed use-after-free of ARP scan callback contexts on the lwIP thread and the packet monitor's unbalanced core-lock call
 - Fixed the ARP poisoning ICMP sweep never running
 - Fixed the SSH host scan ignoring a pending scan cancellation
+- Time now syncs via SNTP automatically on every Wi-Fi connection, not just manual `wifi connect` commands
 
 ### UI & Rendering
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)

@@ -12,6 +12,10 @@
 #include "vendor/pcap.h"     // For pcap_is_wireshark_mode()
 #include "esp_attr.h"
 #include "esp_crt_bundle.h"
+#include "esp_sntp.h"
+#ifdef CONFIG_HAS_RTC_CLOCK
+#include "vendor/drivers/pcf8563.h"
+#endif
 #include "esp_event.h"
 #include "esp_heap_caps.h" // Add include for heap stats
 #include "core/memory_debug.h"
@@ -937,7 +941,7 @@ static void ota_auto_check_task(void *arg) {
 static void schedule_ota_auto_check(void) {
     if (ota_auto_check_running || ota_auto_check_done) return;
     ota_auto_check_running = true;
-    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 6144, NULL,
+    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 8192, NULL,
                                 tskIDLE_PRIORITY + 1, NULL);
     if (rc != pdPASS) {
         ota_auto_check_running = false;
@@ -1038,6 +1042,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         wifi_reconnect_reset();
+        wifi_manager_start_sntp();
         if (settings_get_wigle_auto_upload(&G_Settings)) {
             wigle_upload_all_async();
         }
@@ -2518,6 +2523,41 @@ void wifi_manager_init(void) {
     size_t mem_end = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "wifi_manager_init: COMPLETE. Total used: %d bytes, free internal RAM: %d bytes", 
              (int)(mem_start - mem_end), (int)mem_end);
+}
+
+static void wifi_manager_handle_sntp_sync(struct timeval *tv) {
+    if (!tv || tv->tv_sec <= 1600000000) return;
+
+#ifdef CONFIG_HAS_RTC_CLOCK
+    struct tm utc_timeinfo;
+    gmtime_r(&tv->tv_sec, &utc_timeinfo);
+    RTC_Date rtc_time;
+    rtc_time.year = utc_timeinfo.tm_year + 1900;
+    rtc_time.month = utc_timeinfo.tm_mon + 1;
+    rtc_time.day = utc_timeinfo.tm_mday;
+    rtc_time.hour = utc_timeinfo.tm_hour;
+    rtc_time.minute = utc_timeinfo.tm_min;
+    rtc_time.second = utc_timeinfo.tm_sec;
+
+    if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+        ESP_LOGI(TAG, "Time synchronized from NTP and UTC saved to RTC: %04d-%02d-%02d %02d:%02d:%02d",
+                 rtc_time.year, rtc_time.month, rtc_time.day,
+                 rtc_time.hour, rtc_time.minute, rtc_time.second);
+    }
+#else
+    ESP_LOGI(TAG, "Time synchronized from NTP");
+#endif
+}
+
+void wifi_manager_start_sntp(void) {
+    if (esp_sntp_enabled()) return;
+
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+#ifdef CONFIG_HAS_RTC_CLOCK
+    esp_sntp_set_time_sync_notification_cb(wifi_manager_handle_sntp_sync);
+#endif
+    esp_sntp_init();
 }
 
 void wifi_manager_configure_sta_from_settings(void) {

@@ -935,6 +935,19 @@ void app_main(void) {
     joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
     joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
     joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
+#ifdef CONFIG_JOYSTICK_COM_PIN
+    if (CONFIG_JOYSTICK_COM_PIN >= 0) {
+        gpio_config_t com_conf = {
+            .pin_bit_mask = (1ULL << CONFIG_JOYSTICK_COM_PIN),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE};
+        gpio_config(&com_conf);
+        gpio_set_level(CONFIG_JOYSTICK_COM_PIN, 0);
+        printf("Joystick COM pin %d driven LOW\n", CONFIG_JOYSTICK_COM_PIN);
+    }
+#endif
 #endif
     printf("Joystick Setup Successfully...\n");
 #endif

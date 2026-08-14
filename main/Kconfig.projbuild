@@ -253,6 +253,16 @@ menu "Ghost ESP Options"
             depends on USE_JOYSTICK
             help
                 Set the data pin for center button
+
+        config JOYSTICK_COM_PIN
+            int "Joystick common pin (driven LOW as switch ground)"
+            default -1
+            depends on USE_JOYSTICK
+            help
+                Optional common terminal pin for the joystick switch matrix.
+                When >= 0, the pin is configured as an output driven LOW so a
+                5-way nav stick's COM can be wired to a GPIO instead of GND.
+                Set to -1 when the stick's common is hardwired to ground.
                 
         config USE_TDECK
             bool "Enable TDECK-plus"

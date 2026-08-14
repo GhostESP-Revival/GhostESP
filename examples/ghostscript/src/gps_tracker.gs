@@ -2,7 +2,9 @@
 -- Requires gps/system, power, and storage permissions.
 
 ghost.ui.set_title("GPS tracker")
-ghost.storage.append("gps.csv", "uptime_ms,fix,lat,lon,sats,battery_pct,battery_mv\n")
+if not ghost.storage.exists("gps.csv") then
+    assert(ghost.storage.append("gps.csv", "uptime_ms,fix,lat,lon,sats,battery_pct,battery_mv\n"), "header write failed")
+end
 
 while true do
     local uptime = ghost.system.uptime_ms()
@@ -14,7 +16,10 @@ while true do
     local mv = ghost.power.voltage_mv()
 
     local line = string.format("%d,%s,%.6f,%.6f,%d,%d,%d\n", uptime, tostring(fix), lat, lon, sats, pct, mv)
-    ghost.storage.append("gps.csv", line)
+    if not ghost.storage.append("gps.csv", line) then
+        print("storage append failed")
+        return
+    end
     print(line)
 
     ghost.delay(5000)

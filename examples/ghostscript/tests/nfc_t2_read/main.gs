@@ -16,13 +16,18 @@ for _ = 1, 20 do
     ghost.delay(250)
 end
 
-local tag = ghost.nfc.read(256)
-if tag then
-    print("model: " .. tag.model .. " uid: " .. tag.uid)
-    print("user bytes: " .. tag.user_bytes .. " ndef bytes: " .. tag.ndef_length)
-    print("read-only: " .. tostring(tag.read_only) .. " password: " .. tostring(tag.password_protected))
+local ok, tag_or_error = pcall(ghost.nfc.read, 256)
+ghost.nfc.stop()
+
+if not ok then
+    print("read failed: " .. tostring(tag_or_error))
+    return
+end
+
+if tag_or_error then
+    print("model: " .. tag_or_error.model .. " uid: " .. tag_or_error.uid)
+    print("user bytes: " .. tag_or_error.user_bytes .. " ndef bytes: " .. tag_or_error.ndef_length)
+    print("read-only: " .. tostring(tag_or_error.read_only) .. " password: " .. tostring(tag_or_error.password_protected))
 else
     print("no Type-2 NDEF tag found")
 end
-
-ghost.nfc.stop()

@@ -3,7 +3,7 @@ print("firmware " .. ghost.system.firmware_version())
 print("target " .. ghost.system.target())
 print("lua heap " .. ghost.system.memory_used() .. "/" .. ghost.system.memory_limit())
 
-ghost.storage.write("hello.txt", "hello from GhostScript\n")
+assert(ghost.storage.write("hello.txt", "hello from GhostScript\n"), "storage write failed")
 local saved = ghost.storage.read("hello.txt") or ""
 print("storage: " .. saved)
 

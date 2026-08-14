@@ -11,4 +11,4 @@ python -m ghostbt script compile examples/ghostscript/tests/input_events
 python -m ghostbt script compile examples/ghostscript/tests/nfc_t2_read
 ```
 
-Run `runtime_smoke` first. It verifies scoped storage, bounded logical storage streams, capability queries, and custom events. `nfc_t2_read` is a read-only manual test for a local Type-2 NDEF tag. The other hardware tests report unavailable hardware or no results without modifying radio configuration beyond starting a scan. `input_events` exits after it receives five input events; use the runner controls only after it has started.
+Run `runtime_smoke` first. It verifies scoped storage, bounded logical storage streams, capability queries, and custom events. `nfc_t2_read` is a read-only manual test for a local Type-2 NDEF tag. The other hardware tests report unavailable hardware or no results without modifying radio configuration beyond starting a scan. `input_events` exits after it receives five input events; use joystick, encoder, touch, or keyboard input after it starts. Do not use Back, because the runner handles it as stop/navigation.
