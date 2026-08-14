@@ -3491,9 +3491,20 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
             dm_pressed_obj = NULL;
         }
         lv_point_t pt = ev->data.touch_data.point;
-        View *cur = dm.current_view;
-        lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
-        lv_obj_t *found = lv_indev_search_obj(root, &pt);
+        /* Search overlay layers first so popups on lv_layer_top()/lv_layer_sys()
+         * consume the press instead of rows behind them getting styled. */
+        lv_obj_t *found = lv_indev_search_obj(lv_layer_top(), &pt);
+        if (!found) {
+            lv_obj_t *sys = lv_layer_sys();
+            if (sys && lv_obj_is_valid(sys)) {
+                found = lv_indev_search_obj(sys, &pt);
+            }
+        }
+        if (!found) {
+            View *cur = dm.current_view;
+            lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
+            found = lv_indev_search_obj(root, &pt);
+        }
         if (found) {
             lv_obj_add_state(found, LV_STATE_PRESSED);
             dm_pressed_obj = found;
