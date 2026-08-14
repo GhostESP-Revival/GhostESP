@@ -1428,7 +1428,7 @@ static const char * const wifi_environment_options[] = {
 };
 
 static const char * const wifi_network_options[] = {
-    "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
+    "mDNS Discovery", "ARP Scan Network", "List ARP Results", "Scan Open Ports", "Scan SSH",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
     "Enum Scan", "SNMP Walk",
     "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...", "SNMP Walk Subnet...",
@@ -2353,7 +2353,6 @@ static void arp_list_cleanup(void) {
         detail_view_destroy(arp_detail_view);
         arp_detail_view = NULL;
     }
-    arp_scan_clear_results();
 }
 
 static int arp_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX],
@@ -8476,6 +8475,24 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
+    else if (strcmp(Selected_Option, "List ARP Results") == 0) {
+        if (arp_scan_get_count() > 0) {
+            if (arp_list_menu) {
+                paged_menu_reset(arp_list_menu);
+            }
+            current_wifi_menu_state = WIFI_MENU_ARP_LIST;
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        if (!start_arp_scan_flow()) {
+            error_popup_create("Scan failed to start");
+        }
+        option_invoked = false;
+        return;
+    }
+
     else if (strcmp(Selected_Option, "Beacon Spam - List") == 0) {
         if (scanned_aps) {
             terminal_set_return_view(&options_menu_view);
@@ -9712,6 +9729,17 @@ static void back_event_cb(lv_event_t *e) {
             return;
         }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+        rebuild_current_menu();
+        return;
+    }
+    // If in ARP list view, go back to Network menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ARP_LIST) {
+        arp_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
+        s_skip_history_capture_once = true;
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
         rebuild_current_menu();
         return;
     }
@@ -12991,6 +13019,8 @@ static void rebuild_current_menu(void) {
             options_view_set_title(g_options_view, "Station Details");
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
             options_view_set_title(g_options_view, "Scan All Results");
+        } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ARP_LIST) {
+            options_view_set_title(g_options_view, "ARP Hosts");
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_MULTI_SELECT) {
             options_view_set_title(g_options_view, "Select APs");
         } else if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_STA_MULTI_SELECT) {
