@@ -1948,7 +1948,9 @@ static lv_obj_t *dm_pressed_obj = NULL;
 static void dm_clear_pressed_state(lv_obj_t *obj) {
     (void)obj;
     if (dm_pressed_obj) {
-        lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        if (lv_obj_is_valid(dm_pressed_obj)) {
+            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        }
         dm_pressed_obj = NULL;
     }
 }
@@ -3483,7 +3485,10 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
     if (ev->type != INPUT_TYPE_TOUCH || ev->is_touch_move) return;
     if (ev->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
+            dm_pressed_obj = NULL;
         }
         lv_point_t pt = ev->data.touch_data.point;
         View *cur = dm.current_view;
@@ -3495,7 +3500,9 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
         }
     } else {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
             dm_pressed_obj = NULL;
         }
     }

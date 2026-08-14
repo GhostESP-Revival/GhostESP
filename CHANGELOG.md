@@ -40,6 +40,8 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - The Banshee display is now double buffered
 - ARP host details now offer per-host Scan Open Ports, Scan SSH, NetBIOS, HTTP Banner, SNMP Probe/Walk and Enum Scan actions
+- Fixed inverted joystick/keyboard scroll direction in the Airspace Monitor
+- Fixed a use-after-free panic in the display manager when a cached touch-pressed object was destroyed in-place before the release event
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM
