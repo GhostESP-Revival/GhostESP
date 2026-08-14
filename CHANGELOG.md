@@ -43,6 +43,10 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed inverted joystick/keyboard scroll direction in the Airspace Monitor
 - Fixed a use-after-free panic in the display manager when a cached touch-pressed object was destroyed in-place before the release event
 - Clarified Wi-Fi menu labels and standardised actions without the "Start" prefix
+- Changed the pressed row styling to something a little.. cleaner
+- Replaced the old splash logo on the TDeck
+- Touch now doesn't affect row styling behind a settings popup when open
+- Moved the Timezone settings option to it's own 'Date & Time' category
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM
