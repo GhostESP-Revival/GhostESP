@@ -1431,8 +1431,6 @@ static const char * const wifi_network_options[] = {
     "mDNS Discovery", "ARP Scan Network", "Scan Open Ports", "Scan SSH",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
     "Enum Scan", "SNMP Walk",
-    "Scan SSH Host...", "NetBIOS Scan Host...", "HTTP Banner Host...", "SNMP Probe Host...", "Enum Scan Host...",
-    "SNMP Walk Host...",
     "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...", "SNMP Walk Subnet...",
     NULL
 };
@@ -2400,6 +2398,36 @@ static void arp_detail_back_cb(lv_event_t *e) {
     rebuild_current_menu();
 }
 
+static void arp_host_scan_cb(lv_event_t *e) {
+    int action = (int)(intptr_t)lv_event_get_user_data(e);
+    const arp_host_t *host = (selected_arp_index >= 0) ? arp_scan_get_host(selected_arp_index) : NULL;
+    if (!host) {
+        error_popup_create("Host not found");
+        return;
+    }
+
+    char cmd[64];
+    switch (action) {
+        case 0: snprintf(cmd, sizeof(cmd), "scanports %s", host->ip); break;
+        case 1: snprintf(cmd, sizeof(cmd), "scanssh %s", host->ip); break;
+        case 2: snprintf(cmd, sizeof(cmd), "netbiosscan %s", host->ip); break;
+        case 3: snprintf(cmd, sizeof(cmd), "httpbannerscan %s", host->ip); break;
+        case 4: snprintf(cmd, sizeof(cmd), "snmpprobe %s", host->ip); break;
+        case 5: snprintf(cmd, sizeof(cmd), "snmpprobe walk %s", host->ip); break;
+        default: snprintf(cmd, sizeof(cmd), "enumscan %s", host->ip); break;
+    }
+
+    if (arp_detail_view) {
+        detail_view_destroy(arp_detail_view);
+        arp_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_ARP_LIST;
+    suppress_wifi_state_reset_once = true;
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+}
+
 static void show_arp_detail(int index) {
     const arp_host_t *host = arp_scan_get_host(index);
     if (!host) {
@@ -2407,6 +2435,11 @@ static void show_arp_detail(int index) {
         return;
     }
     selected_arp_index = index;
+
+    if (menu_build_timer) {
+        lv_timer_del(menu_build_timer);
+        menu_build_timer = NULL;
+    }
 
     if (arp_detail_view) {
         detail_view_destroy(arp_detail_view);
@@ -2426,8 +2459,23 @@ static void show_arp_detail(int index) {
         detail_view_add_info(arp_detail_view, "Vendor", vendor);
     }
 
+    bool compact_detail = use_compact_wifi_detail_layout();
+    if (!compact_detail) {
+        detail_view_add_info(arp_detail_view, "Actions:", "");
+    }
+    detail_view_add_action(arp_detail_view, "Scan Open Ports", arp_host_scan_cb, (void *)(intptr_t)0);
+    detail_view_add_action(arp_detail_view, "Scan SSH", arp_host_scan_cb, (void *)(intptr_t)1);
+    detail_view_add_action(arp_detail_view, "NetBIOS Scan", arp_host_scan_cb, (void *)(intptr_t)2);
+    detail_view_add_action(arp_detail_view, "HTTP Banner", arp_host_scan_cb, (void *)(intptr_t)3);
+    detail_view_add_action(arp_detail_view, "SNMP Probe", arp_host_scan_cb, (void *)(intptr_t)4);
+    detail_view_add_action(arp_detail_view, "SNMP Walk", arp_host_scan_cb, (void *)(intptr_t)5);
+    detail_view_add_action(arp_detail_view, "Enum Scan", arp_host_scan_cb, (void *)(intptr_t)6);
+
     detail_view_add_back(arp_detail_view, arp_detail_back_cb, NULL);
     current_wifi_menu_state = WIFI_MENU_ARP_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
 }
 
 static void arp_scan_complete_callback(void) {
@@ -3105,6 +3153,9 @@ static void update_scroll_buttons_visibility(void) {
     } else if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
         target = detail_view_get_list(sinkhole_detail_view);
         force_show = true;
+    } else if (arp_detail_view && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) {
+        target = detail_view_get_list(arp_detail_view);
+        force_show = true;
     } else if (ble_detect_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_DETAILS) {
         target = detail_view_get_list(ble_detect_detail_view);
         force_show = true;
@@ -3184,8 +3235,6 @@ static void snmp_probe_kb_cb(const char *text);
 static void netbios_subnet_kb_cb(const char *text);
 static void http_banner_subnet_kb_cb(const char *text);
 static void snmp_probe_subnet_kb_cb(const char *text);
-static void enum_scan_kb_cb(const char *text);
-static void snmp_walk_kb_cb(const char *text);
 static void snmp_walk_subnet_kb_cb(const char *text);
 static void dual_comm_netbios_subnet_kb_cb(const char *text);
 static void dual_comm_http_banner_subnet_kb_cb(const char *text);
@@ -5451,6 +5500,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         active_detail_view = gtk_abuse_detail_view;
                     } else if (sta_detail_view && opt_touch_wifi_state == WIFI_MENU_STA_DETAILS) {
                         active_detail_view = sta_detail_view;
+                    } else if (arp_detail_view && opt_touch_wifi_state == WIFI_MENU_ARP_DETAILS) {
+                        active_detail_view = arp_detail_view;
                     } else if (ble_detect_detail_view &&
                                opt_touch_bluetooth_state == BLUETOOTH_MENU_DETECT_DETAILS) {
                         active_detail_view = ble_detect_detail_view;
@@ -5534,6 +5585,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) ||
                 gtk_abuse_detail_view ||
                 (sta_detail_view && current_wifi_menu_state == WIFI_MENU_STA_DETAILS) ||
+                (arp_detail_view && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) ||
                 (ble_detect_detail_view &&
                  current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_DETAILS) ||
                 (ble_adv_detail_view &&
@@ -5582,6 +5634,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 active_detail_view = gtk_abuse_detail_view;
             } else if (sta_detail_view && opt_touch_wifi_state == WIFI_MENU_STA_DETAILS) {
                 active_detail_view = sta_detail_view;
+            } else if (arp_detail_view && opt_touch_wifi_state == WIFI_MENU_ARP_DETAILS) {
+                active_detail_view = arp_detail_view;
             } else if (ble_detect_detail_view &&
                        opt_touch_bluetooth_state == BLUETOOTH_MENU_DETECT_DETAILS) {
                 active_detail_view = ble_detect_detail_view;
@@ -9101,60 +9155,6 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Scan SSH Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(ssh_scan_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "NetBIOS Scan Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(netbios_scan_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "HTTP Banner Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(http_banner_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "SNMP Probe Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(snmp_probe_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "Enum Scan Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(enum_scan_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
-    else if (strcmp(Selected_Option, "SNMP Walk Host...") == 0) {
-        keyboard_view_set_return_view(&options_menu_view);
-        keyboard_view_set_submit_callback(snmp_walk_kb_cb);
-        keyboard_view_set_placeholder("IP address (e.g. 192.168.1.1)");
-        keyboard_view_set_initial_text("");
-        display_manager_switch_view(&keyboard_view);
-        view_switched = true;
-    }
-
     else if (strcmp(Selected_Option, "NetBIOS Subnet...") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(netbios_subnet_kb_cb);
@@ -9668,6 +9668,11 @@ static void back_event_cb(lv_event_t *e) {
     // If in AP details view, go back to AP list
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_AP_DETAILS) {
         ap_detail_back_cb(NULL);
+        return;
+    }
+    // If in ARP host details view, go back to ARP list
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) {
+        arp_detail_back_cb(NULL);
         return;
     }
     // If in station details view, go back to station list
@@ -13268,36 +13273,6 @@ static void snmp_probe_subnet_kb_cb(const char *text) {
 
     char cmd[96];
     snprintf(cmd, sizeof(cmd), "snmpprobe subnet %s", text);
-
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
-    simulateCommand(cmd);
-    keyboard_view_set_submit_callback(NULL);
-}
-
-static void enum_scan_kb_cb(const char *text) {
-    if (!text || strlen(text) == 0) {
-        error_popup_create("Please enter a valid IP address");
-        return;
-    }
-
-    char cmd[64];
-    snprintf(cmd, sizeof(cmd), "enumscan %s", text);
-
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
-    simulateCommand(cmd);
-    keyboard_view_set_submit_callback(NULL);
-}
-
-static void snmp_walk_kb_cb(const char *text) {
-    if (!text || strlen(text) == 0) {
-        error_popup_create("Please enter a valid IP address");
-        return;
-    }
-
-    char cmd[96];
-    snprintf(cmd, sizeof(cmd), "snmpprobe walk %s", text);
 
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);

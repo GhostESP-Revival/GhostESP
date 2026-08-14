@@ -39,6 +39,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Card backgrounds are now off by default
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - The Banshee display is now double buffered
+- ARP host details now offer per-host Scan Open Ports, Scan SSH, NetBIOS, HTTP Banner, SNMP Probe/Walk and Enum Scan actions
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM
