@@ -39,9 +39,10 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Card backgrounds are now off by default
 - Various small optimisations to the ALPHA_8BIT LVGL rendering path
 - The Banshee display is now double buffered
-- ARP host details now offer per-host Scan Open Ports, Scan SSH, NetBIOS, HTTP Banner, SNMP Probe/Walk and Enum Scan actions
+- ARP host details now offer per-host Scan Open Ports, SSH Banner, NetBIOS, HTTP Banner, SNMP Probe/Walk and SMB Enum actions
 - Fixed inverted joystick/keyboard scroll direction in the Airspace Monitor
 - Fixed a use-after-free panic in the display manager when a cached touch-pressed object was destroyed in-place before the release event
+- Clarified Wi-Fi menu labels and standardised actions without the "Start" prefix
 
 ### Performance & Memory
 - Moved the LVGL heap to PSRAM

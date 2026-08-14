@@ -1387,50 +1387,50 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
 }
 
 static const char * const wifi_attacks_options[] = {
-    "Start Deauth Attack",
-    "Start Handshake+Deauth",
-    "Start Channel Switch Attack",
+    "Deauth Attack",
+    "Handshake Capture + Deauth",
+    "Channel Switch (CSA) Attack",
     "Beacon Spam - Random",
     "Beacon Spam - Rickroll",
     "Beacon Spam - List",
-    "Start EAPOL Logoff",
-    "Start GTK Abuse",
-    "Start DHCP-Starve",
+    "EAPOL Logoff",
+    "GTK Isolation Bypass Test",
+    "DHCP Starvation",
     "Stop DHCP-Starve",
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    "Start SAE Flood",
+    "SAE DoS Flood",
 #endif
-    "Start Karma Attack",
-    "Start Karma Attack (Custom SSIDs)",
-    "Start Karma Attack (Custom Portal)",
+    "Karma Attack",
+    "Karma Attack (Custom SSIDs)",
+    "Karma Attack (Custom Portal)",
     "Stop Karma Attack",       
     NULL
 };
 
 static const char * const wifi_capture_options[] = {
-    "Capture Probe", "Capture Deauth", "Capture Beacon", "Capture Raw", "Capture Eapol",
-    "Capture WPS", "Capture PWN",
+    "Capture Probe", "Capture Deauth", "Capture Beacon", "Capture Raw (Monitor)", "Capture EAPOL",
+    "Capture WPS", "Capture Pwnagotchi",
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     "Capture 802.15.4", "Capture 802.15.4 (Channel)",
 #endif
-    "Listen for Probes", "Export PCAP hc22000", NULL
+    "Listen for Probes", "Export Handshakes (hc22000)", NULL
 };
 
 static const char * const wifi_scan_select_options[] = {
-    "Scan Access Points", "Scan APs Live", "Scan Stations", "Scan AP + STA",
-    "List Access Points", "List Stations", "List AP + STA",
-    "Multi-Select APs", "Multi-Select Stations", "WPA3 Compliance", NULL
+    "Scan APs", "Scan APs Live", "Scan Stations", "Scan APs + Clients",
+    "List APs", "List Stations", "List APs + Clients",
+    "Multi-Select APs", "Multi-Select Stations", "WPA3/PMF Check", NULL
 };
 
 static const char * const wifi_environment_options[] = {
-    "Sweep", "Airspace Monitor", "PineAP Detection", "Flock Detection", "Channel Congestion",
+    "Environment Sweep", "Airspace Monitor", "PineAP Detection", "Flock Camera Detection", "Channel Congestion",
     "Packet Monitor", "Packet Visualizer", NULL
 };
 
 static const char * const wifi_network_options[] = {
-    "mDNS Discovery", "ARP Scan Network", "List ARP Results", "Scan Open Ports", "Scan SSH",
+    "mDNS Discovery", "ARP Sweep", "List Hosts (ARP)", "Scan Open Ports", "SSH Banner Scan",
     "NetBIOS Scan", "HTTP Banner Scan", "SNMP Probe",
-    "Enum Scan", "SNMP Walk",
+    "SMB Enum (enum4linux)", "SNMP Walk",
     "NetBIOS Subnet...", "HTTP Banner Subnet...", "SNMP Probe Subnet...", "SNMP Walk Subnet...",
     NULL
 };
@@ -1440,11 +1440,11 @@ static void switch_to_settings_category(int cat_idx);
 static void settings_activate_row(int row_index, bool increment);
 
 static const char * const wifi_evil_portal_options[] = {
-    "Start Evil Portal", "Start Custom Evil Portal", "Stop Evil Portal", NULL
+    "Evil Portal", "Custom Evil Portal", "Stop Evil Portal", NULL
 };
 
 static const char * const wifi_dns_sinkhole_options[] = {
-    "Start Sinkhole", "Stop Sinkhole", "Sinkhole Status",
+    "Sinkhole", "Stop Sinkhole", "Sinkhole Status",
     "Download Blocklist", "Toggle Logging", NULL
 };
 
@@ -1460,7 +1460,7 @@ static const char * const wifi_connection_options[] = {"Connect to WiFi", "Conne
 static const char * const wifi_misc_options[] = {"TV Cast (Dial Connect)", "Power Printer", "TP Link Test", NULL};
 
 static const char * const wifi_main_options[] = {
-    "Attacks", "Scan & Select", "Environment", "Network", "Capture", "Evil Portal", "DNS Sinkhole", "Connection", "Misc", NULL
+    "Attacks", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole", "Connection", "Gadgets", NULL
 };
 
 static const char * const gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
@@ -2463,12 +2463,12 @@ static void show_arp_detail(int index) {
         detail_view_add_info(arp_detail_view, "Actions:", "");
     }
     detail_view_add_action(arp_detail_view, "Scan Open Ports", arp_host_scan_cb, (void *)(intptr_t)0);
-    detail_view_add_action(arp_detail_view, "Scan SSH", arp_host_scan_cb, (void *)(intptr_t)1);
+    detail_view_add_action(arp_detail_view, "SSH Banner Scan", arp_host_scan_cb, (void *)(intptr_t)1);
     detail_view_add_action(arp_detail_view, "NetBIOS Scan", arp_host_scan_cb, (void *)(intptr_t)2);
     detail_view_add_action(arp_detail_view, "HTTP Banner", arp_host_scan_cb, (void *)(intptr_t)3);
     detail_view_add_action(arp_detail_view, "SNMP Probe", arp_host_scan_cb, (void *)(intptr_t)4);
     detail_view_add_action(arp_detail_view, "SNMP Walk", arp_host_scan_cb, (void *)(intptr_t)5);
-    detail_view_add_action(arp_detail_view, "Enum Scan", arp_host_scan_cb, (void *)(intptr_t)6);
+    detail_view_add_action(arp_detail_view, "SMB Enum", arp_host_scan_cb, (void *)(intptr_t)6);
 
     detail_view_add_back(arp_detail_view, arp_detail_back_cb, NULL);
     current_wifi_menu_state = WIFI_MENU_ARP_DETAILS;
@@ -7699,21 +7699,21 @@ void option_event_cb(lv_event_t *e) {
     if (SelectedMenuType == OT_Wifi) {
         if (current_wifi_menu_state == WIFI_MENU_MAIN) {
             if (strcmp(Selected_Option, "Attacks") == 0) current_wifi_menu_state = WIFI_MENU_ATTACKS;
-            else if (strcmp(Selected_Option, "Scan & Select") == 0) current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
-            else if (strcmp(Selected_Option, "Environment") == 0) current_wifi_menu_state = WIFI_MENU_ENVIRONMENT;
+            else if (strcmp(Selected_Option, "Recon") == 0) current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+            else if (strcmp(Selected_Option, "Monitor") == 0) current_wifi_menu_state = WIFI_MENU_ENVIRONMENT;
             else if (strcmp(Selected_Option, "Network") == 0) current_wifi_menu_state = WIFI_MENU_NETWORK;
             else if (strcmp(Selected_Option, "Capture") == 0) current_wifi_menu_state = WIFI_MENU_CAPTURE;
             else if (strcmp(Selected_Option, "Evil Portal") == 0) current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;
             else if (strcmp(Selected_Option, "DNS Sinkhole") == 0) current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
             else if (strcmp(Selected_Option, "Connection") == 0) current_wifi_menu_state = WIFI_MENU_CONNECTION;
-            else if (strcmp(Selected_Option, "Misc") == 0) current_wifi_menu_state = WIFI_MENU_MISC;
+            else if (strcmp(Selected_Option, "Gadgets") == 0) current_wifi_menu_state = WIFI_MENU_MISC;
             rebuild_current_menu();
             option_invoked = false;
             return;
         }
 
         if (current_wifi_menu_state == WIFI_MENU_CAPTURE &&
-            strcmp(Selected_Option, "Export PCAP hc22000") == 0) {
+            strcmp(Selected_Option, "Export Handshakes (hc22000)") == 0) {
             pcap_capture_page_offset = 0;
             current_wifi_menu_state = WIFI_MENU_CAPTURE_BROWSER;
             rebuild_current_menu();
@@ -8005,7 +8005,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    if (strcmp(Selected_Option, "Scan Access Points") == 0) {
+    if (strcmp(Selected_Option, "Scan APs") == 0) {
         if (!start_ap_scan_flow()) {
             error_popup_create("Scan failed to start");
         }
@@ -8283,7 +8283,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "List Access Points") == 0) {
+    else if (strcmp(Selected_Option, "List APs") == 0) {
         uint16_t ap_count_local = ap_scan_get_count();
         if (ap_count_local > 0) {
             if (ap_list_menu) {
@@ -8302,7 +8302,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "Scan AP + STA") == 0) {
+    else if (strcmp(Selected_Option, "Scan APs + Clients") == 0) {
         if (!start_scan_all_flow()) {
             error_popup_create("Scan failed to start");
         }
@@ -8310,41 +8310,41 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "Sweep") == 0) {
+    else if (strcmp(Selected_Option, "Environment Sweep") == 0) {
         if (!start_sweep_flow()) {
-            error_popup_create("Sweep failed to start");
+            error_popup_create("Environment Sweep failed to start");
         }
         option_invoked = false;
         return;
     }
 
-    else if (strcmp(Selected_Option, "Start Deauth Attack") == 0) {
+    else if (strcmp(Selected_Option, "Deauth Attack") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
-            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
         } else {
             simulateCommand("attack -d");
         }
         view_switched = true; 
     }
     
-    else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+    else if (strcmp(Selected_Option, "Handshake Capture + Deauth") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
-            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
         } else {
             simulateCommand("attack -hsd");
         }
         view_switched = true; 
     }
     
-    else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
+    else if (strcmp(Selected_Option, "Channel Switch (CSA) Attack") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
-            glog("No APs scanned. Please run 'Scan Access Points' first.\\n");
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
         } else {
             simulateCommand("attack -c");
         }
@@ -8378,7 +8378,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "List AP + STA") == 0) {
+    else if (strcmp(Selected_Option, "List APs + Clients") == 0) {
         uint16_t ap_count_local = ap_scan_get_count();
         if (ap_count_local > 0) {
             if (scanall_list_menu) {
@@ -8417,7 +8417,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "WPA3 Compliance") == 0) {
+    else if (strcmp(Selected_Option, "WPA3/PMF Check") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -8467,7 +8467,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "ARP Scan Network") == 0) {
+    else if (strcmp(Selected_Option, "ARP Sweep") == 0) {
         if (!start_arp_scan_flow()) {
             error_popup_create("Scan failed to start");
         }
@@ -8475,7 +8475,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "List ARP Results") == 0) {
+    else if (strcmp(Selected_Option, "List Hosts (ARP)") == 0) {
         if (arp_scan_get_count() > 0) {
             if (arp_list_menu) {
                 paged_menu_reset(arp_list_menu);
@@ -8526,14 +8526,14 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Capture Raw") == 0) {
+    else if (strcmp(Selected_Option, "Capture Raw (Monitor)") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("capture -raw");
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Capture Eapol") == 0) {
+    else if (strcmp(Selected_Option, "Capture EAPOL") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
 
@@ -8563,13 +8563,13 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Start EAPOL Logoff") == 0) {
+    else if (strcmp(Selected_Option, "EAPOL Logoff") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("attack -e");
         view_switched = true;
     }
-    else if (strcmp(Selected_Option, "Start GTK Abuse") == 0) {
+    else if (strcmp(Selected_Option, "GTK Isolation Bypass Test") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(gtk_abuse_ssid_cb);
         display_manager_switch_view(&keyboard_view);
@@ -8577,7 +8577,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    else if (strcmp(Selected_Option, "Start SAE Flood") == 0) {
+    else if (strcmp(Selected_Option, "SAE DoS Flood") == 0) {
         keyboard_view_set_return_view(&options_menu_view);
         keyboard_view_set_submit_callback(sae_flood_password_cb);
         display_manager_switch_view(&keyboard_view);
@@ -8586,7 +8586,7 @@ void option_event_cb(lv_event_t *e) {
     }
 #endif
 
-    else if (strcmp(Selected_Option, "Start Karma Attack") == 0) {
+    else if (strcmp(Selected_Option, "Karma Attack") == 0) {
         wifi_manager_start_karma();
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
@@ -8600,13 +8600,13 @@ void option_event_cb(lv_event_t *e) {
         TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
         view_switched = true;
     }
-    else if (strcmp(Selected_Option, "Start Karma Attack (Custom SSIDs)") == 0) {
+    else if (strcmp(Selected_Option, "Karma Attack (Custom SSIDs)") == 0) {
         keyboard_view_set_submit_callback(karma_custom_ssids_cb);
         display_manager_switch_view(&keyboard_view);
         keyboard_view_set_placeholder("SSID1,SSID2,SSID3");
         return;
     }
-    else if (strcmp(Selected_Option, "Start Karma Attack (Custom Portal)") == 0) {
+    else if (strcmp(Selected_Option, "Karma Attack (Custom Portal)") == 0) {
         portal_page_offset = 0;
         current_wifi_menu_state = WIFI_MENU_KARMA_PORTAL_SELECT;
         rebuild_current_menu();
@@ -8661,7 +8661,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Start Evil Portal") == 0) {
+    else if (strcmp(Selected_Option, "Evil Portal") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("startportal default FreeWiFi");
@@ -8675,7 +8675,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Start Custom Evil Portal") == 0) {
+    else if (strcmp(Selected_Option, "Custom Evil Portal") == 0) {
         portal_page_offset = 0;
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL_SELECT;
         rebuild_current_menu();
@@ -8711,7 +8711,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "Start Sinkhole") == 0) {
+    else if (strcmp(Selected_Option, "Sinkhole") == 0) {
         blocklist_page_offset = 0;
         blocklist_free_cache();
         const char **files = blocklist_load_page();
@@ -8941,7 +8941,7 @@ void option_event_cb(lv_event_t *e) {
 
 
 
-    else if (strcmp(Selected_Option, "Capture PWN") == 0) {
+    else if (strcmp(Selected_Option, "Capture Pwnagotchi") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("capture -pwn");
@@ -9103,7 +9103,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Flock Detection") == 0) {
+    else if (strcmp(Selected_Option, "Flock Camera Detection") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("flockscan");
@@ -9117,7 +9117,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Scan SSH") == 0) {
+    else if (strcmp(Selected_Option, "SSH Banner Scan") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("scanssh");
@@ -9145,9 +9145,9 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Enum Scan") == 0) {
+    else if (strcmp(Selected_Option, "SMB Enum (enum4linux)") == 0) {
         if (!start_enum_scan_flow()) {
-            error_popup_create("Enum scan failed to start");
+            error_popup_create("SMB enum failed to start");
         }
         option_invoked = false;
         return;
@@ -9220,7 +9220,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
-    else if (strcmp(Selected_Option, "Start DHCP-Starve") == 0) {
+    else if (strcmp(Selected_Option, "DHCP Starvation") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         simulateCommand("dhcpstarve start");
