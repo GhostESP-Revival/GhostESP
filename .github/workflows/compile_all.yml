@@ -72,7 +72,7 @@ jobs:
           - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
           - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4001792, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
-          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", ota: true, ota_slot_size: 5505024, board_key: "somethingsomething" }
+          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", ota: true, ota_slot_size: 5705728, board_key: "somethingsomething" }
           - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }

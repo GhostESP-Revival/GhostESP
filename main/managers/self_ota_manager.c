@@ -39,9 +39,9 @@
 #define SELF_OTA_KEY_UPDATER_SHA "up_sha"
 
 #define BANSHEE_C5_APP0_OFFSET 0x10000
-#define BANSHEE_C5_APP0_SIZE 0x540000
-#define BANSHEE_C5_NAPPS_OFFSET 0x550000
-#define BANSHEE_C5_NAPPS_SIZE 0x100000
+#define BANSHEE_C5_APP0_SIZE 0x550000
+#define BANSHEE_C5_NAPPS_OFFSET 0x560000
+#define BANSHEE_C5_NAPPS_SIZE 0xF0000
 #define BANSHEE_C5_UPDATER_OFFSET 0x650000
 #define BANSHEE_C5_UPDATER_SIZE 0x120000
 #define BANSHEE_C5_COREDUMP_OFFSET 0x770000
@@ -201,8 +201,15 @@ static bool self_ota_banshee_c5_layout_present(void) {
     const esp_partition_t *updater = esp_partition_find_first(ESP_PARTITION_TYPE_APP,
                                                              ESP_PARTITION_SUBTYPE_APP_OTA_0,
                                                              "updater");
-    return updater && updater->address == BANSHEE_C5_UPDATER_OFFSET &&
-           updater->size == BANSHEE_C5_UPDATER_SIZE;
+    if (!(updater && updater->address == BANSHEE_C5_UPDATER_OFFSET &&
+          updater->size == BANSHEE_C5_UPDATER_SIZE)) {
+        return false;
+    }
+    const esp_partition_t *app0 = esp_partition_find_first(ESP_PARTITION_TYPE_APP,
+                                                           ESP_PARTITION_SUBTYPE_APP_FACTORY,
+                                                           "app0");
+    return app0 && app0->address == BANSHEE_C5_APP0_OFFSET &&
+           app0->size == BANSHEE_C5_APP0_SIZE;
 }
 
 static esp_err_t self_ota_migrate_banshee_c5_partition_table_if_needed(void) {
