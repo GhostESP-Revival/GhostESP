@@ -3,6 +3,7 @@
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 
 #include "managers/status_display_animations.h"
+#include "esp_attr.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -13,8 +14,8 @@
 
 #define LIFE_HISTORY 16
 
-static uint8_t s_life_grid[LIFE_ROWS][LIFE_COLS];
-static uint8_t s_life_next[LIFE_ROWS][LIFE_COLS];
+EXT_RAM_BSS_ATTR static uint8_t s_life_grid[LIFE_ROWS][LIFE_COLS];
+EXT_RAM_BSS_ATTR static uint8_t s_life_next[LIFE_ROWS][LIFE_COLS];
 static bool s_life_active;
 static uint32_t s_life_state_hashes[LIFE_HISTORY];
 static int s_life_history_len;

@@ -311,6 +311,8 @@ void register_commands() {
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);
     register_command("tplinktest", handle_tp_link_test);
+    register_command("wol", handle_wol_cmd);
+    register_command("govee", handle_govee_cmd);
     register_command("stop", handle_stop_flipper);
     register_command("reboot", handle_reboot);
     register_command("startwd", handle_startwd);

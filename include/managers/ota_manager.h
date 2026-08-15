@@ -56,6 +56,10 @@ esp_err_t ota_manager_init(void);
 // Spawns a background task; call ota_manager_get_status() to poll the result.
 esp_err_t ota_manager_check_now(void);
 
+// Blocking variant for an existing background worker. Avoids creating a
+// second task while preserving the asynchronous API used by the UI.
+esp_err_t ota_manager_check_now_blocking(void);
+
 // Low-frequency background check (call once per boot / once a day). Only
 // ever performs the manifest fetch and sets the "update available" flag --
 // never downloads or flashes anything.

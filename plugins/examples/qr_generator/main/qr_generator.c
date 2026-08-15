@@ -5,6 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Native SD app shared objects cannot import the full libc string ABI. */
+char *strcpy(char *dst, const char *src) __attribute__((weak));
+char *strcpy(char *dst, const char *src) {
+    char *out = dst;
+    while ((*dst++ = *src++) != '\0') {}
+    return out;
+}
+
 /* The encoder is part of M5GFX and is compiled into this app's shared object. */
 #define QR_TEXT_MAX 120
 #define QR_MAX_VERSION 10

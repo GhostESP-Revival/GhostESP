@@ -214,6 +214,14 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
     lv_obj_set_style_pad_left(btn, GUI_SAFEAREA_HOR, 0);
     lv_obj_set_style_pad_right(btn, GUI_SAFEAREA_VER, 0);
     lv_obj_add_style(btn, get_zebra_style(ov, ov->count), 0);
+    lv_style_t *zebra = get_zebra_style(ov, ov->count);
+    lv_style_value_t zebra_val;
+    if (lv_style_get_prop_inlined(zebra, LV_STYLE_BG_COLOR, &zebra_val) == LV_RES_OK) {
+        lv_obj_set_style_bg_color(btn, lv_color_darken(zebra_val.color, LV_OPA_30), LV_STATE_PRESSED);
+    }
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_transform_width(btn, 0, LV_STATE_PRESSED);
+    lv_obj_set_style_transform_height(btn, 0, LV_STATE_PRESSED);
     if (on_click) lv_obj_add_event_cb(btn, on_click, LV_EVENT_CLICKED, user_data);
     lv_obj_t *lbl = lv_obj_get_child(btn, 0);
     if (lbl) {

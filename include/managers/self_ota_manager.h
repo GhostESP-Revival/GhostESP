@@ -43,6 +43,9 @@ SelfOtaStatus self_ota_manager_get_status(void);
 // reports SELF_OTA_STATE_UPDATE_AVAILABLE when a firmware image exists.
 esp_err_t self_ota_manager_check_now(void);
 
+// Blocking variant for an existing background worker.
+esp_err_t self_ota_manager_check_now_blocking(void);
+
 // Explicit user-confirmed update: fetches this board's own manifest entry,
 // stores the pending updater handoff in NVS, and reboots into the updater app.
 // The running firmware is untouched until the updater is running from its own

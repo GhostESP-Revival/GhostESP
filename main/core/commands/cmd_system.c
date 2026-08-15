@@ -291,7 +291,17 @@ void handle_coredump_cmd(int argc, char **argv) {
                 break;
             }
             b64[written] = '\0';
-            glog("%s", b64);
+            /* glog caps each call at 511 bytes; emit 4-aligned pieces so no
+             * base64 chars are truncated. Newlines between pieces are fine for
+             * host-side base64 decoding. */
+            size_t piece_len = 496; /* multiple of 4, < 511 */
+            size_t pos = 0;
+            while (pos < written) {
+                size_t n = written - pos;
+                if (n > piece_len) n = piece_len;
+                glog("%.*s\n", (int)n, b64 + pos);
+                pos += n;
+            }
             offset += chunk;
         }
         glog("\n=== COREDUMP BASE64 END ===\n");

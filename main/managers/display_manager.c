@@ -1638,6 +1638,10 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "I80 display initialization failed: %s", esp_err_to_name(ret));
     return;
   }
+  /* The I80 path skips lvgl_driver_init(), so the touch driver (CST820) must
+   * be initialized here or its device handle stays NULL and every read fails
+   * with "i2c handle not initialized". */
+  touch_driver_init();
 #else
   lvgl_driver_init();
 #endif
@@ -1669,10 +1673,19 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Keep the C5 SPI flush buffer in DMA-capable internal RAM. PSRAM draw
+  /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
-     time, which is fragile once WiFi/LVGL have fragmented internal RAM. */
+     time, which is fragile once WiFi/LVGL have fragmented internal RAM.
+     Only somethingsomething gets a second buffer: LVGL renders the next
+     chunk while the SPI DMA flushes the previous one, hiding render time
+     behind the transfer. Other C5 boards stay single-buffered to save
+     internal RAM. */
   buf1_pixels = (size_t)width * 5;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    buf2_pixels = (size_t)width * 5;
+  }
+#endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
   buf1_pixels = (size_t)width * 5;
 #elif defined(CONFIG_IDF_TARGET_ESP32)
@@ -1711,6 +1724,18 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     }
   }
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (!buf1) {
+    ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
+    free(buf2);
+    buf2 = NULL;
+    return;
+  }
+  if (!buf2) {
+    ESP_LOGW(TAG, "display_manager: buf2 allocation failed, falling back to single buffer");
+    buf2_pixels = 0;
+  }
+#else
   if (!buf1 || (buf2_pixels > 0 && !buf2)) {
     ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
     free(buf1);
@@ -1719,6 +1744,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = NULL;
     return;
   }
+#endif
   ESP_LOGI(TAG, "display_manager: draw buffers allocated, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -1932,7 +1958,9 @@ static lv_obj_t *dm_pressed_obj = NULL;
 static void dm_clear_pressed_state(lv_obj_t *obj) {
     (void)obj;
     if (dm_pressed_obj) {
-        lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        if (lv_obj_is_valid(dm_pressed_obj)) {
+            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        }
         dm_pressed_obj = NULL;
     }
 }
@@ -2034,9 +2062,13 @@ static void dm_run_on_lvgl_async_cb(void *param) {
   free(call);
 }
 
+bool display_manager_is_lvgl_task(void) {
+  return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
+}
+
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
   if (!fn) return;
-  if (lvgl_task_handle && xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
+  if (!display_manager_is_lvgl_task()) {
     dm_lvgl_call_t *call = malloc(sizeof(*call));
     if (!call) return;
     call->fn = fn;
@@ -3463,19 +3495,35 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
     if (ev->type != INPUT_TYPE_TOUCH || ev->is_touch_move) return;
     if (ev->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
+            dm_pressed_obj = NULL;
         }
         lv_point_t pt = ev->data.touch_data.point;
-        View *cur = dm.current_view;
-        lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
-        lv_obj_t *found = lv_indev_search_obj(root, &pt);
+        /* Search overlay layers first so popups on lv_layer_top()/lv_layer_sys()
+         * consume the press instead of rows behind them getting styled. */
+        lv_obj_t *found = lv_indev_search_obj(lv_layer_top(), &pt);
+        if (!found) {
+            lv_obj_t *sys = lv_layer_sys();
+            if (sys && lv_obj_is_valid(sys)) {
+                found = lv_indev_search_obj(sys, &pt);
+            }
+        }
+        if (!found) {
+            View *cur = dm.current_view;
+            lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
+            found = lv_indev_search_obj(root, &pt);
+        }
         if (found) {
             lv_obj_add_state(found, LV_STATE_PRESSED);
             dm_pressed_obj = found;
         }
     } else {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
             dm_pressed_obj = NULL;
         }
     }

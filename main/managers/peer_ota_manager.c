@@ -244,10 +244,18 @@ void peer_ota_manager_background_check(void) {
 
 static void peer_ota_check_task(void *pv) {
     (void)pv;
+    (void)peer_ota_manager_check_now_blocking();
+    vTaskDelete(NULL);
+}
+
+esp_err_t peer_ota_manager_check_now_blocking(void) {
+    if (!peer_ota_manager_is_supported()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     peer_ota_do_check();
     settings_set_ota_last_check_time(&G_Settings, (uint32_t)time(NULL));
     settings_persist_setting(SETTING_OTA_LAST_CHECK_TIME);
-    vTaskDelete(NULL);
+    return ESP_OK;
 }
 
 esp_err_t peer_ota_manager_check_now(void) {
@@ -872,6 +880,7 @@ bool peer_ota_manager_is_supported(void) { return false; }
 esp_err_t peer_ota_manager_init(void) { return ESP_OK; }
 void peer_ota_manager_background_check(void) {}
 esp_err_t peer_ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t peer_ota_manager_check_now_blocking(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t peer_ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
 PeerOtaStatus peer_ota_manager_get_status(void) { return (PeerOtaStatus){ .state = PEER_OTA_STATE_IDLE }; }
 void peer_ota_manager_handle_otarecv_cmd(int argc, char **argv) { (void)argc; (void)argv; }

@@ -171,6 +171,8 @@ void wifi_manager_set_manual_disconnect(bool disconnect);
 
 void wifi_manager_configure_sta_from_settings(void);
 
+void wifi_manager_start_sntp(void);
+
 void wifi_manager_start_ip_lookup();
 
 #ifdef CONFIG_SPIRAM

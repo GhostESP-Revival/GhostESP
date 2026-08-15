@@ -814,11 +814,11 @@ esp_err_t eth_arp_poison_start(void)
              (int)((network >> 8)  & 0xFF),
              (int)((network >> 16) & 0xFF));
 
+    s_running = true;
+
     icmp_sweep(subnet_prefix);
 
     glog("[ARP Poison] ARP scanning %s0/24 ...\n", subnet_prefix);
-
-    s_running = true;
 
     for (int h = 1; h <= 254; h++) {
         if (!s_running) break;

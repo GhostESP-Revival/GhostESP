@@ -179,7 +179,7 @@ void settings_deinit(void) { nvs_close(nvsHandle); }
 void settings_set_defaults(FSettings *settings) {
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
-  settings->broadcast_speed = 5;
+  settings->broadcast_speed = 1;
   // default to the 'Bright' palette (index 3)
   settings->menu_theme = 3;
   strcpy(settings->ap_ssid, "GhostNet");
@@ -272,7 +272,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->sun_mode = false;
   settings->sun_mode_saved_brightness = 100;
   settings->menu_item_borders = false;
-  settings->menu_card_bg = true;
+  settings->menu_card_bg = false;
   settings->touch_drag_scroll = true;
 
   // Wardriving defaults
@@ -1934,12 +1934,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 2) layout = 1;
+    if (layout > 3) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 2 ? settings->menu_layout : 1;
+    return settings->menu_layout <= 3 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {

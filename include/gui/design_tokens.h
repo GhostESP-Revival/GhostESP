@@ -25,10 +25,17 @@
 #define GUI_SHAKE_CYCLES     3
 #define GUI_SHAKE_PERIOD_MS  60
 
+static lv_color_filter_dsc_t gui_pressed_dark_filter_dsc;
+
+static inline lv_color_t gui_pressed_dark_filter_cb(const lv_color_filter_dsc_t *dsc, lv_color_t color, lv_opa_t opa) {
+    (void)dsc;
+    return lv_color_darken(color, opa);
+}
+
 static inline void gui_apply_pressed_style(lv_obj_t *obj) {
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x444444), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(obj, LV_OPA_30, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_zoom(obj, 244, LV_STATE_PRESSED);
+    lv_color_filter_dsc_init(&gui_pressed_dark_filter_dsc, gui_pressed_dark_filter_cb);
+    lv_obj_set_style_color_filter_dsc(obj, &gui_pressed_dark_filter_dsc, LV_STATE_PRESSED);
+    lv_obj_set_style_color_filter_opa(obj, 35, LV_STATE_PRESSED);
 }
 
 static inline const lv_font_t *gui_font_title(void) {

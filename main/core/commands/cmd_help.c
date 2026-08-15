@@ -19,7 +19,7 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "gadgets", "capture", "beacon", "attack"
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
@@ -332,7 +332,7 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: timezone <TZ_STRING>\n\n");
         glog("webauth\n");
         glog("    Description: Enable/disable web authentication.\n");
-        glog("    Usage: webauth <enable|disable>\n\n");
+        glog("    Usage: webauth [on|off|toggle|status]\n\n");
         glog("pineap\n");
         glog("    Description: Start/Stop detecting WiFi Pineapples.\n");
         glog("    Usage: pineap [-s]\n");
@@ -377,7 +377,9 @@ void handle_help(int argc, char **argv) {
         glog("    Description: Probe SNMP v1/v2c services with common communities\n");
         glog("    Usage: snmpprobe\n");
         glog("           snmpprobe <IP>\n");
-        glog("           snmpprobe subnet <a.b.c[.0|.]>\n\n");
+        glog("           snmpprobe subnet <a.b.c[.0|.]>\n");
+        glog("           snmpprobe walk <IP> [OID]\n");
+        glog("           snmpprobe communities <c1,c2,...|file>\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -487,6 +489,12 @@ void handle_help(int argc, char **argv) {
         glog("dialconnect\n");
         glog("    Cast a random YouTube video to all smart TVs on your LAN.\n");
         glog("    Usage: dialconnect\n\n");
+        return;
+    }
+
+    if (strcmp(category, "gadgets") == 0) {
+        glog("wol <MAC|IP> [broadcast IP]\n");
+        glog("govee scan | govee <IP> on|off|brightness N|color RRGGBB\n");
         return;
     }
 

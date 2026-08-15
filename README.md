@@ -1,10 +1,12 @@
-
-<img width="800" alt="ghostesp_white_text_logo2" src="https://github.com/user-attachments/assets/f2cb3bb4-ab79-4679-8db1-beddc306ba07" />
+<img width="800" alt="ghostesp_logo_white_transparent_2x_shine" src="https://github.com/user-attachments/assets/36005ffd-9cfc-433e-a306-1606feb18107" />
 
 > **The open-source wireless research platform for ESP32.**
-> Built on ESP-IDF v6.0. **v2.0** turns GhostESP into a full graphical, extensible, multi-radio environment.
 
-[![Version](https://img.shields.io/badge/version-2.0-7c5cff?style=flat-square)](https://github.com/spookyorigin/Ghost_ESP)
+**Turn a $10–20 ESP32 board into a wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
+
+**New to GhostESP?** Grab a [compatible device](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) - no drivers, no build toolchain.
+
+[![Version](https://img.shields.io/badge/version-2.1-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
@@ -14,12 +16,23 @@
 
 ---
 
-## What's New in 2.0
+## What's New in 2.x
 
-The biggest update yet: a rebuilt UI, a native app ecosystem, and expanded radio workflows.
+**v2.0** was the biggest update yet: a rebuilt UI, a native app ecosystem, and expanded radio workflows. **v2.1** (Revival) keeps that going with on-device OTA, a second NFC backend, a Cloud Store, and a sandboxed scripting runtime.
 
 <img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" /> <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
 
+**v2.1 highlights:**
+- **Firmware updates on-device**: Wi-Fi, SD card, and GhostLink peer updates with verification and rollback protection.
+- **More NFC**: ST25R3916 backend, EMV payment-card reads, DESFire application/file trees, PicoPass/iCLASS, and MIFARE Classic hardnested recovery.
+- **Cloud Store**: Browse and install apps, scripts, and asset packs directly on the board.
+- **GhostScript**: Sandboxed Lua scripting runtime for scripts from the SD card.
+- **New native apps**: Doom port, HackChat ESP-NOW messenger, and QR Generator.
+- **WiFi**: Combined handshake + deauth attack, SMB/SNMP enumeration, Airspace Monitor attack-type detection, channel congestion chart.
+- **Ethernet & CLI**: ~3x faster scans with SD exports, OS-style commands (`echo`, `ping`, `version`), aliases, scripts, and env vars.
+- **Reliability**: Banshee C5 display/SD no longer block each other, LVGL tick timing fix, RTC persistence, and more stable wardriving.
+
+**v2.0 highlights:**
 - **Redesigned UI**: 60 FPS rendering, toasts, SD-loaded asset packs (icons/themes/backgrounds), touch-drag scrolling, and a full accessibility suite.
 - **Native SD Apps**: Load, build, and package apps with the new App Gallery, scoped permissions, and the Ghost Build Tool (`gbt`). C5 builds can run app code from flash (XIP).
 - **WiFi Airspace Monitor**: Real-time threat insights with adaptive channel dwell, a learned baseline, and a packets/sec sparkline.
@@ -45,17 +58,19 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-## Flagship Capabilities
+## Why GhostESP over the alternatives?
 
-A few things set GhostESP apart from every other ESP32 firmware:
+The short version — see the [full 130+ row comparison](#esp32-firmware-comparison) below for everything else.
 
-- **Native SD App ecosystem**: Create, package, discover, launch, inspect, and stop SD-loaded apps with permissions and scoped storage. Build your own with `gbt`.
-- **ESP-IDF-native architecture**: built directly on Espressif's SDK instead of Arduino/PlatformIO, giving GhostESP tighter control over Wi-Fi, Bluetooth, USB, memory, and low-level hardware features.
-- **GhostLink**: dual-ESP32 command/display interface with remote radio, remote keyboard, BLE bridging, and split-channel wardriving.
-- **Multi-interface control**: use GhostESP from the on-device UI, Flipper Zero app, serial CLI, WebUI, Android companion app, or GhostLink-connected devices.
-- **Broad hardware and radio coverage**: Wi-Fi, BLE, NFC, IR, SubGHz, NRF24, Ethernet, GPS, USB HID, and 802.15.4/Zigbee across 46 board targets.
-- **Research-ready capture workflows**: PCAP, hc22000, WiGLE CSV, sweep captures, Wireshark streaming, SD browsing, and on-device export tools.
-- **Full graphical UI platform**: carousel, grid, and list layouts with themes, asset packs, touch/keyboard/encoder support, and accessibility options.
+| | GhostESP | Others |
+| --- | --- | --- |
+| EMV / payment-card reading | ✓ | — |
+| MIFARE DESFire tree reads | ✓ | — |
+| Transit card parsers (Opal, myki, ITSO, Gallagher) | ✓ | — |
+| Native app ecosystem + Cloud Store + Lua sandbox | ✓ | — |
+| Dual-ESP32 GhostLink (remote radio, BLE bridge) | ✓ | — |
+| Full LVGL graphical UI (carousel/grid/list) | ✓ | Partial or none |
+| Board targets in CI | 46 | 1–42 |
 
 ---
 
@@ -244,7 +259,6 @@ A few things set GhostESP apart from every other ESP32 firmware:
 - Reduced-motion animations
 - SD config backup / restore
 </details>
-
 
 ---
 
@@ -475,8 +489,7 @@ This comparison is based on GhostESP's feature set and publicly available source
 
 </details>
 
-
-
+---
 
 ## Credits
 
@@ -512,8 +525,6 @@ Special thanks to:
       </a><br/>
       <sub>Reference deauthentication code</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/Spooks4576">
         <img src="https://github.com/Spooks4576.png" width="80" height="80" style="border-radius: 50%;" alt="Spooks4576"/><br/>
@@ -521,6 +532,8 @@ Special thanks to:
       </a><br/>
       <sub>Original GhostESP Developer</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/tototo31">
         <img src="https://github.com/tototo31.png" width="80" height="80" style="border-radius: 50%;" alt="Tototo31"/><br/>
@@ -542,8 +555,6 @@ Special thanks to:
       </a><br/>
       <sub>Core IR &amp; NFC implementation (flipperdevices/flipperzero-firmware &amp; contributors)</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/Garag">
         <img src="https://github.com/Garag.png" width="80" height="80" style="border-radius: 50%;" alt="Garag"/><br/>
@@ -558,6 +569,8 @@ Special thanks to:
       </a><br/>
       <sub><a href="https://github.com/connornishijima/SensoryBridge">SensoryBridge</a> - MIC RGB visualizer algorithms &amp; inspiration</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/DarkFlippers">
         <img src="https://github.com/DarkFlippers.png" width="80" height="80" style="border-radius: 50%;" alt="DarkFlippers"/><br/>
@@ -577,12 +590,109 @@ Special thanks to:
         <img src="https://github.com/DecentLabs.png" width="80" height="80" style="border-radius: 50%;" alt="DecentLabs"/><br/>
         <b>DecentLabs</b>
       </a><br/>
-      <sub><a href="https://github.com/DecentLabs/officeAir">officeAir</a> — multi-pass ARP scanning &amp; lwIP thread-safety techniques</sub>
+      <sub><a href="https://github.com/DecentLabs/officeAir">officeAir</a> - multi-pass ARP scanning &amp; lwIP thread-safety techniques</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/jaylikesbunda">
+        <img src="https://github.com/jaylikesbunda.png" width="80" height="80" style="border-radius: 50%;" alt="jaylikesbunda"/><br/>
+        <b>jaylikesbunda</b>
+      </a><br/>
+      <sub>Project maintainer</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Play2BReal">
+        <img src="https://github.com/Play2BReal.png" width="80" height="80" style="border-radius: 50%;" alt="Play2BReal"/><br/>
+        <b>Play2BReal</b>
+      </a><br/>
+      <sub>WiGLE upload &amp; IO expander support</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/the1anonlypr3">
+        <img src="https://github.com/the1anonlypr3.png" width="80" height="80" style="border-radius: 50%;" alt="the1anonlypr3"/><br/>
+        <b>the1anonlypr3</b>
+      </a><br/>
+      <sub>Art and assets</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Billi-Green">
+        <img src="https://github.com/Billi-Green.png" width="80" height="80" style="border-radius: 50%;" alt="Billi-Green"/><br/>
+        <b>Billi-Green</b>
+      </a><br/>
+      <sub>Audio &amp; ENV-III sensor support</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Next-Flip">
+        <img src="https://github.com/Next-Flip.png" width="80" height="80" style="border-radius: 50%;" alt="Next-Flip"/><br/>
+        <b>Next-Flip</b>
+      </a><br/>
+      <sub>Momentum-Firmware - NFC parser base (EMV, DESFire, hardnested, transit parsers; Gallagher by Nick Mooney)</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/noproto">
+        <img src="https://github.com/noproto.png" width="80" height="80" style="border-radius: 50%;" alt="noproto"/><br/>
+        <b>noproto</b>
+      </a><br/>
+      <sub>MIFARE Classic hardnested / nested recovery</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/leptopt1los">
+        <img src="https://github.com/leptopt1los.png" width="80" height="80" style="border-radius: 50%;" alt="leptopt1los"/><br/>
+        <b>Leptopt1los</b>
+      </a><br/>
+      <sub>EMV payment-card parser</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/bettse">
+        <img src="https://github.com/bettse.png" width="80" height="80" style="border-radius: 50%;" alt="bettse"/><br/>
+        <b>bettse</b>
+      </a><br/>
+      <sub><a href="https://github.com/bettse/picopass">picopass</a> - PicoPass / iCLASS support</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/micolous">
+        <img src="https://github.com/micolous.png" width="80" height="80" style="border-radius: 50%;" alt="micolous"/><br/>
+        <b>micolous</b>
+      </a><br/>
+      <sub>Opal transit card parser</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/emilytrau">
+        <img src="https://github.com/emilytrau.png" width="80" height="80" style="border-radius: 50%;" alt="emilytrau"/><br/>
+        <b>emilytrau</b>
+      </a><br/>
+      <sub>myki transit card parser</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/holiman">
+        <img src="https://github.com/holiman.png" width="80" height="80" style="border-radius: 50%;" alt="holiman"/><br/>
+        <b>holiman</b>
+      </a><br/>
+      <sub>loclass - MIFARE key recovery algorithms</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/RfidResearchGroup">
+        <img src="https://github.com/RfidResearchGroup.png" width="80" height="80" style="border-radius: 50%;" alt="RfidResearchGroup"/><br/>
+        <b>RfidResearchGroup</b>
+      </a><br/>
+      <sub>proxmark3 - RFID research tooling</sub>
     </td>
   </tr>
 </table>
 
-> Portions of the IR, NFC, and SubGHz functionality are adapted from the open-source Flipper Zero firmware by flipperdevices, DarkFlippers, xMasterX and their community contributors.
+---
+
+## Contributing
+
+GhostESP welcomes contributions — from a one-line board config to a new feature.
+
+- **Adding a board**: https://docs.ghostesp.net/v2.1/development/custom-board-configs/
+- **Fixing a bug or adding a feature**: check [open issues](https://github.com/GhostESP-Revival/GhostESP/issues) - anything tagged `good first issue` is a solid place to start.
+- **Building a native app**: see the `gbt` (Ghost Build Tool) [docs](https://docs.ghostesp.net/v2.1/development/gbt/) and example apps (Device Inspector, ESP32Finder) for the SDK pattern.
+- Questions before you start? Ask in [Discord](https://discord.gg/5cyNmUMgwh) - the team is responsive.
 
 ---
 
@@ -592,7 +702,7 @@ Ghost ESP is intended solely for educational and ethical security research. Unau
 
 > **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
 
-For guidelines on using the GhostESP name and logo, please see [BRAND GUIDELINES](BRAND_GUIDELINES.md).
+For guidelines on using the GhostESP name and logo, please see the [Brand Guidelines](https://ghostesp.net/brand-guidelines). Brand assets are available at [ghostesp.net/brand-assets](https://ghostesp.net/brand-assets).
 
 Interested in becoming an official partner? Email `partners@ghostesp.net`.
 

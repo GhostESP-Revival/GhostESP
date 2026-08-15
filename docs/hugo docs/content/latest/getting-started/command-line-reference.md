@@ -78,7 +78,8 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`scanports <local|ip> [all|start-end]`**, **`scanarp`**, **`scanlocal`**, **`scanssh <ip>`** — Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
 - **`netbiosscan [subnet [a.b.c.]]|<ip>`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Scan the current subnet, a specific `/24` prefix, or a specific host.
 - **`httpbannerscan [subnet [a.b.c.]]|<ip>`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
-- **`snmpprobe [subnet [a.b.c.]]|<ip>`** — Probe SNMP v1/v2c on UDP port 161 with common communities (`public`, `private`) and retrieve `sysDescr` to identify network devices (routers, switches, printers).
+- **`snmpprobe [subnet [a.b.c.]]|<ip>|walk <ip> [OID]|communities <list|file>`** — Probe SNMP v1/v2c on UDP port 161 with the built-in community list (`public`, `private`, and more) and retrieve `sysDescr` to identify network devices (routers, switches, printers). `walk` dumps a MIB subtree (default `system`). `communities` overrides the list for the session, either as `c1,c2,...` or a path to a file; `/mnt/ghostesp/snmp_communities.txt` (one community per line) is loaded automatically when present.
+- **`enumscan [subnet [a.b.c.]]|<ip>`** — SMB enumeration: negotiates SMB1/SMB2, reports OS, hostname, domain, dialect, and whether SMB signing is required, then lists shares and users via null-session RAP where the server allows it.
 - **`dhcpstarve <start [threads]|stop|display>`** — Flood a DHCP server or show collected leases.
 - **`capture <-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop>`** — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports `-802154` for 802.15.4 capture.
 
@@ -86,6 +87,8 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 - **`powerprinter [ip text font alignment]`** — Send formatted PCL text jobs to LAN printers; pull saved defaults when arguments are omitted.
 - **`dialconnect`** — Pair with a DIAL-capable device (e.g., Chromecast/YouTube).
+- **`wol <MAC|IP> [broadcast IP]`** — Send a Wake-on-LAN magic packet; an IP is resolved while its host is awake, and the broadcast address defaults to `255.255.255.255`.
+- **`govee scan`** / **`govee <IP> on|off|brightness N|color RRGGBB`** — Discover and control LAN-enabled Govee lights.
 
 ## BLE
 *(ESP32-S2 excluded)*

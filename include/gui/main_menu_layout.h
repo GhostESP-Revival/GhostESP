@@ -12,6 +12,7 @@ typedef enum {
     MAIN_MENU_LAYOUT_CAROUSEL = 0,
     MAIN_MENU_LAYOUT_LAUNCHER = 1,
     MAIN_MENU_LAYOUT_LIST = 2,
+    MAIN_MENU_LAYOUT_COMPACT = 3,
 } main_menu_layout_kind_t;
 
 // Source compatibility for callers that still refer to the former Grid layout.

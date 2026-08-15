@@ -62,6 +62,21 @@ void gui_menu_launcher_tile_apply_selected(lv_obj_t *obj, bool background_enable
     lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
 }
 
+void gui_menu_compact_tile_apply(lv_obj_t *obj, lv_obj_t *label, bool selected,
+                                 bool background_enabled, lv_color_t surface,
+                                 lv_color_t text, lv_color_t accent,
+                                 lv_color_t accent_text) {
+    if (!obj) return;
+
+    lv_obj_set_style_bg_color(obj, selected ? accent : surface, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(obj, selected ? LV_OPA_COVER :
+                            (background_enabled ? LV_OPA_COVER : LV_OPA_TRANSP), LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+    if (label) lv_obj_set_style_text_color(label, selected ? accent_text : text, 0);
+}
+
 void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int page_count,
                                     lv_color_t active, lv_color_t inactive) {
     if (!indicator) return;

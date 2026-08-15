@@ -141,6 +141,8 @@ void ssh_scan_host(const char *target_ip) {
     
     glog("SSH scanning host: %s\n", target_ip);
     
+    g_network_scan_cancel = false;
+    
     int open_ports_found = 0;
     
     for (size_t i = 0; i < num_ssh_ports && !g_network_scan_cancel; i++) {

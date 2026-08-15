@@ -2672,13 +2672,16 @@ static bool runtime_resume_script(ghostscript_runtime_t *rt) {
     int nres = 0;
     runtime_begin_slice(rt);
     int rc = lua_resume(rt->thread, NULL, 0, &nres);
-    if (nres > 0) lua_pop(rt->thread, nres);
     if (rc == LUA_OK) {
+        if (nres > 0) lua_pop(rt->thread, nres);
         rt->script_done = true;
         runtime_finish_script_if_needed(rt);
         return true;
     }
-    if (rc == LUA_YIELD) return true;
+    if (rc == LUA_YIELD) {
+        if (nres > 0) lua_pop(rt->thread, nres);
+        return true;
+    }
     if (runtime_finish_requested_exit(rt, rt->thread)) return true;
     runtime_set_lua_error(rt, rt->thread, rc);
     rt->state = GHOSTSCRIPT_STATE_FAILED;

@@ -335,6 +335,7 @@ const SETTINGS_SCHEMA = [
       { id: 'invert_colors',   label: 'Invert Colors',        type: 'bool' },
       { id: 'terminal_color',  label: 'Terminal Color',       type: 'color' },
       { id: 'menu_theme',      label: 'Menu Theme',           type: 'number', min: 0, max: 255, hint: 'Theme index 0-255' },
+      { id: 'accent_color',    label: 'Accent Color',         type: 'color' },
     ]
   },
   {
@@ -371,6 +372,14 @@ const SETTINGS_SCHEMA = [
     ]
   },
   {
+    category: 'Date & Time',
+    icon: 'DT',
+    description: 'Clock and timezone configuration',
+    fields: [
+      { id: 'timezone',     label: 'Timezone',     type: 'text',  max: 25, hint: 'e.g. UTC-5' },
+    ]
+  },
+  {
     category: 'GhostLink',
     icon: 'GL',
     description: 'Dual-device serial bridge pin mapping',
@@ -380,13 +389,11 @@ const SETTINGS_SCHEMA = [
     ]
   },
   {
-    category: 'Custom',
+    category: 'Personalisation',
     icon: 'CU',
-    description: 'Personalisation and timezone',
+    description: 'Custom names and identity',
     fields: [
       { id: 'flappy_name',  label: 'Flappy Name',  type: 'text',  max: 65, hint: 'In-game name' },
-      { id: 'timezone',     label: 'Timezone',     type: 'text',  max: 25, hint: 'e.g. UTC-5' },
-      { id: 'accent_color', label: 'Accent Color', type: 'color' },
     ]
   },
   {
