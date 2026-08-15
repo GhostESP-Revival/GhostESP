@@ -33,24 +33,13 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Why GhostESP
 
-GhostESP is a platform, not a bag of tools. Four things set it apart:
+GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 - **Built on ESP-IDF, not Arduino.** Unlike Marauder and Bruce, GhostESP works against Espressif's SDK directly. It gets new chips and radio features first (802.15.4, Zigbee, 5 GHz on the C5) and lower-level control of the radios, memory, and partitions. Arduino-based firmware can reach the same APIs, just not as directly.
 - **Live capture and on-device analysis.** Stream traffic into Wireshark in real time over USB, and browse, inspect, and convert captures (PCAP, hc22000, WiGLE, 802.15.4) on the device itself.
 - **GhostLink.** Pair two ESP32s so one runs the other's radio, keyboard, and display, with BLE bridging to the Android app, split-channel wardriving, and peer OTA.
 - **Native apps.** SD apps with their own permissions and storage, built with `gbt` and a plugin SDK, installed from the Cloud Store, plus a Lua runtime for scripts. Examples: Device Inspector, ESP32Finder, a Doom port, a QR generator.
-
----
-
-## Flagship Capabilities
-
-- **ESP-IDF-native architecture**: direct access to Espressif's SDK for new silicon, radio coexistence, memory, and low-level control, without the Arduino abstraction layer or its version lag.
-- **Research-ready capture workflows**: PCAP, hc22000, WiGLE CSV, sweep captures, live Wireshark streaming, on-device SD browsing, and export tools.
-- **GhostLink**: dual-ESP32 command and display interface with remote radio, remote keyboard, BLE bridging, split-channel wardriving, and peer OTA.
-- **Multi-interface control**: drive GhostESP from the on-device UI, the Flipper Zero app, the serial CLI, the WebUI, the Android companion app, or a GhostLink-connected device, against the same command set.
-- **Native SD app ecosystem**: create, package, discover, launch, inspect, and stop SD-loaded apps with permissions and scoped storage. Build your own with `gbt`.
-- **Broad hardware and radio coverage**: Wi-Fi, BLE, NFC, IR, SubGHz, NRF24, Ethernet, GPS, USB HID, and 802.15.4 or Zigbee across 46 board targets.
-- **Full graphical UI platform**: carousel, grid, and list layouts with themes, asset packs, touch, keyboard, and encoder support, and accessibility options.
+- **One command set, many front ends.** Drive GhostESP from the on-device UI, serial CLI, WebUI, Flipper Zero app, Android app, or a GhostLink-connected device, all against the same commands.
 
 ---
 
