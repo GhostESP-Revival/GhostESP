@@ -15,6 +15,7 @@
 #include "core/glog.h"
 #include "core/system_manager.h"
 #include "core/utils.h"
+#include "scans/wifi/arp_scan.h"
 #include "esp_random.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -129,7 +130,8 @@ static void smb_finalize_length(uint8_t *buf, size_t total_len) {
 /**
  * @brief Build SMB Negotiate Protocol Request
  *
- * Requests NT LM 0.12 dialect (SMBv1)
+ * Offers SMB 2.002 plus SMBv1 dialects; SMB2-capable servers reply with an
+ * SMB2 negotiate response, SMB1-only servers pick NT LM 0.12.
  */
 static size_t build_smb_negotiate(uint8_t *buf, size_t buf_size) {
     if (buf_size < 128) return 0;
@@ -142,11 +144,12 @@ static size_t build_smb_negotiate(uint8_t *buf, size_t buf_size) {
     // Dialects string
     // Format: buffer format, dialect string (null terminated)
     const char *dialects[] = {
+        "\x02SMB 2.002",
         "\x02NT LM 0.12",
         "\x02LANMAN2.1",
         "\x02Samba",
     };
-    int num_dialects = 3;
+    int num_dialects = 4;
 
     // ByteCount
     size_t bc_off = off;
@@ -184,7 +187,48 @@ typedef struct {
     char server_domain[64];
     char server_name[32];
     bool has_extended_security;
+    bool is_smb2;
+    bool signing_enabled;
+    bool signing_required;
 } smb_negotiate_info_t;
+
+static bool smb_response_is_smb2(const uint8_t *buf, size_t len) {
+    return len >= 8 && buf[4] == 0xFE && buf[5] == 'S' && buf[6] == 'M' && buf[7] == 'B';
+}
+
+static const char *smb2_dialect_name(uint16_t rev) {
+    switch (rev) {
+        case 0x0202: return "SMB 2.0.2";
+        case 0x0210: return "SMB 2.1.0";
+        case 0x0300: return "SMB 3.0.0";
+        case 0x0302: return "SMB 3.0.2";
+        case 0x0311: return "SMB 3.1.1";
+        default: return "SMB2";
+    }
+}
+
+static bool parse_smb2_negotiate(const uint8_t *buf, size_t len, smb_negotiate_info_t *info) {
+    if (!smb_response_is_smb2(buf, len) || len < 74) return false;
+
+    // SMB2 header: NT Status at NetBIOS(4) + 8
+    uint32_t status = smb_get_u32(buf, 12);
+    if (status != 0) return false;
+
+    // Negotiate body: StructureSize(2) SecurityMode(2) DialectRevision(2) ...
+    uint16_t security_mode = smb_get_u16(buf, 70);
+    uint16_t dialect_rev = smb_get_u16(buf, 72);
+
+    info->is_smb2 = true;
+    info->security_mode = security_mode;
+    info->has_extended_security = true;
+    info->signing_enabled = (security_mode & 0x0001) != 0;
+    info->signing_required = (security_mode & 0x0002) != 0;
+
+    snprintf(info->os_version, sizeof(info->os_version), "%s",
+             smb2_dialect_name(dialect_rev));
+
+    return dialect_rev != 0xFFFF;
+}
 
 static bool parse_smb_negotiate(const uint8_t *buf, size_t len, smb_negotiate_info_t *info) {
     if (len < 36) return false;
@@ -202,6 +246,8 @@ static bool parse_smb_negotiate(const uint8_t *buf, size_t len, smb_negotiate_in
     size_t off = 37;
 
     info->security_mode = smb_get_u16(buf, off); off += 2;
+    info->signing_enabled = (info->security_mode & 0x0004) != 0;
+    info->signing_required = (info->security_mode & 0x0008) != 0;
     info->max_mpx = smb_get_u16(buf, off); off += 2;
     info->max_vcs = smb_get_u16(buf, off); off += 2;
     info->max_buffer = smb_get_u32(buf, off); off += 4;
@@ -261,121 +307,6 @@ static bool parse_smb_negotiate(const uint8_t *buf, size_t len, smb_negotiate_in
 // ============================================================================
 // SMB Session Setup (Null Session)
 // ============================================================================
-
-/**
- * @brief Build SMB Session Setup AndX Request (null/anonymous session)
- */
-static size_t build_smb_session_setup(uint8_t *buf, size_t buf_size, uint16_t pid) {
-    if (buf_size < 128) return 0;
-
-    size_t off = smb_build_header(buf, 0x73, 0, pid, 0);
-
-    // WordCount = 13 (NT LM 0.12 AndX)
-    buf[off++] = 13;
-
-    // AndX command: Tree Connect (0x75)
-    buf[off++] = 0x75;
-    // AndX reserved
-    buf[off++] = 0x00;
-
-    // AndX offset (placeholder, fill later)
-    size_t andx_off_pos = off;
-    off += 2;
-
-    // MaxBufferSize
-    smb_put_u16(buf, off, 4356); off += 2;
-    // MaxMPXCount
-    smb_put_u16(buf, off, 2); off += 2;
-    // VCNumber
-    smb_put_u16(buf, off, 1); off += 2;
-    // SessionKey
-    smb_put_u32(buf, off, 0); off += 4;
-
-    // OEMPasswordLen (anonymous = 1 byte null)
-    size_t oem_pw_len_pos = off;
-    smb_put_u16(buf, off, 1); off += 2;
-    // UnicodePasswordLen (null session = 0)
-    smb_put_u16(buf, off, 0); off += 2;
-
-    // Reserved
-    off += 4;
-
-    // Capabilities
-    smb_put_u32(buf, off, 0x000000D5); off += 4;
-
-    // ByteCount
-    size_t bc_off = off;
-    off += 2;
-
-    // OEM password (1 byte null)
-    buf[off++] = 0x00;
-
-    // Unicode password (empty)
-    // Account name (empty, null terminated)
-    buf[off++] = 0x00;
-    // Primary domain (empty, null terminated)
-    buf[off++] = 0x00;
-    // Native OS (null terminated)
-    const char *native_os = "Windows 2000";
-    size_t os_len = strlen(native_os);
-    memcpy(&buf[off], native_os, os_len);
-    off += os_len;
-    buf[off++] = 0x00;
-    // Native LAN manager (null terminated)
-    const char *native_lm = "GhostESP";
-    size_t lm_len = strlen(native_lm);
-    memcpy(&buf[off], native_lm, lm_len);
-    off += lm_len;
-    buf[off++] = 0x00;
-
-    // Set ByteCount
-    uint16_t bc = (uint16_t)(off - bc_off - 2);
-    smb_put_u16(buf, bc_off, bc);
-
-    // Now append Tree Connect AndX at the current offset
-    // Update AndX offset
-    smb_put_u16(buf, andx_off_pos, (uint16_t)off);
-
-    // Tree Connect AndX: WordCount = 4
-    buf[off++] = 4;
-    // AndX command: none (0xFF)
-    buf[off++] = 0xFF;
-    buf[off++] = 0x00;
-    // AndX offset: 0
-    off += 2;
-    // Flags
-    smb_put_u16(buf, off, 0); off += 2;
-    // PasswordLen
-    smb_put_u16(buf, off, 1); off += 2;
-
-    // ByteCount for tree connect
-    size_t tc_bc_off = off;
-    off += 2;
-
-    // Password (1 byte null)
-    buf[off++] = 0x00;
-
-    // Path: \\TARGET\IPC$
-    const char *ipc_path = "\\\\*\\IPC$"; // placeholder, will be filled
-    size_t path_len = strlen(ipc_path);
-    memcpy(&buf[off], ipc_path, path_len);
-    off += path_len;
-    buf[off++] = 0x00;
-
-    // Service (null terminated)
-    const char *service = "?????";
-    size_t svc_len = strlen(service);
-    memcpy(&buf[off], service, svc_len);
-    off += svc_len;
-    buf[off++] = 0x00;
-
-    // Set Tree Connect ByteCount
-    uint16_t tc_bc = (uint16_t)(off - tc_bc_off - 2);
-    smb_put_u16(buf, tc_bc_off, tc_bc);
-
-    smb_finalize_length(buf, off);
-    return off;
-}
 
 /**
  * @brief Build a simpler SMB Session Setup (no AndX chaining)
@@ -795,13 +726,61 @@ static int enum_tcp_connect(const char *target_ip) {
                                             ENUM_CONNECT_TIMEOUT_MS, &g_enum_scan_cancel);
 }
 
+/**
+ * @brief Send a request and receive a complete NetBIOS-framed response
+ *
+ * Loops on recv until the NetBIOS session length (buf[1..3]) is satisfied,
+ * so fragmented negotiate/share responses parse correctly.
+ */
 static int enum_tcp_send_recv(int sock, const uint8_t *tx, size_t tx_len,
                                uint8_t *rx, size_t rx_size) {
     if (send(sock, tx, (int)tx_len, 0) < 0) {
         return -1;
     }
-    return tcp_recv_with_timeout_cancel(sock, (char *)rx, rx_size,
-                                         ENUM_RECV_TIMEOUT_MS, &g_enum_scan_cancel);
+
+    size_t total = 0;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(ENUM_RECV_TIMEOUT_MS);
+    // Once data starts arriving, allow one extra window for the rest
+    TickType_t hard_deadline = deadline + pdMS_TO_TICKS(ENUM_RECV_TIMEOUT_MS);
+
+    while (total < rx_size) {
+        if (g_enum_scan_cancel) return -1;
+
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(deadline - now) <= 0) {
+            if (total == 0 || (int32_t)(hard_deadline - now) <= 0) break;
+        }
+
+        int wait_ms = 100;
+        TickType_t remaining = ((int32_t)(hard_deadline - now) > 0) ? (hard_deadline - now) : 0;
+        int remaining_ms = (int)(remaining * portTICK_PERIOD_MS);
+        if (remaining_ms < wait_ms) wait_ms = remaining_ms;
+        if (wait_ms <= 0) break;
+
+        struct timeval tv = {
+            .tv_sec = wait_ms / 1000,
+            .tv_usec = (wait_ms % 1000) * 1000,
+        };
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        ssize_t n = recv(sock, rx + total, rx_size - total, 0);
+        if (n > 0) {
+            total += (size_t)n;
+            // Complete once the NetBIOS-framed length is satisfied
+            if (total >= 4) {
+                size_t expect = 4u + (((size_t)rx[1] << 16) | ((size_t)rx[2] << 8) | rx[3]);
+                if (expect <= rx_size && total >= expect) {
+                    return (int)expect;
+                }
+            }
+        } else if (n == 0) {
+            break;  // server closed
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            return -1;
+        }
+    }
+
+    return (total > 0) ? (int)total : -1;
 }
 
 // ============================================================================
@@ -810,6 +789,9 @@ static int enum_tcp_send_recv(int sock, const uint8_t *tx, size_t tx_len,
 
 /**
  * @brief Enumerate a single host
+ *
+ * Runs on the serial task in single-host mode: SMB buffers are heap
+ * allocated to keep stack usage low.
  */
 static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *sf) {
     if (g_enum_scan_cancel) return false;
@@ -817,30 +799,57 @@ static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *s
     memset(result, 0, sizeof(enum_host_t));
     strncpy(result->ip, target_ip, sizeof(result->ip) - 1);
 
+    uint8_t *bufs = malloc(2 * SMB_MAX_BUF);
+    if (!bufs) {
+        return false;
+    }
+    uint8_t *tx_buf = bufs;
+    uint8_t *rx_buf = bufs + SMB_MAX_BUF;
+
     int sock = enum_tcp_connect(target_ip);
     if (sock < 0) {
         ESP_LOGD(TAG, "Failed to connect to %s:%d", target_ip, SMB_PORT);
+        free(bufs);
         return false;
     }
 
-    uint8_t tx_buf[SMB_MAX_BUF];
-    uint8_t rx_buf[SMB_MAX_BUF];
     int n;
+    bool ret = false;
+    bool quiet = false;
 
     // Step 1: SMB Negotiate
-    size_t pkt_len = build_smb_negotiate(tx_buf, sizeof(tx_buf));
+    size_t pkt_len = build_smb_negotiate(tx_buf, SMB_MAX_BUF);
     if (pkt_len == 0) {
-        tcp_close_socket(&sock);
-        return false;
+        goto out;
     }
 
-    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, sizeof(rx_buf));
-    if (n <= 0 || !smb_check_status(rx_buf, (size_t)n)) {
-        tcp_close_socket(&sock);
-        return false;
+    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, SMB_MAX_BUF);
+    if (n <= 0) {
+        goto out;
     }
 
     smb_negotiate_info_t neg_info;
+    memset(&neg_info, 0, sizeof(neg_info));
+
+    if (smb_response_is_smb2(rx_buf, (size_t)n)) {
+        // SMB2-only or SMB2-preferred server: report dialect + signing and stop.
+        // Null-session RAP enumeration is SMBv1-only and modern servers
+        // require SPNEGO session setup, so there is nothing further to do.
+        if (parse_smb2_negotiate(rx_buf, (size_t)n, &neg_info)) {
+            strncpy(result->os_version, neg_info.os_version, sizeof(result->os_version) - 1);
+            strncpy(result->smb_dialect, neg_info.os_version, sizeof(result->smb_dialect) - 1);
+            result->smb2 = true;
+            result->signing_enabled = neg_info.signing_enabled;
+            result->signing_required = neg_info.signing_required;
+        }
+        ret = result->smb_dialect[0] != '\0';
+        goto out;
+    }
+
+    if (!smb_check_status(rx_buf, (size_t)n)) {
+        goto out;
+    }
+
     if (parse_smb_negotiate(rx_buf, (size_t)n, &neg_info)) {
         if (neg_info.os_version[0]) {
             strncpy(result->os_version, neg_info.os_version, sizeof(result->os_version) - 1);
@@ -851,54 +860,61 @@ static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *s
         if (neg_info.server_name[0]) {
             strncpy(result->hostname, neg_info.server_name, sizeof(result->hostname) - 1);
         }
+        strncpy(result->smb_dialect, "SMB1", sizeof(result->smb_dialect) - 1);
+        result->signing_enabled = neg_info.signing_enabled;
+        result->signing_required = neg_info.signing_required;
     }
 
     // Step 2: Session Setup (null session)
     uint16_t pid = (uint16_t)(esp_random() & 0xFFFF);
-    pkt_len = build_smb_session_setup_simple(tx_buf, sizeof(tx_buf), pid);
+    pkt_len = build_smb_session_setup_simple(tx_buf, SMB_MAX_BUF, pid);
     if (pkt_len == 0) {
-        tcp_close_socket(&sock);
-        return false;
+        goto out;
     }
 
-    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, sizeof(rx_buf));
+    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, SMB_MAX_BUF);
     if (n <= 0 || !smb_check_status(rx_buf, (size_t)n)) {
-        // Null session rejected - try with guest/empty credentials
-        // Still log what we got from negotiate
-        if (result->os_version[0] || result->hostname[0]) {
-            glog("[Enum] %s: %s %s\n", target_ip,
+        // Null session rejected - still log what we got from negotiate
+        if (result->os_version[0] || result->hostname[0] || result->smb_dialect[0]) {
+            glog("[Enum] %s: %s %s (%s)%s%s\n", target_ip,
                  result->hostname[0] ? result->hostname : "?",
-                 result->os_version[0] ? result->os_version : "?");
+                 result->os_version[0] ? result->os_version : "?",
+                 result->smb_dialect[0] ? result->smb_dialect : "SMB1",
+                 result->signing_required ? " [signing required]" :
+                     (result->signing_enabled ? " [signing enabled]" : " [signing disabled]"),
+                 " null-session rejected");
             if (sf) {
-                scan_file_printf(sf, "%s hostname=%s os=%s domain=%s\n",
-                                 target_ip, result->hostname, result->os_version, result->domain);
+                scan_file_printf(sf, "%s hostname=%s os=%s dialect=%s signing=%s null_session=rejected\n",
+                                 target_ip, result->hostname, result->os_version,
+                                 result->smb_dialect,
+                                 result->signing_required ? "required" :
+                                     (result->signing_enabled ? "enabled" : "disabled"));
             }
         }
-        tcp_close_socket(&sock);
-        return result->os_version[0] || result->hostname[0];
+        ret = result->os_version[0] || result->hostname[0] || result->smb_dialect[0];
+        quiet = true;
+        goto out;
     }
 
     uint16_t uid = smb_get_uid(rx_buf, (size_t)n);
 
     // Step 3: Tree Connect to IPC$
-    pkt_len = build_smb_tree_connect(tx_buf, sizeof(tx_buf), target_ip, pid, uid);
+    pkt_len = build_smb_tree_connect(tx_buf, SMB_MAX_BUF, target_ip, pid, uid);
     if (pkt_len == 0) {
-        tcp_close_socket(&sock);
-        return false;
+        goto out;
     }
 
-    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, sizeof(rx_buf));
+    n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, SMB_MAX_BUF);
     if (n <= 0 || !smb_check_status(rx_buf, (size_t)n)) {
-        tcp_close_socket(&sock);
-        return false;
+        goto out;
     }
 
     uint16_t tid = smb_get_tid(rx_buf, (size_t)n);
 
     // Step 4: RAP NetShareEnum
-    pkt_len = build_rap_share_enum(tx_buf, sizeof(tx_buf), pid, tid, uid);
+    pkt_len = build_rap_share_enum(tx_buf, SMB_MAX_BUF, pid, tid, uid);
     if (pkt_len > 0) {
-        n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, sizeof(rx_buf));
+        n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, SMB_MAX_BUF);
         if (n > 0 && smb_check_status(rx_buf, (size_t)n)) {
             result->share_count = parse_rap_share_enum(rx_buf, (size_t)n,
                                                         result->shares, ENUM_SCAN_MAX_SHARES);
@@ -907,9 +923,9 @@ static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *s
 
     // Step 5: RAP NetUserEnum
     if (!g_enum_scan_cancel) {
-        pkt_len = build_rap_user_enum(tx_buf, sizeof(tx_buf), pid, tid, uid);
+        pkt_len = build_rap_user_enum(tx_buf, SMB_MAX_BUF, pid, tid, uid);
         if (pkt_len > 0) {
-            n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, sizeof(rx_buf));
+            n = enum_tcp_send_recv(sock, tx_buf, pkt_len, rx_buf, SMB_MAX_BUF);
             if (n > 0 && smb_check_status(rx_buf, (size_t)n)) {
                 result->user_count = parse_rap_user_enum(rx_buf, (size_t)n,
                                                           result->users, ENUM_SCAN_MAX_USERS);
@@ -917,11 +933,20 @@ static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *s
         }
     }
 
+    ret = true;
+
+out:
     tcp_close_socket(&sock);
+    free(bufs);
+
+    if (quiet || !ret) {
+        return ret;
+    }
 
     // Log results
     bool has_data = result->os_version[0] || result->hostname[0] ||
-                    result->share_count > 0 || result->user_count > 0;
+                    result->share_count > 0 || result->user_count > 0 ||
+                    result->smb_dialect[0] != '\0';
 
     if (has_data) {
         glog("[Enum] %s", target_ip);
@@ -938,6 +963,20 @@ static bool enum_host(const char *target_ip, enum_host_t *result, scan_file_t *s
         if (result->domain[0]) {
             glog(" domain=%s", result->domain);
             if (sf) scan_file_printf(sf, " domain=%s", result->domain);
+        }
+        if (result->smb_dialect[0]) {
+            glog(" (%s)", result->smb_dialect);
+            if (sf) scan_file_printf(sf, " dialect=%s", result->smb_dialect);
+        }
+        if (result->signing_required) {
+            glog(" [signing required]");
+            if (sf) scan_file_printf(sf, " signing=required");
+        } else if (result->signing_enabled) {
+            glog(" [signing enabled]");
+            if (sf) scan_file_printf(sf, " signing=enabled");
+        } else {
+            glog(" [signing disabled]");
+            if (sf) scan_file_printf(sf, " signing=disabled");
         }
         glog("\n");
 
@@ -983,21 +1022,119 @@ void enum_scan_host(const char *target_ip) {
 
     g_enum_scan_cancel = false;
 
-    enum_host_t result;
-    if (enum_host(target_ip, &result, NULL)) {
+    enum_host_t *result = malloc(sizeof(enum_host_t));
+    if (!result) {
+        glog("Enum scan: out of memory\n");
+        return;
+    }
+
+    if (enum_host(target_ip, result, NULL)) {
         glog("Enumeration complete on %s\n", target_ip);
     } else {
         glog("No SMB services found on %s\n", target_ip);
     }
+    free(result);
 }
 
 void enum_scan_subnet(void) {
-    char subnet_prefix[16];
-    if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
-        glog("Enum Scan: Failed to get subnet prefix\n");
+    g_enum_scan_cancel = false;
+
+    int arp_count = arp_scan_get_count();
+    if (arp_count > 0) {
+        glog("Enum Scan: Scanning %d ARP-discovered host(s)...\n", arp_count);
+
+        scan_file_t sf = SCAN_FILE_INIT;
+        bool saving = (scan_file_open(&sf, "enum_scan", "txt") == ESP_OK);
+        if (saving) {
+            scan_file_printf(&sf, "--- Enum Scan Results (ARP-seeded) ---\n");
+        }
+
+        int found = 0;
+        enum_host_t *tmp = malloc(sizeof(enum_host_t));
+        for (int i = 0; i < arp_count && !g_enum_scan_cancel; i++) {
+            const arp_host_t *host = arp_scan_get_host(i);
+            if (!host) continue;
+
+            if (g_enum_results && found < ENUM_SCAN_MAX_RESULTS) {
+                if (enum_host(host->ip, &g_enum_results[found], &sf)) {
+                    found++;
+                }
+            } else if (tmp) {
+                if (enum_host(host->ip, tmp, &sf)) {
+                    found++;
+                }
+            }
+        }
+        free(tmp);
+
+        g_enum_result_count = found;
+        glog("Enum Scan: Complete. Found %d host(s)\n", found);
+
+        if (saving) {
+            scan_file_printf(&sf, "--- Enum Scan Summary ---\n");
+            scan_file_printf(&sf, "Hosts with SMB: %d\n", found);
+            scan_file_close(&sf);
+        }
         return;
     }
-    enum_scan_subnet_prefix(subnet_prefix);
+
+    char subnet_prefix[16];
+    uint32_t first, last;
+    if (!get_wifi_subnet_range(subnet_prefix, sizeof(subnet_prefix), &first, &last)) {
+        glog("Enum Scan: Failed to get subnet - not connected to WiFi?\n");
+        return;
+    }
+
+    uint32_t total = last - first + 1;
+    glog("Enum Scan: Scanning %s (%u hosts)...\n", subnet_prefix, (unsigned)total);
+
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "enum_scan", "txt") == ESP_OK);
+    if (saving) {
+        scan_file_printf(&sf, "--- Enum Scan Results (Subnet %s) ---\n", subnet_prefix);
+    }
+
+    g_enum_result_count = 0;
+    int found = 0;
+    uint32_t scanned = 0;
+    enum_host_t *tmp = malloc(sizeof(enum_host_t));
+
+    for (uint32_t ip = first; ip <= last && !g_enum_scan_cancel; ip++, scanned++) {
+        if (scanned % 25 == 0) {
+            glog("Enum Scan: Progress %u/%u, found %d\n",
+                 (unsigned)scanned, (unsigned)total, found);
+        }
+
+        char target_ip[16];
+        ip_u32_to_str(ip, target_ip, sizeof(target_ip));
+
+        if (g_enum_results && found < ENUM_SCAN_MAX_RESULTS) {
+            if (enum_host(target_ip, &g_enum_results[found], &sf)) {
+                found++;
+            }
+        } else if (tmp) {
+            if (enum_host(target_ip, tmp, &sf)) {
+                found++;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    free(tmp);
+
+    g_enum_result_count = found;
+
+    if (g_enum_scan_cancel) {
+        glog("Enum Scan: Cancelled. Found %d host(s)\n", found);
+    } else {
+        glog("Enum Scan: Complete. Found %d host(s)\n", found);
+    }
+
+    if (saving) {
+        scan_file_printf(&sf, "--- Enum Scan Summary ---\n");
+        scan_file_printf(&sf, "Hosts with SMB: %d\n", found);
+        scan_file_close(&sf);
+    }
 }
 
 void enum_scan_subnet_prefix(const char *subnet_prefix) {
@@ -1021,6 +1158,8 @@ void enum_scan_subnet_prefix(const char *subnet_prefix) {
 
     glog("Enum Scan: Scanning 254 hosts...\n");
 
+    enum_host_t *tmp = malloc(sizeof(enum_host_t));
+
     for (int host = 1; host <= 254 && !g_enum_scan_cancel; host++) {
         if (host % 25 == 0) {
             glog("Enum Scan: Progress %d/254, found %d\n", host, found);
@@ -1033,15 +1172,15 @@ void enum_scan_subnet_prefix(const char *subnet_prefix) {
             if (enum_host(target_ip, &g_enum_results[found], &sf)) {
                 found++;
             }
-        } else {
-            enum_host_t tmp;
-            if (enum_host(target_ip, &tmp, &sf)) {
+        } else if (tmp) {
+            if (enum_host(target_ip, tmp, &sf)) {
                 found++;
             }
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+    free(tmp);
 
     g_enum_result_count = found;
 
@@ -1064,36 +1203,55 @@ void enum_scan_subnet_prefix(const char *subnet_prefix) {
 
 static void enum_scan_task(void *pvParameters) {
     (void)pvParameters;
-    char subnet_prefix[16];
-    if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
-        glog("Enum Scan: Failed to get subnet prefix\n");
-        g_enum_scan_done = true;
-        vTaskDelete(NULL);
-        return;
-    }
 
     g_enum_result_count = 0;
     g_enum_scan_cancel = false;
     int found = 0;
 
-    glog("Enum Scan: Starting on %s*...\n", subnet_prefix);
-    glog("Enum Scan: Scanning 254 hosts (may take a few minutes)...\n");
+    int arp_count = arp_scan_get_count();
+    char target_ip[16];
 
-    for (int host = 1; host <= 254 && !g_enum_scan_cancel; host++) {
-        if (host % 25 == 0) {
-            glog("Enum Scan: Progress %d/254, found %d\n", host, found);
-        }
+    if (arp_count > 0) {
+        glog("Enum Scan: Starting on %d ARP-discovered host(s)...\n", arp_count);
 
-        char target_ip[16];
-        build_ip_string(target_ip, sizeof(target_ip), subnet_prefix, host);
-
-        if (found < ENUM_SCAN_MAX_RESULTS) {
-            if (enum_host(target_ip, &g_enum_results[found], NULL)) {
-                found++;
+        for (int i = 0; i < arp_count && !g_enum_scan_cancel; i++) {
+            const arp_host_t *host = arp_scan_get_host(i);
+            if (!host) continue;
+            if (found < ENUM_SCAN_MAX_RESULTS) {
+                if (enum_host(host->ip, &g_enum_results[found], NULL)) {
+                    found++;
+                }
             }
         }
+    } else {
+        char subnet_prefix[16];
+        uint32_t first, last;
+        if (!get_wifi_subnet_range(subnet_prefix, sizeof(subnet_prefix), &first, &last)) {
+            glog("Enum Scan: Failed to get subnet\n");
+            g_enum_scan_done = true;
+            vTaskDelete(NULL);
+            return;
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        uint32_t total = last - first + 1;
+        glog("Enum Scan: Starting on %s (%u hosts)...\n", subnet_prefix, (unsigned)total);
+
+        uint32_t scanned = 0;
+        for (uint32_t ip = first; ip <= last && !g_enum_scan_cancel; ip++, scanned++) {
+            if (scanned % 25 == 0) {
+                glog("Enum Scan: Progress %u/%u, found %d\n",
+                     (unsigned)scanned, (unsigned)total, found);
+            }
+
+            ip_u32_to_str(ip, target_ip, sizeof(target_ip));
+
+            if (found < ENUM_SCAN_MAX_RESULTS) {
+                if (enum_host(target_ip, &g_enum_results[found], NULL)) {
+                    found++;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
 
     g_enum_result_count = found;

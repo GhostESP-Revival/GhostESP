@@ -37,7 +37,9 @@
 static const char *TAG = "ARPScan";
 
 // Scan configuration
-#define BATCH_SIZE 20
+// Batches are kept at 8 because lwIP's default ARP_TABLE_SIZE is 10:
+// a larger batch evicts entries before the harvest pass can read them.
+#define BATCH_SIZE 8
 #define ARP_REQUEST_DELAY_MS 5
 #define ARP_RESPONSE_WAIT_MS 80
 #define MAX_RETRIES 3
@@ -79,13 +81,20 @@ typedef struct {
 // Internal Helpers (Module-specific)
 // ============================================================================
 
+static const char *lookup_oui_vendor(const uint8_t *mac);
+
 /**
  * @brief Format a host entry for display (single source of truth)
  */
 static void format_host_entry(char *buffer, size_t size, size_t index, const char *ip, const uint8_t *mac) {
     char mac_str[18];
     format_mac_address(mac, mac_str, sizeof(mac_str), true);
-    snprintf(buffer, size, "%2zu. %s [%s]", index, ip, mac_str);
+    const char *vendor = lookup_oui_vendor(mac);
+    if (vendor) {
+        snprintf(buffer, size, "%2zu. %s [%s] %s", index, ip, mac_str, vendor);
+    } else {
+        snprintf(buffer, size, "%2zu. %s [%s]", index, ip, mac_str);
+    }
 }
 
 /**
@@ -186,33 +195,6 @@ bool send_arp_request(const char *target_ip) {
         return false;
     }
     return true;  /* queued (or already executed); the callback frees it */
-}
-
-/**
- * @brief Send ARP request using lwIP stack (thread-safe)
- */
-static bool send_arp_request_lwip(const char *target_ip) {
-    if (!target_ip) {
-        return false;
-    }
-
-    // Parse target IP
-    ip4_addr_t target_addr;
-    if (!ip4addr_aton(target_ip, &target_addr)) {
-        return false;
-    }
-
-    arp_tcpip_call_t *call = malloc(sizeof(arp_tcpip_call_t));
-    if (!call) {
-        return false;
-    }
-    call->target = target_addr;
-
-    if (tcpip_callback_with_block(arp_request_callback, call, 1) == ERR_MEM) {
-        free(call);  /* not queued: the callback will never run */
-        return false;
-    }
-    return true;  /* queued; the callback frees it */
 }
 
 /**
@@ -429,7 +411,7 @@ static void process_batch(arp_scanner_ctx_t *ctx, uint32_t batch_start, uint32_t
     for (uint32_t ip = batch_start; ip <= batch_end; ip++) {
         ip_to_string(ip, current_ip, sizeof(current_ip));
         if (!is_host_known(ctx, current_ip)) {
-            send_arp_request_lwip(current_ip);
+            send_arp_request(current_ip);
         }
         vTaskDelay(pdMS_TO_TICKS(ARP_REQUEST_DELAY_MS));
     }
@@ -897,6 +879,13 @@ static const char *lookup_oui_vendor(const uint8_t *mac) {
         }
     }
     return NULL;
+}
+
+const char *arp_scan_get_vendor(const uint8_t *mac) {
+    if (!mac) {
+        return NULL;
+    }
+    return lookup_oui_vendor(mac);
 }
 
 static void format_short_mac(const uint8_t *mac, char out[7]) {

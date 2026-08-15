@@ -173,6 +173,26 @@ const char *rssi_to_proximity(int8_t rssi);
 bool get_wifi_subnet_prefix(char *prefix, size_t prefix_size);
 
 /**
+ * @brief Get the full host scan range from the actual netmask
+ *
+ * Computes first/last usable host IPs (host byte order) from the STA
+ * netmask, capped at /20 (4094 hosts) to keep scan times sane.
+ *
+ * @param prefix Buffer for the network address string (minimum 16 bytes)
+ * @param prefix_size Size of prefix buffer
+ * @param first_host First usable host IP (host byte order), may be NULL
+ * @param last_host Last usable host IP (host byte order), may be NULL
+ * @return true on success, false on failure (not connected, etc.)
+ */
+bool get_wifi_subnet_range(char *prefix, size_t prefix_size,
+                           uint32_t *first_host, uint32_t *last_host);
+
+/**
+ * @brief Format a host-byte-order IPv4 address as a dotted string
+ */
+void ip_u32_to_str(uint32_t ip_host_order, char *out, size_t out_size);
+
+/**
  * @brief Connect to a TCP port with timeout
  * 
  * Creates a non-blocking socket, connects with timeout, and returns the socket.

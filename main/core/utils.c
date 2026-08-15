@@ -398,6 +398,66 @@ bool get_wifi_subnet_prefix(char *prefix, size_t prefix_size) {
   return false;
 }
 
+#define SUBNET_MAX_HOST_BITS 12
+
+bool get_wifi_subnet_range(char *prefix, size_t prefix_size,
+                           uint32_t *first_host, uint32_t *last_host) {
+  if (prefix == NULL || prefix_size < 16) {
+    return false;
+  }
+
+  esp_netif_t *netif = get_wifi_sta_netif();
+  if (!netif) {
+    return false;
+  }
+
+  esp_netif_ip_info_t ip_info;
+  if (esp_netif_get_ip_info(netif, &ip_info) != ESP_OK) {
+    return false;
+  }
+
+  uint32_t netmask = ntohl(ip_info.netmask.addr);
+  uint32_t my_ip = ntohl(ip_info.ip.addr);
+
+  int host_bits = 0;
+  uint32_t host_mask = ~netmask;
+  for (uint32_t bit = 1; bit && (host_mask & bit); bit <<= 1) {
+    host_bits++;
+  }
+
+  if (host_bits > SUBNET_MAX_HOST_BITS) {
+    host_bits = SUBNET_MAX_HOST_BITS;
+    host_mask = (1u << host_bits) - 1;
+  }
+
+  uint32_t network = my_ip & ~host_mask;
+  uint32_t broadcast = network | host_mask;
+  uint32_t first = network + 1;
+  uint32_t last = broadcast - 1;
+
+  if (first >= last) {
+    return false;
+  }
+
+  if (first_host) *first_host = first;
+  if (last_host) *last_host = last;
+
+  snprintf(prefix, prefix_size, "%u.%u.%u.%u",
+           (unsigned)((network >> 24) & 0xFF), (unsigned)((network >> 16) & 0xFF),
+           (unsigned)((network >> 8) & 0xFF), (unsigned)(network & 0xFF));
+  return true;
+}
+
+void ip_u32_to_str(uint32_t ip, char *out, size_t out_size) {
+  if (out == NULL || out_size < 16) {
+    if (out && out_size > 0) out[0] = '\0';
+    return;
+  }
+  snprintf(out, out_size, "%u.%u.%u.%u",
+           (unsigned)((ip >> 24) & 0xFF), (unsigned)((ip >> 16) & 0xFF),
+           (unsigned)((ip >> 8) & 0xFF), (unsigned)(ip & 0xFF));
+}
+
 int tcp_connect_with_timeout(const char *target_ip, uint16_t port, int timeout_sec) {
   struct sockaddr_in server_addr;
   int sock;

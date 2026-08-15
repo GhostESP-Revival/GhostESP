@@ -39,6 +39,10 @@ typedef struct {
     char hostname[64];
     char os_version[64];
     char domain[64];
+    char smb_dialect[16];
+    bool smb2;
+    bool signing_enabled;
+    bool signing_required;
     enum_share_t shares[ENUM_SCAN_MAX_SHARES];
     int share_count;
     char users[ENUM_SCAN_MAX_USERS][32];

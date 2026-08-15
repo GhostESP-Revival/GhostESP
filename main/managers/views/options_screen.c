@@ -51,10 +51,12 @@
 #include "scans/ble/gatt_scan.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/arp_scan.h"
+#include "scans/wifi/govee_scan.h"
 #include "scans/wifi/enum4linux_scan.h"
 #include "core/commands.h"
 #include "esp_timer.h"
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include "core/dns_server.h"
 #include "vendor/pcap.h"
@@ -223,6 +225,15 @@ static lv_timer_t *arp_scan_poll_timer = NULL;
 static int selected_arp_index = -1;
 static bool arp_scan_cancel_requested = false;
 
+// Govee LAN discovery flow
+#define GOVEE_LIST_PAGE_SIZE 8
+static paged_menu_t *govee_list_menu = NULL;
+static scan_status_t *govee_scan_status = NULL;
+static detail_view_t *govee_detail_view = NULL;
+static lv_timer_t *govee_scan_poll_timer = NULL;
+static int selected_govee_index = -1;
+static bool govee_scan_cancel_requested = false;
+
 // mDNS discovery flow
 #define MDNS_LIST_PAGE_SIZE 8
 static paged_menu_t *mdns_list_menu = NULL;
@@ -266,6 +277,15 @@ static void arp_scan_complete_callback(void);
 static void arp_list_cleanup(void);
 static const char **arp_list_get_options(void);
 static void show_arp_detail(int index);
+
+static bool start_govee_scan_flow(void);
+static void govee_scan_poll_timer_cb(lv_timer_t *timer);
+static void govee_scan_complete_callback(void);
+static void govee_list_cleanup(void);
+static const char **govee_list_get_options(void);
+static void show_govee_detail(int index);
+static void govee_brightness_kb_cb(const char *text);
+static void govee_color_kb_cb(const char *text);
 
 static bool start_mdns_scan_flow(void);
 static void mdns_scan_poll_timer_cb(lv_timer_t *timer);
@@ -1359,7 +1379,10 @@ typedef enum {
     WIFI_MENU_MDNS_LIST,
     WIFI_MENU_MDNS_DETAILS,
     WIFI_MENU_ENUM_LIST,
-    WIFI_MENU_ENUM_DETAILS
+    WIFI_MENU_ENUM_DETAILS,
+    WIFI_MENU_GOVEE,
+    WIFI_MENU_GOVEE_LIST,
+    WIFI_MENU_GOVEE_DETAILS
 } WifiMenuState;
 
 static WifiMenuState current_wifi_menu_state = WIFI_MENU_MAIN;
@@ -1459,7 +1482,11 @@ static const char * const wifi_dns_sinkhole_download_options[] = {
 
 static const char * const wifi_connection_options[] = {"Connect to WiFi", "Connect to saved WiFi", "Reset AP Credentials", NULL};
 
-static const char * const wifi_misc_options[] = {"TV Cast (Dial Connect)", "Power Printer", "TP Link Test", NULL};
+static const char * const wifi_misc_options[] = {
+    "TV Cast (Dial Connect)", "Power Printer", "TP Link Test", "Wake on LAN", "Govee Lights", NULL
+};
+
+static const char * const wifi_govee_options[] = {"Scan Govee Devices", "List Govee Devices", NULL};
 
 static const char * const wifi_main_options[] = {
     "Attacks", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole", "Connection", "Gadgets", NULL
@@ -2564,6 +2591,182 @@ static bool start_arp_scan_flow(void) {
 }
 
 // ============================================================================
+// Govee LAN Discovery Flow
+// ============================================================================
+
+static void govee_list_cleanup(void) {
+    if (govee_scan_is_running()) {
+        govee_scan_cancel();
+    }
+    if (govee_scan_poll_timer) {
+        lv_timer_del(govee_scan_poll_timer);
+        govee_scan_poll_timer = NULL;
+    }
+    if (govee_list_menu) {
+        paged_menu_destroy(govee_list_menu);
+        govee_list_menu = NULL;
+    }
+    if (govee_scan_status) {
+        scan_status_close(govee_scan_status);
+        govee_scan_status = NULL;
+    }
+    if (govee_detail_view) {
+        detail_view_destroy(govee_detail_view);
+        govee_detail_view = NULL;
+    }
+}
+
+static int govee_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX],
+                              bool *has_more, void *user_data) {
+    (void)user_data;
+    int count = govee_scan_get_count();
+    int loaded = 0;
+    for (int i = offset; i < count && loaded < page_size; i++) {
+        const govee_device_t *device = govee_scan_get_device(i);
+        if (device) {
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s  %s",
+                     device->sku[0] ? device->sku : "Govee Light", device->ip);
+            loaded++;
+        }
+    }
+    *has_more = (offset + loaded) < count;
+    return loaded;
+}
+
+static const char **govee_list_get_options(void) {
+    if (!govee_list_menu) {
+        govee_list_menu = paged_menu_create(GOVEE_LIST_PAGE_SIZE, govee_list_load_fn, NULL);
+    }
+    return paged_menu_get_options(govee_list_menu);
+}
+
+static void govee_detail_back_cb(lv_event_t *e) {
+    (void)e;
+    if (govee_detail_view) {
+        detail_view_destroy(govee_detail_view);
+        govee_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_GOVEE_LIST;
+    rebuild_current_menu();
+}
+
+static void govee_detail_action_cb(lv_event_t *e) {
+    int action = (int)(intptr_t)lv_event_get_user_data(e);
+    const govee_device_t *device = selected_govee_index >= 0 ?
+                                        govee_scan_get_device(selected_govee_index) : NULL;
+    if (!device) {
+        error_popup_create("Govee device not found");
+        return;
+    }
+
+    if (action == 0 || action == 1) {
+        if (govee_set_power(device->ip, action == 0) == ESP_OK) {
+            toast_show_duration(action == 0 ? "Govee turned on" : "Govee turned off", TOAST_SUCCESS, 1500);
+        } else {
+            toast_show_duration("Govee command failed", TOAST_ERROR, 1500);
+        }
+        return;
+    }
+
+    keyboard_view_set_return_view(&options_menu_view);
+    keyboard_view_set_submit_callback(action == 2 ? govee_brightness_kb_cb : govee_color_kb_cb);
+    keyboard_view_set_placeholder(action == 2 ? "Brightness 0-100" : "Color RRGGBB (e.g. FF6600)");
+    keyboard_view_set_initial_text("");
+    display_manager_switch_view(&keyboard_view);
+}
+
+static void show_govee_detail(int index) {
+    const govee_device_t *device = govee_scan_get_device(index);
+    if (!device) {
+        error_popup_create("Govee device not found");
+        return;
+    }
+    selected_govee_index = index;
+    if (menu_build_timer) {
+        lv_timer_del(menu_build_timer);
+        menu_build_timer = NULL;
+    }
+    if (govee_detail_view) detail_view_destroy(govee_detail_view);
+    govee_detail_view = detail_view_create(lv_scr_act(), "Govee Light");
+    reserve_detail_touch_bar_space(govee_detail_view);
+    detail_view_add_info(govee_detail_view, "Model", device->sku[0] ? device->sku : "Unknown");
+    detail_view_add_info(govee_detail_view, "IP", device->ip);
+    if (device->device[0]) detail_view_add_info(govee_detail_view, "Device", device->device);
+    if (device->version[0]) detail_view_add_info(govee_detail_view, "Firmware", device->version);
+    if (!use_compact_wifi_detail_layout()) detail_view_add_info(govee_detail_view, "Actions:", "");
+    detail_view_add_action(govee_detail_view, "Turn On", govee_detail_action_cb, (void *)(intptr_t)0);
+    detail_view_add_action(govee_detail_view, "Turn Off", govee_detail_action_cb, (void *)(intptr_t)1);
+    detail_view_add_action(govee_detail_view, "Set Brightness", govee_detail_action_cb, (void *)(intptr_t)2);
+    detail_view_add_action(govee_detail_view, "Set Color", govee_detail_action_cb, (void *)(intptr_t)3);
+    detail_view_add_back(govee_detail_view, govee_detail_back_cb, NULL);
+    current_wifi_menu_state = WIFI_MENU_GOVEE_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+static void govee_scan_complete_callback(void) {
+    if (govee_scan_status) {
+        scan_status_close(govee_scan_status);
+        govee_scan_status = NULL;
+    }
+    if (govee_scan_get_count() == 0) {
+        error_popup_create("No Govee lights found\nEnable LAN Control in Govee Home");
+        current_wifi_menu_state = WIFI_MENU_GOVEE;
+        rebuild_current_menu();
+        return;
+    }
+    if (govee_list_menu) paged_menu_reset(govee_list_menu);
+    current_wifi_menu_state = WIFI_MENU_GOVEE_LIST;
+    rebuild_current_menu();
+}
+
+static void govee_scan_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (!govee_scan_check_done()) return;
+    lv_timer_del(govee_scan_poll_timer);
+    govee_scan_poll_timer = NULL;
+    if (govee_scan_cancel_requested) {
+        govee_scan_cancel_requested = false;
+        govee_scan_clear_results();
+        if (govee_scan_status) {
+            scan_status_close(govee_scan_status);
+            govee_scan_status = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_GOVEE;
+        rebuild_current_menu();
+        return;
+    }
+    govee_scan_complete_callback();
+}
+
+static void govee_scan_cancel_cb(void) {
+    if (govee_scan_cancel_requested) return;
+    govee_scan_cancel_requested = true;
+    govee_scan_cancel();
+}
+
+static bool start_govee_scan_flow(void) {
+    govee_list_cleanup();
+    govee_scan_cancel_requested = false;
+    govee_scan_status = scan_status_create("Scanning Govee Lights");
+    if (govee_scan_status) {
+        scan_status_set_subtext(govee_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(govee_scan_status, govee_scan_cancel_cb);
+    }
+    esp_err_t err = govee_scan_start_async();
+    if (err != ESP_OK) {
+        if (govee_scan_status) {
+            scan_status_close(govee_scan_status);
+            govee_scan_status = NULL;
+        }
+        return false;
+    }
+    govee_scan_poll_timer = lv_timer_create(govee_scan_poll_timer_cb, 100, NULL);
+    return true;
+}
+
+// ============================================================================
 // mDNS Discovery Flow
 // ============================================================================
 
@@ -3231,6 +3434,9 @@ static void wigle_manual_upload_result_cb(bool success, const char *message);
 static void wigle_stats_result_cb(bool success, const char *message);
 static void wifi_connect_kb_cb(const char *text);
 static void ssh_scan_kb_cb(const char *text);
+static void wol_kb_cb(const char *text);
+static void govee_brightness_kb_cb(const char *text);
+static void govee_color_kb_cb(const char *text);
 static void netbios_scan_kb_cb(const char *text);
 static void http_banner_kb_cb(const char *text);
 static void snmp_probe_kb_cb(const char *text);
@@ -3502,6 +3708,7 @@ static void close_all_scan_status_overlays(void) {
     close_one_scan_status(&ap_scan_status);
     close_one_scan_status(&sta_scan_status);
     close_one_scan_status(&arp_scan_status);
+    close_one_scan_status(&govee_scan_status);
     close_one_scan_status(&mdns_scan_status);
     close_one_scan_status(&sweep_scan_status);
     if (display_manager_get_current_view() == &options_menu_view) {
@@ -3733,6 +3940,9 @@ void options_menu_create() {
                 break;
             case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;
             case WIFI_MENU_MISC: options = wifi_misc_options; break;
+            case WIFI_MENU_GOVEE: options = wifi_govee_options; break;
+            case WIFI_MENU_GOVEE_LIST: options = govee_list_get_options(); break;
+            case WIFI_MENU_GOVEE_DETAILS: options = NULL; break;
             case WIFI_MENU_EVIL_PORTAL_SELECT:
             {
                 // Portal population is now handled in rebuild_current_menu
@@ -8182,6 +8392,37 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
+    else if (current_wifi_menu_state == WIFI_MENU_GOVEE_LIST) {
+        if (strcmp(Selected_Option, "No items found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            paged_menu_page_prev(govee_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            paged_menu_page_next(govee_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        int offset = paged_menu_get_page_offset(govee_list_menu);
+        const char **opts = paged_menu_get_options(govee_list_menu);
+        int skip = paged_menu_has_prev(govee_list_menu) ? 1 : 0;
+        for (int i = 0; opts[i]; i++) {
+            if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
+                show_govee_detail(offset + (i - skip));
+                break;
+            }
+        }
+        option_invoked = false;
+        return;
+    }
+
     else if (current_wifi_menu_state == WIFI_MENU_MDNS_LIST) {
         if (strcmp(Selected_Option, "No items found") == 0) {
             option_invoked = false;
@@ -8655,6 +8896,42 @@ void option_event_cb(lv_event_t *e) {
         display_manager_switch_view(&terminal_view);
         simulateCommand("dialconnect");
         view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Wake on LAN") == 0) {
+        keyboard_view_set_return_view(&options_menu_view);
+        keyboard_view_set_submit_callback(wol_kb_cb);
+        keyboard_view_set_placeholder("MAC or IP (e.g. 192.168.1.10)");
+        keyboard_view_set_initial_text("");
+        display_manager_switch_view(&keyboard_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Govee Lights") == 0) {
+        current_wifi_menu_state = WIFI_MENU_GOVEE;
+        rebuild_current_menu();
+        option_invoked = false;
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "Scan Govee Devices") == 0) {
+        if (!start_govee_scan_flow()) {
+            error_popup_create("Connect to WiFi before scanning");
+        }
+        option_invoked = false;
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "List Govee Devices") == 0) {
+        if (govee_scan_get_count() > 0) {
+            if (govee_list_menu) paged_menu_reset(govee_list_menu);
+            current_wifi_menu_state = WIFI_MENU_GOVEE_LIST;
+            rebuild_current_menu();
+        } else if (!start_govee_scan_flow()) {
+            error_popup_create("Connect to WiFi before scanning");
+        }
+        option_invoked = false;
+        return;
     }
 
     else if (strcmp(Selected_Option, "Power Printer") == 0) {
@@ -9372,6 +9649,7 @@ void options_menu_destroy() {
     station_list_cleanup();
     ble_detect_list_cleanup();
     arp_list_cleanup();
+    govee_list_cleanup();
     mdns_list_cleanup();
 
     if (sweep_scan_status) {
@@ -9732,6 +10010,23 @@ static void back_event_cb(lv_event_t *e) {
             return;
         }
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+        rebuild_current_menu();
+        return;
+    }
+    // If in ARP list view, go back to Network menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_GOVEE_DETAILS) {
+        govee_detail_back_cb(NULL);
+        return;
+    }
+    // If in Govee list view, go back to the Govee submenu.
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_GOVEE_LIST) {
+        govee_list_cleanup();
+        current_wifi_menu_state = WIFI_MENU_GOVEE;
+        rebuild_current_menu();
+        return;
+    }
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_GOVEE) {
+        current_wifi_menu_state = WIFI_MENU_MISC;
         rebuild_current_menu();
         return;
     }
@@ -12808,6 +13103,12 @@ static void rebuild_current_menu(void) {
                     break;
                 case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;
                 case WIFI_MENU_MISC: options = wifi_misc_options; break;
+                case WIFI_MENU_GOVEE: options = wifi_govee_options; break;
+                case WIFI_MENU_GOVEE_LIST:
+                    options = govee_list_get_options();
+                    timer_period = 25;
+                    break;
+                case WIFI_MENU_GOVEE_DETAILS: options = NULL; break;
                 case WIFI_MENU_EVIL_PORTAL_SELECT:
                 {
                     /* JIT-mount on shared-SPI boards before scanning SD */
@@ -13221,6 +13522,58 @@ static void ssh_scan_kb_cb(const char *text) {
     display_manager_switch_view(&terminal_view);
     simulateCommand(cmd);
     keyboard_view_set_submit_callback(NULL);
+}
+
+static void wol_kb_cb(const char *text) {
+    if (!text || strlen(text) == 0) {
+        error_popup_create("Please enter a MAC address");
+        return;
+    }
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "wol %s", text);
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    simulateCommand(cmd);
+    keyboard_view_set_submit_callback(NULL);
+}
+
+static void govee_return_to_list(void) {
+    if (govee_detail_view) {
+        detail_view_destroy(govee_detail_view);
+        govee_detail_view = NULL;
+    }
+    current_wifi_menu_state = WIFI_MENU_GOVEE_LIST;
+    keyboard_view_set_submit_callback(NULL);
+    display_manager_switch_view(&options_menu_view);
+}
+
+static void govee_brightness_kb_cb(const char *text) {
+    char *end = NULL;
+    long brightness = text ? strtol(text, &end, 10) : -1;
+    const govee_device_t *device = selected_govee_index >= 0 ?
+                                        govee_scan_get_device(selected_govee_index) : NULL;
+    if (!device || !text || !*text || !end || *end != '\0' || brightness < 0 || brightness > 100) {
+        error_popup_create("Enter brightness from 0 to 100");
+        return;
+    }
+    esp_err_t err = govee_set_brightness(device->ip, (uint8_t)brightness);
+    toast_show_duration(err == ESP_OK ? "Brightness command sent" : "Govee command failed",
+                        err == ESP_OK ? TOAST_SUCCESS : TOAST_ERROR, 1500);
+    govee_return_to_list();
+}
+
+static void govee_color_kb_cb(const char *text) {
+    unsigned int color = 0;
+    const govee_device_t *device = selected_govee_index >= 0 ?
+                                        govee_scan_get_device(selected_govee_index) : NULL;
+    if (!device || !text || strlen(text) != 6 || sscanf(text, "%06x", &color) != 1) {
+        error_popup_create("Enter a six-digit RGB color");
+        return;
+    }
+    esp_err_t err = govee_set_color(device->ip, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
+    toast_show_duration(err == ESP_OK ? "Color command sent" : "Govee command failed",
+                        err == ESP_OK ? TOAST_SUCCESS : TOAST_ERROR, 1500);
+    govee_return_to_list();
 }
 
 static void netbios_scan_kb_cb(const char *text) {

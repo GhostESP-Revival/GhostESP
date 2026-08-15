@@ -12,6 +12,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Added new Pong and 'Lightcycle' games to the app marketplace for C5 targets
 
 ### Storage & Updates
+- Condensed the SD card boot log into a single card summary line
 - Fixed `sd read --base64` downloads sending truncated data
 - Fixed OTA and Cloud Store manifest fetches failing when CDN requests were redirected from HTTP to HTTPS
 - Fixed Cloud Store fetches failing TLS verification via the HTTPS proxy by enabling cross-signed certificate bundle verification on all boards
@@ -32,9 +33,18 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed use-after-free of ARP scan callback contexts on the lwIP thread and the packet monitor's unbalanced core-lock call
 - Fixed the ARP poisoning ICMP sweep never running
 - Fixed the SSH host scan ignoring a pending scan cancellation
+- LAN scans now reuse ARP sweep results for host discovery with MAC vendor labels
+- Port scan TCP connects now run 8 sockets in parallel for much faster subnet scans
+- SMB enum now negotiates SMB2 and reports dialect + signing status on modern hosts
+- Fixed a stack overflow when running SMB enum on a single host from the UI
+- SNMP probe now retries and validates responses; custom communities via `snmpprobe communities`
+- LAN scans now use the real netmask (up to /20) instead of assuming /24
+- Fixed ARP sweep hosts being missed when table entries evicted before harvest, and SMB parsing breaking on fragmented responses
 - Time now syncs via SNTP automatically on every Wi-Fi connection, not just manual `wifi connect` commands
 - Random Beacon Spam now broadcasts multiple random SSIDs per channel hop 
 - Improved Airspace Monitor accuracy
+- Added Wake-on-LAN gadget
+- Added Govee LAN light discovery and control
 
 ### UI & Rendering
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)

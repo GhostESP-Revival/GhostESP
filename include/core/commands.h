@@ -145,6 +145,8 @@ void handle_nfc_cmd(int argc, char **argv);
 void handle_nfctest_cmd(int argc, char **argv);
 bool nfc_cli_stop(void);
 void handle_tp_link_test(int argc, char **argv);
+void handle_wol_cmd(int argc, char **argv);
+void handle_govee_cmd(int argc, char **argv);
 void handle_status_idle_cmd(int argc, char **argv);
 void handle_unknown_command(const char *cmd);
 

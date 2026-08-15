@@ -14,7 +14,9 @@
 #include "core/network_constants.h"
 #include "core/glog.h"
 #include "core/system_manager.h"
+#include "core/utils.h"
 #include "managers/ghostchi_manager.h"
+#include "scans/wifi/arp_scan.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -32,8 +34,6 @@
 #include "freertos/task.h"
 
 // Constants
-#define START_HOST 1
-#define END_HOST 254
 #define SCAN_TIMEOUT_MS 100
 #define HOST_TIMEOUT_MS 100
 
@@ -197,62 +197,163 @@ bool port_scan_is_host_active(const char *ip_addr) {
 // Port Scanning Functions
 // ============================================================================
 
+// lwIP is configured for 16 active TCP sockets; keep headroom for the rest
+// of the system while still getting a large speedup over sequential connects.
+#define TCP_PIPELINE_SLOTS 8
+#define TCP_LAUNCH_PACING_MS 2
+
+typedef struct {
+    const uint16_t *ports;
+    uint32_t count;
+    uint32_t next;
+    uint16_t range_first;
+    uint16_t range_last;
+} tcp_port_source_t;
+
+static bool tcp_port_source_init_list(tcp_port_source_t *src) {
+    src->ports = COMMON_PORTS;
+    src->count = (uint32_t)NUM_PORTS;
+    src->next = 0;
+    src->range_first = 0;
+    src->range_last = 0;
+    return src->count > 0;
+}
+
+static bool tcp_port_source_init_range(tcp_port_source_t *src, uint16_t first, uint16_t last) {
+    src->ports = NULL;
+    src->count = 0;
+    src->next = 0;
+    src->range_first = first;
+    src->range_last = last;
+    return first <= last;
+}
+
+static bool tcp_port_source_next(tcp_port_source_t *src, uint16_t *out) {
+    if (src->ports) {
+        if (src->next >= src->count) return false;
+        *out = src->ports[src->next++];
+        return true;
+    }
+    uint32_t idx = src->next++;
+    if (src->range_first + idx > src->range_last) return false;
+    *out = (uint16_t)(src->range_first + idx);
+    return true;
+}
+
+static void tcp_scan_pipelined(const char *target_ip, tcp_port_source_t *src,
+                               port_scan_result_t *result) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, target_ip, &addr.sin_addr);
+
+    int socks[TCP_PIPELINE_SLOTS];
+    uint16_t ports[TCP_PIPELINE_SLOTS];
+    int active = 0;
+    bool more = true;
+
+    while (more && !g_port_scan_cancel && result->num_open_ports < PORT_SCAN_MAX_OPEN_PORTS) {
+        while (active < TCP_PIPELINE_SLOTS && result->num_open_ports < PORT_SCAN_MAX_OPEN_PORTS) {
+            uint16_t port;
+            if (!tcp_port_source_next(src, &port)) {
+                more = false;
+                break;
+            }
+
+            int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (sock < 0) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                break;
+            }
+
+            int flags = fcntl(sock, F_GETFL, 0);
+            fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+            addr.sin_port = htons(port);
+            int r = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+
+            if (r == 0) {
+                result->open_ports[result->num_open_ports++] = port;
+                glog("  Port %d: OPEN\n", port);
+                close(sock);
+                vTaskDelay(pdMS_TO_TICKS(TCP_LAUNCH_PACING_MS));
+                continue;
+            }
+            if (r < 0 && errno != EINPROGRESS) {
+                close(sock);
+                vTaskDelay(pdMS_TO_TICKS(TCP_LAUNCH_PACING_MS));
+                continue;
+            }
+
+            socks[active] = sock;
+            ports[active] = port;
+            active++;
+            vTaskDelay(pdMS_TO_TICKS(TCP_LAUNCH_PACING_MS));
+        }
+
+        if (active == 0) break;
+
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        int maxfd = -1;
+        for (int i = 0; i < active; i++) {
+            FD_SET(socks[i], &wfds);
+            if (socks[i] > maxfd) maxfd = socks[i];
+        }
+
+        struct timeval tv = {
+            .tv_sec = SCAN_TIMEOUT_MS / 1000,
+            .tv_usec = (SCAN_TIMEOUT_MS % 1000) * 1000,
+        };
+        int rv = select(maxfd + 1, NULL, &wfds, NULL, &tv);
+        if (rv < 0) break;
+
+        int remaining = 0;
+        for (int i = 0; i < active; i++) {
+            bool done = (rv == 0);
+            bool open = false;
+            if (!done && FD_ISSET(socks[i], &wfds)) {
+                int error = 0;
+                socklen_t len = sizeof(error);
+                if (getsockopt(socks[i], SOL_SOCKET, SO_ERROR, &error, &len) >= 0 && error == 0) {
+                    open = true;
+                }
+                done = true;
+            }
+            if (done) {
+                if (open && result->num_open_ports < PORT_SCAN_MAX_OPEN_PORTS) {
+                    result->open_ports[result->num_open_ports++] = ports[i];
+                    glog("  Port %d: OPEN\n", ports[i]);
+                }
+                close(socks[i]);
+            } else {
+                socks[remaining] = socks[i];
+                ports[remaining] = ports[i];
+                remaining++;
+            }
+        }
+        active = remaining;
+    }
+
+    for (int i = 0; i < active; i++) {
+        close(socks[i]);
+    }
+}
+
 /**
  * @brief Scan common TCP ports on a host
  */
 void port_scan_scan_tcp_ports(const char *target_ip, port_scan_result_t *result) {
-    struct sockaddr_in server_addr;
-    int sock;
-    int scan_result;
-    struct timeval timeout;
-    fd_set fdset;
-    int flags;
-
     snprintf(result->ip, sizeof(result->ip), "%s", target_ip);
     result->num_open_ports = 0;
 
-    server_addr.sin_family = AF_INET;
-    inet_pton(AF_INET, target_ip, &server_addr.sin_addr.s_addr);
-
     glog("Scanning TCP ports on %s...\n", target_ip);
 
-    for (size_t i = 0; i < NUM_PORTS; i++) {
-        if (result->num_open_ports >= PORT_SCAN_MAX_OPEN_PORTS)
-            break;
-
-        uint16_t port = COMMON_PORTS[i];
-        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (sock < 0)
-            continue;
-
-        flags = fcntl(sock, F_GETFL, 0);
-        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-
-        server_addr.sin_port = htons(port);
-        scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
-
-        if (scan_result == 0 || (scan_result < 0 && errno == EINPROGRESS)) {
-            timeout.tv_sec = SCAN_TIMEOUT_MS / 1000;
-            timeout.tv_usec = (SCAN_TIMEOUT_MS % 1000) * 1000;
-
-            FD_ZERO(&fdset);
-            FD_SET(sock, &fdset);
-
-            scan_result = select(sock + 1, NULL, &fdset, NULL, &timeout);
-
-            if (scan_result > 0) {
-                int error = 0;
-                socklen_t len = sizeof(error);
-                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) >= 0 && error == 0) {
-                    result->open_ports[result->num_open_ports++] = port;
-                    glog("  Port %d: OPEN\n", port);
-                }
-            }
-        }
-
-        close(sock);
-        vTaskDelay(pdMS_TO_TICKS(10));
+    tcp_port_source_t src;
+    if (!tcp_port_source_init_list(&src)) {
+        return;
     }
+    tcp_scan_pipelined(target_ip, &src, result);
 }
 
 /**
@@ -353,13 +454,12 @@ static bool udp_port_is_open(const char *target_ip, uint16_t port, uint32_t wait
     struct sockaddr_in from;
     socklen_t fromlen = sizeof(from);
     int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
+    int err = (n < 0) ? errno : 0;
+    close(sock);
     if (n > 0) {
-        close(sock);
         return true;
     }
-    int err = errno;
-    close(sock);
-    if (err == ECONNREFUSED) return false;
+    (void)err;
     return false;
 }
 
@@ -496,61 +596,18 @@ bool port_scan_ip_range(const char *target_ip, uint16_t start_port, uint16_t end
         glog("Invalid port range: %d-%d\n", start_port, end_port);
         return false;
     }
-    // Use local result - no need for context allocation
+
     port_scan_result_t result;
     snprintf(result.ip, sizeof(result.ip), "%s", target_ip);
     result.num_open_ports = 0;
 
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    inet_pton(AF_INET, target_ip, &server_addr.sin_addr.s_addr);
-
     glog("Scanning %s TCP ports %d-%d\n", target_ip, start_port, end_port);
 
-    uint32_t ports_scanned = 0;
-    uint32_t total_ports = (uint32_t)end_port - start_port + 1;
-
-    for (uint32_t p = (uint32_t)start_port; p <= (uint32_t)end_port; p++) {
-        uint16_t port = (uint16_t)p;
-        if (result.num_open_ports >= PORT_SCAN_MAX_OPEN_PORTS)
-            break;
-
-        ports_scanned++;
-        if (ports_scanned % 100 == 0) {
-            glog("Progress: %lu/%lu ports (%.1f%%)\n",
-                 (unsigned long)ports_scanned, (unsigned long)total_ports,
-                 (float)ports_scanned / total_ports * 100);
-        }
-
-        int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (sock < 0)
-            continue;
-
-        int flags = fcntl(sock, F_GETFL, 0);
-        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-
-        server_addr.sin_port = htons(port);
-        int scan_result = connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
-
-        if (scan_result == 0 || (scan_result < 0 && errno == EINPROGRESS)) {
-            struct timeval timeout = {.tv_sec = SCAN_TIMEOUT_MS / 1000,
-                                      .tv_usec = (SCAN_TIMEOUT_MS % 1000) * 1000};
-            fd_set fdset;
-            FD_ZERO(&fdset);
-            FD_SET(sock, &fdset);
-
-            if (select(sock + 1, NULL, &fdset, NULL, &timeout) > 0) {
-                int error = 0;
-                socklen_t len = sizeof(error);
-                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) >= 0 && error == 0) {
-                    result.open_ports[result.num_open_ports++] = port;
-                    glog("  Port %d: OPEN\n", port);
-                }
-            }
-        }
-        close(sock);
-        vTaskDelay(pdMS_TO_TICKS(10));
+    tcp_port_source_t src;
+    if (!tcp_port_source_init_range(&src, start_port, end_port)) {
+        return false;
     }
+    tcp_scan_pipelined(target_ip, &src, &result);
 
     if (result.num_open_ports > 0) {
         glog("Host %s has %d open ports\n", result.ip, result.num_open_ports);
@@ -646,17 +703,41 @@ static void print_service_analysis(const port_scan_result_t *result) {
             has_file_sharing = true;
     }
 
-    printf("\nPossible device type:\n");
-    TERMINAL_VIEW_ADD_TEXT("\nPossible device type:\n");
+    glog("\nPossible device type:\n");
 
     if (has_web && has_db) {
-        printf("- Web Application Server\n");
-        TERMINAL_VIEW_ADD_TEXT("- Web Application Server\n");
+        glog("- Web Application Server\n");
     }
     if (has_file_sharing) {
         glog("- Windows Server\n");
     }
     glog("\n");
+}
+
+static void port_scan_report_host(const char *ip, const uint8_t *mac, size_t index) {
+    const char *vendor = mac ? arp_scan_get_vendor(mac) : NULL;
+    if (vendor) {
+        glog("\n[Host %zu] Found active host: %s (%s)\n", index, ip, vendor);
+    } else {
+        glog("\n[Host %zu] Found active host: %s\n", index, ip);
+    }
+}
+
+static void port_scan_target(const char *ip) {
+    port_scan_result_t tcp_result;
+    port_scan_result_t udp_result;
+
+    port_scan_scan_tcp_ports(ip, &tcp_result);
+    port_scan_scan_udp_ports(ip, &udp_result);
+
+    print_service_analysis(&tcp_result);
+
+    if (udp_result.num_open_ports > 0) {
+        glog("UDP ports on %s:\n", ip);
+        for (uint8_t k = 0; k < udp_result.num_open_ports; k++) {
+            glog("  UDP %d: OPEN\n", udp_result.open_ports[k]);
+        }
+    }
 }
 
 /**
@@ -669,59 +750,58 @@ bool port_scan_subnet(void) {
         return false;
     }
 
-    if (!port_scan_get_subnet_prefix(ctx)) {
-        glog("Failed to get network information. Make sure WiFi is connected.\n");
-        port_scanner_cleanup(ctx);
-        return false;
-    }
-
-    char current_ip[26];
+    char current_ip[16];
     ctx->num_active_hosts = 0;
     g_port_scan_cancel = false;  // Reset cancellation flag
 
-    glog("Starting subnet scan on %s0/24\n", ctx->subnet_prefix);
-    glog("Scanning 254 hosts...\n");
+    int arp_count = arp_scan_get_count();
+    if (arp_count > 0) {
+        glog("Starting port scan on %d ARP-discovered host(s)...\n", arp_count);
 
-    for (int host = START_HOST; host <= END_HOST && !g_port_scan_cancel; host++) {
-        // Progress indication every 25 hosts
-        if (host % 25 == 0) {
-            glog("Progress: %d/254 hosts scanned\n", host);
-        }
-        
-        snprintf(current_ip, sizeof(current_ip), "%s%d", ctx->subnet_prefix, host);
+        for (int i = 0; i < arp_count && !g_port_scan_cancel; i++) {
+            const arp_host_t *host = arp_scan_get_host(i);
+            if (!host) continue;
 
-        if (port_scan_is_host_active(current_ip)) {
-            glog("\n[Host %d] Found active host: %s\n", ctx->num_active_hosts + 1, current_ip);
             ctx->num_active_hosts++;
+            port_scan_report_host(host->ip, host->mac, ctx->num_active_hosts);
+            port_scan_target(host->ip);
+        }
+    } else {
+        uint32_t first, last;
+        if (!get_wifi_subnet_range(ctx->subnet_prefix, sizeof(ctx->subnet_prefix), &first, &last)) {
+            glog("Failed to get network information. Make sure WiFi is connected.\n");
+            port_scanner_cleanup(ctx);
+            return false;
+        }
 
-            // Process results immediately - no storage needed
-            port_scan_result_t tcp_result;
-            port_scan_result_t udp_result;
+        uint32_t total_hosts = last - first + 1;
+        glog("Starting subnet scan on %s (%u hosts)\n", ctx->subnet_prefix,
+             (unsigned)total_hosts);
 
-            port_scan_scan_tcp_ports(current_ip, &tcp_result);
-            port_scan_scan_udp_ports(current_ip, &udp_result);
+        uint32_t scanned = 0;
+        for (uint32_t ip = first; ip <= last && !g_port_scan_cancel; ip++, scanned++) {
+            if (scanned % 25 == 0) {
+                glog("Progress: %u/%u hosts scanned\n", (unsigned)scanned, (unsigned)total_hosts);
+            }
 
-            // Print TCP results analysis immediately
-            print_service_analysis(&tcp_result);
+            ip_u32_to_str(ip, current_ip, sizeof(current_ip));
 
-            // Print UDP results
-            if (udp_result.num_open_ports > 0) {
-                glog("UDP ports on %s:\n", current_ip);
-                for (uint8_t k = 0; k < udp_result.num_open_ports; k++) {
-                    glog("  UDP %d: OPEN\n", udp_result.open_ports[k]);
-                }
+            if (port_scan_is_host_active(current_ip)) {
+                ctx->num_active_hosts++;
+                port_scan_report_host(current_ip, NULL, ctx->num_active_hosts);
+                port_scan_target(current_ip);
             }
         }
     }
-    
+
     glog("\n========================================\n");
     if (g_port_scan_cancel) {
-        glog("Scan cancelled. Found %d active hosts.\n", ctx->num_active_hosts);
+        glog("Scan cancelled. Found %zu active hosts.\n", ctx->num_active_hosts);
     } else {
-        glog("Scan completed. Found %d active hosts.\n", ctx->num_active_hosts);
+        glog("Scan completed. Found %zu active hosts.\n", ctx->num_active_hosts);
     }
     glog("========================================\n");
-    
+
     port_scanner_cleanup(ctx);
     g_port_scan_task_handle = NULL;
     return !g_port_scan_cancel;
