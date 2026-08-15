@@ -10030,6 +10030,14 @@ static void back_event_cb(lv_event_t *e) {
         rebuild_current_menu();
         return;
     }
+    // Gadgets has direct child flows; do not replay a stale Govee state here.
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_MISC) {
+        gui_nav_history_clear();
+        s_skip_history_capture_once = true;
+        current_wifi_menu_state = WIFI_MENU_MAIN;
+        rebuild_current_menu();
+        return;
+    }
     // If in ARP list view, go back to Network menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ARP_LIST) {
         arp_list_cleanup();
