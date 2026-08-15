@@ -25,6 +25,16 @@
    warmup is AIRSPACE_BASELINE_WARMUP windows ~= 4s before the baseline is used. */
 #define AIRSPACE_BASELINE_WARMUP 8U
 #define AIRSPACE_INSIGHT_INTERVAL_MS 1800U
+#define AIRSPACE_CONFIRM_WINDOWS 2U
+
+#define AIRSPACE_SEC_PRIVACY     0x01U
+#define AIRSPACE_SEC_WPA         0x02U
+#define AIRSPACE_SEC_RSN         0x04U
+#define AIRSPACE_SEC_PSK         0x08U
+#define AIRSPACE_SEC_EAP         0x10U
+#define AIRSPACE_SEC_SAE         0x20U
+#define AIRSPACE_SEC_OWE         0x40U
+#define AIRSPACE_SEC_PMF_REQUIRED 0x80U
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 #define AIRSPACE_MAX_WIFI_CHANNEL 165
@@ -52,8 +62,8 @@ typedef struct {
 } airspace_device_t;
 
 /* Beacon-derived AP table (Step 2), shared by beacon-flood and evil-twin
-   detection. One entry per named SSID; a second BSSID for the same SSID that
-   drops encryption is flagged as a rogue AP / evil twin. */
+   detection. One entry per named SSID; a second BSSID with a different compact
+   security fingerprint is flagged as a rogue AP / evil twin. */
 #define AIRSPACE_MAX_APS 32
 typedef struct {
     bool used;
@@ -62,7 +72,7 @@ typedef struct {
     char ssid[33];
     uint8_t channel;
     int8_t rssi;
-    bool has_enc;        /* Privacy bit set in beacon capability info */
+    uint8_t security;    /* Compact WPA/RSN/AKM/PMF fingerprint */
     uint32_t last_seen_ms;
 } airspace_ap_t;
 
@@ -118,15 +128,15 @@ static uint32_t s_window_beacons = 0;      /* beacon frames this window */
 static uint32_t s_window_la_beacons = 0;   /* beacons from locally-admin BSSIDs */
 static bool s_window_evil = false;         /* evil twin seen this window */
 static char s_window_evil_ssid[33] = {0};
-static uint32_t s_last_beacons = 0;
-static uint32_t s_last_la_beacons = 0;
+static uint32_t s_last_beacons = 0;         /* normalized frames per second */
+static uint32_t s_last_la_beacons = 0;      /* normalized frames per second */
 static bool s_last_evil = false;
 static char s_last_evil_ssid[33] = {0};
 static uint16_t s_last_bssids = 0;         /* distinct beaconing APs last window */
 
 /* Auth-flood evidence (Step 3). */
 static uint32_t s_window_auth = 0;         /* auth frames this window */
-static uint32_t s_last_auth = 0;
+static uint32_t s_last_auth = 0;            /* normalized frames per second */
 static uint16_t s_last_auth_src = 0;       /* distinct auth source MACs last window */
 
 /* All of the larger / newer mutable state lives in a single heap block (PSRAM
@@ -161,10 +171,18 @@ typedef struct {
     uint32_t insight_prev_pps;
     uint32_t insight_prev_kick;
     uint8_t insight_prev_tx;
+    /* These consume the three bytes that were alignment padding before the
+       enum, so confirmation adds no heap usage. */
+    uint8_t confirm_kind;
+    uint8_t confirm_streak;
+    uint8_t confirm_window;
     airspace_threat_level_t insight_level;
     char insight_text[64];
     char advice_text[64];
 } airspace_state_t;
+
+_Static_assert(sizeof(airspace_ap_t) == 48, "airspace AP state grew");
+_Static_assert(sizeof(airspace_state_t) == 368, "airspace monitor state grew");
 
 static airspace_state_t *s_state = NULL;
 
@@ -249,15 +267,73 @@ static void bitmap_set9(uint8_t *bm, const uint8_t *key, size_t keylen) {
     bm[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
 }
 
-/* Parse the SSID element shared by beacon (0x08) and probe-response (0x05)
-   frame bodies: fixed 12-byte params then the SSID IE (tag 0) at offset 36.
-   Returns the SSID length (0 if absent/hidden/invalid) and sets *ssid_out. */
+/* Beacon and probe-response IEs normally start with SSID, but valid frames do
+   not have to preserve that order. Walk the bounded TLV list instead. */
 static uint8_t parse_mgmt_ssid(const uint8_t *frame, int len, const uint8_t **ssid_out) {
-    if (len < 38 || frame[36] != 0x00) return 0;
-    uint8_t sl = frame[37];
-    if (sl == 0 || sl > 32 || len < (int)(38 + sl)) return 0;
-    *ssid_out = frame + 38;
-    return sl;
+    if (len < 38) return 0;
+    int offset = 36;
+    while (offset + 2 <= len) {
+        uint8_t id = frame[offset];
+        uint8_t ie_len = frame[offset + 1];
+        offset += 2;
+        if (offset + ie_len > len) return 0;
+        if (id == 0) {
+            if (ie_len == 0 || ie_len > 32) return 0;
+            *ssid_out = frame + offset;
+            return ie_len;
+        }
+        offset += ie_len;
+    }
+    return 0;
+}
+
+static uint8_t parse_mgmt_security(const uint8_t *frame, int len, uint16_t capability) {
+    uint8_t security = (capability & 0x0010U) ? AIRSPACE_SEC_PRIVACY : 0;
+    int offset = 36;
+
+    while (offset + 2 <= len) {
+        uint8_t id = frame[offset];
+        uint8_t ie_len = frame[offset + 1];
+        offset += 2;
+        if (offset + ie_len > len) break;
+
+        const uint8_t *ie = frame + offset;
+        if (id == 221 && ie_len >= 4 && ie[0] == 0x00 && ie[1] == 0x50 &&
+            ie[2] == 0xF2 && ie[3] == 0x01) {
+            security |= AIRSPACE_SEC_WPA;
+        } else if (id == 48) {
+            security |= AIRSPACE_SEC_RSN;
+            size_t pos = 0;
+            if (ie_len >= 8) {
+                pos = 2 + 4; /* version and group cipher */
+                uint16_t pairwise_count = (uint16_t)(ie[pos] | (ie[pos + 1] << 8));
+                pos += 2U + (size_t)pairwise_count * 4U;
+                if (pos + 2 <= ie_len) {
+                    uint16_t akm_count = (uint16_t)(ie[pos] | (ie[pos + 1] << 8));
+                    pos += 2;
+                    for (uint16_t i = 0; i < akm_count && pos + 4 <= ie_len; i++, pos += 4) {
+                        if (ie[pos] != 0x00 || ie[pos + 1] != 0x0F || ie[pos + 2] != 0xAC) continue;
+                        uint8_t suite = ie[pos + 3];
+                        if (suite == 1 || suite == 3 || suite == 5 || suite == 11 || suite == 12) {
+                            security |= AIRSPACE_SEC_EAP;
+                        } else if (suite == 2 || suite == 4 || suite == 6) {
+                            security |= AIRSPACE_SEC_PSK;
+                        } else if (suite == 8) {
+                            security |= AIRSPACE_SEC_SAE;
+                        } else if (suite == 18) {
+                            security |= AIRSPACE_SEC_OWE;
+                        }
+                    }
+                    if (pos + 2 <= ie_len) {
+                        uint16_t caps = (uint16_t)(ie[pos] | (ie[pos + 1] << 8));
+                        if ((caps & 0x0040U) != 0) security |= AIRSPACE_SEC_PMF_REQUIRED;
+                    }
+                }
+            }
+        }
+        offset += ie_len;
+    }
+    return security;
 }
 
 static bool is_broadcast_mac(const uint8_t mac[6]) {
@@ -268,13 +344,11 @@ static bool is_broadcast_mac(const uint8_t mac[6]) {
 }
 
 /* Track a named beacon in the AP table and flag evil twins. Called under
-   s_lock from the RX callback. A second BSSID advertising a known SSID that
-   drops encryption is the high-precision rogue-AP signal; legitimate
-   multi-BSSID networks (mesh, band-steering) keep the same security and are
-   ignored. */
+   s_lock from the RX callback. A second BSSID advertising a known SSID with a
+   different security fingerprint is the high-precision rogue-AP signal. */
 static void airspace_ap_track_locked(const uint8_t *bssid, const uint8_t *ssid,
                                      uint8_t ssid_len, uint8_t channel,
-                                     int8_t rssi, bool has_enc, uint32_t now) {
+                                     int8_t rssi, uint8_t security, uint32_t now) {
     if (s_aps == NULL || ssid_len == 0 || ssid_len > 32) {
         return;
     }
@@ -289,12 +363,16 @@ static void airspace_ap_track_locked(const uint8_t *bssid, const uint8_t *ssid,
             if (free_slot < 0) free_slot = i;
             continue;
         }
+        if ((uint32_t)(now - ap->last_seen_ms) > AIRSPACE_DEVICE_TTL_MS) {
+            memset(ap, 0, sizeof(*ap));
+            if (free_slot < 0) free_slot = i;
+            continue;
+        }
         if (ap->ssid_len == ssid_len && memcmp(ap->ssid, ssid, ssid_len) == 0) {
             if (memcmp(ap->bssid, bssid, 6) != 0) {
-                /* Same SSID from a second BSSID with a different security mode
-                   (one encrypted, one open) is the evil-twin signal, whichever
-                   was seen first. Consistent security = legit multi-BSSID net. */
-                if (ap->has_enc != has_enc) {
+                /* Same SSID from a second BSSID with a different WPA/RSN/AKM
+                   fingerprint is the evil-twin signal, whichever was first. */
+                if (ap->security != security) {
                     s_window_evil = true;
                     memcpy(s_window_evil_ssid, ssid, ssid_len);
                     s_window_evil_ssid[ssid_len] = '\0';
@@ -302,7 +380,7 @@ static void airspace_ap_track_locked(const uint8_t *bssid, const uint8_t *ssid,
             } else {
                 ap->channel = channel;
                 ap->rssi = rssi;
-                ap->has_enc = has_enc;
+                ap->security = security;
                 ap->last_seen_ms = now;
             }
             return;
@@ -322,7 +400,7 @@ static void airspace_ap_track_locked(const uint8_t *bssid, const uint8_t *ssid,
     ap->ssid_len = ssid_len;
     ap->channel = channel;
     ap->rssi = rssi;
-    ap->has_enc = has_enc;
+    ap->security = security;
     ap->last_seen_ms = now;
 }
 
@@ -379,11 +457,11 @@ static void roll_window_locked(uint32_t now) {
     s_last_kick_spoof = s_window_kick_spoof;
     s_last_kick_reason = s_window_kick_reason;
 
-    s_last_beacons = s_window_beacons;
-    s_last_la_beacons = s_window_la_beacons;
+    s_last_beacons = (s_window_beacons * 1000U) / elapsed;
+    s_last_la_beacons = (s_window_la_beacons * 1000U) / elapsed;
     s_last_evil = s_window_evil;
     memcpy(s_last_evil_ssid, s_window_evil_ssid, sizeof(s_last_evil_ssid));
-    s_last_auth = s_window_auth;
+    s_last_auth = (s_window_auth * 1000U) / elapsed;
 
     if (s_devices != NULL) {
         for (int i = 0; i < AIRSPACE_MAX_DEVICES; i++) {
@@ -420,11 +498,20 @@ static void roll_window_locked(uint32_t now) {
         bool beacon_calm = (s_window_la_beacons * 2U) < s_window_beacons ||
                            s_window_beacons < 10U;
 
+        bool hostile_sample = kick_now >= 6U ||
+                              (s_last_auth >= 80U && s_last_auth_src >= 12U) ||
+                              (s_last_beacons >= 40U &&
+                               s_last_la_beacons * 2U >= s_last_beacons &&
+                               bssids_est >= 40U);
         if (s_state->baseline_samples < AIRSPACE_BASELINE_WARMUP) {
-            s_state->baseline_pps += ((float)s_last_pps - s_state->baseline_pps) * 0.25f;
-            s_state->baseline_kick += ((float)kick_now - s_state->baseline_kick) * 0.25f;
-            s_state->baseline_bssids += ((float)bssids_est - s_state->baseline_bssids) * 0.25f;
-            s_state->baseline_samples++;
+            /* Do not teach an obvious startup attack as normal. Fixed
+               thresholds still classify it while baseline learning waits. */
+            if (!hostile_sample) {
+                s_state->baseline_pps += ((float)s_last_pps - s_state->baseline_pps) * 0.25f;
+                s_state->baseline_kick += ((float)kick_now - s_state->baseline_kick) * 0.25f;
+                s_state->baseline_bssids += ((float)bssids_est - s_state->baseline_bssids) * 0.25f;
+                s_state->baseline_samples++;
+            }
         } else {
             if (calm) {
                 s_state->baseline_pps += ((float)s_last_pps - s_state->baseline_pps) * 0.10f;
@@ -446,6 +533,7 @@ static void roll_window_locked(uint32_t now) {
     s_window_kick_total = 0;
     s_window_kick_bcast = 0;
     s_window_kick_spoof = 0;
+    s_window_kick_reason = 0;
     s_window_beacons = 0;
     s_window_la_beacons = 0;
     s_window_evil = false;
@@ -728,6 +816,33 @@ const char *airspace_monitor_threat_label(airspace_threat_level_t level) {
     }
 }
 
+enum {
+    AIRSPACE_PATTERN_NONE = 0,
+    AIRSPACE_PATTERN_EVIL,
+    AIRSPACE_PATTERN_KARMA,
+    AIRSPACE_PATTERN_KICK,
+    AIRSPACE_PATTERN_BEACON,
+    AIRSPACE_PATTERN_AUTH,
+};
+
+static bool confirm_pattern(uint8_t pattern, uint8_t window_id) {
+    if (s_state == NULL) return false;
+
+    if (s_state->confirm_window != window_id) {
+        if (pattern != AIRSPACE_PATTERN_NONE && pattern == s_state->confirm_kind) {
+            if (s_state->confirm_streak < UINT8_MAX) s_state->confirm_streak++;
+        } else {
+            s_state->confirm_kind = pattern;
+            s_state->confirm_streak = pattern == AIRSPACE_PATTERN_NONE ? 0 : 1;
+        }
+        s_state->confirm_window = window_id;
+    }
+
+    return pattern != AIRSPACE_PATTERN_NONE &&
+           pattern == s_state->confirm_kind &&
+           s_state->confirm_streak >= AIRSPACE_CONFIRM_WINDOWS;
+}
+
 /* Unified trend/insight engine. Lives here (not in the view) so the on-screen
    status and the "insight" line can never disagree. Runs on a slow cadence and
    keeps its prior-sample state in the heap block, not BSS. Single caller. */
@@ -814,6 +929,7 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
     bool karma_w = false;
     uint8_t karma_mac[6] = {0};
     uint32_t karma_ssids = 0;
+    uint8_t window_id = 0;
 
     portENTER_CRITICAL(&s_lock);
     roll_window_locked(now);
@@ -831,6 +947,7 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
     auth_src_w = s_last_auth_src;
     if (s_state != NULL) {
         base_bssids = (uint32_t)(s_state->baseline_bssids + 0.5f);
+        window_id = s_state->pps_head;
     }
 
     snap.active = s_active;
@@ -873,7 +990,9 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
 
             uint32_t kick_rate = dev->last_deauth_rate + dev->last_disassoc_rate;
             uint32_t kick_total = dev->deauth_total + dev->disassoc_total;
-            uint32_t score = (kick_rate * 200U) + (kick_total * 20U) + dev->total;
+            /* Ordinary volume is context, not attack evidence. The bounded
+               cumulative term only breaks ties and retains a recent kicker. */
+            uint32_t score = (kick_rate * 200U) + (kick_total > 199U ? 199U : kick_total);
             if (score == 0) continue;
 
             airspace_suspect_t candidate = {0};
@@ -945,7 +1064,7 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
                      global_kick_rate >= snap.baseline_kick + 4;
     bool kick_anom_strong = snap.baseline_ready && global_kick_rate >= 6 &&
                             global_kick_rate >= snap.baseline_kick + 10;
-    bool pps_anom = snap.baseline_ready &&
+    bool pps_anom = snap.baseline_ready && !snap.dwelling &&
                     snap.packets_per_sec >= snap.baseline_pps * 3 + 50;
 
     /* Beacon flood: a spike in the number of DISTINCT beaconing APs that is
@@ -954,8 +1073,9 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
        a dense-but-stable room doesn't trip it — only a surge of *new* spoofed
        APs does. Before the baseline warms up, fall back to a conservative
        absolute floor. la_heavy confirms the surge is spoofed, not just a busy
-       channel. beacons_w/la_beacons_w/bssids_w are per ~500ms window. */
-    bool la_heavy = beacons_w >= 20 && la_beacons_w * 2U >= beacons_w;
+       channel. Beacon frame counts are normalized rates; distinct BSSIDs are
+       retained as a per-window estimate. */
+    bool la_heavy = beacons_w >= 40 && la_beacons_w * 2U >= beacons_w;
     bool bssid_spike = snap.baseline_ready ? (bssids_w >= base_bssids * 3U + 15U)
                                            : (bssids_w >= 40U);
     bool beacon_flood = la_heavy && bssid_spike;
@@ -965,7 +1085,17 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
 
     /* Auth flood: auth frames are rare in normal traffic, so require both a
        high rate and many distinct source MACs (spoofed clients). */
-    bool auth_flood = auth_w >= 40U && auth_src_w >= 12U;
+    bool auth_flood = auth_w >= 80U && auth_src_w >= 12U;
+
+    uint8_t pattern = AIRSPACE_PATTERN_NONE;
+    if (evil_w) pattern = AIRSPACE_PATTERN_EVIL;
+    else if (karma_w) pattern = AIRSPACE_PATTERN_KARMA;
+    else if (offender_kick_rate >= 5 || global_kick_rate >= 15 || kick_anom) {
+        pattern = AIRSPACE_PATTERN_KICK;
+    }
+    else if (beacon_flood) pattern = AIRSPACE_PATTERN_BEACON;
+    else if (auth_flood) pattern = AIRSPACE_PATTERN_AUTH;
+    bool pattern_confirmed = confirm_pattern(pattern, window_id);
 
     if (offender_kick_rate >= 10 || global_kick_rate >= 30 || kick_anom_strong) {
         snap.threat_level = AIRSPACE_THREAT_ATTACK_LIKELY;
@@ -987,27 +1117,27 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
             snprintf(snap.reason, sizeof(snap.reason), "Deauth flood %lu/s r%u%s",
                      (unsigned long)global_kick_rate, (unsigned)kick_reason_w, tool);
         }
-    } else if (evil_w) {
+    } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_EVIL) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason), "Evil twin: %s (sec mismatch)", evil_ssid_w);
-    } else if (karma_w) {
+    } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_KARMA) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason),
                  "Karma AP: %02X:%02X:%02X:%02X:%02X:%02X (%lu SSIDs)",
                  karma_mac[0], karma_mac[1], karma_mac[2], karma_mac[3],
                  karma_mac[4], karma_mac[5], (unsigned long)karma_ssids);
-    } else if (offender_kick_rate >= 5 || global_kick_rate >= 15 || kick_anom) {
+    } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_KICK) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason), "Elevated kick traffic: %lu/s (base %lu)",
                  (unsigned long)global_kick_rate, (unsigned long)snap.baseline_kick);
-    } else if (beacon_flood) {
+    } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_BEACON) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason), "Beacon flood: %lu spoofed APs/win",
                  (unsigned long)bssids_w);
-    } else if (auth_flood) {
+    } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_AUTH) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason), "Auth flood: ~%lu/s from %lu srcs",
-                 (unsigned long)(auth_w * 2U), (unsigned long)auth_src_w);
+                 (unsigned long)auth_w, (unsigned long)auth_src_w);
     } else if (snap.packets_per_sec >= 400 || snap.unique_devices >= 24 || pps_anom) {
         snap.threat_level = AIRSPACE_THREAT_BUSY;
         snprintf(snap.reason, sizeof(snap.reason), "High airtime activity");
@@ -1068,7 +1198,8 @@ void wifi_airspace_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type)
 
     if (kick_frame) {
         s_window_kick_total++;
-        if (len >= 26) {
+        bool protected_frame = (frame[1] & 0x40U) != 0;
+        if (len >= 26 && !protected_frame) {
             s_window_kick_reason = (uint16_t)(frame[24] | (frame[25] << 8));
         }
         /* Addr1 (destination) at frame+4; a broadcast target is the classic
@@ -1087,14 +1218,14 @@ void wifi_airspace_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type)
         if (s_state != NULL) {
             bitmap_set9(s_state->bssid_seen, bssid, 6);  /* distinct-AP estimate */
         }
-        /* Capability info at frame[34..35] (Privacy bit => encrypted). */
-        bool has_enc = ((frame[34] | (frame[35] << 8)) & 0x0010) != 0;
+        uint16_t capability = (uint16_t)(frame[34] | (frame[35] << 8));
+        uint8_t security = parse_mgmt_security(frame, len, capability);
         const uint8_t *ssid = NULL;
         uint8_t ssid_len = parse_mgmt_ssid(frame, len, &ssid);
         if (ssid_len > 0) {
             airspace_ap_track_locked(bssid, ssid, ssid_len,
                                      pkt->rx_ctrl.channel, pkt->rx_ctrl.rssi,
-                                     has_enc, now);
+                                     security, now);
         }
     }
 

@@ -33,6 +33,8 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed the ARP poisoning ICMP sweep never running
 - Fixed the SSH host scan ignoring a pending scan cancellation
 - Time now syncs via SNTP automatically on every Wi-Fi connection, not just manual `wifi connect` commands
+- Random Beacon Spam now broadcasts multiple random SSIDs per channel hop 
+- Improved Airspace Monitor accuracy
 
 ### UI & Rendering
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)

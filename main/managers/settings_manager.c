@@ -179,7 +179,7 @@ void settings_deinit(void) { nvs_close(nvsHandle); }
 void settings_set_defaults(FSettings *settings) {
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
-  settings->broadcast_speed = 5;
+  settings->broadcast_speed = 1;
   // default to the 'Bright' palette (index 3)
   settings->menu_theme = 3;
   strcpy(settings->ap_ssid, "GhostNet");
