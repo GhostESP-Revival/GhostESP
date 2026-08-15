@@ -45,6 +45,9 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Improved Airspace Monitor accuracy
 - Added Wake-on-LAN gadget
 - Added Govee LAN light discovery and control
+- Added Probe Request Flood attack (directed SSID probes with randomized MACs, supports multi-selected APs)
+- Added Bad Msg attack (forged EAPOL key-install frames that drop stations from WPA networks)
+- Added Auth Flood attack (jittered 802.11 auth storm with randomized MACs and rate limiting)
 
 ### UI & Rendering
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)

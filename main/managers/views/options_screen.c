@@ -1419,6 +1419,9 @@ static const char * const wifi_attacks_options[] = {
     "Beacon Spam - Rickroll",
     "Beacon Spam - List",
     "EAPOL Logoff",
+    "Probe Request Flood",
+    "Bad Msg Attack",
+    "Auth Flood",
     "GTK Isolation Bypass Test",
     "DHCP Starvation",
     "Stop DHCP-Starve",
@@ -8595,6 +8598,39 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true; 
     }
 
+    else if (strcmp(Selected_Option, "Probe Request Flood") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
+        } else {
+            simulateCommand("attack -p");
+        }
+        view_switched = true; 
+    }
+
+    else if (strcmp(Selected_Option, "Bad Msg Attack") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
+        } else {
+            simulateCommand("attack -b");
+        }
+        view_switched = true; 
+    }
+
+    else if (strcmp(Selected_Option, "Auth Flood") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        if (!scanned_aps) {
+            glog("No APs scanned. Please run 'Scan APs' first.\\n");
+        } else {
+            simulateCommand("attack -a");
+        }
+        view_switched = true; 
+    }
+
     else if (strcmp(Selected_Option, "Scan Stations") == 0) {
         if (!start_station_scan_with_ap_scan()) {
             error_popup_create("Scan failed to start");
@@ -12091,6 +12127,57 @@ static void ap_hs_deauth_cb(lv_event_t *e) {
     }
 }
 
+static void ap_probe_flood_cb(lv_event_t *e) {
+    (void)e;
+    if (selected_ap_index >= 0) {
+        ap_scan_select(selected_ap_index);
+        wifi_manager_select_ap(selected_ap_index);
+        if (ap_detail_view) {
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("attack -p");
+    }
+}
+
+static void ap_bad_msg_cb(lv_event_t *e) {
+    (void)e;
+    if (selected_ap_index >= 0) {
+        ap_scan_select(selected_ap_index);
+        wifi_manager_select_ap(selected_ap_index);
+        if (ap_detail_view) {
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("attack -b");
+    }
+}
+
+static void ap_auth_flood_cb(lv_event_t *e) {
+    (void)e;
+    if (selected_ap_index >= 0) {
+        ap_scan_select(selected_ap_index);
+        wifi_manager_select_ap(selected_ap_index);
+        if (ap_detail_view) {
+            detail_view_destroy(ap_detail_view);
+            ap_detail_view = NULL;
+        }
+        current_wifi_menu_state = WIFI_MENU_AP_LIST;
+        suppress_wifi_state_reset_once = true;
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("attack -a");
+    }
+}
+
 /* Sampler for the live RSSI ring: pulls the latest tracking RSSI from the wifi
  * manager. Returns true when the reading is fresh (a recent matching packet). */
 static bool track_meter_sample(void *user, int8_t *out_rssi) {
@@ -12413,6 +12500,9 @@ static void show_ap_detail(int ap_index) {
     }
     detail_view_add_action(ap_detail_view, "Deauth", ap_deauth_cb, NULL);
     detail_view_add_action(ap_detail_view, "HS+Deauth", ap_hs_deauth_cb, NULL);
+    detail_view_add_action(ap_detail_view, "Probe Flood", ap_probe_flood_cb, NULL);
+    detail_view_add_action(ap_detail_view, "Bad Msg", ap_bad_msg_cb, NULL);
+    detail_view_add_action(ap_detail_view, "Auth Flood", ap_auth_flood_cb, NULL);
     detail_view_add_action(ap_detail_view, "Connect", ap_connect_cb, NULL);
     detail_view_add_action(ap_detail_view, "Track AP", ap_track_cb, NULL);
     detail_view_add_action(ap_detail_view, "Select AP", ap_select_cb, NULL);

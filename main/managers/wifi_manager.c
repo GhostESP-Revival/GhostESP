@@ -81,6 +81,9 @@
 #include "attacks/wifi/sae_flood.h"
 #include "attacks/wifi/channel_switch_attack.h"
 #include "attacks/wifi/gtk_abuse.h"
+#include "attacks/wifi/probe_request_flood.h"
+#include "attacks/wifi/bad_msg.h"
+#include "attacks/wifi/auth_flood.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/airspace_monitor.h"
 #include "scans/wifi/station_scan.h"
@@ -4557,6 +4560,45 @@ void wifi_manager_stop_channel_switch_attack(void) {
 
 bool wifi_manager_is_channel_switch_attack_running(void) {
     return channel_switch_attack_is_running();
+}
+
+// Probe Request Flood Attack - delegated to probe_request_flood module
+void wifi_manager_start_probe_flood(void) {
+    probe_request_flood_start();
+}
+
+void wifi_manager_stop_probe_flood(void) {
+    probe_request_flood_stop();
+}
+
+bool wifi_manager_is_probe_flood_running(void) {
+    return probe_request_flood_is_running();
+}
+
+// Bad Msg Attack - delegated to bad_msg module
+void wifi_manager_start_bad_msg(void) {
+    bad_msg_start();
+}
+
+void wifi_manager_stop_bad_msg(void) {
+    bad_msg_stop();
+}
+
+bool wifi_manager_is_bad_msg_running(void) {
+    return bad_msg_is_running();
+}
+
+// Auth Flood Attack - delegated to auth_flood module
+void wifi_manager_start_auth_flood(void) {
+    auth_flood_start();
+}
+
+void wifi_manager_stop_auth_flood(void) {
+    auth_flood_stop();
+}
+
+bool wifi_manager_is_auth_flood_running(void) {
+    return auth_flood_is_running();
 }
 
 void wifi_manager_set_html_from_uart(void) {
