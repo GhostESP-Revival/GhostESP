@@ -1,10 +1,7 @@
 <img width="800" alt="ghostesp_logo_white_transparent_2x_shine" src="https://github.com/user-attachments/assets/36005ffd-9cfc-433e-a306-1606feb18107" />
 
-> **The open-source wireless research platform for ESP32.**
-
-**Turn a $10–20 ESP32 board into a wireless research tool** with a full touchscreen UI - no soldering, no Arduino IDE.
-
-**New to GhostESP?** Grab a [compatible device](https://ghostesp.net/boards) and be running in under 5 minutes with the [web flasher](https://ghostesp.net/flasher) - no drivers, no build toolchain.
+> **The ESP-IDF-native wireless security platform for ESP32.**
+> Deep Wi-Fi and BLE assessment, research-grade capture and export, and a real app ecosystem. Built directly on Espressif's ESP-IDF rather than through the Arduino core, so new silicon and radio features land first and there is no abstraction layer between GhostESP and the hardware.
 
 [![Version](https://img.shields.io/badge/version-2.1-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
@@ -16,34 +13,11 @@
 
 ---
 
-## What's New in 2.x
+## What's New
 
-**v2.0** was the biggest update yet: a rebuilt UI, a native app ecosystem, and expanded radio workflows. **v2.1** (Revival) keeps that going with on-device OTA, a second NFC backend, a Cloud Store, and a sandboxed scripting runtime.
+v2.0 rebuilt the UI, added a native app ecosystem, and expanded the radio workflows. v2.1 (Revival) adds on-device OTA with rollback protection, a second NFC backend (ST25R3916), a Cloud Store for apps and scripts and asset packs, and GhostScript, a sandboxed Lua runtime.
 
 <img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" /> <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
-
-**v2.1 highlights:**
-- **Firmware updates on-device**: Wi-Fi, SD card, and GhostLink peer updates with verification and rollback protection.
-- **More NFC**: ST25R3916 backend, EMV payment-card reads, DESFire application/file trees, PicoPass/iCLASS, and MIFARE Classic hardnested recovery.
-- **Cloud Store**: Browse and install apps, scripts, and asset packs directly on the board.
-- **GhostScript**: Sandboxed Lua scripting runtime for scripts from the SD card.
-- **New native apps**: Doom port, HackChat ESP-NOW messenger, and QR Generator.
-- **WiFi**: Combined handshake + deauth attack, SMB/SNMP enumeration, Airspace Monitor attack-type detection, channel congestion chart.
-- **Ethernet & CLI**: ~3x faster scans with SD exports, OS-style commands (`echo`, `ping`, `version`), aliases, scripts, and env vars.
-- **Reliability**: Banshee C5 display/SD no longer block each other, LVGL tick timing fix, RTC persistence, and more stable wardriving.
-
-**v2.0 highlights:**
-- **Redesigned UI**: 60 FPS rendering, toasts, SD-loaded asset packs (icons/themes/backgrounds), touch-drag scrolling, and a full accessibility suite.
-- **Native SD Apps**: Load, build, and package apps with the new App Gallery, scoped permissions, and the Ghost Build Tool (`gbt`). C5 builds can run app code from flash (XIP).
-- **WiFi Airspace Monitor**: Real-time threat insights with adaptive channel dwell, a learned baseline, and a packets/sec sparkline.
-- **Expanded Ghostchi**: 50 levels, 27 XP sources, mood system, and a status-bar badge.
-- **PIN lockscreen**: Auto-lock overlay — captures keep running while locked.
-- **Expanded BadUSB**: Trackpad/mouse jiggler, USB HID output mode, `type_char` CLI, dedicated WebUI page.
-- **Redesigned WebUI**: Refreshed interface with better remote control.
-- **New network recon**: SSH, NetBIOS, HTTP banner, and SNMP scanners, plus a WPA3 compliance checker.
-- **GhostLink BLE bridge**: Bridge a chip to the Android companion app, with `wdstream` wardriving.
-- **More boards**: Marauder V8, Pancake C5, LilyGo T-Dongle-S3/C5, S3TWatch haptics, Cardputer ENV-III, and NM-CYD-C5 fixes.
-- **Under the hood**: Modularized commandline, shared SD mount helpers, checked allocations, and stability fixes across WiFi/BLE/audio/GPS/NFC.
 
 Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -51,26 +25,32 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Get Started
 
-| | | |
+| **Flash your device** | **Community and support** | **Learn more** |
 | --- | --- | --- |
-| **Flash your device** | **Community & support** | **Learn more** |
 | [ghostesp.net/flasher](https://ghostesp.net/flasher) | [Discord](https://discord.gg/5cyNmUMgwh) | [Documentation](https://docs.ghostesp.net) · [Website](https://ghostesp.net) |
 
 ---
 
-## Why GhostESP over the alternatives?
+## Why GhostESP
 
-The short version — see the [full 130+ row comparison](#esp32-firmware-comparison) below for everything else.
+GhostESP is a platform, not a bag of tools. Four things set it apart:
 
-| | GhostESP | Others |
-| --- | --- | --- |
-| EMV / payment-card reading | ✓ | — |
-| MIFARE DESFire tree reads | ✓ | — |
-| Transit card parsers (Opal, myki, ITSO, Gallagher) | ✓ | — |
-| Native app ecosystem + Cloud Store + Lua sandbox | ✓ | — |
-| Dual-ESP32 GhostLink (remote radio, BLE bridge) | ✓ | — |
-| Full LVGL graphical UI (carousel/grid/list) | ✓ | Partial or none |
-| Board targets in CI | 46 | 1–42 |
+- **Built on ESP-IDF, not Arduino.** Unlike Marauder and Bruce, GhostESP works against Espressif's SDK directly. It gets new chips and radio features first (802.15.4, Zigbee, 5 GHz on the C5) and lower-level control of the radios, memory, and partitions. Arduino-based firmware can reach the same APIs, just not as directly.
+- **Live capture and on-device analysis.** Stream traffic into Wireshark in real time over USB, and browse, inspect, and convert captures (PCAP, hc22000, WiGLE, 802.15.4) on the device itself.
+- **GhostLink.** Pair two ESP32s so one runs the other's radio, keyboard, and display, with BLE bridging to the Android app, split-channel wardriving, and peer OTA.
+- **Native apps.** SD apps with their own permissions and storage, built with `gbt` and a plugin SDK, installed from the Cloud Store, plus a Lua runtime for scripts. Examples: Device Inspector, ESP32Finder, a Doom port, a QR generator.
+
+---
+
+## Flagship Capabilities
+
+- **ESP-IDF-native architecture**: direct access to Espressif's SDK for new silicon, radio coexistence, memory, and low-level control, without the Arduino abstraction layer or its version lag.
+- **Research-ready capture workflows**: PCAP, hc22000, WiGLE CSV, sweep captures, live Wireshark streaming, on-device SD browsing, and export tools.
+- **GhostLink**: dual-ESP32 command and display interface with remote radio, remote keyboard, BLE bridging, split-channel wardriving, and peer OTA.
+- **Multi-interface control**: drive GhostESP from the on-device UI, the Flipper Zero app, the serial CLI, the WebUI, the Android companion app, or a GhostLink-connected device, against the same command set.
+- **Native SD app ecosystem**: create, package, discover, launch, inspect, and stop SD-loaded apps with permissions and scoped storage. Build your own with `gbt`.
+- **Broad hardware and radio coverage**: Wi-Fi, BLE, NFC, IR, SubGHz, NRF24, Ethernet, GPS, USB HID, and 802.15.4 or Zigbee across 46 board targets.
+- **Full graphical UI platform**: carousel, grid, and list layouts with themes, asset packs, touch, keyboard, and encoder support, and accessibility options.
 
 ---
 
@@ -159,9 +139,11 @@ The short version — see the [full 130+ row comparison](#esp32-firmware-compari
 <summary><strong>NFC Features</strong></summary>
 
 - PN532 NTAG/MIFARE Classic support
+- ST25R3916 NFC backend (EMV payment-card reads, DESFire application and file trees, PicoPass and iCLASS)
 - Flipper `.nfc` import/export
 - MIFARE Classic dictionary attack (default + user dictionary + session key reuse / sector sweep)
 - Full embedded MIFARE Classic dictionary
+- MIFARE Classic hardnested recovery
 - Flipper NFC parser set (transit, parking, access, amusement, loyalty): BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, Ventra, WashCity, Social Moscow, Sonicare, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, TRT, and more
 - MIFARE Desfire detection
 - Chameleon Ultra support (CLI + UI + BLE control)
@@ -225,6 +207,8 @@ The short version — see the [full 130+ row comparison](#esp32-firmware-compari
 - Native SD app system (load, list, inspect, launch, stop, reset apps with permissions and scoped storage)
 - Ghost Build Tool (`gbt`) for scaffolding, building, and packaging apps and firmware
 - Plugin/app SDK and example apps (Device Inspector, ESP32Finder)
+- Cloud Store (browse and install apps, scripts, and asset packs on-device)
+- GhostScript (sandboxed Lua 5.4 scripting runtime for scripts from the SD card)
 - Ghostchi virtual pet companion (50-level XP system, 27 XP sources, passive/aggressive modes, companion lockscreen, global mood, level-up toasts, status-bar badge)
 - SD Browser (file/folder browsing, rename, delete, copy/move, text file preview)
 - On-device PCAP browser with hc22000 export
@@ -258,6 +242,7 @@ The short version — see the [full 130+ row comparison](#esp32-firmware-compari
 - Light-sleep idle + frequency scaling + Wi-Fi power saving
 - Reduced-motion animations
 - SD config backup / restore
+- On-device OTA and SD firmware update with verification and rollback protection
 </details>
 
 ---
@@ -266,13 +251,13 @@ The short version — see the [full 130+ row comparison](#esp32-firmware-compari
 
 - ESP32-Wroom · ESP32-S2 · ESP32-C3 · ESP32-S3 · ESP32-C5 · ESP32-C6
 
-> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware; C5 has 5 GHz and 802.15.4/Zigbee support.
+> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware. C5 has 5 GHz and 802.15.4 or Zigbee support.
 
 ---
 
 ## Supported Boards
 
-46 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 45 configs in [`configs/`](configs/); Awok V5 shares the generic ESP32-S2 config. Feature support below is derived from those configs.
+46 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 45 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
 
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
@@ -344,10 +329,12 @@ The short version — see the [full 130+ row comparison](#esp32-firmware-compari
 
 ## ESP32 Firmware Comparison
 
+Marauder is the focused, hardware-first Wi-Fi and BLE toolset that much of this space grew out of, and GhostESP credits it directly (see [Credits](#credits)). GhostESP covers the same Wi-Fi and BLE ground and adds the capture-to-analysis pipeline, multi-device control through GhostLink, and the native app ecosystem described above, on an ESP-IDF base rather than Arduino.
+
+The table below compares GhostESP against other broad-scope firmware. It is based on GhostESP's feature set and the publicly available source for each listed project. It is not a complete feature list for every firmware. HaleHound and nyanBOX are compared against the latest public source available to us. If newer releases are closed source, this table cannot be independently verified against those builds.
+
 <details>
 <summary><strong>View comparison table</strong></summary>
-
-This comparison is based on GhostESP's feature set and publicly available source for the listed projects. It is not a complete feature list for every firmware. HaleHound and nyanBOX are compared against the latest public source available to us; if newer releases are closed source, this table cannot be independently updated or verified against those builds.
 
 | Feature | GhostESP | Bruce | HaleHound | nyanBOX |
 | --- | --- | --- | --- | --- |
@@ -485,7 +472,7 @@ This comparison is based on GhostESP's feature set and publicly available source
 | LoRa support |  | [x] |  |  |
 | FM radio support |  | [x] |  |  |
 
-> GhostESP does not ship active jamming features. Distribution, promotion, sale and use of jamming devices or firmware is illegal in many jurisdictions. 
+> GhostESP does not ship active jamming features. Distribution, promotion, sale, and use of jamming devices or firmware is illegal in many jurisdictions.
 
 </details>
 
@@ -698,11 +685,11 @@ GhostESP welcomes contributions — from a one-line board config to a new featur
 
 ## Disclaimers
 
-Ghost ESP is intended solely for educational and ethical security research. Unauthorized or malicious use is illegal. Be sure to familiarize your local laws, and always obtain proper permissions before conducting any network tests.
+Ghost ESP is intended solely for educational and ethical security research. Unauthorized or malicious use is illegal. Familiarize yourself with your local laws, and always obtain proper permission before conducting any network tests.
 
-> **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP) which has been archived and not in development anymore.
+> **Note:** this is a detached fork of [Spooky's GhostESP](https://github.com/Spooks4576/Ghost_ESP), which has been archived and is no longer in development.
 
-For guidelines on using the GhostESP name and logo, please see the [Brand Guidelines](https://ghostesp.net/brand-guidelines). Brand assets are available at [ghostesp.net/brand-assets](https://ghostesp.net/brand-assets).
+For guidelines on using the GhostESP name and logo, see [BRAND GUIDELINES](BRAND_GUIDELINES.md).
 
 Interested in becoming an official partner? Email `partners@ghostesp.net`.
 
