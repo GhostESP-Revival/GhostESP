@@ -981,6 +981,41 @@ blockquote {
   text-transform: uppercase;
 }
 
+.content__body blockquote.docs-danger {
+  margin: 1.25rem 0;
+  padding: 0.6rem 0.9rem;
+  border-left: 4px solid #d63031;
+  border-radius: 0.5rem;
+  background-color: rgba(214, 48, 49, 0.08);
+}
+
+.content__body blockquote.docs-danger p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.content__body blockquote.docs-danger .docs-alert-label {
+  color: #d63031;
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.content__body blockquote.docs-danger strong {
+  color: #d63031;
+}
+
+html[data-theme="dark"] .content__body blockquote.docs-danger {
+  border-left-color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.1);
+}
+
+html[data-theme="dark"] .content__body blockquote.docs-danger .docs-alert-label,
+html[data-theme="dark"] .content__body blockquote.docs-danger strong {
+  color: #ff6b6b;
+}
+
 .content__body img,
 .content__body video,
 .content__body iframe {

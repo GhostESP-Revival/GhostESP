@@ -1360,6 +1360,19 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_11;
             resolved_rx = GPIO_NUM_12;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_core") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            // Straight-through wiring: core TX5 -> peer RX5, peer TX6 -> core RX6.
+            resolved_tx = GPIO_NUM_5;
+            resolved_rx = GPIO_NUM_6;
+        }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_peer") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            resolved_tx = GPIO_NUM_6;
+            resolved_rx = GPIO_NUM_5;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }

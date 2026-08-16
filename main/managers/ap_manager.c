@@ -758,6 +758,16 @@ esp_err_t ap_manager_init(void) {
     }
 #endif
 
+    // Default override: GhostLink P1 peer (ESP32-C3) also defaults AP to OFF
+    // on first boot (when key not present in NVS)
+#if defined(CONFIG_IDF_TARGET_ESP32C3) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_peer") == 0) {
+        if (!settings_ap_enabled_key_exists()) {
+            G_Settings.ap_enabled = false;
+        }
+    }
+#endif
+
     // --- Memory check before AP init ---
     size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     if (free_heap < (45 * 1024)) {
