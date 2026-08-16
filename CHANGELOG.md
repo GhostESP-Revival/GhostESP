@@ -6,6 +6,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 ## Revival v2.1.1
 
 ### Added
+- Added GhostLink P1 Core and Peer support
 - Added new Pong, 'Lightcycle', Breakout, Snake and Tetris games to the app marketplace for C5 targets
 - Added Wake-on-LAN gadget
 - Added Govee LAN light discovery and control
