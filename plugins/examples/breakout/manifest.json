@@ -1,7 +1,7 @@
 {
   "id": "breakout",
   "name": "Breakout",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "GhostESP",
   "description": "Classic brick-breaking action with escalating levels and touch, keyboard, encoder, or D-pad controls.",
   "category": "Games",

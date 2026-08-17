@@ -7,13 +7,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GAME_W 96
-#define GAME_H 144
-#define PADDLE_W 22
+static int game_width;
+static int game_height;
+static bool landscape_layout;
+#define GAME_W game_width
+#define GAME_H game_height
+#define PADDLE_W (landscape_layout ? 40 : 22)
 #define PADDLE_H 3
 #define CPU_Y 7
-#define PLAYER_Y 134
-#define MOVE_STEP 2
+#define PLAYER_Y (GAME_H - (landscape_layout ? 10 : 10))
+#define MOVE_STEP (landscape_layout ? 3 : 2)
 #define FRAME_MS 16
 #define TOUCH_BAR_HEIGHT 34
 
@@ -30,8 +33,10 @@ static ghostesp_ui_obj_t touch_bar;
 static ghostesp_ui_timer_t frame_timer;
 static int canvas_width;
 static int canvas_height;
-static int canvas_left;
-static int canvas_top;
+static int view_width;
+static int view_height;
+static int view_left;
+static int view_top;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
 static ghostesp_touch_state_t touch_state;
@@ -113,10 +118,10 @@ static void fill_rect(int x, int y, int width, int height, uint16_t color) {
     if (y2 > GAME_H) y2 = GAME_H;
     if (x >= x2 || y >= y2) return;
 
-    int left = x * canvas_width / GAME_W;
-    int right = x2 * canvas_width / GAME_W;
-    int top = y * canvas_height / GAME_H;
-    int bottom = y2 * canvas_height / GAME_H;
+    int left = view_left + x * view_width / GAME_W;
+    int right = view_left + x2 * view_width / GAME_W;
+    int top = view_top + y * view_height / GAME_H;
+    int bottom = view_top + y2 * view_height / GAME_H;
     if (right <= left) right = left + 1;
     if (bottom <= top) bottom = top + 1;
     for (int row = top; row < bottom; row++) {
@@ -168,16 +173,16 @@ static void render_frame(void) {
     fill_rect(ball_x - 2, ball_y - 1, 5, 3, COLOR_BALL_GLOW);
     fill_rect(ball_x - 1, ball_y - 2, 3, 5, COLOR_BALL_GLOW);
     fill_rect(ball_x - 1, ball_y - 1, 3, 3, COLOR_WHITE);
-    draw_digit(cpu_score, GAME_W / 2 - 3, 22);
-    draw_digit(player_score, GAME_W / 2 - 3, GAME_H - 34);
+    draw_digit(cpu_score, GAME_W / 2 - 3, landscape_layout ? 18 : 22);
+    draw_digit(player_score, GAME_W / 2 - 3, GAME_H - (landscape_layout ? 18 : 34));
 
 }
 
 static void blit_game_region(int x, int y, int width, int height) {
-    int left = x * canvas_width / GAME_W;
-    int top = y * canvas_height / GAME_H;
-    int right = (x + width) * canvas_width / GAME_W;
-    int bottom = (y + height) * canvas_height / GAME_H;
+    int left = view_left + x * view_width / GAME_W;
+    int top = view_top + y * view_height / GAME_H;
+    int right = view_left + (x + width) * view_width / GAME_W;
+    int bottom = view_top + (y + height) * view_height / GAME_H;
     if (left < 0) left = 0;
     if (top < 0) top = 0;
     if (right > canvas_width) right = canvas_width;
@@ -219,8 +224,8 @@ static void present_dirty(void) {
     int bottom = rendered_ball_y > ball_y ? rendered_ball_y : ball_y;
     blit_game_region(left - 2, top - 2, right - left + 5, bottom - top + 5);
 
-    if (rendered_cpu_score != cpu_score) blit_game_region(GAME_W / 2 - 3, 22, 6, 10);
-    if (rendered_player_score != player_score) blit_game_region(GAME_W / 2 - 3, GAME_H - 34, 6, 10);
+    if (rendered_cpu_score != cpu_score) blit_game_region(GAME_W / 2 - 3, landscape_layout ? 18 : 22, 6, 10);
+    if (rendered_player_score != player_score) blit_game_region(GAME_W / 2 - 3, GAME_H - (landscape_layout ? 18 : 34), 6, 10);
     rendered_player_x = player_x;
     rendered_cpu_x = cpu_x;
     rendered_ball_x = ball_x;
@@ -319,14 +324,19 @@ static void pong_start(void) {
     api->ui_obj_set_size(screen, width, height);
 
     int usable_height = height - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
-    canvas_width = usable_height * GAME_W / GAME_H;
+    landscape_layout = width > usable_height;
+    game_width = landscape_layout ? 240 : 96;
+    game_height = landscape_layout ? 100 : 144;
+    canvas_width = width;
     canvas_height = usable_height;
-    if (canvas_width > width) {
-        canvas_width = width;
-        canvas_height = width * GAME_H / GAME_W;
+    view_width = usable_height * GAME_W / GAME_H;
+    view_height = usable_height;
+    if (view_width > width) {
+        view_width = width;
+        view_height = width * GAME_H / GAME_W;
     }
-    canvas_left = (width - canvas_width) / 2;
-    canvas_top = (usable_height - canvas_height) / 2;
+    view_left = (width - view_width) / 2;
+    view_top = (usable_height - view_height) / 2;
 
     canvas = api->ui_canvas_create(screen, canvas_width, canvas_height);
     if (!canvas) { request_exit(); return; }
@@ -335,7 +345,7 @@ static void pong_start(void) {
     if (!framebuffer) { request_exit(); return; }
     api->ui_canvas_fill(canvas, 0x000000);
     if (api->ui_obj_set_pos)
-        api->ui_obj_set_pos(canvas, canvas_left, canvas_top);
+        api->ui_obj_set_pos(canvas, 0, 0);
     rng_state = api->system_uptime_us ? (uint32_t)api->system_uptime_us() : 0x504F4E47u;
     if (!rng_state) rng_state = 0x504F4E47u;
     reset_game();
@@ -366,7 +376,7 @@ static void pong_input(const ghostesp_input_event_t *event) {
         else if (swipe == GHOSTESP_INPUT_RIGHT)
             player_x = clamp_paddle(player_x + 8);
         touch_active = event->pressed;
-        touch_target = ((event->x - canvas_left) * GAME_W) / canvas_width;
+        touch_target = ((event->x - view_left) * GAME_W) / view_width;
         if (touch_target < 0) touch_target = 0;
         if (touch_target >= GAME_W) touch_target = GAME_W - 1;
         return;

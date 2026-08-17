@@ -5,8 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GRID_W 48
-#define GRID_H 72
+#define MAX_GRID_W 120
+#define MAX_GRID_H 72
+static int grid_width;
+static int grid_height;
+static bool landscape_layout;
+#define GRID_W grid_width
+#define GRID_H grid_height
 #define TOUCH_BAR_HEIGHT 34
 #define FRAME_MS 55
 #define ROUND_PAUSE_TICKS 18
@@ -33,11 +38,13 @@ static ghostesp_ui_obj_t touch_bar;
 static ghostesp_ui_timer_t frame_timer;
 static int canvas_width;
 static int canvas_height;
-static int canvas_left;
-static int canvas_top;
+static int view_width;
+static int view_height;
+static int view_left;
+static int view_top;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
-static uint8_t arena[GRID_H][GRID_W];
+static uint8_t arena[MAX_GRID_H][MAX_GRID_W];
 static rider_t player;
 static rider_t cpu;
 static ghostesp_touch_state_t touch_state;
@@ -74,10 +81,10 @@ static void queue_player_direction(direction_t direction) {
 }
 
 static void cell_bounds(int x, int y, int *left, int *top, int *right, int *bottom) {
-    *left = x * canvas_width / GRID_W;
-    *right = (x + 1) * canvas_width / GRID_W;
-    *top = y * canvas_height / GRID_H;
-    *bottom = (y + 1) * canvas_height / GRID_H;
+    *left = view_left + x * view_width / GRID_W;
+    *right = view_left + (x + 1) * view_width / GRID_W;
+    *top = view_top + y * view_height / GRID_H;
+    *bottom = view_top + (y + 1) * view_height / GRID_H;
 }
 
 static void draw_cell(int x, int y, uint16_t color) {
@@ -120,13 +127,13 @@ static void draw_result_text(const char *text, uint16_t color) {
         ['Y' - 'A'] = {5, 5, 2, 2, 2},
     };
     int length = (int)strlen(text);
-    int scale = canvas_width / 72;
+    int scale = view_width / 72;
     if (scale < 2) scale = 2;
     int char_width = 4 * scale;
     int box_width = length * char_width + 4 * scale;
     int box_height = 9 * scale;
-    int left = (canvas_width - box_width) / 2;
-    int top = (canvas_height - box_height) / 2;
+    int left = view_left + (view_width - box_width) / 2;
+    int top = view_top + (view_height - box_height) / 2;
     fill_pixels(left, top, box_width, box_height, COLOR_BG);
     for (int i = 0; i < length; ++i) {
         if (text[i] == ' ') continue;
@@ -263,22 +270,27 @@ static void lightcycles_start(void) {
     touch_bar = gh_touch_bar(api, true, touch_back, NULL);
     int screen_width = api->ui_screen_get_content_width();
     int usable_height = api->ui_screen_get_content_height() - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
-    canvas_width = usable_height * GRID_W / GRID_H;
+    landscape_layout = screen_width > usable_height;
+    grid_width = landscape_layout ? 120 : 48;
+    grid_height = landscape_layout ? 50 : 72;
+    canvas_width = screen_width;
     canvas_height = usable_height;
-    if (canvas_width > screen_width) {
-        canvas_width = screen_width;
-        canvas_height = screen_width * GRID_H / GRID_W;
+    view_width = usable_height * GRID_W / GRID_H;
+    view_height = usable_height;
+    if (view_width > screen_width) {
+        view_width = screen_width;
+        view_height = screen_width * GRID_H / GRID_W;
     }
-    canvas_left = (screen_width - canvas_width) / 2;
-    canvas_top = (usable_height - canvas_height) / 2;
-    if (canvas_width < GRID_W || canvas_height < GRID_H) {
+    view_left = (screen_width - view_width) / 2;
+    view_top = (usable_height - view_height) / 2;
+    if (view_width < GRID_W || view_height < GRID_H) {
         if (api->toast) api->toast("Display is too small for Light Cycles");
         request_exit();
         return;
     }
     canvas = api->ui_canvas_create(screen, canvas_width, canvas_height);
     if (!canvas) { request_exit(); return; }
-    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas, canvas_left, canvas_top);
+    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas, 0, 0);
     framebuffer_size = (size_t)canvas_width * canvas_height * sizeof(*framebuffer);
     framebuffer = malloc(framebuffer_size);
     if (!framebuffer) { request_exit(); return; }

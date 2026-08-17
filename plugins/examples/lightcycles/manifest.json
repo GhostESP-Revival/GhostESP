@@ -1,7 +1,7 @@
 {
   "id": "lightcycles",
   "name": "Light Cycles",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "GhostESP",
   "description": "A fast top-down light-cycle trail game against a CPU rider.",
   "category": "Games",
