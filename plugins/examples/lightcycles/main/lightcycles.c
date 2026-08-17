@@ -33,6 +33,8 @@ static ghostesp_ui_obj_t touch_bar;
 static ghostesp_ui_timer_t frame_timer;
 static int canvas_width;
 static int canvas_height;
+static int canvas_left;
+static int canvas_top;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
 static uint8_t arena[GRID_H][GRID_W];
@@ -259,9 +261,16 @@ static void lightcycles_start(void) {
     GH_VOID(api, ui_obj_set_pad, screen, 0, 0, 0, 0);
     GH_VOID(api, ui_obj_set_flex_flow, screen, GHOSTESP_FLEX_FLOW_NONE);
     touch_bar = gh_touch_bar(api, true, touch_back, NULL);
-    /* Content dimensions already exclude the status bar. */
-    canvas_width = api->ui_screen_get_content_width();
-    canvas_height = api->ui_screen_get_content_height() - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
+    int screen_width = api->ui_screen_get_content_width();
+    int usable_height = api->ui_screen_get_content_height() - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
+    canvas_width = usable_height * GRID_W / GRID_H;
+    canvas_height = usable_height;
+    if (canvas_width > screen_width) {
+        canvas_width = screen_width;
+        canvas_height = screen_width * GRID_H / GRID_W;
+    }
+    canvas_left = (screen_width - canvas_width) / 2;
+    canvas_top = (usable_height - canvas_height) / 2;
     if (canvas_width < GRID_W || canvas_height < GRID_H) {
         if (api->toast) api->toast("Display is too small for Light Cycles");
         request_exit();
@@ -269,7 +278,7 @@ static void lightcycles_start(void) {
     }
     canvas = api->ui_canvas_create(screen, canvas_width, canvas_height);
     if (!canvas) { request_exit(); return; }
-    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas, 0, 0);
+    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas, canvas_left, canvas_top);
     framebuffer_size = (size_t)canvas_width * canvas_height * sizeof(*framebuffer);
     framebuffer = malloc(framebuffer_size);
     if (!framebuffer) { request_exit(); return; }

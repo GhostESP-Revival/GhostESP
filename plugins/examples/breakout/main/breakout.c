@@ -36,7 +36,7 @@ static ghostesp_ui_obj_t canvas, touch_bar;
 static ghostesp_ui_timer_t frame_timer;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
-static int canvas_width, canvas_height, canvas_left;
+static int canvas_width, canvas_height, canvas_left, canvas_top;
 static int paddle_x, ball_x, ball_y, ball_dx, ball_dy;
 static int old_paddle_x, old_ball_x, old_ball_y;
 static int score, lives, level, old_score, old_lives, old_level;
@@ -272,7 +272,10 @@ static void breakout_start(void) {
     touch_bar=gh_touch_bar(api,true,touch_back,NULL);
     int width=api->ui_screen_get_content_width(), height=api->ui_screen_get_content_height();
     api->ui_obj_set_size(screen,width,height);
-    canvas_width=width; canvas_height=height-(touch_bar?TOUCH_BAR_HEIGHT:0);
+    int usable_height=height-(touch_bar?TOUCH_BAR_HEIGHT:0);
+    canvas_width=usable_height*GAME_W/GAME_H; canvas_height=usable_height;
+    if (canvas_width>width) { canvas_width=width; canvas_height=width*GAME_H/GAME_W; }
+    canvas_left=(width-canvas_width)/2; canvas_top=(usable_height-canvas_height)/2;
     if (canvas_width<50 || canvas_height<75) {
         if (api->toast) api->toast("Display is too small for Breakout");
         request_exit(); return;
@@ -281,7 +284,7 @@ static void breakout_start(void) {
     if (!canvas) { request_exit(); return; }
     framebuffer_size=(size_t)canvas_width*canvas_height*sizeof(*framebuffer); framebuffer=malloc(framebuffer_size);
     if (!framebuffer) { request_exit(); return; }
-    canvas_left=0; if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas,canvas_left,0);
+    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas,canvas_left,canvas_top);
     new_game(); present(); last_frame_ms=api->system_uptime_ms?api->system_uptime_ms():0;
     frame_timer=api->ui_timer_create(game_frame,FRAME_MS,NULL); if (!frame_timer) request_exit();
 }
@@ -295,7 +298,8 @@ static void breakout_input(const ghostesp_input_event_t *event) {
     if (!event || exit_requested) return;
     if (event->type==GHOSTESP_INPUT_BACK && event->pressed) { request_exit(); return; }
     if (event->type==GHOSTESP_INPUT_TOUCH) {
-        if (event->y < 0 || event->y >= canvas_height) {
+        if (event->x < canvas_left || event->x >= canvas_left + canvas_width ||
+            event->y < canvas_top || event->y >= canvas_top + canvas_height) {
             touch_active=false;
             gh_touch_reset(&touch_state);
             return;

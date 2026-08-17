@@ -42,7 +42,7 @@ static lv_obj_t *s_touch_scroll_target = NULL;
 static bool s_preserve_for_keyboard_input = false;
 static bool s_resume_from_keyboard_input = false;
 static int64_t s_ignore_input_until_us = 0;
-static int64_t s_select_pressed_at_us = 0;
+static esp_timer_handle_t s_select_hold_timer = NULL;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
@@ -184,6 +184,17 @@ void plugin_runner_request_exit(void) {
     }
     s_exit_queued = true;
     display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+}
+
+static void plugin_runner_select_hold_cb(void *arg) {
+    (void)arg;
+    plugin_runner_request_exit();
+}
+
+static void plugin_runner_stop_select_hold_timer(void) {
+    if (s_select_hold_timer) {
+        esp_timer_stop(s_select_hold_timer);
+    }
 }
 
 static void plugin_runner_tick_task(void *arg) {
@@ -419,14 +430,12 @@ static void plugin_runner_event_handler(InputEvent *event) {
     ghostesp_input_event_t app_event = convert_input(event);
     if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_index == 1) {
         if (event->data.joystick_pressed) {
-            s_select_pressed_at_us = esp_timer_get_time();
-        } else if (s_select_pressed_at_us != 0) {
-            int64_t held_us = esp_timer_get_time() - s_select_pressed_at_us;
-            s_select_pressed_at_us = 0;
-            if (held_us >= PLUGIN_RUNNER_SELECT_HOLD_EXIT_US) {
-                plugin_runner_request_exit();
-                return;
+            if (s_select_hold_timer) {
+                esp_timer_stop(s_select_hold_timer);
+                esp_timer_start_once(s_select_hold_timer, PLUGIN_RUNNER_SELECT_HOLD_EXIT_US);
             }
+        } else {
+            plugin_runner_stop_select_hold_timer();
         }
     }
     if (app_event.type == GHOSTESP_INPUT_BACK) {
@@ -518,6 +527,13 @@ static void plugin_runner_launch_pending(void) {
 void plugin_runner_view_create(void) {
     s_exit_queued = false;
     plugin_runner_stop_tick();
+    if (!s_select_hold_timer) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = plugin_runner_select_hold_cb,
+            .name = "plugin_select_hold",
+        };
+        esp_timer_create(&timer_args, &s_select_hold_timer);
+    }
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
@@ -545,7 +561,7 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
-    s_select_pressed_at_us = 0;
+    plugin_runner_stop_select_hold_timer();
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
     s_root = gui_screen_create_root_default(NULL, "SD App");
@@ -610,6 +626,11 @@ void plugin_runner_view_destroy(void) {
         s_launch_timer = NULL;
     }
     plugin_runner_stop_tick();
+    plugin_runner_stop_select_hold_timer();
+    if (s_select_hold_timer) {
+        esp_timer_delete(s_select_hold_timer);
+        s_select_hold_timer = NULL;
+    }
     if (s_preserve_for_keyboard_input) {
         s_preserve_for_keyboard_input = false;
         s_resume_from_keyboard_input = true;
@@ -625,7 +646,6 @@ void plugin_runner_view_destroy(void) {
     s_title = NULL;
     s_output = NULL;
     s_touch_started = false;
-    s_select_pressed_at_us = 0;
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
     free(s_output_buf);

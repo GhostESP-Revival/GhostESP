@@ -31,6 +31,7 @@ static ghostesp_ui_timer_t frame_timer;
 static int canvas_width;
 static int canvas_height;
 static int canvas_left;
+static int canvas_top;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
 static ghostesp_touch_state_t touch_state;
@@ -317,14 +318,15 @@ static void pong_start(void) {
     int height = api->ui_screen_get_content_height();
     api->ui_obj_set_size(screen, width, height);
 
-    /* The canvas owns the complete play area, avoiding uncovered side strips. */
     int usable_height = height - (touch_bar ? TOUCH_BAR_HEIGHT : 0);
-    canvas_width = width;
+    canvas_width = usable_height * GAME_W / GAME_H;
     canvas_height = usable_height;
-    if (canvas_width < GAME_W || canvas_height < GAME_H) {
-        canvas_width = GAME_W;
-        canvas_height = GAME_H;
+    if (canvas_width > width) {
+        canvas_width = width;
+        canvas_height = width * GAME_H / GAME_W;
     }
+    canvas_left = (width - canvas_width) / 2;
+    canvas_top = (usable_height - canvas_height) / 2;
 
     canvas = api->ui_canvas_create(screen, canvas_width, canvas_height);
     if (!canvas) { request_exit(); return; }
@@ -332,10 +334,8 @@ static void pong_start(void) {
     framebuffer = malloc(framebuffer_size);
     if (!framebuffer) { request_exit(); return; }
     api->ui_canvas_fill(canvas, 0x000000);
-    int canvas_y = 0;
-    canvas_left = 0;
     if (api->ui_obj_set_pos)
-        api->ui_obj_set_pos(canvas, canvas_left, canvas_y);
+        api->ui_obj_set_pos(canvas, canvas_left, canvas_top);
     rng_state = api->system_uptime_us ? (uint32_t)api->system_uptime_us() : 0x504F4E47u;
     if (!rng_state) rng_state = 0x504F4E47u;
     reset_game();
