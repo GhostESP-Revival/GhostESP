@@ -25,7 +25,6 @@ extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
 extern void keyboard_view_set_start_caps(bool start_caps);
 
-static View *terminal_return_view = NULL;
 
 #include "lvgl.h"
 #include "managers/settings_manager.h"
@@ -667,13 +666,7 @@ static void stop_all_operations(void) {
         handle_stop_flipper(0, NULL);
     }
 
-    // now switch the view
-    if (terminal_return_view) {
-        display_manager_switch_view(terminal_return_view);
-        terminal_return_view = NULL;
-    } else {
-        display_manager_go_back();
-    }
+    display_manager_go_back();
 }
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
 void text_box_click_cb(lv_event_t *e){
@@ -1187,7 +1180,8 @@ View terminal_view = {
 };
 
 void terminal_set_return_view(View *view) {
-    terminal_return_view = view;
+    /* Compatibility no-op. The preceding route is now the return target. */
+    (void)view;
 }
 
 void terminal_set_dualcomm_filter(bool enable) {

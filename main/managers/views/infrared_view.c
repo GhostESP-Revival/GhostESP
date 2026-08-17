@@ -12,6 +12,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "gui/design_tokens.h"
+#include "gui/gui_router.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -1444,7 +1445,7 @@ void infrared_view_create(void) {
     num_ir_items = options_view_get_item_count(g_ir_ov);
     /* Root-menu highlight only resets on a genuine fresh entry from the
      * Main Menu; returning here restores the previously highlighted row. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         selected_ir_index = 0;
     } else if (selected_ir_index < 0 || selected_ir_index >= num_ir_items) {
         selected_ir_index = 0;

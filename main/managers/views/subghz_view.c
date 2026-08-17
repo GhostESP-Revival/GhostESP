@@ -2,6 +2,7 @@
 #include "sdkconfig.h"
 #include "esp_attr.h"
 #include "gui/design_tokens.h"
+#include "gui/gui_router.h"
 
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 
@@ -4606,7 +4607,7 @@ void subghz_view_create(void) {
     s_freq_analyzer_row = options_view_add_item(s_ov, "Freq Analyzer", subghz_freq_analyzer_row_cb, NULL);
     s_waterfall_row = options_view_add_item(s_ov, "Waterfall", subghz_waterfall_row_cb, NULL);
     s_back_row = options_view_add_back_row(s_ov, subghz_back_row_cb, NULL);
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         s_root_selected_index = 0;
     }
     int root_item_count = options_view_get_item_count(s_ov);

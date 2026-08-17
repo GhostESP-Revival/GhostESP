@@ -40,6 +40,7 @@
 #include "gui/detail_view.h"
 #include "gui/rssi_meter.h"
 #include "gui/nav_history.h"
+#include "gui/gui_router.h"
 #include "gui/select_overlay.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wpa3_compliance.h"
@@ -3878,7 +3879,7 @@ void options_menu_create() {
                           s_resume_menu_state.dualcomm_state == current_dualcomm_menu_state &&
                           s_resume_menu_state.settings_root == current_settings_root &&
                           s_resume_menu_state.settings_category == current_settings_category &&
-                          display_manager_previous_view != &main_menu_view;
+                          gui_router_previous_view() != &main_menu_view;
     if (!restoring_view) {
         s_resume_menu_state.valid = false;
         s_pending_restore_state.valid = false;
@@ -6240,9 +6241,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                ap_list_cleanup();
-                current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -6285,9 +6284,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                scanall_list_cleanup();
-                current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -6330,9 +6327,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                station_list_cleanup();
-                current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -6374,9 +6369,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                ble_detect_list_cleanup();
-                current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -6418,9 +6411,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                ble_adv_list_cleanup();
-                current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -6462,9 +6453,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                     }
                 }
             } else if (button == 0 || button == 3) {
-                ble_gatt_list_cleanup();
-                current_bluetooth_menu_state = BLUETOOTH_MENU_MAIN;
-                rebuild_current_menu();
+                back_event_cb(NULL);
             }
             return;
         }
@@ -9689,7 +9678,8 @@ void options_menu_destroy() {
     popup_confirm_close(&ota_result_popup);
 #endif
     settings_select_close();
-    gui_nav_history_clear();
+    /* Full-screen child views are temporary routes. Keep the logical options
+     * ancestry so returning from Terminal/Keyboard can continue unwinding it. */
     scan_all_flow_active = false;
     scan_all_started_station_phase = false;
     station_scan_waiting_for_ap_scan = false;
@@ -10276,7 +10266,7 @@ static void back_event_cb(lv_event_t *e) {
     s_pending_restore_state.valid = false;
     s_rendered_menu_state.valid = false;
     s_discard_resume_on_destroy = true;
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 }
 
 static void wigle_csv_free_cache(void) {

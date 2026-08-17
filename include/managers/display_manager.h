@@ -47,7 +47,7 @@ extern QueueHandle_tt input_queue;
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
 #define RENDERING_TASK_PRIORITY (15)
 
-typedef struct {
+typedef struct View {
   lv_obj_t *root;
   void (*create)(void);
   void (*destroy)(void);
@@ -72,7 +72,6 @@ extern View enviii_view;
 extern View wardriving_view;
 extern View ethernet_screen_view;
 extern View lockscreen_view;
-extern View *display_manager_previous_view;
 
 /* Function prototypes */
 
@@ -90,6 +89,9 @@ bool display_manager_register_view(View *view);
  * @brief Switch to a new view.
  */
 void display_manager_switch_view(View *view);
+
+/** Render a view without changing route history. Only the GUI router calls this. */
+void display_manager_render_view(View *view);
 
 /**
  * @brief Switch to a new view on the LVGL task and wait for the first refresh.

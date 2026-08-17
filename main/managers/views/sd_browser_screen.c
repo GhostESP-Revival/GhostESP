@@ -744,7 +744,7 @@ static void sd_browser_handle_row(int row_index) {
             sd_browser_show_list();
             break;
         case SD_ROW_BACK:
-            display_manager_switch_view(&apps_menu_view);
+            display_manager_go_back();
             break;
     }
 }
@@ -995,7 +995,7 @@ static void sd_browser_back(void) {
         page_offset = 0;
         sd_browser_show_list();
     } else {
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
     }
 }
 

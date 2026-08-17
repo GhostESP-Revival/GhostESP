@@ -123,7 +123,7 @@ static void packet_monitor_return(void) {
     free(s_custom_channels);
     s_custom_channels = NULL;
     s_custom_channel_count = 0;
-    display_manager_switch_view(&options_menu_view);
+    display_manager_go_back();
 }
 
 static bool parse_channels(const char *text, uint8_t *channels, size_t *count) {

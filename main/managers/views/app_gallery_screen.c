@@ -9,6 +9,7 @@
 #include "managers/views/plugin_runner_view.h"
 #include "managers/views/sd_browser_screen.h"
 #include "managers/views/terminal_screen.h"
+#include "gui/gui_router.h"
 #ifdef CONFIG_HAS_COMPASS
 #include "managers/views/compass_screen.h"
 #endif
@@ -1144,7 +1145,7 @@ static void apps_plugin_reload_done(void *arg) {
      * Main Menu; returning here (e.g. after launching a native app or
      * plugin) should preserve which category/item was selected instead of
      * always snapping back to the first icon. */
-    bool fresh_entry = (display_manager_previous_view == &main_menu_view);
+    bool fresh_entry = (gui_router_previous_view() == &main_menu_view);
     if (fresh_entry) {
         in_submenu = false;
         current_category[0] = '\0';

@@ -20,6 +20,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - ARP host details now offer per-host Scan Open Ports, SSH Banner, NetBIOS, HTTP Banner, SNMP Probe/Walk and SMB Enum actions
 
 ### Fixed
+- Fixed Back navigation
 - Fixed merged binary creation in GitHub workflow
 - Fixed TDisplayS3-Touch touch input not working since ESP-IDF v6.0 i2c migration
 - Fixed recurring "Wrong I2C status" errors on shared I2C buses: the shared I2C layer now caches device handles instead of adding/removing them per transaction
