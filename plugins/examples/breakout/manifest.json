@@ -1,12 +1,13 @@
 {
   "id": "breakout",
   "name": "Breakout",
-  "version": "1.0",
+  "version": "1.0.1",
   "author": "GhostESP",
   "description": "Classic brick-breaking action with escalating levels and touch, keyboard, encoder, or D-pad controls.",
   "category": "Games",
   "entry": "breakout.so",
-  "target": "esp32c5",
+  "target": "esp32s3",
+  "targets": ["esp32c5", "esp32s3"],
   "api_version": 1,
   "manifest_version": 1,
   "package_version": 1,
@@ -26,6 +27,7 @@
   ],
   "assets": ["screenshot.webp"],
   "permissions": ["ui", "input", "time"],
+  "requires_features": ["joystick"],
   "memory_limit": 0,
   "stack_size": 4096,
   "requires_psram": false

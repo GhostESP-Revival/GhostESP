@@ -42,10 +42,12 @@ static lv_obj_t *s_touch_scroll_target = NULL;
 static bool s_preserve_for_keyboard_input = false;
 static bool s_resume_from_keyboard_input = false;
 static int64_t s_ignore_input_until_us = 0;
+static int64_t s_select_pressed_at_us = 0;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
 #define PLUGIN_RUNNER_SCROLL_THRESHOLD 16
+#define PLUGIN_RUNNER_SELECT_HOLD_EXIT_US 4000000
 
 typedef enum {
     RUNNER_UI_SET_TITLE,
@@ -415,6 +417,18 @@ static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
     if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
+    if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_index == 1) {
+        if (event->data.joystick_pressed) {
+            s_select_pressed_at_us = esp_timer_get_time();
+        } else if (s_select_pressed_at_us != 0) {
+            int64_t held_us = esp_timer_get_time() - s_select_pressed_at_us;
+            s_select_pressed_at_us = 0;
+            if (held_us >= PLUGIN_RUNNER_SELECT_HOLD_EXIT_US) {
+                plugin_runner_request_exit();
+                return;
+            }
+        }
+    }
     if (app_event.type == GHOSTESP_INPUT_BACK) {
         plugin_runner_request_exit();
         return;
@@ -531,6 +545,7 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
+    s_select_pressed_at_us = 0;
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
     s_root = gui_screen_create_root_default(NULL, "SD App");
@@ -610,6 +625,7 @@ void plugin_runner_view_destroy(void) {
     s_title = NULL;
     s_output = NULL;
     s_touch_started = false;
+    s_select_pressed_at_us = 0;
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
     free(s_output_buf);
