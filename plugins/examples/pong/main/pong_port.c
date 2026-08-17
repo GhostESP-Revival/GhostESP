@@ -16,7 +16,7 @@ static bool landscape_layout;
 #define PADDLE_H 3
 #define CPU_Y 7
 #define PLAYER_Y (GAME_H - (landscape_layout ? 10 : 10))
-#define MOVE_STEP (landscape_layout ? 3 : 2)
+#define MOVE_STEP 2
 #define FRAME_MS 16
 #define TOUCH_BAR_HEIGHT 34
 
