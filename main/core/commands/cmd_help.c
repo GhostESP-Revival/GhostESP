@@ -73,11 +73,11 @@ void handle_help(int argc, char **argv) {
         glog("        -a  : Show access points from Wi-Fi scan\n");
         glog("        -s  : List connected stations\n");
         glog("        -airtags: List discovered AirTags\n\n");
-        glog("wpa3check\n");
-        glog("    Description: Run a WPA3 compliance check on the currently selected AP.\n");
+         glog("wpa3check\n");
+         glog("    Description: Run a passive Wi-Fi security check on the currently selected AP.\n");
         glog("                 If no AP is selected, scans all APs and prints a\n");
         glog("                 summary table with WPA3 presence, transition mode,\n");
-        glog("                 PMF posture, and a short security finding per AP.\n");
+         glog("                 PMF, cipher, Enterprise/EAP limitations, and a finding per AP.\n");
         glog("    Usage: wpa3check (after 'scanap' and optionally 'select -a <index>')\n\n");
         glog("beaconspam\n");
         glog("    Description: Start beacon spam with different modes.\n");

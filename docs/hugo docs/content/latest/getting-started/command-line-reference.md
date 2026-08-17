@@ -13,7 +13,7 @@ toc: true
 
 ## Core
 
-- **`help [category|all]`** — List commands by category (`wifi`, `ble`, `chameleon`, `comm`, `sd`, `led`, `gps`, `misc`, `portal`, `printer`, `cast`, `capture`, `beacon`, `attack`, `wigle`, `ir`, `ethernet`, `camera`). Use `help all` to list every command.
+- **`help [category|all]`** — List commands by category (`wifi`, `ble`, `chameleon`, `comm`, `sd`, `led`, `gps`, `misc`, `portal`, `printer`, `cast`, `capture`, `beacon`, `attack`, `ir`, `ethernet`, `camera`, `shell`, `gadgets`). Use `help all` to list every command.
 - **`chipinfo`** — Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
 - (for developers) **`mem [dump|trace <start|stop|dump>]`** — Print heap stats, dump allocation state, or control heap tracing.
 - **`reboot`** — Soft restart the device.
@@ -55,12 +55,16 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 ### Offense
 
-- **`attack -d|-c|-e|-s|-g <args>`** — Trigger deauth, channel switch (CSA), EAPOL logoff, SAE flood, or GTK abuse.
+- **`attack -d|-c|-e|-s|-g|-hsd|-p|-b|-a <args>`** — Trigger various Wi-Fi attacks.
   - `-d` — Deauthentication attack on selected AP(s).
   - `-c` — Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP's real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
   - `-e` — EAPOL logoff attack.
   - `-s <password>` — SAE flood attack (ESP32-C5/C6 only, requires target PSK).
   - `-g <ssid> <password>` — GTK abuse attack on the selected AP.
+  - `-hsd` — Combined handshake capture + deauth. Simultaneously sends deauth bursts and captures EAPOL frames for WPA handshake extraction.
+  - `-p` — Probe request flood. Broadcasts spoofed probe requests.
+  - `-b` — Bad message attack (EAPOL key install).
+  - `-a` — Authentication flood. Sends mass authentication frames to the AP.
 - **`stop`** — Stops all active attacks, scans, and background tasks.
 - **`stopdeauth`** / **`stopspam`** — Halt active attacks or beacon floods.
 - **`beaconspam [mode]`** — Broadcast spoof SSIDs (`-r`, `-rr`, `-l`, or custom text).
@@ -76,9 +80,9 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 ### Network
 
 - **`scanports <local|ip> [all|start-end]`**, **`scanarp`**, **`scanlocal`**, **`scanssh <ip>`** — Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
-- **`netbiosscan [subnet [a.b.c.]]|<ip>`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Scan the current subnet, a specific `/24` prefix, or a specific host.
-- **`httpbannerscan [subnet [a.b.c.]]|<ip>`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
-- **`snmpprobe [subnet [a.b.c.]]|<ip>|walk <ip> [OID]|communities <list|file>`** — Probe SNMP v1/v2c on UDP port 161 with the built-in community list (`public`, `private`, and more) and retrieve `sysDescr` to identify network devices (routers, switches, printers). `walk` dumps a MIB subtree (default `system`). `communities` overrides the list for the session, either as `c1,c2,...` or a path to a file; `/mnt/ghostesp/snmp_communities.txt` (one community per line) is loaded automatically when present.
+- **`netbiosscan [<ip>|subnet <a.b.c[.0|.]>]`** — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Without arguments, scans the current subnet. With an IP, scans a specific host. With `subnet <prefix>`, scans a `/24` prefix.
+- **`httpbannerscan [<ip>|subnet <a.b.c[.0|.]>]`** — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab `Server` banners to identify web servers and applications.
+- **`snmpprobe [<ip>|subnet <a.b.c[.0|.]>|walk <ip> [OID]|communities <list|file>]`** — Probe SNMP v1/v2c on UDP port 161 with the built-in community list (`public`, `private`, and more) and retrieve `sysDescr` to identify network devices (routers, switches, printers). `walk` dumps a MIB subtree (default `system`). `communities` overrides the list for the session, either as `c1,c2,...` or a path to a file; `/mnt/ghostesp/snmp_communities.txt` (one community per line) is loaded automatically when present.
 - **`enumscan [subnet [a.b.c.]]|<ip>`** — SMB enumeration: negotiates SMB1/SMB2, reports OS, hostname, domain, dialect, and whether SMB signing is required, then lists shares and users via null-session RAP where the server allows it.
 - **`dhcpstarve <start [threads]|stop|display>`** — Flood a DHCP server or show collected leases.
 - **`capture <-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop>`** — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports `-802154` for 802.15.4 capture.
@@ -133,7 +137,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`stopportal`** — Shut down the active portal.
 - **`listportals`** — List bundles on SD card or flash.
 - **`evilportal -c <sethtmlstr|clear>`** — Manage the Evil Portal HTML buffer (`-c sethtmlstr` to capture inbound HTML, `-c clear` to revert to defaults).
-- **`webauth on|off`** — Require or disable web UI login.
+- **`webauth [on|off|toggle|status]`** — Require or disable web UI login. `toggle` flips the current state; `status` shows the current setting.
 
 ### DNS Sinkhole
 
@@ -171,7 +175,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`sd rm <index|path>`** — Delete a file or empty directory.
 - **`sd tree [path] [depth]`** — Recursive directory listing (default depth: 2, max: 10).
 
-All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `SD:ERR:`, `SD:FILE:[n]`, `SD:DIR:[n]`, `SD:READ:`, `SD:WRITE:`.
+All `sd` commands return machine-parsable output with prefixes like `SD:OK:`, `SD:ERR:`, `SD:FILE:[n] name size`, `SD:DIR:[n] name`, `SD:READ:BEGIN:`, `SD:READ:END:`, `SD:WRITE:`.
 
 ### Pin Configuration
 
@@ -270,13 +274,13 @@ Available on boards with **`CONFIG_HAS_CAMERA`** (XIAO ESP32-S3 Sense and compat
 - **`motion snap <on|off>`** — Enable or disable SD card snapshots on motion.
 - **`motion image <on|off>`** — Attach snapshot image to Discord webhook alerts.
 - **`motion discord <url>`** — Set Discord webhook URL for motion alerts.
-- **`motion cooldown <seconds>`** — Set minimum time between webhook alerts.
+- **`motion cooldown <0-3600000>`** — Set minimum time between webhook alerts in milliseconds (max 1 hour). Persists across reboots.
 
 For full setup, tuning, SD snapshots, and Discord webhook configuration, see the [Motion Detector]({{< relref "../camera/motion-detector.md" >}}) guide.
 
 ## RGB
 
-- **`rgbmode <0-13>`** — Run an LED effect immediately. Available modes: `0`=Normal, `1`=Rainbow, `2`=Stealth, `3`=Knight Rider, `4`=Red, `5`=Green, `6`=Blue, `7`=Yellow, `8`=Purple, `9`=Cyan, `10`=Orange, `11`=White, `12`=Pink, `13`=Mic Visualizer. Can also use mode names: `normal`, `rainbow`, `stealth`, `police`, `strobe`, `knight`, `off`, `red`, `green`, `blue`, `yellow`, `purple`, `cyan`, `orange`, `white`, `pink`.
+- **`rgbmode <effect|color|off>`** — Run an LED effect immediately. Effects: `rainbow`, `police`, `strobe`, `knight`, `off`. Solid colors: `red`, `green`, `blue`, `yellow`, `twh-purple`, `cyan`, `orange`, `white`, `pink`.
 - **`setrgbmode <normal|rainbow|stealth>`** — Persist the LED mode across reboots (only accepts `normal`, `rainbow`, or `stealth`). Use `rgbmode` to set any mode temporarily.
 - **`setrgbpins <r> <g> <b>`** — Override discrete RGB GPIOs; pass the same pin for all three values to switch into single-wire NeoPixel mode on that data pin.
 - **`setrgbcount <1-512>`** — Persist the number of RGB LEDs connected so effects span the correct length. Reinitializes immediately if pins are already configured.
@@ -309,7 +313,7 @@ On press, the device switches to the terminal view and runs the command. To use 
 - **`ir send <path|remote_index> [button_index]`** — Transmit a signal from a file. Use `remote_index` from `ir list` and optional `button_index` from `ir show`.
 - **`ir universals list [-all]`** — List universal IR files and, with `-all`, all built‑in universal signals.
 - **`ir universals send <index>`** — Transmit a built‑in universal signal by index (see `ir universals list -all`).
-- **`ir universals sendall <file|TURNHISTVOFF> <button_name> [delay_ms]`** — Transmit all signals for a named button from a universal file or the built‑in TURNHISTVOFF set; can be stopped with `stop`.
+- **`ir universals sendall <file|TURNHISTVOFF> <button_name> [delay_ms]`** — Transmit all signals for a named button from a universal file or the built‑in TURNHISTVOFF set. The built-in signals use the name `POWER` (e.g., `ir universals sendall TURNHISTVOFF POWER`). Can be stopped with `stop`.
 - **`ir rx [timeout]`** — Wait up to `timeout` seconds (default 60) for a single IR signal, print it (decoded or RAW), then stop.
 - **`ir learn [path]`** — Wait for a signal (10s). Without `path`, auto-create a new `.ir` file under `/mnt/ghostesp/infrared/remotes`; with `path`, append the learned signal to that file.
 - **`ir dazzler [stop]`** — Start/stop continuous IR dazzler flood. Responses are machine-parsable: `IR_DAZZLER:STARTED`, `IR_DAZZLER:FAILED`, `IR_DAZZLER:ALREADY_RUNNING`, `IR_DAZZLER:STOPPING`, `IR_DAZZLER:NOT_RUNNING`.
@@ -413,7 +417,7 @@ On press, the device switches to the terminal view and runs the command. To use 
 - **`settings help`** — Show supported subcommands.
 - **`settings get <key>`** / **`settings set <key> <value>`** — Inspect or change individual options.
 - **`settings reset [key]`** — Restore all settings or a specific key to defaults.
-- **`loadconfig`** — Load settings from `config.cfg` on the SD card (SSID, PASSKEY, WiGLE token, auto-upload, donate).
+- **`loadconfig`** — Load settings from `config.cfg` on the SD card (SSID, PASSKEY, WiGLE token, auto-upload, donate, auto-reconnect).
 
 ## Native SD Apps
 

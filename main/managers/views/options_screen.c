@@ -1447,7 +1447,7 @@ static const char * const wifi_capture_options[] = {
 static const char * const wifi_scan_select_options[] = {
     "Scan APs", "Scan APs Live", "Scan Stations", "Scan APs + Clients",
     "List APs", "List Stations", "List APs + Clients",
-    "Multi-Select APs", "Multi-Select Stations", "WPA3/PMF Check", NULL
+    "Multi-Select APs", "Multi-Select Stations", "Wi-Fi Security Check", NULL
 };
 
 static const char * const wifi_environment_options[] = {
@@ -2250,6 +2250,19 @@ static void options_menu_push_rendered_state(void) {
 
 static bool options_menu_restore_previous_state(void) {
     gui_nav_state_t nav;
+    while (gui_nav_history_peek(&nav) && nav.scope == NAV_SCOPE_OPTIONS_MENU) {
+        /* A submenu can be rebuilt while its previous rendered state is still
+         * on the stack. Discard that duplicate instead of making Back bounce
+         * into the view the user just left. */
+        if (nav.value == SelectedMenuType &&
+            ((SelectedMenuType == OT_Wifi && nav.wifi_state == current_wifi_menu_state) ||
+             (SelectedMenuType == OT_Bluetooth && nav.bluetooth_state == current_bluetooth_menu_state) ||
+             (SelectedMenuType == OT_DualComm && nav.dualcomm_state == current_dualcomm_menu_state))) {
+            gui_nav_history_pop(&nav);
+            continue;
+        }
+        break;
+    }
     if (!gui_nav_history_peek(&nav) || nav.scope != NAV_SCOPE_OPTIONS_MENU) {
         return false;
     }
@@ -2869,7 +2882,7 @@ static void mdns_scan_complete_callback(void) {
     int count = wifi_manager_ip_lookup_get_count();
     if (count == 0) {
         error_popup_create("No devices found");
-        current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
         rebuild_current_menu();
         return;
     }
@@ -3121,7 +3134,7 @@ static void sweep_detail_back_cb(lv_event_t *e) {
         detail_view_destroy(sweep_detail_view);
         sweep_detail_view = NULL;
     }
-    current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+    current_wifi_menu_state = WIFI_MENU_ENVIRONMENT;
     rebuild_current_menu();
 }
 
@@ -3154,7 +3167,7 @@ static void show_sweep_detail(void) {
     }
 
     detail_view_add_back(sweep_detail_view, sweep_detail_back_cb, NULL);
-    current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
+    current_wifi_menu_state = WIFI_MENU_ENVIRONMENT;
 }
 
 static void sweep_complete_callback(void) {
@@ -8697,7 +8710,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "WPA3/PMF Check") == 0) {
+    else if (strcmp(Selected_Option, "Wi-Fi Security Check") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -10057,11 +10070,19 @@ static void back_event_cb(lv_event_t *e) {
     // If in Govee list view, go back to the Govee submenu.
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_GOVEE_LIST) {
         govee_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_GOVEE;
         rebuild_current_menu();
         return;
     }
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_GOVEE) {
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_MISC;
         rebuild_current_menu();
         return;
@@ -10116,6 +10137,43 @@ static void back_event_cb(lv_event_t *e) {
         rebuild_current_menu();
         return;
     }
+    // If in Sweep results view, go back to the Environment menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ENVIRONMENT && sweep_detail_view) {
+        sweep_detail_back_cb(NULL);
+        return;
+    }
+    // If in mDNS detail view, go back to the mDNS list
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_MDNS_DETAILS) {
+        mdns_detail_back_cb(NULL);
+        return;
+    }
+    // If in mDNS list view, go back to Network menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_MDNS_LIST) {
+        mdns_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
+        s_skip_history_capture_once = true;
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
+        rebuild_current_menu();
+        return;
+    }
+    // If in Enum detail view, go back to the Enum list
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ENUM_DETAILS) {
+        enum_detail_back_cb(NULL);
+        return;
+    }
+    // If in Enum results list view, go back to Network menu
+    if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_ENUM_LIST) {
+        enum_list_cleanup();
+        if (options_menu_restore_previous_state()) {
+            return;
+        }
+        s_skip_history_capture_once = true;
+        current_wifi_menu_state = WIFI_MENU_NETWORK;
+        rebuild_current_menu();
+        return;
+    }
     // If in a Wi-Fi submenu (but not main), go back to main Wi-Fi menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DOWNLOAD) {
@@ -10144,6 +10202,19 @@ static void back_event_cb(lv_event_t *e) {
         }
         current_wifi_menu_state = WIFI_MENU_MAIN;
         rebuild_current_menu();
+        return;
+    }
+    // If in BLE detail views, go back to the corresponding list
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_DETECT_DETAILS) {
+        ble_detect_detail_back_cb(NULL);
+        return;
+    }
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_ADV_DETAILS) {
+        ble_adv_detail_back_cb(NULL);
+        return;
+    }
+    if (SelectedMenuType == OT_Bluetooth && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
+        ble_gatt_detail_back_cb(NULL);
         return;
     }
     // If in a Bluetooth submenu (but not main), go back to main Bluetooth menu
@@ -12395,6 +12466,7 @@ static void ap_connect_cb(lv_event_t *e) {
         return;
     }
     wifi_manager_select_ap(selected_ap_index);
+    ap_detail_back_cb(NULL);
 
     char ssid[33] = {0};
     strncpy(ssid, (const char *)ap->ssid, sizeof(ssid) - 1);

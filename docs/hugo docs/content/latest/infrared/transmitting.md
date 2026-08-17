@@ -8,7 +8,7 @@ weight: 20
 
 1. Open **Infrared** and browse **Remotes** to see saved `.ir` files.
 2. Pick a Flipper-compatible `.ir` file. GhostESP parses the sections inside the file and lists every named button.
-3. Tap a button entry to transmit. The configured LED should flash pink if not in stealth mode.
+3. Tap a button entry to transmit. The configured LED should flash purple if not in stealth mode.
 
 > **Tip:** If you see “No .ir files” in the Remotes or Universals lists, try reinserting your SD card and rebooting the device. Ensure the `/mnt/ghostesp/infrared/remotes` and `/mnt/ghostesp/infrared/universals` folders exist on the card.
 
@@ -54,8 +54,8 @@ You can send raw or parsed signals directly without a file using the `inline` mo
 name: Power
 type: parsed
 protocol: NEC
-address: FF 00
-command: E7 18
+address: 00 FF
+command: 18 E7
 [IR/CLOSE]
 ```
 
@@ -63,8 +63,10 @@ command: E7 18
 
 ```json
 [IR/BEGIN]
-{"type":"parsed","protocol":"NEC","address":65280,"command":59160}
+{"type":"parsed","protocol":"NEC","address":255,"command":6375}
 [IR/CLOSE]
 ```
+
+> **Note:** In the text format, address and command bytes are listed in MSB-first order and parsed LSB-first. `00 FF` produces address `0x00FF` (255), and `18 E7` produces command `0x18E7` (6375).
 
 See the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}#infrared) for full command details.

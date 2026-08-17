@@ -346,7 +346,7 @@ static void submit_text() {
         callback(submitted_text);
     } else if (input_len > 0) {
         terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
+        display_manager_go_back();
         vTaskDelay(pdMS_TO_TICKS(10));
         simulateCommand(input_buffer);
         memset(input_buffer, 0, sizeof(input_buffer));
@@ -1386,8 +1386,8 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         }
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
+        display_manager_go_back();
 #endif
     }
 }

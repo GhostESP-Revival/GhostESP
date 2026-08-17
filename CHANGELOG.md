@@ -11,6 +11,9 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Added Wake-on-LAN gadget
 - Added Govee LAN light discovery and control
 - Added Probe Request Flood attack (directed SSID probes with randomized MACs, supports multi-selected APs)
+- Improved C5 station scans with AP-aware 5 GHz channel hopping
+- Expanded `wpa3check` with cipher and Enterprise/EAP assessment limits, plus PMF deauth warnings
+- Added per-observation sweep timestamps and PCAP capture statistics
 - Added Bad Msg attack (forged EAPOL key-install frames that drop stations from WPA networks)
 - Added Auth Flood attack (jittered 802.11 auth storm with randomized MACs and rate limiting)
 - Added Compact, an icon-free single-screen label layout inspired by [@MatthewKuKanich](https://github.com/MatthewKuKanich)'s Compact menu style in [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware)
@@ -41,6 +44,8 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed inverted joystick/keyboard scroll direction in the Airspace Monitor
 - Fixed a use-after-free panic in the display manager when a cached touch-pressed object was destroyed in-place before the release event
 - Touch now doesn't affect row styling behind a settings popup when open
+- Fixed Back navigation not returning to the true parent view
+- Fixed Wi-Fi scan result Back navigation bouncing into stale result lists
 
 ### Changed
 - Condensed the SD card boot log into a single card summary line

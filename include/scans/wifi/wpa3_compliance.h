@@ -45,4 +45,7 @@ void wpa3_compliance_check_selected(void);
  */
 void wpa3_compliance_check_all(void);
 
+/** Return a user-facing warning when deauth is unlikely to work. */
+const char *wpa3_deauth_warning(const wifi_ap_record_t *ap);
+
 #endif // WPA3_COMPLIANCE_H

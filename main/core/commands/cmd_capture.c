@@ -404,6 +404,12 @@ void handle_capture_scan(int argc, char **argv) {
 #endif
         pcap_file_close();
         pcap_wireshark_stop();
+        pcap_capture_stats_t stats = {0};
+        pcap_get_stats(&stats);
+        glog("Capture stats: seen=%lu written=%lu dropped=%lu\n",
+             (unsigned long)stats.packets_seen,
+             (unsigned long)stats.packets_written,
+             (unsigned long)stats.packets_dropped);
         status_display_show_status("Capture Stop");
     }
 #ifndef CONFIG_IDF_TARGET_ESP32S2

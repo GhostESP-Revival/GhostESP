@@ -430,6 +430,12 @@ static void compass_timer_cb(lv_timer_t *timer) {
 
 static void compass_event_handler(InputEvent *event) {
     if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_REL) {
+        lv_indev_data_t *data = &event->data.touch_data;
+        if (data->point.x <= 56 && data->point.y >= GUI_STATUS_BAR_HEIGHT &&
+            data->point.y <= GUI_STATUS_BAR_HEIGHT + 56) {
+            display_manager_go_back();
+            return;
+        }
         reset_calibration();
         if (heading_label) lv_label_set_text(heading_label, "Resetting...");
     } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_EXIT_BUTTON) {

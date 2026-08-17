@@ -258,7 +258,7 @@ static void airspace_input_callback(InputEvent *event) {
                 return;  // drag was in progress or release-on-release was applied
             }
             if (!touch_moved) {
-                display_manager_switch_view(&main_menu_view);
+                display_manager_go_back();
             }
         }
     } else if (event->type == INPUT_TYPE_JOYSTICK || event->type == INPUT_TYPE_KEYBOARD) {
@@ -266,7 +266,7 @@ static void airspace_input_callback(InputEvent *event) {
             int button = event->data.joystick_index;
             if (button == 2) scroll_airspace(-1);
             else if (button == 4) scroll_airspace(1);
-            else if (button == 0 || button == 1 || button == 3) display_manager_switch_view(&main_menu_view);
+            else if (button == 0 || button == 1 || button == 3) display_manager_go_back();
             return;
         }
 
@@ -276,18 +276,18 @@ static void airspace_input_callback(InputEvent *event) {
         } else if (key == LV_KEY_DOWN || key == 'j' || key == '.') {
             scroll_airspace(1);
         } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
-            display_manager_switch_view(&main_menu_view);
+            display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
         if (event->data.encoder.button) {
-            display_manager_switch_view(&main_menu_view);
+            display_manager_go_back();
         } else if (event->data.encoder.direction > 0) {
             scroll_airspace(1);
         } else if (event->data.encoder.direction < 0) {
             scroll_airspace(-1);
         }
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 

@@ -9,7 +9,7 @@ weight: 10
 ## Prerequisites
 
 - Python 3 installed with access to the command line.
-- ESP-IDF v6.0 on disk. `build.py` can auto-detect common locations or also download it for you.
+- ESP-IDF v6.0 on disk (v6.0.2 recommended). `build.py` can auto-detect common locations or also download it for you.
 - GhostESP repository cloned locally. Clone from GitHub and navigate into the project directory before running the script.
 
 ## 1. Launch the helper
@@ -28,7 +28,7 @@ python build.py --targets 2 3
 
 Use `--targets all` to queue every board profile.
 
-When prompted for ESP-IDF, confirm a detected path or allow the script to download v5.5. Use `--idf-path <path>` to skip the prompt.
+When prompted for ESP-IDF, confirm a detected path or allow the script to download v6.0.2. Use `--idf-path <path>` to skip the prompt.
 
 ## 2. Select a build target
 

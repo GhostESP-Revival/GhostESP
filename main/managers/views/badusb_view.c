@@ -1243,7 +1243,7 @@ void badusb_view_input_cb(InputEvent *event) {
 
 #ifdef CONFIG_USE_ENCODER
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 #endif
 }

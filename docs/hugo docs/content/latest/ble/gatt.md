@@ -192,5 +192,5 @@ Unknown services display their raw UUID for manual lookup.
 
 - **"No devices found"** — Move closer to BLE devices, or wait longer for devices to advertise.
 - **"Connection failed"** — The device may be paired to another host, sleeping, or out of range. Try again.
-- **"Service enumeration empty"** — Some devices require bonding/pairing before exposing services. GhostESP does passive enumeration.
+- **"Service enumeration empty"** — Some devices require bonding/pairing before exposing services. GhostESP actively initiates pairing during GATT enumeration (auto-confirming numeric comparison) to read protected services.
 - **Bluetooth not available** — ESP32-S2 devices do not have Bluetooth hardware.

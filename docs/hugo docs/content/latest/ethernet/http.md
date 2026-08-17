@@ -11,7 +11,7 @@ Make HTTP requests to web servers and APIs.
 Fetch content from a URL:
 
 ```
-ethhttp https://<url> <lines_to_show|all>
+ethhttp <url> <lines_to_show|all>
 ```
 
 **Parameters**:

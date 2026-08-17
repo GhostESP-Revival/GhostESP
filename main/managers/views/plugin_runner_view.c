@@ -156,6 +156,7 @@ static void runner_show_load_error_toast(esp_err_t err) {
 }
 
 static bool s_sd_eject_detected = false;
+static volatile bool s_exit_queued = false;
 
 static void plugin_runner_launch_pending(void);
 
@@ -168,7 +169,19 @@ static uint32_t plugin_runner_tick_interval(const plugin_loaded_app_t *loaded) {
 
 static void plugin_runner_go_back_async(void *arg) {
     (void)arg;
+    if (display_manager_get_current_view() != &plugin_runner_view) {
+        return;
+    }
+    s_exit_queued = false;
     display_manager_go_back();
+}
+
+void plugin_runner_request_exit(void) {
+    if (s_exit_queued) {
+        return;
+    }
+    s_exit_queued = true;
+    display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
 }
 
 static void plugin_runner_tick_task(void *arg) {
@@ -181,7 +194,7 @@ static void plugin_runner_tick_task(void *arg) {
         if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
             ESP_LOGW(TAG, "SD card removed while app running, stopping");
             s_sd_eject_detected = true;
-            display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+            plugin_runner_request_exit();
             break;
         }
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -403,7 +416,7 @@ static void plugin_runner_event_handler(InputEvent *event) {
     if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
     if (app_event.type == GHOSTESP_INPUT_BACK) {
-        display_manager_go_back();
+        plugin_runner_request_exit();
         return;
     }
     plugin_loaded_app_t *loaded = plugin_loader_current();
@@ -489,6 +502,7 @@ static void plugin_runner_launch_pending(void) {
 }
 
 void plugin_runner_view_create(void) {
+    s_exit_queued = false;
     plugin_runner_stop_tick();
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);

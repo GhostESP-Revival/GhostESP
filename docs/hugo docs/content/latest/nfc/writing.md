@@ -8,7 +8,7 @@ weight: 30
 
 - An NTAG `.nfc` file on the SD card under `/mnt/ghostesp/nfc/`.
 - NTAG21x or Ultralight tag compatible with the captured image size (NTAG213/215/216 page counts).
-- A PN532 or Chameleon Ultra enabled build with a connected PN532 module or Chameleon Ultra.
+- A PN532 or ST25R3916 enabled build with a connected reader module. (Chameleon Ultra cannot write tags; see below.)
 
 ## Steps
 

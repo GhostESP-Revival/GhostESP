@@ -4697,6 +4697,7 @@ void subghz_view_destroy(void) {
     }
 
     subghz_close_popup(true);
+    subghz_close_capture_popup();
     subghz_close_freq_analyzer_popup();
     subghz_close_waterfall_popup();
     popup_confirm_close(&s_saved_delete_confirm);

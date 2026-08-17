@@ -1396,7 +1396,7 @@ static void apps_menu_go_back(void) {
         gui_screen_apply_background(apps_menu_view.root);
         return;
     }
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 }
 
 static void navigate_apps_vertical(int direction) {

@@ -442,8 +442,8 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
     }
 #ifdef CONFIG_USE_ENCODER
     else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "Exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        ESP_LOGI(TAG, "Exit button pressed, returning to previous view");
+        display_manager_go_back();
     }
 #endif
 }

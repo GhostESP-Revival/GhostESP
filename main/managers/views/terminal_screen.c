@@ -1163,7 +1163,6 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
 #ifdef CONFIG_USE_ENCODER
   } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
     stop_all_operations();
-    display_manager_switch_view(&main_menu_view);
 #endif
   }
 }

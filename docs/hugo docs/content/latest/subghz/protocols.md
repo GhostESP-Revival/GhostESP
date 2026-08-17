@@ -44,7 +44,7 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 
 ### Linear
 - **Common use**: Linear brand gate operators
-- **Frequency**: 310 MHz, 315 MHz, 390 MHz
+- **Frequency**: 315 MHz, 390 MHz
 - **Bit length**: 10 bits (Linear), 8 bits (Linear D3)
 - **Variants**: Linear, Linear Delta3
 

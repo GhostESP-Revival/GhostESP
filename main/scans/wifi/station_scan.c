@@ -11,6 +11,7 @@
 
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/ap_scan.h"
+#include "scans/wifi/wifi_channels.h"
 #include "core/scan_saver.h"
 #include "core/ouis.h"
 #include "core/glog.h"
@@ -26,8 +27,7 @@
 #include <string.h>
 
 // Channel hopping configuration
-#define SCANSTA_CHANNEL_HOP_INTERVAL_MS 250  ///< Hop channel every 250ms
-#define SCANSTA_MAX_WIFI_CHANNEL 13          ///< Scan channels 1-13
+#define SCANSTA_HOP_INTERVAL_MS 250          ///< Hop channel every 250ms
 
 // Module tag for logging
 static const char *TAG = "StationScan";
@@ -49,6 +49,9 @@ static bool scan_active = false;
 static esp_timer_handle_t scansta_channel_hop_timer = NULL;
 static bool scansta_hopping_active = false;
 static uint8_t scansta_current_channel = 1;
+static uint8_t scansta_channels[WIFI_CHANNELS_MAX];
+static uint8_t scansta_channel_count = 0;
+static uint8_t scansta_channel_index = 0;
 
 // External dependencies
 extern RGBManager_t rgb_manager;
@@ -317,7 +320,9 @@ static void add_station_ap_pair(const uint8_t *station_mac, const uint8_t *ap_bs
 static void scansta_channel_hop_timer_callback(void *arg) {
     if (!scansta_hopping_active) return;
 
-    scansta_current_channel = (scansta_current_channel % SCANSTA_MAX_WIFI_CHANNEL) + 1;
+    if (scansta_channel_count == 0) return;
+    scansta_channel_index = (uint8_t)((scansta_channel_index + 1) % scansta_channel_count);
+    scansta_current_channel = scansta_channels[scansta_channel_index];
     esp_wifi_set_channel(scansta_current_channel, WIFI_SECOND_CHAN_NONE);
 }
 
@@ -334,7 +339,26 @@ static esp_err_t start_scansta_channel_hopping(void) {
         scansta_channel_hop_timer = NULL;
     }
 
-    scansta_current_channel = 1;
+    uint8_t planned_count = wifi_channels_build_from_ap_results(scansta_channels,
+                                                                 WIFI_CHANNELS_MAX);
+    if (planned_count == 0) {
+        planned_count = wifi_channels_build_country_list(scansta_channels,
+                                                         WIFI_CHANNELS_MAX);
+    }
+    scansta_channel_count = 0;
+    for (uint8_t i = 0; i < planned_count; i++) {
+        if (wifi_channels_is_safe_monitor_channel(scansta_channels[i])) {
+            scansta_channels[scansta_channel_count++] = scansta_channels[i];
+        }
+    }
+    if (scansta_channel_count == 0) {
+        scansta_channels[0] = 1;
+        scansta_channels[1] = 6;
+        scansta_channels[2] = 11;
+        scansta_channel_count = 3;
+    }
+    scansta_channel_index = 0;
+    scansta_current_channel = scansta_channels[scansta_channel_index];
     esp_wifi_set_channel(scansta_current_channel, WIFI_SECOND_CHAN_NONE);
 
     esp_timer_create_args_t timer_args = {
@@ -348,7 +372,7 @@ static esp_err_t start_scansta_channel_hopping(void) {
         return err;
     }
 
-    err = esp_timer_start_periodic(scansta_channel_hop_timer, SCANSTA_CHANNEL_HOP_INTERVAL_MS * 1000);
+    err = esp_timer_start_periodic(scansta_channel_hop_timer, SCANSTA_HOP_INTERVAL_MS * 1000);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start scansta channel hop timer: %s", esp_err_to_name(err));
         esp_timer_delete(scansta_channel_hop_timer);
@@ -357,7 +381,8 @@ static esp_err_t start_scansta_channel_hopping(void) {
     }
 
     scansta_hopping_active = true;
-    ESP_LOGI(TAG, "Station Scan Channel Hopping Started.");
+    ESP_LOGI(TAG, "Station Scan Channel Hopping Started (%u channels, first=%u).",
+             (unsigned)scansta_channel_count, (unsigned)scansta_current_channel);
     return ESP_OK;
 }
 

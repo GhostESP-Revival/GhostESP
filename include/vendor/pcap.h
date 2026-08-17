@@ -49,6 +49,15 @@ typedef enum {
   PCAP_MODE_WIRESHARK
 } pcap_mode_t;
 
+typedef struct {
+  uint64_t started_us;
+  uint64_t stopped_us;
+  uint32_t packets_seen;
+  uint32_t packets_written;
+  uint32_t packets_dropped;
+  uint32_t buffer_flushes;
+} pcap_capture_stats_t;
+
 esp_err_t pcap_init(void);
 esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type);
 esp_err_t pcap_file_open(const char *base_file_name,
@@ -66,6 +75,7 @@ bool pcap_auto_flush_enabled(void);
 void pcap_file_close();
 void pcap_wireshark_stop(void);
 void pcap_discard_buffer(void);
+void pcap_get_stats(pcap_capture_stats_t *out);
 bool pcap_has_hc22000_material(const char *path);
 esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_path_len,
                               int *pmkid_count, int *handshake_count);
