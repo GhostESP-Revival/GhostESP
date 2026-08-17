@@ -22,6 +22,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -497,6 +499,20 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
 // ============================================================================
 
 void station_scan_start(void) {
+    if (scan_active) {
+        return;
+    }
+
+    wifi_manager_set_reconnect_hold(true);
+    esp_err_t disconnect_err = esp_wifi_disconnect();
+    if (disconnect_err != ESP_OK &&
+        disconnect_err != ESP_ERR_WIFI_NOT_STARTED &&
+        disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
+        ESP_LOGW(TAG, "Failed to disconnect STA before station scan: %s",
+                 esp_err_to_name(disconnect_err));
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     ghostchi_manager_add_xp(3);
     // Get AP scan results
     uint16_t ap_count = 0;
@@ -597,6 +613,8 @@ void station_scan_stop(void) {
     // ap_manager_stop_services() and never restored the AP. Restore it now
     // so the WebUI comes back regardless of which caller invoked stop.
     ap_manager_start_services();
+    wifi_manager_configure_sta_from_settings();
+    wifi_manager_set_reconnect_hold(false);
 
     glog("Station Scan Stopped. Found %d stations.\n", station_count);
 }

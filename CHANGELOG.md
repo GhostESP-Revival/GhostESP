@@ -29,6 +29,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed Cloud Store fetches failing TLS verification via the HTTPS proxy by enabling cross-signed certificate bundle verification on all boards
 - Fixed the GhostLink BLE bridge making both paired boards advertise as "GhostESP Bridge" (duplicate devices in the companion scan) and dropping command responses
 - Fixed WiFi auto-reconnect attempts during intentional WiFi shutdowns
+- Fixed WiFi reconnect interfering with AP/STA scans
 - Fixed the Channel Switch attack broadcasting beacons to the AP's own MAC instead of broadcast and transmitting them on the wrong channel
 - Fixed EAPOL Logoff never starting in the STA-only boot configuration
 - Fixed a 2-byte over-length beacon frame in Beacon Spam
