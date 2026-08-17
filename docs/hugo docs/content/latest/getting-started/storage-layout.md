@@ -33,6 +33,7 @@ installed build supports the matching feature.
 | Native SD apps | `ghostesp/apps/` |
 | GhostScript packages | `ghostesp/scripts/` |
 | Theme packages | `ghostesp/themes/` |
+| SNMP community strings (one per line, `#` comments) | `ghostesp/snmp_communities.txt` |
 
 ## Internal Folders
 

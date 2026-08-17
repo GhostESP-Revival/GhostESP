@@ -161,7 +161,7 @@ static void numpad_activate(int idx) {
             input_pos = 0;
         }
     } else if (c == 'e') {
-        display_manager_switch_view(&options_menu_view);
+        display_manager_go_back();
     } else if (c != '\0') {
         if (input_pos < (int)sizeof(input_buffer) - 1) {
             input_buffer[input_pos++] = c;
@@ -374,7 +374,7 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
             return;
         }
         if (key_value == '`' || key_value == 27 || key_value == 29) {
-            display_manager_switch_view(&options_menu_view);
+            display_manager_go_back();
             return;
         }
         if (key_value == 'h' || key_value == ',') { cursor_pos = (cursor_pos > 0) ? cursor_pos - 1 : NP_BTN_COUNT - 1; }
@@ -442,8 +442,8 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
     }
 #ifdef CONFIG_USE_ENCODER
     else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "Exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        ESP_LOGI(TAG, "Exit button pressed, returning to previous view");
+        display_manager_go_back();
     }
 #endif
 }

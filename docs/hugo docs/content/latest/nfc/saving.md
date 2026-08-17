@@ -6,7 +6,7 @@ weight: 20
 
 ## Prerequisites
 
-- A PN532 or Chameleon Ultra enabled build.
+- A PN532, ST25R3916, or Chameleon Ultra enabled build.
 - SD card mounted with free space.
 
 ## Steps

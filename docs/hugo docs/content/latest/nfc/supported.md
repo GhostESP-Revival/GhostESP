@@ -26,9 +26,9 @@ Much of GhostESP's tag decoding is ported from the [Flipper Zero](https://github
 - **Models:** 1K, 4K, Mini (via SAK/ATQA detection).
 
 - **Read:** Sector-by-sector brute-force with layered keys:
-  - User dictionary file on the SD card (`/mnt/ghostesp/nfc/mfc_user_dict.nfc`), which you will have to edit manually.
-  - Built-in common keys.
-  - Flipper Zero dictionary pre-compiled in.
+  - Session keys recovered from prior scans.
+  - User dictionary file on the SD card (`/mnt/ghostesp/nfc/mfc_user_dict.nfc`), which you can edit manually.
+  - Embedded dictionary (compiled into the firmware, combines common keys and Flipper Zero dictionary keys). When the embedded dictionary is absent, an SD card fallback at `/mnt/ghostesp/nfc/mf_classic_dict.nfc` is tried instead.
 
 - **User Dictionary:** Successful keys are appended to `/mnt/ghostesp/nfc/mfc_user_dict.nfc` for future scans.
 
@@ -110,5 +110,5 @@ Beyond raw tag reading, GhostESP ports Flipper Zero / Momentum's `supported_card
 ## Emulation (ST25R3916 only)
 
 - **Type 2 / NTAG:** memory image emulation supported (SPI transport works reliably; I2C transport may be timing-limited with strict readers like the Flipper Zero).
-- **MIFARE Classic:** sector image emulation supported via software Crypto1.
+- **MIFARE Classic:** not yet supported for emulation.
 - **PN532:** cannot emulate in this build; emulation always routes to the ST25R3916 backend regardless of the selected backend.

@@ -219,6 +219,16 @@ void handle_http_banner_scan(int argc, char **argv) {
 }
 
 void handle_snmp_probe(int argc, char **argv) {
+    // snmpprobe communities <c1,c2,...|file>
+    if (argc >= 3 && strcmp(argv[1], "communities") == 0) {
+        if (snmp_scan_load_communities_file(argv[2])) {
+            glog("Loaded SNMP communities from %s\n", argv[2]);
+        } else {
+            snmp_scan_set_communities(argv[2]);
+        }
+        return;
+    }
+
     // SNMP Walk mode: snmpprobe walk [host|subnet] [OID]
     if (argc >= 2 && strcmp(argv[1], "walk") == 0) {
         if (argc >= 4 && strcmp(argv[2], "subnet") == 0) {

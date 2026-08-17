@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define HTTP_PROXY_BASE_URL "http://httpsproxy.fuckyourcdn.com?url="
+#define HTTP_PROXY_BASE_URL "https://httpsproxy.fuckyourcdn.com/?url="
 #define HTTP_PROXY_URL_MAX 2048
 
 bool proxy_should_use(const char *url);

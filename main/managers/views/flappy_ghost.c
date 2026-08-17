@@ -387,7 +387,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
 
       if (touch_x >= (area.x1 - padding) && touch_x <= (area.x2 + padding) &&
           touch_y >= (area.y1 - padding) && touch_y <= (area.y2 + padding)) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
       } else {
         flappy_bird_restart();
       }
@@ -396,7 +396,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
       if (event->data.joystick_index == 1) {
         flappy_bird_restart();
       } else if (event->data.joystick_index == 0) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
       }
     } else if (event->type == INPUT_TYPE_KEYBOARD) { // dummy for handling keyboard input during game over
       ESP_LOGW(TAG, "keyboard event; unhandled");
@@ -410,6 +410,8 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
     ESP_LOGI(TAG, "Joystick event");
     if (button == 1) {
       bird_velocity = settings.flap_strength;
+    } else if (button == 0) {
+      display_manager_go_back();
     }
   } else if (event->type == INPUT_TYPE_TOUCH) {
     ESP_LOGD(TAG, "Touch event");
@@ -420,7 +422,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
 #ifdef CONFIG_USE_ENCODER
   } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
     ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
-    display_manager_switch_view(&main_menu_view);
+    display_manager_go_back();
 #endif
     }
 }

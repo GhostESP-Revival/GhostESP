@@ -281,7 +281,7 @@ static void nrf24_update_pause_ui(void) {
 
 static void nrf24_return_to_menu(void) {
     SelectedMenuType = OT_NRF24;
-    display_manager_switch_view(&options_menu_view);
+    display_manager_go_back();
 }
 
 static void nrf24_toggle_pause(void) {

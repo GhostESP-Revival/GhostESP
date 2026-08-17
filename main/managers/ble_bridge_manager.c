@@ -38,11 +38,22 @@
 #define BRIDGE_NVS_NS "blebridge"
 #define BRIDGE_NVS_PEER "peer"
 #define BRIDGE_NVS_ENABLED "enabled"
+/* "enabled" means "I am the UI side and want my GhostLink peer to run the
+ * bridge" -- apply_saved_enabled commands the peer. "bridged" means "a peer
+ * told me to be the bridge endpoint" -- apply_saved_enabled starts the bridge
+ * locally and must NOT command the peer back (that echo made both boards
+ * advertise as "GhostESP Bridge"). The two roles are mutually exclusive. */
+#define BRIDGE_NVS_BRIDGED "bridged"
 #define BRIDGE_TASK_STACK_BYTES 4096
 #define BRIDGE_FRAME_HEADER_LEN 12
+#define BRIDGE_ATT_NOTIFY_OVERHEAD 3
 #define BRIDGE_DEFAULT_MTU 128
 #define BRIDGE_PEER_COMMAND_PAYLOAD_MAX 60
 #define BRIDGE_COMMAND_MAX 250
+#define BRIDGE_NOTIFY_QUEUE_DEPTH 96
+#define BRIDGE_NOTIFY_RETRY_COUNT 20
+#define BRIDGE_NOTIFY_RETRY_DELAY_MS 10
+#define BRIDGE_NOTIFY_QUEUE_WAIT_MS 100
 
 /* CMD flags in header byte 5. A fragmented command starts with FIRST|MORE,
  * continues with MORE, and finishes with flags=0. FIRST without MORE is also
@@ -65,6 +76,14 @@ typedef enum {
 } bridge_frame_type_t;
 
 typedef struct {
+    uint8_t *data;
+    size_t length;
+    uint16_t conn_handle;
+    uint16_t tx_handle;
+    uint32_t connection_generation;
+} bridge_notify_item_t;
+
+typedef struct {
     bool running;
     bool gatt_registered;
     bool ble_connected;
@@ -76,6 +95,8 @@ typedef struct {
     StackType_t *task_stack;
     StaticTask_t *task_tcb;
     SemaphoreHandle_t lock;
+    QueueHandle_t notify_queue;
+    uint32_t connection_generation;
     uint32_t active_cmd_id;
     bool active_command;
     uint32_t reassembly_cmd_id;
@@ -94,6 +115,8 @@ static ble_bridge_state_t s_bridge = {
 
 static bool bridge_load_enabled(void);
 static void bridge_save_enabled(bool enabled);
+static bool bridge_load_bridged(void);
+static void bridge_save_bridged(bool bridged);
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 static int bridge_gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
@@ -186,10 +209,10 @@ static void bridge_write_u32_le(uint8_t *p, uint32_t value) {
 
 static size_t bridge_notify_payload_cap(void) {
     uint16_t mtu = s_bridge.mtu ? s_bridge.mtu : BRIDGE_DEFAULT_MTU;
-    if (mtu <= BRIDGE_FRAME_HEADER_LEN) {
-        return 20;
+    if (mtu <= BRIDGE_ATT_NOTIFY_OVERHEAD + BRIDGE_FRAME_HEADER_LEN) {
+        return 1;
     }
-    size_t cap = (size_t)mtu - BRIDGE_FRAME_HEADER_LEN;
+    size_t cap = (size_t)mtu - BRIDGE_ATT_NOTIFY_OVERHEAD - BRIDGE_FRAME_HEADER_LEN;
     if (cap > 244) {
         cap = 244;
     }
@@ -197,8 +220,64 @@ static size_t bridge_notify_payload_cap(void) {
 }
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2
+static void bridge_clear_notify_queue(void) {
+    if (!s_bridge.notify_queue) {
+        return;
+    }
+    bridge_notify_item_t item;
+    while (xQueueReceive(s_bridge.notify_queue, &item, 0) == pdTRUE) {
+        free(item.data);
+    }
+}
+
+/* 1 = sent, 0 = current transport failed, -1 = item belongs to an old connection. */
+static int bridge_notify_item(const bridge_notify_item_t *item) {
+    if (!item || !item->data || item->length == 0) {
+        return false;
+    }
+
+    for (int attempt = 0; attempt < BRIDGE_NOTIFY_RETRY_COUNT; ++attempt) {
+        bridge_lock();
+        bool can_notify = s_bridge.ble_connected && s_bridge.notify_enabled &&
+                          s_bridge.conn_handle == item->conn_handle &&
+                          s_bridge.connection_generation == item->connection_generation &&
+                          s_bridge.tx_val_handle == item->tx_handle;
+        bool stale = s_bridge.conn_handle != item->conn_handle ||
+                     s_bridge.connection_generation != item->connection_generation;
+        bridge_unlock();
+        if (!can_notify) {
+            return stale ? -1 : 0;
+        }
+
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(item->data, item->length);
+        if (om) {
+            int rc = ble_gatts_notify_custom(item->conn_handle, item->tx_handle, om);
+            if (rc == 0) {
+                return true;
+            }
+            if (attempt == BRIDGE_NOTIFY_RETRY_COUNT - 1) {
+                ESP_LOGW(TAG, "notify failed after retries: %d", rc);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(BRIDGE_NOTIFY_RETRY_DELAY_MS));
+    }
+    return false;
+}
+
+static void bridge_fail_transport(uint16_t conn_handle, uint32_t generation, const char *reason) {
+    bridge_lock();
+    bool connected = s_bridge.ble_connected && s_bridge.conn_handle == conn_handle &&
+                     s_bridge.connection_generation == generation;
+    bridge_unlock();
+
+    ESP_LOGE(TAG, "BLE transport failed: %s", reason ? reason : "unknown error");
+    if (connected) {
+        (void)ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+}
+
 static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
-                              const uint8_t *payload, size_t payload_len) {
+                               const uint8_t *payload, size_t payload_len) {
     if (payload_len > 0xffff) {
         payload_len = 0xffff;
     }
@@ -206,11 +285,13 @@ static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
     bridge_lock();
     bool can_notify = s_bridge.running && s_bridge.ble_connected && s_bridge.notify_enabled &&
                       s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE && s_bridge.tx_val_handle != 0;
+    QueueHandle_t notify_queue = s_bridge.notify_queue;
     uint16_t conn_handle = s_bridge.conn_handle;
     uint16_t tx_handle = s_bridge.tx_val_handle;
+    uint32_t connection_generation = s_bridge.connection_generation;
     bridge_unlock();
 
-    if (!can_notify) {
+    if (!can_notify || !notify_queue) {
         return false;
     }
 
@@ -225,7 +306,7 @@ static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
     frame[2] = GB_VERSION;
     frame[3] = type;
     frame[4] = status;
-    frame[5] = 0x00;
+    frame[5] = 0;
     bridge_write_u32_le(frame + 6, cmd_id);
     frame[10] = (uint8_t)(payload_len & 0xff);
     frame[11] = (uint8_t)((payload_len >> 8) & 0xff);
@@ -233,15 +314,16 @@ static bool bridge_send_frame(uint8_t type, uint8_t status, uint32_t cmd_id,
         memcpy(frame + BRIDGE_FRAME_HEADER_LEN, payload, payload_len);
     }
 
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(frame, frame_len);
-    free(frame);
-    if (!om) {
-        return false;
-    }
-
-    int rc = ble_gatts_notify_custom(conn_handle, tx_handle, om);
-    if (rc != 0) {
-        ESP_LOGW(TAG, "notify failed: %d", rc);
+    bridge_notify_item_t item = {
+        .data = frame,
+        .length = frame_len,
+        .conn_handle = conn_handle,
+        .tx_handle = tx_handle,
+        .connection_generation = connection_generation,
+    };
+    if (xQueueSend(notify_queue, &item, pdMS_TO_TICKS(BRIDGE_NOTIFY_QUEUE_WAIT_MS)) != pdTRUE) {
+        free(frame);
+        bridge_fail_transport(conn_handle, connection_generation, "notification queue full");
         return false;
     }
     return true;
@@ -298,12 +380,11 @@ static void bridge_command_end_callback(uint8_t status, void *user_data) {
     bool send_end = s_bridge.running && s_bridge.active_command;
     uint32_t cmd_id = s_bridge.active_cmd_id;
     s_bridge.active_command = false;
-    s_bridge.active_cmd_id = 0;
     bridge_unlock();
 
     if (send_end) {
-        /* GhostLink identifies no command, so BLE commands must remain
-         * serialized. END marks handler return, not asynchronous completion. */
+        /* END is only a dispatch boundary. Keep the command ID as the owner of
+         * later asynchronous output until another command replaces it. */
         bridge_send_end(cmd_id, status);
     }
 }
@@ -385,6 +466,7 @@ static void bridge_stop_locked(void) {
     s_bridge.active_cmd_id = 0;
     bridge_unlock();
 #ifndef CONFIG_IDF_TARGET_ESP32S2
+    bridge_clear_notify_queue();
     if (s_bridge.ble_connected && s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
         (void)ble_gap_terminate(s_bridge.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
@@ -400,9 +482,12 @@ static void bridge_stop_locked(void) {
 
 static void bridge_request_stop(const char *reason) {
     ESP_LOGI(TAG, "CTRL stop: %s", reason ? reason : "stopping bridge");
+    /* This path runs on the board actually serving BLE (the bridge endpoint),
+     * so clear the endpoint role. Also clear the commander flag for safety in
+     * case a unit still carries both from older firmware. */
+    bridge_save_bridged(false);
     bridge_save_enabled(false);
     s_bridge.running = false;
-    bridge_stop_locked();
 }
 
 static bool bridge_load_enabled(void) {
@@ -422,6 +507,27 @@ static void bridge_save_enabled(bool enabled) {
         return;
     }
     (void)nvs_set_u8(nvs, BRIDGE_NVS_ENABLED, enabled ? 1 : 0);
+    (void)nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static bool bridge_load_bridged(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(BRIDGE_NVS_NS, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    uint8_t bridged = 0;
+    esp_err_t err = nvs_get_u8(nvs, BRIDGE_NVS_BRIDGED, &bridged);
+    nvs_close(nvs);
+    return err == ESP_OK && bridged != 0;
+}
+
+static void bridge_save_bridged(bool bridged) {
+    nvs_handle_t nvs;
+    if (nvs_open(BRIDGE_NVS_NS, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    (void)nvs_set_u8(nvs, BRIDGE_NVS_BRIDGED, bridged ? 1 : 0);
     (void)nvs_commit(nvs);
     nvs_close(nvs);
 }
@@ -527,8 +633,24 @@ static void bridge_send_cmd_to_peer(uint32_t cmd_id, const char *command) {
 
 static void bridge_task(void *arg) {
     (void)arg;
-    while (s_bridge.running) {
-        vTaskDelay(pdMS_TO_TICKS(100));
+    for (;;) {
+        bridge_notify_item_t item = {0};
+        if (xQueueReceive(s_bridge.notify_queue, &item, pdMS_TO_TICKS(100)) == pdTRUE) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+            int notify_result = bridge_notify_item(&item);
+#endif
+            free(item.data);
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+            if (notify_result == 0) {
+                bridge_fail_transport(item.conn_handle, item.connection_generation,
+                                      "notification retries exhausted");
+            }
+#endif
+            continue;
+        }
+        if (!s_bridge.running) {
+            break;
+        }
     }
     bridge_stop_locked();
     s_bridge.task_handle = NULL;
@@ -615,7 +737,9 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             if (event->connect.status == 0) {
                 bridge_lock();
                 s_bridge.ble_connected = true;
+                s_bridge.notify_enabled = false;
                 s_bridge.conn_handle = event->connect.conn_handle;
+                s_bridge.connection_generation++;
                 s_bridge.mtu = ble_att_mtu(event->connect.conn_handle);
                 s_bridge.active_command = false;
                 s_bridge.active_cmd_id = 0;
@@ -633,6 +757,10 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_DISCONNECT:
             bridge_lock();
+            if (event->disconnect.conn.conn_handle != s_bridge.conn_handle) {
+                bridge_unlock();
+                return 0;
+            }
             s_bridge.ble_connected = false;
             s_bridge.notify_enabled = false;
             s_bridge.conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -647,7 +775,8 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
             return 0;
 
         case BLE_GAP_EVENT_SUBSCRIBE:
-            if (event->subscribe.attr_handle == s_bridge.tx_val_handle) {
+            if (event->subscribe.conn_handle == s_bridge.conn_handle &&
+                event->subscribe.attr_handle == s_bridge.tx_val_handle) {
                 bridge_lock();
                 s_bridge.notify_enabled = event->subscribe.cur_notify;
                 bridge_unlock();
@@ -657,6 +786,10 @@ static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_MTU:
             bridge_lock();
+            if (event->mtu.conn_handle != s_bridge.conn_handle) {
+                bridge_unlock();
+                return 0;
+            }
             s_bridge.mtu = event->mtu.value;
             bridge_unlock();
             bridge_log("MTU=%u", (unsigned)event->mtu.value);
@@ -803,7 +936,10 @@ static bool bridge_ensure_runtime(void) {
     if (!s_bridge.lock) {
         s_bridge.lock = xSemaphoreCreateMutex();
     }
-    return s_bridge.lock != NULL;
+    if (!s_bridge.notify_queue) {
+        s_bridge.notify_queue = xQueueCreate(BRIDGE_NOTIFY_QUEUE_DEPTH, sizeof(bridge_notify_item_t));
+    }
+    return s_bridge.lock != NULL && s_bridge.notify_queue != NULL;
 }
 
 static bool bridge_create_task(void) {
@@ -834,6 +970,11 @@ static bool bridge_create_task(void) {
 static void bridge_wait_and_send_task(void *arg) {
     (void)arg;
     for (int i = 0; i < 30; i++) {
+        if (!bridge_load_enabled()) {
+            ESP_LOGI(TAG, "wait_and_send: bridge disabled, cancelling");
+            vTaskDelete(NULL);
+            return;
+        }
         if (esp_comm_manager_is_connected()) {
             bool ok = esp_comm_manager_send_command("blebridge", "start");
             ESP_LOGI(TAG, "peer connected: sent blebridge start: %s", ok ? "ok" : "fail");
@@ -926,6 +1067,10 @@ bool ble_bridge_get_enabled(void) {
 bool ble_bridge_set_enabled(bool enabled) {
     (void)nvs_flash_init();
     bridge_save_enabled(enabled);
+    /* The menu/CLI toggle is always the UI commander side, never the bridge
+     * endpoint. Clear any stale endpoint role (e.g. a unit tricked into
+     * bridging by the old echo bug) so it stops auto-advertising. */
+    bridge_save_bridged(false);
 
     if (enabled) {
         if (esp_comm_manager_is_connected()) {
@@ -941,11 +1086,28 @@ bool ble_bridge_set_enabled(bool enabled) {
     if (esp_comm_manager_is_connected()) {
         (void)esp_comm_manager_send_command("blebridge", "stop");
     }
+    /* If this board is itself advertising (e.g. it got tricked into running a
+     * bridge by the old echo bug), stop it locally so the toggle can actually
+     * turn it off instead of only messaging the peer. */
+    if (ble_bridge_is_running()) {
+        ble_bridge_stop();
+    }
     return true;
 }
 
 void ble_bridge_apply_saved_enabled(void) {
     (void)nvs_flash_init();
+
+    /* Bridge endpoint role: a peer previously told us to be the bridge, so
+     * start advertising locally. Do NOT fall through to the commander path --
+     * commanding our peer back is exactly the echo that made both boards
+     * advertise. */
+    if (bridge_load_bridged()) {
+        ESP_LOGI(TAG, "apply_saved_enabled: bridged endpoint, starting locally");
+        (void)ble_bridge_start();
+        return;
+    }
+
     bool enabled = bridge_load_enabled();
     ESP_LOGI(TAG, "apply_saved_enabled: stored=%s", enabled ? "true" : "false");
     if (!enabled) {
@@ -966,8 +1128,10 @@ void ble_bridge_stop(void) {
         return;
     }
     bridge_log("stopping");
-    bridge_stop_locked();
-    vTaskDelay(pdMS_TO_TICKS(200));
+    s_bridge.running = false;
+    for (int i = 0; i < 20 && s_bridge.task_handle; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     bridge_log("stopped");
 #endif
 }
@@ -1015,16 +1179,35 @@ void ble_bridge_handle_command(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "start") == 0) {
-        bridge_save_enabled(true);
+        /* A peer-issued start means we are the bridge endpoint: persist the
+         * "bridged" role and clear any stale commander flag so we never echo
+         * "blebridge start" back to the peer. A locally-issued start keeps the
+         * legacy commander behaviour. */
+        bool remote_command = esp_comm_manager_is_remote_command();
+        if (remote_command) {
+            bridge_save_enabled(false);
+        } else {
+            bridge_save_enabled(true);
+            bridge_save_bridged(false);
+        }
         if (ble_bridge_start()) {
+            if (remote_command) {
+                bridge_save_bridged(true);
+            }
             glog("BLE bridge started.\n");
         } else {
+            if (remote_command) {
+                bridge_save_bridged(false);
+            }
             glog("Failed to start BLE bridge.\n");
         }
         return;
     }
 
     if (strcmp(argv[1], "stop") == 0) {
+        /* Stop always clears both roles. This also migrates endpoints carrying
+         * the legacy enabled=1 value even if they receive stop before start. */
+        bridge_save_bridged(false);
         bridge_save_enabled(false);
         ble_bridge_stop();
         glog("BLE bridge stopped.\n");

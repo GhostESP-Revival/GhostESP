@@ -18,6 +18,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/subghz_remote_manager.h"
 #include "managers/views/app_gallery_screen.h"
+#include "managers/views/plugin_runner_view.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "scans/ble/advertiser_scan.h"
@@ -403,6 +404,10 @@ static void plugin_ui_sync_apply(void *arg) {
 
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
     if (!fn) return false;
+    if (display_manager_is_lvgl_task()) {
+        fn(ctx);
+        return true;
+    }
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
     if (!done) return false;
     plugin_ui_sync_call_t call = {
@@ -966,13 +971,8 @@ static void plugin_api_asset_session_end(void) {
     sd_card_jit_end(display_was_suspended);
 }
 
-static void plugin_api_request_exit_now(void *arg) {
-    (void)arg;
-    display_manager_go_back();
-}
-
 static void plugin_api_request_exit(void) {
-    display_manager_run_on_lvgl(plugin_api_request_exit_now, NULL);
+    plugin_runner_request_exit();
 }
 
 void plugin_api_record_joystick_state(unsigned int index, bool pressed) {
@@ -1638,7 +1638,7 @@ static bool plugin_api_espnow_receive(ghostesp_espnow_message_t *out) {
 
 static void plugin_api_app_exit(void) {
     if (!s_api_active) return;
-    display_manager_switch_view(&apps_menu_view);
+    plugin_runner_request_exit();
 }
 
 static void plugin_api_ble_detect_start(void) {

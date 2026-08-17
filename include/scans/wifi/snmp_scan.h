@@ -13,6 +13,24 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+
+#define SNMP_COMMUNITIES_DEFAULT_PATH "/mnt/ghostesp/snmp_communities.txt"
+
+/**
+ * @brief Override the community string list at runtime
+ *
+ * @param csv Comma/semicolon/space separated community strings
+ */
+void snmp_scan_set_communities(const char *csv);
+
+/**
+ * @brief Load community strings from a file (one per line, '#' comments)
+ *
+ * @param path File path; use SNMP_COMMUNITIES_DEFAULT_PATH for the SD default
+ * @return true if at least one community was loaded
+ */
+bool snmp_scan_load_communities_file(const char *path);
 
 /**
  * @brief Scan the local subnet for SNMP services

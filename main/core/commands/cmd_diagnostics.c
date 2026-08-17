@@ -141,6 +141,21 @@ void handle_stop_flipper(int argc, char **argv) {
         stopped_any = true;
     }
     wifi_manager_stop_channel_switch_attack();
+    if (wifi_manager_is_probe_flood_running()) {
+        glog("Stopped probe request flood.\n");
+        stopped_any = true;
+    }
+    wifi_manager_stop_probe_flood();
+    if (wifi_manager_is_bad_msg_running()) {
+        glog("Stopped bad msg attack.\n");
+        stopped_any = true;
+    }
+    wifi_manager_stop_bad_msg();
+    if (wifi_manager_is_auth_flood_running()) {
+        glog("Stopped auth flood attack.\n");
+        stopped_any = true;
+    }
+    wifi_manager_stop_auth_flood();
     wifi_manager_cancel_connect();
 
 #ifndef CONFIG_IDF_TARGET_ESP32S2

@@ -59,7 +59,7 @@ The camera page at `/camera` includes inline controls:
 - **FPS selector** — set target framerate (5–30 fps)
 - **Stop / Start buttons** — toggle the stream on and off
 
-Controls send commands through the `/api/command` endpoint, so they work the same as typing CLI commands.
+Controls send commands through the `/camera/api` endpoint, which is restricted to camera commands only.
 
 ## CLI Commands
 

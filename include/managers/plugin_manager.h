@@ -73,6 +73,7 @@ typedef uint32_t plugin_feature_t;
 #define PLUGIN_FEATURE_DPAD            (1U << 1)
 #define PLUGIN_FEATURE_ENCODER         (1U << 2)
 #define PLUGIN_FEATURE_KEYBOARD        (1U << 3)
+#define PLUGIN_APP_TARGETS_MAX         128
 
 typedef struct {
     char id[PLUGIN_APP_ID_MAX];
@@ -80,6 +81,7 @@ typedef struct {
     char version[PLUGIN_APP_VERSION_MAX];
     char author[PLUGIN_APP_AUTHOR_MAX];
     char target[PLUGIN_APP_TARGET_MAX];
+    char targets[PLUGIN_APP_TARGETS_MAX];
     char entry[PLUGIN_APP_ENTRY_MAX];
     char description[PLUGIN_APP_DESC_MAX];
     char category[PLUGIN_APP_CATEGORY_MAX];

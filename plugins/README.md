@@ -206,6 +206,8 @@ Custom streaming archive (not ZIP). Header: 4-byte magic `GAPP`, version, flags,
 
 Drop `.gapp` files into `/mnt/ghostesp/apps/`, then reboot the device. GhostESP discovers new packages during startup, extracts them into cache, and registers the app.
 
+Native apps receive the five-way joystick as directional/select input. While an app is running, hold the joystick Select button for four seconds to exit back to the Apps view.
+
 ## Quick Start
 
 ```powershell

@@ -12,13 +12,13 @@ weight: 10
 
 ## Learn a remote or button
 
-1. Open **Infrared** and choose **Learn Remote** or **Learn Button** to append to an existing remote.
+1. Open **Infrared** and choose **Learn Remote** to learn a new remote. To add a button to an existing remote, open the remote file and choose **Add Signal**.
 
 2. Align the source remote with the IR receiver window, hold it steady within a few centimeters, then press the button once.
 
 3. Confirm the button name. Easy Learn provides a suggested label during learning, otherwise use the on-screen keyboard.
 
-4. Watch the preview popup for carrier frequency, protocol name, and decoded address/command details. If a known protocol decodes as RAW, cancel and retry.
+4. Watch the preview popup for protocol name and decoded address/command details. If a known protocol decodes as RAW, cancel and retry.
 
 5. Confirm to save. GhostESP will create a new `.ir` file for fresh remotes or append the button to the currently open file automatically.
 
@@ -30,7 +30,7 @@ weight: 10
 ### Tips
 
 - Keep the remote within a few centimeters of the receiver and avoid direct sunlight.
-- If learning fails, exit and re-open the Infrared learning popup to try to reinitialize the RMT RX channel.
+- If learning fails, exit and re-open the Infrared learning popup to try to reinitialize the IR RX channel (uses GPIO interrupts, not RMT).
 
 ## CLI Support
 

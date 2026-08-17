@@ -403,6 +403,12 @@ static void accel_timer_cb(lv_timer_t *timer) {
 
 static void accel_event_handler(InputEvent *event) {
     if (event->type == INPUT_TYPE_TOUCH && event->data.touch_data.state == LV_INDEV_STATE_REL) {
+        lv_indev_data_t *data = &event->data.touch_data;
+        if (data->point.x <= 56 && data->point.y >= GUI_STATUS_BAR_HEIGHT &&
+            data->point.y <= GUI_STATUS_BAR_HEIGHT + 56) {
+            display_manager_go_back();
+            return;
+        }
         peak_g = 0;
         velocity_ms = 0;
         if (peak_label) lv_label_set_text(peak_label, "Peak: 0.00 G");

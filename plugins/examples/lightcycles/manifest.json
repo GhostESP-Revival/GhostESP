@@ -1,0 +1,34 @@
+{
+  "id": "lightcycles",
+  "name": "Light Cycles",
+  "version": "1.0.3",
+  "author": "GhostESP",
+  "description": "A fast top-down light-cycle trail game against a CPU rider.",
+  "category": "Games",
+  "entry": "lightcycles.so",
+  "target": "esp32s3",
+  "targets": ["esp32c5", "esp32s3"],
+  "api_version": 1,
+  "manifest_version": 1,
+  "package_version": 1,
+  "data_version": 1,
+  "storage_scope": "app",
+  "accent_color": "#00D9FF",
+  "icon": "icon.rgb565",
+  "icon_source": "lightcycles.png",
+  "icon_format": "rgb565a8",
+  "icon_width": 50,
+  "icon_height": 50,
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "Light Cycles round result showing cyan and pink trails with a You Lose message"
+    }
+  ],
+  "assets": ["screenshot.webp"],
+  "permissions": ["ui", "input", "time"],
+  "requires_features": ["joystick"],
+  "memory_limit": 0,
+  "stack_size": 4096,
+  "requires_psram": false
+}

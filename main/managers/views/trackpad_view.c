@@ -200,8 +200,8 @@ static void trackpad_stop_and_exit(void) {
         badusb_manager_trackpad_stop();
 #endif
     }
-    View *back = s_return_view ? s_return_view : &badusb_view;
-    display_manager_switch_view(back);
+    s_return_view = NULL;
+    display_manager_go_back();
 }
 
 static int trackpad_accel_step(void) {

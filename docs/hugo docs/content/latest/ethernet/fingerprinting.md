@@ -32,7 +32,7 @@ Run the fingerprint scan from the terminal:
 ethfp
 ```
 
-The scan will run for approximately 3 seconds and display discovered devices with their details:
+The scan runs three sequential sub-scans (mDNS, NBNS, SSDP) at approximately 3 seconds each, totaling around 9 seconds. Discovered devices are displayed with their details:
 
 ```
 IP Address: 192.168.1.100
@@ -46,7 +46,7 @@ Service: upnp
 1. **Connect** to the GhostESP device via GhostLink
 2. **Navigate** to `Ethernet` menu
 3. **Select** `Fingerprint Scan`
-4. **Wait** for the scan to complete (approximately 3 seconds)
+4. **Wait** for the scan to complete (approximately 9 seconds)
 5. **View** the list of discovered devices
 
 ## Understanding Results

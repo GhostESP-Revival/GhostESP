@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 void plugin_runner_set_app(const char *app_id);
+void plugin_runner_request_exit(void);
 void plugin_runner_view_create(void);
 void plugin_runner_view_destroy(void);
 void plugin_runner_stop_tick(void);

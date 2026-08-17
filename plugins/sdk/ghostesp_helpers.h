@@ -158,9 +158,11 @@ static inline ghostesp_input_type_t gh_touch_update(
         return GHOSTESP_INPUT_NONE;
 
     if (event->pressed) {
-        ts->started = true;
-        ts->start_x = event->x;
-        ts->start_y = event->y;
+        if (!ts->started) {
+            ts->started = true;
+            ts->start_x = event->x;
+            ts->start_y = event->y;
+        }
         return GHOSTESP_INPUT_NONE;
     }
 
@@ -193,9 +195,11 @@ static inline ghostesp_input_type_t gh_touch_update_tap(
         return GHOSTESP_INPUT_NONE;
 
     if (event->pressed) {
-        ts->started = true;
-        ts->start_x = event->x;
-        ts->start_y = event->y;
+        if (!ts->started) {
+            ts->started = true;
+            ts->start_x = event->x;
+            ts->start_y = event->y;
+        }
         return GHOSTESP_INPUT_NONE;
     }
 

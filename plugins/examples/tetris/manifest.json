@@ -1,0 +1,34 @@
+{
+  "id": "tetris",
+  "name": "Tetris",
+  "version": "1.2",
+  "author": "GhostESP",
+  "description": "Adaptive full-featured falling-block puzzle game with hold, ghost piece, seven-bag randomizer, levels, and scoring.",
+  "category": "Games",
+  "entry": "tetris.so",
+  "target": "esp32s3",
+  "targets": ["esp32c5", "esp32s3"],
+  "api_version": 1,
+  "manifest_version": 1,
+  "package_version": 1,
+  "data_version": 1,
+  "storage_scope": "app",
+  "accent_color": "#8B5CF6",
+  "icon": "icon.rgb565",
+  "icon_source": "tetris.png",
+  "icon_format": "rgb565a8",
+  "icon_width": 50,
+  "icon_height": 50,
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "Tetris gameplay with falling pieces, ghost piece, score, level, lines, hold, and next queue"
+    }
+  ],
+  "assets": ["screenshot.webp"],
+  "permissions": ["ui", "input", "time"],
+  "requires_features": ["joystick"],
+  "memory_limit": 0,
+  "stack_size": 4096,
+  "requires_psram": false
+}

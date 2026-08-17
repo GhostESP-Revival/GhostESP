@@ -93,10 +93,10 @@ All API calls live under the `ghost` table. Subtables are lazy-loaded on first a
 | `ui`         | `toast`, `set_title`, `screen_width`, `screen_height`.                       |
 | `event`      | `on`, `off`, `emit`, `wait`: pub/sub between scripts and firmware.           |
 | `input`      | `subscribe(topic, fn)`, `unsubscribe(topic, fn)`: aliases for event subscription; use topic `"input"` for all input. |
-| `system`     | `free_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random`. |
+| `system`     | `free_heap`, `free_internal_heap`, `uptime_ms`, `memory_used`, `memory_limit`, `firmware_version`, `target`, `reboot`, `random` (requires `random` permission). |
 | `storage`    | `read`, `write`, `append`, `delete`, `mkdir`, `list`, `stat`, `rename`, `exists`, bounded logical streams. |
 | `capabilities` | `has_permission(name)`, `has_feature(name)`: inspect manifest authorization and host support. |
-| `wifi`       | `scan_start`, `scan_stop`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
+| `wifi`       | `scan_start`, `scan_stop`, `scan_done`, `scan_finish`, `ap_count`, `ap(i)`, `connect`, `disconnect`, `is_connected`, `rssi`, `ip`, `set_channel`, `get_channel`, `deauth`, `on_ap`, `station_scan_start`, `station_scan_stop`, `station_count`, `station(i)`. |
 | `ble`        | `scan_start`, `scan_stop`, `device_count`, `get_device(i)`, `on_device`.     |
 | `gps`        | `is_available`, `has_fix`, `latitude`, `longitude`, `altitude`, `satellites`, `on_fix`. |
 | `power`      | `percent`, `voltage_mv`, `is_charging`, `get_brightness`, `set_brightness`.  |
@@ -343,7 +343,7 @@ the target-clamped default Lua heap.
 }
 ```
 
-Available permissions include `wifi`, `wifi_control`, `ble`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `commands`, `settings`, `network`, `power`, `display`, `time`, `random`, and `system` (currently required for GPS access). Unknown permission names grant nothing, so a typo normally appears later as `permission denied`.
+Available permissions include `wifi`, `wifi_control`, `ble`, `nfc`, `ir`, `subghz`, `badusb`, `rgb`, `storage`, `ui`, `commands`, `settings`, `network`, `power`, `display`, `time`, `random`, `system`, `tasks`, `gpio` / `raw_gpio`, `lvgl`, `uart` / `serial`, `i2c`, `spi`, `adc`, `pwm`, `input` / `buttons`, `camera`, `usb`, `ethernet` / `eth`, `audio` / `mic`, and `zigbee`. Unknown permission names grant nothing, so a typo normally appears later as `permission denied`.
 
 ## Examples
 
@@ -465,7 +465,7 @@ Available standard libraries:
       table.insert(fields, unescape(f))
   end
   ```
-- **Output buffer is 4 KB**; older text is trimmed. If you need a full log, `commands.start` to a CLI command that already writes to a file (e.g. `capture -eapol`) instead of capturing in Lua.
+- **Command log buffer is 640 bytes** (8 lines × 80 characters); older lines are trimmed. If you need a full log, pipe a CLI command that already writes to a file (e.g. `capture -eapol`) instead of capturing output in Lua.
 - **No permission prompt at runtime.** If a script doesn't have a permission, the API call errors with `permission denied`. Check the manifest before shipping.
 - **Wi-Fi and BLE share one radio on most ESP32s.** Starting a BLE scan mid-Wi-Fi-scan will tear down Wi-Fi. Drive them sequentially from the same script.
 

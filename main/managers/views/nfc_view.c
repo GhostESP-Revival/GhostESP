@@ -19,6 +19,7 @@
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
 #include "gui/design_tokens.h"
+#include "gui/gui_router.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6062,7 +6063,7 @@ void nfc_view_create(void) {
      * elsewhere and back) restores the previously highlighted row instead
      * of always landing on the first item. Submenu state (in_saved_list
      * etc.) still always resets to root on re-entry, unchanged. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         selected_index = 0;
     } else if (selected_index < 0 || selected_index >= num_items) {
         selected_index = 0;

@@ -3,6 +3,7 @@
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 
 #include "managers/status_display_animations.h"
+#include "esp_attr.h"
 
 #include <stdint.h>
 
@@ -16,7 +17,7 @@ typedef struct {
     uint8_t trail;
 } Star;
 
-static Star s_stars[STAR_COUNT];
+EXT_RAM_BSS_ATTR static Star s_stars[STAR_COUNT];
 static bool s_starfield_inited;
 
 void status_anim_starfield_reset(void)

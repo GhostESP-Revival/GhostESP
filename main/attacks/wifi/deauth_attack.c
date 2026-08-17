@@ -12,6 +12,7 @@
  */
 
 #include "attacks/wifi/deauth_attack.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/wifi_manager.h"
 #include "core/system_manager.h"
 #include "managers/ap_manager.h"
@@ -299,6 +300,12 @@ static void deauth_task(void *param) {
 
 void deauth_attack_start(void) {
     if (!deauth_task_running) {
+        extern wifi_ap_record_t selected_ap;
+        const char *pmf_warning = wpa3_deauth_warning(&selected_ap);
+        if (pmf_warning) {
+            glog("WARNING: %s\n", pmf_warning);
+            TERMINAL_VIEW_ADD_TEXT("WARNING: %s\n", pmf_warning);
+        }
         ap_manager_stop_services();
         ghostchi_manager_add_xp(3);
 
@@ -438,6 +445,7 @@ void deauth_attack_start_station(void) {
         deauth_attack_start();
         return;
     }
+    glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
     if (deauth_station_task_handle) {
         printf("Station deauth already running.\n");
         return;
@@ -666,6 +674,10 @@ void deauth_attack_start_handshake_deauth(void) {
 #endif
             return;
         }
+        const char *pmf_warning = wpa3_deauth_warning(&selected_ap_local);
+        if (pmf_warning) glog("WARNING: %s\n", pmf_warning);
+    } else {
+        glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
     }
 
     ap_manager_stop_services();

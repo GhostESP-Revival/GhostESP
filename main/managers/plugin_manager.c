@@ -435,6 +435,17 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     copy_json_string(root, "version", out->version, sizeof(out->version));
     copy_json_string(root, "author", out->author, sizeof(out->author));
     copy_json_string(root, "target", out->target, sizeof(out->target));
+    cJSON *targets = cJSON_GetObjectItemCaseSensitive(root, "targets");
+    if (cJSON_IsArray(targets)) {
+        cJSON *target = NULL;
+        cJSON_ArrayForEach(target, targets) {
+            if (!cJSON_IsString(target) || !target->valuestring) continue;
+            size_t used = strlen(out->targets);
+            if (used + strlen(target->valuestring) + 2 >= sizeof(out->targets)) break;
+            if (used > 0) out->targets[used++] = ',';
+            strcpy(out->targets + used, target->valuestring);
+        }
+    }
     copy_json_string(root, "entry", out->entry, sizeof(out->entry));
     copy_json_string(root, "description", out->description, sizeof(out->description));
     copy_json_string(root, "category", out->category, sizeof(out->category));
@@ -582,6 +593,17 @@ bool plugin_manager_target_supported(void) {
 
 bool plugin_manager_target_matches(const plugin_app_manifest_t *app) {
     if (!app) return false;
+    if (app->targets[0] != '\0') {
+        const char *target = plugin_api_current_target();
+        const char *cursor = app->targets;
+        while (*cursor) {
+            const char *end = strchr(cursor, ',');
+            size_t len = end ? (size_t)(end - cursor) : strlen(cursor);
+            if (strlen(target) == len && strncmp(cursor, target, len) == 0) return true;
+            cursor = end ? end + 1 : cursor + len;
+        }
+        return false;
+    }
     if (app->target[0] == '\0') return true;
     return strcmp(app->target, plugin_api_current_target()) == 0;
 }

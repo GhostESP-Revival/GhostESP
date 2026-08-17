@@ -92,7 +92,7 @@ static char s_app_id[] = "calculator";
 static char s_app_name[] = "Calculator";
 
 #define CALC_REQUIRED_API_SIZE \
-    (offsetof(ghostesp_api_t, ui_has_touchscreen) + sizeof(((ghostesp_api_t *)0)->ui_has_touchscreen))
+    (offsetof(ghostesp_api_t, request_exit) + sizeof(((ghostesp_api_t *)0)->request_exit))
 
 typedef enum {
     BTN_AC = 0, BTN_SIGN, BTN_PERCENT, BTN_DIV,
@@ -339,7 +339,7 @@ static void on_btn_click(void *user) {
 
 static void touch_back_clicked(void *user) {
     (void)user;
-    GH_VOID(api, app_exit);
+    GH_VOID(api, request_exit);
 }
 
 #define CALC_TOUCH_BAR_HEIGHT 34
@@ -449,7 +449,7 @@ static void calculator_input(const ghostesp_input_event_t *event) {
     /* Touch: swipe detection */
     if (event->type == GHOSTESP_INPUT_TOUCH) {
         ghostesp_input_type_t swipe = gh_touch_update(&touch_state, event);
-        if (swipe == GHOSTESP_INPUT_RIGHT) GH_VOID(api, app_exit);
+        if (swipe == GHOSTESP_INPUT_RIGHT) GH_VOID(api, request_exit);
         return;
     }
 
@@ -467,14 +467,14 @@ static void calculator_input(const ghostesp_input_event_t *event) {
 
     /* Back */
     if (event->type == GHOSTESP_INPUT_BACK) {
-        GH_VOID(api, app_exit);
+        GH_VOID(api, request_exit);
         return;
     }
 
     /* Keyboard */
     if (event->type == GHOSTESP_INPUT_KEY) {
         int v = event->value;
-        if (v == 27 || v == 8 || v == 127 || v == 'q' || v == 'Q') { GH_VOID(api, app_exit); }
+        if (v == 27 || v == 8 || v == 127 || v == 'q' || v == 'Q') { GH_VOID(api, request_exit); }
         else if (v >= '0' && v <= '9') { handle_button((calc_btn_id_t)(BTN_0 + v - '0')); }
         else if (v == '.' || v == ',') { handle_button(BTN_DOT); }
         else if (v == '+') { handle_button(BTN_ADD); }

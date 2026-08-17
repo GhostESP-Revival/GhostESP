@@ -44,4 +44,4 @@ From a C5 display controller paired with an S3 over GhostLink:
 
 - **USB required**: The device must be plugged into the host PC before starting. If VSENSE is configured, it waits for USB connection automatically.
 - **Mutually exclusive**: Mouse Jiggler cannot run at the same time as BadUSB script execution or USB Keyboard mode — they share the same USB HID interface.
-- **Stops on cancel**: Selecting Cancel on the display or running `badusb stop` halts the jiggler and uninstalls the USB driver.
+- **Stops on cancel**: Selecting Cancel on the display halts the jiggler and uninstalls the USB driver. Running `badusb stop` halts the jiggler but leaves the USB HID device connected (the CDC console is not restored until the device is re-plugged or rebooted).

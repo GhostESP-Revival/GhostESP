@@ -12,6 +12,7 @@
 #include "gui/screen_layout.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
+#include "gui/gui_router.h"
 #include "managers/views/error_popup.h"
 #include "esp_attr.h"
 #include "managers/views/keyboard_screen.h"
@@ -917,7 +918,7 @@ void badusb_view_create(void) {
      * entry from the Main Menu; returning here (e.g. after a hardware
      * shortcut jumped elsewhere and back) restores whichever submenu and
      * row were active instead of always landing back on the root menu. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         current_menu_state = BADUSB_MENU_MAIN;
         selected_item_index = 0;
     }
@@ -1243,7 +1244,7 @@ void badusb_view_input_cb(InputEvent *event) {
 
 #ifdef CONFIG_USE_ENCODER
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 #endif
 }

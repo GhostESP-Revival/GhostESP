@@ -42,10 +42,12 @@ static lv_obj_t *s_touch_scroll_target = NULL;
 static bool s_preserve_for_keyboard_input = false;
 static bool s_resume_from_keyboard_input = false;
 static int64_t s_ignore_input_until_us = 0;
+static esp_timer_handle_t s_select_hold_timer = NULL;
 
 #define PLUGIN_RUNNER_TICK_MS 100
 #define PLUGIN_RUNNER_TAP_THRESHOLD 12
 #define PLUGIN_RUNNER_SCROLL_THRESHOLD 16
+#define PLUGIN_RUNNER_SELECT_HOLD_EXIT_US 4000000
 
 typedef enum {
     RUNNER_UI_SET_TITLE,
@@ -156,6 +158,7 @@ static void runner_show_load_error_toast(esp_err_t err) {
 }
 
 static bool s_sd_eject_detected = false;
+static volatile bool s_exit_queued = false;
 
 static void plugin_runner_launch_pending(void);
 
@@ -168,7 +171,30 @@ static uint32_t plugin_runner_tick_interval(const plugin_loaded_app_t *loaded) {
 
 static void plugin_runner_go_back_async(void *arg) {
     (void)arg;
+    if (display_manager_get_current_view() != &plugin_runner_view) {
+        return;
+    }
+    s_exit_queued = false;
     display_manager_go_back();
+}
+
+void plugin_runner_request_exit(void) {
+    if (s_exit_queued) {
+        return;
+    }
+    s_exit_queued = true;
+    display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+}
+
+static void plugin_runner_select_hold_cb(void *arg) {
+    (void)arg;
+    plugin_runner_request_exit();
+}
+
+static void plugin_runner_stop_select_hold_timer(void) {
+    if (s_select_hold_timer) {
+        esp_timer_stop(s_select_hold_timer);
+    }
 }
 
 static void plugin_runner_tick_task(void *arg) {
@@ -181,7 +207,7 @@ static void plugin_runner_tick_task(void *arg) {
         if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
             ESP_LOGW(TAG, "SD card removed while app running, stopping");
             s_sd_eject_detected = true;
-            display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
+            plugin_runner_request_exit();
             break;
         }
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -402,8 +428,18 @@ static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
     if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
+    if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_index == 1) {
+        if (event->data.joystick_pressed) {
+            if (s_select_hold_timer) {
+                esp_timer_stop(s_select_hold_timer);
+                esp_timer_start_once(s_select_hold_timer, PLUGIN_RUNNER_SELECT_HOLD_EXIT_US);
+            }
+        } else {
+            plugin_runner_stop_select_hold_timer();
+        }
+    }
     if (app_event.type == GHOSTESP_INPUT_BACK) {
-        display_manager_go_back();
+        plugin_runner_request_exit();
         return;
     }
     plugin_loaded_app_t *loaded = plugin_loader_current();
@@ -489,7 +525,15 @@ static void plugin_runner_launch_pending(void) {
 }
 
 void plugin_runner_view_create(void) {
+    s_exit_queued = false;
     plugin_runner_stop_tick();
+    if (!s_select_hold_timer) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = plugin_runner_select_hold_cb,
+            .name = "plugin_select_hold",
+        };
+        esp_timer_create(&timer_args, &s_select_hold_timer);
+    }
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;
@@ -517,6 +561,7 @@ void plugin_runner_view_create(void) {
     s_sd_eject_detected = false;
     s_output_buf[0] = '\0';
     s_touch_started = false;
+    plugin_runner_stop_select_hold_timer();
     s_touch_scrolling = false;
     s_touch_scroll_target = NULL;
     s_root = gui_screen_create_root_default(NULL, "SD App");
@@ -581,6 +626,11 @@ void plugin_runner_view_destroy(void) {
         s_launch_timer = NULL;
     }
     plugin_runner_stop_tick();
+    plugin_runner_stop_select_hold_timer();
+    if (s_select_hold_timer) {
+        esp_timer_delete(s_select_hold_timer);
+        s_select_hold_timer = NULL;
+    }
     if (s_preserve_for_keyboard_input) {
         s_preserve_for_keyboard_input = false;
         s_resume_from_keyboard_input = true;

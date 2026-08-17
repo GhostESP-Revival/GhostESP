@@ -528,9 +528,17 @@ static esp_err_t tca9535_read_inputs(uint8_t *port0, uint8_t *port1)
         return ESP_ERR_TIMEOUT;
     }
 
+    // Take the shared per-port bus lock so this poll is serialized with the
+    // other bus users (touch screen reads, etc.).
+    bool locked = i2c_bus_lock(g_config.i2c_port, 50);
+
     uint8_t reg = TCA9535_INPUT_PORT0;
     uint8_t values[2] = {0};
-    esp_err_t ret = i2c_master_transmit_receive(g_tca9535_dev, &reg, sizeof(reg), values, sizeof(values), 50);
+    esp_err_t ret = locked ? i2c_master_transmit_receive(g_tca9535_dev, &reg, sizeof(reg), values, sizeof(values), 50)
+                           : ESP_ERR_TIMEOUT;
+    if (locked) {
+        i2c_bus_unlock(g_config.i2c_port);
+    }
     if (ret == ESP_OK) {
         *port0 = values[0];
         *port1 = values[1];

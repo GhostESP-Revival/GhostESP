@@ -34,7 +34,7 @@ If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
 
 ## MIFARE Classic Flow
 
-- **Dictionary attack order:** GhostESP tries user keys, then common keys, then the Flipper dictionary.
+- **Dictionary attack order:** GhostESP tries session keys (from prior scans) first, then the user dictionary (`/mnt/ghostesp/nfc/mfc_user_dict.nfc`), then the embedded dictionary blob (which combines common keys and Flipper dictionary keys). When the embedded blob is absent, an SD card fallback dictionary at `/mnt/ghostesp/nfc/mf_classic_dict.nfc` is tried instead.
 
 - **Caching behavior.** Once a sector unlocks, its blocks and both Key A/Key B values are cached. The title shifts to “Reading sectors...” during the copy. Successful keys are appended back to the user dictionary on the SD card.
 

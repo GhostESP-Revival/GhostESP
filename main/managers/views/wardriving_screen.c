@@ -593,7 +593,7 @@ static void wardriving_input_callback(InputEvent *event) {
             }
             if (wd_point_in_obj(wd_back_btn, &data->point)) {
                 wd_touch_reset();
-                display_manager_switch_view(&main_menu_view);
+                display_manager_go_back();
                 return;
             }
 
@@ -652,11 +652,11 @@ static void wardriving_input_callback(InputEvent *event) {
             touch_press_active = true;
         } else if (event->data.touch_data.state == LV_INDEV_STATE_REL && touch_press_active) {
             touch_press_active = false;
-            display_manager_switch_view(&main_menu_view);
+            display_manager_go_back();
         }
 #endif
     } else if (event->type == INPUT_TYPE_JOYSTICK) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         uint8_t key = event->data.key_value;
         if (key == LV_KEY_UP || key == ';' || key == 'k') {
@@ -664,12 +664,12 @@ static void wardriving_input_callback(InputEvent *event) {
         } else if (key == LV_KEY_DOWN || key == '.' || key == 'j') {
             wardriving_scroll_content(1);
         } else if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`' || key == 'q' || key == 'Q') {
-            display_manager_switch_view(&main_menu_view);
+            display_manager_go_back();
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 }
 
@@ -683,7 +683,7 @@ static void wardriving_scroll_content(int dir) {
 #ifdef CONFIG_USE_TOUCHSCREEN
 static void wd_scroll_up_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(-1); }
 static void wd_scroll_down_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(1); }
-static void wd_back_cb(lv_event_t *e) { (void)e; display_manager_switch_view(&main_menu_view); }
+static void wd_back_cb(lv_event_t *e) { (void)e; display_manager_go_back(); }
 
 /* Bottom control bar styled identically to the other touch views: circular
  * scroll-up (left) and scroll-down (right) buttons flanking a Back button. */

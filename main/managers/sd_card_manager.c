@@ -610,26 +610,18 @@ void list_files_recursive(const char *dirname, int level) {
 
 static void sdmmc_card_print_info(const sdmmc_card_t *card) {
   if (card == NULL) {
-    printf("Card is NULL\n");
+    printf("SD card info unavailable\n");
     return;
   }
 
-  printf("Name: %s\n", card->cid.name);
-  printf("Type: %s\n", (card->ocr & SD_OCR_SDHC_CAP) ? "SDHC/SDXC" : "SDSC");
-  printf("Capacity: %lluMB\n", ((uint64_t)card->csd.capacity) *
-                                   card->csd.sector_size / (1024 * 1024));
-  printf("Sector size: %dB\n", card->csd.sector_size);
-  printf("Speed: %s\n",
+  printf("SD card: %s, %lluMB (%s)\n",
+         (card->ocr & SD_OCR_SDHC_CAP) ? "SDHC/SDXC" : "SDSC",
+         ((uint64_t)card->csd.capacity) * card->csd.sector_size / (1024 * 1024),
          (card->csd.tr_speed > 25000000) ? "high speed" : "default speed");
 
-  if (card->is_mem) {
-    printf("Card is memory card\n");
-    printf("CSD version: %d\n", card->csd.csd_ver);
-    printf("Manufacture ID: %02x\n", card->cid.mfg_id);
-    printf("Serial number: %08x\n", card->cid.serial);
-  } else {
-    printf("Card is not a memory card\n");
-  }
+  ESP_LOGD(TAG, "SD details: %s, sector size %dB, CSD v%d, mfg %02x, serial %08x",
+           card->cid.name, card->csd.sector_size, card->csd.csd_ver,
+           card->cid.mfg_id, card->cid.serial);
 }
 
 esp_err_t sd_card_init(void) {
@@ -679,7 +671,7 @@ esp_err_t sd_card_init(void) {
   sd_card_manager_t backup_config = sd_card_manager;
 
 #ifdef CONFIG_USING_MMC_1_BIT
-  printf("Initializing SD card in SDMMC mode (1-bit) using configured pins...\n");
+  printf("Mounting SD card (SDMMC 1-bit)...\n");
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.flags = SDMMC_HOST_FLAG_1BIT;
@@ -722,7 +714,7 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.is_initialized = true;
   s_mount_type = MOUNT_SDMMC;
   sdmmc_card_print_info(sd_card_manager.card);
-  printf("SD card initialized successfully\n");
+  printf("SD card ready (SDMMC 1-bit).\n");
 
   sd_card_setup_directory_structure();
 
@@ -730,7 +722,7 @@ esp_err_t sd_card_init(void) {
 
 #elif defined(CONFIG_USING_MMC)
 
-  printf("Initializing SD card in SDMMC mode (4-bit) using configured pins...\n");
+  printf("Mounting SD card (SDMMC 4-bit)...\n");
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
@@ -777,14 +769,14 @@ esp_err_t sd_card_init(void) {
 
   sd_card_manager.is_initialized = true;
   sdmmc_card_print_info(sd_card_manager.card);
-  printf("SD card initialized successfully\n");
+  printf("SD card ready (SDMMC 4-bit).\n");
 
   sd_card_setup_directory_structure();
 
   return ESP_OK;
 #elif CONFIG_USING_SPI
 
-  printf("Initializing SD card in SPI mode using configured pins...\n");
+  printf("Mounting SD card (SPI)...\n");
 
   bool shared_spi_guard_active = false;
   bool display_rebind_required = false;
@@ -1105,7 +1097,7 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.is_initialized = true;
   s_mount_type = MOUNT_SPI;
   sdmmc_card_print_info(sd_card_manager.card);
-  printf("SD card initialized successfully in SPI mode.\n");
+  printf("SD card ready (SPI).\n");
 
   sd_card_setup_directory_structure();
 
@@ -1134,7 +1126,7 @@ esp_err_t sd_card_init(void) {
 
   sd_card_manager.is_initialized = true;
   sdmmc_card_print_info(sd_card_manager.card);
-  printf("SD card initialized successfully\n");
+  printf("SD card ready.\n");
 
   sd_card_setup_directory_structure();
 
@@ -1806,7 +1798,7 @@ esp_err_t sd_card_load_config() {
   err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
   if (err != ESP_OK) {
     if (err == ESP_ERR_NVS_NOT_FOUND) {
-        printf("NVS namespace '%s' not found. Using default SD pins.\n", NVS_NAMESPACE);
+        printf("No saved SD pin config - using defaults.\n");
         // Keep default pins already set in sd_card_manager struct definition
         return ESP_OK; // Not an error if first boot
     } else {
@@ -1887,19 +1879,13 @@ void sd_card_print_config() {
   }
 #endif
 
-  printf("SD Card Pin Configuration:\n");
-  printf("MMC Mode:\n");
-  printf("  CLK: GPIO%d\n", sd_card_manager.clkpin);
-  printf("  CMD: GPIO%d\n", sd_card_manager.cmdpin);
-  printf("  D0:  GPIO%d\n", sd_card_manager.d0pin);
-  printf("  D1:  GPIO%d\n", sd_card_manager.d1pin);
-  printf("  D2:  GPIO%d\n", sd_card_manager.d2pin);
-  printf("  D3:  GPIO%d\n", sd_card_manager.d3pin);
-  printf("SPI Mode:\n");
-  printf("  CS:   GPIO%d\n", sd_card_manager.spi_cs_pin);
-  printf("  CLK:  GPIO%d\n", sd_card_manager.spi_clk_pin);
-  printf("  MISO: GPIO%d\n", sd_card_manager.spi_miso_pin);
-  printf("  MOSI: GPIO%d\n", sd_card_manager.spi_mosi_pin);
+  printf("SD pins: MMC(CLK %d, CMD %d, D0 %d, D1 %d, D2 %d, D3 %d) "
+         "SPI(CS %d, CLK %d, MISO %d, MOSI %d)\n",
+         sd_card_manager.clkpin, sd_card_manager.cmdpin,
+         sd_card_manager.d0pin, sd_card_manager.d1pin,
+         sd_card_manager.d2pin, sd_card_manager.d3pin,
+         sd_card_manager.spi_cs_pin, sd_card_manager.spi_clk_pin,
+         sd_card_manager.spi_miso_pin, sd_card_manager.spi_mosi_pin);
 }
 
 bool sd_card_is_virtual_storage() {

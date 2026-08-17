@@ -745,7 +745,7 @@ static void on_poison_monitor(lv_event_t *e) {
 
 static void on_back(lv_event_t *e) {
     (void)e;
-    display_manager_switch_view(s_return_view ? s_return_view : &options_menu_view);
+    display_manager_go_back();
 }
 
 void ethernet_screen_set_return_view(View *view) {
@@ -1548,7 +1548,7 @@ static void ethernet_screen_input_cb(InputEvent *event) {
                             lv_event_send(btn, LV_EVENT_CLICKED, NULL);
                     }
                 }
-                if (back) display_manager_switch_view(s_return_view ? s_return_view : &options_menu_view);
+                if (back) display_manager_go_back();
             }
             break;
 

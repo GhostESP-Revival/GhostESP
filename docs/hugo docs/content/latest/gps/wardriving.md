@@ -112,7 +112,7 @@ An observation is logged when at least one condition is true:
 
 - First time this BLE MAC is seen
 - Device name was previously empty and now available
-- RSSI improves by more than `5 dBm`
+- RSSI differs by more than `5 dBm` (either improvement or degradation)
 
 ### Practical implications
 

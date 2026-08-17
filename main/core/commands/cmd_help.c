@@ -19,7 +19,7 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "gadgets", "capture", "beacon", "attack"
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
@@ -56,12 +56,15 @@ void handle_help(int argc, char **argv) {
         glog("attack\n");
         glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s (SAE flood)\n");
         glog("    Arguments:\n");
         glog("        -d  : Start deauth attack (supports multiple APs)\n");
         glog("        -hsd: Start handshake capture + deauth attack (forces handshakes)\n");
         glog("        -c  : Start channel switch attack (supports multiple APs)\n");
         glog("        -e  : Start EAPOL logoff attack\n");
+        glog("        -p  : Start probe request flood attack (supports multiple APs)\n");
+        glog("        -b  : Start bad msg attack (EAPOL key install + zero MIC)\n");
+        glog("        -a  : Start auth flood attack (supports multiple APs)\n");
         glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
         glog("list\n");
         glog("    Description: List Wi-Fi scan results or connected stations.\n");
@@ -70,11 +73,11 @@ void handle_help(int argc, char **argv) {
         glog("        -a  : Show access points from Wi-Fi scan\n");
         glog("        -s  : List connected stations\n");
         glog("        -airtags: List discovered AirTags\n\n");
-        glog("wpa3check\n");
-        glog("    Description: Run a WPA3 compliance check on the currently selected AP.\n");
+         glog("wpa3check\n");
+         glog("    Description: Run a passive Wi-Fi security check on the currently selected AP.\n");
         glog("                 If no AP is selected, scans all APs and prints a\n");
         glog("                 summary table with WPA3 presence, transition mode,\n");
-        glog("                 PMF posture, and a short security finding per AP.\n");
+         glog("                 PMF, cipher, Enterprise/EAP limitations, and a finding per AP.\n");
         glog("    Usage: wpa3check (after 'scanap' and optionally 'select -a <index>')\n\n");
         glog("beaconspam\n");
         glog("    Description: Start beacon spam with different modes.\n");
@@ -332,7 +335,7 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: timezone <TZ_STRING>\n\n");
         glog("webauth\n");
         glog("    Description: Enable/disable web authentication.\n");
-        glog("    Usage: webauth <enable|disable>\n\n");
+        glog("    Usage: webauth [on|off|toggle|status]\n\n");
         glog("pineap\n");
         glog("    Description: Start/Stop detecting WiFi Pineapples.\n");
         glog("    Usage: pineap [-s]\n");
@@ -377,7 +380,9 @@ void handle_help(int argc, char **argv) {
         glog("    Description: Probe SNMP v1/v2c services with common communities\n");
         glog("    Usage: snmpprobe\n");
         glog("           snmpprobe <IP>\n");
-        glog("           snmpprobe subnet <a.b.c[.0|.]>\n\n");
+        glog("           snmpprobe subnet <a.b.c[.0|.]>\n");
+        glog("           snmpprobe walk <IP> [OID]\n");
+        glog("           snmpprobe communities <c1,c2,...|file>\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -487,6 +492,12 @@ void handle_help(int argc, char **argv) {
         glog("dialconnect\n");
         glog("    Cast a random YouTube video to all smart TVs on your LAN.\n");
         glog("    Usage: dialconnect\n\n");
+        return;
+    }
+
+    if (strcmp(category, "gadgets") == 0) {
+        glog("wol <MAC|IP> [broadcast IP]\n");
+        glog("govee scan | govee <IP> on|off|brightness N|color RRGGBB\n");
         return;
     }
 

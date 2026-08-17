@@ -62,6 +62,8 @@ jobs:
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
           - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo TEmbedC1101" }
+          - { name: "GhostLink P1 Core",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ghostlink_p1_core",           zip_name: "GhostLink_P1_Core.zip" }
+          - { name: "GhostLink P1 Peer",     idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.ghostlink_p1_peer",           zip_name: "GhostLink_P1_Peer.zip" }
           - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo T-Dongle-S3" }
           - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip", ota: true, ota_slot_size: 5767168, board_key: "LilyGo T-Dongle-C5" }
           - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip", ota: true, ota_slot_size: 4194304, board_key: "S3TWatch" }
@@ -71,7 +73,7 @@ jobs:
           - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
           - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4001792, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
-          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", ota: true, ota_slot_size: 5505024, board_key: "somethingsomething" }
+          - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", ota: true, ota_slot_size: 5705728, board_key: "somethingsomething" }
           - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
@@ -96,9 +98,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.0-${{ runner.os }}-v1
-          restore-keys: |
-            esp-idf-v6.0-${{ runner.os }}-
+          key: esp-idf-v6.0.2-${{ runner.os }}-v2
 
       - name: Install ESP-IDF Dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
@@ -109,7 +109,7 @@ jobs:
       - name: Install ESP-IDF
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
-          git clone -b v6.0 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+          git clone -b v6.0.2 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
       - name: Apply Custom SDK Config
@@ -128,9 +128,49 @@ jobs:
           export IDF_TARGET=${{ matrix.target.idf_target }}
           echo "IDF_TARGET=${{ matrix.target.idf_target }}" >> $GITHUB_ENV
 
-      - name: Patch gdbstub Source
+      - name: Patch ESP-IDF 6.0.2 gdbstub compatibility
         run: |
-          python3 -c "import os,pathlib; p=pathlib.Path(os.path.expanduser('~/esp-idf'))/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          idf = Path.home() / "esp-idf"
+
+          gdbstub = idf / "components/esp_gdbstub/src/gdbstub.c"
+          source = gdbstub.read_text(encoding="utf-8")
+          helper_guard = re.compile(
+              r"#if\s*\(?\s*CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME\s*\|\|\s*CONFIG_ESP_GDBSTUB_SUPPORT_TASKS\s*\)?"
+          )
+          if helper_guard.search(source):
+              source = helper_guard.sub("#if 1", source)
+              gdbstub.write_text(source, encoding="utf-8")
+
+          if os.environ["IDF_TARGET"] in {"esp32", "esp32s2", "esp32s3"}:
+              xtensa = idf / "components/esp_gdbstub/src/port/xtensa/gdbstub_xtensa.c"
+              source = xtensa.read_text(encoding="utf-8")
+              source = source.replace("portNUM_PROCESSORS", "CONFIG_FREERTOS_NUMBER_OF_CORES")
+              source, tcb_count = re.subn(
+                  r"const\s+StaticTask_t\s*\*\s*tcb\s*;",
+                  "void *tcb = NULL;",
+                  source,
+              )
+              source, lookup_count = re.subn(
+                  r"tcb\s*=\s*esp_gdbstub_find_tcb_by_frame\s*\(frame\)\s*;",
+                  "",
+                  source,
+              )
+              source, call_count = re.subn(
+                  r"#if\s+(?:XCHAL_HAVE_FP|0)\s+(?=gdbstub_write_fpu_regs\s*\()",
+                  "#if 0\n    ",
+                  source,
+              )
+              if tcb_count != lookup_count or tcb_count not in {0, 1}:
+                  raise SystemExit(
+                      f"unexpected Xtensa FPU patch counts: tcb={tcb_count}, lookup={lookup_count}"
+                  )
+              xtensa.write_text(source, encoding="utf-8")
+          PY
 
       - name: Clean and Build Project
         env:
@@ -197,6 +237,36 @@ jobs:
           else
             BOOT_OFFSET=0x0
           fi
+          # The app offset is NOT always 0x10000: the OTA tables put otadata
+          # there and the first app slot at 0x20000 or above, so a hardcoded
+          # offset writes the app over otadata and leaves every app slot empty
+          # ("No bootable app partitions"). Read the real offset out of the
+          # partition table this build produced -- factory if present, else the
+          # lowest OTA slot, which is what the bootloader falls back to when
+          # otadata is blank (as it is on a fresh flash).
+          APP_OFFSET=$(python3 - "$ARTIFACT_DIR/partitions.bin" <<'PY'
+          import pathlib, struct, sys
+          FMT = "<2sBBLL16sL"
+          SZ = struct.calcsize(FMT)
+          table = pathlib.Path(sys.argv[1]).read_bytes()
+          factory, ota = None, {}
+          for pos in range(0, len(table) - SZ + 1, SZ):
+              magic, ptype, subtype, offset, _size, _label, _flags = struct.unpack(
+                  FMT, table[pos:pos + SZ])
+              if magic != bytes((0xAA, 0x50)):
+                  break  # end of table (MD5 entry or padding)
+              if ptype != 0x00:  # not an app partition
+                  continue
+              if subtype == 0x00 and factory is None:
+                  factory = offset
+              elif 0x10 <= subtype <= 0x1F:
+                  ota.setdefault(subtype, offset)
+          if factory is None and not ota:
+              sys.exit("no factory or ota app partition in table")
+          print("0x%x" % (factory if factory is not None else ota[min(ota)]))
+          PY
+          ) || { echo "Failed to read app offset from partition table"; exit 1; }
+          echo "App offset for ${{ matrix.target.name }}: $APP_OFFSET"
           python3 -m esptool --chip "$IDF_TARGET" merge_bin \
             --output "$ARTIFACT_DIR/merged.bin" \
             --flash_mode "$FLASH_MODE" \
@@ -205,7 +275,7 @@ jobs:
             --target-offset 0x0 \
             "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
             0x8000 "$ARTIFACT_DIR/partitions.bin" \
-            0x10000 "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+            "$APP_OFFSET" "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
 
           zip -j "$ZIP_FILE" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_FILE"; exit 1; }
           ls -lh "$ZIP_FILE"

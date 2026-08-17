@@ -5,7 +5,7 @@ GhostScript on-device execution is `.gsb` bytecode only. Keep `.gs` files as sou
 Recommended workflow:
 
 ```bash
-gbt script compile examples/ghostscript/src/hello.gs --out /path/to/hello/hello.gsb
+python -m ghostbt script compile examples/ghostscript/src/hello.gs --out /path/to/hello/hello.gsb
 ```
 
 Place it in a directory with a manifest. For `hello.gs`, use:
@@ -21,7 +21,7 @@ Place it in a directory with a manifest. For `hello.gs`, use:
 
 Deploy `/mnt/ghostesp/scripts/hello/manifest.json` and `/mnt/ghostesp/scripts/hello/hello.gsb` together. The `gbt script deploy` command copies only a `.gsb`, so use it only for unprivileged standalone scripts; copy a complete package directory yourself when it needs permissions.
 
-`src/` contains source examples. `dist/` contains compiled reference bytecode and may be regenerated. The complete packages in `tests/` are the best starting point for a deployable script because each already includes a matching manifest.
+`src/` contains source examples. `dist/` contains unprivileged reference bytecode and may be regenerated; do not deploy it standalone when an example requires permissions. The complete packages in `tests/` are the best starting point for a deployable script because each already includes a matching manifest.
 
 Core examples:
 

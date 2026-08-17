@@ -8,6 +8,7 @@
 #include "managers/status_display_manager.h"
 
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_flash.h"
 #include "esp_partition.h"
@@ -38,9 +39,9 @@
 #define SELF_OTA_KEY_UPDATER_SHA "up_sha"
 
 #define BANSHEE_C5_APP0_OFFSET 0x10000
-#define BANSHEE_C5_APP0_SIZE 0x540000
-#define BANSHEE_C5_NAPPS_OFFSET 0x550000
-#define BANSHEE_C5_NAPPS_SIZE 0x100000
+#define BANSHEE_C5_APP0_SIZE 0x550000
+#define BANSHEE_C5_NAPPS_OFFSET 0x560000
+#define BANSHEE_C5_NAPPS_SIZE 0xF0000
 #define BANSHEE_C5_UPDATER_OFFSET 0x650000
 #define BANSHEE_C5_UPDATER_SIZE 0x120000
 #define BANSHEE_C5_COREDUMP_OFFSET 0x770000
@@ -53,7 +54,6 @@ extern const uint8_t _binary_banshee_c5_updater_bin_end[] asm("_binary_banshee_c
 
 static SemaphoreHandle_t s_status_mutex;
 static SelfOtaStatus s_status;
-static DRAM_ATTR __attribute__((aligned(4))) uint8_t s_partition_table_sector[ESP_PARTITION_TABLE_SIZE];
 
 static esp_err_t self_ota_migrate_banshee_c5_partition_table_if_needed(void);
 static esp_err_t self_ota_provision_banshee_c5_updater(void);
@@ -201,8 +201,15 @@ static bool self_ota_banshee_c5_layout_present(void) {
     const esp_partition_t *updater = esp_partition_find_first(ESP_PARTITION_TYPE_APP,
                                                              ESP_PARTITION_SUBTYPE_APP_OTA_0,
                                                              "updater");
-    return updater && updater->address == BANSHEE_C5_UPDATER_OFFSET &&
-           updater->size == BANSHEE_C5_UPDATER_SIZE;
+    if (!(updater && updater->address == BANSHEE_C5_UPDATER_OFFSET &&
+          updater->size == BANSHEE_C5_UPDATER_SIZE)) {
+        return false;
+    }
+    const esp_partition_t *app0 = esp_partition_find_first(ESP_PARTITION_TYPE_APP,
+                                                           ESP_PARTITION_SUBTYPE_APP_FACTORY,
+                                                           "app0");
+    return app0 && app0->address == BANSHEE_C5_APP0_OFFSET &&
+           app0->size == BANSHEE_C5_APP0_SIZE;
 }
 
 static esp_err_t self_ota_migrate_banshee_c5_partition_table_if_needed(void) {
@@ -215,17 +222,25 @@ static esp_err_t self_ota_migrate_banshee_c5_partition_table_if_needed(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = self_ota_build_banshee_c5_partition_table(s_partition_table_sector,
-                                                              sizeof(s_partition_table_sector));
-    if (err != ESP_OK) return err;
+    uint8_t *partition_table_sector = heap_caps_aligned_alloc(
+        4, ESP_PARTITION_TABLE_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!partition_table_sector) return ESP_ERR_NO_MEM;
+
+    esp_err_t err = self_ota_build_banshee_c5_partition_table(partition_table_sector,
+                                                               ESP_PARTITION_TABLE_SIZE);
+    if (err != ESP_OK) {
+        free(partition_table_sector);
+        return err;
+    }
 
     glog("Self-OTA: migrating Banshee C5 partition table for updater partition\n");
     err = esp_flash_erase_region(esp_flash_default_chip, ESP_PARTITION_TABLE_OFFSET,
                                  ESP_PARTITION_TABLE_SIZE);
     if (err == ESP_OK) {
-        err = esp_flash_write(esp_flash_default_chip, s_partition_table_sector,
-                              ESP_PARTITION_TABLE_OFFSET, ESP_PARTITION_TABLE_SIZE);
+        err = esp_flash_write(esp_flash_default_chip, partition_table_sector,
+                               ESP_PARTITION_TABLE_OFFSET, ESP_PARTITION_TABLE_SIZE);
     }
+    free(partition_table_sector);
     if (err != ESP_OK) {
         glog("Self-OTA: partition table migration failed: %s\n", esp_err_to_name(err));
         return err;
@@ -325,9 +340,10 @@ static esp_err_t self_ota_store_pending_update(const OtaManifestEntry *entry) {
     return err;
 }
 
-static void self_ota_check_task(void *pv) {
-    (void)pv;
-
+esp_err_t self_ota_manager_check_now_blocking(void) {
+    if (!self_ota_manager_is_supported()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     xSemaphoreTake(s_status_mutex, portMAX_DELAY);
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = SELF_OTA_STATE_CHECKING;
@@ -335,13 +351,17 @@ static void self_ota_check_task(void *pv) {
 
 #ifndef CONFIG_BUILD_CONFIG_TEMPLATE
     self_ota_set_error("Board has no CONFIG_BUILD_CONFIG_TEMPLATE");
+    return ESP_ERR_NOT_SUPPORTED;
 #else
     OtaManifestEntry entry;
     uint8_t channel = settings_get_ota_channel(&G_Settings);
-    if (ota_manager_fetch_manifest_entry(CONFIG_BUILD_CONFIG_TEMPLATE, channel, &entry) != ESP_OK || !entry.found) {
+    esp_err_t err = ota_manager_fetch_manifest_entry(CONFIG_BUILD_CONFIG_TEMPLATE, channel, &entry);
+    if (err != ESP_OK || !entry.found) {
         self_ota_set_error("No manifest entry for this board");
+        return err != ESP_OK ? err : ESP_ERR_NOT_FOUND;
     } else if (entry.size == 0 || entry.download_url[0] == '\0' || entry.sha256[0] == '\0') {
         self_ota_set_error("Manifest entry missing size/url/sha256");
+        return ESP_ERR_INVALID_RESPONSE;
     } else {
         xSemaphoreTake(s_status_mutex, portMAX_DELAY);
         s_status.state = SELF_OTA_STATE_UPDATE_AVAILABLE;
@@ -350,8 +370,13 @@ static void self_ota_check_task(void *pv) {
         s_status.image_size = entry.size;
         xSemaphoreGive(s_status_mutex);
     }
+    return ESP_OK;
 #endif
+}
 
+static void self_ota_check_task(void *pv) {
+    (void)pv;
+    (void)self_ota_manager_check_now_blocking();
     vTaskDelete(NULL);
 }
 
@@ -465,6 +490,7 @@ bool self_ota_manager_is_supported(void) { return false; }
 esp_err_t self_ota_manager_init(void) { return ESP_OK; }
 SelfOtaStatus self_ota_manager_get_status(void) { return (SelfOtaStatus){ .state = SELF_OTA_STATE_IDLE }; }
 esp_err_t self_ota_manager_check_now(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t self_ota_manager_check_now_blocking(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t self_ota_manager_start_update(void) { return ESP_ERR_NOT_SUPPORTED; }
 
 #endif

@@ -14,12 +14,8 @@
 #include "vendor/pcap.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "sdkconfig.h"
-#ifdef CONFIG_HAS_RTC_CLOCK
-#include "vendor/drivers/pcf8563.h"
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,6 +186,21 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_start_eapollogoff_attack();
             status_display_show_status("EAPOL Start");
             return;
+        } else if (strcmp(argv[1], "-p") == 0) {
+            glog("Probe Request Flood starting...\n");
+            wifi_manager_start_probe_flood();
+            status_display_show_status("Probe Flood Start");
+            return;
+        } else if (strcmp(argv[1], "-b") == 0) {
+            glog("Bad Msg attack starting...\n");
+            wifi_manager_start_bad_msg();
+            status_display_show_status("Bad Msg Start");
+            return;
+        } else if (strcmp(argv[1], "-a") == 0) {
+            glog("Auth Flood attack starting...\n");
+            wifi_manager_start_auth_flood();
+            status_display_show_status("Auth Flood Start");
+            return;
         } else if (strcmp(argv[1], "-s") == 0) {
             if (argc < 3) {
                 glog("Usage: attack -s <password>\n");
@@ -212,7 +223,7 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
+    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
     status_display_show_status("Attack Usage");
 }
 
@@ -251,6 +262,9 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_sae_flood();
     wifi_manager_stop_channel_switch_attack();
     wifi_manager_stop_gtk_abuse();
+    wifi_manager_stop_probe_flood();
+    wifi_manager_stop_bad_msg();
+    wifi_manager_stop_auth_flood();
     glog("All WiFi attacks stopped...\n");
     status_display_show_status("Attacks Off");
 }
@@ -387,35 +401,6 @@ void handle_track_sta_cmd(int argc, char **argv) {
     wifi_manager_track_sta();
 }
 
-#ifdef CONFIG_HAS_RTC_CLOCK
-// Time synchronization callback for SNTP
-static void sntp_time_sync_callback(struct timeval *tv) {
-    if (tv && tv->tv_sec > 1600000000) { // Valid time (after Sept 2020)
-        struct tm timeinfo;
-        struct tm utc_timeinfo;
-
-        // Get local time for display
-        localtime_r(&tv->tv_sec, &timeinfo);
-
-        // Save UTC time to RTC (not local time)
-        gmtime_r(&tv->tv_sec, &utc_timeinfo);
-        RTC_Date rtc_time;
-        rtc_time.year = utc_timeinfo.tm_year + 1900;
-        rtc_time.month = utc_timeinfo.tm_mon + 1;
-        rtc_time.day = utc_timeinfo.tm_mday;
-        rtc_time.hour = utc_timeinfo.tm_hour;
-        rtc_time.minute = utc_timeinfo.tm_min;
-        rtc_time.second = utc_timeinfo.tm_sec;
-
-        if (rtc_set_datetime(&rtc_time) == ESP_OK) {
-            ESP_LOGI("SNTP", "Time synchronized from NTP and UTC saved to RTC: %04d-%02d-%02d %02d:%02d:%02d",
-                     rtc_time.year, rtc_time.month, rtc_time.day,
-                     rtc_time.hour, rtc_time.minute, rtc_time.second);
-        }
-    }
-}
-#endif
-
 void handle_wifi_connection(int argc, char **argv) {
     const char *ssid;
     const char *password;
@@ -509,16 +494,7 @@ void handle_wifi_connection(int argc, char **argv) {
     wifi_manager_set_manual_disconnect(false);
     wifi_manager_connect_wifi(ssid, password);
 
-    if (!esp_sntp_enabled()) {
-        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-        esp_sntp_setservername(0, "pool.ntp.org");
-
-#ifdef CONFIG_HAS_RTC_CLOCK
-        esp_sntp_set_time_sync_notification_cb(sntp_time_sync_callback);
-#endif
-
-        esp_sntp_init();
-    }
+    wifi_manager_start_sntp();
 }
 
 void handle_wifi_disconnect(int argc, char **argv) {

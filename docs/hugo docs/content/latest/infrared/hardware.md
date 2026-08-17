@@ -11,6 +11,8 @@ GhostESP exposes IR features only when the board is built with IR RX or TX enabl
 - LilyGo S3TWatch — IR transmit
 - ESP32-S3 Cardputer / Cardputer ADV — IR transmit
 - LilyGo TEmbed C1101 — IR transmit and receive
+- Banshee (Poltergeist build) — IR transmit and receive
+- Banshee (Banshee C5 build) — IR transmit and receive
 
 Other boards may ship with TX-only support or no IR hardware at all. Look for infrared support listed in the release notes or above before flashing.
 

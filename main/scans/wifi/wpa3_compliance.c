@@ -19,6 +19,7 @@ static const char *TAG = "WPA3";
 
 typedef struct {
     bool wpa3_present;
+    bool enterprise;
     bool transition_mode;
     bool pmf_required;
     bool pmf_optional;
@@ -26,6 +27,20 @@ typedef struct {
     const char *pmf_label;
     const char *finding;
 } wpa3_compliance_t;
+
+static const char *cipher_label(wifi_cipher_type_t cipher) {
+    switch (cipher) {
+        case WIFI_CIPHER_TYPE_NONE: return "None";
+        case WIFI_CIPHER_TYPE_WEP40: return "WEP40";
+        case WIFI_CIPHER_TYPE_WEP104: return "WEP104";
+        case WIFI_CIPHER_TYPE_TKIP: return "TKIP";
+        case WIFI_CIPHER_TYPE_CCMP: return "CCMP";
+        case WIFI_CIPHER_TYPE_TKIP_CCMP: return "TKIP/CCMP";
+        case WIFI_CIPHER_TYPE_GCMP: return "GCMP";
+        case WIFI_CIPHER_TYPE_GCMP256: return "GCMP-256";
+        default: return "Unknown";
+    }
+}
 
 static void sanitize_ssid(const uint8_t *input_ssid, char *out, size_t out_len) {
     char tmp[33];
@@ -68,28 +83,29 @@ static void classify_ap(const wifi_ap_record_t *ap, wpa3_compliance_t *out) {
             out->auth_label = "WPA";
             out->pmf_label = "Not Required";
             out->pmf_optional = true;
-            out->finding = "Legacy WPA (TKIP) only - replace with WPA2 or WPA3.";
+            out->finding = "Legacy WPA observed; review for migration.";
             break;
 
         case WIFI_AUTH_WPA2_PSK:
             out->auth_label = "WPA2";
             out->pmf_label = "Optional";
             out->pmf_optional = true;
-            out->finding = "WPA2-only network - upgrade clients and AP to WPA3.";
+            out->finding = "WPA2-Personal observed; PMF posture requires verification.";
             break;
 
         case WIFI_AUTH_WPA_WPA2_PSK:
             out->auth_label = "WPA/WPA2";
             out->pmf_label = "Optional";
             out->pmf_optional = true;
-            out->finding = "Mixed WPA/WPA2 with TKIP - downgrade risk to legacy clients.";
+            out->finding = "Mixed WPA/WPA2 with legacy compatibility enabled.";
             break;
 
         case WIFI_AUTH_WPA2_ENTERPRISE:
             out->auth_label = "WPA2-Enterprise";
+            out->enterprise = true;
             out->pmf_label = "Optional";
             out->pmf_optional = true;
-            out->finding = "WPA2-Enterprise - migrate to WPA3-Enterprise for 192-bit security.";
+            out->finding = "WPA2-Enterprise advertised; EAP method and certificate were not assessed.";
             break;
 
         case WIFI_AUTH_WPA3_PSK:
@@ -97,7 +113,7 @@ static void classify_ap(const wifi_ap_record_t *ap, wpa3_compliance_t *out) {
             out->wpa3_present = true;
             out->pmf_required = true;
             out->pmf_label = "Required";
-            out->finding = "Compliant: WPA3-Personal with mandatory PMF.";
+            out->finding = "WPA3-Personal advertised with mandatory PMF; association was not verified.";
             break;
 
         case WIFI_AUTH_WPA2_WPA3_PSK:
@@ -111,10 +127,11 @@ static void classify_ap(const wifi_ap_record_t *ap, wpa3_compliance_t *out) {
 
         case WIFI_AUTH_WPA3_ENTERPRISE:
             out->auth_label = "WPA3-Enterprise";
+            out->enterprise = true;
             out->wpa3_present = true;
             out->pmf_required = true;
             out->pmf_label = "Required";
-            out->finding = "Compliant: WPA3-Enterprise with mandatory PMF.";
+            out->finding = "WPA3-Enterprise advertised with mandatory PMF; association was not verified.";
             break;
 
         case WIFI_AUTH_WAPI_PSK:
@@ -133,7 +150,7 @@ static void classify_ap(const wifi_ap_record_t *ap, wpa3_compliance_t *out) {
 
 static const char *short_finding(const wpa3_compliance_t *c) {
     if (c->wpa3_present && c->transition_mode) return "Downgradable";
-    if (c->wpa3_present) return "Compliant";
+    if (c->wpa3_present) return c->enterprise ? "Enterprise advertised" : "WPA3 advertised";
     switch (c->auth_label[0]) {
         case 'O': return "Open";
         case 'W': return strcmp(c->auth_label, "WEP") == 0 ? "WEP broken" : "Legacy";
@@ -163,6 +180,11 @@ void wpa3_compliance_check_ap(const wifi_ap_record_t *ap) {
     glog("SSID: %s\n", ssid);
     glog("BSSID: %s\n", mac_str);
     glog("Auth: %s\n", c.auth_label);
+    glog("Cipher: pairwise=%s group=%s\n", cipher_label(ap->pairwise_cipher),
+         cipher_label(ap->group_cipher));
+    if (c.enterprise) {
+        glog("EAP: Not observable from beacon\nCertificate: Not assessed\n");
+    }
     glog("WPA3 Present: %s\n", c.wpa3_present ? "Yes" : "No");
     glog("Transition Mode: %s\n", c.transition_mode ? "Enabled" : "Disabled");
     glog("PMF: %s\n", c.pmf_label);
@@ -173,6 +195,13 @@ void wpa3_compliance_check_ap(const wifi_ap_record_t *ap) {
         scan_file_printf(&sf, "SSID: %s\n", ssid);
         scan_file_printf(&sf, "BSSID: %s\n", mac_str);
         scan_file_printf(&sf, "Auth: %s\n", c.auth_label);
+        scan_file_printf(&sf, "Cipher: pairwise=%s group=%s\n",
+                         cipher_label(ap->pairwise_cipher),
+                         cipher_label(ap->group_cipher));
+        if (c.enterprise) {
+            scan_file_printf(&sf, "EAP: Not observable from beacon\n");
+            scan_file_printf(&sf, "Certificate: Not assessed\n");
+        }
         scan_file_printf(&sf, "WPA3 Present: %s\n", c.wpa3_present ? "Yes" : "No");
         scan_file_printf(&sf, "Transition Mode: %s\n", c.transition_mode ? "Enabled" : "Disabled");
         scan_file_printf(&sf, "PMF: %s\n", c.pmf_label);
@@ -224,12 +253,28 @@ void wpa3_compliance_check_all(void) {
              ap->bssid[3], ap->bssid[4], ap->bssid[5]);
         glog("  %s\n", c.auth_label);
         glog("  PMF: %s\n", c.pmf_label);
+        glog("  Cipher: %s/%s\n", cipher_label(ap->pairwise_cipher),
+             cipher_label(ap->group_cipher));
+        if (c.enterprise) glog("  EAP/Certificate: not assessed\n");
         glog("  %s\n", tag);
     }
 
     glog("Summary: %u compliant, %u downgradable, %u legacy, %u open, %u other\n",
          compliant, downgradable, legacy, open_n, other);
     glog("--- End of Report ---\n");
+}
+
+const char *wpa3_deauth_warning(const wifi_ap_record_t *ap) {
+    if (!ap) return "No AP selected; PMF posture is unknown.";
+    switch (ap->authmode) {
+        case WIFI_AUTH_WPA3_PSK:
+        case WIFI_AUTH_WPA3_ENTERPRISE:
+            return "PMF is required; deauthentication is expected to be ineffective for WPA3 clients.";
+        case WIFI_AUTH_WPA2_WPA3_PSK:
+            return "This is WPA2/WPA3 transition mode; WPA3 clients may resist deauthentication.";
+        default:
+            return NULL;
+    }
 }
 
 void wpa3_compliance_check_selected(void) {

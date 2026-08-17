@@ -121,12 +121,6 @@ void splash_create(void) {
     lv_img_set_zoom(img, 192);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, -30);
   }
-  else if (LV_VER_RES < 140 || LV_HOR_RES > 300) {
-    lv_img_set_src(img, &ghost);
-    lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
-    lv_img_set_zoom(img, 384);
-    lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
-  }
   else {
     lv_img_set_src(img, &ghostesplogo);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
@@ -141,6 +135,8 @@ void splash_create(void) {
   const char *build_name = CONFIG_BUILD_CONFIG_TEMPLATE;
   if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
     build_name = "The Banshee";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_core") == 0) {
+    build_name = "GhostLink P1 Core";
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);

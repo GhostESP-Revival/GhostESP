@@ -64,7 +64,7 @@ static void congestion_stop_scan(void) {
 static void congestion_return_to_options(void) {
     if (s_leaving) return;
     s_leaving = true;
-    display_manager_switch_view(&options_menu_view);
+    display_manager_go_back();
 }
 
 static void sort_channels(uint8_t *channels, int count) {

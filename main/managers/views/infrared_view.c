@@ -12,6 +12,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "gui/design_tokens.h"
+#include "gui/gui_router.h"
 
 void update_learning_popup_selection(void);
 void update_easy_learn_popup_selection(void);
@@ -160,6 +161,8 @@ static QueueHandle_t ir_sd_queue = NULL;
 static TaskHandle_t ir_sd_worker_handle = NULL;
 static void ir_sd_worker_task(void *arg);
 
+static bool s_resume_commands = false;
+
 #ifdef CONFIG_HAS_INFRARED_RX
 
 static lv_obj_t *learning_popup = NULL;
@@ -241,6 +244,7 @@ void infrared_rx_pause_for_tx(bool pause) {
 }
 
 static void rename_remote_keyboard_callback(const char *name) {
+    s_resume_commands = true;
     if (!name || strlen(name) == 0) {
         display_manager_switch_view(&infrared_view);
         return;
@@ -283,7 +287,7 @@ static void rename_remote_keyboard_callback(const char *name) {
         display_manager_switch_view(&infrared_view);
         return;
     }
-    
+
     snprintf(new_path, sizeof(new_path), "%s/%s.ir", safe_dir_path, filename_part);
     strncpy(old_path, current_remote_path, sizeof(old_path) - 1);
     old_path[sizeof(old_path) - 1] = '\0';
@@ -306,6 +310,7 @@ static void rename_remote_keyboard_callback(const char *name) {
 }
 
 static void add_signal_keyboard_callback(const char *name) {
+    s_resume_commands = true;
     if (!name || strlen(name) == 0) {
         display_manager_switch_view(&infrared_view);
         return;
@@ -326,6 +331,7 @@ static void append_signal_to_remote(const char *signal_name);
 #ifdef CONFIG_HAS_INFRARED_RX
 static void add_signal_to_remote_callback(const char *name)
 {
+    s_resume_commands = true;
     if (name) {
         strncpy(learned_signal_name, name, sizeof(learned_signal_name) - 1);
         learned_signal_name[sizeof(learned_signal_name) - 1] = '\0';
@@ -341,12 +347,10 @@ static void add_signal_to_remote_callback(const char *name)
 
 void learned_signal_name_callback(const char *name)
 {
+    bool was_adding_to_existing = add_signal_mode && strlen(current_remote_path) > 0;
     if (name) {
         strncpy(learned_signal_name, name, sizeof(learned_signal_name) - 1);
         learned_signal_name[sizeof(learned_signal_name) - 1] = '\0';
-        
-        // Store whether we were in add signal mode before saving
-        bool was_adding_to_existing = add_signal_mode && strlen(current_remote_path) > 0;
         
         status_display_show_status("IR Learning...");
         
@@ -398,6 +402,10 @@ void learned_signal_name_callback(const char *name)
     
     // Reset the add signal mode flag
     add_signal_mode = false;
+    
+    if (was_adding_to_existing) {
+        s_resume_commands = true;
+    }
     
     // Return to infrared view
     display_manager_switch_view(&infrared_view);
@@ -1437,12 +1445,47 @@ void infrared_view_create(void) {
     num_ir_items = options_view_get_item_count(g_ir_ov);
     /* Root-menu highlight only resets on a genuine fresh entry from the
      * Main Menu; returning here restores the previously highlighted row. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         selected_ir_index = 0;
     } else if (selected_ir_index < 0 || selected_ir_index >= num_ir_items) {
         selected_ir_index = 0;
     }
     if (num_ir_items > 0) options_view_set_selected(g_ir_ov, selected_ir_index);
+
+    /* Returning from the keyboard or learn flows after an in-remote edit:
+     * rebuild the command list of the remote being edited instead of
+     * showing the root menu. */
+    if (s_resume_commands) {
+        s_resume_commands = false;
+        if (current_remote_path[0] != '\0' && !in_universals_mode) {
+            if (signals) {
+                infrared_manager_free_list(signals, signal_count);
+                signals = NULL;
+                signal_count = 0;
+            }
+            if (infrared_manager_read_list(current_remote_path, &signals, &signal_count)) {
+                options_view_clear(g_ir_ov);
+                selected_ir_index = 0;
+
+                for (size_t i = 0; i < signal_count; i++) {
+                    options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void *)(intptr_t)i);
+                }
+
+                options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
+                options_view_add_item(g_ir_ov, "Add New Signal", add_signal_cb, NULL);
+                lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+                if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+                num_ir_items = options_view_get_item_count(g_ir_ov);
+
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+                ir_add_back_row();
+                num_ir_items = options_view_get_item_count(g_ir_ov);
+#endif
+                options_view_set_selected(g_ir_ov, 0);
+            }
+        }
+    }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     uint8_t ir_theme = settings_get_menu_theme(&G_Settings);
@@ -1668,7 +1711,13 @@ void infrared_view_input_cb(InputEvent *event) {
 
     // allow enter/esc to cancel universals transmit popup immediately
     if (transmitting_popup && lv_obj_is_valid(transmitting_popup)) {
-        if (event->type == INPUT_TYPE_KEYBOARD) {
+        if (event->type == INPUT_TYPE_TOUCH) {
+            if (event->data.touch_data.state == LV_INDEV_STATE_PR) {
+                universal_transmit_cancel = true;
+                cleanup_transmit_popup(NULL);
+                return;
+            }
+        } else if (event->type == INPUT_TYPE_KEYBOARD) {
             uint8_t key = event->data.key_value;
             if (key == 13 || key == 10 || key == 27 || key == 'c' || key == 'C') {
                 universal_transmit_cancel = true;
@@ -2310,8 +2359,8 @@ void infrared_view_input_cb(InputEvent *event) {
             }
         }
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
+        display_manager_go_back();
 #endif
     }
 }
@@ -2914,6 +2963,7 @@ void easy_learn_signal_name_callback(void)
 void signal_preview_cancel_cb(lv_event_t *e)
 {
     // Clean up learned signal data (only for raw signals!)
+    bool was_adding_cancel = add_signal_mode;
     status_display_show_status("IR Discarded");
     if (learned_signal.is_raw && learned_signal.payload.raw.timings) {
         free(learned_signal.payload.raw.timings);
@@ -2922,6 +2972,10 @@ void signal_preview_cancel_cb(lv_event_t *e)
     }
     learned_signal.is_raw = false;
     add_signal_mode = false;
+    
+    if (was_adding_cancel) {
+        s_resume_commands = true;
+    }
     
     // Clean up popup immediately (not async) to prevent UI corruption
     cleanup_signal_preview_popup(NULL);

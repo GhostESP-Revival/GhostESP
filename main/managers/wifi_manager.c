@@ -12,6 +12,10 @@
 #include "vendor/pcap.h"     // For pcap_is_wireshark_mode()
 #include "esp_attr.h"
 #include "esp_crt_bundle.h"
+#include "esp_sntp.h"
+#ifdef CONFIG_HAS_RTC_CLOCK
+#include "vendor/drivers/pcf8563.h"
+#endif
 #include "esp_event.h"
 #include "esp_heap_caps.h" // Add include for heap stats
 #include "core/memory_debug.h"
@@ -77,6 +81,9 @@
 #include "attacks/wifi/sae_flood.h"
 #include "attacks/wifi/channel_switch_attack.h"
 #include "attacks/wifi/gtk_abuse.h"
+#include "attacks/wifi/probe_request_flood.h"
+#include "attacks/wifi/bad_msg.h"
+#include "attacks/wifi/auth_flood.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/airspace_monitor.h"
 #include "scans/wifi/station_scan.h"
@@ -140,10 +147,10 @@ bool manual_disconnect = false;
 static volatile bool wifi_connect_cancel_requested = false;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
 static int wifi_reconnect_count = 0;
+static volatile bool wifi_driver_started = false;
 static volatile bool wifi_monitor_capture_active = false;
 static volatile bool wifi_timed_scan_active = false;
 #define WIFI_MAX_RECONNECT_ATTEMPTS  5
-#define WIFI_OTA_AUTO_CHECK_TIMEOUT_MS 30000
 static volatile bool visualizer_stop_requested = false;
 static volatile int visualizer_socket = -1;
 static volatile bool ota_auto_check_running = false;
@@ -719,6 +726,12 @@ static void wifi_reconnect_reset(void) {
 }
 
 static void wifi_reconnect_timer_cb(void *arg) {
+    if (wifi_reconnect_hold || !wifi_driver_started) {
+        ESP_LOGI(TAG, "Skipping auto-reconnect while Wi-Fi is reserved or stopped");
+        wifi_reconnect_count = 0;
+        return;
+    }
+
     const char *reason = NULL;
     if (wifi_reconnect_blocked(&reason)) {
         ESP_LOGI(TAG, "Skipping auto-reconnect while %s", reason ? reason : "busy");
@@ -867,57 +880,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data);
 static void wifi_retry_timer_callback(void* arg);
 
-static bool wait_for_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        OtaStatus status = ota_manager_get_status();
-        if (status.state == OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
-static bool wait_for_self_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        SelfOtaStatus status = self_ota_manager_get_status();
-        if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == SELF_OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
-static bool wait_for_peer_ota_check_result(uint32_t timeout_ms) {
-    bool saw_checking = false;
-    uint32_t waited = 0;
-    while (waited < timeout_ms) {
-        PeerOtaStatus status = peer_ota_manager_get_status();
-        if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE) return true;
-        if (status.state == PEER_OTA_STATE_CHECKING) {
-            saw_checking = true;
-        } else if (saw_checking || waited >= 500) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-        waited += 200;
-    }
-    return false;
-}
-
 static void ota_auto_check_task(void *arg) {
     (void)arg;
 
@@ -929,21 +891,27 @@ static void ota_auto_check_task(void *arg) {
     return;
 #endif
 
+    // Avoid TLS allocation while app_main, display, SD, and plugin discovery
+    // are simultaneously consuming their boot-time internal/DMA peaks.
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
     bool update_available = false;
 
     if (ota_manager_is_supported()) {
-        if (ota_manager_check_now() == ESP_OK && wait_for_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (ota_manager_check_now_blocking() == ESP_OK) {
             OtaStatus status = ota_manager_get_status();
-            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+            if (status.state == OTA_STATE_UPDATE_AVAILABLE &&
+                status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
                 glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
                      status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
                 update_available = true;
             }
         }
     } else if (self_ota_manager_is_supported()) {
-        if (self_ota_manager_check_now() == ESP_OK && wait_for_self_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (self_ota_manager_check_now_blocking() == ESP_OK) {
             SelfOtaStatus status = self_ota_manager_get_status();
-            if (status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
+            if (status.state == SELF_OTA_STATE_UPDATE_AVAILABLE &&
+                status.latest_build_number > (long)GHOSTESP_BUILD_NUMBER) {
                 glog("There is a new update available: device firmware %s (build %ld > %ld)\n",
                      status.latest_version, status.latest_build_number, (long)GHOSTESP_BUILD_NUMBER);
                 update_available = true;
@@ -952,9 +920,10 @@ static void ota_auto_check_task(void *arg) {
     }
 
     if (peer_ota_manager_is_supported() && esp_comm_manager_is_connected()) {
-        if (peer_ota_manager_check_now() == ESP_OK && wait_for_peer_ota_check_result(WIFI_OTA_AUTO_CHECK_TIMEOUT_MS)) {
+        if (peer_ota_manager_check_now_blocking() == ESP_OK) {
             PeerOtaStatus status = peer_ota_manager_get_status();
-            if (status.peer_current_build_number >= 0 &&
+            if (status.state == PEER_OTA_STATE_UPDATE_AVAILABLE &&
+                status.peer_current_build_number >= 0 &&
                 status.peer_build_number > status.peer_current_build_number) {
                 glog("There is a new update available: GhostLink peer firmware %s (build %ld > %ld)\n",
                      status.peer_version, status.peer_build_number, status.peer_current_build_number);
@@ -975,7 +944,7 @@ static void ota_auto_check_task(void *arg) {
 static void schedule_ota_auto_check(void) {
     if (ota_auto_check_running || ota_auto_check_done) return;
     ota_auto_check_running = true;
-    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 6144, NULL,
+    BaseType_t rc = xTaskCreate(ota_auto_check_task, "ota_auto_chk", 8192, NULL,
                                 tskIDLE_PRIORITY + 1, NULL);
     if (rc != pdPASS) {
         ota_auto_check_running = false;
@@ -987,7 +956,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                                void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        wifi_driver_started = true;
         ESP_LOGD(TAG, "STA started; saved-network connect is explicit/reconnect-only");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
+        wifi_driver_started = false;
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
         
@@ -1011,7 +983,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         
         // Clean, single-line disconnect logging
         const char *reason = NULL;
-        if (wifi_reconnect_blocked(&reason)) {
+        if (wifi_reconnect_hold) {
+            glog("WiFi disconnected while radio reserved\n");
+            manual_disconnect = false;
+            wifi_reconnect_reset();
+        } else if (wifi_reconnect_blocked(&reason)) {
             glog("WiFi disconnected while %s\n", reason ? reason : "busy");
             manual_disconnect = false;
             if (wifi_reconnect_count == 0) {
@@ -1069,6 +1045,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         wifi_reconnect_reset();
+        wifi_manager_start_sntp();
         if (settings_get_wigle_auto_upload(&G_Settings)) {
             wigle_upload_all_async();
         }
@@ -2551,8 +2528,52 @@ void wifi_manager_init(void) {
              (int)(mem_start - mem_end), (int)mem_end);
 }
 
+static void wifi_manager_handle_sntp_sync(struct timeval *tv) {
+    if (!tv || tv->tv_sec <= 1600000000) return;
+
+#ifdef CONFIG_HAS_RTC_CLOCK
+    struct tm utc_timeinfo;
+    gmtime_r(&tv->tv_sec, &utc_timeinfo);
+    RTC_Date rtc_time;
+    rtc_time.year = utc_timeinfo.tm_year + 1900;
+    rtc_time.month = utc_timeinfo.tm_mon + 1;
+    rtc_time.day = utc_timeinfo.tm_mday;
+    rtc_time.hour = utc_timeinfo.tm_hour;
+    rtc_time.minute = utc_timeinfo.tm_min;
+    rtc_time.second = utc_timeinfo.tm_sec;
+
+    if (rtc_set_datetime(&rtc_time) == ESP_OK) {
+        ESP_LOGI(TAG, "Time synchronized from NTP and UTC saved to RTC: %04d-%02d-%02d %02d:%02d:%02d",
+                 rtc_time.year, rtc_time.month, rtc_time.day,
+                 rtc_time.hour, rtc_time.minute, rtc_time.second);
+    }
+#else
+    ESP_LOGI(TAG, "Time synchronized from NTP");
+#endif
+}
+
+void wifi_manager_start_sntp(void) {
+    if (esp_sntp_enabled()) return;
+
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+#ifdef CONFIG_HAS_RTC_CLOCK
+    esp_sntp_set_time_sync_notification_cb(wifi_manager_handle_sntp_sync);
+#endif
+    esp_sntp_init();
+}
+
 void wifi_manager_configure_sta_from_settings(void) {
     wifi_reconnect_reset();
+
+    if (!wifi_driver_started) {
+        esp_err_t start_err = esp_wifi_start();
+        if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_STATE) {
+            printf("Failed to start WiFi for STA connection: %s\n", esp_err_to_name(start_err));
+            return;
+        }
+        wifi_driver_started = true;
+    }
 
     // Configure STA with saved credentials for boot-time connection
     const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
@@ -2578,6 +2599,13 @@ void wifi_manager_configure_sta_from_settings(void) {
             TERMINAL_VIEW_ADD_TEXT("Connecting to saved network: %s\n", saved_ssid);
             
             esp_err_t connect_err = esp_wifi_connect();
+            if (connect_err == ESP_ERR_WIFI_NOT_STARTED) {
+                esp_err_t start_err = esp_wifi_start();
+                if (start_err == ESP_OK || start_err == ESP_ERR_WIFI_STATE) {
+                    wifi_driver_started = true;
+                    connect_err = esp_wifi_connect();
+                }
+            }
             if (connect_err != ESP_OK) {
                 printf("Failed to initiate connection: %s\n", esp_err_to_name(connect_err));
                 TERMINAL_VIEW_ADD_TEXT("Failed to connect to saved network\n");
@@ -4532,6 +4560,45 @@ void wifi_manager_stop_channel_switch_attack(void) {
 
 bool wifi_manager_is_channel_switch_attack_running(void) {
     return channel_switch_attack_is_running();
+}
+
+// Probe Request Flood Attack - delegated to probe_request_flood module
+void wifi_manager_start_probe_flood(void) {
+    probe_request_flood_start();
+}
+
+void wifi_manager_stop_probe_flood(void) {
+    probe_request_flood_stop();
+}
+
+bool wifi_manager_is_probe_flood_running(void) {
+    return probe_request_flood_is_running();
+}
+
+// Bad Msg Attack - delegated to bad_msg module
+void wifi_manager_start_bad_msg(void) {
+    bad_msg_start();
+}
+
+void wifi_manager_stop_bad_msg(void) {
+    bad_msg_stop();
+}
+
+bool wifi_manager_is_bad_msg_running(void) {
+    return bad_msg_is_running();
+}
+
+// Auth Flood Attack - delegated to auth_flood module
+void wifi_manager_start_auth_flood(void) {
+    auth_flood_start();
+}
+
+void wifi_manager_stop_auth_flood(void) {
+    auth_flood_stop();
+}
+
+bool wifi_manager_is_auth_flood_running(void) {
+    return auth_flood_is_running();
 }
 
 void wifi_manager_set_html_from_uart(void) {

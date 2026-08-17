@@ -12,6 +12,7 @@
 #include "core/scan_saver.h"
 #include "core/glog.h"
 #include "core/utils.h"
+#include "scans/wifi/arp_scan.h"
 #include "esp_random.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -27,16 +28,26 @@
 
 // Constants
 #define SNMP_RECV_TIMEOUT_MS 250
+#define SNMP_SEND_RETRIES 2
 #define SNMP_PORT 161
-#define SNMP_MAX_COMMUNITIES 2
+#define SNMP_MAX_COMMUNITIES 32
 #define SNMP_BUFFER_SIZE 512
 #define SNMP_WALK_MAX_ENTRIES 10000
 
 // Module tag for logging
 static const char *TAG = "SNMPScan";
 
-// Common SNMP community strings
-static const char *SNMP_COMMUNITIES[] = {"public", "private"};
+static const char *SNMP_DEFAULT_COMMUNITIES[] = {
+    "public", "private", "community", "snmp", "cisco", "monitor", "world",
+    "default", "read", "write", "admin", "proxy", "guest", "secret",
+    "stormshield", "tplink", "netgear", "homesecurity"
+};
+#define SNMP_DEFAULT_COMMUNITY_COUNT \
+    (sizeof(SNMP_DEFAULT_COMMUNITIES) / sizeof(SNMP_DEFAULT_COMMUNITIES[0]))
+
+static const char *g_snmp_communities[SNMP_MAX_COMMUNITIES];
+static int g_snmp_community_count = 0;
+static bool g_snmp_communities_owned = false;
 
 // Shared cancellation flag for all network scans
 static volatile bool g_network_scan_cancel = false;
@@ -51,6 +62,83 @@ void snmp_scan_cancel(void) {
 
 void snmp_scan_reset_cancel(void) {
     g_network_scan_cancel = false;
+}
+
+// ============================================================================
+// Community String Management
+// ============================================================================
+
+static void snmp_communities_clear(void) {
+    if (g_snmp_communities_owned) {
+        for (int i = 0; i < g_snmp_community_count; i++) {
+            free((void *)g_snmp_communities[i]);
+        }
+    }
+    memset(g_snmp_communities, 0, sizeof(g_snmp_communities));
+    g_snmp_community_count = 0;
+    g_snmp_communities_owned = false;
+}
+
+void snmp_scan_set_communities(const char *csv) {
+    if (csv == NULL || csv[0] == '\0') {
+        return;
+    }
+
+    char buf[512];
+    strncpy(buf, csv, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    snmp_communities_clear();
+    g_snmp_communities_owned = true;
+
+    char *save = NULL;
+    char *tok = strtok_r(buf, ",; ", &save);
+    while (tok != NULL && g_snmp_community_count < SNMP_MAX_COMMUNITIES) {
+        g_snmp_communities[g_snmp_community_count++] = strdup(tok);
+        tok = strtok_r(NULL, ",; ", &save);
+    }
+
+    glog("[SNMP] Using %d community string(s)\n", g_snmp_community_count);
+}
+
+bool snmp_scan_load_communities_file(const char *path) {
+    if (path == NULL || path[0] == '\0') {
+        return false;
+    }
+
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return false;
+    }
+
+    snmp_communities_clear();
+    g_snmp_communities_owned = true;
+
+    char line[64];
+    while (fgets(line, sizeof(line), f) != NULL &&
+           g_snmp_community_count < SNMP_MAX_COMMUNITIES) {
+        char *nl = strpbrk(line, "\r\n");
+        if (nl) *nl = '\0';
+        if (line[0] == '\0' || line[0] == '#') continue;
+        g_snmp_communities[g_snmp_community_count++] = strdup(line);
+    }
+    fclose(f);
+
+    glog("[SNMP] Loaded %d communities from %s\n", g_snmp_community_count, path);
+    return g_snmp_community_count > 0;
+}
+
+static void snmp_communities_default_init(void) {
+    if (g_snmp_community_count > 0) {
+        return;
+    }
+    if (snmp_scan_load_communities_file(SNMP_COMMUNITIES_DEFAULT_PATH)) {
+        return;
+    }
+    for (size_t i = 0; i < SNMP_DEFAULT_COMMUNITY_COUNT; i++) {
+        g_snmp_communities[i] = SNMP_DEFAULT_COMMUNITIES[i];
+    }
+    g_snmp_community_count = (int)SNMP_DEFAULT_COMMUNITY_COUNT;
 }
 
 // ============================================================================
@@ -129,6 +217,23 @@ static bool asn1_skip_tlv(const uint8_t *buf, size_t len, size_t *pos, uint8_t e
     return *pos <= len;
 }
 
+static bool asn1_read_int(const uint8_t *buf, size_t len, size_t *pos, int32_t *out) {
+    if (*pos >= len || buf[(*pos)++] != 0x02) return false;
+    size_t vlen = 0;
+    if (!asn1_read_len(buf, len, pos, &vlen)) return false;
+    if (*pos + vlen > len || vlen > 4) return false;
+    int32_t val = 0;
+    if (vlen > 0) {
+        val = (int8_t)buf[*pos];
+        for (size_t i = 1; i < vlen; i++) {
+            val = (val << 8) | buf[*pos + i];
+        }
+    }
+    *pos += vlen;
+    *out = val;
+    return true;
+}
+
 /**
  * @brief Build SNMPv1 GetRequest packet for sysDescr
  */
@@ -196,7 +301,8 @@ static size_t build_snmp_get_request(uint8_t *buf, size_t buf_size,
 /**
  * @brief Parse SNMP response to extract sysDescr string
  */
-static bool parse_snmp_response(const uint8_t *buf, size_t len, char *out, size_t out_size) {
+static bool parse_snmp_response(const uint8_t *buf, size_t len, int32_t expect_req_id,
+                                char *out, size_t out_size) {
     if (len < 20 || buf[0] != 0x30) return false;
 
     size_t pos = 1;
@@ -218,8 +324,13 @@ static bool parse_snmp_response(const uint8_t *buf, size_t len, char *out, size_
     size_t pdu_end = pos + pdu_len;
     if (pdu_end > seq_end) return false;
 
-    // Skip request-id, error-status, error-index
-    for (int i = 0; i < 3; i++) {
+    // Request ID: reject delayed/mismatched responses
+    int32_t resp_id = 0;
+    if (!asn1_read_int(buf, pdu_end, &pos, &resp_id)) return false;
+    if (expect_req_id >= 0 && resp_id != expect_req_id) return false;
+
+    // Skip error-status, error-index
+    for (int i = 0; i < 2; i++) {
         if (!asn1_skip_tlv(buf, pdu_end, &pos, 0x02)) return false;
     }
 
@@ -260,7 +371,8 @@ static bool parse_snmp_response(const uint8_t *buf, size_t len, char *out, size_
  * @brief Probe a single host for SNMP with given community
  */
 static bool probe_snmp(const char *target_ip, const char *community,
-                        char *sysdescr, size_t sysdescr_size, scan_file_t *sf) {
+                       char *sysdescr, size_t sysdescr_size, const char *vendor,
+                       scan_file_t *sf) {
     if (g_network_scan_cancel) return false;
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -288,31 +400,58 @@ static bool probe_snmp(const char *target_ip, const char *community,
         return false;
     }
 
-    sendto(sock, packet, pkt_len, 0,
-           (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-
     uint8_t rx_buf[SNMP_BUFFER_SIZE];
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
 
-    int n = recvfrom(sock, rx_buf, sizeof(rx_buf), 0,
-                     (struct sockaddr *)&from_addr, &from_len);
-    close(sock);
+    for (int attempt = 0; attempt < SNMP_SEND_RETRIES && !g_network_scan_cancel; attempt++) {
+        sendto(sock, packet, pkt_len, 0,
+               (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
-    if (n > 0) {
-        if (parse_snmp_response(rx_buf, (size_t)n, sysdescr, sysdescr_size)) {
-            if (strlen(sysdescr) > 0) {
-                glog("[SNMP] %s (community: %s) sysDescr: %s\n",
-                     target_ip, community, sysdescr);
-                if (sf != NULL) {
-                    scan_file_printf(sf, "[%s] community=%s sysDescr=%s\n",
-                                     target_ip, community, sysdescr);
+        int n = recvfrom(sock, rx_buf, sizeof(rx_buf), 0,
+                         (struct sockaddr *)&from_addr, &from_len);
+
+        if (n > 0 && from_addr.sin_addr.s_addr == dest_addr.sin_addr.s_addr) {
+            if (parse_snmp_response(rx_buf, (size_t)n, (int32_t)req_id,
+                                    sysdescr, sysdescr_size)) {
+                if (strlen(sysdescr) > 0) {
+                    if (vendor) {
+                        glog("[SNMP] %s (%s) (community: %s) sysDescr: %s\n",
+                             target_ip, vendor, community, sysdescr);
+                    } else {
+                        glog("[SNMP] %s (community: %s) sysDescr: %s\n",
+                             target_ip, community, sysdescr);
+                    }
+                    if (sf != NULL) {
+                        if (vendor) {
+                            scan_file_printf(sf, "[%s] vendor=%s community=%s sysDescr=%s\n",
+                                             target_ip, vendor, community, sysdescr);
+                        } else {
+                            scan_file_printf(sf, "[%s] community=%s sysDescr=%s\n",
+                                             target_ip, community, sysdescr);
+                        }
+                    }
+                    close(sock);
+                    return true;
                 }
-                return true;
             }
         }
     }
 
+    close(sock);
+    return false;
+}
+
+static bool snmp_probe_ip(const char *target_ip, const uint8_t *mac, scan_file_t *sf) {
+    const char *vendor = mac ? arp_scan_get_vendor(mac) : NULL;
+    char sysdescr[256];
+    for (int i = 0; i < g_snmp_community_count && !g_network_scan_cancel; i++) {
+        if (probe_snmp(target_ip, g_snmp_communities[i], sysdescr, sizeof(sysdescr),
+                       vendor, sf)) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     return false;
 }
 
@@ -332,19 +471,10 @@ void snmp_scan_host(const char *target_ip) {
     ESP_LOGI(TAG, "Starting SNMP scan on host: %s", target_ip);
     glog("SNMP scanning host: %s\n", target_ip);
 
-    char sysdescr[256];
-    bool found = false;
     g_network_scan_cancel = false;
+    snmp_communities_default_init();
 
-    for (int i = 0; i < SNMP_MAX_COMMUNITIES; i++) {
-        if (probe_snmp(target_ip, SNMP_COMMUNITIES[i], sysdescr, sizeof(sysdescr), NULL)) {
-            found = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    if (!found) {
+    if (!snmp_probe_ip(target_ip, NULL, NULL)) {
         glog("SNMP scan on %s: No response\n", target_ip);
     }
 
@@ -355,14 +485,88 @@ void snmp_scan_host(const char *target_ip) {
  * @brief Scan the local subnet for SNMP services
  */
 void snmp_scan_subnet(void) {
-    char subnet_prefix[16];
+    snmp_communities_default_init();
+    g_network_scan_cancel = false;
 
-    if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
-        glog("SNMP Scan: Failed to get subnet prefix - not connected to WiFi?\n");
+    int arp_count = arp_scan_get_count();
+    if (arp_count > 0) {
+        glog("SNMP Scan: Probing %d ARP-discovered host(s)...\n", arp_count);
+
+        scan_file_t sf = SCAN_FILE_INIT;
+        bool saving = (scan_file_open(&sf, "snmp_scan", "txt") == ESP_OK);
+        if (saving) {
+            scan_file_printf(&sf, "--- SNMP Scan Results (ARP-seeded) ---\n");
+        }
+
+        int hosts_found = 0;
+        for (int i = 0; i < arp_count && !g_network_scan_cancel; i++) {
+            const arp_host_t *host = arp_scan_get_host(i);
+            if (!host) continue;
+            if (snmp_probe_ip(host->ip, host->mac, &sf)) {
+                hosts_found++;
+            }
+        }
+
+        if (g_network_scan_cancel) {
+            glog("SNMP Scan: Cancelled. Found %d SNMP host(s)\n", hosts_found);
+        } else {
+            glog("SNMP Scan: Complete - found %d SNMP host(s)\n", hosts_found);
+        }
+
+        if (saving) {
+            scan_file_printf(&sf, "--- SNMP Scan Summary ---\n");
+            scan_file_printf(&sf, "Hosts with SNMP: %d\n", hosts_found);
+            scan_file_close(&sf);
+        }
         return;
     }
 
-    snmp_scan_subnet_prefix(subnet_prefix);
+    char subnet_prefix[16];
+    uint32_t first, last;
+    if (!get_wifi_subnet_range(subnet_prefix, sizeof(subnet_prefix), &first, &last)) {
+        glog("SNMP Scan: Failed to get subnet - not connected to WiFi?\n");
+        return;
+    }
+
+    uint32_t total = last - first + 1;
+    glog("SNMP Scan: Scanning %s (%u hosts)...\n", subnet_prefix, (unsigned)total);
+
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "snmp_scan", "txt") == ESP_OK);
+
+    if (saving) {
+        scan_file_printf(&sf, "--- SNMP Scan Results (Subnet %s) ---\n", subnet_prefix);
+    }
+
+    int hosts_found = 0;
+    uint32_t scanned = 0;
+
+    for (uint32_t ip = first; ip <= last && !g_network_scan_cancel; ip++, scanned++) {
+        if (scanned % 25 == 0) {
+            glog("SNMP Scan: Progress %u/%u hosts\n", (unsigned)scanned, (unsigned)total);
+        }
+
+        char target_ip[16];
+        ip_u32_to_str(ip, target_ip, sizeof(target_ip));
+
+        if (snmp_probe_ip(target_ip, NULL, &sf)) {
+            hosts_found++;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (g_network_scan_cancel) {
+        glog("SNMP Scan: Cancelled. Found %d SNMP host(s)\n", hosts_found);
+    } else {
+        glog("SNMP Scan: Subnet scan complete - found %d SNMP host(s)\n", hosts_found);
+    }
+
+    if (saving) {
+        scan_file_printf(&sf, "--- SNMP Scan Summary ---\n");
+        scan_file_printf(&sf, "Hosts with SNMP: %d\n", hosts_found);
+        scan_file_close(&sf);
+    }
 }
 
 void snmp_scan_subnet_prefix(const char *subnet_prefix) {
@@ -371,6 +575,7 @@ void snmp_scan_subnet_prefix(const char *subnet_prefix) {
         return;
     }
 
+    snmp_communities_default_init();
     glog("SNMP Scan: Scanning subnet %s*\n", subnet_prefix);
 
     scan_file_t sf = SCAN_FILE_INIT;
@@ -381,7 +586,6 @@ void snmp_scan_subnet_prefix(const char *subnet_prefix) {
     }
 
     int hosts_found = 0;
-    char sysdescr[256];
     g_network_scan_cancel = false;
 
     glog("SNMP Scan: Scanning 254 hosts...\n");
@@ -396,13 +600,8 @@ void snmp_scan_subnet_prefix(const char *subnet_prefix) {
         char target_ip[16];
         build_ip_string(target_ip, sizeof(target_ip), subnet_prefix, host);
 
-        bool found = false;
-        for (int i = 0; i < SNMP_MAX_COMMUNITIES && !found && !g_network_scan_cancel; i++) {
-            if (probe_snmp(target_ip, SNMP_COMMUNITIES[i], sysdescr, sizeof(sysdescr), &sf)) {
-                found = true;
-                hosts_found++;
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
+        if (snmp_probe_ip(target_ip, NULL, &sf)) {
+            hosts_found++;
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -479,7 +678,7 @@ static size_t build_snmp_getnext_request(uint8_t *buf, size_t buf_size,
     return msg_len + 2;
 }
 
-static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
+static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len, int32_t expect_req_id,
                                          uint8_t *out_oid, size_t *out_oid_len,
                                          char *out_value, size_t out_value_size,
                                          uint8_t *out_type) {
@@ -503,7 +702,11 @@ static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
     size_t pdu_end = pos + pdu_len;
     if (pdu_end > seq_end) return false;
 
-    for (int i = 0; i < 3; i++) {
+    int32_t resp_id = 0;
+    if (!asn1_read_int(buf, pdu_end, &pos, &resp_id)) return false;
+    if (expect_req_id >= 0 && resp_id != expect_req_id) return false;
+
+    for (int i = 0; i < 2; i++) {
         if (!asn1_skip_tlv(buf, pdu_end, &pos, 0x02)) return false;
     }
 
@@ -558,10 +761,10 @@ static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
             size_t out_pos = 0;
             for (size_t i = 0; i < val_len && out_pos < out_value_size - 1; i++) {
                 uint8_t b = buf[pos + i];
+                int w;
                 if (i == 0) {
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     "%d.%d", b / 40, b % 40);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 "%d.%d", b / 40, b % 40);
                 } else if (b & 0x80) {
                     uint32_t val = b & 0x7F;
                     while (i + 1 < val_len && (buf[pos + i + 1] & 0x80)) {
@@ -569,13 +772,17 @@ static bool parse_snmp_getnext_response(const uint8_t *buf, size_t len,
                         val = (val << 7) | (buf[pos + i] & 0x7F);
                     }
                     if (i + 1 < val_len) { i++; val = (val << 7) | buf[pos + i]; }
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     ".%lu", (unsigned long)val);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 ".%lu", (unsigned long)val);
                 } else {
-                    int w = snprintf(&out_value[out_pos], out_value_size - out_pos,
-                                     ".%u", b);
-                    if (w > 0) out_pos += (size_t)w;
+                    w = snprintf(&out_value[out_pos], out_value_size - out_pos,
+                                 ".%u", b);
+                }
+                if (w >= 0 && (size_t)w < out_value_size - out_pos) {
+                    out_pos += (size_t)w;
+                } else {
+                    out_pos = out_value_size - 1;
+                    break;
                 }
             }
             out_value[out_pos] = '\0';
@@ -602,18 +809,22 @@ static void format_oid(const uint8_t *oid, size_t oid_len, char *out, size_t out
     }
     size_t pos = 0;
     for (size_t i = 0; i < oid_len && pos < out_size - 1; i++) {
+        int w;
         if (i == 0) {
-            int w = snprintf(&out[pos], out_size - pos, "%d.%d", oid[0] / 40, oid[0] % 40);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, "%d.%d", oid[0] / 40, oid[0] % 40);
         } else if (oid[i] & 0x80) {
             uint32_t val = oid[i] & 0x7F;
             while (i + 1 < oid_len && (oid[i + 1] & 0x80)) { i++; val = (val << 7) | (oid[i] & 0x7F); }
             if (i + 1 < oid_len) { i++; val = (val << 7) | oid[i]; }
-            int w = snprintf(&out[pos], out_size - pos, ".%lu", (unsigned long)val);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, ".%lu", (unsigned long)val);
         } else {
-            int w = snprintf(&out[pos], out_size - pos, ".%u", oid[i]);
-            if (w > 0) pos += (size_t)w;
+            w = snprintf(&out[pos], out_size - pos, ".%u", oid[i]);
+        }
+        if (w >= 0 && (size_t)w < out_size - pos) {
+            pos += (size_t)w;
+        } else {
+            pos = out_size - 1;
+            break;
         }
     }
     out[pos] = '\0';
@@ -699,6 +910,7 @@ static void snmp_walk_host_internal(const char *target_ip, const char *community
         int n = recvfrom(sock, rx_buf, sizeof(rx_buf), 0,
                          (struct sockaddr *)&from_addr, &from_len);
         if (n <= 0) break;
+        if (from_addr.sin_addr.s_addr != dest_addr.sin_addr.s_addr) continue;
 
         size_t check_pos = 1;
         size_t check_len = 0;
@@ -713,7 +925,7 @@ static void snmp_walk_host_internal(const char *target_ip, const char *community
         char value[256];
         uint8_t val_type = 0;
 
-        if (!parse_snmp_getnext_response(rx_buf, (size_t)n,
+        if (!parse_snmp_getnext_response(rx_buf, (size_t)n, (int32_t)req_id,
                                           resp_oid, &resp_oid_len,
                                           value, sizeof(value), &val_type)) break;
 
@@ -760,27 +972,102 @@ void snmp_walk_host(const char *target_ip, const char *oid_root) {
     const char *oid = oid_root ? oid_root : OID_SYSTEM;
     glog("SNMP walk on %s (OID %s)...\n", target_ip, oid);
     g_network_scan_cancel = false;
+    snmp_communities_default_init();
 
-    for (int i = 0; i < SNMP_MAX_COMMUNITIES && !g_network_scan_cancel; i++) {
-        glog("[SNMP-WALK] Trying community: %s\n", SNMP_COMMUNITIES[i]);
-        snmp_walk_host_internal(target_ip, SNMP_COMMUNITIES[i], oid, NULL);
+    for (int i = 0; i < g_snmp_community_count && !g_network_scan_cancel; i++) {
+        glog("[SNMP-WALK] Trying community: %s\n", g_snmp_communities[i]);
+        snmp_walk_host_internal(target_ip, g_snmp_communities[i], oid, NULL);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     glog("SNMP walk completed on %s\n", target_ip);
 }
 
 void snmp_walk_subnet(const char *oid_root) {
-    char subnet_prefix[16];
-    if (!get_wifi_subnet_prefix(subnet_prefix, sizeof(subnet_prefix))) {
-        glog("SNMP Walk: Failed to get subnet prefix\n");
+    snmp_communities_default_init();
+    const char *oid = oid_root ? oid_root : OID_SYSTEM;
+
+    int arp_count = arp_scan_get_count();
+    if (arp_count > 0) {
+        glog("SNMP Walk: Walking %d ARP-discovered host(s), OID %s\n", arp_count, oid);
+
+        scan_file_t sf = SCAN_FILE_INIT;
+        bool saving = (scan_file_open(&sf, "snmp_walk", "txt") == ESP_OK);
+        if (saving) scan_file_printf(&sf, "--- SNMP Walk Results (ARP-seeded, OID %s) ---\n", oid);
+
+        g_network_scan_cancel = false;
+        int hosts_walked = 0;
+
+        for (int i = 0; i < arp_count && !g_network_scan_cancel; i++) {
+            const arp_host_t *host = arp_scan_get_host(i);
+            if (!host) continue;
+            if (!snmp_probe_ip(host->ip, host->mac, NULL)) continue;
+            glog("[SNMP-WALK] Found SNMP on %s, walking...\n", host->ip);
+            for (int c = 0; c < g_snmp_community_count && !g_network_scan_cancel; c++) {
+                snmp_walk_host_internal(host->ip, g_snmp_communities[c], oid, &sf);
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+            hosts_walked++;
+        }
+
+        glog("SNMP Walk: Complete. Walked %d host(s)\n", hosts_walked);
+        if (saving) {
+            scan_file_printf(&sf, "--- SNMP Walk Summary ---\n");
+            scan_file_printf(&sf, "Hosts walked: %d\n", hosts_walked);
+            scan_file_close(&sf);
+        }
         return;
     }
-    snmp_walk_subnet_prefix(subnet_prefix, oid_root);
+
+    char subnet_prefix[16];
+    uint32_t first, last;
+    if (!get_wifi_subnet_range(subnet_prefix, sizeof(subnet_prefix), &first, &last)) {
+        glog("SNMP Walk: Failed to get subnet\n");
+        return;
+    }
+
+    uint32_t total = last - first + 1;
+    glog("SNMP Walk: Walking %s (%u hosts) OID %s\n", subnet_prefix, (unsigned)total, oid);
+
+    scan_file_t sf = SCAN_FILE_INIT;
+    bool saving = (scan_file_open(&sf, "snmp_walk", "txt") == ESP_OK);
+    if (saving) scan_file_printf(&sf, "--- SNMP Walk Results (Subnet %s OID %s) ---\n", subnet_prefix, oid);
+
+    int hosts_walked = 0;
+    g_network_scan_cancel = false;
+    uint32_t scanned = 0;
+
+    for (uint32_t ip = first; ip <= last && !g_network_scan_cancel; ip++, scanned++) {
+        if (scanned % 5 == 0) glog("SNMP Walk: Progress %u/%u\n", (unsigned)scanned, (unsigned)total);
+
+        char target_ip[16];
+        ip_u32_to_str(ip, target_ip, sizeof(target_ip));
+
+        if (!snmp_probe_ip(target_ip, NULL, NULL)) continue;
+
+        glog("[SNMP-WALK] Found SNMP on %s, walking...\n", target_ip);
+        for (int c = 0; c < g_snmp_community_count && !g_network_scan_cancel; c++) {
+            snmp_walk_host_internal(target_ip, g_snmp_communities[c], oid, &sf);
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        hosts_walked++;
+    }
+
+    if (g_network_scan_cancel) {
+        glog("SNMP Walk: Cancelled. Walked %d host(s)\n", hosts_walked);
+    } else {
+        glog("SNMP Walk: Complete. Walked %d host(s)\n", hosts_walked);
+    }
+    if (saving) {
+        scan_file_printf(&sf, "--- SNMP Walk Summary ---\n");
+        scan_file_printf(&sf, "Hosts walked: %d\n", hosts_walked);
+        scan_file_close(&sf);
+    }
 }
 
 void snmp_walk_subnet_prefix(const char *subnet_prefix, const char *oid_root) {
     if (subnet_prefix == NULL || strlen(subnet_prefix) == 0) return;
 
+    snmp_communities_default_init();
     const char *oid = oid_root ? oid_root : OID_SYSTEM;
     glog("SNMP Walk: Walking subnet %s* OID %s\n", subnet_prefix, oid);
 
@@ -797,23 +1084,14 @@ void snmp_walk_subnet_prefix(const char *subnet_prefix, const char *oid_root) {
         char target_ip[16];
         build_ip_string(target_ip, sizeof(target_ip), subnet_prefix, host);
 
-        char sysdescr[256];
-        bool has_snmp = false;
-        for (int i = 0; i < SNMP_MAX_COMMUNITIES && !has_snmp && !g_network_scan_cancel; i++) {
-            if (probe_snmp(target_ip, SNMP_COMMUNITIES[i], sysdescr, sizeof(sysdescr), NULL))
-                has_snmp = true;
-            vTaskDelay(pdMS_TO_TICKS(25));
-        }
+        if (!snmp_probe_ip(target_ip, NULL, NULL)) continue;
 
-        if (has_snmp && !g_network_scan_cancel) {
-            glog("[SNMP-WALK] Found SNMP on %s, walking...\n", target_ip);
-            for (int i = 0; i < SNMP_MAX_COMMUNITIES && !g_network_scan_cancel; i++) {
-                snmp_walk_host_internal(target_ip, SNMP_COMMUNITIES[i], oid, &sf);
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-            hosts_walked++;
+        glog("[SNMP-WALK] Found SNMP on %s, walking...\n", target_ip);
+        for (int i = 0; i < g_snmp_community_count && !g_network_scan_cancel; i++) {
+            snmp_walk_host_internal(target_ip, g_snmp_communities[i], oid, &sf);
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        hosts_walked++;
     }
 
     if (g_network_scan_cancel) {

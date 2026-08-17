@@ -58,6 +58,7 @@
 #endif
 #include "core/screen_mirror.h"
 #include "gui/lvgl_safe.h"
+#include "gui/gui_router.h"
 
 uint32_t theme_palette_get_surface_alt(uint8_t theme);
 uint32_t theme_palette_get_text_muted(uint8_t theme);
@@ -219,56 +220,7 @@ lv_obj_t *battery_label = NULL;
 lv_obj_t *level_label = NULL;
 lv_obj_t *mainlabel = NULL;
 
-View *display_manager_previous_view = NULL;
 static View *s_lockscreen_return_view = NULL;
-
-/* Navigation back-stack.
- *
- * A single "previous view" pointer cannot represent a navigation hierarchy: as
- * soon as you go A->B and then Back to A, the pointer flips to B, so pressing
- * Back again from A returns to B -- an endless two-view bounce (e.g. NFC ->
- * keyboard -> exit -> NFC -> back -> keyboard...). Instead we keep an explicit
- * stack of the ancestor views to unwind through. The current view is NOT on the
- * stack; index 0 is the oldest ancestor, [depth-1] is the immediate parent.
- *
- * Forward navigation pushes the view being left. Navigating to a view already
- * on the stack (an ancestor) unwinds down to it instead of pushing, which
- * collapses A->B->A style revisits and prevents loops. Views are static
- * singletons so their pointers are stable and comparable. */
-#define VIEW_HISTORY_MAX 24
-static View *s_view_history[VIEW_HISTORY_MAX];
-static int s_view_history_depth = 0;
-
-/* System views that should never be a Back target (boot splash, lockscreen).
- * They are not pushed onto the back-stack when navigated away from. */
-static bool view_is_history_excluded(View *view) {
-  return view == &splash_view || view == &lockscreen_view;
-}
-
-/* Update the back-stack for a transition from `from` to `to`. Both may be
- * NULL/equal; caller holds dm.mutex. */
-static void view_history_record(View *from, View *to) {
-  if (to == NULL || to == from) return;
-
-  /* If the target is already an ancestor, this is a Back/up navigation: unwind
-   * the stack down to (and excluding) that entry rather than pushing. */
-  for (int i = s_view_history_depth - 1; i >= 0; --i) {
-    if (s_view_history[i] == to) {
-      s_view_history_depth = i;
-      return;
-    }
-  }
-
-  /* Forward navigation: remember the view we're leaving so Back returns here. */
-  if (from == NULL || view_is_history_excluded(from)) return;
-  if (s_view_history_depth >= VIEW_HISTORY_MAX) {
-    /* Drop the oldest entry to make room; deep chains are rare. */
-    memmove(&s_view_history[0], &s_view_history[1],
-            (VIEW_HISTORY_MAX - 1) * sizeof(View *));
-    s_view_history_depth = VIEW_HISTORY_MAX - 1;
-  }
-  s_view_history[s_view_history_depth++] = from;
-}
 
 /* True while the lockscreen is shown as a floating overlay (wake / auto-lock)
  * on top of a still-live view. In this mode dm.current_view keeps pointing at
@@ -342,6 +294,23 @@ static TickType_t last_touch_time;
 static bool is_backlight_dimmed = false;
 static bool is_backlight_off = false;
 static bool s_switch_backlight_configured = false;
+static View *s_joystick_press_owner[5];
+
+static bool dm_joystick_event_matches_view(const InputEvent *event, View *view) {
+  if (!event || event->type != INPUT_TYPE_JOYSTICK) return true;
+  int index = event->data.joystick_index;
+  if (index < 0 || index >= (int)(sizeof(s_joystick_press_owner) /
+                                  sizeof(s_joystick_press_owner[0]))) {
+    return false;
+  }
+  if (event->data.joystick_pressed) {
+    s_joystick_press_owner[index] = view;
+    return true;
+  }
+  View *owner = s_joystick_press_owner[index];
+  s_joystick_press_owner[index] = NULL;
+  return owner == NULL || owner == view;
+}
 
 #ifdef CONFIG_USE_ENCODER
 static encoder_t g_encoder;
@@ -1628,6 +1597,10 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "I80 display initialization failed: %s", esp_err_to_name(ret));
     return;
   }
+  /* The I80 path skips lvgl_driver_init(), so the touch driver (CST820) must
+   * be initialized here or its device handle stays NULL and every read fails
+   * with "i2c handle not initialized". */
+  touch_driver_init();
 #else
   lvgl_driver_init();
 #endif
@@ -1659,10 +1632,19 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Keep the C5 SPI flush buffer in DMA-capable internal RAM. PSRAM draw
+  /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
-     time, which is fragile once WiFi/LVGL have fragmented internal RAM. */
+     time, which is fragile once WiFi/LVGL have fragmented internal RAM.
+     Only somethingsomething gets a second buffer: LVGL renders the next
+     chunk while the SPI DMA flushes the previous one, hiding render time
+     behind the transfer. Other C5 boards stay single-buffered to save
+     internal RAM. */
   buf1_pixels = (size_t)width * 5;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    buf2_pixels = (size_t)width * 5;
+  }
+#endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
   buf1_pixels = (size_t)width * 5;
 #elif defined(CONFIG_IDF_TARGET_ESP32)
@@ -1701,6 +1683,18 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     }
   }
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (!buf1) {
+    ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
+    free(buf2);
+    buf2 = NULL;
+    return;
+  }
+  if (!buf2) {
+    ESP_LOGW(TAG, "display_manager: buf2 allocation failed, falling back to single buffer");
+    buf2_pixels = 0;
+  }
+#else
   if (!buf1 || (buf2_pixels > 0 && !buf2)) {
     ESP_LOGE(TAG, "display_manager: failed to allocate LVGL draw buffers");
     free(buf1);
@@ -1709,6 +1703,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = NULL;
     return;
   }
+#endif
   ESP_LOGI(TAG, "display_manager: draw buffers allocated, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -1922,12 +1917,14 @@ static lv_obj_t *dm_pressed_obj = NULL;
 static void dm_clear_pressed_state(lv_obj_t *obj) {
     (void)obj;
     if (dm_pressed_obj) {
-        lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        if (lv_obj_is_valid(dm_pressed_obj)) {
+            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+        }
         dm_pressed_obj = NULL;
     }
 }
 
-static void display_manager_switch_view_internal(View *view) {
+void display_manager_render_view(View *view) {
   if (view == NULL) return;
 #ifdef CONFIG_JC3248W535EN_LCD
   bsp_display_lock(0);
@@ -1940,9 +1937,7 @@ static void display_manager_switch_view_internal(View *view) {
     if (dm.current_view && dm.current_view->root) {
       dm_clear_pressed_state(dm.current_view->root);
     }
-    view_history_record(dm.current_view, view);
     if (dm.current_view && dm.current_view->root) {
-      display_manager_previous_view = dm.current_view;
       if (dm.current_view->destroy) {
         dm.current_view->destroy();
       }
@@ -1954,7 +1949,6 @@ static void display_manager_switch_view_internal(View *view) {
       lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
       if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     } else {
-      display_manager_previous_view = dm.current_view;
       dm.current_view = view;
       if (view->get_hardwareinput_callback) {
         view->get_hardwareinput_callback((void **)&dm.current_view->input_callback);
@@ -1973,7 +1967,7 @@ static void display_manager_switch_view_internal(View *view) {
 }
 
 static void dm_switch_async_cb(void *param) {
-  display_manager_switch_view_internal((View *)param);
+  gui_router_legacy_switch_immediate((View *)param);
 }
 
 typedef struct {
@@ -1985,7 +1979,8 @@ static void dm_switch_wait_async_cb(void *param) {
   dm_switch_wait_t *call = (dm_switch_wait_t *)param;
   if (!call) return;
 
-  display_manager_switch_view_internal(call->view);
+  gui_route_t route = {.id = GUI_ROUTE_VIEW, .view = call->view};
+  gui_router_navigate_immediate(&route);
   lv_timer_handler();
   lv_refr_now(NULL);
   xSemaphoreGive(call->done);
@@ -2024,9 +2019,13 @@ static void dm_run_on_lvgl_async_cb(void *param) {
   free(call);
 }
 
+bool display_manager_is_lvgl_task(void) {
+  return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
+}
+
 void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
   if (!fn) return;
-  if (lvgl_task_handle && xTaskGetCurrentTaskHandle() != lvgl_task_handle) {
+  if (!display_manager_is_lvgl_task()) {
     dm_lvgl_call_t *call = malloc(sizeof(*call));
     if (!call) return;
     call->fn = fn;
@@ -2050,7 +2049,8 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
   if (view == NULL) return false;
 
   if (!lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle) {
-    display_manager_switch_view_internal(view);
+    gui_route_t route = {.id = GUI_ROUTE_VIEW, .view = view};
+    gui_router_navigate_immediate(&route);
     lv_timer_handler();
     lv_refr_now(NULL);
     return true;
@@ -2081,19 +2081,7 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
 }
 
 void display_manager_go_back(void) {
-  /* Walk one level up the navigation back-stack (see view_history_record).
-   * Unlike a single previous-view pointer, this returns to the actual parent
-   * regardless of how the current view was reached -- and switching to that
-   * parent unwinds the stack, so repeated Back presses keep climbing instead
-   * of bouncing between the last two views. Falls back to the main menu when
-   * the stack is empty (e.g. the first view after boot). */
-  View *target = (s_view_history_depth > 0)
-                     ? s_view_history[s_view_history_depth - 1]
-                     : NULL;
-  if (!target || target == dm.current_view) {
-    target = &main_menu_view;
-  }
-  display_manager_switch_view(target);
+  gui_router_back();
 }
 
 void display_manager_init_deferred_peripherals(void) {
@@ -3453,19 +3441,35 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
     if (ev->type != INPUT_TYPE_TOUCH || ev->is_touch_move) return;
     if (ev->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
+            dm_pressed_obj = NULL;
         }
         lv_point_t pt = ev->data.touch_data.point;
-        View *cur = dm.current_view;
-        lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
-        lv_obj_t *found = lv_indev_search_obj(root, &pt);
+        /* Search overlay layers first so popups on lv_layer_top()/lv_layer_sys()
+         * consume the press instead of rows behind them getting styled. */
+        lv_obj_t *found = lv_indev_search_obj(lv_layer_top(), &pt);
+        if (!found) {
+            lv_obj_t *sys = lv_layer_sys();
+            if (sys && lv_obj_is_valid(sys)) {
+                found = lv_indev_search_obj(sys, &pt);
+            }
+        }
+        if (!found) {
+            View *cur = dm.current_view;
+            lv_obj_t *root = (cur && cur->root) ? cur->root : lv_scr_act();
+            found = lv_indev_search_obj(root, &pt);
+        }
         if (found) {
             lv_obj_add_state(found, LV_STATE_PRESSED);
             dm_pressed_obj = found;
         }
     } else {
         if (dm_pressed_obj) {
-            lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            if (lv_obj_is_valid(dm_pressed_obj)) {
+                lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
+            }
             dm_pressed_obj = NULL;
         }
     }
@@ -3517,6 +3521,7 @@ void processEvent() {  // do not process events until the display manager is up
        * "current" view (so its capture keeps running) but all input belongs to
        * the lockscreen. */
       if (s_lockscreen_overlay_active) {
+        current = &lockscreen_view;
         input_callback = lockscreen_view.input_callback;
         view_name = lockscreen_view.name;
       }
@@ -3526,6 +3531,10 @@ void processEvent() {  // do not process events until the display manager is up
       ESP_LOGD(TAG, "Input event type: %d, Current view: %s\n", event.type, view_name);
       bool accepts_touch_move = touch_move_events_enabled_for_view_name(view_name);
       if (event.type == INPUT_TYPE_TOUCH && event.is_touch_move && !accepts_touch_move) {
+        processed++;
+        continue;
+      }
+      if (!dm_joystick_event_matches_view(&event, current)) {
         processed++;
         continue;
       }
@@ -3591,6 +3600,7 @@ void processEvent() {  // do not process events until the display manager is up
 
         /* See note above: lockscreen overlay owns input while it's up. */
         if (s_lockscreen_overlay_active) {
+          current = &lockscreen_view;
           input_callback = lockscreen_view.input_callback;
           view_name = lockscreen_view.name;
         }
@@ -3601,6 +3611,8 @@ void processEvent() {  // do not process events until the display manager is up
         bool accepts_touch_move = touch_move_events_enabled_for_view_name(view_name);
         if (event.type == INPUT_TYPE_TOUCH && event.is_touch_move && !accepts_touch_move) {
           // drop live move samples for views that still treat pressed touches as clicks
+        } else if (!dm_joystick_event_matches_view(&event, current)) {
+          // A release belongs to the view where its press began.
         } else if (event.type == INPUT_TYPE_JOYSTICK && !event.data.joystick_pressed &&
             strcmp(view_name, "Keyboard Screen") != 0 &&
             strcmp(view_name, "Trackpad") != 0 &&

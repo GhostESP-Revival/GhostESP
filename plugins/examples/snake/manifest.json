@@ -1,0 +1,34 @@
+{
+  "id": "snake",
+  "name": "Snake",
+  "version": "1.0.1",
+  "author": "GhostESP",
+  "description": "Classic Snake with adaptive portrait and landscape layouts.",
+  "category": "Games",
+  "entry": "snake.so",
+  "target": "esp32s3",
+  "targets": ["esp32c5", "esp32s3"],
+  "api_version": 1,
+  "manifest_version": 1,
+  "package_version": 1,
+  "data_version": 1,
+  "storage_scope": "app",
+  "accent_color": "#64D96B",
+  "icon": "icon.rgb565",
+  "icon_source": "snake.png",
+  "icon_format": "rgb565a8",
+  "icon_width": 50,
+  "icon_height": 50,
+  "screenshots": [
+    {
+      "path": "screenshot.webp",
+      "alt": "Snake gameplay with green snake, red food, score, and touch Back control"
+    }
+  ],
+  "assets": ["screenshot.webp"],
+  "permissions": ["ui", "input", "time"],
+  "requires_features": ["joystick"],
+  "memory_limit": 0,
+  "stack_size": 4096,
+  "requires_psram": false
+}

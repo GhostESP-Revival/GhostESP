@@ -96,4 +96,7 @@ def load_manifest(app_dir: pathlib.Path) -> dict:
 
 
 def detect_target(manifest: dict) -> str:
+    targets = manifest.get("targets")
+    if isinstance(targets, list) and targets:
+        return str(targets[0])
     return manifest.get("target", "esp32s3")

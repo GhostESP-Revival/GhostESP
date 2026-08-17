@@ -50,7 +50,7 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 
 ### 6. Can I upload custom Evil Portal HTML over Serial or from my Flipper Zero?
 - **SD Card:** Place custom HTML in `/ghostesp/evil_portal/portals` on your SD card.
-- **Flipper Zero App:** You can upload simple HTML (max 2048 bytes) directly via the app (v1.4+ and firmware v1.7+).
+- **Flipper Zero App:** You can upload simple HTML (max 2048 bytes) directly via the Flipper companion app.
 
 ---
 

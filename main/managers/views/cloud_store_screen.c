@@ -552,7 +552,7 @@ static void enter_folder(cloud_store_item_type_t type) {
 // category chooser and top level both exit outward from there.
 static void go_up_level(void) {
     if (s_section == CLOUD_SECTION_TOP) {
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     if (s_level == SECTION_LEVEL_ITEMS && s_category_level_exists) {

@@ -49,7 +49,6 @@ static inline lv_coord_t kb_radius(void) {
     return settings_get_menu_rounded(&G_Settings) ? GUI_RADIUS_SM / 2 : 0;
 }
 
-static View *keyboard_return_view = NULL;
 
 static lv_obj_t *root = NULL;
 static lv_obj_t *input_label = NULL;
@@ -341,12 +340,11 @@ static void submit_text() {
         memset(input_buffer, 0, sizeof(input_buffer));
         input_len = 0;
         update_input_label();
-        if (keyboard_return_view)
-            display_manager_switch_view_and_wait_for_refresh(keyboard_return_view);
+        display_manager_go_back();
         callback(submitted_text);
     } else if (input_len > 0) {
         terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
+        display_manager_go_back();
         vTaskDelay(pdMS_TO_TICKS(10));
         simulateCommand(input_buffer);
         memset(input_buffer, 0, sizeof(input_buffer));
@@ -916,14 +914,6 @@ static void keyboard_destroy() {
         input_label = NULL;
         submit_callback = NULL;
         immediate_callback = NULL;
-        /* Clear the return view too. It is global state set by the opener
-         * *before* switching to the keyboard; leaving it stale meant a later
-         * opener that doesn't set its own (e.g. the options-menu keyboards)
-         * inherited the previous target -- most visibly &terminal_view from the
-         * terminal command box -- so pressing Done dumped the user into the
-         * terminal instead of returning to whatever opened the keyboard. Each
-         * opener that needs a return view (NFC, terminal) sets it every time. */
-        keyboard_return_view = NULL;
         input_len = 0;
         input_buffer[0] = '\0';
         is_symbols_mode = false;
@@ -1386,8 +1376,8 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         }
 #ifdef CONFIG_USE_ENCODER
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
-        display_manager_switch_view(&main_menu_view);
+        ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
+        display_manager_go_back();
 #endif
     }
 }
@@ -1443,7 +1433,8 @@ void keyboard_view_set_initial_text(const char *text) {
 }
 
 void keyboard_view_set_return_view(View *view) {
-    keyboard_return_view = view;
+    /* Compatibility no-op. Done and Exit both pop the keyboard route. */
+    (void)view;
 }
 
 View keyboard_view = {
