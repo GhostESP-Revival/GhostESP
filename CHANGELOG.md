@@ -7,7 +7,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 
 ### Added
 - Added GhostLink P1 Core and Peer support
-- Added new Pong, 'Lightcycle', Breakout, Snake and Tetris games to the app marketplace for C5 targets
+- Added new Pong, 'Lightcycle', Breakout, Snake and Tetris games to the app marketplace for C5 and S3 targets
 - Added Wake-on-LAN gadget
 - Added Govee LAN light discovery and control
 - Added Probe Request Flood attack (directed SSID probes with randomized MACs, supports multi-selected APs)
