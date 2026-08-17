@@ -31,12 +31,14 @@
 #include "private/elf_symbol.h"
 
 extern int __ltdf2(double a, double b);
+extern unsigned int __bswapsi2(unsigned int value);
 extern unsigned int __fixunsdfsi(double a);
 extern int __gtdf2(double a, double b);
 extern double __floatunsidf(unsigned int i);
 extern double __divdf3(double a, double b);
 extern float __divsf3(float a, float b);
 extern double __extendsfdf2(float a);
+extern float __truncdfsf2(double a);
 extern long long __divdi3(long long a, long long b);
 extern int *__errno(void);
 #ifdef __getreent
@@ -143,6 +145,7 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
 
     /* math */
 
+    ESP_ELFSYM_EXPORT(__bswapsi2),
     ESP_ELFSYM_EXPORT(__ltdf2),
     ESP_ELFSYM_EXPORT(__fixunsdfsi),
     ESP_ELFSYM_EXPORT(__gtdf2),
@@ -150,6 +153,7 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__divdf3),
     ESP_ELFSYM_EXPORT(__divsf3),
     ESP_ELFSYM_EXPORT(__extendsfdf2),
+    ESP_ELFSYM_EXPORT(__truncdfsf2),
     ESP_ELFSYM_EXPORT(__divdi3),
     ESP_ELFSYM_EXPORT(sinf),
     ESP_ELFSYM_EXPORT(cosf),
