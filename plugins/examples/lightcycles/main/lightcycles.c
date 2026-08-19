@@ -315,7 +315,7 @@ static void lightcycles_input(const ghostesp_input_event_t *event) {
     if (!event || exit_requested) return;
     if (event->type == GHOSTESP_INPUT_BACK && event->pressed) { request_exit(); return; }
     if (event->type == GHOSTESP_INPUT_TOUCH) {
-        ghostesp_input_type_t swipe = gh_touch_update(&touch_state, event);
+        ghostesp_input_type_t swipe = gh_touch_update_live(&touch_state, event);
         if (swipe == GHOSTESP_INPUT_UP) queue_player_direction(DIR_UP);
         else if (swipe == GHOSTESP_INPUT_RIGHT) queue_player_direction(DIR_RIGHT);
         else if (swipe == GHOSTESP_INPUT_DOWN) queue_player_direction(DIR_DOWN);

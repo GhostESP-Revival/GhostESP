@@ -286,7 +286,7 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "nav_buttons_enabled")) {
     s->nav_buttons_enabled = jget_bool(root, "nav_buttons_enabled", s->nav_buttons_enabled);
   }
-  s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 3);
+  s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 4);
   if (cJSON_GetObjectItemCaseSensitive(root, "carousel_invert_direction")) {
     s->carousel_invert_direction =
         jget_bool(root, "carousel_invert_direction", s->carousel_invert_direction);

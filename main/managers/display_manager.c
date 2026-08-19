@@ -88,6 +88,8 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 
 #ifdef CONFIG_USE_CARDPUTER
 #include "vendor/keyboard_handler.h"
+#endif
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_IS_ATOMS3R)
 #include "vendor/m5/m5gfx_wrapper.h"
 #endif
 
@@ -433,7 +435,9 @@ static int shift_count = 0;
 static int shift_count_before_caps = 10;
 static Point2D_t last_pressed_keys[16];
 static size_t last_pressed_len = 0;
+#endif
 
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_IS_ATOMS3R)
 void m5stack_lvgl_render_callback(lv_disp_drv_t *drv, const lv_area_t *area,
                                   lv_color_t *color_p) {
   int32_t x1 = area->x1;
@@ -469,7 +473,7 @@ static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
     
     screen_mirror_send_area(area, color_p);
     
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
     m5stack_lvgl_render_callback(drv, area, color_p);
 #elif defined(CONFIG_USE_TDISPLAY_S3)
     i80_display_flush_cb(drv, area, color_p);
@@ -1287,7 +1291,13 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_remove_style_all(left_container);
   lv_obj_set_size(left_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(left_container, LV_FLEX_FLOW_ROW);
-  lv_obj_align(left_container, LV_ALIGN_LEFT_MID, GUI_GRID, 0);
+  lv_obj_align(left_container, LV_ALIGN_LEFT_MID,
+#ifdef CONFIG_IS_ATOMS3R
+               1, /* tighter inset: use more of the 128px width */
+#else
+               GUI_GRID,
+#endif
+               0);
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, lv_color_hex(theme_palette_get_text(theme)), 0);
@@ -1301,7 +1311,13 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_set_flex_flow(right_container, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(right_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(right_container, GUI_GRID, 0);
-  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID, -GUI_GRID, 0);
+  lv_obj_align(right_container, LV_ALIGN_RIGHT_MID,
+#ifdef CONFIG_IS_ATOMS3R
+               -1, /* tighter inset: push icons further right */
+#else
+               -GUI_GRID,
+#endif
+               0);
   level_label = lv_label_create(right_container);
   lv_label_set_text(level_label, "");
   lv_obj_set_style_text_color(level_label, lv_color_hex(0x666666), 0);
@@ -1387,13 +1403,17 @@ void apply_power_management_config(bool power_save_enabled) {
   }
   rgb_manager_power_transition_end();
 
-#if defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
+#if defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R)
   // Reconfigure LEDC timer after power management changes to maintain stable PWM
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .duty_resolution = LEDC_TIMER_10_BIT,
       .timer_num = BACKLIGHT_TIMER,
-      .freq_hz = 5000, // 5 kHz
+#ifdef CONFIG_USE_ATOMS3R_BUTTON
+       .freq_hz = 500, // AtomS3R LP5562 backlight recommendation
+#else
+       .freq_hz = 5000, // 5 kHz
+#endif
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Auto-select best clock for current power mode
   };
   esp_err_t timer_err = ledc_timer_config(&ledc_timer);
@@ -1480,12 +1500,16 @@ void display_manager_init(void) {
   apply_power_management_config(settings_get_power_save_enabled(&G_Settings));
 
   // Configure LEDC timer for backlight (only for PWM boards or TDisplay S3)
-#if defined(CONFIG_USE_TDISPLAY_S3) || defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
+#if defined(CONFIG_USE_TDISPLAY_S3) || (defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R))
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .duty_resolution = LEDC_TIMER_10_BIT,
       .timer_num = BACKLIGHT_TIMER,
-      .freq_hz = 5000, // 5 kHz
+#ifdef CONFIG_USE_ATOMS3R_BUTTON
+       .freq_hz = 500, // AtomS3R LP5562 backlight recommendation
+#else
+       .freq_hz = 5000, // 5 kHz
+#endif
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Use stable APB clock for reliable PWM
   };
   ledc_timer_config(&ledc_timer);
@@ -1589,7 +1613,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_init();
   ESP_LOGI(TAG, "display_manager: LVGL core init done, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
   init_m5gfx_display();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
   esp_err_t ret = i80_display_init();
@@ -1618,7 +1642,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   /* Determine display resolution before sizing the buffers so the allocation
      and LVGL registration always use the same pixel count. */
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
+#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
   int width = get_m5gfx_width();
   int height = get_m5gfx_height();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
@@ -1629,7 +1653,16 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   int height = CONFIG_TFT_HEIGHT;
 #endif
 
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
+#if defined(CONFIG_IS_ATOMS3R)
+  /* Single full-frame buffer. full_refresh=1 needs a screen-sized buffer, but a
+     single one is enough and, more importantly, one 32KB internal DMA block
+     allocates reliably where two (double-buffered, 64KB) do not once WiFi/LVGL
+     have fragmented internal RAM -- the double alloc was failing and bailing out
+     before dm.mutex was created, leaving render_view to assert on a NULL queue.
+     The full-canvas present path (setAddrWindow 0,0,128,128) is preserved. */
+  buf1_pixels = (size_t)width * (size_t)height;
+  buf2_pixels = 0;
+#elif defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
   /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
@@ -1657,7 +1690,17 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
 
   if (!buf1) {
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_IS_ATOMS3R)
+    buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (buf1) ESP_LOGI(TAG, "display_manager: AtomS3R buf1 allocated in internal DMA RAM (%d bytes)", (int)buf1_bytes);
+    if (!buf1) {
+      /* Once the WiFi AP is up, internal DMA RAM is too fragmented to hand back
+         a contiguous full-frame block. ESP32-S3 SPI DMA can source the flush
+         straight from PSRAM, so fall back there instead of crash-looping. */
+      buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+      if (buf1) ESP_LOGI(TAG, "display_manager: AtomS3R buf1 allocated in PSRAM (%d bytes)", (int)buf1_bytes);
+    }
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (buf1) ESP_LOGI(TAG, "display_manager: buf1 allocated in internal DMA RAM (%d bytes)", (int)buf1_bytes);
 #elif defined(CONFIG_SPIRAM)
@@ -1670,7 +1713,10 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     }
   }
   if (buf2_pixels > 0 && !buf2) {
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_IS_ATOMS3R)
+    buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (buf2) ESP_LOGI(TAG, "display_manager: AtomS3R buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (buf2) ESP_LOGI(TAG, "display_manager: buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
 #elif defined(CONFIG_SPIRAM)
@@ -1715,6 +1761,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = width;
   disp_drv.ver_res = height;
+#ifdef CONFIG_IS_ATOMS3R
+  // Match the reference full-canvas present path and avoid stale GC9107 edge
+  // pixels left behind by partial LVGL flush windows.
+  disp_drv.full_refresh = 1;
+#endif
 
   disp_drv.flush_cb = invert_flush_cb;
   disp_drv.draw_buf = &disp_buf;
@@ -1930,7 +1981,7 @@ void display_manager_render_view(View *view) {
   bsp_display_lock(0);
 #endif
   if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
-    ESP_LOGI(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
+    ESP_LOGD(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
     if (view == &lockscreen_view) {
       display_manager_run_freeze_pre_lock();
     }
@@ -2316,6 +2367,8 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     ESP_LOGI(TAG, "TDisplay S3 backlight: %d%% (LEDC PWM)", percentage);
+#elif defined(CONFIG_IS_ATOMS3R)
+    m5gfx_set_brightness(percentage);
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
@@ -2998,7 +3051,94 @@ void hardware_input_task(void *pvParameters) {
       }
 #endif
 
- #ifdef CONFIG_USE_JOYSTICK
+#ifdef CONFIG_USE_ATOMS3R_BUTTON
+    /* AtomS3R single active-low button. Actions are decided on release by how
+       long the button was held, plus a short multi-tap counter:
+         1 tap          -> Down   (index 4)       navigate next
+         2 taps         -> Up     (index 2)       navigate previous
+         3 taps         -> Back   (EXIT_BUTTON)
+         hold >= 0.5s   -> Select (index 1)
+         hold >= 1.0s   -> Back   (EXIT_BUTTON)
+       Back has TWO triggers -- triple tap and long hold -- so going back is
+       always reliable even when triple-tap timing is slightly off (this is the
+       universal back affordance for menus that have no on-screen Back item). */
+    {
+      static bool button_was_pressed = false;
+      static uint8_t tap_count = 0;
+      static uint32_t button_pressed_at = 0;
+      static uint32_t last_release_at = 0;
+      const uint32_t MULTI_TAP_WINDOW_MS = 300; /* forgiving enough for triple */
+      const uint32_t HOLD_SELECT_MS = 500;
+      const uint32_t HOLD_BACK_MS = 2000;
+      bool pressed = joystick_get_button_state(&joysticks[0]);
+      uint32_t now_ms = dm_now_ms();
+
+      /* Commit counted quick taps: instantly at 3 (max), otherwise once the
+         window since the last release elapses with the button still up. */
+      if (!pressed && tap_count > 0 &&
+          (tap_count >= 3 || (now_ms - last_release_at) >= MULTI_TAP_WINDOW_MS)) {
+        if (tap_count >= 3) {
+          // Triple tap = Back. Views map INPUT_TYPE_EXIT_BUTTON to go-back;
+          // joystick index 0 is "Left" on the carousel, not back.
+          InputEvent event = {
+            .type = INPUT_TYPE_EXIT_BUTTON,
+            .data.exit_pressed = true,
+          };
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+        } else {
+          int index = (tap_count == 1) ? 4 : 2; /* 1 -> Down, 2 -> Up */
+          InputEvent event = {
+            .type = INPUT_TYPE_JOYSTICK,
+            .data.joystick_index = index,
+            .data.joystick_pressed = true,
+          };
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+          event.data.joystick_pressed = false;
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+        }
+        tap_count = 0;
+      }
+
+      if (pressed && !button_was_pressed) {
+        button_pressed_at = now_ms;
+        button_was_pressed = true;
+        last_touch_time = xTaskGetTickCount();
+        if (is_backlight_dimmed || is_backlight_off) {
+          set_backlight_brightness(100);
+          is_backlight_dimmed = false;
+          is_backlight_off = false;
+        }
+      } else if (!pressed && button_was_pressed) {
+        uint32_t duration = now_ms - button_pressed_at;
+        if (duration >= HOLD_BACK_MS) {
+          // Long hold = Back. Reliable, timing-independent alternative to the
+          // triple tap so back always works in any menu.
+          tap_count = 0;
+          InputEvent event = {
+            .type = INPUT_TYPE_EXIT_BUTTON,
+            .data.exit_pressed = true,
+          };
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+        } else if (duration >= HOLD_SELECT_MS) {
+          // Medium hold = Select, delivered as a press+release pair.
+          tap_count = 0;
+          InputEvent event = {
+            .type = INPUT_TYPE_JOYSTICK,
+            .data.joystick_index = 1,
+            .data.joystick_pressed = true,
+          };
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+          event.data.joystick_pressed = false;
+          xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
+        } else {
+          // Quick tap: count toward Down/Up/triple-Back (committed above).
+          if (tap_count < 3) tap_count++;
+          last_release_at = now_ms;
+        }
+        button_was_pressed = false;
+      }
+    }
+#elif defined(CONFIG_USE_JOYSTICK)
 #ifdef CONFIG_USE_TDECK
     {
       uint32_t now_ms = dm_now_ms();

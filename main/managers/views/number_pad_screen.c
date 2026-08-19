@@ -440,7 +440,7 @@ static void handle_hardware_button_press_number_pad(InputEvent *event) {
         }
         if (prev_cursor != cursor_pos) refresh_focus();
     }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "Exit button pressed, returning to previous view");
         display_manager_go_back();

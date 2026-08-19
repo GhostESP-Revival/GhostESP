@@ -13,6 +13,7 @@ typedef enum {
     MAIN_MENU_LAYOUT_LAUNCHER = 1,
     MAIN_MENU_LAYOUT_LIST = 2,
     MAIN_MENU_LAYOUT_COMPACT = 3,
+    MAIN_MENU_LAYOUT_HERO = 4,
 } main_menu_layout_kind_t;
 
 // Source compatibility for callers that still refer to the former Grid layout.
@@ -50,6 +51,10 @@ typedef struct {
     int carousel_preview_icon_target;
     int carousel_preview_offset;
     int carousel_transition_distance;
+
+    int hero_icon_target;
+    int hero_icon_y_offset;
+    int hero_pip_count;      /* max pips shown by the HERO position indicator */
 
     int list_button_height;
     int list_icon_target;

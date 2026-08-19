@@ -26,6 +26,7 @@ typedef struct {
     int32_t x;
     int32_t y;
     bool pressed;
+    bool is_touch_move;
 } ghostesp_input_event_t;
 
 #define GHOSTESP_BUTTON_LEFT   (1u << 0)

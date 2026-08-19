@@ -8,6 +8,7 @@
  *********************/
 #include "ili9341.h"
 #include "disp_spi.h"
+#include <string.h>
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -236,6 +237,27 @@ static void ili9341_set_orientation(uint8_t orientation)
     };
 
     ESP_LOGI(TAG, "Display orientation: %s", orientation_str[orientation]);
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    /* M5Stack CoreS3 / CoreS3-SE drive an ILI9342C panel (invert=true, BGR
+       order per M5GFX Panel_M5StackCoreS3). Unlike a generic ILI9341 (native
+       portrait, needs MV set for landscape), the ILI9342C is NATIVE 320x240
+       landscape - MV must stay CLEAR. Setting MV addresses the GRAM as
+       240-wide while LVGL still pushes 320-wide rows, which produces diagonal
+       noise lines and a 90-degrees-rotated image. So the landscape entries
+       (index 2/3, the ones this board uses) are MV-clear; portrait (0/1)
+       keep MV set. Landscape byte 0x08 = BGR only (no mirror); if the image
+       comes up mirrored left-right use 0x48 (MX), upside-down use 0x88 (MY),
+       both use 0xC8. */
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0) {
+        static const uint8_t cores3_madctl[] = {0x68, 0xA8, 0x08, 0xC8};
+        ESP_LOGI(TAG, "0x36 command value (CoreS3): 0x%02X",
+                 cores3_madctl[orientation]);
+        ili9341_send_cmd(0x36);
+        ili9341_send_data((void *) &cores3_madctl[orientation], 1);
+        return;
+    }
+#endif
 
 #if defined CONFIG_LV_PREDEFINED_DISPLAY_M5STACK
     uint8_t data[] = {0x68, 0x68, 0x08, 0x08};

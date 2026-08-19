@@ -1153,7 +1153,7 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
         scroll_terminal_up();
       }
     }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
   } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
     stop_all_operations();
 #endif

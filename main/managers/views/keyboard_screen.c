@@ -16,6 +16,16 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(CONFIG_IS_ATOMS3R) && !defined(CONFIG_USE_JOYSTICK)
+// AtomS3R's single button drives the encoder-style keyboard (a horizontal glyph
+// strip), which fits the 128px display far better than the full key matrix.
+// The button's tap scheme maps onto encoder actions in the input handler:
+// tap = next glyph, double tap = previous, hold = type, triple tap = close.
+// This define is local to this translation unit (it is set after all includes),
+// so it only reroutes this file's gating, not the rest of the firmware.
+#define CONFIG_USE_ENCODER 1
+#endif
+
 #define KEYBOARD_COLUMNS 10
 
 static const char *TAG = "keyboard_screen";
@@ -957,12 +967,12 @@ static void keyboard_hold_invert_cb(lv_timer_t *t) {
     joy_focused_btn_id = id;
 }
 
-static void handle_hardware_button_press_keyboard(InputEvent *event) {
-
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
-    if (event->type == INPUT_TYPE_ENCODER) {
+// Move the encoder selection by `dir` and, when `activate` is set, apply the
+// selected glyph/action. Shared by the rotary encoder and the AtomS3R single
+// button (tap = move, hold = activate).
+static void encoder_apply(int dir, bool activate) {
         if (!encoder_cont) return;
-        int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;
         lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
@@ -976,7 +986,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         encoder_set_item_style(encoder_sel_idx);
         encoder_position_item(encoder_sel_idx);
         encoder_position_selector();
-        if (event->data.encoder.button) {
+        if (activate) {
             const char *sel = encoder_items[encoder_sel_idx];
             if(strcmp(sel, "Aa") == 0) {
                 // toggle case
@@ -1042,8 +1052,30 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 add_char_to_buffer_raw(c);
             }
         }
+}
+#endif
+
+static void handle_hardware_button_press_keyboard(InputEvent *event) {
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
+    if (event->type == INPUT_TYPE_ENCODER) {
+        encoder_apply(event->data.encoder.direction, event->data.encoder.button);
         return;
     }
+#ifdef CONFIG_IS_ATOMS3R
+    // AtomS3R single button -> encoder actions. The button state machine emits
+    // joystick events: single tap = Down(4), double tap = Up(2), hold = Select(1).
+    // Triple tap arrives separately as INPUT_TYPE_EXIT_BUTTON (handled below).
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        if (!encoder_cont || !event->data.joystick_pressed) return;
+        switch (event->data.joystick_index) {
+            case 4: encoder_apply(+1, false); break; // tap: next glyph
+            case 2: encoder_apply(-1, false); break; // double tap: previous glyph
+            case 1: encoder_apply(0, true);   break; // hold: type selected glyph
+            default: break;
+        }
+        return;
+    }
+#endif
 #endif
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
@@ -1060,8 +1092,19 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 cursor_row = (cursor_row > 0) ? cursor_row - 1 : num_rows - 1;
                 if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
             } else if (button == 4) { // down
+#ifdef CONFIG_IS_ATOMS3R
+                // With one button, make each short press advance linearly
+                // through every key instead of requiring Right navigation.
+                if (cursor_col + 1 < row_lens[cursor_row]) {
+                    cursor_col++;
+                } else {
+                    cursor_row = (cursor_row + 1) % num_rows;
+                    cursor_col = 0;
+                }
+#else
                 cursor_row = (cursor_row < num_rows - 1) ? cursor_row + 1 : 0;
                 if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
+#endif
             }
         }
 
@@ -1374,7 +1417,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
         display_manager_go_back();

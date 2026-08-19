@@ -419,7 +419,7 @@ void flappy_bird_view_hardwareinput_callback(InputEvent *event) {
   } else if (event->type == INPUT_TYPE_KEYBOARD) { // dummy for handling keyboard input while playing
       ESP_LOGW(TAG, "keyboard event; unhandled");
       return;
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
   } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
     ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
     display_manager_go_back();

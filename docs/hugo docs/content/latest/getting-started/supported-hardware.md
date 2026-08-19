@@ -95,6 +95,8 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">ESP32-C5 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">ESP32-C6 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Heltec V3</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">M5Stack CoreS3-SE</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">M5Stack AtomS3R</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>has 1MB vfs partition</td><td>Manual</td><td>✗</td></tr>
     </tbody>
   </table>
 </div>
@@ -104,6 +106,8 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
 **Native SD Apps:** `✓` means the release build supports loading native `.gapp` apps from SD.
 
 **GPS Default / SD Default:** these columns describe the release build's default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so `✗` does not mean the feature is impossible on custom wiring.
+
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
 
 ## Camera Support
 
@@ -152,5 +156,7 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | Heltec V3 | `HeltecV3.zip` | |
 | Wired Hatters Banshee C5 | `Banshee_C5.zip` | |
 | Wired Hatters Banshee S3 | `Banshee_S3.zip` | |
+| M5Stack CoreS3-SE | `M5Stack_CoreS3-SE.zip` | |
+| M5Stack AtomS3R | `M5Stack_AtomS3R.zip` | |
 
 > **Note:** Images are being added as they become available.

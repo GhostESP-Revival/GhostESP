@@ -26,6 +26,7 @@
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#include "vendor/drivers/aw9523.h"
 #include "vendor/drivers/pcf8563.h"
 #include <sys/time.h>
 #include <time.h>
@@ -67,7 +68,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -177,6 +178,9 @@ static void splash_plugin_progress_cb(float pct, int files_scanned, int files_to
 
 #ifdef CONFIG_HAS_MIC
 #include "managers/microphone/mic_visualizer.h"
+#endif
+#if defined(CONFIG_HAS_ES7210_MIC) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#include "managers/m5_audio_codec.h"
 #endif
 
 // Helper macro for measuring RAM usage (internal + PSRAM) around a feature init call
@@ -640,7 +644,7 @@ static void deferred_sd_init_task(void *arg) {
     // Hand off app discovery to its own PSRAM-backed static task so the GAPP
     // inflate can use the same fat stack the Apps menu allocates. The SD Init
     // task stays at 6K; the splash holds until both boot steps are signalled.
-#if CONFIG_ENABLE_NATIVE_SD_APPS
+#if CONFIG_ENABLE_NATIVE_SD_APPS && !defined(CONFIG_IS_ATOMS3R)
     if (!start_boot_app_discovery_task()) {
         splash_boot_step_done(BOOT_DONE_PLUGIN);
     }
@@ -664,6 +668,20 @@ void app_main(void) {
     gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(CONFIG_SD_SPI_CS_PIN, 1);
     ESP_LOGI(TAG, "SD Card CS pin %d set HIGH", CONFIG_SD_SPI_CS_PIN);
+#endif
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    /* CoreS3-SE: the HY2.0 grove ports get their 5V from a boost converter
+     * gated by the AW9523 expander, which powers up disabled. Without this,
+     * units plugged into PORT.A/B/C (ENV-III, GPS, NFC) are never powered and
+     * never ACK on I2C. */
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0) {
+        esp_err_t bus5v_err = aw9523_set_port_5v(true);
+        if (bus5v_err != ESP_OK) {
+            ESP_LOGW(TAG, "Grove port 5V enable failed: %s",
+                     esp_err_to_name(bus5v_err));
+        }
+    }
 #endif
 
     // Reduce NimBLE log verbosity (keep warnings/errors only)
@@ -880,11 +898,12 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ethernet Comm Handler init", eth_comm_handler_init());
 #endif
 #ifdef CONFIG_HAS_MIC
+    MEASURE_INIT_RAM("M5 audio codec init", m5_audio_codec_init());
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
     ESP_LOGI(TAG, "Initializing audio receiver for TLV320DAC3100 I2S");
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
@@ -906,6 +925,18 @@ void app_main(void) {
 
 
 #ifdef CONFIG_WITH_SCREEN
+
+#ifdef CONFIG_USE_ATOMS3R_BUTTON
+    gpio_config_t atoms3r_button_config = {
+        .pin_bit_mask = 1ULL << CONFIG_ATOMS3R_BUTTON_PIN,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&atoms3r_button_config);
+    joystick_init(&joysticks[0], CONFIG_ATOMS3R_BUTTON_PIN, 2500, true);
+#endif
 
 #ifdef CONFIG_USE_JOYSTICK
 #ifdef CONFIG_USE_IO_EXPANDER

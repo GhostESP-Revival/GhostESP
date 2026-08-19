@@ -10,6 +10,13 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include <stdbool.h>
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_LV_DISPLAY_USE_SPI_MISO) && \
+    defined(CONFIG_LV_DISP_PIN_DC) && defined(CONFIG_LV_DISP_SPI_MISO) && \
+    (CONFIG_LV_DISP_PIN_DC == CONFIG_LV_DISP_SPI_MISO)
+#include <soc/gpio_reg.h>
+#define DISP_SPI_SHARED_DC_MISO 1
+#endif
 
 #define TAG "disp_spi"
 
@@ -88,6 +95,10 @@
  **********************/
 static void spi_ready (spi_transaction_t *trans);
 static int disp_spi_get_mode(void);
+#if defined(DISP_SPI_SHARED_DC_MISO)
+static void IRAM_ATTR disp_spi_shared_dc_pre(spi_transaction_t *trans);
+static inline void disp_spi_shared_dc_set_output(bool output);
+#endif
 
 /**********************
  *  STATIC VARIABLES
@@ -135,7 +146,11 @@ esp_err_t disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed
         .spics_io_num=DISP_SPI_CS,
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
         .queue_size=SPI_TRANSACTION_POOL_SIZE,
+ #if defined(DISP_SPI_SHARED_DC_MISO)
+        .pre_cb=disp_spi_shared_dc_pre,
+ #else
         .pre_cb=NULL,
+ #endif
         .post_cb=NULL,
 #if defined(DISP_SPI_HALF_DUPLEX)
         .flags = SPI_DEVICE_NO_DUMMY | SPI_DEVICE_HALFDUPLEX,
@@ -338,6 +353,12 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
 {
     disp_spi_send_flag_t flags = (disp_spi_send_flag_t) trans->user;
 
+#if defined(DISP_SPI_SHARED_DC_MISO)
+    /* GPIO35 is SD MISO while the display is idle. Return it to input after
+     * every display transaction so an SD transfer can drive the shared pin. */
+    disp_spi_shared_dc_set_output(false);
+#endif
+
     if (flags & DISP_SPI_SIGNAL_FLUSH) {
         lv_disp_t * disp = NULL;
 
@@ -359,3 +380,19 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
         chained_post_cb(trans);
     }
 }
+
+#if defined(DISP_SPI_SHARED_DC_MISO)
+static inline void disp_spi_shared_dc_set_output(bool output)
+{
+    const uint32_t mask = 1u << (GPIO_NUM_35 & 31);
+    *(volatile uint32_t *)(output ? GPIO_ENABLE1_W1TS_REG : GPIO_ENABLE1_W1TC_REG) = mask;
+}
+
+static void IRAM_ATTR disp_spi_shared_dc_pre(spi_transaction_t *trans)
+{
+    (void)trans;
+    /* The ILI9342 D/C level was set by the panel driver before queuing the
+     * transaction. Enable GPIO35 output only for the active display CS. */
+    disp_spi_shared_dc_set_output(true);
+}
+#endif

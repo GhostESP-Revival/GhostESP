@@ -140,6 +140,30 @@ out:
     return ret;
 }
 
+esp_err_t i2c_shared_release_bus(i2c_port_num_t port)
+{
+    if (port < 0 || port >= I2C_NUM_MAX) return ESP_ERR_INVALID_ARG;
+    if (!i2c_bus_lock((int)port, 100)) return ESP_ERR_TIMEOUT;
+
+    esp_err_t ret = ESP_OK;
+    for (int i = 0; i < I2C_SHARED_MAX_CACHED_DEVICES; i++) {
+        if (s_dev_cache[port][i].dev) {
+            esp_err_t rm_ret = i2c_master_bus_rm_device(s_dev_cache[port][i].dev);
+            if (ret == ESP_OK && rm_ret != ESP_OK) ret = rm_ret;
+            memset(&s_dev_cache[port][i], 0, sizeof(s_dev_cache[port][i]));
+        }
+    }
+
+    if (s_bus_handles[port]) {
+        esp_err_t del_ret = i2c_del_master_bus(s_bus_handles[port]);
+        if (ret == ESP_OK && del_ret != ESP_OK) ret = del_ret;
+        if (del_ret == ESP_OK) s_bus_handles[port] = NULL;
+    }
+
+    i2c_bus_unlock((int)port);
+    return ret;
+}
+
 esp_err_t i2c_shared_add_device(i2c_master_bus_handle_t bus,
                                 uint16_t addr,
                                 uint32_t scl_speed_hz,

@@ -105,8 +105,8 @@ static const uint32_t display_timeout_values[] = {5000, 10000, 30000, 60000, UIN
 static const char *theme_options[] = {"OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 #define THEME_COUNT 17
 
-static const char *menu_layout_options[] = {"Carousel", "Grid", "List", "Compact"};
-#define MENU_LAYOUT_COUNT 4
+static const char *menu_layout_options[] = {"Carousel", "Grid", "List", "Compact", "Hero"};
+#define MENU_LAYOUT_COUNT 5
 
 static const char *terminal_color_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
 static const uint32_t terminal_color_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
@@ -995,6 +995,9 @@ static void setup_wizard_input_callback(InputEvent *event) {
                     welcome_btn_focus = 1;
                     update_welcome_btn_focus();
                 }
+            } else if (idx == 4) { // Down - cycle the two choices
+                welcome_btn_focus = (welcome_btn_focus + 1) % 2;
+                update_welcome_btn_focus();
             } else if (idx == 1) { // Select - activate focused button
                 if (welcome_btn_focus == 0) {
                     start_btn_event_cb(NULL);
@@ -1253,6 +1256,9 @@ void setup_wizard_reset_and_open(void) {
     temp_terminal_color = 0;
     temp_epilepsy_warning = 1;
     temp_font_size = 1;
+#ifdef CONFIG_IS_ATOMS3R
+    temp_font_size = 0;
+#endif
     temp_reduced_motion = 0;
     temp_high_contrast = 0;
 #ifdef CONFIG_WITH_STATUS_DISPLAY

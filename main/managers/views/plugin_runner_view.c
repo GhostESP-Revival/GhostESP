@@ -296,6 +296,7 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
             out.x = event->data.touch_data.point.x;
             out.y = event->data.touch_data.point.y;
             out.pressed = event->data.touch_data.state == LV_INDEV_STATE_PR;
+            out.is_touch_move = event->is_touch_move;
             break;
         case INPUT_TYPE_ENCODER:
             out.type = event->data.encoder.button ? GHOSTESP_INPUT_SELECT : (event->data.encoder.direction > 0 ? GHOSTESP_INPUT_RIGHT : GHOSTESP_INPUT_LEFT);

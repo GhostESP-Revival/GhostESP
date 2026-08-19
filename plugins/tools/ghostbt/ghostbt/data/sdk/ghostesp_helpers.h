@@ -146,6 +146,7 @@ typedef struct {
     int start_x;
     int start_y;
     bool started;
+    bool triggered;
 } ghostesp_touch_state_t;
 
 #define GH_SWIPE_THRESHOLD 24
@@ -158,9 +159,11 @@ static inline ghostesp_input_type_t gh_touch_update(
         return GHOSTESP_INPUT_NONE;
 
     if (event->pressed) {
-        ts->started = true;
-        ts->start_x = event->x;
-        ts->start_y = event->y;
+        if (!ts->started) {
+            ts->started = true;
+            ts->start_x = event->x;
+            ts->start_y = event->y;
+        }
         return GHOSTESP_INPUT_NONE;
     }
 
@@ -182,6 +185,36 @@ static inline ghostesp_input_type_t gh_touch_update(
     }
 }
 
+static inline ghostesp_input_type_t gh_touch_update_live(
+    ghostesp_touch_state_t *ts, const ghostesp_input_event_t *event)
+{
+    if (!event || event->type != GHOSTESP_INPUT_TOUCH) return GHOSTESP_INPUT_NONE;
+    if (event->pressed) {
+        if (!ts->started) {
+            ts->started = true; ts->triggered = false;
+            ts->start_x = event->x; ts->start_y = event->y;
+        }
+        if (event->is_touch_move && !ts->triggered) {
+            int dx = event->x - ts->start_x, dy = event->y - ts->start_y;
+            int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+            if (ax >= GH_SWIPE_THRESHOLD || ay >= GH_SWIPE_THRESHOLD) {
+                ts->triggered = true;
+                if (ax >= ay) return dx > 0 ? GHOSTESP_INPUT_RIGHT : GHOSTESP_INPUT_LEFT;
+                return dy > 0 ? GHOSTESP_INPUT_DOWN : GHOSTESP_INPUT_UP;
+            }
+        }
+        return GHOSTESP_INPUT_NONE;
+    }
+    if (!ts->started) return GHOSTESP_INPUT_NONE;
+    bool triggered = ts->triggered;
+    int dx = event->x - ts->start_x, dy = event->y - ts->start_y;
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+    ts->started = false;
+    if (triggered || (ax < GH_SWIPE_THRESHOLD && ay < GH_SWIPE_THRESHOLD)) return GHOSTESP_INPUT_NONE;
+    if (ax >= ay) return dx > 0 ? GHOSTESP_INPUT_RIGHT : GHOSTESP_INPUT_LEFT;
+    return dy > 0 ? GHOSTESP_INPUT_DOWN : GHOSTESP_INPUT_UP;
+}
+
 /* Variant that also detects tap (press + release with no significant movement) */
 static inline ghostesp_input_type_t gh_touch_update_tap(
     ghostesp_touch_state_t *ts,
@@ -193,9 +226,11 @@ static inline ghostesp_input_type_t gh_touch_update_tap(
         return GHOSTESP_INPUT_NONE;
 
     if (event->pressed) {
-        ts->started = true;
-        ts->start_x = event->x;
-        ts->start_y = event->y;
+        if (!ts->started) {
+            ts->started = true;
+            ts->start_x = event->x;
+            ts->start_y = event->y;
+        }
         return GHOSTESP_INPUT_NONE;
     }
 
@@ -222,6 +257,7 @@ static inline ghostesp_input_type_t gh_touch_update_tap(
 /* Reset touch state (call when changing pages/views) */
 static inline void gh_touch_reset(ghostesp_touch_state_t *ts) {
     ts->started = false;
+    ts->triggered = false;
 }
 
 /* ============================================================

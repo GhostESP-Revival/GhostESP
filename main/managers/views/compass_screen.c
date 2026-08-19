@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "i2c_bus_lock.h"
+#include "managers/bmi270_driver.h"
 #include <math.h>
 
 #ifdef CONFIG_HAS_COMPASS
@@ -28,10 +29,16 @@ static lv_point_t pts_s[2];
 static lv_obj_t *heading_label = NULL;
 
 #define PI 3.14159265f
+#ifdef CONFIG_IS_ATOMS3R
+#define RING_SIZE 76
+#define CARDINAL_RADIUS 30
+#define NEEDLE_LEN 24
+#else
 #define RING_SIZE 200
-#define RING_CENTER (RING_SIZE / 2)
-#define NEEDLE_LEN 70
 #define CARDINAL_RADIUS 85  // Distance from center to N/S/E/W labels
+#define NEEDLE_LEN 70
+#endif
+#define RING_CENTER (RING_SIZE / 2)
 
 static lv_obj_t *lbl_n = NULL;
 static lv_obj_t *lbl_s = NULL;
@@ -83,7 +90,11 @@ static void init_fixed_needle(void) {
 static lv_timer_t *compass_timer = NULL;
 static i2c_master_dev_handle_t s_compass_dev = NULL;
 
+#ifdef CONFIG_COMPASS_USE_BMM150
+#define COMPASS_I2C_ADDR CONFIG_BMM150_I2C_ADDR
+#else
 #define COMPASS_I2C_ADDR 0x7C
+#endif
 
 #ifndef CONFIG_COMPASS_I2C_PORT
 #define CONFIG_COMPASS_I2C_PORT 0
@@ -196,6 +207,16 @@ static esp_err_t qmc6309_read_bytes(uint8_t reg, uint8_t *data, size_t len) {
 #define QMC6309_SET_ONLY        0x01
 #define QMC6309_SET_RESET_OFF   0x02
 
+#ifdef CONFIG_COMPASS_USE_BMM150
+#define BMM150_REG_CHIP_ID      0x40
+#define BMM150_REG_DATA_START   0x42
+#define BMM150_REG_POWER        0x4B
+#define BMM150_REG_OPMODE       0x4C
+#define BMM150_REG_REPXY        0x51
+#define BMM150_REG_REPZ         0x52
+#define BMM150_CHIP_ID_VAL      0x32
+#endif
+
 // Calibration data
 static int x_offset = 0;
 static int y_offset = 0;
@@ -240,6 +261,17 @@ static void reset_calibration(void) {
 
 static void compass_init_hw(void) {
     if (compass_initialized) return;
+
+#ifdef CONFIG_COMPASS_USE_BMM150
+    if (bmi270_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize BMI270/BMM150 sensor hub");
+        return;
+    }
+
+    compass_initialized = true;
+    ESP_LOGI(TAG, "BMI270/BMM150 sensor hub initialized");
+    return;
+#else
     
     uint8_t chip_id = 0;
     if (qmc6309_read_bytes(QMC6309_REG_CHIP_ID, &chip_id, 1) != ESP_OK || chip_id != QMC6309_CHIP_ID_VAL) {
@@ -264,11 +296,103 @@ static void compass_init_hw(void) {
     
     compass_initialized = true;
     ESP_LOGI(TAG, "Compass HW initialized");
+#endif
 }
 
 static void compass_timer_cb(lv_timer_t *timer) {
     if (!compass_initialized) return;
     
+#ifdef CONFIG_COMPASS_USE_BMM150
+    int16_t raw_x, raw_y, raw_z;
+    if (bmi270_read_mag(&raw_x, &raw_y, &raw_z) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read BMM150 through BMI270");
+        return;
+    }
+
+    /* Feed the common calibration/filter/rendering path below. */
+    static uint32_t last_log_time = 0;
+    uint32_t now = esp_timer_get_time() / 1000;
+    if (first_sample) {
+        x_min = x_max = raw_x;
+        y_min = y_max = raw_y;
+        z_min = z_max = raw_z;
+        last_raw_x = raw_x;
+        last_raw_y = raw_y;
+        first_sample = false;
+    }
+    int movement = abs(raw_x - last_raw_x) + abs(raw_y - last_raw_y);
+    last_raw_x = raw_x;
+    last_raw_y = raw_y;
+    if (!cal_valid) {
+        if (raw_x < x_min) x_min = raw_x;
+        if (raw_x > x_max) x_max = raw_x;
+        if (raw_y < y_min) y_min = raw_y;
+        if (raw_y > y_max) y_max = raw_y;
+        sample_count++;
+        int x_range = x_max - x_min;
+        int y_range = y_max - y_min;
+        float ratio = (y_range > 10) ? ((float)x_range / y_range) : 0.0f;
+        if (x_range > 100 && y_range > 100 && ratio > 0.6f && ratio < 1.7f &&
+            sample_count > MIN_CAL_SAMPLES) {
+            x_offset = (x_max + x_min) / 2;
+            y_offset = (y_max + y_min) / 2;
+            float avg_range = (x_range + y_range) / 2.0f;
+            x_scale = x_range > 0 ? avg_range / x_range : 1.0f;
+            y_scale = y_range > 0 ? avg_range / y_range : 1.0f;
+            cal_valid = true;
+        }
+    } else if (movement > 10) {
+        bool updated = false;
+        if (raw_x < x_min - 5) { x_min = raw_x; updated = true; }
+        if (raw_x > x_max + 5) { x_max = raw_x; updated = true; }
+        if (raw_y < y_min - 5) { y_min = raw_y; updated = true; }
+        if (raw_y > y_max + 5) { y_max = raw_y; updated = true; }
+        if (updated) {
+            x_offset = (x_max + x_min) / 2;
+            y_offset = (y_max + y_min) / 2;
+        }
+    }
+    if (!cal_valid) {
+        if (heading_label) lv_label_set_text(heading_label, "Rotate Device...");
+        return;
+    }
+    float cur_x_cal = (float)(raw_x - x_offset) * x_scale;
+    float cur_y_cal = (float)(raw_y - y_offset) * y_scale;
+    filtered_x = filtered_x * (1.0f - ALPHA_RAW) + cur_x_cal * ALPHA_RAW;
+    filtered_y = filtered_y * (1.0f - ALPHA_RAW) + cur_y_cal * ALPHA_RAW;
+    float heading = atan2f(filtered_x, filtered_y) * 180.0f / PI;
+    if (heading < 0) heading += 360.0f;
+    if (heading >= 360.0f) heading -= 360.0f;
+    if (last_heading < 0) last_heading = heading;
+    else {
+        float diff = heading - last_heading;
+        if (diff > 180.0f) diff -= 360.0f;
+        else if (diff < -180.0f) diff += 360.0f;
+        last_heading += diff * ALPHA_UI;
+        if (last_heading < 0) last_heading += 360.0f;
+        if (last_heading >= 360.0f) last_heading -= 360.0f;
+    }
+    if (heading_label) {
+        static int last_displayed_heading = -1;
+        int current_heading = (int)last_heading;
+        if (current_heading != last_displayed_heading) {
+            lv_label_set_text_fmt(heading_label, "%d°", current_heading);
+            last_displayed_heading = current_heading;
+        }
+    }
+    static float last_render_heading = -999;
+    if (fabsf(last_heading - last_render_heading) >= 0.2f) {
+        update_cardinal_positions(last_heading);
+        last_render_heading = last_heading;
+    }
+#ifdef DEBUG_COMPASS
+    if (now - last_log_time > 2000) {
+        ESP_LOGI(TAG, "BMM150 heading: %.1f", last_heading);
+        last_log_time = now;
+    }
+#endif
+    return;
+#else
     static int drdy_fail_count = 0;
     uint8_t status = 0;
     esp_err_t ret = qmc6309_read_bytes(QMC6309_REG_STATUS, &status, 1);
@@ -426,6 +550,7 @@ static void compass_timer_cb(lv_timer_t *timer) {
     } else {
         ESP_LOGE(TAG, "Failed to read data registers");
     }
+#endif
 }
 
 static void compass_event_handler(InputEvent *event) {
@@ -524,8 +649,20 @@ void compass_create(void) {
     heading_label = lv_label_create(content);
     lv_label_set_text(heading_label, "Initialize...");
     lv_obj_set_style_text_color(heading_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(heading_label, accessibility_get_font_title(), 0);
-    lv_obj_align(heading_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_text_font(heading_label,
+#ifdef CONFIG_IS_ATOMS3R
+                               accessibility_get_font_small(),
+#else
+                               accessibility_get_font_title(),
+#endif
+                               0);
+    lv_obj_align(heading_label, LV_ALIGN_BOTTOM_MID, 0,
+#ifdef CONFIG_IS_ATOMS3R
+                 -1
+#else
+                 -10
+#endif
+    );
     
     reset_calibration();
     compass_timer = lv_timer_create(compass_timer_cb, 33, NULL);

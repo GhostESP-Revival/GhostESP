@@ -203,6 +203,7 @@ static lv_obj_t *left_nav_btn = NULL;
 static lv_obj_t *right_nav_btn = NULL;
 static lv_obj_t *carousel_prev_obj = NULL;
 static lv_obj_t *carousel_next_obj = NULL;
+static lv_obj_t *hero_pip_container = NULL;
 static int touch_start_x;
 static int touch_start_y;
 static int touch_last_x;
@@ -236,6 +237,10 @@ static StaticTask_t *apps_plugin_reload_tcb = NULL;
 
 static inline bool apps_is_compact_layout(void) {
     return apps_layout == MAIN_MENU_LAYOUT_COMPACT;
+}
+
+static inline bool apps_is_carousel_like_layout(void) {
+    return apps_layout == MAIN_MENU_LAYOUT_CAROUSEL || apps_layout == MAIN_MENU_LAYOUT_HERO;
 }
 
 static void apply_compact_app_tile(lv_obj_t *obj, bool selected) {
@@ -380,6 +385,7 @@ static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, i
 }
 
 static void update_app_carousel_previews(void) {
+    if (apps_layout != MAIN_MENU_LAYOUT_CAROUSEL) return;
     main_menu_layout_metrics_t layout;
     main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
     if (!layout.carousel_show_previews || num_apps < 2) return;
@@ -636,6 +642,7 @@ static void apps_cleanup_layout(void) {
     launcher_current_page = -1;
     carousel_prev_obj = NULL;
     carousel_next_obj = NULL;
+    hero_pip_container = NULL;
 }
 
 static void scroll_app_launcher_card_to_view(int index) {
@@ -745,6 +752,144 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
     return card;
 }
 
+static lv_obj_t *create_app_hero_card(const main_menu_layout_metrics_t *layout,
+                                      int x_offset, lv_opa_t opacity) {
+    int app_idx = selected_app_index;
+    lv_obj_t *card = lv_btn_create(apps_container);
+    gui_apply_pressed_style(card);
+    apps_carousel_cache = (apps_carousel_cache_t){0};
+    apps_carousel_cache.card = card;
+
+    /* Flipper-style hero: one big icon + title, minimal chrome. No card
+     * surface, no borders, no shadows. */
+    lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(card, opacity, 0);
+    apps_carousel_cache.border_color = app_items[app_idx].border_color;
+    apps_carousel_cache.item_index = selected_app_index;
+
+    lv_obj_set_size(card, layout->screen_width, layout->screen_height);
+    lv_obj_align(card, LV_ALIGN_CENTER, x_offset, 0);
+
+    const char *item_symbol = app_item_symbol_icon(app_idx);
+    const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(app_idx);
+    if (item_symbol) {
+        lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[app_idx].border_color,
+                                                &lv_font_montserrat_24);
+        if (icon) {
+            lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->hero_icon_y_offset);
+            /* Symbol glyphs are fixed-size font glyphs; zoom the label around
+             * its own center so they fill the same target box as image icons
+             * and every hero icon renders at the same size. Keep the 24px
+             * font because it contains the complete LVGL symbol set, including
+             * folder symbols, then scale its glyph to the target. */
+            lv_obj_set_style_transform_pivot_x(icon, lv_obj_get_width(icon) / 2, 0);
+            lv_obj_set_style_transform_pivot_y(icon, lv_obj_get_height(icon) / 2, 0);
+            lv_obj_set_style_transform_zoom(icon,
+                                            (lv_coord_t)((layout->hero_icon_target * 256) / 24),
+                                            0);
+            apps_carousel_cache.icon = icon;
+            apps_carousel_cache.icon_src = NULL;
+            apps_carousel_cache.symbol_src = item_symbol;
+            apps_carousel_cache.icon_recolor_enabled = false;
+            apps_carousel_cache.icon_is_symbol = true;
+        }
+    } else if (item_icon) {
+        lv_obj_t *icon = lv_img_create(card);
+        lv_img_set_src(icon, item_icon);
+        lv_img_set_antialias(icon, false);
+        bool recolor_enabled = app_item_icon_should_recolor(app_idx, item_icon);
+        if (recolor_enabled) {
+            lv_obj_set_style_img_recolor(icon, app_items[app_idx].border_color, 0);
+            lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+        } else {
+            lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
+        }
+        lv_obj_set_style_clip_corner(icon, false, 0);
+
+        gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 512);
+        lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->hero_icon_y_offset);
+        apps_carousel_cache.icon = icon;
+        apps_carousel_cache.icon_src = item_icon;
+        apps_carousel_cache.symbol_src = NULL;
+        apps_carousel_cache.icon_recolor_enabled = recolor_enabled;
+        apps_carousel_cache.icon_is_symbol = false;
+    }
+
+    lv_obj_t *label = lv_label_create(card);
+    const char *label_text = app_items[app_idx].name;
+    if (app_items[app_idx].view == NULL && !app_items[app_idx].is_category_folder) {
+        label_text = "< Back";
+    }
+    lv_label_set_text(label, label_text);
+    lv_obj_set_style_text_font(label, accessibility_get_font_title(), 0);
+    lv_obj_set_style_text_color(label, apps_text_color, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0,
+                 layout->hero_icon_y_offset + layout->hero_icon_target / 2 + GUI_GRID * 2);
+    apps_carousel_cache.label = label;
+    apps_carousel_cache.label_text = label_text;
+
+    return card;
+}
+
+static lv_obj_t *create_current_app_card(const main_menu_layout_metrics_t *layout,
+                                         int x_offset, lv_opa_t opacity) {
+    if (apps_layout == MAIN_MENU_LAYOUT_HERO) {
+        return create_app_hero_card(layout, x_offset, opacity);
+    }
+    return create_app_carousel_card(layout, x_offset, opacity);
+}
+
+static void update_app_hero_position(void) {
+    if (!hero_pip_container || apps_layout != MAIN_MENU_LAYOUT_HERO || num_apps < 1) return;
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_HERO, num_apps, &layout);
+    int cap = layout.hero_pip_count < 1 ? 1 : layout.hero_pip_count;
+    int pip_count = num_apps < cap ? num_apps : cap;
+    int current = (num_apps <= 1) ? 0 : (selected_app_index * (pip_count - 1)) / (num_apps - 1);
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+
+    lv_obj_t *row = hero_pip_container;
+    lv_obj_clean(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, 10);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    for (int i = 0; i < pip_count; ++i) {
+        bool selected = i == current;
+        lv_obj_t *dot = lv_obj_create(row);
+        lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(dot, selected ? accent : apps_text_color, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(dot, selected ? LV_OPA_COVER : LV_OPA_40, LV_PART_MAIN);
+        lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+
+static void create_app_hero_position_indicator(void) {
+    if (apps_layout != MAIN_MENU_LAYOUT_HERO) return;
+    if (!hero_pip_container) {
+        hero_pip_container = lv_obj_create(apps_menu_view.root);
+        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -8);
+    } else if (lv_obj_is_valid(hero_pip_container)) {
+        lv_obj_clean(hero_pip_container);
+    }
+    lv_obj_move_foreground(hero_pip_container);
+    update_app_hero_position();
+}
+
 static void apps_carousel_fade_in_ready_cb(lv_anim_t *a) {
     (void)a;
     apps_is_animating = false;
@@ -753,12 +898,15 @@ static void apps_carousel_fade_in_ready_cb(lv_anim_t *a) {
 static void apps_carousel_fade_out_ready_cb(lv_anim_t *a) {
     lv_obj_t *old_card = (lv_obj_t *)a->var;
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
     int start_x = apps_carousel_next_slide_left ? layout.carousel_transition_distance :
                                                   -layout.carousel_transition_distance;
 
     if (old_card && lv_obj_is_valid(old_card)) lv_obj_del(old_card);
-    current_app_obj = create_app_carousel_card(&layout, start_x, LV_OPA_TRANSP);
+    /* The deleted card no longer owns any cached asset images. Allow those
+     * slots to be reused before resolving the incoming card's icon. */
+    asset_pack_reset_icon_pins();
+    current_app_obj = create_current_app_card(&layout, start_x, LV_OPA_TRANSP);
     update_app_carousel_previews();
 
     lv_anim_t move_in;
@@ -784,10 +932,10 @@ static void update_app_item(bool move_left) {
     if (!app_items || num_apps <= 0) return;
 
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_apps, &layout);
+    main_menu_layout_get_metrics(apps_layout, num_apps, &layout);
 
     if (!current_app_obj) {
-        current_app_obj = create_app_carousel_card(&layout, 0, LV_OPA_COVER);
+        current_app_obj = create_current_app_card(&layout, 0, LV_OPA_COVER);
         update_app_carousel_previews();
         apps_is_animating = false;
         return;
@@ -799,7 +947,7 @@ static void update_app_item(bool move_left) {
     int duration = ANIM_DURATION;
     if (duration <= 0) {
         lv_obj_del(current_app_obj);
-        current_app_obj = create_app_carousel_card(&layout, 0, LV_OPA_COVER);
+        current_app_obj = create_current_app_card(&layout, 0, LV_OPA_COVER);
         update_app_carousel_previews();
         apps_is_animating = false;
         return;
@@ -1078,8 +1226,10 @@ static void render_app_items(void) {
     if (!apps_container || !lv_obj_is_valid(apps_container)) return;
 
     apps_cancel_carousel_anims();
+    lvgl_obj_del_safe(&hero_pip_container);
     lv_obj_clean(apps_container);
     apps_cleanup_layout();
+    asset_pack_reset_icon_pins();
     current_app_obj = NULL;
     apps_carousel_cache = (apps_carousel_cache_t){0};
     apps_is_animating = false;
@@ -1095,6 +1245,10 @@ static void render_app_items(void) {
         select_app_item(selected_app_index, false);
     } else {
         update_app_item(false);
+    }
+
+    if (apps_layout == MAIN_MENU_LAYOUT_HERO) {
+        create_app_hero_position_indicator();
     }
 
     move_app_nav_buttons_foreground();
@@ -1239,7 +1393,7 @@ static void apps_plugin_reload_done(void *arg) {
             lv_obj_set_style_text_font(left_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(left_label, apps_text_color, 0);
-        lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 2);
 
         right_nav_btn = lv_btn_create(lv_scr_act());
         gui_apply_pressed_style(right_nav_btn);
@@ -1258,7 +1412,7 @@ static void apps_plugin_reload_done(void *arg) {
             lv_obj_set_style_text_font(right_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(right_label, apps_text_color, 0);
-        lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 2);
 
         ESP_LOGI(TAG, "Navigation buttons created for apps menu");
 
@@ -1272,15 +1426,34 @@ static void apps_plugin_reload_done(void *arg) {
     render_app_items();
     gui_screen_apply_background(apps_menu_view.root);
 
-    if (left_nav_btn) {
+    if (left_nav_btn && apps_layout != MAIN_MENU_LAYOUT_HERO) {
         lv_coord_t old_y = lv_obj_get_y(left_nav_btn);
         lv_obj_set_y(left_nav_btn, old_y + status_bar_height / 2);
         lv_obj_move_foreground(left_nav_btn);
     }
-    if (right_nav_btn) {
+    if (right_nav_btn && apps_layout != MAIN_MENU_LAYOUT_HERO) {
         lv_coord_t old_y = lv_obj_get_y(right_nav_btn);
         lv_obj_set_y(right_nav_btn, old_y + status_bar_height / 2);
         lv_obj_move_foreground(right_nav_btn);
+    }
+
+    /* HERO layout: the arrows are normally anchored to the content-area
+     * middle, which on the minimal hero stage lands low on the screen, far
+     * below the big icon and practically on top of the page dots. Re-anchor
+     * them to the hero icon's vertical center so they read as next/prev
+     * controls beside the icon (and title) instead. */
+    if (apps_layout == MAIN_MENU_LAYOUT_HERO) {
+        lv_area_t icon_area;
+        if (apps_carousel_cache.icon && lv_obj_is_valid(apps_carousel_cache.icon)) {
+            lv_obj_get_coords(apps_carousel_cache.icon, &icon_area);
+            lv_coord_t icon_center_y = (icon_area.y1 + icon_area.y2) / 2;
+            if (left_nav_btn) {
+                lv_obj_set_y(left_nav_btn, icon_center_y - lv_obj_get_height(left_nav_btn) / 2);
+            }
+            if (right_nav_btn) {
+                lv_obj_set_y(right_nav_btn, icon_center_y - lv_obj_get_height(right_nav_btn) / 2);
+            }
+        }
     }
 
     // No re-scan on open. The boot-time scan (run from the splash deferred
@@ -1337,7 +1510,7 @@ void apps_menu_destroy(void) {
  */
 static void select_app_item(int index, bool slide_left) {
     if (!app_items || num_apps <= 0) return;
-    if (apps_layout == MAIN_MENU_LAYOUT_CAROUSEL && apps_is_animating) return;
+    if (apps_is_carousel_like_layout() && apps_is_animating) return;
     if (index < 0) index = num_apps - 1;
     if (index >= num_apps) index = 0;
 
@@ -1384,6 +1557,7 @@ static void select_app_item(int index, bool slide_left) {
 
     selected_app_index = index;
     update_app_item(slide_left);
+    if (apps_layout == MAIN_MENU_LAYOUT_HERO) update_app_hero_position();
 }
 
 static void apps_menu_go_back(void) {
@@ -1655,7 +1829,7 @@ void apps_menu_event_handler(InputEvent *event) {
                 return;
             }
 
-            if (touch_dragged && apps_layout != MAIN_MENU_LAYOUT_CAROUSEL) {
+            if (touch_dragged && !apps_is_carousel_like_layout()) {
                 touch_dragged = false;
                 touch_drag_axis = 0;
                 return;
@@ -1663,7 +1837,7 @@ void apps_menu_event_handler(InputEvent *event) {
             touch_dragged = false;
             touch_drag_axis = 0;
 
-            if (apps_layout == MAIN_MENU_LAYOUT_CAROUSEL) {
+            if (apps_is_carousel_like_layout()) {
                 if (abs(dx) > SWIPE_THRESHOLD && abs(dx) > abs(dy)) {
                     if (dx < 0) {
                         select_app_item(selected_app_index + 1, true);
@@ -1747,7 +1921,7 @@ void apps_menu_event_handler(InputEvent *event) {
                         }
                     }
                 } else {
-                    // Carousel layout - use current selection
+                    // Carousel/Hero layout - use current selection
                     handle_app_item_selection(selected_app_index);
                 }
                 return;
@@ -1770,7 +1944,7 @@ void apps_menu_event_handler(InputEvent *event) {
                 select_app_item(apps_grid_horizontal_target(-1), false);
             }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "IO6 exit button pressed, returning to main menu");
         apps_menu_go_back();

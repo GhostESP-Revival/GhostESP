@@ -269,15 +269,37 @@ static bool display_spi_suspend_for_sd(void) { return false; }
 static bool display_spi_resume_after_sd(void) { return true; }
 #endif
 
-static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
+/* CoreS3-SE shares GPIO35 between LCD D/C and SD MISO. The display drives it
+ * while its CS is active; the SD card must be allowed to drive it as an input
+ * during the shared-bus mount. */
+static void shared_spi_set_display_dc_mode(bool sd_mode)
+{
+#if defined(CONFIG_LV_DISPLAY_USE_SPI_MISO) && defined(CONFIG_LV_DISP_PIN_DC) && \
+    defined(CONFIG_SD_SPI_MISO_PIN) && (CONFIG_LV_DISP_PIN_DC == CONFIG_SD_SPI_MISO_PIN)
+  esp_err_t ret = gpio_set_direction(CONFIG_LV_DISP_PIN_DC,
+                                     sd_mode ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to switch shared LCD D/C GPIO%d to %s: %s",
+             CONFIG_LV_DISP_PIN_DC, sd_mode ? "SD input" : "LCD output",
+             esp_err_to_name(ret));
+  }
+#else
+  (void)sd_mode;
+#endif
+}
+
+static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active, bool sd_mounted) {
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
-  ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d)", guard_active);
+  ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d, mounted=%d)",
+           guard_active, sd_mounted);
   if (guard_active) {
+    shared_spi_set_display_dc_mode(sd_mounted);
     display_manager_resume_lvgl_task();
     display_manager_resume_input_task();
   }
 #else
   (void)guard_active;
+  (void)sd_mounted;
 #endif
 }
 
@@ -512,7 +534,7 @@ void sd_card_get_cached_stats(sd_card_cached_stats_t *out) {
     }
 }
 
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 static bool s_virtual_storage_mounted = false;
 
@@ -647,8 +669,8 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.card = NULL;
 
 
-#ifdef CONFIG_IS_S3TWATCH
-  ESP_LOGI(TAG, "S3TWatch detected - attempting virtual storage mount");
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+  ESP_LOGI(TAG, "Board without SD card detected - attempting virtual storage mount");
   
   vTaskDelay(pdMS_TO_TICKS(100));
   
@@ -780,23 +802,34 @@ esp_err_t sd_card_init(void) {
 
   bool shared_spi_guard_active = false;
   bool display_rebind_required = false;
+  bool concurrent_shared_spi = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  concurrent_shared_spi = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0;
+#endif
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
   ESP_LOGI(TAG, "Checking shared SPI: is_shared_display_sd_spi()=%d, display_sd_spi_pins_match()=%d",
            is_shared_display_sd_spi(), display_sd_spi_pins_match());
   display_rebind_required = display_spi_requires_rebind_for_sd();
   ESP_LOGI(TAG, "display_rebind_required=%d", display_rebind_required);
   if (is_shared_display_sd_spi() && !display_rebind_required) {
-    /* Pins match the display, so the display's SPI device is still attached
-     * to the shared host. Pause LVGL and defer panel detach to the
-     * gating/rebind block below before SD claims the bus. */
-    shared_spi_guard_active = true;
-    ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
-    display_manager_suspend_input_task();
-    display_manager_suspend_lvgl_task();
-    disp_wait_for_pending_transactions();
+    if (concurrent_shared_spi) {
+      /* CoreS3-SE has a real shared SPI bus. Keep LVGL alive and let the SPI
+       * host arbitrate display and SD transactions normally. */
+      shared_spi_set_display_dc_mode(true);
+    } else {
+      /* Pins match the display, so the display's SPI device is still attached
+       * to the shared host. Pause LVGL and defer panel detach to the
+       * gating/rebind block below before SD claims the bus. */
+      shared_spi_guard_active = true;
+      ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
+      display_manager_suspend_input_task();
+      display_manager_suspend_lvgl_task();
+      disp_wait_for_pending_transactions();
 #ifdef CONFIG_LV_DISP_SPI_CS
-    gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+      gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
 #endif
+      shared_spi_set_display_dc_mode(true);
+    }
   }
 #else
   ESP_LOGI(TAG, "Shared SPI code path not compiled in");
@@ -913,7 +946,7 @@ esp_err_t sd_card_init(void) {
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
   if (experimental_shared_spi) {
-    host.max_freq_khz = 10000;    /* Persistent routing avoids JIT churn; use a conservative faster clock. */
+    host.max_freq_khz = 20000;    /* Persistent routing avoids JIT churn; raised from 10 MHz after stress-testing reads on Banshee C5. */
   }
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
@@ -962,7 +995,7 @@ esp_err_t sd_card_init(void) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
       sd_spi_bus_track(SPI2_HOST, false);
     } else {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -989,7 +1022,7 @@ esp_err_t sd_card_init(void) {
       sd_spi_bus_track(sd_host_id, false);
     } else {
       ESP_LOGE(TAG, "ESP32: spi_bus_initialize failed with %s", esp_err_to_name(bus_ret));
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -1006,7 +1039,7 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -1017,7 +1050,7 @@ esp_err_t sd_card_init(void) {
     if (!is_shared_display_sd_spi()) {
       host_id = choose_free_s3_sd_spi_host(&bus_config, dmabus);
       if (host_id < 0) {
-        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
         printf("Failed to find a free SPI host for SD on ESP32-S3\n");
         return ESP_ERR_INVALID_STATE;
       }
@@ -1031,7 +1064,7 @@ esp_err_t sd_card_init(void) {
       } else if (bus_ret == ESP_ERR_INVALID_STATE) {
         sd_spi_bus_track(host_id, false);
       } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
         printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
         return bus_ret;
       }
@@ -1050,7 +1083,7 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -1078,7 +1111,7 @@ esp_err_t sd_card_init(void) {
   ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
   ESP_LOGD(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d",
            esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
-  shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+  shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, ret == ESP_OK);
   if (ret != ESP_OK) {
     ESP_LOGD(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
@@ -1318,7 +1351,7 @@ void sd_card_jit_end(bool display_was_suspended) {
 }
 
 void sd_card_unmount_with_context(sd_unmount_context_t context) {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   if (s_virtual_storage_mounted) {
     unmount_virtual_storage();
     sd_card_manager.is_initialized = false;
@@ -1864,11 +1897,11 @@ read_error:
 }
 
 void sd_card_print_config() {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   if (s_virtual_storage_mounted) {
-    printf("Storage Configuration: Virtual Flash Storage (S3TWatch)\n");
+    printf("Storage Configuration: Virtual Flash Storage\n");
     printf("Mount Point: /mnt\n");
-    printf("Storage Type: Internal Flash Partition (4MB)\n");
+    printf("Storage Type: Internal Flash Partition\n");
     
     const esp_partition_t* storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "storage");
     if (storage_partition) {
@@ -1889,7 +1922,7 @@ void sd_card_print_config() {
 }
 
 bool sd_card_is_virtual_storage() {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   return s_virtual_storage_mounted;
 #else
   return false;

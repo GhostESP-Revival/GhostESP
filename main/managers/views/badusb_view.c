@@ -1242,7 +1242,7 @@ void badusb_view_input_cb(InputEvent *event) {
         return;
     }
 
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         display_manager_go_back();
     }

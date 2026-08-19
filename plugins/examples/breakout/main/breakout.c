@@ -317,6 +317,7 @@ static void breakout_input(const ghostesp_input_event_t *event) {
         touch_active=event->pressed; touch_target=((event->x-view_left)*GAME_W)/view_width;
         if (touch_target<0) touch_target=0;
         if (touch_target>=GAME_W) touch_target=GAME_W-1;
+        if (event->pressed) paddle_x=clamp_paddle(touch_target-PADDLE_W/2);
         if (swipe==GHOSTESP_INPUT_LEFT) paddle_x=clamp_paddle(paddle_x-8);
         else if (swipe==GHOSTESP_INPUT_RIGHT) paddle_x=clamp_paddle(paddle_x+8);
         else if (swipe==GHOSTESP_INPUT_UP || tap) activate();

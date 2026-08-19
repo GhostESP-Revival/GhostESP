@@ -43,7 +43,7 @@
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #include "managers/zigbee_manager.h"
 #endif
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 #ifdef CONFIG_HAS_AUDIO_PLAYER

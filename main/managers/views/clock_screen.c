@@ -133,7 +133,7 @@ static void clock_event_handler(InputEvent *event) {
         display_manager_go_back();
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         display_manager_go_back();
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_ENCODER && event->data.encoder.button) {
         display_manager_go_back();
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {

@@ -15,6 +15,8 @@ main_menu_layout_kind_t main_menu_layout_from_setting(uint8_t setting) {
             return MAIN_MENU_LAYOUT_LIST;
         case 3:
             return MAIN_MENU_LAYOUT_COMPACT;
+        case 4:
+            return MAIN_MENU_LAYOUT_HERO;
         default:
             return MAIN_MENU_LAYOUT_CAROUSEL;
     }
@@ -23,6 +25,12 @@ main_menu_layout_kind_t main_menu_layout_from_setting(uint8_t setting) {
 main_menu_layout_kind_t main_menu_layout_resolve_for_size(main_menu_layout_kind_t kind,
                                                           int screen_width,
                                                           int screen_height) {
+    /* A 128px square cannot display the carousel/hero chrome reliably. Use
+     * the paginated launcher unless the user explicitly chose the list view. */
+    if (screen_width <= 128 && screen_height <= 160 &&
+        kind != MAIN_MENU_LAYOUT_LIST) {
+        return MAIN_MENU_LAYOUT_LAUNCHER;
+    }
     if (kind == MAIN_MENU_LAYOUT_LAUNCHER && (screen_width < 120 || screen_height <= 80)) {
         return MAIN_MENU_LAYOUT_CAROUSEL;
     }
@@ -88,6 +96,24 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     } else if (screen_width >= 320) {
         metrics->nav_button_size = 60;
         metrics->nav_button_margin = 20;
+    }
+
+    if (kind == MAIN_MENU_LAYOUT_HERO) {
+        /* Flipper-style: one big icon + title, minimal chrome. No card, no
+         * shadows, no previews. Only the slide distance is shared with the
+         * carousel render path. */
+        int min_dim = LV_MIN(screen_width, content_height);
+        int icon_target = (int)(min_dim * 0.42f);
+        if (min_dim <= 128) icon_target = (int)(min_dim * 0.48f);
+        metrics->hero_icon_target = clamp_int(icon_target, 48, 176);
+        metrics->hero_icon_y_offset = clamp_int(-((int)(metrics->hero_icon_target / 3)), -44, -14);
+        metrics->hero_pip_count = LV_MIN(9, screen_width <= 160 ? 5 : 7);
+        metrics->carousel_show_previews = false;
+        metrics->carousel_show_label = screen_width > 120;
+        metrics->carousel_transition_distance = clamp_int(screen_width / 4, 48, 96);
+        metrics->carousel_button_size = metrics->hero_icon_target; /* unused by HERO */
+        metrics->carousel_icon_target = metrics->hero_icon_target;
+        metrics->carousel_icon_y_offset = metrics->hero_icon_y_offset;
     }
 
     metrics->list_button_height = (screen_height <= 160 || screen_width <= 160) ? 32 : 44;

@@ -1140,7 +1140,7 @@ static void sd_browser_input_callback(InputEvent *event) {
                 }
             }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         sd_browser_back();
 #endif

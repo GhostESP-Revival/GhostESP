@@ -137,6 +137,10 @@ void splash_create(void) {
     build_name = "The Banshee";
   } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_core") == 0) {
     build_name = "GhostLink P1 Core";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0) {
+    build_name = "M5Stack CoreS3-SE";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "atoms3r") == 0) {
+    build_name = "M5Stack AtomS3R";
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);

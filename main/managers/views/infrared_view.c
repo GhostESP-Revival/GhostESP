@@ -109,7 +109,7 @@ static bool popup_style_initialized = false;
 
 static options_view_t *g_ir_ov = NULL;
 static void back_event_cb(lv_event_t *e);
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
 static void ir_add_back_row(void);
 #endif
 static lv_obj_t *root = NULL;
@@ -388,7 +388,7 @@ void learned_signal_name_callback(const char *name)
                 lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
                 if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
                 
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
                 ir_add_back_row();
 #endif
                 num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -489,7 +489,7 @@ static void append_signal_to_remote(const char *signal_name) {
 }
 #endif
 
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
 static const char *IR_BACK_OPTION_MAGIC_STR = "__IR_BACK_OPTION__";
 static void ir_add_back_row(void) {
     lv_obj_t *btn = options_view_add_back_row(g_ir_ov, back_event_cb, NULL);
@@ -691,7 +691,7 @@ static void rebuild_ir_file_list_ui(void) {
         options_view_add_item(g_ir_ov, "No .ir files", placeholder_event_cb, NULL);
     }
 
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
     ir_add_back_row();
 #endif
     num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -709,7 +709,7 @@ static void refresh_ir_file_list(const char *dir) {
         if (g_ir_ov) options_view_clear(g_ir_ov);
         num_ir_items = 0;
         selected_ir_index = 0;
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
         if (g_ir_ov) ir_add_back_row();
         num_ir_items = g_ir_ov ? options_view_get_item_count(g_ir_ov) : 0;
 #endif
@@ -1360,7 +1360,7 @@ static void back_event_cb(lv_event_t *e) {
         }
 #endif
         options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
         ir_add_back_row();
 #endif
         num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -1439,7 +1439,7 @@ void infrared_view_create(void) {
 
     options_view_add_item(g_ir_ov, "IR Dazzler", dazzler_event_cb, NULL);
 
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
     ir_add_back_row();
 #endif
     num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -1478,7 +1478,7 @@ void infrared_view_create(void) {
 
                 num_ir_items = options_view_get_item_count(g_ir_ov);
 
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
                 ir_add_back_row();
                 num_ir_items = options_view_get_item_count(g_ir_ov);
 #endif
@@ -2034,7 +2034,7 @@ void infrared_view_input_cb(InputEvent *event) {
                         ir_select_item((int)i);
 
                         // Magic "Back" button for encoder mode
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
                         if (lv_obj_get_user_data(btn) == IR_BACK_OPTION_MAGIC_STR) {
                             back_event_cb(NULL);
                             return;
@@ -2108,7 +2108,7 @@ void infrared_view_input_cb(InputEvent *event) {
             ESP_LOGI(TAG, "joystick down pressed, selecting next item");
             ir_select_item(selected_ir_index + 1);
         } else if(idx == 1) {
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
             // Check if the selected item is the Back option (ensure it's the last child)
             lv_obj_t *selected_obj = lv_obj_get_child(list, selected_ir_index);
             lv_obj_t *last_child = lv_obj_get_child(list, lv_obj_get_child_cnt(list) - 1);
@@ -2194,7 +2194,7 @@ void infrared_view_input_cb(InputEvent *event) {
             ir_select_item(selected_ir_index + 1);
         } else if (keyValue == 13) {
             ESP_LOGI(TAG, "Keyboard Enter button pressed\n");
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
             // Check if the selected item is the Back option
             lv_obj_t *selected_obj = lv_obj_get_child(list, selected_ir_index);
             if (selected_obj && lv_obj_get_user_data(selected_obj) == IR_BACK_OPTION_MAGIC_STR) {
@@ -2359,8 +2359,8 @@ void infrared_view_input_cb(InputEvent *event) {
             }
         }
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
-        display_manager_go_back();
+        ESP_LOGI(TAG, "Exit button pressed, returning to previous IR level");
+        back_event_cb(NULL);
 #endif
     }
 }
@@ -2437,7 +2437,7 @@ static void file_event_open(int idx) {
         for (size_t i = 0; i < uni_command_count; i++) {
             options_view_add_item(g_ir_ov, uni_command_names[i], command_event_cb, (void*)(intptr_t)i);
         }
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
         ir_add_back_row();
 #endif
         num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -2496,7 +2496,7 @@ static void file_event_open(int idx) {
     
     num_ir_items = options_view_get_item_count(g_ir_ov);
     
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
     ir_add_back_row();
     num_ir_items = options_view_get_item_count(g_ir_ov);
 #endif
@@ -2535,7 +2535,12 @@ static void command_event_execute(int idx) {
         static StaticTask_t s_uni_tx_tcb;
         static StackType_t *s_uni_tx_stack = NULL;
         if (!s_uni_tx_stack) {
-            s_uni_tx_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            /* The task stack MUST live in internal RAM, not PSRAM: this task
+               does fopen/fread on the IR file and drives RMT, both of which can
+               momentarily disable the flash cache that maps PSRAM. With the
+               stack in PSRAM the CPU loses access to its own stack during those
+               windows -> double exception with a garbage SP. */
+            s_uni_tx_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
         if (s_uni_tx_stack) {
             universal_task_handle = xTaskCreateStatic(universal_transmit_task, "uni_tx_task", 4096, args, tskIDLE_PRIORITY + 1, s_uni_tx_stack, &s_uni_tx_tcb);
@@ -2943,7 +2948,7 @@ void easy_learn_signal_name_callback(void)
             lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
             if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
             
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK)
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
             ir_add_back_row();
 #endif
             num_ir_items = options_view_get_item_count(g_ir_ov);
@@ -3362,7 +3367,10 @@ void create_easy_learn_popup(void)
     if (ir_learning_task_tcb) free(ir_learning_task_tcb);
     const uint32_t ir_learning_stack_bytes = 8192;
     const uint32_t ir_learning_stack_words = (ir_learning_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-    ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* Internal RAM, not PSRAM: ir_learning_task drives RMT RX and touches the
+       filesystem, which can disable the flash cache that maps PSRAM and leave
+       the task unable to reach a PSRAM-resident stack (double exception). */
+    ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ir_learning_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (ir_learning_task_stack && ir_learning_task_tcb) {
         ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", ir_learning_stack_words, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);
@@ -3727,7 +3735,10 @@ static void learn_remote_event_cb(lv_event_t *e) {
         if (ir_learning_task_tcb) free(ir_learning_task_tcb);
         const uint32_t ir_learning_stack_bytes = 8192;
         const uint32_t ir_learning_stack_words = (ir_learning_stack_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
-        ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* Internal RAM, not PSRAM: ir_learning_task drives RMT RX and touches the
+       filesystem, which can disable the flash cache that maps PSRAM and leave
+       the task unable to reach a PSRAM-resident stack (double exception). */
+    ir_learning_task_stack = (StackType_t *)heap_caps_malloc(ir_learning_stack_words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         ir_learning_task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (ir_learning_task_stack && ir_learning_task_tcb) {
             ir_learning_task_handle = xTaskCreateStatic(ir_learning_task, "ir_learning", ir_learning_stack_words, NULL, 5, ir_learning_task_stack, ir_learning_task_tcb);

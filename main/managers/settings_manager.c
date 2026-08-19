@@ -266,6 +266,9 @@ void settings_set_defaults(FSettings *settings) {
   settings->menu_rounded = true;
   settings->epilepsy_warning_enabled = true;
   settings->font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
+#ifdef CONFIG_IS_ATOMS3R
+  settings->font_size = 0; // Small is the default on the AtomS3R display
+#endif
   settings->reduced_motion = false;
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
@@ -1934,12 +1937,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 3) layout = 1;
+    if (layout > 4) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 3 ? settings->menu_layout : 1;
+    return settings->menu_layout <= 4 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
@@ -2115,6 +2118,7 @@ void settings_reset_badusb_defaults(FSettings *settings) {
   settings->badusb_randomize = false;
   settings->badusb_kb_layout = KB_LAYOUT_US;
 }
+#endif
 
 // MIC RGB Visualizer getters and setters
 void settings_set_mic_visualizer_mode(FSettings *settings, MicVisualizerMode mode) {
@@ -2194,7 +2198,6 @@ bool settings_get_mic_calibrate(const FSettings *settings) {
   // Calibration is a one-shot action, always returns false
   return false;
 }
-#endif
 
 void settings_set_ghostlink_split_view(FSettings *settings, bool enabled) {
   if (settings) {

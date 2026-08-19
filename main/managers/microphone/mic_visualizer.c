@@ -13,6 +13,12 @@
 #ifdef CONFIG_HAS_MIC
 
 #include "managers/microphone/mic_driver.h"
+#ifndef CONFIG_MIC_I2S_PORT
+#define CONFIG_MIC_I2S_PORT 0
+#endif
+#ifndef CONFIG_MIC_I2S_MCLK_PIN
+#define CONFIG_MIC_I2S_MCLK_PIN -1
+#endif
 #include "managers/microphone/mic_goertzel.h"
 #include "core/esp_comm_manager.h"
 #include "esp_log.h"
@@ -158,6 +164,8 @@ esp_err_t mic_visualizer_init(void) {
         .bclk_pin = (gpio_num_t)CONFIG_MIC_I2S_BCLK_PIN,
         .ws_pin = (gpio_num_t)CONFIG_MIC_I2S_WS_PIN,
         .din_pin = (gpio_num_t)CONFIG_MIC_I2S_DIN_PIN,
+        .mclk_pin = (gpio_num_t)CONFIG_MIC_I2S_MCLK_PIN,
+        .i2s_port = CONFIG_MIC_I2S_PORT,
         .sample_rate = CONFIG_MIC_SAMPLE_RATE,
         .buffer_samples = CONFIG_MIC_BUFFER_SAMPLES
     };

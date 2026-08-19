@@ -272,7 +272,7 @@ typedef struct {
   
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
-  uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List, 3=Compact)
+  uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List, 3=Compact, 4=Hero)
   bool carousel_invert_direction; // Invert main menu carousel slide direction
   
   // Neopixel settings

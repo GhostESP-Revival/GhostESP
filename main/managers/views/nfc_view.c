@@ -1524,7 +1524,7 @@ static bool nfc_init_local_reader_st25r(const char *tag) {
             (gpio_num_t)CONFIG_NFC_SCL_PIN,
             (gpio_num_t)CONFIG_NFC_RST_PIN,
             (gpio_num_t)CONFIG_NFC_IRQ_PIN,
-            I2C_NUM_0,
+            CONFIG_NFC_ST25R3916_I2C_PORT,
             CONFIG_NFC_ST25R3916_I2C_ADDR,
             g_pn532) != ESP_OK) {
         ESP_LOGE(tag, "st25r3916_new_driver_i2c failed");
@@ -2057,7 +2057,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_nfc_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the NFC scan popup
             nfc_scan_cancel_cb(NULL);
@@ -2183,7 +2183,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_saved_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the saved details popup
             saved_close_cb(NULL);
@@ -2269,7 +2269,7 @@ void nfc_view_input_cb(InputEvent *event) {
                 return;
             }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             nfc_credits_close_cb(NULL);
             return;
@@ -2305,7 +2305,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_keys_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the keys popup
             keys_close_cb(NULL);
@@ -2378,7 +2378,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_cu_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) { cu_close_cb(NULL); return; }
 #endif
         else if (event->type == INPUT_TYPE_JOYSTICK) {
@@ -2464,7 +2464,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_nfc_write_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the NFC write popup
             nfc_write_cancel_cb(NULL);
@@ -2511,7 +2511,7 @@ void nfc_view_input_cb(InputEvent *event) {
             int kv = event->data.key_value;
             if (kv == 13 || kv == 10 || kv == 27 || kv == 'c' || kv == 'C' || kv == 29 || kv == '`') { nfc_emu_cancel_cb(NULL); return; }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) { nfc_emu_cancel_cb(NULL); return; }
 #endif
         return;
@@ -2677,7 +2677,7 @@ void nfc_view_input_cb(InputEvent *event) {
         } else if (kv == 29 || kv == '`') {
             if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
 #endif

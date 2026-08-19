@@ -115,7 +115,7 @@ if(CONFIG_NFC_ST25R3916)
     list(APPEND required_components esp-idf-st25r3916)
 endif()
 
-if(idf_target STREQUAL "esp32s3" AND (CONFIG_USE_CARDPUTER OR CONFIG_USE_CARDPUTER_ADV))
+if(idf_target STREQUAL "esp32s3" AND (CONFIG_USE_CARDPUTER OR CONFIG_USE_CARDPUTER_ADV OR CONFIG_IS_ATOMS3R))
     list(APPEND sources "vendor/m5/m5gfx_wrapper.cpp")
     list(APPEND sources ${m5gfx_sources})
     list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/M5GFX/src")

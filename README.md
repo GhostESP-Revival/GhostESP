@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
-[![Boards](https://img.shields.io/badge/board%20targets-46-2ea043?style=flat-square)](#supported-boards)
+[![Boards](https://img.shields.io/badge/board%20targets-50-2ea043?style=flat-square)](#supported-boards)
 
 **⭐️ Enjoying GhostESP? Please give the repo a star. It helps a lot.**
 
@@ -246,7 +246,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 ## Supported Boards
 
-46 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 45 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
+50 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 49 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
 
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
@@ -281,7 +281,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | T-Embed CC1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✗ |
 | T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | ✗ | ✓ | ✗ |
+| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | has 4MB vfs partition | ✓ | ✗ |
 | T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✗ |
 | JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
 | Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
@@ -299,8 +299,12 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
 | Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
 | Pancake C5 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
+| M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | Full | ✓ | ✓ | ✓ |
+| M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | Full | has 1MB vfs partition | ✗ | ✗ |
 
 `*` — the checked-in config for this board predates a Kconfig option (`NFC_CHAMELEON`) that defaults on for BLE-capable boards; no board-specific override is present, so this reflects the Kconfig default rather than an explicit setting in the file. Most unstarred BLE-capable boards set the symbol explicitly, but some generic configs may also rely on the Kconfig default.
+
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
 
 **Display:** `Full` = LVGL graphical UI. `Status` = secondary small status display only (shares the IO-expander I2C bus), no full UI. `—` = headless, no display.
 
@@ -330,7 +334,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
 | ESP-IDF-native architecture | [x] |  |  |  |
 | Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
-| Supported board targets | 46 CI targets | 42+ | 4 | 1 |
+| Supported board targets | 50 CI targets | 42+ | 4 | 1 |
 | Full LVGL graphical UI | [x] |  |  |  |
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |

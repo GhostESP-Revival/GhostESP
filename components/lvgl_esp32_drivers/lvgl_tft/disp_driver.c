@@ -50,6 +50,7 @@ void *disp_driver_init(void)
     // We still use menuconfig for these settings
     // It will be set up during runtime in the future
 #if (defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH) || defined(CONFIG_LV_DISP_BACKLIGHT_PWM))
+#if CONFIG_LV_DISP_PIN_BCKL >= 0
     const disp_backlight_config_t bckl_config = {
         .gpio_num = CONFIG_LV_DISP_PIN_BCKL,
 #if defined CONFIG_LV_DISP_BACKLIGHT_PWM
@@ -67,6 +68,11 @@ void *disp_driver_init(void)
     };
     disp_backlight_h bckl_handle = disp_backlight_new(&bckl_config);
     return bckl_handle;
+#else
+    /* Some boards, including CoreS3-SE, drive the backlight through a PMIC
+     * rather than an ESP GPIO. Leave the LVGL GPIO backlight driver disabled. */
+    return NULL;
+#endif
 #else
     return NULL;
 #endif

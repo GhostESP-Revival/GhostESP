@@ -80,8 +80,10 @@ jobs:
           - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip", ota: true, ota_slot_size: 5767168, board_key: "NM-CYD-C5" }
           - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
           - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3_sense" }
-          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3" }
-          - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
+           - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3" }
+           - { name: "M5Stack CoreS3-SE",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.m5cores3se",                    zip_name: "M5Stack_CoreS3-SE.zip" }
+           - { name: "M5Stack AtomS3R",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.atoms3r",                      zip_name: "M5Stack_AtomS3R.zip" }
+           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
           - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
           - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
 

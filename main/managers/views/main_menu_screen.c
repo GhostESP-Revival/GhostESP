@@ -193,6 +193,11 @@ static lv_obj_t *left_nav_btn = NULL;
 static lv_obj_t *right_nav_btn = NULL;
 static lv_obj_t *carousel_prev_obj = NULL;
 static lv_obj_t *carousel_next_obj = NULL;
+static lv_obj_t *hero_pip_container = NULL;
+
+static inline bool is_carousel_like_layout(void) {
+    return current_layout == MAIN_MENU_LAYOUT_CAROUSEL || current_layout == MAIN_MENU_LAYOUT_HERO;
+}
 
 typedef struct {
     lv_obj_t *card;
@@ -249,8 +254,6 @@ static void update_carousel_preview(lv_obj_t **preview_ptr, int visible_index, i
         lv_obj_set_style_shadow_width(preview, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_all(preview, 0, LV_PART_MAIN);
         lv_obj_set_style_radius(preview, GUI_RADIUS_LG, LV_PART_MAIN);
-    } else {
-        lv_obj_clean(preview);
     }
 
     lv_obj_set_size(preview, layout->carousel_preview_size, layout->carousel_preview_size);
@@ -259,10 +262,14 @@ static void update_carousel_preview(lv_obj_t **preview_ptr, int visible_index, i
     lv_obj_set_style_opa(preview, LV_OPA_60, LV_PART_MAIN);
     lv_obj_align(preview, LV_ALIGN_CENTER, x_offset, 0);
 
+    /* Reuse the preview's single icon child in place; avoids object-churn
+     * (alloc/free + ~10 style calls) on every carousel step. */
+    lv_obj_t *icon = lv_obj_get_child(preview, 0);
+    if (!icon) icon = lv_img_create(preview);
+
     bool connected = esp_comm_manager_is_connected();
     int menu_index = visible_index_to_menu_index(visible_index, connected);
     const lv_img_dsc_t *item_icon = menu_item_icon(menu_index);
-    lv_obj_t *icon = lv_img_create(preview);
     lv_img_set_src(icon, item_icon);
     lv_img_set_antialias(icon, false);
     gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, 256);
@@ -276,6 +283,7 @@ static void update_carousel_preview(lv_obj_t **preview_ptr, int visible_index, i
 }
 
 static void update_carousel_previews(void) {
+    if (current_layout != MAIN_MENU_LAYOUT_CAROUSEL) return;
     main_menu_layout_metrics_t layout;
     main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_items, &layout);
     if (!layout.carousel_show_previews || num_items < 2) return;
@@ -432,7 +440,7 @@ static lv_obj_t *create_carousel_card(const main_menu_layout_metrics_t *layout,
 
     bool show_borders = settings_get_menu_item_borders(&G_Settings);
     int card_border_w = show_borders ? 2 : 0;
-    apply_card_style(card, menu_surface_color, menu_items[menu_index].border_color, card_border_w, 8);
+    apply_card_style(card, menu_surface_color, menu_items[menu_index].border_color, card_border_w, 0);
     lv_obj_set_style_radius(card, GUI_RADIUS_LG, LV_PART_MAIN);
     lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(card, false, 0);
@@ -480,20 +488,137 @@ static lv_obj_t *create_carousel_card(const main_menu_layout_metrics_t *layout,
     return card;
 }
 
+static lv_obj_t *create_hero_card(const main_menu_layout_metrics_t *layout,
+                                  int x_offset, lv_opa_t opacity) {
+    lv_obj_t *card = lv_btn_create(menu_container);
+    gui_apply_pressed_style(card);
+    carousel_cache = (carousel_card_cache_t){0};
+    carousel_cache.card = card;
+    bool connected = esp_comm_manager_is_connected();
+    int menu_index = visible_index_to_menu_index(selected_item_index, connected);
+
+    lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(card, opacity, 0);
+    carousel_cache.border_color = menu_items[menu_index].border_color;
+    carousel_cache.item_index = selected_item_index;
+
+    lv_obj_set_size(card, layout->screen_width, layout->screen_height);
+    lv_obj_align(card, LV_ALIGN_CENTER, x_offset, 0);
+
+    lv_obj_t *icon = lv_img_create(card);
+    const lv_img_dsc_t *item_icon = menu_item_icon(menu_index);
+    lv_img_set_src(icon, item_icon);
+    carousel_cache.icon = icon;
+    carousel_cache.icon_src = item_icon;
+    lv_img_set_antialias(icon, false);
+    gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 256);
+    bool recolor_enabled = menu_item_icon_should_recolor(menu_index, item_icon);
+    if (recolor_enabled) {
+        lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_TRANSP, 0);
+    }
+    carousel_cache.icon_recolor_enabled = recolor_enabled;
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->hero_icon_y_offset);
+
+    lv_obj_t *label = lv_label_create(card);
+    lv_label_set_text(label, menu_items[menu_index].name);
+    lv_obj_set_style_text_font(label, accessibility_get_font_title(), 0);
+    lv_obj_set_style_text_color(label, menu_text_color, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0,
+                 layout->hero_icon_y_offset + layout->hero_icon_target / 2 + GUI_GRID * 2);
+    carousel_cache.label = label;
+
+    carousel_cache.label_text = menu_items[menu_index].name;
+    return card;
+}
+
+static lv_obj_t *create_current_card(const main_menu_layout_metrics_t *layout,
+                                     int x_offset, lv_opa_t opacity) {
+    if (current_layout == MAIN_MENU_LAYOUT_HERO) {
+        return create_hero_card(layout, x_offset, opacity);
+    }
+    return create_carousel_card(layout, x_offset, opacity);
+}
+
+/* Warms the icon cache for the neighbours of the current selection so a
+ * subsequent swipe never blocks on SD/decompress mid-animation. */
+static void prefetch_neighbor_icons(void) {
+    if (!is_carousel_like_layout() || num_items < 2) return;
+    bool connected = esp_comm_manager_is_connected();
+    int next_idx = visible_index_to_menu_index((selected_item_index + 1) % num_items, connected);
+    int prev_idx = visible_index_to_menu_index((selected_item_index + num_items - 1) % num_items, connected);
+    menu_item_icon(next_idx);
+    menu_item_icon(prev_idx);
+}
+
+static void update_hero_position(void) {
+    if (!hero_pip_container || current_layout != MAIN_MENU_LAYOUT_HERO || num_items < 1) return;
+
+    main_menu_layout_metrics_t layout;
+    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_HERO, num_items, &layout);
+    int cap = layout.hero_pip_count < 1 ? 1 : layout.hero_pip_count;
+    int pip_count = num_items < cap ? num_items : cap;
+    int current = (num_items <= 1) ? 0 : (selected_item_index * (pip_count - 1)) / (num_items - 1);
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+
+    lv_obj_t *row = hero_pip_container;
+    lv_obj_clean(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, 10);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    for (int i = 0; i < pip_count; ++i) {
+        bool selected = i == current;
+        lv_obj_t *dot = lv_obj_create(row);
+        lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(dot, selected ? accent : menu_text_color, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(dot, selected ? LV_OPA_COVER : LV_OPA_40, LV_PART_MAIN);
+        lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+
+static void create_hero_position_indicator(void) {
+    if (current_layout != MAIN_MENU_LAYOUT_HERO) return;
+    if (!hero_pip_container) {
+        hero_pip_container = lv_obj_create(main_menu_view.root);
+        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -8);
+    } else if (lv_obj_is_valid(hero_pip_container)) {
+        lv_obj_clean(hero_pip_container);
+    }
+    lv_obj_move_foreground(hero_pip_container);
+    update_hero_position();
+}
+
 static void carousel_fade_in_ready_cb(lv_anim_t *a) {
     (void)a;
     is_animating = false;
+    prefetch_neighbor_icons();
 }
 
 static void carousel_fade_out_ready_cb(lv_anim_t *a) {
     lv_obj_t *old_card = (lv_obj_t *)a->var;
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_items, &layout);
+    main_menu_layout_get_metrics(current_layout, num_items, &layout);
     int start_x = carousel_next_slide_left ? layout.carousel_transition_distance :
                                              -layout.carousel_transition_distance;
 
     if (old_card && lv_obj_is_valid(old_card)) lv_obj_del(old_card);
-    current_item_obj = create_carousel_card(&layout, start_x, LV_OPA_TRANSP);
+    current_item_obj = create_current_card(&layout, start_x, LV_OPA_TRANSP);
     update_carousel_previews();
 
     lv_anim_t move_in;
@@ -517,10 +642,10 @@ static void carousel_fade_out_ready_cb(lv_anim_t *a) {
 
 static void update_menu_item(bool move_left) {
     main_menu_layout_metrics_t layout;
-    main_menu_layout_get_metrics(MAIN_MENU_LAYOUT_CAROUSEL, num_items, &layout);
+    main_menu_layout_get_metrics(current_layout, num_items, &layout);
 
     if (!current_item_obj) {
-        current_item_obj = create_carousel_card(&layout, 0, LV_OPA_COVER);
+        current_item_obj = create_current_card(&layout, 0, LV_OPA_COVER);
         update_carousel_previews();
         is_animating = false;
         return;
@@ -532,7 +657,7 @@ static void update_menu_item(bool move_left) {
     int duration = ANIM_DURATION;
     if (duration <= 0) {
         lv_obj_del(current_item_obj);
-        current_item_obj = create_carousel_card(&layout, 0, LV_OPA_COVER);
+        current_item_obj = create_current_card(&layout, 0, LV_OPA_COVER);
         update_carousel_previews();
         is_animating = false;
         return;
@@ -562,6 +687,11 @@ static void update_menu_item(bool move_left) {
 // Move selection vertically for list and launcher layouts; direction: -1 up, +1 down.
 static void navigate_vertical(int direction, lv_anim_enable_t scroll_anim) {
     if (direction == 0) return;
+    if (current_layout == MAIN_MENU_LAYOUT_HERO) {
+        select_menu_item_with_scroll(selected_item_index + (direction > 0 ? 1 : -1), false,
+                                     scroll_anim);
+        return;
+    }
     if (current_layout == MAIN_MENU_LAYOUT_LIST) {
         select_menu_item_with_scroll(selected_item_index + (direction > 0 ? 1 : -1), false,
                                      scroll_anim);
@@ -635,22 +765,22 @@ void handle_keyboard_interactions(int keyValue){
     const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     // arrows and vim keys: h/j/k/l, plus , /
     if (keyValue == 44 || keyValue == ',' || keyValue == 'h') { // left
-        ESP_LOGI(TAG, "Left button or 'h' pressed\n");
+        ESP_LOGD(TAG, "Left button or 'h' pressed\n");
         select_menu_item(grid_horizontal_target(-1), inverted ? true : false);
     } else if (keyValue == 47 || keyValue == '/' || keyValue == 'l') { // right
-        ESP_LOGI(TAG, "Right button or 'l' pressed\n");
+        ESP_LOGD(TAG, "Right button or 'l' pressed\n");
         select_menu_item(grid_horizontal_target(1), inverted ? false : true);
     } else if (keyValue == LV_KEY_UP || keyValue == 'k' || keyValue == ';') { // up
-        ESP_LOGI(TAG, "Up arrow or 'k' pressed\n");
+        ESP_LOGD(TAG, "Up arrow or 'k' pressed\n");
         navigate_vertical(-1, LV_ANIM_ON);
     } else if (keyValue == LV_KEY_DOWN || keyValue == 'j' || keyValue == '.') { // down
-        ESP_LOGI(TAG, "Down arrow or 'j' pressed\n");
+        ESP_LOGD(TAG, "Down arrow or 'j' pressed\n");
         navigate_vertical(1, LV_ANIM_ON);
     } else if (keyValue == LV_KEY_ENTER || keyValue == 13) { // enter/select
-        ESP_LOGI(TAG, "Enter pressed\n");
+        ESP_LOGD(TAG, "Enter pressed\n");
         handle_menu_item_selection(selected_item_index);
     } else if (keyValue == LV_KEY_ESC || keyValue == 29 || keyValue == '`') { // esc
-        ESP_LOGI(TAG, "Esc pressed\n");
+        ESP_LOGD(TAG, "Esc pressed\n");
         // no-op on main menu
     }
 }
@@ -740,7 +870,7 @@ static void menu_item_event_handler(InputEvent *event) {
                 return;
             }
 
-            if (touch_dragged && current_layout != MAIN_MENU_LAYOUT_CAROUSEL) {
+            if (touch_dragged && !is_carousel_like_layout()) {
                 if (release_target && !settings_get_touch_drag_scroll(&G_Settings) && dy) {
                     display_manager_queue_scroll(release_target, dy);
                 }
@@ -757,7 +887,7 @@ static void menu_item_event_handler(InputEvent *event) {
             // (require both press and release inside the button and minimal movement).
 
             // Handle different layout types
-            if (current_layout == MAIN_MENU_LAYOUT_CAROUSEL) {
+            if (is_carousel_like_layout()) {
                 // Prioritize swipe detection for carousel; if a horizontal
                 // swipe is detected, act on it and return immediately so a
                 // release-over-button doesn't trigger it.
@@ -795,7 +925,7 @@ static void menu_item_event_handler(InputEvent *event) {
                     bool end_in_left = (data->point.x >= left_area.x1 && data->point.x <= left_area.x2 &&
                                         data->point.y >= left_area.y1 && data->point.y <= left_area.y2);
                     if (start_in_left && end_in_left && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
-                        ESP_LOGI(TAG, "Left navigation button tapped (press+release inside)");
+                        ESP_LOGD(TAG, "Left navigation button tapped (press+release inside)");
                         animate_nav_button_press(left_nav_btn);
                         select_menu_item(selected_item_index - 1, false);
                         return;
@@ -806,7 +936,7 @@ static void menu_item_event_handler(InputEvent *event) {
                     bool end_in_right = (data->point.x >= right_area.x1 && data->point.x <= right_area.x2 &&
                                          data->point.y >= right_area.y1 && data->point.y <= right_area.y2);
                     if (start_in_right && end_in_right && abs(dx) < TAP_THRESHOLD && abs(dy) < TAP_THRESHOLD) {
-                        ESP_LOGI(TAG, "Right navigation button tapped (press+release inside)");
+                        ESP_LOGD(TAG, "Right navigation button tapped (press+release inside)");
                         animate_nav_button_press(right_nav_btn);
                         select_menu_item(selected_item_index + 1, true);
                         return;
@@ -886,7 +1016,7 @@ static void menu_item_event_handler(InputEvent *event) {
         } else {
             handle_keyboard_interactions(kv);
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "IO6 exit button pressed, staying on main menu");
         // On main menu, the exit button doesn't do anything since we're already at the top level
@@ -927,10 +1057,11 @@ static void select_menu_item_with_scroll(int index, bool slide_left, lv_anim_ena
     if (index >= num_items) index = 0;
 
     // Update selection for different layouts
-    if (current_layout == MAIN_MENU_LAYOUT_CAROUSEL) {
+    if (is_carousel_like_layout()) {
         if (index == selected_item_index && current_item_obj) return;
         selected_item_index = index;
         update_menu_item(slide_left);
+        if (current_layout == MAIN_MENU_LAYOUT_HERO) update_hero_position();
     } else if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER || current_layout == MAIN_MENU_LAYOUT_COMPACT) {
         // Update selection for the paginated launcher.
         if (grid_cards) {
@@ -1032,7 +1163,7 @@ static void handle_menu_item_selection(int item_index) {
     EOptionsMenuType target_type = 0;
     for (int i = 0; i < num_actions; ++i) {
         if (strcmp(name, menu_actions[i].name) == 0) {
-            ESP_LOGI(TAG, "%s selected\n", menu_actions[i].name);
+            ESP_LOGD(TAG, "%s selected\n", menu_actions[i].name);
             
             // Add status display messages for menu navigation
             if (strcmp(menu_actions[i].name, "WiFi") == 0) {
@@ -1359,6 +1490,7 @@ static void cleanup_layout_arrays(void) {
     launcher_current_page = -1;
     carousel_prev_obj = NULL;
     carousel_next_obj = NULL;
+    hero_pip_container = NULL;
 }
 
 static lv_timer_t *menu_refresh_timer = NULL;
@@ -1399,7 +1531,10 @@ static void menu_refresh_timer_cb(lv_timer_t *t) {
 
         if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER || current_layout == MAIN_MENU_LAYOUT_COMPACT) create_launcher_menu();
         else if (current_layout == MAIN_MENU_LAYOUT_LIST) create_list_menu();
-        else select_menu_item(selected_item_index, false);
+        else {
+            select_menu_item(selected_item_index, false);
+            if (current_layout == MAIN_MENU_LAYOUT_HERO) create_hero_position_indicator();
+        }
 
         gui_screen_apply_background(main_menu_view.root);
     }
@@ -1437,8 +1572,12 @@ void main_menu_create(void) {
     } else if (current_layout == MAIN_MENU_LAYOUT_LIST) {
         create_list_menu();
     } else {
-        // Default carousel layout
+        // Default carousel layout and the Hero (carousel-like) layout
         update_menu_item(false);
+    }
+
+    if (current_layout == MAIN_MENU_LAYOUT_HERO) {
+        create_hero_position_indicator();
     }
 
     // Check if navigation buttons should be shown based on user setting
@@ -1495,7 +1634,7 @@ void main_menu_create(void) {
             lv_obj_set_style_text_font(left_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(left_label, menu_text_color, 0);
-        lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(left_label, LV_ALIGN_CENTER, 0, 2);
 
         // Create right navigation button
         right_nav_btn = lv_btn_create(lv_scr_act());
@@ -1519,7 +1658,7 @@ void main_menu_create(void) {
             lv_obj_set_style_text_font(right_label, accessibility_get_font_title(), 0);
         }
         lv_obj_set_style_text_color(right_label, menu_text_color, 0);
-        lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(right_label, LV_ALIGN_CENTER, 0, 2);
         
         ESP_LOGI(TAG, "Navigation buttons created - size: %d, margin: %d", btn_size, btn_margin);
         // ensure nav buttons are above other screen content (e.g., scrollable menu_container)
@@ -1539,17 +1678,34 @@ void main_menu_create(void) {
     }
 
     // also shift nav buttons down so they remain vertically centered with the menu
-    if (left_nav_btn) {
+    if (left_nav_btn && current_layout != MAIN_MENU_LAYOUT_HERO) {
         lv_coord_t old_y = lv_obj_get_y(left_nav_btn);
         lv_obj_set_y(left_nav_btn, old_y + status_bar_height / 2);
         // ensure nav button remains on top after repositioning
         lv_obj_move_foreground(left_nav_btn);
     }
-    if (right_nav_btn) {
+    if (right_nav_btn && current_layout != MAIN_MENU_LAYOUT_HERO) {
         lv_coord_t old_y = lv_obj_get_y(right_nav_btn);
         lv_obj_set_y(right_nav_btn, old_y + status_bar_height / 2);
         // ensure nav button remains on top after repositioning
         lv_obj_move_foreground(right_nav_btn);
+    }
+
+    // HERO layout: anchor the arrows to the big icon's vertical center (the
+    // icon sits raised above the content-area middle), mirroring the app
+    // gallery so both hero screens look consistent.
+    if (current_layout == MAIN_MENU_LAYOUT_HERO) {
+        lv_area_t icon_area;
+        if (carousel_cache.icon && lv_obj_is_valid(carousel_cache.icon)) {
+            lv_obj_get_coords(carousel_cache.icon, &icon_area);
+            lv_coord_t icon_center_y = (icon_area.y1 + icon_area.y2) / 2;
+            if (left_nav_btn) {
+                lv_obj_set_y(left_nav_btn, icon_center_y - lv_obj_get_height(left_nav_btn) / 2);
+            }
+            if (right_nav_btn) {
+                lv_obj_set_y(right_nav_btn, icon_center_y - lv_obj_get_height(right_nav_btn) / 2);
+            }
+        }
     }
 }
 

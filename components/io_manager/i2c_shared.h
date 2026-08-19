@@ -21,6 +21,10 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
                                        i2c_master_bus_handle_t *out_bus,
                                        bool *out_created);
 
+/* Remove a shared bus and cached devices so another peripheral can temporarily
+ * claim the same GPIOs. The bus can be recreated afterward. */
+esp_err_t i2c_shared_release_bus(i2c_port_num_t port);
+
 /* Create a persistent device handle. The caller owns it and is responsible
  * for removing it (e.g. at deinit). Not cached. */
 esp_err_t i2c_shared_add_device(i2c_master_bus_handle_t bus,

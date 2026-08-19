@@ -1317,7 +1317,7 @@ static void nrf24_input_handler(InputEvent *event) {
         return;
     }
 
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         nrf24_return_to_menu();
         return;

@@ -3,6 +3,24 @@
 ## Attribution
 Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
+## Revival v2.1.2
+
+### Added
+- Added the Hero main menu layout
+- Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
+
+### Changed
+- LVGL frame pacing is now a fixed 16 ms instead of rendering as fast as possible
+- Carousel cards no longer draw a software shadow, cutting frame render cost while swiping
+- Carousel side previews now swap their icon in place instead of destroying and recreating the widget on every nav step
+- Neighbour icons are pre-fetched into the asset cache after each carousel/Hero transition
+- Demoted hot-path navigation and input logs to verbose so UART output no longer stalls input handling
+- Raised the persistent shared-SPI SD clock to 20 MHz on the Banshee C5 (was 10 MHz) so SD reads finish faster and free the display bus sooner
+- Audio player shows exact track length parsed from Xing/VBRI headers (CBR fallback excludes ID3 tags)
+- Audio progress now follows the audible playback clock: no jump at track start, and pause/resume continues from the same point
+- 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming
+- Both audio player screens gained a touch Back bar matching other views
+
 ## Revival v2.1.1
 
 ### Added

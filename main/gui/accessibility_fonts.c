@@ -20,21 +20,42 @@ static const lv_font_t *get_body_font_for_size(uint8_t size) {
 }
 
 static const lv_font_t *get_title_font_for_size(uint8_t size) {
+#ifdef CONFIG_IS_ATOMS3R
+    // 128x128 is too small for the standard title tier; drop one step so menu/
+    // gallery/options item labels fit.
+    switch (size) {
+        case 0: return &lv_font_montserrat_10;
+        case 1: return &lv_font_montserrat_12;
+        case 2: return &lv_font_montserrat_14;
+        default: return &lv_font_montserrat_12;
+    }
+#else
     switch (size) {
         case 0: return &lv_font_montserrat_12;
         case 1: return &lv_font_montserrat_14;
         case 2: return &lv_font_montserrat_16;
         default: return &lv_font_montserrat_14;
     }
+#endif
 }
 
 static const lv_font_t *get_display_font_for_size(uint8_t size) {
+#ifdef CONFIG_IS_ATOMS3R
+    // Shrink the display tier on the 128px Atom (nav arrows, hero labels).
+    switch (size) {
+        case 0: return &lv_font_montserrat_14;
+        case 1: return &lv_font_montserrat_18;
+        case 2: return &lv_font_montserrat_18;
+        default: return &lv_font_montserrat_18;
+    }
+#else
     switch (size) {
         case 0: return &lv_font_montserrat_18;
         case 1: return &lv_font_montserrat_24;
         case 2: return &lv_font_montserrat_24; // 32 not compiled, use 24
         default: return &lv_font_montserrat_24;
     }
+#endif
 }
 
 const lv_font_t *accessibility_get_font_small(void) {
