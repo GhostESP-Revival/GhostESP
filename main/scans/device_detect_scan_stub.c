@@ -38,6 +38,12 @@ bool ble_device_detect_is_tracking(void) {
     return false;
 }
 
+bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    (void)out_rssi;
+    (void)out_fresh;
+    return false;
+}
+
 const char *ble_device_detect_type_to_string(BLEDetectDeviceType type) {
     (void)type;
     return "BLE Device";

@@ -6,6 +6,7 @@
 #include "core/utils.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
@@ -66,6 +67,8 @@ typedef struct {
     ble_addr_t addr;
     BLEDetectDeviceType type;
     TickType_t last_log_tick;
+    int8_t last_rssi;
+    int64_t last_rx_us;   // esp_timer timestamp of the last matching advertisement
 } BLEDetectTrackingState;
 
 static const char *TAG = "BLEDetect";
@@ -298,6 +301,8 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
         if (s_tracking.active && existing->type == s_tracking.type &&
             existing->addr.type == s_tracking.addr.type &&
             memcmp(existing->addr.val, s_tracking.addr.val, sizeof(existing->addr.val)) == 0) {
+            s_tracking.last_rssi = existing->rssi;
+            s_tracking.last_rx_us = esp_timer_get_time();
             if (existing->type == BLE_DETECT_DEVICE_AIRTAG) {
                 char mac[18];
                 format_mac_address(existing->addr.val, mac, sizeof(mac), false);
@@ -362,6 +367,8 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     if (s_tracking.active && device->type == s_tracking.type &&
         device->addr.type == s_tracking.addr.type &&
         memcmp(device->addr.val, s_tracking.addr.val, sizeof(device->addr.val)) == 0) {
+        s_tracking.last_rssi = device->rssi;
+        s_tracking.last_rx_us = esp_timer_get_time();
         log_tracking_update(device);
     }
 }
@@ -371,6 +378,7 @@ void ble_device_detect_start(void) {
     s_device_count = 0;
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
 
     if (!ble_is_initialized()) {
         ble_init();
@@ -403,6 +411,7 @@ void ble_device_detect_stop(void) {
     s_scan_active = false;
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
     ble_unregister_handler(ble_device_detect_callback);
 
     if (was_active) {
@@ -475,6 +484,8 @@ bool ble_device_detect_start_tracking(int index) {
     s_tracking.type = dev.type;
     memcpy(&s_tracking.addr, &dev.addr, sizeof(s_tracking.addr));
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rssi = dev.rssi;
+    s_tracking.last_rx_us = esp_timer_get_time();
 
     char mac[18];
     format_mac_address(dev.addr.val, mac, sizeof(mac), false);
@@ -515,8 +526,24 @@ bool ble_device_detect_start_airtag_spoof(int index) {
 void ble_device_detect_stop_tracking(void) {
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
 }
 
 bool ble_device_detect_is_tracking(void) {
     return s_tracking.active;
+}
+
+bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!s_tracking.active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = s_tracking.last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // Consider the reading "live" if a matching advertisement arrived recently.
+        *out_fresh = (s_tracking.last_rx_us != 0) && ((now - s_tracking.last_rx_us) < 1500000);
+    }
+    return true;
 }

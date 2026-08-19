@@ -128,6 +128,7 @@ typedef enum {
     TRACK_SRC_WIFI_STA,
     TRACK_SRC_BLE_ADV,
     TRACK_SRC_BLE_GATT,
+    TRACK_SRC_BLE_DETECT,
 } track_source_t;
 static track_source_t track_source = TRACK_SRC_NONE;
 static int selected_ap_index = -1;
@@ -326,6 +327,7 @@ static void start_track_overlay(track_source_t src, const char *status_title,
                                 rssi_meter_sample_cb sampler);
 static bool track_meter_sample_ble_adv(void *user, int8_t *out_rssi);
 static bool track_meter_sample_ble_gatt(void *user, int8_t *out_rssi);
+static bool track_meter_sample_ble_detect(void *user, int8_t *out_rssi);
 static bool track_exit_requested(const InputEvent *event);
 static void show_station_detail(int station_index);
 static void station_list_cleanup(void);
@@ -11053,8 +11055,24 @@ static void stop_ble_detect_flow(void) {
 static void ble_detect_track_cb(lv_event_t *e) {
     (void)e;
 
-    if (selected_ble_detect_index < 0 ||
-        !ble_device_detect_start_tracking(selected_ble_detect_index)) {
+    if (selected_ble_detect_index < 0) {
+        error_popup_create("Track failed");
+        return;
+    }
+
+    /* Build the subtext label (name, else MAC) before tearing down the detail. */
+    char target_label[24] = {0};
+    BLEDetectDeviceInfo info;
+    if (ble_device_detect_get_device(selected_ble_detect_index, &info) == 0) {
+        if (info.name[0] != '\0') {
+            strncpy(target_label, info.name, sizeof(target_label) - 1);
+        } else {
+            snprintf(target_label, sizeof(target_label), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5]);
+        }
+    }
+
+    if (!ble_device_detect_start_tracking(selected_ble_detect_index)) {
         error_popup_create("Track failed");
         return;
     }
@@ -11064,9 +11082,10 @@ static void ble_detect_track_cb(lv_event_t *e) {
         ble_detect_detail_view = NULL;
     }
 
+    selected_ble_detect_index = -1;
     current_bluetooth_menu_state = BLUETOOTH_MENU_DETECT_LIST;
-    terminal_set_return_view(&options_menu_view);
-    display_manager_switch_view(&terminal_view);
+    start_track_overlay(TRACK_SRC_BLE_DETECT, "Track Detect", target_label,
+                        track_meter_sample_ble_detect);
 }
 
 static void ble_detect_spoof_cb(lv_event_t *e) {
@@ -12288,6 +12307,17 @@ static bool track_meter_sample_ble_gatt(void *user, int8_t *out_rssi) {
     return fresh;
 }
 
+/* Sampler for the BLE detect tracker: pulls the latest RSSI from the detect
+ * scan. Returns true when a matching advertisement arrived recently. */
+static bool track_meter_sample_ble_detect(void *user, int8_t *out_rssi) {
+    (void)user;
+    bool fresh = false;
+    if (!ble_device_detect_get_track_status(out_rssi, &fresh)) {
+        return false;
+    }
+    return fresh;
+}
+
 /* Stop whichever hardware tracker currently feeds the RSSI ring overlay. */
 static void track_stop_current_source(void) {
     switch (track_source) {
@@ -12300,6 +12330,9 @@ static void track_stop_current_source(void) {
             break;
         case TRACK_SRC_BLE_GATT:
             gatt_scan_stop_tracking();
+            break;
+        case TRACK_SRC_BLE_DETECT:
+            ble_device_detect_stop_tracking();
             break;
         default:
             break;
@@ -12393,6 +12426,9 @@ static void stop_track_flow(void) {
             break;
         case TRACK_SRC_BLE_GATT:
             ble_gatt_detail_back_cb(NULL);
+            break;
+        case TRACK_SRC_BLE_DETECT:
+            ble_detect_detail_back_cb(NULL);
             break;
         case TRACK_SRC_WIFI_AP:
         default:
