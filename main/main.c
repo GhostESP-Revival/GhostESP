@@ -898,7 +898,12 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ethernet Comm Handler init", eth_comm_handler_init());
 #endif
 #ifdef CONFIG_HAS_MIC
+#if defined(CONFIG_HAS_ES7210_MIC) || defined(CONFIG_HAS_AW88298_SPEAKER)
+    // M5 audio codec is only present on boards with the ES7210 mic and/or
+    // AW88298 speaker (e.g. M5Stack CoreS3-SE). Keep in sync with the
+    // include guard at the top of this file.
     MEASURE_INIT_RAM("M5 audio codec init", m5_audio_codec_init());
+#endif
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
