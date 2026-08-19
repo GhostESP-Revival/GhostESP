@@ -750,7 +750,7 @@ static inline void gh_page_clear(int *depth) {
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {    \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;  \
         if (ha->struct_size < (min_api_size)) {                            \
-            if (ha->log) ha->log((app_id_str) " requires newer API");      \
+            if (ha->log) ha->log(app_id_str " requires newer API");      \
             return 0;                                                      \
         }                                                                  \
         return &(app_var);                                                 \
@@ -763,7 +763,7 @@ static inline void gh_page_clear(int *depth) {
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {        \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;      \
         if (ha->struct_size < (min_api_size)) {                                \
-            if (ha->log) ha->log((app_id_str) " requires newer API");          \
+            if (ha->log) ha->log(app_id_str " requires newer API");          \
             return 0;                                                          \
         }                                                                      \
         (api_ptr) = ha;                                                        \
@@ -916,10 +916,16 @@ static inline ghostesp_popup_t gh_confirm(
  * ============================================================ */
 static inline void gh_container_clear(const ghostesp_api_t *api, ghostesp_ui_obj_t container) {
     if (!api || !container) return;
+    if (!api->raw_symbol) return;
+    typedef uint32_t (*gh_child_count_fn_t)(void *obj);
+    typedef void *(*gh_child_fn_t)(void *obj, int32_t index);
+    gh_child_count_fn_t child_count = (gh_child_count_fn_t)api->raw_symbol("lv_obj_get_child_cnt");
+    gh_child_fn_t child_at = (gh_child_fn_t)api->raw_symbol("lv_obj_get_child");
+    if (!child_count || !child_at) return;
     /* iterate children in reverse to avoid index shifting */
-    int count = (int)(intptr_t)GH_CALL(api, lv_obj_get_child_cnt, container);
+    int count = (int)child_count(container);
     for (int i = count - 1; i >= 0; i--) {
-        void *child = GH_CALL(api, lv_obj_get_child, container, i);
+        void *child = child_at(container, i);
         if (child) GH_VOID(api, ui_obj_delete, child);
     }
 }

@@ -8,7 +8,7 @@ Build and package [GhostESP](https://github.com/GhostESP-Revival/GhostESP) nativ
 pip install ghostbt
 ```
 
-Requires Python 3.8+ and [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) (install via `gbt setup`).
+Requires Python 3.10+ and [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) (install via `gbt setup`).
 
 ## Quick Start
 
@@ -134,7 +134,7 @@ The generated pack folder contains `manifest.json`, `checksums.json`, and genera
 
 ## Requirements
 
-- Python 3.8 or later
+- Python 3.10 or later
 - ESP-IDF (auto-installed by `gbt setup` if missing)
 - Git (for `gbt setup`)
 

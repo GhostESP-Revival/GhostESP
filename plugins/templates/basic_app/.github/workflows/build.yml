@@ -1,0 +1,38 @@
+name: Build GhostESP App
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ghostbt
+        run: pip install ghostbt==0.5.7
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ghostbt/esp-idf
+            ~/.espressif
+          key: esp-idf-v6.0.1-esp32s3
+
+      - name: Install toolchain
+        run: |
+          gbt setup --target esp32s3
+          source ~/.ghostbt/esp-idf/export.sh >/dev/null
+          echo "ESP_ROM_ELF_DIR=$ESP_ROM_ELF_DIR" >> "$GITHUB_ENV"
+
+      - name: Build package
+        run: gbt dist . --target esp32s3 --gapp
