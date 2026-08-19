@@ -120,6 +120,7 @@ static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
 static const char *NVS_SUN_MODE_KEY = "sun_mode";
 static const char *NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY = "sun_mode_pb";
+static const char *NVS_LOG_LEVEL_KEY = "log_level";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
 static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
@@ -274,6 +275,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->high_contrast = false;
   settings->sun_mode = false;
   settings->sun_mode_saved_brightness = 100;
+  settings->log_level = ESP_LOG_WARN;
   settings->menu_item_borders = false;
   settings->menu_card_bg = false;
   settings->touch_drag_scroll = true;
@@ -864,6 +866,10 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->sun_mode_saved_brightness = value_u8;
   }
+  err = nvs_get_u8(nvsHandle, NVS_LOG_LEVEL_KEY, &value_u8);
+  if (err == ESP_OK && value_u8 <= ESP_LOG_VERBOSE) {
+    settings->log_level = value_u8;
+  }
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
@@ -1231,6 +1237,10 @@ void settings_persist_setting(SettingsType setting) {
             key = NVS_SUN_MODE_KEY;
             nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, G_Settings.sun_mode_saved_brightness);
             break;
+        case SETTING_LOG_LEVEL:
+            err = nvs_set_u8(nvsHandle, NVS_LOG_LEVEL_KEY, G_Settings.log_level);
+            key = NVS_LOG_LEVEL_KEY;
+            break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
@@ -1491,6 +1501,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, settings->sun_mode ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, settings->sun_mode_saved_brightness));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_LOG_LEVEL_KEY, settings->log_level));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0));
@@ -2287,6 +2298,16 @@ void settings_set_sun_mode(FSettings *settings, bool enabled) {
 
 bool settings_get_sun_mode(const FSettings *settings) {
   return settings ? settings->sun_mode : false;
+}
+
+void settings_set_log_level(FSettings *settings, uint8_t level) {
+  if (settings && level <= ESP_LOG_VERBOSE) {
+    settings->log_level = level;
+  }
+}
+
+uint8_t settings_get_log_level(const FSettings *settings) {
+  return settings ? settings->log_level : ESP_LOG_WARN;
 }
 
 void settings_set_menu_item_borders(FSettings *settings, bool enabled) {

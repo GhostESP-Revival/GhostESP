@@ -10,6 +10,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
 
 ### Changed
+- Added runtime global log-level control through the `loglevel` command and system settings
 - LVGL frame pacing is now a fixed 16 ms instead of rendering as fast as possible
 - Carousel cards no longer draw a software shadow, cutting frame render cost while swiping
 - Carousel side previews now swap their icon in place instead of destroying and recreating the widget on every nav step

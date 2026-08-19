@@ -8,11 +8,11 @@ keywords: ["M5Stack AtomS3R", "AtomS3R", "Grove", "ENV-III", "GPS", "ST25R3916"]
 
 ## Overview
 
-The **M5Stack AtomS3R** is a compact ESP32-S3 board with a small touch display, a single push button, and a Grove connector. Use the `M5Stack_AtomS3R.zip` build from the [supported hardware]({{< relref "../getting-started/supported-hardware.md" >}}) list.
+The **M5Stack AtomS3R** is a compact ESP32-S3 board with a small display and a Grove connector. The display is **not** touch-enabled — the entire display panel is a single button, so navigation is driven by pressing the screen itself. Use the `M5Stack_AtomS3R.zip` build from the [supported hardware]({{< relref "../getting-started/supported-hardware.md" >}}) list.
 
 ## Navigation
 
-The button is the screen itself. Press down on the display to activate it.
+The screen is a push button, not a touch panel. Press down on the display to activate it.
 
 | Action | How |
 |---|---|

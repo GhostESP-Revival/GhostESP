@@ -330,6 +330,7 @@ void register_commands() {
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("settings", handle_settings_cmd);
+    register_command("loglevel", handle_log_level_cmd);
     register_command("listportals", handle_listportals);
     register_command("evilportal", handle_evilportal);
     register_command("commdiscovery", handle_comm_discovery);

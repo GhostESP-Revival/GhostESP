@@ -175,6 +175,7 @@ typedef enum {
     SETTING_OTA_UPDATE_PEER,
     SETTING_OTA_INSTALL_FROM_SD,
     SETTING_SUN_MODE,
+    SETTING_LOG_LEVEL,
 } SettingsType;
 
 #define GPS_BAUD_AUTO 1U
@@ -328,6 +329,7 @@ typedef struct {
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
     bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
     uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
+    uint8_t log_level;                 // ESP-IDF global log level (esp_log_level_t)
 
     // Lockscreen settings
     bool lockscreen_enabled;
@@ -606,6 +608,8 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_sun_mode(FSettings *settings, bool enabled);
 bool settings_get_sun_mode(const FSettings *settings);
+void settings_set_log_level(FSettings *settings, uint8_t level);
+uint8_t settings_get_log_level(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
 void settings_set_menu_card_bg(FSettings *settings, bool enabled);

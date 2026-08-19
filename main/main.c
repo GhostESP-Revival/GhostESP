@@ -801,6 +801,7 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Initializing Settings");
     MEASURE_INIT_RAM("Settings init", settings_init(&G_Settings));
+    esp_log_level_set("*", (esp_log_level_t)settings_get_log_level(&G_Settings));
 
 #if GHOSTESP_OTA_SUPPORTED
     MEASURE_INIT_RAM("OTA manager init", ota_manager_init());

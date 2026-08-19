@@ -397,6 +397,9 @@ void handle_help(int argc, char **argv) {
         glog("        settings get ap_ssid\n");
         glog("        settings set rgb_mode 1\n");
         glog("        settings reset\n\n");
+        glog("loglevel\n");
+        glog("    Description: View or change the global ESP-IDF log level.\n");
+        glog("    Usage: loglevel [none|error|warn|info|debug|verbose]\n\n");
         glog("    Description: View or change the status display idle animation (status OLED only).\n");
         glog("    Usage: statusidle [list|set <life|ghost|starfield|hud|matrix|ghosts|spiral|leaves|bouncing|0|1|2|3|4|5|6|7|8>]\n\n");
         return;

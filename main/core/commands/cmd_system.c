@@ -27,11 +27,50 @@
 #include "sdkconfig.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
+#include <esp_log.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static const char *log_level_name(esp_log_level_t level) {
+    static const char *names[] = {"none", "error", "warn", "info", "debug", "verbose"};
+    return (level <= ESP_LOG_VERBOSE) ? names[level] : "unknown";
+}
+
+void handle_log_level_cmd(int argc, char **argv) {
+    if (argc == 1) {
+        esp_log_level_t level = (esp_log_level_t)settings_get_log_level(&G_Settings);
+        glog("Global log level: %s (%d)\n", log_level_name(level), level);
+        return;
+    }
+
+    if (argc != 2) {
+        glog("Usage: loglevel [none|error|warn|info|debug|verbose]\n");
+        return;
+    }
+
+    static const char *names[] = {"none", "error", "warn", "info", "debug", "verbose"};
+    esp_log_level_t level = ESP_LOG_NONE;
+    bool found = false;
+    for (int i = 0; i <= ESP_LOG_VERBOSE; i++) {
+        if (strcasecmp(argv[1], names[i]) == 0) {
+            level = (esp_log_level_t)i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        glog("Unknown log level. Use none, error, warn, info, debug, or verbose.\n");
+        return;
+    }
+
+    esp_log_level_set("*", level);
+    settings_set_log_level(&G_Settings, level);
+    settings_save(&G_Settings);
+    glog("Global log level set to %s.\n", log_level_name(level));
+}
 
 void handle_reboot(int argc, char **argv) {
     glog("Rebooting system...\n");

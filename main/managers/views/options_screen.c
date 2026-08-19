@@ -1063,6 +1063,7 @@ typedef enum {
     SETTINGS_CAT_POWER,
     SETTINGS_CAT_DATE_TIME,
     SETTINGS_CAT_SYSTEM_TOOLS,
+    SETTINGS_CAT_LOGGING,
     SETTINGS_CAT_BACKUP_RESET,
     SETTINGS_CAT_SCAN_SAVING,
     SETTINGS_CAT_WIGLE,
@@ -1145,6 +1146,7 @@ static SettingsCategory settings_categories[] = {
     {"Date & Time", SETTINGS_CAT_DATE_TIME, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Setup", SETTINGS_CAT_SYSTEM_TOOLS, SETTINGS_ROOT_SYSTEM, false, NULL},
+    {"Logging", SETTINGS_CAT_LOGGING, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Transfer or Reset", SETTINGS_CAT_BACKUP_RESET, SETTINGS_ROOT_SYSTEM, false, NULL},
 #if GHOSTESP_OTA_SUPPORTED
     {"Firmware Update", SETTINGS_CAT_FIRMWARE_UPDATE, SETTINGS_ROOT_SYSTEM, true, "CONFIG_ESPTOOLPY_FLASHSIZE_8MB or CONFIG_ESPTOOLPY_FLASHSIZE_16MB"},
@@ -1712,6 +1714,7 @@ static const char * const rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", 
 static const char * const timeout_options[] = {"5s", "10s", "15s", "30s", "60s", "2m", "5m", "Never"};
 static const char * const theme_options[] = {"OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
 static const char * const bool_options[] = {"Off", "On"};
+static const char * const log_level_options[] = {"None", "Error", "Warn", "Info", "Debug", "Verbose"};
 static const char * const textcolor_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
 static const uint32_t textcolor_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
 static const char * const menu_layout_options[] = {"Carousel", "Grid", "List", "Compact", "Hero"};
@@ -1800,6 +1803,7 @@ static SettingsItem settings_items[] = {
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Sun Mode", SETTING_SUN_MODE, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Log Level", SETTING_LOG_LEVEL, log_level_options, 6, ESP_LOG_WARN, SETTINGS_CAT_LOGGING, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -4313,6 +4317,9 @@ static void load_current_settings_values(void) {
             case SETTING_SUN_MODE:
                 settings_items[i].current_value = settings_get_sun_mode(&G_Settings) ? 1 : 0;
                 break;
+            case SETTING_LOG_LEVEL:
+                settings_items[i].current_value = settings_get_log_level(&G_Settings);
+                break;
             case SETTING_WEB_AUTH:
                 settings_items[i].current_value = settings_get_web_auth_enabled(&G_Settings) ? 1 : 0;
                 break;
@@ -4608,6 +4615,10 @@ static void apply_setting_change(int setting_index, int new_value) {
             }
             break;
         }
+        case SETTING_LOG_LEVEL:
+            settings_set_log_level(&G_Settings, (uint8_t)new_value);
+            esp_log_level_set("*", (esp_log_level_t)new_value);
+            break;
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
             break;

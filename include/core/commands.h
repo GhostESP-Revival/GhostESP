@@ -161,6 +161,7 @@ void handle_ap_enable_cmd(int argc, char **argv);
 void handle_chip_info_cmd(int argc, char **argv);
 void handle_mirror_cmd(int argc, char **argv);
 void handle_apps_cmd(int argc, char **argv);
+void handle_log_level_cmd(int argc, char **argv);
 #if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv);
 #endif
