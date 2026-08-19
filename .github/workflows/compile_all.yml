@@ -114,6 +114,27 @@ jobs:
           git clone -b v6.0.2 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
+      - name: Repair cached ESP-IDF Python environment if broken
+        if: steps.cache-idf.outputs.cache-hit == 'true'
+        run: |
+          # The cached venv's bin/python symlinks into the runner's Python
+          # toolcache (/opt/hostedtoolcache/Python/3.10.x/...). GitHub bumps
+          # the patch version on image updates, evicting the old path and
+          # breaking the symlink -- export.sh then fails with "virtual
+          # environment not found". Detect that and rebuild just the venv;
+          # the toolchains under ~/.espressif/tools stay cached, so this is
+          # fast (only pip installs the requirements).
+          IDF_VER=$(sed -nE 's/^v([0-9]+\.[0-9]+).*/\1/p' ~/esp-idf/version.txt)
+          PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          VENV="$HOME/.espressif/python_env/idf${IDF_VER}_py${PY_VER}_env"
+          if [ -x "$VENV/bin/python" ]; then
+            echo "ESP-IDF Python env is usable: $VENV"
+          else
+            echo "Cached ESP-IDF Python env ($VENV) is missing or broken; recreating..."
+            rm -rf "$VENV"
+            ~/esp-idf/install.sh
+          fi
+
       - name: Apply Custom SDK Config
         run: |
           rm -f sdkconfig sdkconfig.defaults
