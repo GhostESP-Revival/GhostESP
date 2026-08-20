@@ -254,10 +254,44 @@ static void log_tracking_update(const BLEDetectDevice *device) {
     s_tracking.last_log_tick = now;
 }
 
+static bool is_tracking_addr(const ble_addr_t *addr) {
+    return s_tracking.active && addr != NULL && s_tracking.addr.type == addr->type &&
+           memcmp(s_tracking.addr.val, addr->val, sizeof(addr->val)) == 0;
+}
+
 static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) {
     (void)len;
 
     if (!s_scan_active || event == NULL || event->type != BLE_GAP_EVENT_DISC) {
+        return;
+    }
+
+    /* While tracking, update RSSI for the tracked MAC unconditionally (like
+     * advertiser_scan) and ignore all other advertisements to keep the list
+     * stable under the RSSI meter overlay. */
+    if (s_tracking.active) {
+        if (!is_tracking_addr(&event->disc.addr)) {
+            return;
+        }
+        s_tracking.last_rssi = event->disc.rssi;
+        s_tracking.last_rx_us = esp_timer_get_time();
+        /* Keep the stored device entry in sync so the list shows latest RSSI. */
+        for (int i = 0; i < s_device_count; i++) {
+            if (s_devices[i].addr.type == event->disc.addr.type &&
+                memcmp(s_devices[i].addr.val, event->disc.addr.val, sizeof(event->disc.addr.val)) == 0) {
+                s_devices[i].rssi = event->disc.rssi;
+                if (s_devices[i].type == BLE_DETECT_DEVICE_AIRTAG) {
+                    char mac[18];
+                    format_mac_address(s_devices[i].addr.val, mac, sizeof(mac), false);
+                    glog("Tracking AirTag: RSSI %d dBm (%s)\n"
+                         "     MAC: %s\n",
+                         s_devices[i].rssi, rssi_to_proximity(s_devices[i].rssi), mac);
+                } else {
+                    log_tracking_update(&s_devices[i]);
+                }
+                break;
+            }
+        }
         return;
     }
 
@@ -455,11 +489,6 @@ bool ble_device_detect_start_tracking(int index) {
         return false;
     }
 
-    if (s_devices[index].type == BLE_DETECT_DEVICE_FLIPPER) {
-        return flipper_scan_track_device(s_devices[index].addr.val, s_devices[index].addr.type,
-                                         s_devices[index].name, s_devices[index].rssi);
-    }
-
     BLEDetectDevice dev;
     memcpy(&dev, &s_devices[index], sizeof(dev));
 
@@ -542,8 +571,9 @@ bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh) {
     }
     if (out_fresh) {
         int64_t now = esp_timer_get_time();
-        // Consider the reading "live" if a matching advertisement arrived recently.
-        *out_fresh = (s_tracking.last_rx_us != 0) && ((now - s_tracking.last_rx_us) < 1500000);
+        // AirTags and similar beacons advertise infrequently (~2 s), so allow a
+        // longer window than the 1.5 s used for dense Wi-Fi/BLE-adv streams.
+        *out_fresh = (s_tracking.last_rx_us != 0) && ((now - s_tracking.last_rx_us) < 3500000);
     }
     return true;
 }

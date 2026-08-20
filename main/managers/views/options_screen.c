@@ -5578,19 +5578,22 @@ void handle_hardware_button_press_options(InputEvent *event) {
      * Touch is left to fall through to the shared options touch pipeline (same
      * as the detail-view overlay) so move/scroll samples still reach LVGL like
      * other views; ring taps are swallowed and the Back button handled there. */
-    if (track_meter && rssi_meter_is_active(track_meter)) {
+    bool track_overlay_active = track_meter && rssi_meter_is_active(track_meter);
+    if (track_overlay_active) {
         if (event->type != INPUT_TYPE_TOUCH) {
             if (track_exit_requested(event)) {
                 stop_track_flow();
             }
             return;
         }
+        /* TOUCH events must not be treated as scan-stop inputs while the
+         * RSSI meter is up; fall through to the dedicated touch handler. */
     }
 
     bool station_scan_overlay_active = station_scan_is_active() ||
                                        (sta_scan_poll_timer != NULL) ||
                                        (sta_scan_status != NULL);
-    if (station_scan_overlay_active && should_stop_station_scan_on_input(event)) {
+    if (!track_overlay_active && station_scan_overlay_active && should_stop_station_scan_on_input(event)) {
         stop_station_scan_flow();
         return;
     }
@@ -5598,7 +5601,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
     bool ble_detect_overlay_active = ble_device_detect_is_active() ||
                                      (ble_detect_poll_timer != NULL) ||
                                      (ble_detect_status != NULL);
-    if (ble_detect_overlay_active && should_stop_station_scan_on_input(event)) {
+    if (!track_overlay_active && ble_detect_overlay_active && should_stop_station_scan_on_input(event)) {
         stop_ble_detect_flow();
         return;
     }
@@ -5606,7 +5609,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
     bool ble_adv_overlay_active = advertiser_scan_is_active() ||
                                   (ble_adv_poll_timer != NULL) ||
                                   (ble_adv_status != NULL);
-    if (ble_adv_overlay_active && should_stop_station_scan_on_input(event)) {
+    if (!track_overlay_active && ble_adv_overlay_active && should_stop_station_scan_on_input(event)) {
         stop_ble_adv_flow();
         return;
     }
@@ -5614,7 +5617,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
     bool ble_gatt_overlay_active = gatt_scan_is_active() ||
                                    (ble_gatt_poll_timer != NULL) ||
                                    (ble_gatt_status != NULL);
-    if (ble_gatt_overlay_active && should_stop_station_scan_on_input(event)) {
+    if (!track_overlay_active && ble_gatt_overlay_active && should_stop_station_scan_on_input(event)) {
         stop_ble_gatt_flow();
         return;
     }
@@ -10993,14 +10996,9 @@ static void ble_detect_list_cleanup(void) {
 
     selected_ble_detect_index = -1;
     ble_detect_last_count = -1;
-    if (ble_device_detect_is_tracking()) {
-        // Keep BLE scan running for tracking updates in terminal
-        // Only clean up UI elements above
-    } else {
-        ble_device_detect_stop_tracking();
-        if (ble_device_detect_is_active()) {
-            ble_device_detect_stop();
-        }
+    ble_device_detect_stop_tracking();
+    if (ble_device_detect_is_active()) {
+        ble_device_detect_stop();
     }
 }
 
