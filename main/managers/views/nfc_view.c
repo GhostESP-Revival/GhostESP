@@ -215,6 +215,8 @@ static bool saved_details_parsed_view = false;
 static bool saved_has_extra_details = false;
 static char *saved_details_text = NULL;
 static char g_saved_current_path[256] = {0};
+// Deep-link request (favorite launch): saved tag to open on create/live view.
+static char s_pending_saved_open[256] = {0};
 static popup_confirm_t *saved_delete_confirm_popup = NULL;
 
 // user mfc keys popup
@@ -5964,6 +5966,28 @@ static void nfc_write_go_cb(lv_event_t *e) {
 
 // ---- End Write Flow ----
 
+// Deep-link support for favorites: open the Saved list and show the details
+// popup for a specific tag file. Safe to call before the view exists.
+static void nfc_view_apply_pending_open(void);
+void nfc_view_open_saved(const char *path) {
+    if (!path || !path[0]) return;
+    strncpy(s_pending_saved_open, path, sizeof(s_pending_saved_open) - 1);
+    s_pending_saved_open[sizeof(s_pending_saved_open) - 1] = '\0';
+    if (g_nfc_ov && lv_obj_is_valid(g_nfc_ov)) {
+        nfc_view_apply_pending_open();
+    }
+}
+
+static void nfc_view_apply_pending_open(void) {
+    if (!s_pending_saved_open[0]) return;
+    char path[256];
+    strncpy(path, s_pending_saved_open, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    s_pending_saved_open[0] = '\0';
+    saved_enter_list();
+    create_saved_details_popup(path);
+}
+
 void nfc_view_create(void) {
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
     root = gui_screen_create_root_no_bg(NULL, NULL, lv_color_hex(GUI_DEFAULT_BG_COLOR), LV_OPA_TRANSP);
@@ -6079,6 +6103,9 @@ void nfc_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     update_nfc_scroll_buttons_visibility();
 #endif
+
+    // Consume any pending favorite deep-link (nfc_view_open_saved).
+    nfc_view_apply_pending_open();
 }
 
 void nfc_view_destroy(void) {

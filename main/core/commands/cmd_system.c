@@ -72,6 +72,67 @@ void handle_log_level_cmd(int argc, char **argv) {
     glog("Global log level set to %s.\n", log_level_name(level));
 }
 
+void handle_fav_cmd(int argc, char **argv) {
+    if (argc == 1) {
+        uint8_t cnt = settings_get_favorites_count(&G_Settings);
+        glog("Favorites (%u/%d):\n", cnt, FAVORITES_MAX);
+        for (int i = 0; i < cnt; i++) {
+            const char *n = settings_get_favorite(&G_Settings, i);
+            glog("  %d: %s\n", i + 1, n ? n : "");
+        }
+        glog("Bypass PIN: %s\n", settings_get_favorites_bypass(&G_Settings) ? "on" : "off");
+        glog("Usage: fav [list|add <name>|remove <name>|toggle <name>|clear|bypass <on|off|toggle>]\n");
+        glog("  Menu: WiFi, BLE, GPS, Infrared, NFC, NRF24, SubGHz, BadUSB, GhostLink, Ethernet, Apps, Settings\n");
+        glog("  Files: ir:/path/to/remote.ir  nfc:/path/to/tag.nfc  subghz:/path/to/file.sub  app:<plugin_id>\n");
+        glog("  Ex: fav add WiFi   | fav add ir:/mnt/ghostesp/infrared/remotes/TV.ir\n");
+        return;
+    }
+    if (strcmp(argv[1], "list") == 0) {
+        uint8_t cnt = settings_get_favorites_count(&G_Settings);
+        for (int i = 0; i < cnt; i++) glog("%d: %s\n", i+1, settings_get_favorite(&G_Settings, i));
+        if (cnt==0) glog("(no favorites)\n");
+        return;
+    }
+    if (strcmp(argv[1], "clear") == 0) {
+        G_Settings.favorites_count = 0;
+        memset(G_Settings.favorites, 0, sizeof(G_Settings.favorites));
+        settings_persist_setting(SETTING_FAVORITES);
+        glog("Favorites cleared.\n");
+        return;
+    }
+    if (strcmp(argv[1], "bypass") == 0) {
+        if (argc == 2) {
+            glog("Bypass: %s\n", settings_get_favorites_bypass(&G_Settings) ? "on" : "off");
+            return;
+        }
+        bool cur = settings_get_favorites_bypass(&G_Settings);
+        bool nv = cur;
+        if (strcmp(argv[2], "on") == 0) nv = true;
+        else if (strcmp(argv[2], "off") == 0) nv = false;
+        else if (strcmp(argv[2], "toggle") == 0) nv = !cur;
+        else { glog("Usage: fav bypass [on|off|toggle]\n"); return; }
+        settings_set_favorites_bypass(&G_Settings, nv);
+        settings_persist_setting(SETTING_FAVORITES_BYPASS);
+        glog("Bypass %s.\n", nv ? "enabled" : "disabled");
+        return;
+    }
+    if (argc >= 3 && (strcmp(argv[1], "add")==0 || strcmp(argv[1], "remove")==0 || strcmp(argv[1], "toggle")==0)) {
+        const char *name = argv[2];
+        bool ok = false;
+        if (strcmp(argv[1], "add")==0) ok = settings_add_favorite(&G_Settings, name);
+        else if (strcmp(argv[1], "remove")==0) ok = settings_remove_favorite(&G_Settings, name);
+        else ok = settings_toggle_favorite(&G_Settings, name);
+        if (ok) {
+            settings_persist_setting(SETTING_FAVORITES);
+            glog("%s %s favorites.\n", name, strcmp(argv[1], "remove")==0 ? "removed from" : "toggled/added to");
+        } else {
+            glog("Failed (maybe full or not found). Count %u/%d\n", settings_get_favorites_count(&G_Settings), FAVORITES_MAX);
+        }
+        return;
+    }
+    glog("Usage: fav [list|add <name>|remove <name>|toggle <name>|clear|bypass <on|off|toggle>]\n");
+}
+
 void handle_reboot(int argc, char **argv) {
     glog("Rebooting system...\n");
     esp_restart();

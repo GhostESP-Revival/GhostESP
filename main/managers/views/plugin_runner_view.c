@@ -77,12 +77,14 @@ static void runner_print_now(const char *text) {
         cur = strlen(s_output_buf);
     }
     snprintf(s_output_buf + cur, PLUGIN_RUNNER_OUTPUT_BUF_SIZE - cur, "%s", text);
-    lv_label_set_text(s_output, s_output_buf);
+    // Reference the runner's own buffer instead of copying it into the
+    // LVGL pool; refr since static text doesn't auto-refresh.
+    lv_label_set_text_static(s_output, s_output_buf);
 }
 
 static void runner_clear_now(void) {
     if (s_output_buf) s_output_buf[0] = '\0';
-    if (s_output && lv_obj_is_valid(s_output)) lv_label_set_text(s_output, "");
+    if (s_output && lv_obj_is_valid(s_output)) lv_label_set_text_static(s_output, s_output_buf);
 }
 
 static void runner_ui_apply(void *arg) {

@@ -127,6 +127,9 @@ static char current_dir[256] = "/mnt/ghostesp";
 static bool has_remotes_option = false;
 static bool has_universals_option = false;
 static bool in_universals_mode = false;
+// Deep-link request (favorite launch): full path of the remote to open as
+// soon as the view is created, or immediately if it is already running.
+static char s_pending_remote_open[256] = {0};
 static char **uni_command_names = NULL;
 static size_t uni_command_count = 0;
 static char current_universal_file[256] = "";
@@ -532,6 +535,9 @@ static TaskHandle_t universals_task_handle = NULL;
 // forward declarations
 static void file_event_open(int idx);
 static void command_event_execute(int idx);
+static void ir_open_universal_path(const char *full_path);
+static void ir_open_remote_path(const char *full_path, const char *fname);
+static void infrared_view_apply_pending_open(void);
 static void file_event_cb(lv_event_t *e);
 static void command_event_cb(lv_event_t *e);
 static void placeholder_event_cb(lv_event_t *e);
@@ -1555,6 +1561,9 @@ void infrared_view_create(void) {
         }
     }
 #endif
+
+    // Consume any pending favorite deep-link (infrared_view_open_remote).
+    infrared_view_apply_pending_open();
 }
 
 void infrared_view_destroy(void) {
@@ -2366,82 +2375,140 @@ void infrared_view_input_cb(InputEvent *event) {
 }
 
 // open selected IR file and list commands
-static void file_event_open(int idx) {
-    if (in_universals_mode) {
-        
-        // clear previous unique names
-        for (size_t i = 0; i < uni_command_count; i++) free(uni_command_names[i]);
-        free(uni_command_names);
-        uni_command_names = NULL;
-        uni_command_count = 0;
-        // Check if this is TURNHISTVOFF.ir - use universal IR system
-        if (strcmp(ir_file_paths[idx], "TURNHISTVOFF.ir") == 0) {
-            // Set up for universal IR transmission
-            strcpy(current_universal_file, "TURNHISTVOFF");
-            printf("Using universal IR system for TURNHISTVOFF\n");
-            
-            // Create a single command entry for universal transmission
-            uni_command_names = malloc(sizeof(*uni_command_names));
-            if (uni_command_names) {
-                uni_command_names[0] = strdup("Power Off");
-                uni_command_count = 1;
-            }
-        } else {
-            // build full file path for regular universal files
-            char path[256];
-            size_t base_len = strlen(current_dir);
-            if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
-            memcpy(path, current_dir, base_len);
-            path[base_len] = '\0';
-            snprintf(path + base_len, sizeof(path) - base_len, "/%s", ir_file_paths[idx]);
-            // remember for transmit
-            strncpy(current_universal_file, path, sizeof(current_universal_file) - 1);
-            current_universal_file[sizeof(current_universal_file) - 1] = '\0';
-            printf("scanning universal file: %s\n", current_universal_file);
-            // scan file for unique command names
-            bool susp = false; bool did = ir_sd_begin(&susp);
-            FILE *f = fopen(path, "r"); if (!f) { if (did) ir_sd_end(susp); return; }
-            char buf[256], last[256] = "";
-            while (fgets(buf, sizeof(buf), f)) {
-                char *s = buf;
-                while (*s && isspace((unsigned char)*s)) s++;
-                if (*s == '#' || *s == '\0') continue;
-                if (strncmp(s, "name:", 5) == 0) {
-                    char *v = s + 5; while (*v && isspace((unsigned char)*v)) v++;
-                    char *e = v + strlen(v) - 1; while (e > v && isspace((unsigned char)*e)) *e-- = '\0';
-                    if (strcmp(v, last) != 0) {
-                        bool dup = false;
-                        for (size_t j = 0; j < uni_command_count; j++) {
-                            if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
-                        }
-                        if (!dup) {
-                            char **tmp = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
-                            if (!tmp) break;
-                            uni_command_names = tmp;
-                            char *name = strdup(v);
-                            if (!name) break;
-                            uni_command_names[uni_command_count] = name;
-                            uni_command_count++;
-                        }
-                        strcpy(last, v);
+// Open a universal-remote file and list its unique command names.
+static void ir_open_universal_path(const char *full_path) {
+    // clear previous unique names
+    for (size_t i = 0; i < uni_command_count; i++) free(uni_command_names[i]);
+    free(uni_command_names);
+    uni_command_names = NULL;
+    uni_command_count = 0;
+    const char *fname = strrchr(full_path, '/');
+    fname = fname ? fname + 1 : full_path;
+    // Check if this is TURNHISTVOFF.ir - use universal IR system
+    if (strcmp(fname, "TURNHISTVOFF.ir") == 0) {
+        // Set up for universal IR transmission
+        strcpy(current_universal_file, "TURNHISTVOFF");
+        printf("Using universal IR system for TURNHISTVOFF\n");
+
+        // Create a single command entry for universal transmission
+        uni_command_names = malloc(sizeof(*uni_command_names));
+        if (uni_command_names) {
+            uni_command_names[0] = strdup("Power Off");
+            uni_command_count = 1;
+        }
+    } else {
+        // remember full path for transmit
+        strncpy(current_universal_file, full_path, sizeof(current_universal_file) - 1);
+        current_universal_file[sizeof(current_universal_file) - 1] = '\0';
+        printf("scanning universal file: %s\n", current_universal_file);
+        // scan file for unique command names
+        bool susp = false; bool did = ir_sd_begin(&susp);
+        FILE *f = fopen(full_path, "r"); if (!f) { if (did) ir_sd_end(susp); return; }
+        char buf[256], last[256] = "";
+        while (fgets(buf, sizeof(buf), f)) {
+            char *s = buf;
+            while (*s && isspace((unsigned char)*s)) s++;
+            if (*s == '#' || *s == '\0') continue;
+            if (strncmp(s, "name:", 5) == 0) {
+                char *v = s + 5; while (*v && isspace((unsigned char)*v)) v++;
+                char *e = v + strlen(v) - 1; while (e > v && isspace((unsigned char)*e)) *e-- = '\0';
+                if (strcmp(v, last) != 0) {
+                    bool dup = false;
+                    for (size_t j = 0; j < uni_command_count; j++) {
+                        if (strcmp(uni_command_names[j], v) == 0) { dup = true; break; }
                     }
+                    if (!dup) {
+                        char **tmp = realloc(uni_command_names, (uni_command_count + 1) * sizeof(*uni_command_names));
+                        if (!tmp) break;
+                        uni_command_names = tmp;
+                        char *name = strdup(v);
+                        if (!name) break;
+                        uni_command_names[uni_command_count] = name;
+                        uni_command_count++;
+                    }
+                    strcpy(last, v);
                 }
             }
-            fclose(f);
-            if (did) ir_sd_end(susp);
-            printf("found %zu unique commands\n", uni_command_count);
         }
-        if (g_ir_ov) options_view_clear(g_ir_ov);
-        showing_commands = true;
-        selected_ir_index = 0;
-        for (size_t i = 0; i < uni_command_count; i++) {
-            options_view_add_item(g_ir_ov, uni_command_names[i], command_event_cb, (void*)(intptr_t)i);
-        }
+        fclose(f);
+        if (did) ir_sd_end(susp);
+        printf("found %zu unique commands\n", uni_command_count);
+    }
+    if (g_ir_ov) options_view_clear(g_ir_ov);
+    showing_commands = true;
+    selected_ir_index = 0;
+    for (size_t i = 0; i < uni_command_count; i++) {
+        options_view_add_item(g_ir_ov, uni_command_names[i], command_event_cb, (void*)(intptr_t)i);
+    }
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
-        ir_add_back_row();
+    ir_add_back_row();
 #endif
-        num_ir_items = options_view_get_item_count(g_ir_ov);
-        options_view_set_selected(g_ir_ov, 0);
+    num_ir_items = options_view_get_item_count(g_ir_ov);
+    options_view_set_selected(g_ir_ov, 0);
+}
+
+// Open a saved remote file and list its signals plus management actions.
+static void ir_open_remote_path(const char *full_path, const char *fname) {
+    ESP_LOGI(TAG, "opening IR file: %s", full_path);
+
+    // Save current remote info for management functions
+    strncpy(current_remote_path, full_path, sizeof(current_remote_path) - 1);
+    current_remote_path[sizeof(current_remote_path) - 1] = '\0';
+
+    // Extract remote name (without .ir extension)
+    strncpy(current_remote_name, fname, sizeof(current_remote_name) - 1);
+    current_remote_name[sizeof(current_remote_name) - 1] = '\0';
+    char *dot = strrchr(current_remote_name, '.');
+    if (dot) *dot = '\0';
+
+    if (signals) {
+        infrared_manager_free_list(signals, signal_count);
+        signals = NULL;
+        signal_count = 0;
+    }
+    // Free the previous screen's rows BEFORE parsing so LVGL returns its
+    // widgets to the internal heap first -- on PSRAM-less boards (Cardputer)
+    // this is often exactly the room the timings arrays need.
+    if (g_ir_ov) options_view_clear(g_ir_ov);
+    bool susp2 = false; bool did2 = ir_sd_begin(&susp2);
+    if (!infrared_manager_read_list(full_path, &signals, &signal_count)) {
+        if (did2) ir_sd_end(susp2);
+        ESP_LOGE(TAG, "failed to read IR list from file: %s", full_path);
+        return;
+    }
+    if (did2) ir_sd_end(susp2);
+    showing_commands = true;
+    selected_ir_index = 0;
+
+    ESP_LOGI(TAG, "listing %zu commands for %s", signal_count, fname);
+
+    for (size_t i = 0; i < signal_count; i++) {
+        options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void*)(intptr_t)i);
+    }
+
+    options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
+    options_view_add_item(g_ir_ov, "Add New Signal", add_signal_cb, NULL);
+    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
+    if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    num_ir_items = options_view_get_item_count(g_ir_ov);
+
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
+    ir_add_back_row();
+    num_ir_items = options_view_get_item_count(g_ir_ov);
+#endif
+    options_view_set_selected(g_ir_ov, 0);
+}
+
+static void file_event_open(int idx) {
+    if (in_universals_mode) {
+        char path[256];
+        size_t base_len = strlen(current_dir);
+        if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
+        memcpy(path, current_dir, base_len);
+        path[base_len] = '\0';
+        snprintf(path + base_len, sizeof(path) - base_len, "/%s", ir_file_paths[idx]);
+        ir_open_universal_path(path);
         return;
     }
     if (idx < 0 || idx >= ir_file_count) return;
@@ -2454,53 +2521,49 @@ static void file_event_open(int idx) {
         strncat(path, "/", sizeof(path) - strlen(path) - 1);
     }
     strncat(path, ir_file_paths[idx], sizeof(path) - strlen(path) - 1);
+    ir_open_remote_path(path, ir_file_paths[idx]);
+}
 
-    ESP_LOGI(TAG, "opening IR file: %s", path);
-
-    // Save current remote info for management functions
-    strncpy(current_remote_path, path, sizeof(current_remote_path) - 1);
-    current_remote_path[sizeof(current_remote_path) - 1] = '\0';
-    
-    // Extract remote name (without .ir extension)
-    strncpy(current_remote_name, ir_file_paths[idx], sizeof(current_remote_name) - 1);
-    current_remote_name[sizeof(current_remote_name) - 1] = '\0';
-    char *dot = strrchr(current_remote_name, '.');
-    if (dot) *dot = '\0';
-
-    if (signals) {
-        infrared_manager_free_list(signals, signal_count);
-        signals = NULL;
-        signal_count = 0;
+// Deep-link support for favorites: open a specific remote file. Safe to call
+// before the view exists - the request is consumed by infrared_view_create().
+void infrared_view_open_remote(const char *path) {
+    if (!path || !path[0]) return;
+    strncpy(s_pending_remote_open, path, sizeof(s_pending_remote_open) - 1);
+    s_pending_remote_open[sizeof(s_pending_remote_open) - 1] = '\0';
+    // View already live (e.g. lockscreen overlay on top of it): apply now.
+    if (g_ir_ov && lv_obj_is_valid(g_ir_ov)) {
+        infrared_view_apply_pending_open();
     }
-    bool susp2 = false; bool did2 = ir_sd_begin(&susp2);
-    if (!infrared_manager_read_list(path, &signals, &signal_count)) {
-        if (did2) ir_sd_end(susp2);
-        ESP_LOGE(TAG, "failed to read IR list from file: %s", path);
-        return;
-    }
-    if (did2) ir_sd_end(susp2);
-    if (g_ir_ov) options_view_clear(g_ir_ov);
-    showing_commands = true;
-    selected_ir_index = 0;
+}
 
-    ESP_LOGI(TAG, "listing %zu commands for %s", signal_count, ir_file_paths[idx]);
-
-    for (size_t i = 0; i < signal_count; i++) {
-        options_view_add_item(g_ir_ov, signals[i].name, command_event_cb, (void*)(intptr_t)i);
+static void infrared_view_apply_pending_open(void) {
+    if (!s_pending_remote_open[0]) return;
+    char path[256];
+    strncpy(path, s_pending_remote_open, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    s_pending_remote_open[0] = '\0';
+    const char *fname = strrchr(path, '/');
+    fname = fname ? fname + 1 : path;
+    bool is_universals = strstr(path, "/universals/") != NULL;
+    // Reuse the normal navigation path so flags (has_remotes_option etc.)
+    // stay consistent for the back button. This avoids the state mismatch
+    // that left has_remotes_option=true after a direct ir_open_* call and
+    // later made the second back press fall through to display_manager_go_back
+    // or try to rebuild a stale list.
+    if (is_universals) {
+        universals_event_cb(NULL);
+    } else {
+        remotes_event_cb(NULL);
     }
-    
-    options_view_add_item(g_ir_ov, "Rename Remote", rename_remote_cb, NULL);
-    options_view_add_item(g_ir_ov, "Add New Signal", add_signal_cb, NULL);
-    lv_obj_t *delete_btn = options_view_add_item(g_ir_ov, "Delete Remote", delete_remote_cb, NULL);
-    if (delete_btn) lv_obj_set_style_bg_color(delete_btn, lv_color_hex(0x8B0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    
-    num_ir_items = options_view_get_item_count(g_ir_ov);
-    
-#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_USE_JOYSTICK) || defined(CONFIG_USE_ATOMS3R_BUTTON)
-    ir_add_back_row();
-    num_ir_items = options_view_get_item_count(g_ir_ov);
-#endif
-    options_view_set_selected(g_ir_ov, 0);
+    // Find the requested file in the freshly populated list and open it
+    for (size_t i = 0; i < ir_file_count; i++) {
+        if (strcmp(ir_file_paths[i], fname) == 0) {
+            file_event_open((int)i);
+            return;
+        }
+    }
+    // Fallback: path already compared via fname; if still not found, keep
+    // the file list visible so the user can pick manually.
 }
 
 // execute selected IR command

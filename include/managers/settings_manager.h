@@ -176,7 +176,15 @@ typedef enum {
     SETTING_OTA_INSTALL_FROM_SD,
     SETTING_SUN_MODE,
     SETTING_LOG_LEVEL,
+    SETTING_FAVORITES,
+    SETTING_FAVORITES_BYPASS,
+    SETTING_MANAGE_FAVORITES,
 } SettingsType;
+
+/* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
+ * 8-slot layouts are migrated on load (see settings_manager.c). */
+#define FAVORITES_MAX 16
+#define FAVORITE_NAME_LEN 64
 
 #define GPS_BAUD_AUTO 1U
 
@@ -330,6 +338,9 @@ typedef struct {
     bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
     uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
     uint8_t log_level;                 // ESP-IDF global log level (esp_log_level_t)
+    uint8_t favorites_count;
+    char favorites[FAVORITES_MAX][FAVORITE_NAME_LEN];
+    bool favorites_bypass_pin;
 
     // Lockscreen settings
     bool lockscreen_enabled;
@@ -610,6 +621,14 @@ void settings_set_sun_mode(FSettings *settings, bool enabled);
 bool settings_get_sun_mode(const FSettings *settings);
 void settings_set_log_level(FSettings *settings, uint8_t level);
 uint8_t settings_get_log_level(const FSettings *settings);
+bool settings_is_favorite(const FSettings *settings, const char *name);
+bool settings_add_favorite(FSettings *settings, const char *name);
+bool settings_remove_favorite(FSettings *settings, const char *name);
+bool settings_toggle_favorite(FSettings *settings, const char *name);
+uint8_t settings_get_favorites_count(const FSettings *settings);
+const char *settings_get_favorite(const FSettings *settings, uint8_t idx);
+void settings_set_favorites_bypass(FSettings *settings, bool bypass);
+bool settings_get_favorites_bypass(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
 void settings_set_menu_card_bg(FSettings *settings, bool enabled);

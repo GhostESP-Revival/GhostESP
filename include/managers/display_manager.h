@@ -200,6 +200,10 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+
+/* Current status-bar title text ("" if none). Valid until the next
+ * add_status_bar call - copy if you need to keep it. */
+const char *display_manager_get_status_title(void);
 void display_manager_raise_status_bar(void);
 void display_manager_restore_status_bar(void);
 

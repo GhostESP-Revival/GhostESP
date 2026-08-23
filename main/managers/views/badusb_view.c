@@ -855,6 +855,39 @@ static void go_back(void) {
     }
 }
 
+// Deep-link support for favorites: run a specific script by name (as shown
+// in the Select Script list). Safe to call before the view exists - the
+// request is consumed by badusb_view_create().
+static char s_pending_script[MAX_SCRIPT_NAME] = {0};
+static void badusb_view_apply_pending_open(void);
+
+void badusb_view_open_script(const char *name) {
+    if (!name || !name[0]) return;
+    strncpy(s_pending_script, name, sizeof(s_pending_script) - 1);
+    s_pending_script[sizeof(s_pending_script) - 1] = '\0';
+    // View already live (e.g. lockscreen overlay on top of it): apply now.
+    if (g_ov && lv_obj_is_valid(g_ov)) {
+        badusb_view_apply_pending_open();
+    }
+}
+
+static void badusb_view_apply_pending_open(void) {
+    if (!s_pending_script[0]) return;
+    char name[MAX_SCRIPT_NAME];
+    strncpy(name, s_pending_script, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    s_pending_script[0] = '\0';
+
+    if (badusb_is_remote() && !esp_comm_manager_is_connected()) {
+        error_popup_create("Not connected to peer");
+        return;
+    }
+    populate_script_list();
+    current_menu_state = BADUSB_MENU_SCRIPT_SELECT;
+    rebuild_menu();
+    handle_option(name); // executes the payload exactly as the picker would
+}
+
 static void rebuild_menu(void) {
     if (!g_ov) return;
 
@@ -1010,6 +1043,9 @@ void badusb_view_create(void) {
 
     update_scroll_buttons_visibility();
 #endif
+
+    // Consume any pending favorite deep-link (badusb_view_open_script).
+    badusb_view_apply_pending_open();
 }
 
 void badusb_view_destroy(void) {

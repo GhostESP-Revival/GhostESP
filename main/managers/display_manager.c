@@ -18,6 +18,7 @@
 #include "gui/toast.h"
 #include "managers/views/error_popup.h"
 #include "managers/views/main_menu_screen.h"
+#include "suppress_noisy_logs.h"
 #include "managers/views/options_screen.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/clock_screen.h"
@@ -1252,6 +1253,13 @@ static void level_label_click_cb(lv_event_t *e) {
     display_manager_switch_view(&ghostchi_view);
 }
 
+const char *display_manager_get_status_title(void) {
+  if (status_bar && lv_obj_is_valid(status_bar) && mainlabel && lv_obj_is_valid(mainlabel)) {
+    return lv_label_get_text(mainlabel);
+  }
+  return "";
+}
+
 void display_manager_add_status_bar(const char *CurrentMenuName) {
     const char *label_text = CurrentMenuName ? CurrentMenuName : "";
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -2271,7 +2279,9 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0 ||
           strcmp(view_name, "Cloud Store") == 0 ||
-          strcmp(view_name, "ENV-III") == 0);
+          strcmp(view_name, "ENV-III") == 0 ||
+          strcmp(view_name, "Favorites Manager") == 0 ||
+          strcmp(view_name, "Lockscreen") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {
@@ -3957,6 +3967,20 @@ void lvgl_tick_task(void *arg) {
               ESP_LOGW(TAG, "lvgl_tick: input_queue backlog=%u", (unsigned)pending);
           }
           last_mon = now;
+      }
+
+      // LVGL pool pressure snapshot every 30s: max_used tells us how far the
+      // pool can be shrunk without any functional loss.
+      {
+          static TickType_t last_lv_mem_log;
+          if (now - last_lv_mem_log >= pdMS_TO_TICKS(30000)) {
+              last_lv_mem_log = now;
+              lv_mem_monitor_t mmon;
+              lv_mem_monitor(&mmon);
+              ESP_LOGI(TAG, "lvgl pool: total=%u free=%u peak=%u frag=%u%%",
+                       (unsigned)mmon.total_size, (unsigned)mmon.free_size,
+                       (unsigned)mmon.max_used, (unsigned)mmon.frag_pct);
+          }
       }
 
       // Auto-lock timeout check

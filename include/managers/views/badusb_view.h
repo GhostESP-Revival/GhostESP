@@ -9,4 +9,9 @@ extern View badusb_view;
 // status: "waiting", "running", or "done"
 void badusb_view_update_status(const char *status);
 
+/* Deep-link: run a specific payload script by name (as listed under
+ * Run Script). Safe to call before the view is created; applied on create
+ * or immediately if the view is already live. */
+void badusb_view_open_script(const char *name);
+
 #endif // BADUSB_VIEW_H

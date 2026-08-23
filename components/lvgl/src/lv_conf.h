@@ -42,10 +42,14 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     /*Size of the memory available for `lv_malloc()` in bytes (>= 2kB)*/
-    #define LV_MEM_SIZE (68 * 1024U)          /*[bytes]*/
+    /* Adaptive sizing: modest always-reserved base plus an elastic expansion
+     * budget drawn from the main heap only when UI complexity demands it.
+     * Base + expand == the previous fixed 68 K ceiling, so the worst case is
+     * unchanged while low-RAM boards permanently reserve 24 K less. */
+    #define LV_MEM_SIZE (44 * 1024U)          /*[bytes]*/
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/
-    #define LV_MEM_POOL_EXPAND_SIZE 0
+    #define LV_MEM_POOL_EXPAND_SIZE (24 * 1024U)
 
     /*Set an address for the memory pool instead of allocating it as a normal array. Can be in external SRAM too.*/
     #define LV_MEM_ADR 0     /*0: unused*/

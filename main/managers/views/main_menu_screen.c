@@ -22,6 +22,7 @@
 #include "managers/views/lockscreen.h"
 #include "managers/settings_manager.h"
 #include "core/esp_comm_manager.h"
+#include "gui/toast.h"
 #include "managers/status_display_manager.h"
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 #include "managers/views/audio_player_screen.h"
@@ -761,6 +762,28 @@ static int grid_horizontal_target(int direction) {
  *  @brief handles keyboard button presses
  */
 
+static void toggle_favorite_for_selected(void) {
+    bool dual = esp_comm_manager_is_connected();
+    int menu_idx = visible_index_to_menu_index(selected_item_index, dual);
+    if (menu_idx < 0 || menu_idx >= get_total_menu_items()) return;
+    const char *name = menu_items[menu_idx].name;
+    if (!name) return;
+    bool was_fav = settings_is_favorite(&G_Settings, name);
+    bool ok;
+    if (was_fav) ok = settings_remove_favorite(&G_Settings, name);
+    else ok = settings_add_favorite(&G_Settings, name);
+    if (ok) {
+        settings_persist_setting(SETTING_FAVORITES);
+        toast_show(was_fav ? "Removed from Favorites" : "Added to Favorites", TOAST_SUCCESS);
+        // Haptic feedback if available
+        #ifdef CONFIG_HAS_HAPTIC
+        // haptic_manager_trigger(HAPTIC_TAP);
+        #endif
+    } else {
+        toast_show(settings_get_favorites_count(&G_Settings) >= FAVORITES_MAX ? "Favorites full (8 max)" : "Failed", TOAST_WARN);
+    }
+}
+
 void handle_keyboard_interactions(int keyValue){
     const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
     // arrows and vim keys: h/j/k/l, plus , /
@@ -776,6 +799,9 @@ void handle_keyboard_interactions(int keyValue){
     } else if (keyValue == LV_KEY_DOWN || keyValue == 'j' || keyValue == '.') { // down
         ESP_LOGD(TAG, "Down arrow or 'j' pressed\n");
         navigate_vertical(1, LV_ANIM_ON);
+    } else if (keyValue == 'p' || keyValue == 'P') { // pin favorite
+        ESP_LOGD(TAG, "Pin favorite pressed\n");
+        toggle_favorite_for_selected();
     } else if (keyValue == LV_KEY_ENTER || keyValue == 13) { // enter/select
         ESP_LOGD(TAG, "Enter pressed\n");
         handle_menu_item_selection(selected_item_index);

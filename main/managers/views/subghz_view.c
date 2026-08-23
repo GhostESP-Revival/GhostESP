@@ -4581,6 +4581,38 @@ static void subghz_input_handler(InputEvent *event) {
     }
 }
 
+// Deep-link support for favorites: open a specific saved capture. Safe to
+// call before the view exists - consumed by subghz_view_create().
+static char s_pending_capture_open[256] = {0};
+static void subghz_view_apply_pending_open(void);
+
+void subghz_view_open_capture(const char *path) {
+    if (!path || !path[0]) return;
+    strncpy(s_pending_capture_open, path, sizeof(s_pending_capture_open) - 1);
+    s_pending_capture_open[sizeof(s_pending_capture_open) - 1] = '\0';
+    // View already live (e.g. lockscreen overlay on top of it): apply now.
+    if (s_ov && lv_obj_is_valid(s_ov)) {
+        subghz_view_apply_pending_open();
+    }
+}
+
+static void subghz_view_apply_pending_open(void) {
+    if (!s_pending_capture_open[0]) return;
+    char path[256];
+    strncpy(path, s_pending_capture_open, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    s_pending_capture_open[0] = '\0';
+    s_saved_page = 0;
+    subghz_saved_list_reload();
+    for (int i = 0; i < s_saved_file_count; i++) {
+        if (s_saved_file_paths[i] && strcmp(s_saved_file_paths[i], path) == 0) {
+            s_saved_index = i;
+            break;
+        }
+    }
+    subghz_open_saved_popup();
+}
+
 void subghz_view_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
@@ -4685,6 +4717,9 @@ void subghz_view_create(void) {
     memset(s_peaks, 0, sizeof(s_peaks));
 
     s_timer = lv_timer_create(subghz_timer_cb, 33, NULL);
+
+    // Consume any pending favorite deep-link (subghz_view_open_capture).
+    subghz_view_apply_pending_open();
 }
 
 void subghz_view_destroy(void) {

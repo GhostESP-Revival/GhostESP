@@ -402,6 +402,12 @@ static esp_err_t sd_card_mount_spi_with_retry(
     const sdspi_device_config_t *slot_config,
     const esp_vfs_fat_sdmmc_mount_config_t *mount_config) {
   esp_err_t ret = ESP_FAIL;
+  // The IDF SD driver logs a scary multi-line error (with a reboot HINT)
+  // for every attempt. Silence it during retries and emit ONE clear,
+  // user-friendly summary at the end instead - the raw spam was generating
+  // bogus bug reports for the normal "no card inserted" case.
+  esp_log_level_t prev_vfs = esp_log_level_get("vfs_fat_sdmmc");
+  esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
   for (int attempt = 1; attempt <= 3; ++attempt) {
     esp_err_t prepare_ret = sd_card_prepare_shared_spi_card();
     if (prepare_ret != ESP_OK) {
@@ -410,9 +416,16 @@ static esp_err_t sd_card_mount_spi_with_retry(
     sd_card_manager.card = NULL;
     ret = esp_vfs_fat_sdspi_mount("/mnt", host, slot_config, mount_config,
                                   &sd_card_manager.card);
-    if (ret == ESP_OK) return ESP_OK;
-    ESP_LOGW(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
+    if (ret == ESP_OK) break;
+    ESP_LOGD(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
     if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  esp_log_level_set("vfs_fat_sdmmc", prev_vfs);
+  if (ret != ESP_OK) {
+    bool no_card = (ret == ESP_ERR_TIMEOUT);
+    ESP_LOGW(TAG, "No SD card detected after 3 attempts (%s)%s",
+             esp_err_to_name(ret),
+             no_card ? " - insert a card and reboot to enable SD features" : "");
   }
   return ret;
 }
