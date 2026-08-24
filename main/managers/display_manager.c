@@ -1435,7 +1435,7 @@ void apply_power_management_config(bool power_save_enabled) {
     if (power_save_enabled) {
       ap_manager_stop_services();
     } else if (settings_get_ap_enabled(&G_Settings)) {
-      ap_manager_start_services();
+      (void)ap_manager_restore_after_attack("power save off");
     }
   }
 }

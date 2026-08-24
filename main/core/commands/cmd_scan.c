@@ -279,7 +279,7 @@ static void sweep_run_internal(void) {
         glog("\nReport saved to: %s\n", report_path);
     }
 
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("sweep");
     glog("\n=== Sweep Complete ===\n");
     glog("WiFi: %d APs, %d stations | Security: %d open, %d weak, %d secure\n",
          ap_cnt, station_count, open_networks, weak_networks, secure_networks);
@@ -353,7 +353,7 @@ void handle_scanall(int argc, char **argv) {
     // 3. Print Combined Results
     wifi_manager_scanall_chart();
 
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("scanall");
     status_display_show_status("ScanAll Done");
 }
 

@@ -329,7 +329,7 @@ static void ble_resume_networking(void) {
         esp_err_t err = ap_manager_init();
         if (err == ESP_OK) {
             wifi_manager_configure_sta_from_settings();
-            (void)ap_manager_start_services();
+            (void)ap_manager_restore_after_attack("ble resume");
         }
 #endif
         if (err != ESP_OK) {
@@ -355,6 +355,11 @@ static void ble_resume_networking(void) {
             ESP_LOGW(TAG_BLE, "Heap fragmented, using reduced Wi-Fi buffers");
         }
         err = esp_wifi_init(&cfg);
+        if (err == ESP_OK) {
+            // Custom cfg path bypasses ap_manager_ensure_wifi_init(); still
+            // force RAM-only config storage so radio state never persists.
+            esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        }
 #endif
         if (err == ESP_OK) {
             wifi_mode_t mode = (ble_prev_wifi_mode == WIFI_MODE_NULL) ? WIFI_MODE_STA : ble_prev_wifi_mode;

@@ -76,7 +76,7 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     // entry, so this function is the only thing that brings the AP back for
     // those flows. Always restore AP services before returning, regardless
     // of whether the Wi-Fi driver restart succeeded.
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("scan stop");
 
     if (stop_err != ESP_OK || start_err != ESP_OK) {
         glog("WiFi scan stop completed with recovery errors (stop=%s, start=%s).\n",

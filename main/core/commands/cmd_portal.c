@@ -555,7 +555,7 @@ void handle_sinkhole_cmd(int argc, char **argv) {
             glog("Set your device DNS to " IPSTR "\n", IP2STR(&ip_info.ip));
             status_display_show_status("Sinkhole On");
         } else {
-            ap_manager_start_services();
+            (void)ap_manager_restore_after_attack("sinkhole fail");
             glog("Failed to start DNS sinkhole\n");
             status_display_show_status("Sinkhole Fail");
         }
@@ -565,7 +565,7 @@ void handle_sinkhole_cmd(int argc, char **argv) {
             if (h) {
                 dns_sinkhole_save_stats();
                 stop_dns_server(h);
-                ap_manager_start_services();
+                (void)ap_manager_restore_after_attack("sinkhole stop");
                 glog("DNS sinkhole stopped\n");
                 TERMINAL_VIEW_ADD_TEXT("DNS sinkhole stopped\n");
                 status_display_show_status("Sinkhole Off");

@@ -1562,7 +1562,7 @@ static void plugin_api_wifi_live_scan_stop(void) {
     if (stop_err != ESP_OK) {
         ESP_LOGW(TAG, "wifi stop after live scan: %s", esp_err_to_name(stop_err));
     }
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("plugin live scan");
     plugin_wifi_snapshot_scan_results();
 }
 
@@ -2539,7 +2539,7 @@ void plugin_api_release(void) {
         s_plugin_live_scan_active = false;
         wifi_manager_stop_monitor_mode();
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("plugin cleanup");
     }
     if (s_plugin_espnow_started) {
         espnow_manager_stop();

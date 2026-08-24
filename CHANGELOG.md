@@ -25,6 +25,10 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming
 - Both audio player screens gained a touch Back bar matching other views
 
+### Fixed
+- Fixed the AP never coming back after scans or deauth attacks - resolves #382
+- Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368
+
 ## Revival v2.1.1
 
 ### Added

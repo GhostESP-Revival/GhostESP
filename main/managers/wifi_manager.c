@@ -2220,7 +2220,7 @@ void wifi_manager_stop_evil_portal_keep_wifi(void) {
     // DON'T call wifi_stop_safely() - keep STA connected
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("portal stop");
 
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
@@ -2400,10 +2400,8 @@ void wifi_manager_init(void) {
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
 
     // Initialize WiFi with default settings
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
     ESP_LOGI(TAG, "wifi_manager: initializing WiFi driver...");
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(ap_manager_ensure_wifi_init());
     ESP_LOGI(TAG, "wifi_manager: WiFi driver init done, free internal RAM: %d bytes (used: %d)", 
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), 
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
@@ -4085,7 +4083,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
 
 cleanup:
     wifi_timed_scan_active = false;
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("timed scan");
     return err;
 }
 

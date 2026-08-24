@@ -4647,7 +4647,7 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_AP_ENABLED:
             settings_set_ap_enabled(&G_Settings, new_value == 1);
             if (new_value == 1) {
-                ap_manager_start_services();
+                (void)ap_manager_restore_after_attack("ap enable");
             } else {
                 ap_manager_stop_services();
             }
@@ -13680,7 +13680,7 @@ static void ap_ssid_kb_cb(const char *text) {
         settings_set_ap_ssid(&G_Settings, text);
         settings_persist_setting(SETTING_AP_SSID);
         // Apply AP changes so new clients can connect with new SSID
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("ap ssid change");
     }
     keyboard_view_set_submit_callback(NULL);
     current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
@@ -13696,7 +13696,7 @@ static void ap_password_kb_cb(const char *text) {
     // Allow empty string (= open AP); only reject null
     settings_set_ap_password(&G_Settings, text ? text : "");
     settings_persist_setting(SETTING_AP_PASSWORD);
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("ap password change");
     keyboard_view_set_submit_callback(NULL);
     current_settings_root = SETTINGS_ROOT_CONNECTIVITY;
     current_settings_category = settings_category_index_for_id(SETTINGS_CAT_NETWORK);

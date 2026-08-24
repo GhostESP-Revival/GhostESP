@@ -238,7 +238,7 @@ static void cloud_store_restore_ap_if_needed(void) {
     s_ap_paused_for_cloud = false;
     if (settings_get_ap_enabled(&G_Settings)) {
         ESP_LOGI(TAG, "Restoring AP/Web UI services after Cloud Store network request");
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("cloud store");
     }
 #endif
 }

@@ -7,6 +7,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/wifi_manager.h"
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -220,8 +221,7 @@ static esp_err_t wdstream_prepare_wifi(void) {
     wifi_mode_t mode;
     esp_err_t err = esp_wifi_get_mode(&mode);
     if (err == ESP_ERR_WIFI_NOT_INIT) {
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
+        err = ap_manager_ensure_wifi_init();
         if (err != ESP_OK) goto fail;
     } else if (err != ESP_OK) {
         goto fail;
@@ -237,7 +237,7 @@ static esp_err_t wdstream_prepare_wifi(void) {
     return ESP_OK;
 
 fail:
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("wdstream");
     return err;
 }
 
@@ -460,7 +460,7 @@ static void wdstream_task(void *pvParameter) {
     if (wifi_ready) {
         (void)esp_wifi_scan_stop();
         (void)esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("wdstream stop");
     }
 
     wdstream_emit("WD:END reason=%s\n", s_wdstream_stop_reason);

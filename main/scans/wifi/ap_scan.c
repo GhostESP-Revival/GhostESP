@@ -39,7 +39,7 @@ void wifi_manager_configure_sta_from_settings(void);
 void wifi_manager_set_reconnect_hold(bool hold);
 
 static void restore_wifi_after_scan(void) {
-    (void)ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("ap scan stop");
     wifi_manager_configure_sta_from_settings();
     wifi_manager_set_reconnect_hold(false);
 }
@@ -241,8 +241,7 @@ void ap_scan_start(void) {
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err == ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGW(TAG, "Wi-Fi not initialized, reinitializing driver...");
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
+        err = ap_manager_ensure_wifi_init();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
@@ -356,8 +355,7 @@ esp_err_t ap_scan_start_async(void) {
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err == ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGW(TAG, "Wi-Fi not initialized, reinitializing driver...");
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
+        err = ap_manager_ensure_wifi_init();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));

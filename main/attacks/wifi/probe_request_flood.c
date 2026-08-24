@@ -101,7 +101,7 @@ static void probe_flood_task(void *param) {
                 esp_wifi_set_channel(selected_aps[i].primary, WIFI_SECOND_CHAN_NONE);
                 uint16_t len = build_probe_request(frame, selected_aps[i].ssid, ssid_len);
                 for (int burst = 0; burst < 10 && probe_flood_running; burst++) {
-                    if (esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false) == ESP_OK) {
+                    if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
                         probe_flood_packets_sent++;
                     }
                 }
@@ -113,7 +113,7 @@ static void probe_flood_task(void *param) {
             esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
             uint16_t len = build_probe_request(frame, selected_ap.ssid, ssid_len);
             for (int burst = 0; burst < 10 && probe_flood_running; burst++) {
-                if (esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false) == ESP_OK) {
+                if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
                     probe_flood_packets_sent++;
                 }
             }
@@ -168,24 +168,14 @@ void probe_request_flood_start(void) {
         glog("Starting probe request flood on: %s (ch %d)\n", sanitized_ssid, selected_ap.primary);
     }
 
-    // Injecting on WIFI_IF_AP requires the AP interface to be active.
+    // Attack radio profile tears down the GhostNet AP (kicking any WebUI
+    // client) and injects from the STA interface, keeping the radio free for
+    // channel hopping.
     ap_manager_stop_services();
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     probe_flood_running = true;
     probe_flood_packets_sent = 0;
@@ -202,7 +192,7 @@ void probe_request_flood_start(void) {
             probe_flood_task_handle = NULL;
         }
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("probe flood start");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_status("Probe Flood failed");
 #endif
@@ -232,7 +222,7 @@ void probe_request_flood_stop(void) {
     }
 
     esp_wifi_stop();
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("probe flood stop");
 
     glog("Probe Flood stopped. Total: %lu packets\n", (unsigned long)probe_flood_packets_sent);
 #ifdef CONFIG_WITH_STATUS_DISPLAY

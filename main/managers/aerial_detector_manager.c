@@ -9,6 +9,7 @@
 // Copyright (c) 2025 jbohack, Licensed under MIT
 //
 #include "managers/aerial_detector_manager.h"
+#include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "core/glog.h"
@@ -343,9 +344,9 @@ static void start_wifi_phase(void) {
     wifi_mode_t current_mode;
     esp_err_t ret = esp_wifi_get_mode(&current_mode);
     if (ret != ESP_OK) {
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_wifi_init(&cfg);
-        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        if (ap_manager_ensure_wifi_init() != ESP_OK) {
+            ESP_LOGW(TAG, "wifi driver init failed for scan phase");
+        }
         esp_wifi_set_mode(WIFI_MODE_STA);
         esp_wifi_start();
     }

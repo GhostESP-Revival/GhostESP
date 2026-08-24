@@ -151,7 +151,7 @@ static void chameleon_resume_ap(void) {
         esp_err_t err_init = ap_manager_init();
         if (err_init == ESP_OK) {
             wifi_manager_configure_sta_from_settings();
-            (void)ap_manager_start_services();
+            (void)ap_manager_restore_after_attack("chameleon resume");
         }
         if (err_init != ESP_OK) {
             ESP_LOGE(TAG, "Failed to restore GhostNet AP services: 0x%X", (unsigned int)err_init);
@@ -163,8 +163,7 @@ static void chameleon_resume_ap(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
         
         // Re-init just the Wi-Fi driver (netif/event loop already exist)
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_err_t err = esp_wifi_init(&cfg);
+        esp_err_t err = ap_manager_ensure_wifi_init();
         if (err == ESP_OK) {
             wifi_mode_t m = (g_prev_wifi_mode == WIFI_MODE_NULL) ? WIFI_MODE_STA : g_prev_wifi_mode;
             esp_wifi_set_mode(m);
