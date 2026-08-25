@@ -127,6 +127,9 @@ static bool lockscreen_handle_favorites_input(bool up, bool down, bool left, boo
 static void lockscreen_create_fav_pill(void);
 static void lockscreen_destroy_fav_pill(void);
 static void lockscreen_fav_launch(const char *name);
+#ifdef CONFIG_USE_TOUCHSCREEN
+static void lockscreen_fav_update_scroll_buttons(void);
+#endif
 
 static void lockscreen_clear_input(void);
 static void lockscreen_add_char(char c);
@@ -1067,7 +1070,6 @@ static void lockscreen_fav_launch(const char *name) {
     #endif
     // Helper to switch: unlock first if needed, then switch
     bool is_overlay = s_overlay_mode;
-    View *return_view = display_manager_get_lockscreen_return_view();
     // If favorite is Lock, just stay locked
     if (strcmp(name, "Lock") == 0) return;
     // Generic prefix handling for file-based favorites (IR, NFC, SubGHz, Apps)
