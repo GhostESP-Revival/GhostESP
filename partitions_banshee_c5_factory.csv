@@ -1,0 +1,10 @@
+# Banshee C5 8MB factory layout - OTA disabled.
+# No updater partition; app0 enlarged to avoid flash overflow.
+# app0 0x670000 (6.5 MB) fits current ~5.66 MB binary with ~1.14 MB headroom.
+# napps remains for native SD apps flash-XIP (C5).
+# Name,     Type, SubType,  Offset,   Size,    Flags
+nvs,        data, nvs,      0x9000,   0x7000,
+app0,       app,  factory,  0x10000,  0x670000,
+napps,      data, 0xFE,     0x680000, 0x100000,
+coredump,   data, coredump, 0x780000, 0x20000,
+otadata,    data, ota,      0x7A0000, 0x2000,

@@ -78,7 +78,7 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">T-Display S3 Touch</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">S3TWatch</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>has 4MB vfs partition</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">TEmbed C1101</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">Banshee</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Updater + peer</td><td>✓</td></tr>
+      <tr><th scope="row">Banshee</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
       <tr><th scope="row">GhostBoard</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Poltergeist</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">T-Deck</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
@@ -101,7 +101,7 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
   </table>
 </div>
 
-**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Updater + peer` means Banshee uses the C5 updater app for its display MCU and GhostLink peer update for the S3. `Manual` means USB/manual flashing is required for that release build.
+**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Manual` means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously `Updater + peer`) is disabled in v2.1.2 due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
 
 **Native SD Apps:** `✓` means the release build supports loading native `.gapp` apps from SD.
 

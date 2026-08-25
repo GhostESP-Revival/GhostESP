@@ -1102,9 +1102,9 @@ CONFIG_ESPTOOLPY_MONITOR_BAUD=460800
 # CONFIG_PARTITION_TABLE_TWO_OTA is not set
 # CONFIG_PARTITION_TABLE_TWO_OTA_LARGE is not set
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_banshee_c5_updater.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_banshee_c5_factory.csv"
 # default:
-CONFIG_PARTITION_TABLE_FILENAME="partitions_banshee_c5_updater.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_banshee_c5_factory.csv"
 # Native SD app flash-XIP (execute app .text from the napps partition)
 CONFIG_ELF_LOADER_C5_FLASH_XIP=y
 CONFIG_ELF_LOADER_CACHE_OFFSET=y

@@ -1,6 +1,6 @@
 ---
 title: "Firmware Updates"
-description: "How GhostESP firmware update checks, installs, peer updates, SD card updates, and Banshee C5 updater recovery work."
+description: "How GhostESP firmware update checks, installs, peer updates and SD card updates work."
 keywords: ["firmware", "ota", "updates", "sd card", "banshee", "ghostlink"]
 weight: 120
 toc: true
@@ -44,26 +44,26 @@ Boards with a normal dual-partition OTA layout download the firmware, write it t
 
 ## Banshee C5 Update Behavior
 
-Banshee C5 uses a special updater flow because it cannot fit two full GhostESP app slots alongside its fixed native-app flash-XIP partition.
+> **v2.1.2: Banshee C5 self-OTA disabled.** The `Banshee_C5` build previously used a dedicated updater app (reserve `updater` partition + 1.12 MB embedded updater) to work around the fixed native-app flash-XIP partition. The flow was unreliable and repeatedly pushed the app over flash (`app0 0x550000` overflow `0x17BF0` in v2.1.2). Self-OTA is disabled for this board for now; flash via USB using the [Installation Guide]({{< relref "installation-guide.md" >}}) or the Web Flasher at https://ghostesp.net/flasher . OTA will return in a future release with a leaner layout.
 
-On Banshee C5:
+<details><summary>Previous updater flow (historical, currently disabled)</summary>
 
-- **Check Device Update** checks the Banshee C5 firmware manifest entry.
-- **Install Update** stores the pending update request, switches boot to a small updater app, and reboots.
-- The updater app connects to Wi-Fi, downloads the firmware, verifies SHA-256, then rewrites `app0` while running from the updater partition.
-- The main app partition is not touched until the updater has downloaded and verified the new firmware.
+Banshee C5 previously used a special updater flow because it cannot fit two full GhostESP app slots alongside its fixed native-app flash-XIP partition.
 
-If the updater fails before touching `app0`, it records the error, switches boot back to `app0`, and reboots into normal GhostESP. On boot, GhostESP shows an **Update Failed** popup with the updater error. The popup stays on screen until dismissed.
+On Banshee C5 (when enabled):
 
-If failure happens after `app0` erase or write has started, the updater does not boot back to `app0` because the app may be incomplete. It stays in updater recovery and retries after reboot. If it cannot recover, use USB/manual flashing.
+- **Check Device Update** checked the Banshee C5 firmware manifest entry.
+- **Install Update** stored the pending update request, switched boot to a small updater app, and rebooted.
+- The updater app connected to Wi-Fi, downloaded the firmware, verified SHA-256, then rewrote `app0` while running from the updater partition.
+- The main app partition was not touched until the updater had downloaded and verified the new firmware.
 
-Common safe failures include:
+If the updater failed before touching `app0`, it recorded the error, switched boot back to `app0`, and rebooted into normal GhostESP. On boot, GhostESP showed an **Update Failed** popup with the updater error.
 
-- Wi-Fi connection failed.
-- No pending update was found.
-- Download failed.
-- SHA-256 verification failed.
-- Firmware image was too large.
+If failure happened after `app0` erase or write had started, the updater did not boot back to `app0` because the app could be incomplete. It stayed in updater recovery and retried after reboot. If it could not recover, USB/manual flashing was required.
+
+Common safe failures included Wi-Fi connection failed, no pending update found, download failed, SHA-256 verification failed, and firmware image too large.
+
+</details>
 
 ## Peer Firmware Updates
 
@@ -85,7 +85,7 @@ During a peer update, the primary downloads the peer firmware and streams it ove
 
 On boards with a normal dual-partition OTA layout, **Install from SD Card** can install firmware from the SD card.
 
-The action is hidden on boards where SD-card OTA is not supported, including Banshee C5.
+The action is hidden on boards where SD-card OTA is not supported, including Banshee C5 (self-OTA disabled in v2.1.2).
 
 To use SD-card OTA:
 
@@ -127,5 +127,5 @@ What you can do if the access point does not come back:
 
 - If an update check says no firmware was found, confirm that **Update Channel** is set correctly.
 - If install says no update is ready, run **Check Device Update** first.
-- If a Banshee C5 updater failure is shown on boot, dismiss the popup, check Wi-Fi credentials, and try the update again.
+- Banshee C5: self-OTA is disabled in v2.1.2 (see above); use USB/manual flashing. The updater failure popup only appears on builds with the updater partition (pre-v2.1.2).
 - If the device cannot boot normal firmware after a failed update, reflash manually with USB using the [Installation Guide]({{< relref "installation-guide.md" >}}).

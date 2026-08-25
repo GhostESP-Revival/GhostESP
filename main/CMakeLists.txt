@@ -189,7 +189,10 @@ list(APPEND required_components esp_audio_codec)
 
 set(embed_files_list "core/ouis.bin")
 
-if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
+# Banshee C5 self-OTA disabled for v2.1.2 - was bad UX and flash overflow (see partitions_banshee_c5_factory.csv).
+# Previous updater embed block disabled:
+# if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
+if(FALSE)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(banshee_c5_updater_build_dir "${CMAKE_SOURCE_DIR}/ota_updater/build_banshee_c5_updater_auto")
     set(banshee_c5_updater_sdkconfig_defaults "${CMAKE_SOURCE_DIR}/ota_updater/sdkconfig.defaults")
@@ -241,9 +244,10 @@ endif()
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-incompatible-pointer-types -Wno-unused-local-typedefs)
 
-if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE GHOSTESP_BANSHEE_C5_UPDATER_EMBEDDED=1)
-endif()
+# Disabled for v2.1.2 - Banshee C5 OTA removed
+# if(CONFIG_BUILD_CONFIG_TEMPLATE STREQUAL "somethingsomething")
+#     target_compile_definitions(${COMPONENT_LIB} PRIVATE GHOSTESP_BANSHEE_C5_UPDATER_EMBEDDED=1)
+# endif()
 
 idf_build_get_property(idf_path IDF_PATH)
 target_include_directories(${COMPONENT_LIB} PRIVATE

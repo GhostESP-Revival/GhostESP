@@ -29,6 +29,10 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed the AP never coming back after scans or deauth attacks - resolves #382
 - Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327
 
+### Removed
+- Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3
+
+
 ## Revival v2.1.1
 
 ### Added
