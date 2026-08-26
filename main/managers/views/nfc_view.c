@@ -216,7 +216,7 @@ static bool saved_has_extra_details = false;
 static char *saved_details_text = NULL;
 static char g_saved_current_path[256] = {0};
 // Deep-link request (favorite launch): saved tag to open on create/live view.
-static char s_pending_saved_open[256] = {0};
+static char *s_pending_saved_open = NULL;
 static popup_confirm_t *saved_delete_confirm_popup = NULL;
 
 // user mfc keys popup
@@ -5971,19 +5971,20 @@ static void nfc_write_go_cb(lv_event_t *e) {
 static void nfc_view_apply_pending_open(void);
 void nfc_view_open_saved(const char *path) {
     if (!path || !path[0]) return;
-    strncpy(s_pending_saved_open, path, sizeof(s_pending_saved_open) - 1);
-    s_pending_saved_open[sizeof(s_pending_saved_open) - 1] = '\0';
+    free(s_pending_saved_open);
+    s_pending_saved_open = strdup(path);
     if (g_nfc_ov && lv_obj_is_valid(g_nfc_ov)) {
         nfc_view_apply_pending_open();
     }
 }
 
 static void nfc_view_apply_pending_open(void) {
-    if (!s_pending_saved_open[0]) return;
+    if (!s_pending_saved_open) return;
     char path[256];
     strncpy(path, s_pending_saved_open, sizeof(path) - 1);
     path[sizeof(path) - 1] = '\0';
-    s_pending_saved_open[0] = '\0';
+    free(s_pending_saved_open);
+    s_pending_saved_open = NULL;
     saved_enter_list();
     create_saved_details_popup(path);
 }

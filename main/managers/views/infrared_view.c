@@ -129,7 +129,7 @@ static bool has_universals_option = false;
 static bool in_universals_mode = false;
 // Deep-link request (favorite launch): full path of the remote to open as
 // soon as the view is created, or immediately if it is already running.
-static char s_pending_remote_open[256] = {0};
+static char *s_pending_remote_open = NULL;
 static char **uni_command_names = NULL;
 static size_t uni_command_count = 0;
 static char current_universal_file[256] = "";
@@ -2528,8 +2528,8 @@ static void file_event_open(int idx) {
 // before the view exists - the request is consumed by infrared_view_create().
 void infrared_view_open_remote(const char *path) {
     if (!path || !path[0]) return;
-    strncpy(s_pending_remote_open, path, sizeof(s_pending_remote_open) - 1);
-    s_pending_remote_open[sizeof(s_pending_remote_open) - 1] = '\0';
+    free(s_pending_remote_open);
+    s_pending_remote_open = strdup(path);
     // View already live (e.g. lockscreen overlay on top of it): apply now.
     if (g_ir_ov && lv_obj_is_valid(g_ir_ov)) {
         infrared_view_apply_pending_open();
@@ -2537,11 +2537,12 @@ void infrared_view_open_remote(const char *path) {
 }
 
 static void infrared_view_apply_pending_open(void) {
-    if (!s_pending_remote_open[0]) return;
+    if (!s_pending_remote_open) return;
     char path[256];
     strncpy(path, s_pending_remote_open, sizeof(path) - 1);
     path[sizeof(path) - 1] = '\0';
-    s_pending_remote_open[0] = '\0';
+    free(s_pending_remote_open);
+    s_pending_remote_open = NULL;
     const char *fname = strrchr(path, '/');
     fname = fname ? fname + 1 : path;
     bool is_universals = strstr(path, "/universals/") != NULL;

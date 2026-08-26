@@ -24,6 +24,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -858,13 +859,13 @@ static void go_back(void) {
 // Deep-link support for favorites: run a specific script by name (as shown
 // in the Select Script list). Safe to call before the view exists - the
 // request is consumed by badusb_view_create().
-static char s_pending_script[MAX_SCRIPT_NAME] = {0};
+static char *s_pending_script = NULL;
 static void badusb_view_apply_pending_open(void);
 
 void badusb_view_open_script(const char *name) {
     if (!name || !name[0]) return;
-    strncpy(s_pending_script, name, sizeof(s_pending_script) - 1);
-    s_pending_script[sizeof(s_pending_script) - 1] = '\0';
+    free(s_pending_script);
+    s_pending_script = strdup(name);
     // View already live (e.g. lockscreen overlay on top of it): apply now.
     if (g_ov && lv_obj_is_valid(g_ov)) {
         badusb_view_apply_pending_open();
@@ -872,11 +873,12 @@ void badusb_view_open_script(const char *name) {
 }
 
 static void badusb_view_apply_pending_open(void) {
-    if (!s_pending_script[0]) return;
+    if (!s_pending_script) return;
     char name[MAX_SCRIPT_NAME];
     strncpy(name, s_pending_script, sizeof(name) - 1);
     name[sizeof(name) - 1] = '\0';
-    s_pending_script[0] = '\0';
+    free(s_pending_script);
+    s_pending_script = NULL;
 
     if (badusb_is_remote() && !esp_comm_manager_is_connected()) {
         error_popup_create("Not connected to peer");

@@ -52,12 +52,15 @@ static lv_obj_t *s_scroll_up_btn = NULL;
 static lv_obj_t *s_scroll_down_btn = NULL;
 static lv_obj_t *s_touch_back_btn = NULL;
 #endif
-static fav_row_t s_rows[FAV_ROWS_MAX];
+// Heap-backed row/file buffers: 2 KB+ of static arrays would permanently
+// burn internal RAM on boards without PSRAM (esp32s2 etc.); these are only
+// needed while the screen is open.
+static fav_row_t *s_rows = NULL;
 static int s_row_count = 0;
 static bool s_picker_mode = false;
 static int s_picker_stage = 0;   // 0 = category chooser, 1 = item chooser
 static int s_picker_category = 0;
-static char s_file_paths[FAV_FILES_MAX][FAVORITE_NAME_LEN];
+static char (*s_file_paths)[FAVORITE_NAME_LEN] = NULL;
 static int s_file_count = 0;
 static bool s_touch_started = false;
 #ifdef CONFIG_USE_TOUCHSCREEN
@@ -207,6 +210,7 @@ static bool handle_touch(InputEvent *event) {
 
 static int scan_ir_files(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     const char *dirs[] = { "/mnt/ghostesp/infrared/remotes", "/mnt/ghostesp/infrared/universals" };
     for (int d = 0; d < 2 && s_file_count < FAV_FILES_MAX; d++) {
         DIR *dir = opendir(dirs[d]);
@@ -227,6 +231,7 @@ static int scan_ir_files(void) {
 
 static int scan_nfc_files(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     const char *dirp = "/mnt/ghostesp/nfc";
     DIR *dir = opendir(dirp);
     if (!dir) return 0;
@@ -245,6 +250,7 @@ static int scan_nfc_files(void) {
 
 static int scan_subghz_files(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     const char *dirp = "/mnt/ghostesp/subghz";
     DIR *dir = opendir(dirp);
     if (!dir) {
@@ -267,6 +273,7 @@ static int scan_subghz_files(void) {
 
 static int scan_app_ids(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     int cnt = plugin_manager_count();
     for (int i = 0; i < cnt && s_file_count < FAV_FILES_MAX; i++) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
@@ -280,6 +287,7 @@ static int scan_app_ids(void) {
 
 static int scan_script_files(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     const char *dirp = "/mnt/ghostesp/scripts";
     DIR *dir = opendir(dirp);
     if (!dir) return 0;
@@ -298,6 +306,7 @@ static int scan_script_files(void) {
 
 static int scan_badusb_files(void) {
     s_file_count = 0;
+    if (!s_file_paths) return 0;
     const char *dirp = "/mnt/ghostesp/badusb";
     DIR *dir = opendir(dirp);
     if (!dir) return 0;
@@ -319,7 +328,7 @@ static int scan_badusb_files(void) {
 // --- list building ---------------------------------------------------------
 
 static void add_row(row_type_t type, int index, const char *label) {
-    if (s_row_count >= FAV_ROWS_MAX) return;
+    if (!s_rows || s_row_count >= FAV_ROWS_MAX) return;
     if (!options_view_add_item(s_ov, label, row_click_cb, NULL)) return;
     s_rows[s_row_count].type = type;
     s_rows[s_row_count].index = index;
@@ -351,7 +360,7 @@ static void build_main_list(int select_row) {
 
     if (select_row < 0 || select_row >= s_row_count) select_row = 0;
     // Never rest the cursor on an informational row.
-    if (s_rows[select_row].type == ROW_NONE) select_row = s_row_count > 1 ? 1 : 0;
+    if (s_rows && s_rows[select_row].type == ROW_NONE) select_row = s_row_count > 1 ? 1 : 0;
     options_view_set_selected(s_ov, select_row);
 #ifdef CONFIG_USE_TOUCHSCREEN
     fav_update_scroll_buttons();
@@ -482,13 +491,13 @@ static void pick_item(int row_index) {
     if (s_picker_category == 0) {
         if (item_index >= 0 && item_index < k_pin_options_count) chosen = k_pin_options[item_index];
     } else {
-        if (item_index >= 0 && item_index < s_file_count) chosen = s_file_paths[item_index];
+        if (s_file_paths && item_index >= 0 && item_index < s_file_count) chosen = s_file_paths[item_index];
     }
     if (chosen) add_favorite(chosen);
 }
 
 static void activate_row(int selected) {
-    if (!s_ov || selected < 0 || selected >= s_row_count) return;
+    if (!s_ov || !s_rows || selected < 0 || selected >= s_row_count) return;
     fav_row_t row = s_rows[selected];
     switch (row.type) {
         case ROW_NONE:
@@ -717,6 +726,15 @@ void favorites_manager_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     touch_drag_reset(&s_favmgr_touch_drag);
 #endif
+    // Row/file buffers live on the heap for the lifetime of the screen so
+    // low-RAM boards without PSRAM don't pay 2 KB+ of permanent BSS.
+    free(s_rows);
+    free(s_file_paths);
+    s_rows = (fav_row_t *)malloc(sizeof(fav_row_t) * FAV_ROWS_MAX);
+    s_file_paths = (char (*)[FAVORITE_NAME_LEN])malloc(FAV_FILES_MAX * FAVORITE_NAME_LEN);
+    s_row_count = 0;
+    s_file_count = 0;
+
     build_main_list(s_resume_row);
     // Entry animation, matching the other options-style lists.
     options_view_trigger_wipe(s_ov);
@@ -735,6 +753,10 @@ void favorites_manager_destroy(void) {
     s_touch_back_btn = NULL;
 #endif
     s_row_count = 0;
+    free(s_rows);
+    free(s_file_paths);
+    s_rows = NULL;
+    s_file_paths = NULL;
     s_picker_mode = false;
     s_picker_stage = 0;
     s_picker_category = 0;

@@ -4582,14 +4582,15 @@ static void subghz_input_handler(InputEvent *event) {
 }
 
 // Deep-link support for favorites: open a specific saved capture. Safe to
-// call before the view exists - consumed by subghz_view_create().
-static char s_pending_capture_open[256] = {0};
+// call before the view exists - consumed by subghz_view_create(). Heap-backed
+// so it does not burn 256 B of internal RAM on boards without PSRAM.
+static char *s_pending_capture_open = NULL;
 static void subghz_view_apply_pending_open(void);
 
 void subghz_view_open_capture(const char *path) {
     if (!path || !path[0]) return;
-    strncpy(s_pending_capture_open, path, sizeof(s_pending_capture_open) - 1);
-    s_pending_capture_open[sizeof(s_pending_capture_open) - 1] = '\0';
+    free(s_pending_capture_open);
+    s_pending_capture_open = strdup(path);
     // View already live (e.g. lockscreen overlay on top of it): apply now.
     if (s_ov && lv_obj_is_valid(s_ov)) {
         subghz_view_apply_pending_open();
@@ -4597,11 +4598,12 @@ void subghz_view_open_capture(const char *path) {
 }
 
 static void subghz_view_apply_pending_open(void) {
-    if (!s_pending_capture_open[0]) return;
+    if (!s_pending_capture_open) return;
     char path[256];
     strncpy(path, s_pending_capture_open, sizeof(path) - 1);
     path[sizeof(path) - 1] = '\0';
-    s_pending_capture_open[0] = '\0';
+    free(s_pending_capture_open);
+    s_pending_capture_open = NULL;
     s_saved_page = 0;
     subghz_saved_list_reload();
     for (int i = 0; i < s_saved_file_count; i++) {
