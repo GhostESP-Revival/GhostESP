@@ -105,6 +105,13 @@ static char s_fav_saved_status_title[48] = {0};
 static int s_numpad_y = 94;
 static bool s_landscape_layout = false;
 
+// Extra invisible touch padding around the Favorites pill/hint so the
+// touch target is comfortable to hit without growing the visuals. Kept
+// at 6px so the portrait pill (sitting 6px above the numpad) never
+// overlaps the keypad: 22px pill + 12px padding = a ~34px effective
+// target that fills the dead gap between pill and numpad exactly.
+#define LS_FAV_TOUCH_PAD 6
+
 #ifdef CONFIG_USE_TOUCHSCREEN
 // Standard bottom touch bar for the favorites overlay (scroll up / Back /
 // scroll down), matching the other options-style views.
@@ -893,13 +900,16 @@ static void lockscreen_show_favorites(void) {
         display_manager_add_status_bar("Favorites");
     }
     // Integrated full-width list: no card chrome, same background as the view.
+    // No top header: the status bar above the overlay carries the title, so
+    // the list starts flush at the top of the overlay (only 8px bottom margin
+    // before the touch bar).
     int margin = (LV_HOR_RES <= 160) ? 6 : 10;
     int list_w = LV_HOR_RES - margin * 2;
-    int list_h = LV_VER_RES - GUI_STATUS_BAR_H - 30 - 8 - touch_h;
+    int list_h = LV_VER_RES - GUI_STATUS_BAR_H - 8 - touch_h;
     if (list_h < 60) list_h = 60;
     s_fav_list = lv_obj_create(s_fav_overlay);
     lv_obj_set_size(s_fav_list, list_w, list_h);
-    lv_obj_align(s_fav_list, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_align(s_fav_list, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(s_fav_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_fav_list, 0, 0);
     lv_obj_set_style_radius(s_fav_list, 0, 0);
@@ -1194,6 +1204,7 @@ static void lockscreen_create_fav_pill(void) {
         lv_obj_align(s_fav_hint, LV_ALIGN_BOTTOM_MID, 0, -6);
         lv_obj_add_flag(s_fav_hint, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(s_fav_hint, (lv_event_cb_t)lockscreen_show_favorites, LV_EVENT_CLICKED, NULL);
+        lv_obj_set_ext_click_area(s_fav_hint, LS_FAV_TOUCH_PAD);
     } else {
         if (!s_content || !lv_obj_is_valid(s_content)) return;
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
@@ -1249,6 +1260,8 @@ static void lockscreen_create_fav_pill(void) {
             lv_obj_set_style_text_color(lbl, lv_color_hex(theme_palette_get_text(theme)), 0);
             lv_obj_center(lbl);
             lv_obj_add_event_cb(s_fav_pill, (lv_event_cb_t)lockscreen_show_favorites, LV_EVENT_CLICKED, NULL);
+            // Bigger invisible touch target around the pill (visual stays 22px).
+            lv_obj_set_ext_click_area(s_fav_pill, LS_FAV_TOUCH_PAD);
             // Focus ring handling via s_fav_pill_focused
             s_fav_pill_focused = false;
         } else {
@@ -1285,6 +1298,7 @@ static void lockscreen_create_fav_pill(void) {
             lv_obj_align(s_fav_hint, LV_ALIGN_TOP_MID, x_off, hint_y);
             lv_obj_add_flag(s_fav_hint, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(s_fav_hint, (lv_event_cb_t)lockscreen_show_favorites, LV_EVENT_CLICKED, NULL);
+            lv_obj_set_ext_click_area(s_fav_hint, LS_FAV_TOUCH_PAD);
         }
 #endif
     }
@@ -1475,7 +1489,7 @@ static void lockscreen_input_handler(InputEvent *event) {
             if (event->type == INPUT_TYPE_TOUCH) {
                 lv_indev_data_t *td = &event->data.touch_data;
                 if (s_fav_hint && lv_obj_is_valid(s_fav_hint)) {
-                    lv_area_t ha; lv_obj_get_coords(s_fav_hint, &ha);
+                    lv_area_t ha; lv_obj_get_click_area(s_fav_hint, &ha);
                     if (td->point.x >= ha.x1 && td->point.x <= ha.x2 && td->point.y >= ha.y1 && td->point.y <= ha.y2) {
                         lockscreen_show_favorites(); return;
                     }
@@ -1489,14 +1503,14 @@ static void lockscreen_input_handler(InputEvent *event) {
 
     if (event->type == INPUT_TYPE_TOUCH) {
         lv_indev_data_t *data = &event->data.touch_data;
-        // Check pill tap first
+        // Check pill tap first (click area includes the invisible touch padding)
         if (s_fav_pill && lv_obj_is_valid(s_fav_pill)) {
-            lv_area_t pa; lv_obj_get_coords(s_fav_pill, &pa);
+            lv_area_t pa; lv_obj_get_click_area(s_fav_pill, &pa);
             bool on_pill = (data->point.x >= pa.x1 && data->point.x <= pa.x2 && data->point.y >= pa.y1 && data->point.y <= pa.y2);
             if (on_pill && data->state == LV_INDEV_STATE_REL) { lockscreen_show_favorites(); return; }
         }
         if (s_fav_hint && lv_obj_is_valid(s_fav_hint)) {
-            lv_area_t ha; lv_obj_get_coords(s_fav_hint, &ha);
+            lv_area_t ha; lv_obj_get_click_area(s_fav_hint, &ha);
             bool on_hint = (data->point.x >= ha.x1 && data->point.x <= ha.x2 && data->point.y >= ha.y1 && data->point.y <= ha.y2);
             if (on_hint && data->state == LV_INDEV_STATE_REL) { lockscreen_show_favorites(); return; }
         }
