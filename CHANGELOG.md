@@ -1,7 +1,7 @@
 # Ghost ESP Changelog
 
 ## Attribution
-Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
+Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
 ## Revival v2.1.2
 
@@ -31,7 +31,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327
 
 ### Removed
-- Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3
+- Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)
 
 
 ## Revival v2.1.1
