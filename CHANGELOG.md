@@ -9,6 +9,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added the Hero main menu layout
 - Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
 - Added favorites menu where you can pin menu items, IR remotes, NFC tags, SubGHz captures and apps
+- Favorites overlay Back row, styled like the favorites rows, so joysticks can exit by pressing a row
 - Replaced the accent-only menu themes with 21 full color palettes
 
 ### Changed
@@ -29,6 +30,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Fixed
 - Fixed the AP never coming back after scans or deauth attacks - resolves #382
 - Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327
+- Fixed GhostLink-relayed Ethernet fingerprint/port/ping scans and ARP poison silently failing; display now flags a peer that doesn't acknowledge
 
 ### Removed
 - Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)

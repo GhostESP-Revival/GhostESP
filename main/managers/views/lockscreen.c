@@ -728,16 +728,19 @@ static void lockscreen_destroy_numpad(void) {
 
 // --- Favorites overlay (responsive, theme-consistent) ---
 
+// Selection domain is [0 .. s_fav_count]; index s_fav_count is the Back row.
+// A joystick can therefore navigate to "Back" and press SELECT to leave the
+// overlay, exactly like the other options-style lists.
 static void lockscreen_fav_set_selected(int idx) {
-    if (!s_fav_btns || s_fav_count <= 0) return;
-    if (idx < 0) idx = s_fav_count - 1;
-    if (idx >= s_fav_count) idx = 0;
+    if (!s_fav_btns) return;
+    if (idx < 0) idx = s_fav_count;
+    if (idx > s_fav_count) idx = 0;
     s_fav_selected = idx;
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
     lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
     lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
-    for (int i = 0; i < s_fav_count; i++) {
+    for (int i = 0; i <= s_fav_count; i++) {
         lv_obj_t *btn = s_fav_btns[i];
         if (!btn || !lv_obj_is_valid(btn)) continue;
         bool sel = (i == s_fav_selected);
@@ -761,6 +764,7 @@ static void lockscreen_fav_set_selected(int idx) {
 }
 
 static void lockscreen_fav_activate_selected(void) {
+    // The last row is Back: pressing SELECT on it closes the overlay.
     if (s_fav_count <= 0 || s_fav_selected < 0 || s_fav_selected >= s_fav_count) {
         lockscreen_hide_favorites();
         return;
@@ -917,6 +921,7 @@ static void lockscreen_show_favorites(void) {
     lv_obj_set_style_pad_row(s_fav_list, 3, 0);
     lv_obj_set_flex_flow(s_fav_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_fav_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
     // Empty state
     if (s_fav_count == 0) {
         lv_obj_t *lbl = lv_label_create(s_fav_list);
@@ -927,12 +932,11 @@ static void lockscreen_show_favorites(void) {
         lv_obj_set_style_text_font(lbl, gui_font_caption(), 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(theme_palette_get_text_muted(theme)), 0);
         lv_obj_center(lbl);
-        s_fav_btns = NULL;
-        return;
     }
-    lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
-    s_fav_btns = (lv_obj_t **)malloc(sizeof(lv_obj_t *) * s_fav_count);
-    for (int i = 0; i < s_fav_count; i++) {
+    // One extra slot for the Back row.
+    s_fav_btns = (lv_obj_t **)malloc(sizeof(lv_obj_t *) * (s_fav_count + 1));
+    if (s_fav_btns) {
+        for (int i = 0; i < s_fav_count; i++) {
         const char *name = settings_get_favorite(&G_Settings, i);
         const char *display = name ? name : "";
         // Strip prefix for display: "ir:/path" -> basename, "menu:WiFi" -> "WiFi"
@@ -963,8 +967,30 @@ static void lockscreen_show_favorites(void) {
         lv_obj_center(lbl);
         lv_obj_add_event_cb(btn, lockscreen_fav_btn_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         s_fav_btns[i] = btn;
+        }
+
+        // Back row: identical styling to the favorite rows so joystick users
+        // can scroll to it and press SELECT to leave the overlay.
+        lv_obj_t *back_btn = lv_btn_create(s_fav_list);
+        lv_obj_set_width(back_btn, list_w - 4);
+        int back_h = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 26 : 34;
+        lv_obj_set_height(back_btn, back_h);
+        lv_obj_set_style_radius(back_btn, GUI_RADIUS_SM, 0);
+        gui_apply_pressed_style(back_btn);
+        gui_menu_card_apply(back_btn, true, surface, surface, 0, 0);
+        lv_obj_t *back_lbl = lv_label_create(back_btn);
+        lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Back");
+        lv_label_set_long_mode(back_lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(back_lbl, list_w - 24);
+        lv_obj_set_style_text_align(back_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(back_lbl, accessibility_get_font_body(), 0);
+        lv_obj_center(back_lbl);
+        lv_obj_add_event_cb(back_btn, lockscreen_fav_btn_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)s_fav_count);
+        s_fav_btns[s_fav_count] = back_btn;
+
+        lockscreen_fav_set_selected(0);
     }
-    lockscreen_fav_set_selected(0);
 #ifdef CONFIG_USE_TOUCHSCREEN
     // Standard bottom touch bar (scroll up / Back / scroll down).
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -1444,8 +1470,9 @@ static void lockscreen_input_handler(InputEvent *event) {
                     lockscreen_fav_update_scroll_buttons();
                     return;
                 }
-                // Tap on a favorite row: select and open it.
-                for (int i = 0; i < s_fav_count; i++) {
+                // Tap on a favorite row: select and open it (index s_fav_count
+                // is the Back row, handled by activate_selected()).
+                for (int i = 0; i <= s_fav_count; i++) {
                     if (!s_fav_btns || !s_fav_btns[i] || !lv_obj_is_valid(s_fav_btns[i])) continue;
                     lv_area_t ra; lv_obj_get_coords(s_fav_btns[i], &ra);
                     if (td->point.x >= ra.x1 && td->point.x <= ra.x2 && td->point.y >= ra.y1 && td->point.y <= ra.y2) {

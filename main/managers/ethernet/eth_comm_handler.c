@@ -408,17 +408,33 @@ bool eth_comm_handler_handle_command(const char *command, const char *data) {
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 
+    // The on-device Ethernet UI (ethernet_screen.c) sends these sub-command
+    // names over GhostLink. Keep the short aliases ("fp", "port", "ports",
+    // "ping", "poison") alongside the UI names so both the display firmware
+    // and this handler keep interoperating regardless of which side is
+    // newer. NOTE: an unrecognized sub-command MUST NOT be swallowed
+    // silently -- the display waits for the "S|scanning"/"S|done" stream
+    // echo and would otherwise sit on the scanning screen forever.
     if (strcmp(data, "arp_scan") == 0) {
         xTaskCreate_psram(remote_arp_task,    "eth_rem_arp",  8192, NULL, 5, &s_remote_task);
-    } else if (strcmp(data, "fp") == 0 || strcmp(data, "fingerprint") == 0) {
+    } else if (strcmp(data, "fp") == 0 || strcmp(data, "fingerprint") == 0 ||
+               strcmp(data, "fp_scan") == 0) {
         xTaskCreate_psram(remote_fp_task,     "eth_rem_fp",   10240, NULL, 5, &s_remote_task);
-    } else if (strcmp(data, "port") == 0) {
+    } else if (strcmp(data, "port") == 0 || strcmp(data, "port_scan_local") == 0) {
         xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)false, 5, &s_remote_task);
-    } else if (strcmp(data, "ports") == 0) {
+    } else if (strcmp(data, "ports") == 0 || strcmp(data, "port_scan_all") == 0) {
         xTaskCreate_psram(remote_port_task,   "eth_rem_port", 8192, (void *)(intptr_t)true,  5, &s_remote_task);
-    } else if (strcmp(data, "ping") == 0) {
+    } else if (strcmp(data, "ping") == 0 || strcmp(data, "ping_sweep") == 0) {
         xTaskCreate_psram(remote_ping_task,   "eth_rem_ping", 8192, NULL, 5, &s_remote_task);
     } else if (strcmp(data, "poison") == 0 || strcmp(data, "monitor") == 0) {
+        xTaskCreate_psram(remote_poison_monitor_task, "eth_rem_mon", 8192, NULL, 3, &s_remote_task);
+    } else if (strcmp(data, "poison_start") == 0) {
+        // Start the attack first; the monitor task below exits immediately
+        // if ARP poison is not actually running.
+        esp_err_t err = eth_arp_poison_start();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "eth_arp_poison_start failed: %s", esp_err_to_name(err));
+        }
         xTaskCreate_psram(remote_poison_monitor_task, "eth_rem_mon", 8192, NULL, 3, &s_remote_task);
     } else if (strcmp(data, "poison_stop") == 0) {
         eth_arp_poison_stop();
@@ -428,6 +444,8 @@ bool eth_comm_handler_handle_command(const char *command, const char *data) {
     } else if (strcmp(data, "cancel") == 0) {
         // already cancelled above; acknowledge
         eth_stream_record("S|done");
+    } else {
+        ESP_LOGW(TAG, "Unhandled ethernet sub-command: '%s'", data);
     }
 
     return true;
