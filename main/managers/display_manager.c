@@ -1242,7 +1242,7 @@ void display_manager_update_status_bar_color(void) {
     lv_obj_set_style_text_color(battery_label, text_color, 0);
   }
   if (level_label && lv_obj_is_valid(level_label)) {
-    lv_obj_set_style_text_color(level_label, lv_color_hex(0x666666), 0);
+    lv_obj_set_style_text_color(level_label, text_color, 0);
   }
 
   status_update_cb(NULL);
@@ -1328,7 +1328,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
                0);
   level_label = lv_label_create(right_container);
   lv_label_set_text(level_label, "");
-  lv_obj_set_style_text_color(level_label, lv_color_hex(0x666666), 0);
+  lv_obj_set_style_text_color(level_label, status_text_color, 0);
   lv_obj_set_style_text_font(level_label, accessibility_get_font_small(), 0);
   lv_obj_add_flag(level_label, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(level_label, level_label_click_cb, LV_EVENT_CLICKED, NULL);

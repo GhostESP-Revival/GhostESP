@@ -802,8 +802,15 @@ const SETTINGS_SCHEMA = [
       { id: 'max_bright',      label: 'Max Brightness',       type: 'number', min: 0, max: 100 },
       { id: 'invert_colors',   label: 'Invert Colors',        type: 'bool' },
       { id: 'terminal_color',  label: 'Terminal Color',       type: 'color' },
-      { id: 'menu_theme',      label: 'Menu Theme',           type: 'number', min: 0, max: 255, hint: 'Theme index 0-255' },
-      { id: 'accent_color',    label: 'Accent Color',         type: 'color' },
+      { id: 'theme_bg_fx',     label: 'Background Effects',   type: 'bool' },
+      { id: 'menu_theme',      label: 'Menu Theme',           type: 'enum', options: [
+        ['0', 'Ghost'], ['1', 'Catppuccin Mocha'], ['2', 'Flexoki'], ['3', 'Bright'],
+        ['4', 'Solarized Dark'], ['5', 'Monochrome'], ['6', 'Rose Pine'], ['7', 'Dracula'],
+        ['8', 'Nord'], ['9', 'Gruvbox Dark'], ['10', 'Everforest Dark'], ['11', 'Tokyo Night'],
+        ['12', 'Catppuccin Latte'], ['13', 'Solarized Light'], ['14', 'Kanagawa Wave'],
+        ['15', 'Rose Pine Dawn'], ['16', 'PaperColor Light'],
+        ['17', 'Cherry'], ['18', 'Glacier'], ['19', 'Orchid'], ['20', 'Umber']
+      ] },
     ]
   },
   {

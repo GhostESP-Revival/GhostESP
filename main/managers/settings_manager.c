@@ -1,4 +1,5 @@
 #include "managers/settings_manager.h"
+#include "gui/theme_palette_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "lvgl.h"
@@ -112,6 +113,8 @@ static const char *NVS_MIC_MIRROR_MODE_KEY = "mic_mirror";
 
 static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
 static const char *NVS_MENU_BG_SHADE_KEY = "menu_bg_shd";
+static const char *NVS_THEME_SCHEMA_KEY = "theme_schema";
+static const char *NVS_THEME_BG_EFFECTS_KEY = "theme_bg_fx";
 static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
 static const char *NVS_EPILEPSY_WARNING_KEY = "epil_warn";
 static const char *NVS_FONT_SIZE_KEY = "font_size";
@@ -265,7 +268,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->mic_contrast = 2; // Medium contrast
   settings->mic_mirror_mode = false;
   settings->ghostlink_split_view = true; // Default to split view
-  settings->menu_bg_shade = 2;
+  settings->menu_bg_shade = 1;
+  settings->theme_background_effects = true;
   settings->menu_rounded = true;
   settings->epilepsy_warning_enabled = true;
   settings->font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
@@ -601,7 +605,25 @@ void settings_load(FSettings *settings) {
   }
 
   err = nvs_get_u8(nvsHandle, NVS_MENU_THEME_KEY, &value_u8);
-  if (err == ESP_OK) settings->menu_theme = value_u8;
+  if (err == ESP_OK) {
+    /* Schema 0 = pre-descriptor accent presets; remap once to palette IDs. */
+    uint8_t schema = 0;
+    bool migrate_theme = nvs_get_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, &schema) != ESP_OK || schema == 0;
+    settings->menu_theme = migrate_theme ? theme_palette_migrate_legacy(value_u8)
+                                         : theme_palette_clamp_id(value_u8);
+    if (migrate_theme) {
+      if (nvs_set_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, 1) == ESP_OK) {
+        nvs_commit(nvsHandle);
+      }
+    }
+  } else {
+    /* Fresh device: stamp the current schema so nothing remaps later. */
+    uint8_t schema = 0;
+    if (nvs_get_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, &schema) != ESP_OK) {
+      nvs_set_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, 1);
+      nvs_commit(nvsHandle);
+    }
+  }
   err = nvs_get_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, &value_u32);
   if (err == ESP_OK) {
     settings->terminal_text_color = value_u32;
@@ -835,6 +857,10 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_bg_shade = value_u8;
   }
+  err = nvs_get_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->theme_background_effects = value_u8 != 0;
+  }
   
   err = nvs_get_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -871,6 +897,7 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->sun_mode_saved_brightness = value_u8;
   }
+  settings_normalize_modes(settings);
   err = nvs_get_u8(nvsHandle, NVS_LOG_LEVEL_KEY, &value_u8);
   if (err == ESP_OK && value_u8 <= ESP_LOG_VERBOSE) {
     settings->log_level = value_u8;
@@ -1292,6 +1319,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, G_Settings.menu_bg_shade);
             key = NVS_MENU_BG_SHADE_KEY;
             break;
+        case SETTING_THEME_BACKGROUND_EFFECTS:
+            err = nvs_set_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, G_Settings.theme_background_effects ? 1 : 0);
+            key = NVS_THEME_BG_EFFECTS_KEY;
+            break;
         case SETTING_MENU_ROUNDED:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, G_Settings.menu_rounded ? 1 : 0);
             key = NVS_MENU_ROUNDED_KEY;
@@ -1589,6 +1620,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MIC_MIRROR_MODE_KEY, settings->mic_mirror_mode ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, settings->ghostlink_split_view ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, settings->menu_bg_shade));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, settings->theme_background_effects ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, settings->epilepsy_warning_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, settings->font_size));
@@ -1854,7 +1886,7 @@ bool settings_get_thirds_control_enabled(const FSettings *settings) {
 }
 
 void settings_set_menu_theme(FSettings *settings, uint8_t theme) {
-  settings->menu_theme = theme;
+  settings->menu_theme = theme_palette_clamp_id(theme);
 }
 
 uint8_t settings_get_menu_theme(const FSettings *settings) {
@@ -2333,6 +2365,14 @@ uint8_t settings_get_menu_bg_shade(const FSettings *settings) {
   return settings ? settings->menu_bg_shade : 1;
 }
 
+void settings_set_theme_background_effects(FSettings *settings, bool enabled) {
+  if (settings) settings->theme_background_effects = enabled;
+}
+
+bool settings_get_theme_background_effects(const FSettings *settings) {
+  return settings ? settings->theme_background_effects : true;
+}
+
 void settings_set_menu_rounded(FSettings *settings, bool enabled) {
   if (settings) {
     settings->menu_rounded = enabled;
@@ -2383,9 +2423,17 @@ uint8_t settings_get_input_repeat_speed(const FSettings *settings) {
   return settings ? settings->input_repeat_speed : 1;
 }
 
+void settings_normalize_modes(FSettings *settings) {
+  /* High Contrast and Sun Mode are exclusive; High Contrast wins. */
+  if (settings && settings->high_contrast && settings->sun_mode) {
+    settings->sun_mode = false;
+  }
+}
+
 void settings_set_high_contrast(FSettings *settings, bool enabled) {
   if (settings) {
     settings->high_contrast = enabled;
+    if (enabled) settings->sun_mode = false;
   }
 }
 
@@ -2396,6 +2444,7 @@ bool settings_get_high_contrast(const FSettings *settings) {
 void settings_set_sun_mode(FSettings *settings, bool enabled) {
   if (settings) {
     settings->sun_mode = enabled;
+    if (enabled) settings->high_contrast = false;
   }
 }
 

@@ -6,6 +6,8 @@
 #include "core/glog.h"
 #include "core/memory_debug.h"
 #include "gui/design_tokens.h"
+#include "gui/theme_palette_api.h"
+#include "managers/settings_manager.h"
 #include "gui/screen_layout.h"
 #include "managers/badusb_manager.h"
 #include "managers/ble_manager.h"
@@ -464,18 +466,20 @@ lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent) {
 }
 
 static void plugin_ui_style_panel(lv_obj_t *obj) {
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x181818), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(theme_palette_get_surface(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x303030), LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, lv_color_hex(theme_palette_get_border(theme)), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, GUI_GRID * 3, LV_PART_MAIN);
 }
 
 static void plugin_ui_style_button(lv_obj_t *obj) {
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x2B2B2B), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(theme_palette_get_surface_alt(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, lv_color_hex(theme_palette_get_border(theme)), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
@@ -561,7 +565,8 @@ static void plugin_api_ui_screen_create_now(void *arg) {
     if (!root) return;
 
     lv_obj_clean(root);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(root, lv_color_hex(theme_palette_get_background(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
     display_manager_add_status_bar(ctx->title && ctx->title[0] ? ctx->title : "SD App");
 
@@ -606,7 +611,8 @@ static void plugin_api_ui_label_create_now(void *arg) {
     lv_label_set_text(label, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_color(label, lv_color_hex(0xE6E6E6), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(label, gui_font_body(), LV_PART_MAIN);
     ctx->result = label;
 }
@@ -630,7 +636,8 @@ static void plugin_api_ui_button_create_now(void *arg) {
     lv_label_set_text(label, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_center(label);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(label, gui_font_body(), LV_PART_MAIN);
 
     plugin_ui_button_ctx_t *button_ctx = calloc(1, sizeof(*button_ctx));
@@ -731,14 +738,15 @@ static void plugin_api_ui_show_popup_now(void *arg) {
     lv_obj_t *title = lv_label_create(box);
     lv_label_set_text(title, ctx->title ? ctx->title : "App");
     lv_obj_set_width(title, LV_PCT(100));
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(title, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, gui_font_title(), LV_PART_MAIN);
 
     lv_obj_t *body = lv_label_create(box);
     lv_label_set_text(body, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body, LV_PCT(100));
-    lv_obj_set_style_text_color(body, lv_color_hex(0xD0D0D0), LV_PART_MAIN);
+    lv_obj_set_style_text_color(body, lv_color_hex(theme_palette_get_text_muted(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(body, gui_font_body(), LV_PART_MAIN);
 
     lv_obj_t *close = lv_btn_create(box);
@@ -747,6 +755,7 @@ static void plugin_api_ui_show_popup_now(void *arg) {
     lv_obj_set_width(close, LV_PCT(100));
     lv_obj_t *close_label = lv_label_create(close);
     lv_label_set_text(close_label, "Close");
+    lv_obj_set_style_text_color(close_label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_center(close_label);
     lv_obj_add_event_cb(close, plugin_ui_delete_user_obj_event_cb, LV_EVENT_CLICKED, overlay);
 }

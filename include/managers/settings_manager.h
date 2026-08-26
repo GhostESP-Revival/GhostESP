@@ -179,6 +179,7 @@ typedef enum {
     SETTING_FAVORITES,
     SETTING_FAVORITES_BYPASS,
     SETTING_MANAGE_FAVORITES,
+    SETTING_THEME_BACKGROUND_EFFECTS,
 } SettingsType;
 
 /* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
@@ -325,7 +326,8 @@ typedef struct {
     uint8_t mic_contrast;           // 1-5 (square iterations)
     bool mic_mirror_mode;           // Mirror visualizer center-out
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
-    uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
+    uint8_t menu_bg_shade;          // 0=Darker, 1=Palette, 2=Lighter, 3=Lightest
+    bool theme_background_effects;  // Show the selected palette's subtle background treatment
     bool menu_rounded;              // Rounded corners on menu items
     bool epilepsy_warning_enabled;  // Show warning before flashing LED effects
     uint8_t font_size;              // 0=Small, 1=Normal, 2=Large
@@ -604,6 +606,10 @@ bool settings_get_ghostlink_split_view(const FSettings *settings);
 
 void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade);
 uint8_t settings_get_menu_bg_shade(const FSettings *settings);
+void settings_set_theme_background_effects(FSettings *settings, bool enabled);
+bool settings_get_theme_background_effects(const FSettings *settings);
+/* Enforce mutual exclusivity of accessibility display modes in-place. */
+void settings_normalize_modes(FSettings *settings);
 void settings_set_menu_rounded(FSettings *settings, bool enabled);
 bool settings_get_menu_rounded(const FSettings *settings);
 void settings_set_epilepsy_warning_enabled(FSettings *settings, bool enabled);

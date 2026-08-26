@@ -569,12 +569,17 @@ static void compass_event_handler(InputEvent *event) {
 }
 
 void compass_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x000000));
-    compass_container = gui_screen_create_root(NULL, "Compass", lv_color_hex(0x000000), LV_OPA_COVER);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t background = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+    lv_color_t muted = lv_color_hex(theme_palette_get_text_muted(theme));
+    lv_color_t danger = lv_color_hex(theme_palette_get_danger(theme));
+    display_manager_fill_screen(background);
+    compass_container = gui_screen_create_root(NULL, "Compass", background, LV_OPA_COVER);
     compass_view.root = compass_container;
     
     lv_obj_t *content = gui_screen_create_content(compass_container, GUI_STATUS_BAR_HEIGHT);
-    lv_obj_set_style_text_color(content, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(content, text, 0);
     
     // Ring container (for the rotating cardinal labels)
     ring = lv_obj_create(content);
@@ -582,7 +587,7 @@ void compass_create(void) {
     lv_obj_align(ring, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_color(ring, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(ring, lv_color_hex(theme_palette_get_border(theme)), 0);
     lv_obj_set_style_border_width(ring, 2, 0);
     lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(ring, 0, 0);
@@ -590,22 +595,22 @@ void compass_create(void) {
     // Cardinal direction labels (will be repositioned by update_cardinal_positions)
     lbl_n = lv_label_create(ring);
     lv_label_set_text(lbl_n, "N");
-    lv_obj_set_style_text_color(lbl_n, lv_color_hex(0xFF4444), 0);  // Red for North
+    lv_obj_set_style_text_color(lbl_n, danger, 0);
     lv_obj_set_style_text_font(lbl_n, accessibility_get_font_title(), 0);
     
     lbl_s = lv_label_create(ring);
     lv_label_set_text(lbl_s, "S");
-    lv_obj_set_style_text_color(lbl_s, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(lbl_s, text, 0);
     lv_obj_set_style_text_font(lbl_s, accessibility_get_font_title(), 0);
     
     lbl_e = lv_label_create(ring);
     lv_label_set_text(lbl_e, "E");
-    lv_obj_set_style_text_color(lbl_e, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(lbl_e, text, 0);
     lv_obj_set_style_text_font(lbl_e, accessibility_get_font_title(), 0);
     
     lbl_w = lv_label_create(ring);
     lv_label_set_text(lbl_w, "W");
-    lv_obj_set_style_text_color(lbl_w, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(lbl_w, text, 0);
     lv_obj_set_style_text_font(lbl_w, accessibility_get_font_title(), 0);
 
     // Apply animation times for smoother interpolation
@@ -617,22 +622,22 @@ void compass_create(void) {
     // South needle (white) - FIXED pointing down
     needle_line_s = lv_line_create(ring);
     lv_obj_set_style_line_width(needle_line_s, 6, 0);
-    lv_obj_set_style_line_color(needle_line_s, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_line_color(needle_line_s, muted, 0);
     lv_obj_set_style_line_rounded(needle_line_s, true, 0);
     
     // North needle (red) - FIXED pointing up
     needle_line_n = lv_line_create(ring);
     lv_obj_set_style_line_width(needle_line_n, 6, 0);
-    lv_obj_set_style_line_color(needle_line_n, lv_color_hex(0xFF0000), 0);
+    lv_obj_set_style_line_color(needle_line_n, danger, 0);
     lv_obj_set_style_line_rounded(needle_line_n, true, 0);
     
     // Center pivot
     lv_obj_t *pivot = lv_obj_create(ring);
     lv_obj_set_size(pivot, 12, 12);
-    lv_obj_set_style_bg_color(pivot, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_bg_color(pivot, muted, 0);
     lv_obj_set_style_radius(pivot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(pivot, 2, 0);
-    lv_obj_set_style_border_color(pivot, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(pivot, text, 0);
     lv_obj_align(pivot, LV_ALIGN_CENTER, 0, 0);
     
     // Calculate label dimensions for centering
@@ -648,7 +653,7 @@ void compass_create(void) {
     
     heading_label = lv_label_create(content);
     lv_label_set_text(heading_label, "Initialize...");
-    lv_obj_set_style_text_color(heading_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(heading_label, text, 0);
     lv_obj_set_style_text_font(heading_label,
 #ifdef CONFIG_IS_ATOMS3R
                                accessibility_get_font_small(),

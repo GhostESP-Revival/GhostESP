@@ -147,12 +147,11 @@ static lv_obj_t *create_clock_label(lv_obj_t *parent, const char *text, const lv
     lv_label_set_text(label, text);
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, color, 0);
-    /* On top of an asset-pack background, give the label a dark pill behind
-     * it so it stays readable no matter what image is showing through. Same
-     * look as the lockscreen prompt/PIN dots. */
+    /* Keep labels readable over artwork using the pack/theme surface pair. */
     if (asset_bg) {
-        lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        lv_obj_set_style_bg_color(label, lv_color_hex(theme_palette_get_surface(theme)), 0);
+        lv_obj_set_style_bg_opa(label, LV_OPA_80, 0);
         lv_obj_set_style_radius(label, 3, 0);
         lv_obj_set_style_pad_hor(label, 6, 0);
         lv_obj_set_style_pad_ver(label, 1, 0);
@@ -168,13 +167,10 @@ void clock_create(void) {
         tzset();
     }
     
-    // Get current theme colors for text only
+    // Asset-pack manifests can provide a text color suited to their artwork.
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     bool asset_bg = asset_pack_get_background_tile() != NULL;
-    /* White text on a dark pill when the asset pack image is showing, so the
-     * labels stay readable on any background. Accent color on the flat theme
-     * background. */
-    lv_color_t text_color = asset_bg ? lv_color_hex(0xFFFFFF) : lv_color_hex(theme_palette_get_accent(theme));
+    lv_color_t text_color = lv_color_hex(theme_palette_get_text(theme));
 
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
     display_manager_fill_screen(bg_color);

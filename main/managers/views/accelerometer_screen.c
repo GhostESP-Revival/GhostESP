@@ -446,12 +446,20 @@ static void accel_event_handler(InputEvent *event) {
 }
 
 void accelerometer_create(void) {
-    display_manager_fill_screen(lv_color_hex(0x000000));
-    accel_container = gui_screen_create_root(NULL, "Accel", lv_color_hex(0x000000), LV_OPA_COVER);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t background = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
+    lv_color_t surface_alt = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+    lv_color_t muted = lv_color_hex(theme_palette_get_text_muted(theme));
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+    lv_color_t danger = lv_color_hex(theme_palette_get_danger(theme));
+    display_manager_fill_screen(background);
+    accel_container = gui_screen_create_root(NULL, "Accel", background, LV_OPA_COVER);
     accelerometer_view.root = accel_container;
 
     lv_obj_t *content = gui_screen_create_content(accel_container, GUI_STATUS_BAR_HEIGHT);
-    lv_obj_set_style_text_color(content, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(content, text, 0);
 
     int sw = LV_HOR_RES;
     int sh = LV_VER_RES - GUI_STATUS_BAR_HEIGHT;
@@ -486,7 +494,7 @@ void accelerometer_create(void) {
                                12,
 #endif
                                LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(gauge_arc_bg, lv_color_hex(0x333333), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(gauge_arc_bg, surface_alt, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(gauge_arc_bg,
 #ifdef CONFIG_IS_ATOMS3R
                                8,
@@ -494,7 +502,7 @@ void accelerometer_create(void) {
                                12,
 #endif
                                LV_PART_MAIN);
-    lv_obj_set_style_arc_color(gauge_arc_bg, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(gauge_arc_bg, surface, LV_PART_MAIN);
     lv_obj_remove_style(gauge_arc_bg, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(gauge_arc_bg, LV_OBJ_FLAG_CLICKABLE);
 
@@ -514,7 +522,7 @@ void accelerometer_create(void) {
                                12,
 #endif
                                LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(gauge_arc, lv_color_hex(0x00FF00), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(gauge_arc, accent, LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(gauge_arc, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_remove_style(gauge_arc, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(gauge_arc, LV_OBJ_FLAG_CLICKABLE);
@@ -533,12 +541,12 @@ void accelerometer_create(void) {
         tick_pts[i][1].x = gauge_cx + (int)(cosf(angle_rad) * tick_outer);
          tick_pts[i][1].y = gauge_cy - (int)(sinf(angle_rad) * tick_outer);
         lv_line_set_points(tick, tick_pts[i], 2);
-        lv_obj_set_style_line_color(tick, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_line_color(tick, muted, 0);
         lv_obj_set_style_line_width(tick, 2, 0);
 
         lv_obj_t *tick_lbl = lv_label_create(content);
         lv_label_set_text_fmt(tick_lbl, "%d", i);
-        lv_obj_set_style_text_color(tick_lbl, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_color(tick_lbl, muted, 0);
         lv_obj_set_style_text_font(tick_lbl, accessibility_get_font_small(), 0);
         int lbl_r = gauge_r - 24;
         int lbl_x = gauge_cx + (int)(cosf(angle_rad) * lbl_r);
@@ -548,7 +556,7 @@ void accelerometer_create(void) {
 
     needle_line = lv_line_create(content);
     lv_obj_set_style_line_width(needle_line, 3, 0);
-    lv_obj_set_style_line_color(needle_line, lv_color_hex(0xFF4444), 0);
+    lv_obj_set_style_line_color(needle_line, danger, 0);
     lv_obj_set_style_line_rounded(needle_line, true, 0);
 
     needle_pts[0].x = gauge_cx;
@@ -559,17 +567,17 @@ void accelerometer_create(void) {
 
     lv_obj_t *pivot = lv_obj_create(content);
     lv_obj_set_size(pivot, 10, 10);
-    lv_obj_set_style_bg_color(pivot, lv_color_hex(0xFF4444), 0);
+    lv_obj_set_style_bg_color(pivot, danger, 0);
     lv_obj_set_style_radius(pivot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(pivot, 1, 0);
-    lv_obj_set_style_border_color(pivot, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(pivot, text, 0);
     lv_obj_align(pivot, LV_ALIGN_CENTER, 0,
                  gauge_shift
     );
 
     g_label = lv_label_create(content);
     lv_label_set_text(g_label, "0.00");
-    lv_obj_set_style_text_color(g_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(g_label, text, 0);
 #ifdef CONFIG_IS_ATOMS3R
     // Display font (18-24px) is oversized inside the 48px gauge on 128px.
     lv_obj_set_style_text_font(g_label, &lv_font_montserrat_16, 0);
@@ -586,7 +594,7 @@ void accelerometer_create(void) {
 
     lv_obj_t *unit_label = lv_label_create(content);
     lv_label_set_text(unit_label, "G");
-    lv_obj_set_style_text_color(unit_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(unit_label, muted, 0);
     lv_obj_set_style_text_font(unit_label, accessibility_get_font_body(), 0);
     lv_obj_align(unit_label, LV_ALIGN_CENTER, 0,
 #ifdef CONFIG_IS_ATOMS3R
@@ -598,31 +606,31 @@ void accelerometer_create(void) {
 
     orient_label = lv_label_create(content);
     lv_label_set_text(orient_label, "Flat (Face Up)  Shake:0.0");
-    lv_obj_set_style_text_color(orient_label, lv_color_hex(0x44DD44), 0);
+    lv_obj_set_style_text_color(orient_label, lv_color_hex(theme_palette_get_success(theme)), 0);
     lv_obj_set_style_text_font(orient_label, accessibility_get_font_small(), 0);
     lv_obj_align(orient_label, LV_ALIGN_BOTTOM_MID, 0, -55);
 
     peak_label = lv_label_create(content);
     lv_label_set_text(peak_label, "Peak: 0.00 G");
-    lv_obj_set_style_text_color(peak_label, lv_color_hex(0xFFAA00), 0);
+    lv_obj_set_style_text_color(peak_label, lv_color_hex(theme_palette_get_warning(theme)), 0);
     lv_obj_set_style_text_font(peak_label, accessibility_get_font_small(), 0);
     lv_obj_align(peak_label, LV_ALIGN_BOTTOM_MID, 0, -42);
 
     speed_label = lv_label_create(content);
     lv_label_set_text(speed_label, "NO GPS: 0.0 km/h | 0.0 mph");
-    lv_obj_set_style_text_color(speed_label, lv_color_hex(0x00CCFF), 0);
+    lv_obj_set_style_text_color(speed_label, accent, 0);
     lv_obj_set_style_text_font(speed_label, accessibility_get_font_small(), 0);
     lv_obj_align(speed_label, LV_ALIGN_BOTTOM_MID, 0, -29);
 
     tilt_label = lv_label_create(content);
     lv_label_set_text(tilt_label, "Pitch:0.0deg  Roll:0.0deg");
-    lv_obj_set_style_text_color(tilt_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(tilt_label, muted, 0);
     lv_obj_set_style_text_font(tilt_label, accessibility_get_font_small(), 0);
     lv_obj_align(tilt_label, LV_ALIGN_BOTTOM_MID, 0, -16);
 
     xyz_label = lv_label_create(content);
     lv_label_set_text(xyz_label, "X:0.00  Y:0.00  Z:0.00");
-    lv_obj_set_style_text_color(xyz_label, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_text_color(xyz_label, muted, 0);
     lv_obj_set_style_text_font(xyz_label, accessibility_get_font_small(), 0);
     lv_obj_align(xyz_label, LV_ALIGN_BOTTOM_MID, 0, -3);
 

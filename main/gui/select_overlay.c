@@ -190,6 +190,7 @@ gui_select_overlay_t *gui_select_overlay_create(const gui_select_overlay_config_
         if (cfg->font) lv_obj_set_style_text_font(label, cfg->font, 0);
         lv_obj_set_style_text_color(label, cfg->text_color, 0);
         lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+        if (cfg->decorate_row) cfg->decorate_row(btn, i, cfg->user_data);
     }
 
     gui_select_overlay_update_selection(overlay);

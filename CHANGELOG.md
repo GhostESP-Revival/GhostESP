@@ -9,6 +9,7 @@ Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://g
 - Added the Hero main menu layout
 - Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
 - Added favorites menu where you can pin menu items, IR remotes, NFC tags, SubGHz captures and apps
+- Replaced the accent-only menu themes with 21 full color palettes
 
 ### Changed
 - BLE Detect Devices "Track" action now uses the live RSSI ring overlay (matching Track AP/STA/Adv/GATT) instead of switching to the terminal

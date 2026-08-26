@@ -1717,13 +1717,13 @@ static const char * const rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", 
 #define RGB_MODE_COUNT 13
 #endif
 static const char * const timeout_options[] = {"5s", "10s", "15s", "30s", "60s", "2m", "5m", "Never"};
-static const char * const theme_options[] = {"OG", "Pastel", "Dark", "Bright", "Solarized", "Monochrome", "Rose Red", "Purple", "Blue", "Orange", "Neon", "Cyberpunk", "Ocean", "Sunset", "Forest", "Cherry Blossom", "Soft Sand"};
+static const char *theme_options[THEME_PALETTE_THEME_COUNT];
 static const char * const bool_options[] = {"Off", "On"};
 static const char * const log_level_options[] = {"None", "Error", "Warn", "Info", "Debug", "Verbose"};
 static const char * const textcolor_options[] = {"Green", "White", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange"};
 static const uint32_t textcolor_values[] = {0x00FF00, 0xFFFFFF, 0xFF0000, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFA500};
 static const char * const menu_layout_options[] = {"Carousel", "Grid", "List", "Compact", "Hero"};
-static const char * const bg_shade_options[] = {"Darkest", "Darker", "Dark", "Medium"};
+static const char * const bg_shade_options[] = {"Darker", "Palette", "Lighter", "Lightest"};
 #ifdef CONFIG_WITH_STATUS_DISPLAY
 static const char * const idle_animation_options[] = {"Game of Life", "Ghost", "Starfield", "HUD", "Matrix", "Flying Ghosts", "Spiral", "Falling Leaves", "Bouncing Text"};
 static const char * const idle_delay_options[] = {"Never", "5s", "10s", "30s"};
@@ -1813,12 +1813,13 @@ static SettingsItem settings_items[] = {
     {"Manage Favorites", SETTING_MANAGE_FAVORITES, action_options, 1, 0, SETTINGS_CAT_FAVORITES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Font", SETTING_TERMINAL_FONT_SIZE, font_size_options, 3, 1, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
-    {"Menu Theme", SETTING_MENU_THEME, theme_options, 17, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Menu Theme", SETTING_MENU_THEME, theme_options, THEME_PALETTE_THEME_COUNT, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Background Effects", SETTING_THEME_BACKGROUND_EFFECTS, bool_options, 2, 1, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 5, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
-    {"BG Shade", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Surface Tone", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Item Borders", SETTING_MENU_ITEM_BORDERS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Card Background", SETTING_MENU_CARD_BG, bool_options, 2, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -4281,6 +4282,9 @@ void options_menu_create() {
 }
 
 static void load_current_settings_values(void) {
+    for (uint8_t theme = 0; theme < THEME_PALETTE_THEME_COUNT; ++theme) {
+        theme_options[theme] = theme_palette_get_name(theme);
+    }
     for (int i = 0; i < sizeof(settings_items)/sizeof(settings_items[0]); i++) {
         switch (settings_items[i].setting_type) {
             case SETTING_RGB_MODE:
@@ -4350,6 +4354,9 @@ static void load_current_settings_values(void) {
                 break;
             case SETTING_MENU_BG_SHADE:
                 settings_items[i].current_value = settings_get_menu_bg_shade(&G_Settings);
+                break;
+            case SETTING_THEME_BACKGROUND_EFFECTS:
+                settings_items[i].current_value = settings_get_theme_background_effects(&G_Settings) ? 1 : 0;
                 break;
             case SETTING_MENU_ROUNDED:
                 settings_items[i].current_value = settings_get_menu_rounded(&G_Settings) ? 1 : 0;
@@ -4550,6 +4557,28 @@ static void mic_cal_done_timer_cb(lv_timer_t *timer) {
 }
 #endif
 
+/* Re-styles the persistent touch bar and its buttons from the active theme.
+ * The bar lives on lv_scr_act() across menu rebuilds, so palette changes
+ * must reach it explicitly or it keeps the previous theme's colors. */
+static void settings_touch_bar_restyle(void) {
+    if (!touch_bar || !lv_obj_is_valid(touch_bar)) return;
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bar_bg = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t btn_bg = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t btn_text = lv_color_hex(theme_palette_get_text(theme));
+    lv_obj_set_style_bg_color(touch_bar, bar_bg, 0);
+    lv_obj_invalidate(touch_bar);
+    lv_obj_t *btns[3] = {scroll_up_btn, back_btn, scroll_down_btn};
+    for (int i = 0; i < 3; ++i) {
+        if (!btns[i] || !lv_obj_is_valid(btns[i])) continue;
+        lv_obj_set_style_bg_color(btns[i], btn_bg, LV_PART_MAIN);
+        lv_obj_t *label = lv_obj_get_child(btns[i], 0);
+        if (label && lv_obj_is_valid(label)) {
+            lv_obj_set_style_text_color(label, btn_text, 0);
+        }
+    }
+}
+
 static void apply_setting_change(int setting_index, int new_value) {
     SettingsItem *item = &settings_items[setting_index];
     item->current_value = new_value;
@@ -4579,9 +4608,19 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_THEME:
             settings_set_menu_theme(&G_Settings, new_value);
             display_manager_update_status_bar_color();
+            gui_screen_apply_theme_background(root);
+            settings_touch_bar_restyle();
             if (g_options_view) {
                 options_view_refresh_styles(g_options_view);
                 update_settings_arrows_visibility();
+            }
+            break;
+        case SETTING_THEME_BACKGROUND_EFFECTS:
+            settings_set_theme_background_effects(&G_Settings, new_value == 1);
+            gui_screen_apply_theme_background(root);
+            settings_touch_bar_restyle();
+            if (g_options_view) {
+                options_view_refresh_styles(g_options_view);
             }
             break;
         case SETTING_THIRD_CONTROL:
@@ -4608,6 +4647,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             bool enabling = (new_value == 1);
             settings_set_sun_mode(&G_Settings, enabling);
             if (enabling) {
+                settings_persist_setting(SETTING_HIGH_CONTRAST);
                 G_Settings.sun_mode_saved_brightness = settings_get_max_screen_brightness(&G_Settings);
                 settings_set_max_screen_brightness(&G_Settings, 100);
             } else {
@@ -4616,6 +4656,9 @@ static void apply_setting_change(int setting_index, int new_value) {
             }
             set_backlight_brightness(100); // scaled by max brightness
             display_manager_update_status_bar_color();
+            gui_screen_apply_theme_background(root);
+            settings_touch_bar_restyle();
+            load_current_settings_values();
             if (g_options_view) {
                 options_view_refresh_styles(g_options_view);
                 update_settings_arrows_visibility();
@@ -4666,14 +4709,11 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_MENU_BG_SHADE:
             settings_set_menu_bg_shade(&G_Settings, (uint8_t)new_value);
             display_manager_update_status_bar_color();
+            gui_screen_apply_theme_background(root);
+            settings_touch_bar_restyle();
             if (g_options_view) {
                 options_view_refresh_styles(g_options_view);
                 update_settings_arrows_visibility();
-            }
-            if (touch_bar && lv_obj_is_valid(touch_bar)) {
-                uint8_t t = settings_get_menu_theme(&G_Settings);
-                lv_color_t tb_bg = lv_color_hex(theme_palette_get_background(t));
-                lv_obj_set_style_bg_color(touch_bar, tb_bg, 0);
             }
             break;
         case SETTING_MENU_ROUNDED:
@@ -4926,15 +4966,20 @@ static void apply_setting_change(int setting_index, int new_value) {
                 return;
             }
             
+            uint8_t theme = settings_get_menu_theme(&G_Settings);
+            lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
+            lv_color_t surface_alt = lv_color_hex(theme_palette_get_surface_alt(theme));
+            lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+            lv_color_t muted = lv_color_hex(theme_palette_get_text_muted(theme));
             int popup_w = LV_HOR_RES - 20;
             int popup_h = LV_VER_RES - 40;
             wigle_help_popup = popup_create_container(lv_layer_top(), popup_w, popup_h, true);
-            lv_obj_set_style_bg_color(wigle_help_popup, lv_color_hex(0x1E1E1E), 0);
+            lv_obj_set_style_bg_color(wigle_help_popup, surface, 0);
             lv_obj_add_flag(wigle_help_popup, LV_OBJ_FLAG_CLICKABLE);
             
             lv_obj_t *title = lv_label_create(wigle_help_popup);
             lv_label_set_text(title, "WiGLE Setup Help");
-            lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_text_color(title, text, 0);
             lv_obj_set_style_text_font(title, accessibility_get_font_body(), 0);
             lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
             
@@ -4943,7 +4988,7 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_t *help_label = lv_label_create(help_scroll);
             lv_label_set_long_mode(help_label, LV_LABEL_LONG_WRAP);
             lv_obj_set_width(help_label, popup_w - 20);
-            lv_obj_set_style_text_color(help_label, lv_color_hex(0xCCCCCC), 0);
+            lv_obj_set_style_text_color(help_label, muted, 0);
             
             const char *help_text = 
                 "1. Create free account at wigle.net\n"
@@ -4966,13 +5011,13 @@ static void apply_setting_change(int setting_index, int new_value) {
             lv_obj_add_flag(close_btn, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_size(close_btn, 80, 30);
             lv_obj_align(close_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
-            lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x444444), 0);
+            lv_obj_set_style_bg_color(close_btn, surface_alt, 0);
             lv_obj_add_event_cb(close_btn, wigle_help_close_cb, LV_EVENT_CLICKED, NULL);
             
             lv_obj_t *btn_label = lv_label_create(close_btn);
             lv_label_set_text(btn_label, "Close");
             lv_obj_center(btn_label);
-            lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
+            lv_obj_set_style_text_color(btn_label, text, 0);
             
             return;
         }
@@ -5050,7 +5095,11 @@ static void apply_setting_change(int setting_index, int new_value) {
             break;
         case SETTING_HIGH_CONTRAST:
             settings_set_high_contrast(&G_Settings, new_value == 1);
+            if (new_value == 1) settings_persist_setting(SETTING_SUN_MODE);
             display_manager_update_status_bar_color();
+            gui_screen_apply_theme_background(root);
+            settings_touch_bar_restyle();
+            load_current_settings_values();
             if (g_options_view) {
                 options_view_refresh_styles(g_options_view);
                 update_settings_arrows_visibility();
@@ -5226,6 +5275,57 @@ static void settings_select_close(void) {
     settings_select_setting_index = -1;
 }
 
+/* Paints the 4-chip palette preview directly onto the row button during
+ * DRAW_MAIN. Widget-based chips (~68 extra objects per overlay open)
+ * exhausted LVGL's heap on RAM-constrained boards and crashed creation. */
+static void settings_theme_swatch_draw_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
+    lv_obj_t *row = lv_event_get_target(e);
+    int option_index = (int)(intptr_t)lv_event_get_user_data(e);
+    if (!row || !lv_obj_is_valid(row)) return;
+    if (option_index < 0 || option_index >= THEME_PALETTE_THEME_COUNT) return;
+    lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
+    if (!draw_ctx || !draw_ctx->clip_area) return;
+
+    const theme_descriptor_t *theme = theme_palette_get_descriptor((uint8_t)option_index);
+    const uint32_t colors[4] = {theme->background, theme->surface, theme->accent, theme->text};
+
+    lv_area_t row_area;
+    lv_obj_get_coords(row, &row_area);
+    lv_coord_t chip_w = 7;
+    lv_coord_t chip_h = LV_MIN(lv_area_get_height(&row_area) - 8, 14);
+    if (chip_h < 6) return;
+    lv_coord_t y1 = lv_area_get_height(&row_area) / 2 + row_area.y1 - chip_h / 2;
+    lv_coord_t x2 = row_area.x2 - 6;
+
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_opa = LV_OPA_COVER;
+    dsc.border_width = 1;
+    dsc.border_opa = LV_OPA_COVER;
+    dsc.border_color = lv_color_hex(theme->border);
+    dsc.radius = 2;
+
+    for (int i = 3; i >= 0; --i) {
+        dsc.bg_color = lv_color_hex(colors[i]);
+        lv_area_t chip = {(lv_coord_t)(x2 - chip_w), y1, x2, (lv_coord_t)(y1 + chip_h - 1)};
+        lv_draw_rect(draw_ctx, &dsc, &chip);
+        x2 -= chip_w;
+    }
+}
+
+static void settings_theme_decorate_row(lv_obj_t *row, int option_index, void *user_data) {
+    (void)user_data;
+    if (!row || option_index < 0 || option_index >= THEME_PALETTE_THEME_COUNT) return;
+    lv_obj_add_event_cb(row, settings_theme_swatch_draw_cb, LV_EVENT_DRAW_MAIN,
+                        (void *)(intptr_t)option_index);
+    lv_obj_t *label = lv_obj_get_child(row, 0);
+    /* Row width isn't laid out yet, but the parent list is sized explicitly. */
+    lv_obj_t *list = lv_obj_get_parent(row);
+    lv_coord_t list_w = list ? lv_obj_get_width(list) : 0;
+    if (label && list_w > 60) lv_obj_set_width(label, list_w - 44);
+}
+
 static void settings_select_open(int setting_index) {
     if (setting_index < 0 || setting_index >= settings_items_count) return;
     SettingsItem *item = &settings_items[setting_index];
@@ -5275,6 +5375,7 @@ static void settings_select_open(int setting_index) {
         .font = (row_h <= 34) ? accessibility_get_font_small() : accessibility_get_font_body(),
         .on_select = settings_select_apply_value,
         .on_dismiss = settings_select_dismiss,
+        .decorate_row = item->setting_type == SETTING_MENU_THEME ? settings_theme_decorate_row : NULL,
         .user_data = NULL,
     };
     settings_select_overlay = gui_select_overlay_create(&cfg);
@@ -12955,12 +13056,13 @@ static void wigle_stats_popup_open(void) {
         return;
     }
 
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
     int popup_w = 0;
     int popup_h = 0;
     int y_offset = 0;
     wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
     wigle_stats_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset, true);
-    lv_obj_set_style_bg_color(wigle_stats_popup, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(wigle_stats_popup, lv_color_hex(theme_palette_get_surface(theme)), 0);
     lv_obj_add_flag(wigle_stats_popup, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *title = popup_create_title_label(wigle_stats_popup, "WiGLE Stats", accessibility_get_font_body(), 5);
@@ -12973,7 +13075,7 @@ static void wigle_stats_popup_open(void) {
     wigle_stats_body_label = lv_label_create(wigle_stats_scroll);
     lv_label_set_long_mode(wigle_stats_body_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(wigle_stats_body_label, popup_w - 24);
-    lv_obj_set_style_text_color(wigle_stats_body_label, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_color(wigle_stats_body_label, lv_color_hex(theme_palette_get_text_muted(theme)), 0);
     lv_obj_set_style_text_font(wigle_stats_body_label,
                                (LV_VER_RES <= 200) ? accessibility_get_font_small() : accessibility_get_font_body(),
                                0);
@@ -13050,12 +13152,13 @@ static void wigle_show_csv_details_popup(const char *filename) {
         lvgl_obj_del_safe(&wigle_manual_popup);
     }
 
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
     int popup_w = 0;
     int popup_h = 0;
     int y_offset = 0;
     wigle_get_popup_geometry(&popup_w, &popup_h, &y_offset);
     wigle_manual_popup = popup_create_container_with_offset(lv_layer_top(), popup_w, popup_h, y_offset, true);
-    lv_obj_set_style_bg_color(wigle_manual_popup, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(wigle_manual_popup, lv_color_hex(theme_palette_get_surface(theme)), 0);
     lv_obj_add_flag(wigle_manual_popup, LV_OBJ_FLAG_CLICKABLE);
 
     popup_create_title_label(wigle_manual_popup, "WiGLE Manual Upload", accessibility_get_font_body(), 5);
@@ -13067,7 +13170,7 @@ static void wigle_show_csv_details_popup(const char *filename) {
     wigle_manual_info_label = lv_label_create(info_scroll);
     lv_label_set_long_mode(wigle_manual_info_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(wigle_manual_info_label, popup_w - 24);
-    lv_obj_set_style_text_color(wigle_manual_info_label, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_color(wigle_manual_info_label, lv_color_hex(theme_palette_get_text_muted(theme)), 0);
     lv_obj_set_style_text_font(wigle_manual_info_label,
                                (LV_VER_RES <= 200) ? accessibility_get_font_small() : accessibility_get_font_body(),
                                0);

@@ -3,6 +3,7 @@
 
 #include "core/commands.h"
 #include "core/glog.h"
+#include "gui/theme_palette_api.h"
 #include "managers/config_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/settings_sd_backup.h"
@@ -79,12 +80,13 @@ static const SettingDescriptor k_settings_desc[] = {
     {"invert_colors", ST_BOOL, OFF(invert_colors), "Display", 0, 0, 0},
     {"terminal_color", ST_COLOR_HEX, OFF(terminal_text_color), "Display", 0, 0, 0},
     {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
-    {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, 255},
+    {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, THEME_PALETTE_THEME_COUNT - 1},
     {"font_size", ST_U8, OFF(font_size), "Display", 0, 0, 2},
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
     {"repeat_speed", ST_U8, OFF(input_repeat_speed), "Display", 0, 0, 2},
     {"high_contrast", ST_BOOL, OFF(high_contrast), "Display", 0, 0, 0},
     {"sun_mode", ST_BOOL, OFF(sun_mode), "Display", 0, 0, 0},
+    {"theme_bg_fx", ST_BOOL, OFF(theme_background_effects), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
@@ -511,7 +513,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    invert_colors     - Invert screen colors (true/false)\n");
         glog("    terminal_color    - Terminal text color (hex)\n");
         glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
-        glog("    menu_theme        - Menu theme (0=OG)\n");
+        glog("    menu_theme        - Menu theme palette index\n");
         glog("    font_size         - Global font size (0=Small,1=Normal,2=Large)\n");
         glog("    reduce_motion     - Reduce animations (true/false)\n");
         glog("    repeat_speed      - Input repeat speed (0-2)\n");
@@ -580,6 +582,7 @@ void handle_settings_cmd(int argc, char **argv) {
             }
             return;
         }
+        settings_normalize_modes(settings);
         settings_save(settings);
         log_set_confirmation(d, settings);
         return;
