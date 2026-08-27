@@ -45,8 +45,9 @@ typedef struct {
   char command[256];
 } SerialCommand;
 
-// Command history structures
-#define MAX_HISTORY_SIZE 10
+// Command history structures (kept small: 6x256 B = 1.5 KB of .bss; boards
+// without PSRAM like the esp32s2 budget internal RAM tightly)
+#define MAX_HISTORY_SIZE 6
 #define MAX_COMMAND_LENGTH 256
 
 typedef struct {

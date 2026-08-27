@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 2080" width="1800" height="2080" role="img" aria-labelledby="title desc">
+  <title id="title">GhostLink P1 full wiring diagram</title>
+  <desc id="desc">Point-to-point power, UART, USB, navigation and microSD wiring for the GhostLink P1.</desc>
+  <style>
+    text { font-family: Arial, Helvetica, sans-serif; fill: #18232d; }
+    .title { font-size: 32px; font-weight: 700; }
+    .subtitle { font-size: 16px; fill: #52606d; }
+    .section { font-size: 23px; font-weight: 700; fill: #263746; }
+    .box { fill: #fff; stroke: #536270; stroke-width: 2; }
+    .head { fill: #e9eef3; }
+    .power-head { fill: #fff0ed; }
+    .signal-head { fill: #edf6ff; }
+    .nav-head { fill: #f1edff; }
+    .box-title { font-size: 20px; font-weight: 700; }
+    .row { font-size: 17px; }
+    .note { font-size: 14px; fill: #52606d; }
+    .warning { font-size: 15px; fill: #8a2d22; }
+    .center { text-anchor: middle; }
+    .wire-5v { stroke: #d0342c; stroke-width: 4; fill: none; }
+    .wire-3v3 { stroke: #e8730a; stroke-width: 4; fill: none; }
+    .wire-gnd { stroke: #343a40; stroke-width: 4; fill: none; }
+    .wire-bat { stroke: #946200; stroke-width: 4; fill: none; }
+    .wire-uart { stroke: #1f6fb2; stroke-width: 4; fill: none; }
+    .wire-usb { stroke: #00838f; stroke-width: 4; fill: none; }
+    .wire-nav { stroke: #7b4fd0; stroke-width: 4; fill: none; }
+    .wire-spi { stroke: #1e8e3e; stroke-width: 4; fill: none; }
+    .pin-5v { fill: #d0342c; }
+    .pin-3v3 { fill: #e8730a; }
+    .pin-gnd { fill: #343a40; }
+    .pin-bat { fill: #946200; }
+    .pin-uart { fill: #1f6fb2; }
+    .pin-usb { fill: #00838f; }
+    .pin-nav { fill: #7b4fd0; }
+    .pin-spi { fill: #1e8e3e; }
+  </style>
+
+  <rect width="1800" height="2050" fill="#f8fafc"/>
+  <text x="50" y="52" class="title">GhostLink P1 - point-to-point wiring</text>
+  <text x="50" y="82" class="subtitle">Each line is a physical wire. Lines do not pass through card text.</text>
+
+  <!-- Legend -->
+  <rect x="50" y="105" width="1700" height="52" rx="8" fill="#fff" stroke="#c7d0d9"/>
+  <line x1="75" y1="131" x2="110" y2="131" class="wire-5v"/><text x="122" y="137" class="row">5V</text>
+  <line x1="190" y1="131" x2="225" y2="131" class="wire-3v3"/><text x="237" y="137" class="row">3V3</text>
+  <line x1="310" y1="131" x2="345" y2="131" class="wire-gnd"/><text x="357" y="137" class="row">GND</text>
+  <line x1="440" y1="131" x2="475" y2="131" class="wire-bat"/><text x="487" y="137" class="row">Battery</text>
+  <line x1="605" y1="131" x2="640" y2="131" class="wire-uart"/><text x="652" y="137" class="row">UART</text>
+  <line x1="755" y1="131" x2="790" y2="131" class="wire-usb"/><text x="802" y="137" class="row">USB data</text>
+  <line x1="955" y1="131" x2="990" y2="131" class="wire-nav"/><text x="1002" y="137" class="row">Navigation</text>
+  <line x1="1175" y1="131" x2="1210" y2="131" class="wire-spi"/><text x="1222" y="137" class="row">SD SPI</text>
+  <text x="1435" y="137" class="note">24-26 AWG for power wires</text>
+
+  <!-- ================= POWER ================= -->
+  <text x="50" y="205" class="section">1. Power and charging</text>
+
+  <!-- USB-C source -->
+  <rect x="50" y="230" width="320" height="190" rx="10" class="box"/>
+  <rect x="50" y="230" width="320" height="46" rx="10" class="head"/>
+  <text x="72" y="261" class="box-title">Panel USB-C jack</text>
+  <circle cx="370" cy="315" r="6" class="pin-5v"/><text x="72" y="321" class="row">VBUS / 5V</text>
+  <circle cx="370" cy="365" r="6" class="pin-gnd"/><text x="72" y="371" class="row">GND</text>
+  <text x="72" y="402" class="note">D+ and D- are shown in section 3.</text>
+
+  <!-- Battery -->
+  <rect x="50" y="480" width="320" height="165" rx="12" fill="#f0efe6" stroke="#536270" stroke-width="2"/>
+  <text x="72" y="520" class="box-title">18650 cell</text>
+  <circle cx="370" cy="550" r="6" class="pin-bat"/><text x="72" y="556" class="row">+ dome / BAT+</text>
+  <circle cx="370" cy="600" r="6" class="pin-bat"/><text x="72" y="606" class="row">- spring / BAT-</text>
+  <text x="72" y="632" class="warning">Never reverse the cell.</text>
+
+  <!-- IP5306 -->
+  <rect x="520" y="180" width="400" height="390" rx="10" class="box"/>
+  <rect x="520" y="180" width="400" height="48" rx="10" class="power-head"/>
+  <text x="542" y="212" class="box-title">IP5306 charge / boost</text>
+  <circle cx="520" cy="315" r="6" class="pin-5v"/><text x="542" y="321" class="row">5V IN</text>
+  <circle cx="520" cy="365" r="6" class="pin-gnd"/><text x="542" y="371" class="row">Input GND</text>
+  <circle cx="520" cy="430" r="6" class="pin-bat"/><text x="542" y="436" class="row">BAT+</text>
+  <circle cx="520" cy="480" r="6" class="pin-bat"/><text x="542" y="486" class="row">BAT-</text>
+  <circle cx="920" cy="250" r="7" class="pin-5v"/><text x="898" y="256" class="row" text-anchor="end">OUT+ / 5V</text>
+  <circle cx="920" cy="520" r="7" class="pin-gnd"/><text x="898" y="526" class="row" text-anchor="end">OUT- / GND</text>
+
+  <!-- Physical destination wires -->
+  <rect x="1100" y="180" width="650" height="420" rx="10" class="box"/>
+  <rect x="1100" y="180" width="650" height="46" rx="10" class="head"/>
+  <text x="1122" y="211" class="box-title">Physical destination wires</text>
+  <circle cx="1100" cy="250" r="6" class="pin-5v"/><text x="1122" y="256" class="row">IP5306 OUT+ -&gt; CYD 5V</text>
+  <circle cx="1100" cy="300" r="6" class="pin-5v"/><text x="1122" y="306" class="row">IP5306 OUT+ -&gt; C3 5V</text>
+  <line x1="1120" y1="330" x2="1730" y2="330" stroke="#d7dee5" stroke-width="2"/>
+  <circle cx="1100" cy="380" r="6" class="pin-gnd"/><text x="1122" y="386" class="row">IP5306 OUT- -&gt; CYD GND</text>
+  <circle cx="1100" cy="430" r="6" class="pin-gnd"/><text x="1122" y="436" class="row">IP5306 OUT- -&gt; C3 GND</text>
+  <circle cx="1100" cy="480" r="6" class="pin-gnd"/><text x="1122" y="486" class="row">IP5306 OUT- -&gt; microSD GND</text>
+  <circle cx="1100" cy="530" r="6" class="pin-gnd"/><text x="1122" y="536" class="row">IP5306 OUT- -&gt; panel USB-C GND</text>
+  <line x1="1120" y1="555" x2="1730" y2="555" stroke="#d7dee5" stroke-width="2"/>
+  <line x1="1122" y1="578" x2="1180" y2="578" class="wire-3v3"/><text x="1200" y="584" class="row">CYD 3V3 -&gt; microSD VCC</text>
+
+  <!-- USB input wires -->
+  <line x1="370" y1="315" x2="520" y2="315" class="wire-5v"/>
+  <line x1="370" y1="365" x2="520" y2="365" class="wire-gnd"/>
+
+  <!-- Battery wires -->
+  <path d="M370 550 H440 V430 H520" class="wire-bat"/>
+  <path d="M370 600 H470 V480 H520" class="wire-bat"/>
+
+  <!-- OUT+ directly fans out from one IP5306 pad -->
+  <line x1="920" y1="250" x2="980" y2="250" class="wire-5v"/>
+  <circle cx="980" cy="250" r="7" class="pin-5v"/>
+  <line x1="980" y1="250" x2="980" y2="300" class="wire-5v"/>
+  <line x1="980" y1="250" x2="1100" y2="250" class="wire-5v"/>
+  <line x1="980" y1="300" x2="1100" y2="300" class="wire-5v"/>
+
+  <!-- OUT- directly fans out from one IP5306 pad -->
+  <line x1="920" y1="520" x2="1020" y2="520" class="wire-gnd"/>
+  <circle cx="1020" cy="520" r="7" class="pin-gnd"/>
+  <line x1="1020" y1="380" x2="1020" y2="530" class="wire-gnd"/>
+  <line x1="1020" y1="380" x2="1100" y2="380" class="wire-gnd"/>
+  <line x1="1020" y1="430" x2="1100" y2="430" class="wire-gnd"/>
+  <line x1="1020" y1="480" x2="1100" y2="480" class="wire-gnd"/>
+  <line x1="1020" y1="530" x2="1100" y2="530" class="wire-gnd"/>
+
+  <!-- Dedicated warning box -->
+  <rect x="50" y="690" width="1700" height="60" rx="8" fill="#fff8e6" stroke="#c98b19" stroke-width="2"/>
+  <text x="75" y="727" class="warning">USB VBUS goes only to IP5306 5V IN. Do not connect USB VBUS to IP5306 OUT+.</text>
+
+  <!-- ================= UART ================= -->
+  <text x="50" y="815" class="section">2. GhostLink UART - crossed TX/RX</text>
+  <rect x="50" y="850" width="430" height="145" rx="10" class="box"/>
+  <rect x="50" y="850" width="430" height="44" rx="10" class="signal-head"/>
+  <text x="72" y="880" class="box-title">CYD S3 core</text>
+  <circle cx="480" cy="920" r="6" class="pin-uart"/><text x="72" y="926" class="row">GPIO6 TX</text>
+  <circle cx="480" cy="965" r="6" class="pin-uart"/><text x="72" y="971" class="row">GPIO7 RX</text>
+  <rect x="1320" y="850" width="430" height="145" rx="10" class="box"/>
+  <rect x="1320" y="850" width="430" height="44" rx="10" class="signal-head"/>
+  <text x="1342" y="880" class="box-title">C3 SuperMini</text>
+  <circle cx="1320" cy="920" r="6" class="pin-uart"/><text x="1342" y="926" class="row">GPIO7 RX</text>
+  <circle cx="1320" cy="965" r="6" class="pin-uart"/><text x="1342" y="971" class="row">GPIO6 TX</text>
+  <line x1="480" y1="920" x2="1320" y2="920" class="wire-uart"/>
+  <line x1="480" y1="965" x2="1320" y2="965" class="wire-uart"/>
+
+  <!-- ================= USB DATA ================= -->
+  <text x="50" y="1055" class="section">3. Aux USB flashing</text>
+  <rect x="50" y="1090" width="430" height="145" rx="10" class="box"/>
+  <rect x="50" y="1090" width="430" height="44" rx="10" class="signal-head"/>
+  <text x="72" y="1120" class="box-title">Panel USB-C jack</text>
+  <circle cx="480" cy="1160" r="6" class="pin-usb"/><text x="72" y="1166" class="row">D+</text>
+  <circle cx="480" cy="1205" r="6" class="pin-usb"/><text x="72" y="1211" class="row">D-</text>
+  <rect x="1320" y="1090" width="430" height="145" rx="10" class="box"/>
+  <rect x="1320" y="1090" width="430" height="44" rx="10" class="signal-head"/>
+  <text x="1342" y="1120" class="box-title">C3 USB connector</text>
+  <circle cx="1320" cy="1160" r="6" class="pin-usb"/><text x="1342" y="1166" class="row">USB D+</text>
+  <circle cx="1320" cy="1205" r="6" class="pin-usb"/><text x="1342" y="1211" class="row">USB D-</text>
+  <line x1="480" y1="1160" x2="1320" y2="1160" class="wire-usb"/>
+  <line x1="480" y1="1205" x2="1320" y2="1205" class="wire-usb"/>
+
+  <!-- ================= NAV PINOUT ================= -->
+  <text x="50" y="1295" class="section">4. 5-way navigation pad pinout</text>
+  <rect x="50" y="1330" width="500" height="315" rx="10" class="box"/>
+  <rect x="50" y="1330" width="500" height="44" rx="10" class="nav-head"/>
+  <text x="72" y="1360" class="box-title">CYD / firmware connection</text>
+  <circle cx="550" cy="1410" r="6" class="pin-nav"/><text x="72" y="1416" class="row">GPIO45 - firmware Left</text>
+  <circle cx="550" cy="1455" r="6" class="pin-nav"/><text x="72" y="1461" class="row">GPIO42 - firmware Right</text>
+  <circle cx="550" cy="1500" r="6" class="pin-nav"/><text x="72" y="1506" class="row">GPIO47 - firmware Up</text>
+  <circle cx="550" cy="1545" r="6" class="pin-nav"/><text x="72" y="1551" class="row">GPIO48 - firmware Down</text>
+  <circle cx="550" cy="1590" r="6" class="pin-nav"/><text x="72" y="1596" class="row">GPIO39 - SET / Select</text>
+  <circle cx="550" cy="1630" r="6" class="pin-gnd"/><text x="72" y="1636" class="row">CYD GND - second GND pin</text>
+  <rect x="1250" y="1330" width="500" height="315" rx="10" class="box"/>
+  <rect x="1250" y="1330" width="500" height="44" rx="10" class="nav-head"/>
+  <text x="1272" y="1360" class="box-title">5-way nav stick</text>
+  <circle cx="1250" cy="1410" r="6" class="pin-nav"/><text x="1272" y="1416" class="row">RIGHT pad</text>
+  <circle cx="1250" cy="1455" r="6" class="pin-nav"/><text x="1272" y="1461" class="row">LEFT pad</text>
+  <circle cx="1250" cy="1500" r="6" class="pin-nav"/><text x="1272" y="1506" class="row">DOWN pad</text>
+  <circle cx="1250" cy="1545" r="6" class="pin-nav"/><text x="1272" y="1551" class="row">UP pad</text>
+  <circle cx="1250" cy="1590" r="6" class="pin-nav"/><text x="1272" y="1596" class="row">SET pad</text>
+  <circle cx="1250" cy="1630" r="6" class="pin-gnd"/><text x="1272" y="1636" class="row">COM pad</text>
+  <line x1="550" y1="1410" x2="1250" y2="1410" class="wire-nav"/>
+  <line x1="550" y1="1455" x2="1250" y2="1455" class="wire-nav"/>
+  <line x1="550" y1="1500" x2="1250" y2="1500" class="wire-nav"/>
+  <line x1="550" y1="1545" x2="1250" y2="1545" class="wire-nav"/>
+  <line x1="550" y1="1590" x2="1250" y2="1590" class="wire-nav"/>
+  <line x1="550" y1="1630" x2="1250" y2="1630" class="wire-gnd"/>
+
+  <!-- ================= SD PINOUT ================= -->
+  <text x="50" y="1710" class="section">5. microSD SPI pinout and power</text>
+  <rect x="50" y="1745" width="500" height="305" rx="10" class="box"/>
+  <rect x="50" y="1745" width="500" height="44" rx="10" class="signal-head"/>
+  <text x="72" y="1775" class="box-title">Source connection</text>
+  <circle cx="550" cy="1820" r="6" class="pin-spi"/><text x="72" y="1826" class="row">CYD GPIO16 - CS</text>
+  <circle cx="550" cy="1860" r="6" class="pin-spi"/><text x="72" y="1866" class="row">CYD GPIO18 - SCK / CLK</text>
+  <circle cx="550" cy="1900" r="6" class="pin-spi"/><text x="72" y="1906" class="row">CYD GPIO17 - MOSI / DI</text>
+  <circle cx="550" cy="1940" r="6" class="pin-spi"/><text x="72" y="1946" class="row">CYD GPIO19 - MISO / DO</text>
+  <circle cx="550" cy="1980" r="6" class="pin-3v3"/><text x="72" y="1986" class="row">CYD 3V3</text>
+  <circle cx="550" cy="2020" r="6" class="pin-gnd"/><text x="72" y="2026" class="row">IP5306 OUT- / GND</text>
+  <rect x="1250" y="1745" width="500" height="305" rx="10" class="box"/>
+  <rect x="1250" y="1745" width="500" height="44" rx="10" class="signal-head"/>
+  <text x="1272" y="1775" class="box-title">microSD module</text>
+  <circle cx="1250" cy="1820" r="6" class="pin-spi"/><text x="1272" y="1826" class="row">CS</text>
+  <circle cx="1250" cy="1860" r="6" class="pin-spi"/><text x="1272" y="1866" class="row">SCK / CLK</text>
+  <circle cx="1250" cy="1900" r="6" class="pin-spi"/><text x="1272" y="1906" class="row">MOSI / DI</text>
+  <circle cx="1250" cy="1940" r="6" class="pin-spi"/><text x="1272" y="1946" class="row">MISO / DO</text>
+  <circle cx="1250" cy="1980" r="6" class="pin-3v3"/><text x="1272" y="1986" class="row">VCC / 3V3</text>
+  <circle cx="1250" cy="2020" r="6" class="pin-gnd"/><text x="1272" y="2026" class="row">GND</text>
+  <line x1="550" y1="1820" x2="1250" y2="1820" class="wire-spi"/>
+  <line x1="550" y1="1860" x2="1250" y2="1860" class="wire-spi"/>
+  <line x1="550" y1="1900" x2="1250" y2="1900" class="wire-spi"/>
+  <line x1="550" y1="1940" x2="1250" y2="1940" class="wire-spi"/>
+  <line x1="550" y1="1980" x2="1250" y2="1980" class="wire-3v3"/>
+  <line x1="550" y1="2020" x2="1250" y2="2020" class="wire-gnd"/>
+</svg>

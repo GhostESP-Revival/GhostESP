@@ -636,15 +636,17 @@ CONFIG_TFT_HEIGHT=170
 # Misc Options
 #
 CONFIG_USE_JOYSTICK=y
-# Joystick wiring is physically crossed: the Left pad wire goes to GPIO45 and
-# the Right pad wire to GPIO42 (Up=47, Down=48 likewise swapped). Keep the
-# buttons connected inverted to match these values.
+# Joystick wiring is crossed against the pad silkscreen: the firmware's Left
+# pin (GPIO45) is hooked to the pad's RIGHT wire, Right pin (GPIO42) to the
+# pad's LEFT wire, Up pin (GPIO47) to the pad's DOWN wire and Down pin
+# (GPIO48) to the pad's UP wire. Wire by firmware pin, not pad label. The
+# buttons are active-low and the pad COM is hardwired to a CYD GND pin.
 CONFIG_L_BTN=45
 CONFIG_R_BTN=42
 CONFIG_U_BTN=47
 CONFIG_D_BTN=48
 CONFIG_C_BTN=39
-CONFIG_JOYSTICK_COM_PIN=21
+CONFIG_JOYSTICK_COM_PIN=-1
 # CONFIG_USE_TDECK is not set
 # CONFIG_USE_CARDPUTER is not set
 # CONFIG_USE_CARDPUTER_ADV is not set
