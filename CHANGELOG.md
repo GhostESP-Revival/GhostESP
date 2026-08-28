@@ -9,10 +9,11 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added the Hero main menu layout
 - Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
 - Added favorites menu where you can pin menu items, IR remotes, NFC tags, SubGHz captures and apps
-- Favorites overlay Back row, styled like the favorites rows, so joysticks can exit by pressing a row
 - Replaced the accent-only menu themes with 21 full color palettes
+- Added BadBLE native Bluetooth HID keyboard that runs DuckyScript payloads over BLE with on-device UI and CLI support
 
 ### Changed
+- Standardized main menu and App Gallery icons
 - BLE Detect Devices "Track" action now uses the live RSSI ring overlay (matching Track AP/STA/Adv/GATT) instead of switching to the terminal
 - Added runtime global log-level control through the `loglevel` command and system settings
 - SD card not inserted now logs a single clear line instead of repeating driver errors

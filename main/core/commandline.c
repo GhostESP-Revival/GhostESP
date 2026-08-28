@@ -419,6 +419,9 @@ void register_commands() {
     register_command("nrf24", handle_nrf24_cmd);
     register_command("audio", handle_audio_cmd);
     register_command("badusb", handle_badusb_cmd);
+#ifdef CONFIG_HAS_BADBLE
+    register_command("badble", handle_badble_cmd);
+#endif
 #if CONFIG_ENABLE_GHOSTSCRIPT
     register_command("script", handle_script_cmd);
 #endif

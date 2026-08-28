@@ -338,6 +338,22 @@ menu "Ghost ESP Options"
                 keyboard and execute DuckyScript v1.0 payloads from the SD card.
                 Only available on ESP32-S3 which has USB OTG support.
 
+        config HAS_BADBLE
+            bool "Enable BadBLE (Bluetooth HID Script Injection)"
+            default y if IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32S3
+            depends on !IDF_TARGET_ESP32S2
+            depends on SOC_BT_SUPPORTED
+            depends on BT_ENABLED
+            depends on BT_NIMBLE_ENABLED
+            depends on BT_CONTROLLER_ENABLED
+            depends on BT_NIMBLE_ROLE_PERIPHERAL
+            depends on BT_NIMBLE_GATT_SERVER
+            select BT_NIMBLE_HID_SERVICE
+            help
+                Enable native BLE HID keyboard support for DuckyScript payloads.
+                Uses the NimBLE HID service and is available on Bluetooth-capable
+                targets with a NimBLE GATT server.
+
         config BADUSB_VSENSE_PIN
             int "BadUSB VBUS Sense Pin (use -1 to disable)"
             default -1

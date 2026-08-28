@@ -1,4 +1,8 @@
+#include "sdkconfig.h"
 #include "managers/ble_bridge_manager.h"
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/badble_manager.h"
+#endif
 
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
@@ -455,6 +459,21 @@ static bool bridge_is_local_ctrl(const char *cmd) {
     return strcmp(lower, "stop") == 0;
 }
 
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+/* Drops a GATT registration flag left over from a previous NimBLE host
+ * incarnation. Full host teardown (ble_hs_deinit) owns the single legal
+ * ble_gatts_stop() per incarnation, so profiles are never torn down on stop;
+ * instead the flag is cleared at the start of the next host incarnation and
+ * the profile re-registers on the fresh, empty GATT database. */
+static void bridge_invalidate_stale_gatt(void) {
+    if (s_bridge.gatt_registered) {
+        ESP_LOGI(TAG, "clearing stale GATT registration from previous session");
+        s_bridge.gatt_registered = false;
+        s_bridge.tx_val_handle = 0;
+    }
+}
+#endif
+
 static void bridge_stop_locked(void) {
     s_bridge.running = false;
     bridge_reset_reassembly();
@@ -478,6 +497,12 @@ static void bridge_stop_locked(void) {
     s_bridge.conn_handle = BLE_HS_CONN_HANDLE_NONE;
 #endif
     esp_comm_manager_disconnect();
+    /* NOTE: the GATT database is deliberately NOT released here. NimBLE
+     * allows exactly one ble_gatts_stop() per host incarnation and full host
+     * teardown (ble_hs_deinit) owns it - releasing the database here would
+     * double-stop it and fault when the host is deinitialized afterwards. The
+     * registration flag is simply kept; the next full host (re)initialization
+     * clears it and re-registers on the fresh, empty GATT database. */
 }
 
 static void bridge_request_stop(const char *reason) {
@@ -1000,12 +1025,27 @@ bool ble_bridge_start(void) {
     glog("blebridge is not supported on ESP32-S2.\n");
     return false;
 #else
+#ifdef CONFIG_HAS_BADBLE
+    if (badble_manager_is_running()) {
+        bridge_log("BadBLE is active; stop it before starting the bridge");
+        return false;
+    }
+#endif
     if (s_bridge.running) {
         bridge_log("already running");
         return true;
     }
     (void)nvs_flash_init();
     (void)bridge_load_last_peer(s_bridge.last_peer, sizeof(s_bridge.last_peer));
+
+    if (!ble_is_initialized()) {
+        /* Fresh NimBLE host incarnation: any GATT registration flag from a
+         * previous incarnation is stale (profiles are never torn down on
+         * stop - full host teardown owns the single legal ble_gatts_stop).
+         * Clear it so the bridge re-registers on the fresh, empty GATT
+         * database below. */
+        bridge_invalidate_stale_gatt();
+    }
 
     ble_init();
     if (!ble_wait_for_ready()) {

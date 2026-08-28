@@ -676,6 +676,9 @@ static void ble_adv_set_subtext(int found_count) {
 #include "managers/views/keyboard_screen.h"
 #include "managers/usb_keyboard_manager.h"
 #include "managers/views/badusb_view.h"
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/views/badble_view.h"
+#endif
 #if CONFIG_HAS_INFRARED
 #include "managers/views/infrared_view.h"
 #endif
@@ -1992,6 +1995,9 @@ static const io_btn_preset_t io_btn_presets[] = {
 #endif
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     {"BadUSB", "view:badusb", &badusb_view},
+#endif
+#ifdef CONFIG_HAS_BADBLE
+    {"BadBLE", "view:badble", &badble_view},
 #endif
     {"GPS", "view:gps", &options_menu_view},
 #ifdef CONFIG_HAS_COMPASS
@@ -13848,7 +13854,6 @@ static void ssh_scan_kb_cb(const char *text) {
     
     char cmd[64];
     snprintf(cmd, sizeof(cmd), "scanssh %s", text);
-    
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
     simulateCommand(cmd);

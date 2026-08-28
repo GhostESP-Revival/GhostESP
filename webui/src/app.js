@@ -510,14 +510,16 @@ function buildWifi() {
 
 function buildBle() {
   const groups = Object.keys(BLE_GROUPS);
-  document.querySelector('[data-tabs="ble"]').innerHTML = groups.map((name, i) =>
+  const allGroups = [...groups, ...Object.keys(BADBLE_GROUPS)];
+  document.querySelector('[data-tabs="ble"]').innerHTML = allGroups.map((name, i) =>
     `<button class="tab-btn ${i === 0 ? 'active' : ''}" data-ble-tab="${esc(name)}">${esc(name)}</button>`
   ).join('');
-  $('ble-subpages').innerHTML = groups.map((name, i) =>
-    `<div class="subpage ${i === 0 ? 'active' : ''}" data-ble-page="${esc(name)}">
-      <div class="menu-list">${BLE_GROUPS[name].map(action => actionRow(action, 'ble')).join('')}</div>
-    </div>`
-  ).join('');
+  $('ble-subpages').innerHTML = allGroups.map((name, i) => {
+    const list = BLE_GROUPS[name] || BADBLE_GROUPS[name];
+    return `<div class="subpage ${i === 0 ? 'active' : ''}" data-ble-page="${esc(name)}">
+      <div class="menu-list">${list.map(action => actionRow(action, 'ble')).join('')}</div>
+    </div>`;
+  }).join('');
   document.querySelectorAll('[data-ble-tab]').forEach(btn =>
     btn.addEventListener('click', () => {
       if (state.activeAction) closeAction();

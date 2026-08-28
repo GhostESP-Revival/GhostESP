@@ -63,6 +63,9 @@
 #ifdef CONFIG_HAS_BADUSB
 #include "managers/badusb_manager.h"
 #endif
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/badble_manager.h"
+#endif
 
 #ifdef CONFIG_HAS_CAMERA
 #include "managers/motion_detector_manager.h"
@@ -801,6 +804,9 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Initializing Settings");
     MEASURE_INIT_RAM("Settings init", settings_init(&G_Settings));
+#ifdef CONFIG_HAS_BADBLE
+    MEASURE_INIT_RAM("BadBLE Manager", badble_manager_init());
+#endif
     esp_log_level_set("*", (esp_log_level_t)settings_get_log_level(&G_Settings));
 
 #if GHOSTESP_OTA_SUPPORTED

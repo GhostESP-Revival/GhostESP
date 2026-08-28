@@ -168,8 +168,27 @@ endif()
 # Add BadUSB manager and HID script parser when BadUSB is enabled (S3 only)
 if(CONFIG_HAS_BADUSB)
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badusb_manager.c")
-    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/hid_script_parser.c")
     list(APPEND required_components esp_tinyusb)
+endif()
+
+# BadBLE uses the shared transport-neutral DuckyScript parser and the IDF HID
+# component.  Keep this separate from BadUSB so non-S3 BLE targets do not pull
+# in TinyUSB.
+if(CONFIG_HAS_BADBLE)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badble_manager.c")
+elseif(NOT idf_target STREQUAL "esp32s2")
+    # IDF v6.0.2 quirk: the component requirements graph is built by a
+    # sub-process that re-runs this CMakeLists WITHOUT sdkconfig values, so
+    # config-gated REQUIRES appends (CONFIG_HAS_BADBLE, CONFIG_HAS_BADUSB,
+    # CONFIG_HAS_CAMERA, ...) never reach the link graph. Gate on idf_target
+    # instead - it IS visible there. Every non-S2 target in this project has
+    # Bluetooth (ESP32/C3/C5/C6/S3), so esp_hid is always linked. It compiles
+    # to an effectively empty library where BadBLE is disabled by Kconfig.
+    list(APPEND required_components esp_hid)
+endif()
+
+if(CONFIG_HAS_BADUSB OR CONFIG_HAS_BADBLE)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/hid_script_parser.c")
 endif()
 
 # Add motion detector manager when camera is enabled (S3 only)
@@ -235,6 +254,10 @@ else()
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
                            REQUIRES ${required_components}
                            EMBED_FILES ${embed_files_list})
+endif()
+
+if(CONFIG_HAS_BADBLE)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=ble_gatts_stop")
 endif()
 
 # add compile definition for esp32s2 target to maintain legacy guards (needs COMPONENT_LIB)

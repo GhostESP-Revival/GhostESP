@@ -36,6 +36,9 @@
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
 #include "managers/views/badusb_view.h"
 #endif
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/views/badble_view.h"
+#endif
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 #include "managers/views/subghz_view.h"
 #endif
@@ -134,6 +137,23 @@ static void apply_compact_menu_tile(lv_obj_t *obj, bool selected) {
                                 menu_surface_color, menu_text_color, accent, accent_text);
 }
 
+static void apply_menu_launcher_selection_style(lv_obj_t *card, bool selected) {
+    if (!card) return;
+
+    lv_color_t label_color = menu_text_color;
+    if (selected) {
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+        gui_menu_launcher_tile_apply_selected(card, card_bg_enabled(), accent);
+        label_color = accent;
+    } else {
+        gui_menu_launcher_tile_apply(card, card_bg_enabled(), menu_surface_color);
+    }
+
+    lv_obj_t *label = lv_obj_get_child(card, -1);
+    if (label) lv_obj_set_style_text_color(label, label_color, 0);
+}
+
 static int grid_rows = 0;
 static int grid_cols = 0;
 
@@ -152,7 +172,7 @@ typedef struct {
   const char *name;
   const char *asset_key;
   const lv_img_dsc_t *icon;
-  const int palette_index; // kept for compatibility; runtime assigns slots by visible order
+  const int palette_index; // kept for compatibility; runtime uses the theme accent for icons
   lv_color_t border_color;
 } menu_item_t;
 
@@ -177,6 +197,9 @@ menu_item_t menu_items[] = {
 #endif
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     {"BadUSB", "usb", &usb, 3, {{0}}},
+#endif
+#ifdef CONFIG_HAS_BADBLE
+    {"BadBLE", "bluetooth", &bluetooth, 3, {{0}}},
 #endif
     {"GhostLink", "dualcomm", &dualcomm, 1, {{0}}},
     {"Ethernet", "lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", &lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, 1, {{0}}},
@@ -382,11 +405,10 @@ static void init_menu_colors(void) {
     refresh_menu_surface_colors();
 
     bool connected = esp_comm_manager_is_connected();
-    bool solid = theme_palette_is_solid(theme);
+    lv_color_t icon_color = lv_color_hex(theme_palette_get_accent(theme));
     for (int visible = 0; visible < num_items; visible++) {
         int menu_index = visible_index_to_menu_index(visible, connected);
-        int slot = solid ? 0 : (visible % THEME_PALETTE_SLOT_COUNT);
-        menu_items[menu_index].border_color = lv_color_hex(theme_palette_get(theme, slot));
+        menu_items[menu_index].border_color = icon_color;
     }
 }
 
@@ -1096,20 +1118,17 @@ static void select_menu_item_with_scroll(int index, bool slide_left, lv_anim_ena
                 if (is_compact_layout()) {
                     apply_compact_menu_tile(grid_cards[selected_item_index], false);
                 } else {
-                    gui_menu_launcher_tile_apply(grid_cards[selected_item_index], card_bg_enabled(),
-                                                 menu_surface_color);
+                    apply_menu_launcher_selection_style(grid_cards[selected_item_index], false);
                 }
             }
 
             // Highlight new selection with theme accent
             selected_item_index = index;
             if (grid_cards[selected_item_index]) {
-                uint8_t theme = settings_get_menu_theme(&G_Settings);
-                lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
                 if (is_compact_layout()) {
                     apply_compact_menu_tile(grid_cards[selected_item_index], true);
                 } else {
-                    gui_menu_launcher_tile_apply_selected(grid_cards[selected_item_index], card_bg_enabled(), accent);
+                    apply_menu_launcher_selection_style(grid_cards[selected_item_index], true);
                 }
 
                 scroll_launcher_card_to_view(selected_item_index);
@@ -1179,6 +1198,9 @@ static void handle_menu_item_selection(int item_index) {
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
         {"BadUSB", 0, &badusb_view},
 #endif
+#ifdef CONFIG_HAS_BADBLE
+        {"BadBLE", 0, &badble_view},
+#endif
     };
 
     const int num_actions = sizeof(menu_actions) / sizeof(menu_actions[0]);
@@ -1216,6 +1238,8 @@ static void handle_menu_item_selection(int item_index) {
                 status_display_show_status("Ethernet");
             } else if (strcmp(menu_actions[i].name, "BadUSB") == 0) {
                 status_display_show_status("BadUSB");
+            } else if (strcmp(menu_actions[i].name, "BadBLE") == 0) {
+                status_display_show_status("BadBLE");
             } else if (strcmp(menu_actions[i].name, "Audio") == 0) {
                 status_display_show_status("Audio Player");
 #ifdef CONFIG_HAS_AUDIO_PLAYER
@@ -1388,7 +1412,11 @@ static void create_launcher_menu(void) {
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(label, grid_card_width - (is_compact_layout() ? 12 : 8));
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        if (is_compact_layout()) {
+            lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        } else {
+            lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
+        }
 
         if (is_compact_layout()) apply_compact_menu_tile(grid_cards[i], false);
 
@@ -1402,12 +1430,10 @@ static void create_launcher_menu(void) {
 
     // Highlight selected card with theme accent
     if (grid_cards[selected_item_index]) {
-        uint8_t theme = settings_get_menu_theme(&G_Settings);
-        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
         if (is_compact_layout()) {
             apply_compact_menu_tile(grid_cards[selected_item_index], true);
         } else {
-            gui_menu_launcher_tile_apply_selected(grid_cards[selected_item_index], card_bg_enabled(), accent);
+            apply_menu_launcher_selection_style(grid_cards[selected_item_index], true);
         }
 
         scroll_launcher_card_to_view(selected_item_index);

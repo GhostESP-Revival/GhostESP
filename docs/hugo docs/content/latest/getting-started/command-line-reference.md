@@ -122,6 +122,22 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`enumgatt`** — Connect to the selected device and enumerate its GATT services.
 - **`trackgatt`** — Track the selected device using real-time RSSI signal strength.
 
+### BadBLE Keyboard
+
+Bluetooth HID keyboard mode (DuckyScript over BLE). BadBLE owns the BLE radio while active — stop it before using BLE scans or the bridge.
+
+- **`badble status`** — Show BadBLE state (advertising / connected / script), advertised name, and host status.
+- **`badble list`** — List DuckyScripts in `/mnt/ghostesp/badble/`.
+- **`badble run <file>`** — Wait for a paired host and run a DuckyScript. `badble run "Ghost Art (Built-in)"` runs the built-in payload without an SD card.
+- **`badble stop`** — Stop BadBLE; WiFi/AP are restored.
+- **`badble keyboard_start`** / **`keyboard_stop`** — Enable / disable live typing mode.
+- **`badble type <text>`** — Type text on the connected host.
+- **`badble keysend <modifier> <keycode>`** — Send a single HID keypress (numeric modifier and keycode values).
+- **`badble name`** — Show the advertised device name.
+- **`badble set_name <text>`** — Set the advertised name (max 31 characters, persisted in NVS).
+
+See [BadBLE]({{< relref "../../ble/badble.md" >}}) for pairing and usage details.
+
 ### Aerial Detection
 
 - **`aerialscan [seconds]`** — Scan for aerial devices (drones, UAVs, RC controllers) using WiFi and BLE in sequential phases. Default: 30 seconds. Phase 1: WiFi scan (OpenDroneID WiFi, DJI WiFi, drone networks). Phase 2: BLE scan (OpenDroneID BLE, DJI BLE) — **WiFi automatically suspended during BLE phase and restored after**.

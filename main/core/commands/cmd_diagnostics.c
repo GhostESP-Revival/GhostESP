@@ -18,6 +18,9 @@
 #include "attacks/wifi/dhcp_starvation.h"
 #include "core/dns_server.h"
 #include "managers/aerial_detector_manager.h"
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/badble_manager.h"
+#endif
 #include "managers/ble_manager.h"
 #include "managers/dial_manager.h"
 #include "managers/display_manager.h"
@@ -165,6 +168,13 @@ void handle_stop_flipper(int argc, char **argv) {
     }
     ble_spam_stop();
     ble_stop_gatt_scan();
+#ifdef CONFIG_HAS_BADBLE
+    if (badble_manager_is_running()) {
+        glog("Stopped BadBLE keyboard.\n");
+        stopped_any = true;
+        (void)badble_manager_stop();
+    }
+#endif
     ble_stop();
 #endif
 

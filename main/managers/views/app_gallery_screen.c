@@ -28,6 +28,9 @@
 LV_IMG_DECLARE(speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48);
 LV_IMG_DECLARE(enviii);
 LV_IMG_DECLARE(accelerometer_icon);
+LV_IMG_DECLARE(folder);
+LV_IMG_DECLARE(description);
+LV_IMG_DECLARE(storefront);
 
 #include "managers/plugin_manager.h"
 #include "managers/settings_manager.h"
@@ -124,24 +127,24 @@ static const app_item_t builtin_app_items[] = {
     },
     {
         .name = "SD Browser",
-        .asset_key = NULL,
-        .symbol_icon = LV_SYMBOL_DIRECTORY,
+        .asset_key = "folder",
+        .icon = &folder,
         .palette_index = 1,
         .view = &sd_browser_view,
     },
 #if CONFIG_ENABLE_GHOSTSCRIPT
     {
         .name = "GhostScript",
-        .asset_key = NULL,
-        .symbol_icon = LV_SYMBOL_FILE,
+        .asset_key = "description",
+        .icon = &description,
         .palette_index = 5,
         .view = &ghostscript_browser_view,
     },
 #endif
     {
         .name = "Store",
-        .asset_key = NULL,
-        .symbol_icon = LV_SYMBOL_DOWNLOAD,
+        .asset_key = "storefront",
+        .icon = &storefront,
         .palette_index = 3,
         .view = &cloud_store_view,
     },
@@ -234,6 +237,23 @@ static volatile bool apps_plugin_reload_in_progress = false;
 static bool apps_allow_plugin_icon_load = false;
 static StackType_t *apps_plugin_reload_stack = NULL;
 static StaticTask_t *apps_plugin_reload_tcb = NULL;
+
+static void apply_app_launcher_selection_style(lv_obj_t *card, bool selected) {
+    if (!card) return;
+
+    lv_color_t label_color = apps_text_color;
+    if (selected) {
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+        gui_menu_launcher_tile_apply_selected(card, app_card_bg_enabled(), accent);
+        label_color = accent;
+    } else {
+        gui_menu_launcher_tile_apply(card, app_card_bg_enabled(), apps_surface_color);
+    }
+
+    lv_obj_t *label = lv_obj_get_child(card, -1);
+    if (label) lv_obj_set_style_text_color(label, label_color, 0);
+}
 
 static inline bool apps_is_compact_layout(void) {
     return apps_layout == MAIN_MENU_LAYOUT_COMPACT;
@@ -479,9 +499,8 @@ static void add_plugin_category_folders(void) {
     for (int j = 0; j < num_categories && num_apps < s_app_items_capacity - 1; ++j) {
         strncpy(app_items[num_apps].category, category_names[j], sizeof(app_items[num_apps].category) - 1);
         app_items[num_apps].name = app_items[num_apps].category;
-        app_items[num_apps].asset_key = NULL;
-        app_items[num_apps].symbol_icon = LV_SYMBOL_DIRECTORY;
-        app_items[num_apps].icon = NULL;
+        app_items[num_apps].asset_key = "folder";
+        app_items[num_apps].icon = &folder;
         app_items[num_apps].palette_index = 1;
         app_items[num_apps].view = NULL;
         app_items[num_apps].disabled = false;
@@ -576,14 +595,15 @@ static void start_plugin_reload_async(void) {
     }
 }
 
-// Use the same theme palettes as the main menu to color app borders
+// Use the theme accent for all app borders/icons so the gallery reads as a
+// single color; plugin-provided accent colors still take precedence.
 static void init_app_colors(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     refresh_apps_surface_colors();
+    lv_color_t icon_color = lv_color_hex(theme_palette_get_accent(theme));
     for (int i = 0; i < num_apps; ++i) {
-        int slot = i % THEME_PALETTE_SLOT_COUNT;
         if (!parse_accent_color(app_items[i].accent_color, &app_items[i].border_color)) {
-            app_items[i].border_color = lv_color_hex(theme_palette_get(theme, slot));
+            app_items[i].border_color = icon_color;
         }
     }
 }
@@ -719,7 +739,7 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         lv_obj_set_style_clip_corner(icon, false, 0);
 
         gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, 512);
-        int icon_x_offset = -3;
+        int icon_x_offset = 0;
         if (app_items[app_idx].view == &ghostchi_view) {
             icon_x_offset = 9;
         }
@@ -1112,7 +1132,11 @@ static void create_apps_launcher_menu(void) {
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(label, card_width - (apps_is_compact_layout() ? 12 : 8));
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        if (apps_is_compact_layout()) {
+            lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        } else {
+            lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
+        }
         if (apps_is_compact_layout()) apply_compact_app_tile(card, false);
     }
 
@@ -1122,12 +1146,10 @@ static void create_apps_launcher_menu(void) {
     }
 
     if (selected_app_index >= 0 && selected_app_index < num_apps && apps_grid_cards[selected_app_index]) {
-        uint8_t theme = settings_get_menu_theme(&G_Settings);
-        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
         if (apps_is_compact_layout()) {
             apply_compact_app_tile(apps_grid_cards[selected_app_index], true);
         } else {
-            gui_menu_launcher_tile_apply_selected(apps_grid_cards[selected_app_index], app_card_bg_enabled(), accent);
+            apply_app_launcher_selection_style(apps_grid_cards[selected_app_index], true);
         }
         scroll_app_launcher_card_to_view(selected_app_index);
     }
@@ -1520,18 +1542,16 @@ static void select_app_item(int index, bool slide_left) {
             if (apps_is_compact_layout()) {
                 apply_compact_app_tile(old, false);
             } else {
-                gui_menu_launcher_tile_apply(old, app_card_bg_enabled(), apps_surface_color);
+                apply_app_launcher_selection_style(old, false);
             }
         }
         selected_app_index = index;
         if (apps_grid_cards[selected_app_index]) {
             lv_obj_t *card = apps_grid_cards[selected_app_index];
-            uint8_t theme = settings_get_menu_theme(&G_Settings);
-            lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
             if (apps_is_compact_layout()) {
                 apply_compact_app_tile(card, true);
             } else {
-                gui_menu_launcher_tile_apply_selected(card, app_card_bg_enabled(), accent);
+                apply_app_launcher_selection_style(card, true);
             }
             scroll_app_launcher_card_to_view(selected_app_index);
         }
