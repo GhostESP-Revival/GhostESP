@@ -48,9 +48,10 @@ def package_app(
     out: str = None,
     make_gapp: bool = False,
     target: str = None,
+    manifest_name: str = "manifest.json",
 ) -> pathlib.Path:
     app_path = pathlib.Path(app_dir).resolve()
-    manifest = load_manifest(app_path)
+    manifest = load_manifest(app_path, manifest_name=manifest_name)
     app_id = manifest["id"]
     version = manifest.get("version", "0.0.0")
     target = target or manifest.get("target", "unknown")

@@ -4,6 +4,9 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "gui/native_canvas_scale.h"
+#endif
 
 typedef struct {
     ghostesp_ui_obj_t parent;
@@ -527,6 +530,12 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
     if (left >= right || top >= bottom) return;
 
     uint16_t *destination = (uint16_t *)image->data;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    native_canvas_scale_rgb565(destination, canvas_width, ctx->pixels,
+        ctx->src_width, ctx->src_height, ctx->src_stride,
+        ctx->dst_x, ctx->dst_y, ctx->dst_width, ctx->dst_height,
+        left, top, right, bottom, LV_COLOR_16_SWAP);
+#else
     const bool copy_rows = left == ctx->dst_x && right == dst_right &&
                            ctx->dst_width == ctx->src_width;
     for (int32_t y = top; y < bottom; y++) {
@@ -561,6 +570,7 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
         }
     }
+#endif
     lv_area_t area;
     lv_obj_get_coords(canvas, &area);
     area.x1 += left;

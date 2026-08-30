@@ -1,5 +1,24 @@
 #include "gui/menu_item_style.h"
 
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_USE_TOUCHSCREEN)
+static bool s_touch_input = true;
+#else
+static bool s_touch_input = false;
+#endif
+
+bool gui_menu_set_touch_input(bool touch) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    bool changed = s_touch_input != touch;
+    s_touch_input = touch;
+    return changed;
+#else
+    (void)touch;
+    return false;
+#endif
+}
+
+bool gui_menu_focus_visible(void) { return !s_touch_input; }
+
 void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
                          lv_color_t surface, lv_color_t border,
                          int border_width, int shadow_width) {
@@ -23,7 +42,7 @@ void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
 
 void gui_menu_card_apply_selected(lv_obj_t *obj, bool background_enabled,
                                   lv_color_t accent) {
-    if (!obj) return;
+    if (!obj || !gui_menu_focus_visible()) return;
 
     // Focus remains visible even when users disable card backgrounds.
     lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
@@ -52,7 +71,7 @@ void gui_menu_launcher_tile_apply(lv_obj_t *obj, bool background_enabled,
 
 void gui_menu_launcher_tile_apply_selected(lv_obj_t *obj, bool background_enabled,
                                            lv_color_t accent) {
-    if (!obj) return;
+    if (!obj || !gui_menu_focus_visible()) return;
     (void)accent;
 
     // Selection is a neutral focus plate; color remains on the icon and page dot.
@@ -68,6 +87,7 @@ void gui_menu_compact_tile_apply(lv_obj_t *obj, lv_obj_t *label, bool selected,
                                  lv_color_t accent_text) {
     if (!obj) return;
 
+    selected = selected && gui_menu_focus_visible();
     lv_obj_set_style_bg_color(obj, selected ? accent : surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, selected ? LV_OPA_COVER :
                             (background_enabled ? LV_OPA_COVER : LV_OPA_TRANSP), LV_PART_MAIN);

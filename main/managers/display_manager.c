@@ -150,6 +150,7 @@ static volatile bool g_cached_batt_valid = false;
 
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
 #include "gui/lv_draw_ppa_v8.h"
+#include "managers/views/plugin_runner_view.h"
 #include "lvgl_i2c/i2c_manager.h"
 #include "lvgl_touch/touch_driver.h"
 #include "vendor/drivers/crowpanel_p4_display.h"
@@ -2360,6 +2361,10 @@ static void dm_p4_home_exit_timer_cb(lv_timer_t *timer) {
         return;
     }
 
+    /* Native apps can still be finishing a tick or engine bring-up. Forcing
+     * destruction after 280ms would join that worker on the UI task again. */
+    if (s_p4_home_exit_view == &plugin_runner_view && plugin_runner_home_exit_pending()) return;
+
     if (s_p4_home_exit_phase == 0) {
         /* A few legacy views do not implement INPUT_TYPE_EXIT_BUTTON on this
          * board. Give them their keyboard back event as a delayed fallback. */
@@ -2386,6 +2391,16 @@ static void dm_p4_home_exit_timer_cb(lv_timer_t *timer) {
 static void dm_p4_go_home_through_view(void) {
     View *leaving = dm.current_view;
     if (!leaving || leaving == &splash_view || leaving == &main_menu_view) return;
+
+    if (leaving == &plugin_runner_view) {
+        ESP_LOGI(TAG, "P4 Home: waiting for native app tick before normal exit");
+        if (!plugin_runner_request_home_exit()) return;
+        if (s_p4_home_exit_timer) lv_timer_del(s_p4_home_exit_timer);
+        s_p4_home_exit_view = leaving;
+        s_p4_home_exit_phase = 0;
+        s_p4_home_exit_timer = lv_timer_create(dm_p4_home_exit_timer_cb, 140, NULL);
+        return;
+    }
 
     /* Use the same event as the physical exit button. Scan/attack views stop
      * workers and restore their radio profile before navigating away. */
@@ -3038,6 +3053,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Cloud Store") == 0 ||
           strcmp(view_name, "ENV-III") == 0 ||
           strcmp(view_name, "Favorites Manager") == 0 ||
+          strcmp(view_name, "Menu Editor") == 0 ||
           strcmp(view_name, "Lockscreen") == 0);
 }
 

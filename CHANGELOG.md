@@ -29,6 +29,16 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming
 - Both audio player screens gained a touch Back bar matching other views
 
+### CrowPanel Advanced P4
+- Refined CrowPanel Advanced P4 main menu and App Gallery layouts with larger touch targets and balanced spacing
+- Polished large CrowPanel P4 layouts with fuller spacing, improved control placement and better use of wide displays
+- Redesigned the P4 Audio player as a split-view library and now-playing layout
+- Standardized the P4 left-edge back swipe with joystick-left behavior and animated gesture feedback
+- Improved P4 touch routing and reliability for native SD apps and large-screen controls
+- Main Menu and App Gallery items can now be shown in either menu and reordered independently from Settings
+- Enlarged setting selection popups on CrowPanel Advanced P4 displays
+- Centered the "Tap to launch" hint in P4 Favorites cards
+
 ### Fixed
 - Fixed the AP never coming back after scans or deauth attacks - resolves #382
 - Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327

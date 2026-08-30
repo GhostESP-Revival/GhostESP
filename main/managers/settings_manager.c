@@ -183,6 +183,7 @@ void settings_init(FSettings *settings) {
 void settings_deinit(void) { nvs_close(nvsHandle); }
 
 void settings_set_defaults(FSettings *settings) {
+  menu_config_reset(&settings->menu_config);
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
   settings->broadcast_speed = 1;
@@ -902,6 +903,14 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK && value_u8 <= ESP_LOG_VERBOSE) {
     settings->log_level = value_u8;
   }
+  size_t menu_config_size = sizeof(settings->menu_config);
+  menu_config_reset(&settings->menu_config);
+  err = nvs_get_blob(nvsHandle, "menu_config", &settings->menu_config, &menu_config_size);
+  if (err != ESP_OK || menu_config_size != menu_config_storage_size(&settings->menu_config)) {
+    menu_config_reset(&settings->menu_config);
+  }
+  menu_config_validate(&settings->menu_config);
+
   size_t req_sz = 0;
   err = nvs_get_blob(nvsHandle, NVS_FAVORITES_KEY, NULL, &req_sz);
   if (err == ESP_OK) {
@@ -1368,6 +1377,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_FAVS_BYPASS_KEY, G_Settings.favorites_bypass_pin ? 1 : 0);
             key = NVS_FAVS_BYPASS_KEY;
             break;
+        case SETTING_MENU_CONFIG:
+            err = nvs_set_blob(nvsHandle, "menu_config", &G_Settings.menu_config, menu_config_storage_size(&G_Settings.menu_config));
+            key = "menu_config";
+            break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
             key = NVS_MENU_ITEM_BORDERS_KEY;
@@ -1637,6 +1650,7 @@ esp_err_t settings_save(const FSettings *settings) {
         NVS_SET(nvs_set_blob(nvsHandle, NVS_FAVORITES_KEY, blob, sizeof(blob)));
     }
     NVS_SET(nvs_set_u8(nvsHandle, NVS_FAVS_BYPASS_KEY, settings->favorites_bypass_pin ? 1 : 0));
+    NVS_SET(nvs_set_blob(nvsHandle, "menu_config", &settings->menu_config, menu_config_storage_size(&settings->menu_config)));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0));

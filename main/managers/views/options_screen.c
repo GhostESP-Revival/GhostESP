@@ -43,6 +43,7 @@
 #include "gui/nav_history.h"
 #include "gui/gui_router.h"
 #include "gui/select_overlay.h"
+#include "managers/views/menu_editor_screen.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
@@ -1821,6 +1822,8 @@ static SettingsItem settings_items[] = {
     {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 5, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Main Menu Items", SETTING_MAIN_MENU_ITEMS, action_options, 1, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Apps Gallery Items", SETTING_APPS_MENU_ITEMS, action_options, 1, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Surface Tone", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -3897,7 +3900,8 @@ void options_menu_create() {
                           s_resume_menu_state.dualcomm_state == current_dualcomm_menu_state &&
                           s_resume_menu_state.settings_root == current_settings_root &&
                           s_resume_menu_state.settings_category == current_settings_category &&
-                          gui_router_previous_view() != &main_menu_view;
+                          gui_router_previous_view() != &main_menu_view &&
+                          gui_router_previous_view() != &apps_menu_view;
     if (!restoring_view) {
         s_resume_menu_state.valid = false;
         s_pending_restore_state.valid = false;
@@ -4347,6 +4351,8 @@ static void load_current_settings_values(void) {
                 settings_items[i].current_value = settings_get_favorites_bypass(&G_Settings) ? 1 : 0;
                 break;
             case SETTING_MANAGE_FAVORITES:
+            case SETTING_MAIN_MENU_ITEMS:
+            case SETTING_APPS_MENU_ITEMS:
                 settings_items[i].current_value = 0;
                 break;
             case SETTING_WEB_AUTH:
@@ -4692,6 +4698,12 @@ static void apply_setting_change(int setting_index, int new_value) {
             break;
         case SETTING_MANAGE_FAVORITES:
             display_manager_switch_view(&favorites_manager_view);
+            return;
+        case SETTING_MAIN_MENU_ITEMS:
+            menu_editor_open(MENU_PLACE_MAIN);
+            return;
+        case SETTING_APPS_MENU_ITEMS:
+            menu_editor_open(MENU_PLACE_APPS);
             return;
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
@@ -5349,6 +5361,9 @@ static void settings_select_open(int setting_index) {
 
     int row_h = (button_height_global > 0) ? button_height_global - 8 : 40;
     if (row_h < 30) row_h = 30;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    row_h = 64;
+#endif
 
     lv_obj_t *row = NULL;
     if (menu_container && lv_obj_is_valid(menu_container)) {
@@ -5368,6 +5383,9 @@ static void settings_select_open(int setting_index) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     bottom_reserved += SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
 #endif
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    bottom_reserved = GUI_HOME_SAFE_H + 16;
+#endif
     gui_select_overlay_config_t cfg = {
         .parent = lv_layer_top(),
         .anchor = row,
@@ -5378,8 +5396,13 @@ static void settings_select_open(int setting_index) {
         .max_visible_rows = (LV_VER_RES <= 200) ? 4 : 5,
         .top_reserved = GUI_STATUS_BAR_H + 4,
         .bottom_reserved = bottom_reserved,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        .min_width = LV_MIN(360, LV_HOR_RES - 64),
+        .max_width = LV_MIN(520, LV_HOR_RES - 64),
+#else
         .min_width = 90,
         .max_width = 230,
+#endif
         .surface_color = lv_color_hex(theme_palette_get_surface_alt(theme)),
         .text_color = lv_color_hex(theme_palette_get_text(theme)),
         .muted_text_color = lv_color_hex(theme_palette_get_text_muted(theme)),

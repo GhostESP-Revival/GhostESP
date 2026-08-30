@@ -50,7 +50,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     if (content_height < 60) content_height = screen_height;
 
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    bool large_p4 = screen_width >= 800 && content_height >= 400;
+    bool large_p4 = screen_width >= 480 && screen_height >= 480 && content_height >= 360;
 #else
     bool large_p4 = false;
 #endif
@@ -97,9 +97,10 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     if (large_p4) {
         metrics->carousel_button_size = clamp_int((int)(min_dim * 0.46f), 220, 280);
         metrics->carousel_icon_target = clamp_int((int)(metrics->carousel_button_size * 0.42f), 88, 120);
-        metrics->carousel_preview_size = 112;
-        metrics->carousel_preview_icon_target = 64;
-        metrics->carousel_preview_offset = metrics->carousel_button_size / 2 + 80;
+        metrics->carousel_preview_size = clamp_int((screen_width - metrics->carousel_button_size) / 2 - 64, 64, 112);
+        metrics->carousel_preview_icon_target = LV_MIN(64, metrics->carousel_preview_size - 16);
+        metrics->carousel_preview_offset = metrics->carousel_button_size / 2 +
+                                            metrics->carousel_preview_size / 2 + 32;
         metrics->carousel_transition_distance = 180;
     }
 
@@ -113,7 +114,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->nav_button_margin = 20;
     }
     if (large_p4) {
-        metrics->nav_button_size = 80;
+        metrics->nav_button_size = 56;
         metrics->nav_button_margin = 32;
     }
 
@@ -133,6 +134,11 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->carousel_button_size = metrics->hero_icon_target; /* unused by HERO */
         metrics->carousel_icon_target = metrics->hero_icon_target;
         metrics->carousel_icon_y_offset = metrics->hero_icon_y_offset;
+        if (large_p4) {
+            metrics->hero_icon_target = clamp_int(content_height / 3, 120, 200);
+            metrics->hero_icon_y_offset = -32;
+            metrics->hero_pip_count = 7;
+        }
     }
 
     metrics->list_button_height = (screen_height <= 160 || screen_width <= 160) ? 32 : 44;
@@ -212,6 +218,31 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     if (kind == MAIN_MENU_LAYOUT_LAUNCHER || kind == MAIN_MENU_LAYOUT_COMPACT) {
         metrics->container_align = LV_ALIGN_TOP_MID;
         metrics->container_y = status_bar_height;
+    }
+
+    if (large_p4) {
+        /* Physical viewport width remains screen_width; page offsets use the
+         * inset container width. Both launchers consume the same geometry. */
+        metrics->container_width = LV_MIN(screen_width - 64, 880);
+        if (kind == MAIN_MENU_LAYOUT_LIST) {
+            metrics->container_width = LV_MIN(screen_width - 64, 720);
+        }
+        if (kind == MAIN_MENU_LAYOUT_LAUNCHER || kind == MAIN_MENU_LAYOUT_COMPACT) {
+            bool compact = kind == MAIN_MENU_LAYOUT_COMPACT;
+            metrics->columns = metrics->container_width >= 840 ? 5 :
+                               metrics->container_width >= 640 ? 4 : 3;
+            metrics->margin = compact ? 8 : 16;
+            metrics->page_indicator_height = 28;
+            int area_h = content_height - metrics->page_indicator_height;
+            metrics->visible_rows = compact ? LV_MAX(1, (area_h - 8) / 56) :
+                                             (portrait ? 4 : 2);
+            metrics->rows = LV_MAX(1, (item_count + metrics->columns - 1) / metrics->columns);
+            metrics->page_capacity = metrics->columns * metrics->visible_rows;
+            metrics->page_count = LV_MAX(1, (item_count + metrics->page_capacity - 1) / metrics->page_capacity);
+            metrics->card_width = (metrics->container_width - (metrics->columns + 1) * metrics->margin) / metrics->columns;
+            metrics->card_height = (area_h - (metrics->visible_rows + 1) * metrics->margin) / metrics->visible_rows;
+            metrics->card_height = LV_MIN(metrics->card_height, compact ? 48 : 184);
+        }
     }
 }
 
