@@ -190,6 +190,11 @@ endif()
 # in TinyUSB.
 if(CONFIG_HAS_BADBLE)
     list(APPEND sources "${CMAKE_SOURCE_DIR}/main/managers/badble_manager.c")
+    list(APPEND required_components esp_hid)
+    # IDF 6's component-requirements subprocess can retain the esp_hid
+    # library dependency without propagating its public include directory to
+    # sources added through this component's generated source list.
+    list(APPEND extra_includes "${IDF_PATH}/components/esp_hid/include")
 elseif(NOT idf_target STREQUAL "esp32s2" AND NOT idf_target STREQUAL "esp32p4")
     # IDF v6.0.2 quirk: the component requirements graph is built by a
     # sub-process that re-runs this CMakeLists WITHOUT sdkconfig values, so
@@ -272,6 +277,12 @@ endif()
 
 if(CONFIG_HAS_BADBLE)
     target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=ble_gatts_stop")
+    # On ESP32-P4, esp_hid is placed before main in IDF's static link line.
+    # Pull in its NimBLE HID implementation explicitly so references emitted
+    # by badble_manager.c are not missed by archive ordering.
+    idf_component_get_property(esp_hid_lib esp_hid COMPONENT_LIB)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+                          "-Wl,--whole-archive" ${esp_hid_lib} "-Wl,--no-whole-archive")
 endif()
 
 # add compile definition for esp32s2 target to maintain legacy guards (needs COMPONENT_LIB)

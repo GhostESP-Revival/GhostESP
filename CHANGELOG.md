@@ -15,6 +15,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Changed
 - Standardized main menu and App Gallery icons
+- Main Menu and App Gallery contents can be customized and reordered independently on all device targets
 - BLE Detect Devices "Track" action now uses the live RSSI ring overlay (matching Track AP/STA/Adv/GATT) instead of switching to the terminal
 - Added runtime global log-level control through the `loglevel` command and system settings
 - SD card not inserted now logs a single clear line instead of repeating driver errors
@@ -35,7 +36,6 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Redesigned the P4 Audio player as a split-view library and now-playing layout
 - Standardized the P4 left-edge back swipe with joystick-left behavior and animated gesture feedback
 - Improved P4 touch routing and reliability for native SD apps and large-screen controls
-- Main Menu and App Gallery items can now be shown in either menu and reordered independently from Settings
 - Enlarged setting selection popups on CrowPanel Advanced P4 displays
 - Centered the "Tap to launch" hint in P4 Favorites cards
 

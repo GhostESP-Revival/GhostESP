@@ -386,12 +386,12 @@ menu "Ghost ESP Options"
 
         config HAS_BADBLE
             bool "Enable BadBLE (Bluetooth HID Script Injection)"
-            default y if IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32S3
+            default y if IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4
             depends on !IDF_TARGET_ESP32S2
-            depends on SOC_BT_SUPPORTED
+            depends on SOC_BT_SUPPORTED || ESP_HOSTED_ENABLE_BT_NIMBLE
             depends on BT_ENABLED
             depends on BT_NIMBLE_ENABLED
-            depends on BT_CONTROLLER_ENABLED
+            depends on BT_CONTROLLER_ENABLED || ESP_HOSTED_ENABLE_BT_NIMBLE
             depends on BT_NIMBLE_ROLE_PERIPHERAL
             depends on BT_NIMBLE_GATT_SERVER
             select BT_NIMBLE_HID_SERVICE
