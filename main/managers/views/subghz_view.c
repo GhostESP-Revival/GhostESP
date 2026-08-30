@@ -655,29 +655,21 @@ static bool subghz_sd_begin(bool *display_was_suspended) {
         *display_was_suspended = false;
     }
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+    if (sd_card_needs_jit_mount()) {
         esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
         if (mount_err != ESP_OK) {
             return false;
         }
         (void)sd_card_setup_directory_structure();
     }
-#endif
 
     return true;
 }
 
 static void subghz_sd_end(bool display_was_suspended) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+    if (sd_card_needs_jit_mount()) {
         sd_card_unmount_after_flush(display_was_suspended);
     }
-#else
-    (void)display_was_suspended;
-#endif
 }
 
 static bool subghz_local_save_snapshot(const char *name_hint,

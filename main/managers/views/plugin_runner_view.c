@@ -218,7 +218,18 @@ static void plugin_runner_tick_task(void *arg) {
                                   : plugin_runner_tick_interval(loaded);
         loaded->last_tick_ms = now_ms;
         plugin_loader_tick(loaded, elapsed_ms);
-        if (!s_tick_stop_requested) vTaskDelayUntil(&last_wake, interval ? interval : 1);
+        if (!s_tick_stop_requested) {
+            /* An over-budget app makes vTaskDelayUntil() return immediately
+               forever, which can starve IDLE on single-core targets. Give the
+               watchdog and lower-priority system tasks one tick whenever the
+               app has already missed its deadline. */
+            TickType_t now_tick = xTaskGetTickCount();
+            if (now_tick - last_wake >= interval) {
+                vTaskDelay(1);
+            } else {
+                vTaskDelayUntil(&last_wake, interval ? interval : 1);
+            }
+        }
     }
 
     s_tick_task = NULL;

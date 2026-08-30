@@ -350,11 +350,7 @@ esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_
 }
 
 static bool pcap_is_jit_template(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
-#else
-  return false;
-#endif
+  return sd_card_needs_jit_mount();
 }
 
 typedef struct {

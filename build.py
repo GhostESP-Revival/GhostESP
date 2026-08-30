@@ -37,12 +37,13 @@ def print_banner():
     print("       +======================================+")
     print()
 
-def download_esp_idf(version: str = "5.5.1") -> Optional[str]:
+def download_esp_idf(version: str = "6.0.2") -> Optional[str]:
     """Download and extract ESP-IDF"""
     print(f"\nDownloading ESP-IDF v{version}...")
     
     # ESP-IDF download URLs
     urls = {
+        "6.0.2": "https://github.com/espressif/esp-idf/releases/download/v6.0.2/esp-idf-v6.0.2.zip",
         "5.5.1": "https://github.com/espressif/esp-idf/releases/download/v5.5.1/esp-idf-v5.5.1.zip",
         "5.5": "https://github.com/espressif/esp-idf/releases/download/v5.5/esp-idf-v5.5.zip",
         "5.4.1": "https://github.com/espressif/esp-idf/releases/download/v5.4.1/esp-idf-v5.4.1.zip"
@@ -173,9 +174,11 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             r"C:\Program Files\esp-idf",
             r"C:\Program Files (x86)\esp-idf",
             r"C:\tools\esp-idf",
+            r"C:\esp\esp-idf-v6.0.2",
             # r"S:\Espressif\frameworks\esp-idf-v5.5",
             r"C:\esp\esp-idf-v5.5",
             r"C:\esp\esp-idf-v5.4.1",
+            os.path.join(script_dir, "esp-idf-v6.0.2"),
             os.path.join(script_dir, "esp-idf-v5.5"),
             os.path.join(script_dir, "esp-idf-v5.4.1"),
             os.path.join(script_dir, "esp-idf")
@@ -192,8 +195,10 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             "/opt/espressif/esp-idf",
             f"{home}/esp/esp-idf-v5.5",
             f"{home}/esp/esp-idf-v5.4.1",
+            f"{home}/esp/esp-idf-v6.0.2",
             f"{home}/esp/v5.5/esp-idf",
             f"{home}/esp/v5.4.1/esp-idf",
+            os.path.join(script_dir, "esp-idf-v6.0.2"),
             os.path.join(script_dir, "esp-idf-v5.5"),
             os.path.join(script_dir, "esp-idf-v5.4.1"),
             os.path.join(script_dir, "esp-idf")
@@ -245,18 +250,21 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
     if auto_download:
         print("\nESP-IDF not found. Would you like to download it automatically?")
         print("Available versions:")
-        print("  1. ESP-IDF v5.5.1 (recommended)")
-        print("  2. ESP-IDF v5.4.1")
-        print("  3. Manual path input")
-        print("  4. Exit")
+        print("  1. ESP-IDF v6.0.2 (recommended)")
+        print("  2. ESP-IDF v5.5.1")
+        print("  3. ESP-IDF v5.4.1")
+        print("  4. Manual path input")
+        print("  5. Exit")
         
-        choice = input("Enter your choice (1-4): ").strip()
+        choice = input("Enter your choice (1-5): ").strip()
         
         if choice == '1':
-            return download_esp_idf("5.5.1")
+            return download_esp_idf("6.0.2")
         elif choice == '2':
-            return download_esp_idf("5.4.1")
+            return download_esp_idf("5.5.1")
         elif choice == '3':
+            return download_esp_idf("5.4.1")
+        elif choice == '4':
             pass  # Fall through to manual input
         else:
             print("Exiting build script.")
@@ -289,7 +297,8 @@ def validate_esp_idf(idf_path: str) -> bool:
     
     if not os.path.exists(export_path):
         print(f"ERROR: Invalid ESP-IDF path. {export_script} not found in {idf_path}")
-        print("Please ensure you have ESP-IDF v5.5.1 (recommended) or v5.4.1 installed.")
+        print("Please ensure you have ESP-IDF v6.0.2 (recommended), v5.5.1, or v5.4.1 installed.")
+        print("Download v6.0.2: https://github.com/espressif/esp-idf/releases/tag/v6.0.2")
         print("Download v5.5.1: https://github.com/espressif/esp-idf/releases/tag/v5.5.1")
         print("Download v5.4.1: https://github.com/espressif/esp-idf/releases/tag/v5.4.1")
         return False
@@ -389,7 +398,8 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "Lolin_S3_Pro", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.lolins3pro", "zip_name": "Lolin_S3_Pro.zip"},
         {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"},
         {"name": "Marauder V8", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.MarauderV8", "zip_name": "MarauderV8.zip"},
-        {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"}
+        {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"},
+        {"name": "Banshee C5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.somethingsomething", "zip_name": "Banshee-C5.zip"}
     ]
 
 def validate_project_directory() -> bool:

@@ -716,12 +716,7 @@ static void mfc_user_dict_ensure_loaded(void){
 
     bool mounted_here = false;
     bool display_was_suspended = false;
-    bool needs_jit_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        needs_jit_mount = true;
-    }
-#endif
+    bool needs_jit_mount = sd_card_needs_jit_mount();
     if (needs_jit_mount && !sd_card_manager.is_initialized) {
         if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
             mounted_here = true;
@@ -860,12 +855,7 @@ static void mfc_user_dict_append_unique(const uint8_t key[6]){
 
     bool mounted_here = false;
     bool display_was_suspended = false;
-    bool needs_jit_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        needs_jit_mount = true;
-    }
-#endif
+    bool needs_jit_mount = sd_card_needs_jit_mount();
     if (needs_jit_mount && !sd_card_manager.is_initialized) {
         if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
             mounted_here = true;

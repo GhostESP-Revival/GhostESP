@@ -126,6 +126,23 @@ menu "Ghost ESP Options"
         help
             Enable support for ILI9341 display module.
 
+    config USE_C5_PARLIO_DISPLAY
+        bool "Use ESP32-C5 PARLIO display transport"
+        default n
+        depends on IDF_TARGET_ESP32C5 && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
+        help
+            Drive the display through the ESP32-C5 PARLIO peripheral in
+            single-data-line SPI mode. This leaves SPI2 available for an
+            independent SD card bus.
+
+    config C5_PARLIO_CLOCK_HZ
+        int "ESP32-C5 PARLIO pixel clock (Hz)"
+        default 80000000
+        range 1 80000000
+        depends on USE_C5_PARLIO_DISPLAY
+        help
+            Pixel clock used by the ESP32-C5 PARLIO display transport.
+
     config WITH_STATUS_DISPLAY
         bool "Enable Status Display"
         default n
@@ -1605,17 +1622,6 @@ menu "Ghost ESP Options"
         help
             Enable extra TFT/SD SPI bus coordination for boards that share
             MOSI/MISO/CLK between display and SD card.
-
-    config EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI
-        bool "Experimental ESP32-C5 persistent TFT/SD SPI bus"
-        default n
-        depends on IDF_TARGET_ESP32C5 && USING_SPI && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
-        help
-            Keep the TFT and SD card attached to SPI2 simultaneously by routing
-            SPI2 clock and MOSI to both sets of GPIOs. Transactions still share
-            one controller and are serialized by the SPI driver. This currently
-            applies only to the somethingsomething board template. Disable this
-            option to restore the existing JIT mount and display handoff path.
 
     config SD_MMC_D0 
         int "SD Card D0 Pin"

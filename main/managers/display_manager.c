@@ -7,6 +7,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl_helpers.h"
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#include "lvgl_tft/banshee_c5_parlio.h"
+#endif
 #include "managers/sd_card_manager.h"
 #include "managers/plugin_api.h"
 #include "managers/settings_manager.h"
@@ -209,7 +212,11 @@ void set_keyboard_brightness(uint8_t brightness);
 #define BACKLIGHT_TIMER LEDC_TIMER_0
 #define RGB_TIMER       LEDC_TIMER_1
 
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
 #define LVGL_TASK_PERIOD_MS 5
+#else
+#define LVGL_TASK_PERIOD_MS 10
+#endif
 #define INTERMEDIATE_DIM_PERCENT 20
 #define INTERMEDIATE_DIM_DURATION_MS 5000
 static const char *TAG = "DisplayManager";
@@ -1673,17 +1680,25 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
+   /* Keep the C5 display buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
      time, which is fragile once WiFi/LVGL have fragmented internal RAM.
      Only somethingsomething gets a second buffer: LVGL renders the next
      chunk while the SPI DMA flushes the previous one, hiding render time
      behind the transfer. Other C5 boards stay single-buffered to save
      internal RAM. */
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+  buf1_pixels = (size_t)width * 10;
+#else
   buf1_pixels = (size_t)width * 5;
+#endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
   if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+    buf2_pixels = (size_t)width * 10;
+#else
     buf2_pixels = (size_t)width * 5;
+#endif
   }
 #endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
@@ -1709,7 +1724,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
       if (buf1) ESP_LOGI(TAG, "display_manager: AtomS3R buf1 allocated in PSRAM (%d bytes)", (int)buf1_bytes);
     }
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    buf1 = banshee_c5_parlio_alloc_draw_buffer(buf1_bytes);
+#else
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+#endif
     if (buf1) ESP_LOGI(TAG, "display_manager: buf1 allocated in internal DMA RAM (%d bytes)", (int)buf1_bytes);
 #elif defined(CONFIG_SPIRAM)
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
@@ -1725,7 +1744,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (buf2) ESP_LOGI(TAG, "display_manager: AtomS3R buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    buf2 = banshee_c5_parlio_alloc_draw_buffer(buf2_bytes);
+#else
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+#endif
     if (buf2) ESP_LOGI(TAG, "display_manager: buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
 #elif defined(CONFIG_SPIRAM)
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
@@ -2046,10 +2069,12 @@ static void dm_switch_wait_async_cb(void *param) {
   free(call);
 }
 
-lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
-  if (!cb) return LV_RES_INV;
-  if (!s_lvgl_call_mutex) {
-    /* Called before display_manager_init() finished creating the mutex; there
+static lv_res_t display_manager_lvgl_async_call_with_timeout(lv_async_cb_t cb,
+                                                              void *user_data,
+                                                              TickType_t timeout) {
+    if (!cb) return LV_RES_INV;
+    if (!s_lvgl_call_mutex) {
+        /* Called before display_manager_init() finished creating the mutex; there
      * is no concurrent lv_timer_handler() running yet, so this is safe. */
     return lv_async_call(cb, user_data);
   }
@@ -2057,13 +2082,23 @@ lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
    * may run well past MUTEX_TIMEOUT_MS (tuned for the unrelated, short dm-state
    * critical sections elsewhere in this file), so give enqueueing callers more
    * room before dropping the call. */
-  if (xSemaphoreTakeRecursive(s_lvgl_call_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-    ESP_LOGW(TAG, "display_manager_lvgl_async_call: timed out waiting for LVGL call mutex");
-    return LV_RES_INV;
-  }
+    if (xSemaphoreTakeRecursive(s_lvgl_call_mutex, timeout) != pdTRUE) {
+        if (timeout != 0) {
+            ESP_LOGW(TAG, "display_manager_lvgl_async_call: timed out waiting for LVGL call mutex");
+        }
+        return LV_RES_INV;
+    }
   lv_res_t res = lv_async_call(cb, user_data);
-  xSemaphoreGiveRecursive(s_lvgl_call_mutex);
-  return res;
+    xSemaphoreGiveRecursive(s_lvgl_call_mutex);
+    return res;
+}
+
+lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
+    return display_manager_lvgl_async_call_with_timeout(cb, user_data, pdMS_TO_TICKS(100));
+}
+
+lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_data) {
+    return display_manager_lvgl_async_call_with_timeout(cb, user_data, 0);
 }
 
 typedef struct {
@@ -2082,17 +2117,33 @@ bool display_manager_is_lvgl_task(void) {
   return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
 }
 
-void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
-  if (!fn) return;
-  if (!display_manager_is_lvgl_task()) {
-    dm_lvgl_call_t *call = malloc(sizeof(*call));
-    if (!call) return;
-    call->fn = fn;
-    call->arg = arg;
-    display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call);
-    return;
+static bool display_manager_run_on_lvgl_common(void (*fn)(void *), void *arg,
+                                                bool wait_for_lvgl) {
+    if (!fn) return false;
+    if (!display_manager_is_lvgl_task()) {
+        dm_lvgl_call_t *call = malloc(sizeof(*call));
+        if (!call) return false;
+        call->fn = fn;
+        call->arg = arg;
+        lv_res_t result = wait_for_lvgl
+                              ? display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call)
+                              : display_manager_lvgl_async_call_nowait(dm_run_on_lvgl_async_cb, call);
+        if (result != LV_RES_OK) {
+            free(call);
+            return false;
+        }
+    return true;
   }
-  fn(arg);
+    fn(arg);
+    return true;
+}
+
+bool display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
+    return display_manager_run_on_lvgl_common(fn, arg, true);
+}
+
+bool display_manager_run_on_lvgl_nowait(void (*fn)(void *), void *arg) {
+    return display_manager_run_on_lvgl_common(fn, arg, false);
 }
 
 void display_manager_switch_view(View *view) {
@@ -2627,7 +2678,11 @@ static void encoder_poll_task(void *pvParameters)
 #endif
 
 void hardware_input_task(void *pvParameters) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+  const TickType_t tick_interval = pdMS_TO_TICKS(5);
+#else
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
+#endif
   const int touch_move_min_delta = 1;
 
   lv_indev_drv_t touch_driver;
@@ -3793,7 +3848,11 @@ void processEvent() {  // do not process events until the display manager is up
 /* ---- scroll coalescing ------------------------------------------------- */
 
 #define SCROLL_COALESCE_MAX_STEP 64
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#define SCROLL_FLUSH_INTERVAL_MS 5
+#else
 #define SCROLL_FLUSH_INTERVAL_MS 16
+#endif
 
 typedef struct {
   lv_obj_t *target;
@@ -3920,7 +3979,7 @@ bool touch_drag_release(touch_drag_t *d, const lv_indev_data_t *data) {
 }
 
 void lvgl_tick_task(void *arg) {
-  const TickType_t tick_interval = pdMS_TO_TICKS(10);
+  const TickType_t tick_interval = pdMS_TO_TICKS(LVGL_TASK_PERIOD_MS);
   TickType_t last_mon = 0;
   TickType_t last_tick_time = xTaskGetTickCount();
   while (1) {

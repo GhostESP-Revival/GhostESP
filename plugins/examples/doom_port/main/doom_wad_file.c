@@ -14,8 +14,11 @@
 #include <string.h>
 
 #define MAX_WAD_PARTS 32
-#define WAD_CACHE_BLOCK_SIZE (4 * 1024)
-#define WAD_CACHE_BLOCKS 32
+/* Keep more of the streamed WAD in PSRAM. This reduces repeated SD/archive
+   reads when PU_CACHE lumps are evicted, while leaving the internal DMA heap
+   untouched. */
+#define WAD_CACHE_BLOCK_SIZE (16 * 1024)
+#define WAD_CACHE_BLOCKS 64
 
 typedef struct {
     unsigned int part;

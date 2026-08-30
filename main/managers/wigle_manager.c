@@ -122,11 +122,7 @@ static bool wigle_sta_has_ip(void) {
 }
 
 static bool wigle_require_jit_mount(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#else
-    return false;
-#endif
+    return sd_card_needs_jit_mount();
 }
 
 static bool wigle_is_safe_csv_name(const char *name) {
@@ -1034,14 +1030,10 @@ esp_err_t wigle_upload_all(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#endif
+    bool require_jit = sd_card_needs_jit_mount();
 
     if (require_jit) {
-        /* JIT path: SD and display share SPI — mount only in brief windows,
-         * never during HTTP (DNS/TLS can stall for 7+ seconds). */
+        /* JIT path: mount only in brief file-I/O windows, never during HTTP. */
         return wigle_process_queue_jit(api_key);
     }
 

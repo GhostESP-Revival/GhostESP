@@ -1,5 +1,6 @@
 #include "managers/plugin_api_internal.h"
 #include "gui/gui_anim.h"
+#include "sdkconfig.h"
 #include "esp_heap_caps.h"
 #include <limits.h>
 #include <stdlib.h>
@@ -529,8 +530,20 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
     uint16_t *destination = (uint16_t *)image->data;
     const bool copy_rows = left == ctx->dst_x && right == dst_right &&
                            ctx->dst_width == ctx->src_width;
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    const bool same_height = ctx->src_height == ctx->dst_height;
+    const bool fast_320_to_240 = ctx->src_width == 320 && ctx->src_height == 200 &&
+                                 ctx->src_stride >= 320 && ctx->dst_x == 0 &&
+                                 ctx->dst_width == 240 && same_height;
+#endif
     for (int32_t y = top; y < bottom; y++) {
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+        int32_t source_y = same_height
+                               ? y - ctx->dst_y
+                               : (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+#else
         int32_t source_y = (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+#endif
         const uint16_t *source_row = ctx->pixels + (size_t)source_y * (size_t)ctx->src_stride;
         uint16_t *destination_row = destination + (size_t)y * (size_t)canvas_width;
         if (copy_rows) {
@@ -551,6 +564,35 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
             continue;
         }
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+        if (fast_320_to_240) {
+            int32_t source_x = 0;
+            int32_t x = left;
+            for (; x + 2 < right; x += 3, source_x += 4) {
+                uint16_t pixel0 = source_row[source_x];
+                uint16_t pixel1 = source_row[source_x + 1];
+                uint16_t pixel2 = source_row[source_x + 2];
+#if LV_COLOR_16_SWAP
+                destination_row[x] = (uint16_t)(pixel0 << 8 | pixel0 >> 8);
+                destination_row[x + 1] = (uint16_t)(pixel1 << 8 | pixel1 >> 8);
+                destination_row[x + 2] = (uint16_t)(pixel2 << 8 | pixel2 >> 8);
+#else
+                destination_row[x] = pixel0;
+                destination_row[x + 1] = pixel1;
+                destination_row[x + 2] = pixel2;
+#endif
+            }
+            for (; x < right; ++x, ++source_x) {
+                uint16_t pixel = source_row[source_x];
+#if LV_COLOR_16_SWAP
+                destination_row[x] = (uint16_t)(pixel << 8 | pixel >> 8);
+#else
+                destination_row[x] = pixel;
+#endif
+            }
+            continue;
+        }
+#endif
         for (int32_t x = left; x < right; x++) {
             int32_t source_x = (int32_t)(((int64_t)x - ctx->dst_x) * ctx->src_width / ctx->dst_width);
 #if LV_COLOR_16_SWAP
@@ -629,9 +671,21 @@ bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint
     if (width > SIZE_MAX / height || width * height > max_pixels ||
         width * height > SIZE_MAX / sizeof(uint16_t) ||
         (size_t)(src_height - 1) > (SIZE_MAX - width) / (size_t)src_stride) return false;
+#if !defined(CONFIG_USE_C5_PARLIO_DISPLAY)
     const size_t pixel_count = width * height;
+#endif
     canvas_blit_ctx_t *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return false;
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    /* Banshee native apps can provide a PSRAM frame buffer that remains
+       untouched until the queued UI callback completes. Avoiding the extra
+       frame copy keeps Doom's render task from competing with the UI task. */
+    *ctx = (canvas_blit_ctx_t){
+        .canvas = canvas, .pixels = pixels, .src_width = src_width, .src_height = src_height,
+        .src_stride = src_stride, .dst_x = dst_x, .dst_y = dst_y,
+        .dst_width = dst_width, .dst_height = dst_height,
+    };
+#else
     ctx->owned_pixels = malloc(pixel_count * sizeof(uint16_t));
     if (!ctx->owned_pixels) {
         free(ctx);
@@ -648,11 +702,17 @@ bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint
         .dst_width = dst_width, .dst_height = dst_height,
         .owned_pixels = ctx->owned_pixels,
     };
+#endif
     while (xSemaphoreTake(s_async_blit_done, 0) == pdTRUE) { /* drain stale signal */ }
     s_async_blit_pending = true;
     /* Runs inline if we're already on the UI task, which clears pending
        before this returns — that's fine, it just degrades to synchronous. */
-    plugin_api_internal_run_async(plugin_api_ui_canvas_blit_async_cb, ctx);
+    if (!plugin_api_internal_run_async_nowait(plugin_api_ui_canvas_blit_async_cb, ctx)) {
+        s_async_blit_pending = false;
+        free(ctx->owned_pixels);
+        free(ctx);
+        return false;
+    }
     return true;
 }
 

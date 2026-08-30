@@ -35,10 +35,11 @@ static int viewport_width;
 static int viewport_height;
 static bool frame_pending;
 static bool storage_session_active;
-/* Doom renders into DG_ScreenBuffer; the async blit reads asynchronously,
-   so hand the UI task a private copy and keep DG_ScreenBuffer free for the
-   next frame. Without this the two would race and tear. */
-static uint16_t *shadow_frame;
+static bool native_banshee_present;
+/* On Banshee, the two frame buffers live in PSRAM. One is rendered while the
+   other is being consumed by the queued UI blit, so no frame-sized copy is
+   needed between Doom and LVGL. */
+static pixel_t *spare_frame;
 static bool async_present;
 
 static int minimum(int a, int b) {
@@ -58,6 +59,7 @@ void doom_port_platform_init(const ghostesp_api_t *host_api) {
 
     const int content_width = api->ui_screen_get_content_width();
     const int content_height = api->ui_screen_get_content_height();
+    native_banshee_present = api->has_feature && api->has_feature("banshee_c5");
     viewport_width = minimum(content_width, DOOM_WIDTH);
     viewport_height = minimum(content_height, DOOM_HEIGHT);
     viewport_x = (content_width - viewport_width) / 2;
@@ -98,22 +100,24 @@ void doom_port_platform_init(const ghostesp_api_t *host_api) {
     canvas = api->ui_canvas_create(screen, content_width, content_height);
     if (canvas) api->ui_canvas_fill(canvas, 0x000000);
 
-    /* Async present is deliberately NOT used: this SoC is single-core, so
-       overlapping the render with the UI task's composite+flush doesn't
-       reduce total CPU work (measured: present 109ms->31ms but tick
-       94ms->186ms, net fps unchanged) and it starved the IDLE task enough
-       to trip the task watchdog. The host API remains available for
-       genuinely I/O-bound uses. */
     async_present = false;
-    shadow_frame = NULL;
+    spare_frame = NULL;
+    if (native_banshee_present &&
+        api->ui_canvas_blit_rgb565_async && api->ui_canvas_blit_async_wait) {
+        spare_frame = malloc((size_t)DOOM_WIDTH * DOOM_HEIGHT * sizeof(*spare_frame));
+        async_present = spare_frame != NULL;
+    }
 }
 
 void doom_port_platform_shutdown(void) {
-    /* Must outlive any blit still reading it. */
-    if (async_present && api->ui_canvas_blit_async_wait) api->ui_canvas_blit_async_wait(1000);
+    /* The spare frame may be the source of an outstanding zero-copy blit. */
+    if (async_present && api->ui_canvas_blit_async_wait) {
+        api->ui_canvas_blit_async_wait(UINT32_MAX);
+    }
     async_present = false;
-    free(shadow_frame);
-    shadow_frame = NULL;
+    native_banshee_present = false;
+    free(spare_frame);
+    spare_frame = NULL;
 }
 
 void doom_port_platform_hide_loading(void) {
@@ -215,26 +219,29 @@ void DG_DrawFrame(void) {
 void doom_port_platform_present(void) {
     if (!frame_pending || !canvas || !DG_ScreenBuffer) return;
     frame_pending = false;
+
+    const uint16_t *present_pixels = (const uint16_t *)DG_ScreenBuffer;
+    int32_t present_width = DOOM_WIDTH;
+    int32_t present_height = DOOM_HEIGHT;
+    int32_t present_stride = DOOM_WIDTH;
     if (async_present) {
-        /* Wait for the previous frame's blit to release the shadow buffer.
-           This happens *after* Doom has already rendered this frame, so the
-           render ran concurrently with that blit rather than after it. */
-        if (api->ui_canvas_blit_async_wait(1000)) {
-            memcpy(shadow_frame, DG_ScreenBuffer,
-                   (size_t)DOOM_WIDTH * DOOM_HEIGHT * sizeof(uint16_t));
-            if (api->ui_canvas_blit_rgb565_async(canvas, shadow_frame,
-                                                 DOOM_WIDTH, DOOM_HEIGHT, DOOM_WIDTH,
-                                                 viewport_x, viewport_y,
-                                                 viewport_width, viewport_height)) {
-                return;
-            }
-        }
-        /* Fall through to the synchronous path if the queue was busy or the
-           wait timed out, so a stalled UI task drops back to correct-but-slow
-           rather than silently dropping frames. */
+        /* Do not let a slow LVGL refresh back-pressure the game loop. The
+           current Doom buffer is the spare buffer whenever a blit is pending,
+           so dropping this frame is safe; the next completed frame replaces
+           the one on the canvas. The C5 host path performs the 320-to-240
+           conversion without changing Doom's generic framebuffer. */
+        if (!api->ui_canvas_blit_async_wait(0)) return;
+        if (!api->ui_canvas_blit_rgb565_async(canvas, present_pixels,
+                                              present_width, present_height, present_stride,
+                                              viewport_x, viewport_y,
+                                              viewport_width, viewport_height)) return;
+        pixel_t *presented_frame = DG_ScreenBuffer;
+        DG_ScreenBuffer = spare_frame;
+        spare_frame = presented_frame;
+        return;
     }
-    api->ui_canvas_blit_rgb565(canvas, (const uint16_t *)DG_ScreenBuffer,
-                               DOOM_WIDTH, DOOM_HEIGHT, DOOM_WIDTH,
+    api->ui_canvas_blit_rgb565(canvas, present_pixels,
+                               present_width, present_height, present_stride,
                                viewport_x, viewport_y, viewport_width, viewport_height);
 }
 

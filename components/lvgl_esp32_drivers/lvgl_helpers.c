@@ -20,6 +20,10 @@
 #include "lvgl_i2c/i2c_manager.h"
 #include "esp_idf_version.h"
 
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#include "lvgl_tft/banshee_c5_parlio.h"
+#endif
+
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "lvgl.h"
 #else
@@ -86,7 +90,7 @@ void lvgl_driver_init(void)
     return;
 #endif
 
-#if defined (SHARED_SPI_BUS)
+#if defined (SHARED_SPI_BUS) && !defined(CONFIG_USE_C5_PARLIO_DISPLAY)
 #ifndef CONFIG_USE_7_INCHER
 #ifndef CONFIG_USE_BIT_BANG_TOUCH
     ESP_LOGI(TAG, "Initializing shared SPI master");
@@ -107,7 +111,16 @@ void lvgl_driver_init(void)
 #endif
 
 /* Display controller initialization */
-#if defined CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI
+#if defined CONFIG_USE_C5_PARLIO_DISPLAY
+    ESP_LOGI(TAG, "Initializing PARLIO master for C5 display");
+    esp_err_t parlio_ret = banshee_c5_parlio_init();
+    if (parlio_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize C5 PARLIO display: %s",
+            esp_err_to_name(parlio_ret));
+        return;
+    }
+    disp_driver_init();
+#elif defined CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI
     ESP_LOGI(TAG, "Initializing SPI master for display");
     ESP_LOGI(TAG, "Internal DMA RAM free: %d bytes",
         heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));

@@ -361,6 +361,13 @@ bool plugin_api_feature_supported(const char *feature) {
 #endif
     }
     if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
+    if (strcmp(feature, "banshee_c5") == 0) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+        return true;
+#else
+        return false;
+#endif
+    }
     if (strcmp(feature, "wifi") == 0) return true;
 #ifndef CONFIG_IDF_TARGET_ESP32S2
     if (strcmp(feature, "ble") == 0) return true;
@@ -457,8 +464,12 @@ bool plugin_api_internal_run_sync(void (*fn)(void *ctx), void *ctx) {
     return plugin_ui_run_sync(fn, ctx);
 }
 
-void plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx) {
-    display_manager_run_on_lvgl(fn, ctx);
+bool plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx) {
+    return display_manager_run_on_lvgl(fn, ctx);
+}
+
+bool plugin_api_internal_run_async_nowait(void (*fn)(void *ctx), void *ctx) {
+    return display_manager_run_on_lvgl_nowait(fn, ctx);
 }
 
 lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent) {
