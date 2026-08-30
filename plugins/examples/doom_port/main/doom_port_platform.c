@@ -46,6 +46,16 @@ static int minimum(int a, int b) {
     return a < b ? a : b;
 }
 
+static bool doom_port_has_psram_allocator(void) {
+    if (!api) return false;
+    const size_t field_end = offsetof(ghostesp_api_t, psram_free) +
+                             sizeof(api->psram_free);
+    return api->struct_size >= field_end && api->psram_malloc && api->psram_free;
+}
+
+void *doom_port_psram_malloc(size_t size);
+void doom_port_psram_free(void *ptr);
+
 void doom_port_platform_init(const ghostesp_api_t *host_api) {
     api = host_api;
     key_read = 0;
@@ -104,9 +114,17 @@ void doom_port_platform_init(const ghostesp_api_t *host_api) {
     spare_frame = NULL;
     if (native_banshee_present &&
         api->ui_canvas_blit_rgb565_async && api->ui_canvas_blit_async_wait) {
-        spare_frame = malloc((size_t)DOOM_WIDTH * DOOM_HEIGHT * sizeof(*spare_frame));
+        spare_frame = doom_port_psram_malloc((size_t)DOOM_WIDTH * DOOM_HEIGHT * sizeof(*spare_frame));
         async_present = spare_frame != NULL;
     }
+}
+
+void *doom_port_psram_malloc(size_t size) {
+    return doom_port_has_psram_allocator() ? api->psram_malloc(size) : NULL;
+}
+
+void doom_port_psram_free(void *ptr) {
+    if (doom_port_has_psram_allocator()) api->psram_free(ptr);
 }
 
 void doom_port_platform_shutdown(void) {
@@ -116,7 +134,7 @@ void doom_port_platform_shutdown(void) {
     }
     async_present = false;
     native_banshee_present = false;
-    free(spare_frame);
+    doom_port_psram_free(spare_frame);
     spare_frame = NULL;
 }
 

@@ -18,7 +18,7 @@
    reads when PU_CACHE lumps are evicted, while leaving the internal DMA heap
    untouched. */
 #define WAD_CACHE_BLOCK_SIZE (16 * 1024)
-#define WAD_CACHE_BLOCKS 64
+#define WAD_CACHE_BLOCKS 128
 
 typedef struct {
     unsigned int part;
@@ -41,6 +41,8 @@ extern wad_file_class_t stdc_wad_file;
 int doom_port_wad_read(unsigned int part, uint32_t offset, void *buffer, size_t buffer_len);
 long doom_port_wad_size(unsigned int part);
 bool doom_port_storage_session_begin(void);
+void *doom_port_psram_malloc(size_t size);
+void doom_port_psram_free(void *ptr);
 
 static wad_file_t *W_StdC_OpenFile(char *path) {
     (void)path; /* part naming is fixed; every read goes through the API by part index, not this path string. */
@@ -60,7 +62,7 @@ static wad_file_t *W_StdC_OpenFile(char *path) {
         return NULL;
     }
 
-    result->cache = malloc(WAD_CACHE_BLOCK_SIZE * WAD_CACHE_BLOCKS);
+    result->cache = doom_port_psram_malloc(WAD_CACHE_BLOCK_SIZE * WAD_CACHE_BLOCKS);
 
     result->wad.file_class = &stdc_wad_file;
     result->wad.mapped = NULL;
@@ -70,7 +72,7 @@ static wad_file_t *W_StdC_OpenFile(char *path) {
 
 static void W_StdC_CloseFile(wad_file_t *wad) {
     ghostesp_wad_file_t *file = (ghostesp_wad_file_t *)wad;
-    free(file->cache);
+    doom_port_psram_free(file->cache);
     Z_Free(wad);
 }
 

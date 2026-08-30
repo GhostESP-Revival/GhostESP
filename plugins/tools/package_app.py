@@ -46,7 +46,11 @@ def write_gapp(package_dir: pathlib.Path, out_path: pathlib.Path, no_compress: b
         for path in files:
             rel = path.relative_to(package_dir).as_posix().encode("utf-8")
             data = path.read_bytes()
-            if no_compress:
+            # Asset payloads are read directly from stored GAPP entries by the
+            # native app loader. Keeping them uncompressed avoids a large,
+            # synchronous WAD decompression during boot app discovery.
+            store_asset = path.relative_to(package_dir).parts[0] == "assets"
+            if no_compress or store_asset:
                 method = 0
                 payload = data
             else:

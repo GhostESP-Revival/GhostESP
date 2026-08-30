@@ -1421,6 +1421,15 @@ static void *plugin_api_app_malloc(size_t size) {
     return header + 1;
 }
 
+static void *plugin_api_psram_malloc(size_t size) {
+    if (size == 0) return NULL;
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void plugin_api_psram_free(void *ptr) {
+    if (ptr) heap_caps_free(ptr);
+}
+
 static void *plugin_api_app_calloc(size_t count, size_t size) {
     if (count == 0 || size == 0) return NULL;
     if (count > SIZE_MAX / size) return NULL;
@@ -2454,6 +2463,8 @@ static ghostesp_api_t s_api = {
     .espnow_send = plugin_api_espnow_send,
     .espnow_message_count = plugin_api_espnow_message_count,
     .espnow_receive = plugin_api_espnow_receive,
+    .psram_malloc = plugin_api_psram_malloc,
+    .psram_free = plugin_api_psram_free,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,

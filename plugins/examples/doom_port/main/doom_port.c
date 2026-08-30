@@ -59,11 +59,10 @@ static char *doom_argv[] = {
     "-iwad", doom_iwad_path,
     "-gfxmode", "rgb565",
 };
-/* asset_storage_size is required; the async-blit pair that follows it is
-   optional (present() falls back to the synchronous blit), so anchor the
-   requirement at asset_storage_size and NULL-check the async ones. */
+/* Doom's large working buffers use the strict PSRAM allocator. The async-blit
+   pair that follows asset_storage_size remains optional. */
 #define DOOM_PORT_REQUIRED_API_SIZE \
-    (offsetof(ghostesp_api_t, asset_storage_size) + sizeof(((ghostesp_api_t *)0)->asset_storage_size))
+    (offsetof(ghostesp_api_t, psram_free) + sizeof(((ghostesp_api_t *)0)->psram_free))
 
 void doom_port_platform_init(const ghostesp_api_t *host_api);
 void doom_port_platform_push_key(bool pressed, unsigned char key);
@@ -74,6 +73,7 @@ void doom_port_storage_session_end(void);
 void doom_port_platform_present(void);
 void doom_port_platform_hide_loading(void);
 void doom_port_platform_shutdown(void);
+void doom_port_psram_free(void *ptr);
 
 static void doom_port_start(void) {
     select_pressed = false;
@@ -149,7 +149,7 @@ static void doom_port_stop(void) {
     free(lumpinfo);
     lumpinfo = NULL;
     numlumps = 0;
-    free(DG_ScreenBuffer);
+    doom_port_psram_free(DG_ScreenBuffer);
     DG_ScreenBuffer = NULL;
     Z_Shutdown();
     engine_ready = false;
