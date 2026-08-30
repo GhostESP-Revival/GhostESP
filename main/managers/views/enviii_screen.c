@@ -69,7 +69,11 @@ static void enviii_scroll_content(int dir);
 #define ENVIII_SCROLL_BTN_PADDING 3
 
 static int enviii_touch_bar_height(void) {
+#if GUI_LEGACY_TOUCH_BAR
     return ENVIII_SCROLL_BTN_SIZE + ENVIII_SCROLL_BTN_PADDING * 2;
+#else
+    return 0;
+#endif
 }
 #endif
 
@@ -864,6 +868,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     if (!root) return;
 
     const int bar_h = enviii_touch_bar_height();
+    if (bar_h <= 0) return;
 
     touch_bar = lv_obj_create(root);
     lv_obj_remove_style_all(touch_bar);

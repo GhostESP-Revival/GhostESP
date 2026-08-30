@@ -15,6 +15,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/ghostscript_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/wifi_manager.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -1336,7 +1337,18 @@ bool cloud_store_apps_available(void) {
 static void refresh_task(void *arg) {
     bool caps_task = arg != NULL;
     cloud_store_pause_ap_if_needed();
-    esp_err_t err = refresh_manifest();
+    esp_err_t err = ESP_OK;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    // P4 can obtain its lease before SNTP has completed. Do not let the first
+    // Cloud Store request race the certificate validity check.
+    if (!wifi_manager_wait_for_valid_time(20000)) {
+        err = ESP_ERR_TIMEOUT;
+    } else {
+        err = refresh_manifest();
+    }
+#else
+    err = refresh_manifest();
+#endif
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     s_ctx->status.state = err == ESP_OK ? CLOUD_STORE_STATE_READY : CLOUD_STORE_STATE_FAILED;
     strncpy(s_ctx->status.active_name, "Cloud Store", sizeof(s_ctx->status.active_name) - 1);

@@ -1,6 +1,6 @@
 #include "managers/audio_i2s_output.h"
 
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -216,7 +216,7 @@ esp_err_t audio_i2s_output_init(void)
     }
 
     /* Standard I2S configuration for the selected I2S speaker codec. */
-#ifdef CONFIG_HAS_AW88298_SPEAKER
+#if defined(CONFIG_HAS_AW88298_SPEAKER)
     /* CoreS3 I2S data lines (per M5Unified): speaker data-out = GPIO13,
      * mic data-in = GPIO14. These are easy to transpose - sending speaker
      * audio out GPIO14 (the mic's line) leaves the AW88298 with no data and
@@ -224,6 +224,10 @@ esp_err_t audio_i2s_output_init(void)
     const gpio_num_t bclk_pin = GPIO_NUM_34;
     const gpio_num_t ws_pin = GPIO_NUM_33;
     const gpio_num_t dout_pin = GPIO_NUM_13;
+#elif defined(CONFIG_HAS_CROWPANEL_NS4168)
+    const gpio_num_t bclk_pin = GPIO_NUM_22;
+    const gpio_num_t ws_pin = GPIO_NUM_21;
+    const gpio_num_t dout_pin = GPIO_NUM_23;
 #else
     const gpio_num_t bclk_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_BCLK_PIN;
     const gpio_num_t ws_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_WCLK_PIN;
@@ -262,6 +266,18 @@ esp_err_t audio_i2s_output_init(void)
         s_i2s_tx_chan = NULL;
         return ret;
     }
+
+#ifdef CONFIG_HAS_CROWPANEL_NS4168
+    gpio_config_t ns4168_en = {
+        .pin_bit_mask = 1ULL << 30,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = 0,
+        .pull_down_en = 0,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&ns4168_en);
+    gpio_set_level(30, 0);
+#endif
 
     s_initialized = true;
     s_first_write_logged = false;
@@ -331,6 +347,8 @@ void audio_i2s_output_deinit(void)
     /* Power the amp down while BCLK is still running, so it stops cleanly
      * instead of being left enabled with a dead reference clock. */
     (void)m5_audio_codec_speaker_disable();
+#elif defined(CONFIG_HAS_CROWPANEL_NS4168)
+    gpio_set_level(30, 1);
 #endif
     if (s_i2s_tx_chan) {
         i2s_channel_disable(s_i2s_tx_chan);
@@ -529,4 +547,4 @@ bool audio_i2s_output_is_initialized(void) { return false; }
 void audio_i2s_output_set_volume(uint8_t percent) { (void)percent; }
 uint8_t audio_i2s_output_get_volume(void) { return 100; }
 
-#endif /* CONFIG_HAS_TLV320DAC_I2S */
+#endif /* CONFIG_HAS_TLV320DAC_I2S || CONFIG_HAS_AW88298_SPEAKER || CONFIG_HAS_CROWPANEL_NS4168 */

@@ -42,6 +42,7 @@ typedef enum {
 } detail_nav_region_t;
 
 struct detail_view_t {
+    lv_obj_t *backdrop;
     lv_obj_t *container;
     lv_obj_t *info_panel;
     lv_obj_t *info_canvas;
@@ -570,7 +571,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
     bool small = (w <= 240 || h <= 240);
     dv->compact_layout = detail_view_should_use_compact_layout(w, h);
-    dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : 34);
+    dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : GUI_CONTROL_H);
     bool rounded = get_menu_rounded();
     dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     dv->selected = -1;
@@ -583,12 +584,27 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     
     lv_color_t bg, surface, surface_alt, text, accent;
     get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
+
+    /* P4 detail content is intentionally capped, but the view must still
+     * cover the complete display so the parent view cannot show at the sides. */
+    lv_coord_t content_w = LV_MIN(w, GUI_CONTENT_MAX_W);
+    if (content_w < w) {
+        dv->backdrop = lv_obj_create(parent);
+        if (dv->backdrop) {
+            lv_obj_remove_style_all(dv->backdrop);
+            lv_obj_set_size(dv->backdrop, w, h);
+            lv_obj_set_pos(dv->backdrop, 0, 0);
+            lv_obj_set_style_bg_color(dv->backdrop, bg, 0);
+            lv_obj_set_style_bg_opa(dv->backdrop, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(dv->backdrop, LV_OBJ_FLAG_SCROLLABLE);
+        }
+    }
     
     dv->container = lv_obj_create(parent);
     lv_coord_t content_h = h - STATUS_BAR_HEIGHT;
     if (content_h < 60) content_h = 60;
     dv->content_h = content_h;
-    lv_obj_set_size(dv->container, w, content_h);
+    lv_obj_set_size(dv->container, content_w, content_h);
     lv_obj_align(dv->container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
     lv_obj_set_style_bg_color(dv->container, bg, 0);
     lv_obj_set_style_pad_all(dv->container, 0, 0);
@@ -640,7 +656,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_flex_grow(dv->action_list, 1);
     lv_obj_set_style_bg_color(dv->action_list, bg, 0);
     lv_obj_set_style_pad_top(dv->action_list, action_pad_v, 0);
-    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v + GUI_HOME_SAFE_H, 0);
     lv_obj_set_style_pad_left(dv->action_list, action_pad_h, 0);
     lv_obj_set_style_pad_right(dv->action_list, action_pad_h, 0);
     lv_obj_set_style_pad_row(dv->action_list, action_row_gap, 0);
@@ -691,6 +707,7 @@ void detail_view_destroy(detail_view_t *dv) {
     detail_view_free_info_items(dv);
     free(dv->info_items);
     if (dv->container && lv_obj_is_valid(dv->container)) lv_obj_del(dv->container);
+    if (dv->backdrop && lv_obj_is_valid(dv->backdrop)) lv_obj_del(dv->backdrop);
     free(dv->rows);
     free(dv);
 }
@@ -1100,6 +1117,9 @@ void detail_view_refresh_styles(detail_view_t *dv) {
     dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     
     lv_obj_set_style_bg_color(dv->container, bg, 0);
+    if (dv->backdrop && lv_obj_is_valid(dv->backdrop)) {
+        lv_obj_set_style_bg_color(dv->backdrop, bg, 0);
+    }
     lv_obj_set_style_bg_color(dv->info_panel, bg, 0);
     lv_obj_set_style_bg_color(dv->action_list, bg, 0);
     

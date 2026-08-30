@@ -23,6 +23,9 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
 #include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ESP32P4
+#include "managers/ghost_raw_radio.h"
+#endif
 #include "esp_idf_version.h"
 #ifdef CONFIG_WITH_ETHERNET
 #include "managers/ethernet_manager.h"
@@ -405,6 +408,36 @@ void handle_ifconfig_cmd(int argc, char **argv) {
     wifi_mode_t mode = WIFI_MODE_NULL;
     (void)esp_wifi_get_mode(&mode);
     print_ip_info("STA", esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), is_wifi_sta_connected());
+#if CONFIG_IDF_TARGET_ESP32P4
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_dhcp_status_t dhcp_status;
+    if (sta && esp_netif_dhcpc_get_status(sta, &dhcp_status) == ESP_OK) {
+        glog("  netif %s  DHCP %s\n", esp_netif_is_netif_up(sta) ? "UP" : "DOWN",
+             dhcp_status == ESP_NETIF_DHCP_STARTED ? "running" :
+             dhcp_status == ESP_NETIF_DHCP_STOPPED ? "stopped" : "not started");
+        esp_netif_ip_info_t ip;
+        if (esp_netif_is_netif_up(sta) && esp_netif_get_ip_info(sta, &ip) == ESP_OK && !ip.ip.addr) {
+            glog("  No IPv4 lease yet; Wi-Fi association alone does not mean network access.\n");
+        }
+    }
+    uint8_t radio_mac[6] = {0}, netif_mac[6] = {0};
+    esp_err_t mac_err = esp_wifi_get_mac(WIFI_IF_STA, radio_mac);
+    if (mac_err == ESP_OK) {
+        const char *comparison = "cannot compare with";
+        if (sta && esp_netif_get_mac(sta, netif_mac) == ESP_OK) {
+            comparison = memcmp(radio_mac, netif_mac, sizeof(radio_mac)) == 0 ?
+                         "matches" : "DIFFERS FROM";
+        }
+        glog("  C6 radio MAC %02x:%02x:%02x:%02x:%02x:%02x (%s host netif)\n",
+             radio_mac[0], radio_mac[1], radio_mac[2], radio_mac[3], radio_mac[4], radio_mac[5],
+             comparison);
+    } else {
+        glog("  C6 radio MAC query: %s\n", esp_err_to_name(mac_err));
+    }
+    esp_err_t diag_err = ghost_wifi_request_sta_diag();
+    if (diag_err == ESP_OK) glog("  C6 STA counters requested; asynchronous P4_STA reply follows.\n");
+    else glog("  C6 STA diagnostic request failed: %s\n", esp_err_to_name(diag_err));
+#endif
     print_ip_info("AP", esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"),
                   mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
 #ifdef CONFIG_WITH_ETHERNET

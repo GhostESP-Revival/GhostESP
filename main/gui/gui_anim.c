@@ -144,23 +144,40 @@ void gui_anim_selection_travel(lv_obj_t *indicator, lv_coord_t from_y, lv_coord_
     lv_anim_start(&a);
 }
 
-static void pulse_ready_cb(lv_anim_t *a) {
+static void pulse_color_exec_cb(void *var, int32_t v) {
+    lv_obj_t *o = (lv_obj_t *)var;
+    lv_opa_t cur = lv_obj_get_style_bg_opa(o, 0);
+    if (cur == (lv_opa_t)v) return;
+    lv_obj_set_style_bg_opa(o, (lv_opa_t)v, 0);
+}
+
+static void pulse_color_ready_cb(lv_anim_t *a) {
     lv_obj_t *obj = (lv_obj_t *)a->var;
     if (obj && lv_obj_is_valid(obj)) {
-        lv_obj_set_style_transform_zoom(obj, 256, 0);
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
     }
 }
 
 void gui_anim_press_pulse(lv_obj_t *obj) {
     if (!obj) return;
-    lv_anim_del(obj, anim_set_zoom);
+    lv_anim_del(obj, pulse_color_exec_cb);
+
+    /* Brief color-wash: fade a semi-transparent overlay in then out.
+     * Uses bg_opa only — no transform, so LVGL never allocates a
+     * temporary software layer.  On large containers (e.g. a full-
+     * screen keyboard) this avoids the whole-screen flash that
+     * transform_zoom triggers in LVGL 8. */
+    lv_opa_t base_opa = lv_obj_get_style_bg_opa(obj, 0);
+    if (base_opa == 0) {
+        lv_obj_set_style_bg_color(obj, lv_color_black(), 0);
+    }
 
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, obj);
-    lv_anim_set_values(&a, 256, 245);
+    lv_anim_set_values(&a, base_opa, LV_OPA_30);
     lv_anim_set_time(&a, GUI_ANIM_MICRO / 2);
-    lv_anim_set_exec_cb(&a, anim_set_zoom);
+    lv_anim_set_exec_cb(&a, pulse_color_exec_cb);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
     lv_anim_set_ready_cb(&a, NULL);
     lv_anim_start(&a);
@@ -168,12 +185,12 @@ void gui_anim_press_pulse(lv_obj_t *obj) {
     lv_anim_t b;
     lv_anim_init(&b);
     lv_anim_set_var(&b, obj);
-    lv_anim_set_values(&b, 245, 256);
+    lv_anim_set_values(&b, LV_OPA_30, base_opa);
     lv_anim_set_time(&b, GUI_ANIM_MICRO / 2);
     lv_anim_set_delay(&b, GUI_ANIM_MICRO / 2);
-    lv_anim_set_exec_cb(&b, anim_set_zoom);
+    lv_anim_set_exec_cb(&b, pulse_color_exec_cb);
     lv_anim_set_path_cb(&b, lv_anim_path_ease_out);
-    lv_anim_set_ready_cb(&b, pulse_ready_cb);
+    lv_anim_set_ready_cb(&b, pulse_color_ready_cb);
     lv_anim_start(&b);
 }
 

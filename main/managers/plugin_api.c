@@ -362,7 +362,7 @@ bool plugin_api_feature_supported(const char *feature) {
     }
     if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
     if (strcmp(feature, "wifi") == 0) return true;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(feature, "ble") == 0) return true;
 #endif
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
@@ -1129,7 +1129,7 @@ static bool plugin_api_nfc_stop(void) {
 
 static bool plugin_api_ble_start_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     ghostscript_runtime_reset_ble_seen();
     s_plugin_ble_started = gatt_scan_start();
     return s_plugin_ble_started;
@@ -1140,7 +1140,7 @@ static bool plugin_api_ble_start_scan(void) {
 
 static bool plugin_api_ble_stop_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     s_plugin_ble_started = false;
     ble_stop();
     return true;
@@ -1151,7 +1151,7 @@ static bool plugin_api_ble_stop_scan(void) {
 
 static int plugin_api_ble_device_count(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return 0;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     return ble_get_gatt_device_count();
 #else
     return 0;
@@ -1160,7 +1160,7 @@ static int plugin_api_ble_device_count(void) {
 
 static bool plugin_api_ble_get_device(int index, ghostesp_ble_device_info_t *out) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE) || !out) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     memset(out, 0, sizeof(*out));
     return ble_get_gatt_device_data(index, out->mac, &out->rssi, out->name, sizeof(out->name)) == 0;
 #else
@@ -2538,7 +2538,7 @@ void plugin_api_release(void) {
     display_manager_resume_lvgl_task();
 
     /* Safety: stop hardware that a misbehaving script may have left running. */
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_plugin_ble_started && ble_is_initialized()) {
         ble_stop();
     }

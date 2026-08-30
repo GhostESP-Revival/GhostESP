@@ -46,8 +46,14 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     if (screen_width < 1) screen_width = 1;
     if (screen_height < 1) screen_height = 1;
     status_bar_height = clamp_int(status_bar_height, 0, screen_height);
-    int content_height = screen_height - status_bar_height;
+    int content_height = screen_height - status_bar_height - GUI_HOME_SAFE_H;
     if (content_height < 60) content_height = screen_height;
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    bool large_p4 = screen_width >= 800 && content_height >= 400;
+#else
+    bool large_p4 = false;
+#endif
 
     main_menu_density_t density = MAIN_MENU_DENSITY_REGULAR;
     if (screen_width <= 160 || content_height <= 96) {
@@ -64,7 +70,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         .density = density,
         .container_align = LV_ALIGN_CENTER,
         .container_x = 0,
-        .container_y = status_bar_height / 2,
+        .container_y = (status_bar_height - GUI_HOME_SAFE_H) / 2,
         .container_width = screen_width,
         .container_height = content_height,
     };
@@ -88,6 +94,15 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->carousel_show_previews = screen_width >= 200 && carousel_side_space >= 48;
     metrics->carousel_transition_distance = clamp_int(screen_width / 4, 48, 96);
 
+    if (large_p4) {
+        metrics->carousel_button_size = clamp_int((int)(min_dim * 0.46f), 220, 280);
+        metrics->carousel_icon_target = clamp_int((int)(metrics->carousel_button_size * 0.42f), 88, 120);
+        metrics->carousel_preview_size = 112;
+        metrics->carousel_preview_icon_target = 64;
+        metrics->carousel_preview_offset = metrics->carousel_button_size / 2 + 80;
+        metrics->carousel_transition_distance = 180;
+    }
+
     metrics->nav_button_size = 52;
     metrics->nav_button_margin = 15;
     if (screen_width <= 128) {
@@ -96,6 +111,10 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     } else if (screen_width >= 320) {
         metrics->nav_button_size = 60;
         metrics->nav_button_margin = 20;
+    }
+    if (large_p4) {
+        metrics->nav_button_size = 80;
+        metrics->nav_button_margin = 32;
     }
 
     if (kind == MAIN_MENU_LAYOUT_HERO) {
@@ -123,8 +142,20 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->list_row_gap = 6;
     metrics->list_column_gap = 12;
 
+    if (large_p4) {
+        metrics->list_button_height = 64;
+        metrics->list_icon_target = 40;
+        metrics->list_button_pad = 12;
+        metrics->list_pad = 24;
+        metrics->list_row_gap = 10;
+        metrics->list_column_gap = 16;
+    }
+
     bool portrait = screen_height > screen_width;
     int columns = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 : 2;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (screen_width >= 800) columns = 6;
+#endif
     if (kind == MAIN_MENU_LAYOUT_COMPACT) {
         columns = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 :
                   (screen_width >= 160) ? 2 : 1;
@@ -143,6 +174,9 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->page_indicator_height = 0;
     if (kind == MAIN_MENU_LAYOUT_LAUNCHER) {
         metrics->page_indicator_height = density == MAIN_MENU_DENSITY_COMPACT ? 10 : 14;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        if (screen_width >= 800) metrics->page_indicator_height = 20;
+#endif
         int page_content_height = content_height - metrics->page_indicator_height;
         metrics->visible_rows = page_content_height >= 360 ? 4 :
                                 page_content_height >= 240 ? 3 :

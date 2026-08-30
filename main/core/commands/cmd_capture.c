@@ -380,7 +380,7 @@ void handle_capture_scan(int argc, char **argv) {
         }
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(capturetype, "-wiresharkble") == 0) {
         status_display_show_status("Wireshark BLE");
         int err = pcap_wireshark_start(PCAP_CAPTURE_BLUETOOTH);
@@ -396,7 +396,7 @@ void handle_capture_scan(int argc, char **argv) {
         glog("Stopping packet capture...\n");
         wifi_manager_stop_wireshark_channel_hop();
         wifi_manager_stop_monitor_mode();
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_stop();
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -412,7 +412,7 @@ void handle_capture_scan(int argc, char **argv) {
              (unsigned long)stats.packets_dropped);
         status_display_show_status("Capture Stop");
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(capturetype, "-ble") == 0) {
         printf("Starting BLE packet capture...\n");
         TERMINAL_VIEW_ADD_TEXT("Starting BLE packet capture...\n");
@@ -450,7 +450,7 @@ void handle_capture_scan(int argc, char **argv) {
         strcmp(capturetype, "-export") != 0 &&
         strcmp(capturetype, "-wireshark") != 0 &&
         strcmp(capturetype, "-stop") != 0
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         && strcmp(capturetype, "-wiresharkble") != 0
         && strcmp(capturetype, "-ble") != 0
         && strcmp(capturetype, "-skimmer") != 0
@@ -476,7 +476,7 @@ void handle_capture(int argc, char **argv) {
         status_display_show_status("Capture Usage");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(argv[1], "-ble") == 0) {
         glog("Starting BLE packet capture...\n");
         ble_start_capture();

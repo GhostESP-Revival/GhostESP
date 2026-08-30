@@ -621,6 +621,7 @@ void ghostscript_runner_view_create(void) {
     lv_obj_set_style_text_color(s_output, text, 0);
     lv_obj_set_style_text_font(s_output, &lv_font_montserrat_12, 0);
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     s_touch_bar = lv_obj_create(s_root);
     lv_obj_remove_style_all(s_touch_bar);
     lv_obj_set_size(s_touch_bar, LV_HOR_RES, GS_RUNNER_TOUCH_BAR_HEIGHT);
@@ -689,6 +690,7 @@ void ghostscript_runner_view_create(void) {
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
     lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
     toast_show_duration("Running GhostScript...", TOAST_INFO, 1000);
     s_launch_timer = lv_timer_create(launch_cb, 50, NULL);

@@ -1984,7 +1984,7 @@ typedef struct {
 
 static const io_btn_preset_t io_btn_presets[] = {
     {"WiFi", "view:wifi", &options_menu_view},
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     {"BLE", "view:ble", &options_menu_view},
 #endif
 #ifdef CONFIG_HAS_NFC
@@ -4044,7 +4044,7 @@ void options_menu_create() {
         switch (current_bluetooth_menu_state) {
             case BLUETOOTH_MENU_MAIN: options = bluetooth_main_options; break;
             case BLUETOOTH_MENU_DETECT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                 if (ble_device_detect_is_tracking()) {
                     ble_device_detect_stop_tracking();
                 }
@@ -4059,7 +4059,7 @@ void options_menu_create() {
                 break;
             case BLUETOOTH_MENU_DETECT_DETAILS: options = NULL; break;
             case BLUETOOTH_MENU_ADV_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                 if (advertiser_scan_get_count() <= 0 && !advertiser_scan_is_active()) {
                     start_ble_adv_flow();
                 }
@@ -4215,12 +4215,17 @@ void options_menu_create() {
 
     /* Status bar already handled by options_view_create */
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     const int BUTTON_AREA_HEIGHT = TOUCH_BAR_HEIGHT;
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
     lv_obj_set_size(menu_container, screen_width, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 
+#if GUI_LEGACY_TOUCH_BAR
     touch_bar = lv_obj_create(lv_scr_act());
     lv_obj_remove_style_all(touch_bar);
     lv_obj_set_size(touch_bar, screen_width, TOUCH_BAR_HEIGHT);
@@ -4273,6 +4278,7 @@ void options_menu_create() {
     lv_obj_set_style_text_color(down_label, control_text_color, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
     if (g_freeze_hook_id < 0) {
         g_freeze_hook_id = display_manager_register_freeze_pre_lock(options_menu_freeze_pre_lock);
@@ -11747,7 +11753,7 @@ static void ble_gatt_list_cleanup(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_is_initialized()) {
         ble_stop();
     }
@@ -11780,7 +11786,7 @@ static void stop_ble_gatt_flow(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_is_initialized()) {
         ble_stop();
     }
@@ -13541,7 +13547,7 @@ static void rebuild_current_menu(void) {
             switch (current_bluetooth_menu_state) {
                 case BLUETOOTH_MENU_MAIN: options = bluetooth_main_options; break;
                 case BLUETOOTH_MENU_DETECT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                     if (ble_device_detect_is_tracking()) {
                         ble_device_detect_stop_tracking();
                     }
@@ -13567,7 +13573,7 @@ static void rebuild_current_menu(void) {
                     break;
                 case BLUETOOTH_MENU_ADV_DETAILS: options = NULL; break;
                 case BLUETOOTH_MENU_GATT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                     if (gatt_scan_get_device_count() <= 0 && !gatt_scan_is_active()) {
                         start_ble_gatt_flow();
                     }

@@ -26,12 +26,17 @@
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_hosted.h"
+#include "managers/p4_slave_ota_manager.h"
+#include "managers/ghost_raw_radio.h"
+#endif
 #include "vendor/drivers/aw9523.h"
 #include "vendor/drivers/pcf8563.h"
 #include <sys/time.h>
 #include <time.h>
 #include <stdlib.h>
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
 #endif
@@ -71,7 +76,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -711,7 +716,48 @@ void app_main(void) {
 
 
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
-    MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    /* The ESP-Hosted constructor starts the transport, but the C6 handshake
+     * must be explicitly completed before esp_wifi_remote is used. */
+    ESP_LOGI(TAG, "Connecting to ESP-Hosted C6...");
+    esp_err_t hosted_err = esp_hosted_connect_to_slave();
+    bool hosted_ready = hosted_err == ESP_OK;
+    if (!hosted_ready) {
+        ESP_LOGE(TAG, "ESP-Hosted C6 connection failed: %s", esp_err_to_name(hosted_err));
+    } else {
+        /* ESP32-P4 has no local Bluetooth controller. The onboard C6
+         * supplies it through ESP-Hosted's NimBLE VHCI bridge. */
+        esp_err_t hosted_bt_err = esp_hosted_bt_controller_init();
+        if (hosted_bt_err == ESP_OK) {
+            hosted_bt_err = esp_hosted_bt_controller_enable();
+        }
+        if (hosted_bt_err != ESP_OK) {
+            ESP_LOGW(TAG, "ESP-Hosted C6 Bluetooth unavailable: %s",
+                     esp_err_to_name(hosted_bt_err));
+        } else {
+            ESP_LOGI(TAG, "ESP-Hosted C6 Bluetooth controller enabled");
+        }
+        p4_slave_ota_result_t ota_result = p4_slave_ota_update(false);
+        if (ota_result == P4_SLAVE_OTA_UPDATED) {
+            ESP_LOGI(TAG, "C6 update complete; rebooting P4");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        }
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+        esp_err_t raw_init = ghost_raw_radio_init();
+        if (raw_init != ESP_OK) {
+            ESP_LOGW(TAG, "Ghost raw radio init deferred: %s", esp_err_to_name(raw_init));
+        }
+#endif
+    }
+#else
+    bool hosted_ready = true;
+#endif
+    if (hosted_ready) {
+        MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
+    } else {
+        ESP_LOGW(TAG, "Skipping Wi-Fi initialization because ESP-Hosted is offline");
+    }
 #ifdef CONFIG_WITH_ETHERNET
     {
         esp_err_t eth_ret;
@@ -721,7 +767,7 @@ void app_main(void) {
         }
     }
 #endif
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2)
     // MEASURE_INIT_RAM("BLE Manager", ble_init());
 #endif
 #ifdef CONFIG_HAS_BADUSB
@@ -888,7 +934,7 @@ void app_main(void) {
             ESP_LOGI(TAG, "Comm Manager disabled for this build");
         }
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2)
     MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
 #endif
     wardriving_register_stream_handler();
@@ -915,8 +961,8 @@ void app_main(void) {
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
-    ESP_LOGI(TAG, "Initializing audio receiver for TLV320DAC3100 I2S");
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+    ESP_LOGI(TAG, "Initializing audio receiver");
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
 #ifdef CONFIG_HAS_CAMERA
@@ -1076,7 +1122,15 @@ void app_main(void) {
         bool initialized = false;
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        /* CrowPanel P4 has no user RGB LED on the generic LEDC pins.  The
+         * generic fallback defaults can otherwise resolve to GPIO0 and claim
+         * LEDC channel 0, which is also the MIPI panel backlight channel. */
+        data_pin = GPIO_NUM_NC;
+        rgb_led_count = 0;
+#endif
         if (rgb_led_count <= 0) {
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
             if (rgb_manager.num_leds > 0) {
                 rgb_led_count = rgb_manager.num_leds;
             } else if (CONFIG_NUM_LEDS > 0) {
@@ -1084,6 +1138,7 @@ void app_main(void) {
             } else {
                 rgb_led_count = 1;
             }
+#endif
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);

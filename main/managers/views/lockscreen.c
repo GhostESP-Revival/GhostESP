@@ -569,8 +569,6 @@ static void lockscreen_build_numpad(void) {
     lv_obj_clear_flag(s_numpad_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(s_numpad_cont, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(s_numpad_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(s_numpad_cont, 2, 0);
-    lv_obj_set_style_pad_column(s_numpad_cont, 2, 0);
 
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
     int content_w = lv_obj_get_width(s_content);
@@ -578,6 +576,11 @@ static void lockscreen_build_numpad(void) {
     bool landscape = (content_w > content_h && content_h <= 146);
 
     int gap = 2;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    gap = 8;
+#endif
+    lv_obj_set_style_pad_row(s_numpad_cont, gap, 0);
+    lv_obj_set_style_pad_column(s_numpad_cont, gap, 0);
     int btn_h, btn_w, numpad_x, numpad_y;
 
     if (landscape) {
@@ -596,11 +599,19 @@ static void lockscreen_build_numpad(void) {
     } else {
         int min_numpad_y = 94;
         int bottom_margin = 10;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        min_numpad_y = content_h / 4;
+        bottom_margin = 20;
+#endif
         int numpad_h = content_h - min_numpad_y - bottom_margin;
         if (numpad_h < 36) numpad_h = 36;
         btn_h = (numpad_h - (NUMPAD_ROWS - 1) * gap) / NUMPAD_ROWS;
         if (LV_VER_RES > 240) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            if (btn_h > GUI_CONTROL_H) btn_h = GUI_CONTROL_H;
+#else
             if (btn_h > 42) btn_h = 42;
+#endif
         } else {
             if (btn_h > 30) btn_h = 30;
         }
@@ -638,7 +649,12 @@ static void lockscreen_build_numpad(void) {
         lv_obj_set_style_shadow_opa(s_numpad_btns[i], LV_OPA_TRANSP, 0);
         lv_obj_t *lbl = lv_label_create(s_numpad_btns[i]);
         lv_label_set_text(lbl, k_numpad_labels[i]);
-        const lv_font_t *f = (btn_h < 20) ? &lv_font_montserrat_10 : (btn_h >= 36 ? &lv_font_montserrat_16 : &lv_font_montserrat_12);
+        const lv_font_t *f;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        f = btn_h >= 56 ? gui_font_title() : gui_font_body();
+#else
+        f = (btn_h < 20) ? &lv_font_montserrat_10 : (btn_h >= 36 ? &lv_font_montserrat_16 : &lv_font_montserrat_12);
+#endif
         lv_obj_set_style_text_font(lbl, f, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(lbl);
@@ -652,6 +668,12 @@ static void lockscreen_build_companion_layout(int content_w, int content_h) {
     int ghost_sz = 72;
     if (content_h <= 120) {
         ghost_sz = 64;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    } else if (content_h >= 480) {
+        ghost_sz = 160;
+    } else if (content_h >= 320) {
+        ghost_sz = 128;
+#endif
     } else if (content_h >= 220) {
         ghost_sz = 96;
     }
@@ -953,6 +975,9 @@ static void lockscreen_show_favorites(void) {
         lv_obj_t *btn = lv_btn_create(s_fav_list);
         lv_obj_set_width(btn, list_w - 4);
         int row_h = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 26 : 34;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        if (LV_VER_RES >= 480) row_h = GUI_CONTROL_H;
+#endif
         lv_obj_set_height(btn, row_h);
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, 0);
         gui_apply_pressed_style(btn);
@@ -992,6 +1017,7 @@ static void lockscreen_show_favorites(void) {
         lockscreen_fav_set_selected(0);
     }
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     // Standard bottom touch bar (scroll up / Back / scroll down).
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
     lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
@@ -1050,6 +1076,7 @@ static void lockscreen_show_favorites(void) {
     lv_obj_add_flag(s_fav_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     lockscreen_fav_update_scroll_buttons();
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 }
 
@@ -1232,7 +1259,7 @@ static void lockscreen_create_fav_pill(void) {
         lv_obj_set_style_radius(s_fav_hint, 6, 0);
         lv_obj_set_style_pad_hor(s_fav_hint, 6, 0);
         lv_obj_set_style_pad_ver(s_fav_hint, 2, 0);
-        lv_obj_align(s_fav_hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+        lv_obj_align(s_fav_hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 6));
         lv_obj_add_flag(s_fav_hint, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(s_fav_hint, (lv_event_cb_t)lockscreen_show_favorites, LV_EVENT_CLICKED, NULL);
         lv_obj_set_ext_click_area(s_fav_hint, LS_FAV_TOUCH_PAD);
@@ -1724,28 +1751,52 @@ void lockscreen_create(void) {
     } else {
         int min_numpad_y = 94;
         int bottom_margin = 10;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        min_numpad_y = content_h / 4;
+        bottom_margin = 20;
+#endif
+        int numpad_gap = 2;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        numpad_gap = 8;
+#endif
         int numpad_h = content_h - min_numpad_y - bottom_margin;
         if (numpad_h < 36) numpad_h = 36;
-        int btn_h = (numpad_h - (NUMPAD_ROWS - 1) * 2) / NUMPAD_ROWS;
+        int btn_h = (numpad_h - (NUMPAD_ROWS - 1) * numpad_gap) / NUMPAD_ROWS;
         if (LV_VER_RES > 240) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            if (btn_h > GUI_CONTROL_H) btn_h = GUI_CONTROL_H;
+#else
             if (btn_h > 42) btn_h = 42;
+#endif
         } else {
             if (btn_h > 30) btn_h = 30;
         }
         if (btn_h < 14) btn_h = 14;
-        int grid_h = NUMPAD_ROWS * btn_h + (NUMPAD_ROWS - 1) * 2;
+        int grid_h = NUMPAD_ROWS * btn_h + (NUMPAD_ROWS - 1) * numpad_gap;
         int numpad_y = content_h - grid_h - bottom_margin;
         if (numpad_y < min_numpad_y) numpad_y = min_numpad_y;
 
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        int ghost_sz = content_h >= 480 ? 160 : 112;
+        int group_h = ghost_sz + 54;
+        int icon_y = (numpad_y - group_h) / 2;
+        if (icon_y < 8) icon_y = 8;
+        int prompt_y_offset = icon_y + ghost_sz + 8;
+        int dots_y_offset = icon_y + ghost_sz + 26;
+#else
         int icon_y = (numpad_y - 88) / 2;
         if (icon_y < 2) icon_y = 2;
         int prompt_y_offset = icon_y + 56;
         int dots_y_offset = icon_y + 72;
+#endif
         s_ghost_base_y = icon_y;
 
         s_ghost = lv_img_create(s_content);
         lv_img_set_src(s_ghost, &tired_50x50);
         lv_obj_set_pos(s_ghost, (content_w - 50) / 2, s_ghost_base_y + lockscreen_ghost_bob_offset());
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
+#endif
 
         s_prompt = lv_label_create(s_content);
         lv_obj_set_style_text_font(s_prompt, gui_font_caption(), 0);
@@ -1758,7 +1809,13 @@ void lockscreen_create(void) {
         lv_obj_align(s_prompt, LV_ALIGN_TOP_MID, 0, prompt_y_offset);
 
         s_dots = lv_label_create(s_content);
-        lv_obj_set_style_text_font(s_dots, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(s_dots,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                                   gui_font_body(),
+#else
+                                   &lv_font_montserrat_16,
+#endif
+                                   0);
         lv_obj_set_style_text_color(s_dots, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_bg_color(s_dots, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(s_dots, LV_OPA_60, 0);

@@ -44,7 +44,12 @@ static void theme_pattern_draw_cb(lv_event_t *e) {
     mark.border_width = 0;
     mark.radius = 0;
 
-    int spacing = (LV_HOR_RES <= 160) ? 12 : 16;
+    int spacing;
+    if (LV_HOR_RES <= 160) spacing = 12;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    else if (LV_HOR_RES >= 800) spacing = 24;
+#endif
+    else spacing = 16;
     if (pattern == THEME_PATTERN_GRID) spacing *= 2;
 
     if (pattern == THEME_PATTERN_DIAGONAL || pattern == THEME_PATTERN_WAVES) {

@@ -179,7 +179,7 @@ typedef struct {
 // Define colors as compile-time constants
 menu_item_t menu_items[] = {
     {"WiFi", "wifi", &wifi, 1, {{0}}}, // applies to all boards
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     {"BLE", "bluetooth", &bluetooth, 0, {{0}}},
 #endif
     {"GPS", "Map", &Map, 2, {{0}}},
@@ -619,7 +619,7 @@ static void create_hero_position_indicator(void) {
     if (current_layout != MAIN_MENU_LAYOUT_HERO) return;
     if (!hero_pip_container) {
         hero_pip_container = lv_obj_create(main_menu_view.root);
-        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -8);
+        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 8));
     } else if (lv_obj_is_valid(hero_pip_container)) {
         lv_obj_clean(hero_pip_container);
     }
@@ -1170,7 +1170,7 @@ static void handle_menu_item_selection(int item_index) {
     } menu_action_t;
 
     static const menu_action_t menu_actions[] = {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         {"BLE", OT_Bluetooth, &options_menu_view},
 #endif
         {"WiFi", OT_Wifi, &options_menu_view},
@@ -1727,6 +1727,12 @@ void main_menu_create(void) {
         if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER || current_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
         }
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        else if (current_layout == MAIN_MENU_LAYOUT_LIST) {
+            lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
+            lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
+        }
+#endif
     }
 
     // also shift nav buttons down so they remain vertically centered with the menu

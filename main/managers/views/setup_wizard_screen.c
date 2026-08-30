@@ -512,7 +512,7 @@ static void show_option_screen(const char *title_text, const char **options, int
 #endif
     lv_obj_set_style_text_color(hint, wizard_color(theme_palette_get_text_muted(wizard_theme())), 0);
     lv_obj_set_style_text_font(hint, body_font, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -hint_bottom);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + hint_bottom));
 }
 
 static int prev_country_cursor = -1;
@@ -598,7 +598,7 @@ static void show_country_screen(void) {
 #endif
     lv_obj_set_style_text_color(hint, wizard_color(theme_palette_get_text_muted(wizard_theme())), 0);
     lv_obj_set_style_text_font(hint, body_font, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -hint_bottom);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + hint_bottom));
 }
 
 static void finish_btn_event_cb(lv_event_t *e) {
@@ -672,7 +672,7 @@ static void show_complete_screen(void) {
     lv_obj_t *finish_btn = lv_btn_create(root);
     gui_apply_pressed_style(finish_btn);
     lv_obj_set_size(finish_btn, btn_w, btn_h);
-    lv_obj_align(finish_btn, LV_ALIGN_BOTTOM_MID, 0, -btn_bottom);
+    lv_obj_align(finish_btn, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + btn_bottom));
     style_wizard_btn(finish_btn, wizard_color(theme_palette_get_accent(wizard_theme())), 5);
     lv_obj_t *finish_label = lv_label_create(finish_btn);
     lv_label_set_text(finish_label, "Finish");

@@ -173,6 +173,10 @@ void wifi_manager_configure_sta_from_settings(void);
 
 void wifi_manager_start_sntp(void);
 
+// Returns true once the system clock is valid for HTTPS, waiting for SNTP
+// when necessary.
+bool wifi_manager_wait_for_valid_time(uint32_t timeout_ms);
+
 void wifi_manager_start_ip_lookup();
 
 #ifdef CONFIG_SPIRAM

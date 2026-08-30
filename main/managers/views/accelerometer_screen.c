@@ -4,6 +4,7 @@
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "lvgl.h"
@@ -608,31 +609,31 @@ void accelerometer_create(void) {
     lv_label_set_text(orient_label, "Flat (Face Up)  Shake:0.0");
     lv_obj_set_style_text_color(orient_label, lv_color_hex(theme_palette_get_success(theme)), 0);
     lv_obj_set_style_text_font(orient_label, accessibility_get_font_small(), 0);
-    lv_obj_align(orient_label, LV_ALIGN_BOTTOM_MID, 0, -55);
+    lv_obj_align(orient_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 55));
 
     peak_label = lv_label_create(content);
     lv_label_set_text(peak_label, "Peak: 0.00 G");
     lv_obj_set_style_text_color(peak_label, lv_color_hex(theme_palette_get_warning(theme)), 0);
     lv_obj_set_style_text_font(peak_label, accessibility_get_font_small(), 0);
-    lv_obj_align(peak_label, LV_ALIGN_BOTTOM_MID, 0, -42);
+    lv_obj_align(peak_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 42));
 
     speed_label = lv_label_create(content);
     lv_label_set_text(speed_label, "NO GPS: 0.0 km/h | 0.0 mph");
     lv_obj_set_style_text_color(speed_label, accent, 0);
     lv_obj_set_style_text_font(speed_label, accessibility_get_font_small(), 0);
-    lv_obj_align(speed_label, LV_ALIGN_BOTTOM_MID, 0, -29);
+    lv_obj_align(speed_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 29));
 
     tilt_label = lv_label_create(content);
     lv_label_set_text(tilt_label, "Pitch:0.0deg  Roll:0.0deg");
     lv_obj_set_style_text_color(tilt_label, muted, 0);
     lv_obj_set_style_text_font(tilt_label, accessibility_get_font_small(), 0);
-    lv_obj_align(tilt_label, LV_ALIGN_BOTTOM_MID, 0, -16);
+    lv_obj_align(tilt_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 16));
 
     xyz_label = lv_label_create(content);
     lv_label_set_text(xyz_label, "X:0.00  Y:0.00  Z:0.00");
     lv_obj_set_style_text_color(xyz_label, muted, 0);
     lv_obj_set_style_text_font(xyz_label, accessibility_get_font_small(), 0);
-    lv_obj_align(xyz_label, LV_ALIGN_BOTTOM_MID, 0, -3);
+    lv_obj_align(xyz_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 3));
 
 #ifdef CONFIG_IS_ATOMS3R
     // 128px has no room for the full readout stack. Keep only orientation/shake

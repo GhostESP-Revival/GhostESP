@@ -1,0 +1,4 @@
+[codespell]
+skip = build,*.drawio,*.svg,*.pdf,common/proto/esp_hosted_rpc.pb-c.*,slave/main/esp_hosted_coprocessor_fw_ver.h,host/esp_hosted_host_fw_ver.h
+ignore-words-list = rsource,INDX,ans,aNULL,aci,DEACTIVE,OT,ot
+write-changes = true

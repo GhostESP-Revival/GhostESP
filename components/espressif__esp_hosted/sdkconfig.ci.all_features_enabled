@@ -1,0 +1,11 @@
+# ESP-Hosted All Features Enabled Configuration
+# This configuration enables network split, power save, CLI, and SDIO with minimal overrides
+
+# Network Split Configuration (not default)
+CONFIG_ESP_HOSTED_NETWORK_SPLIT_ENABLED=y
+
+# Host Power Save Configuration (default is y when supported)
+CONFIG_ESP_HOSTED_HOST_POWER_SAVE_ENABLED=y
+
+# CLI Configuration (default is y)
+CONFIG_ESP_HOSTED_CLI_ENABLED=y

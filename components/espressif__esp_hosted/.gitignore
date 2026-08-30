@@ -1,0 +1,7 @@
+build
+slave/build-ghost-c6*/
+dependencies.lock
+managed_components
+sdkconfig
+sdkconfig.old
+.component_hash

@@ -11,7 +11,7 @@
 #include "managers/ota_manager.h"
 #include "sdkconfig.h"
 #include "vendor/drivers/pcf8563.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
 #include "attacks/ble/ble_spam.h"
@@ -315,6 +315,9 @@ void register_commands() {
     register_command("govee", handle_govee_cmd);
     register_command("stop", handle_stop_flipper);
     register_command("reboot", handle_reboot);
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    register_command("c6ota", handle_p4_slave_ota_cmd);
+#endif
     register_command("startwd", handle_startwd);
     register_command("wdstream", handle_wdstream_cmd);
     register_command("gpsinfo", handle_gps_info);
@@ -351,7 +354,7 @@ void register_commands() {
     register_command("otainfo", handle_otainfo_cmd);
 #endif
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blescan", handle_ble_scan_cmd);
     register_command("blebridge", ble_bridge_handle_command);
     register_command("blewardriving", handle_ble_wardriving);
@@ -383,7 +386,7 @@ void register_commands() {
     register_command("timezone", handle_timezone_cmd);
     register_command("settime", handle_settime_cmd);
     register_command("time", handle_time_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("listflippers", handle_list_flippers_cmd);
     register_command("selectflipper", handle_select_flipper_cmd);
     register_command("listgatt", handle_list_gatt_cmd);
@@ -406,7 +409,7 @@ void register_commands() {
 #endif
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blespam", handle_ble_spam_cmd);
 #endif
     register_command("setrgbmode", handle_set_rgb_mode_cmd);

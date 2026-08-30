@@ -90,6 +90,14 @@ menu "Ghost ESP Options"
         help
             Enable touchscreen input.
 
+    config GHOSTESP_P4_PPA_RENDER
+        bool "Use ESP32-P4 PPA for LVGL rendering"
+        depends on IDF_TARGET_ESP32P4 && WITH_SCREEN
+        default y
+        help
+            Accelerate eligible RGB565 fills and image blends with the P4 PPA.
+            Unsupported operations automatically use LVGL software rendering.
+
     config USE_7_INCHER
         bool "Use 7-inch Display"
         default n
@@ -119,6 +127,44 @@ menu "Ghost ESP Options"
         default n
         help
             Enable support for JC3248W535EN LCD.
+
+    config CROWPANEL_ADVANCED_P4
+        bool "Enable Elecrow CrowPanel Advanced P4 HMI"
+        default n
+        depends on IDF_TARGET_ESP32P4
+        help
+            Enable the Elecrow CrowPanel Advanced P4 display family. Select
+             the panel transport below for the physical display variant.
+
+    config CROWPANEL_P4_REV_V12_PLUS
+        bool "CrowPanel Advanced P4 board revision v1.2 or newer"
+        default y
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Select the v1.2+ board power and ESP-Hosted wiring. Disable this
+            only for boards marked v1.1.
+
+    choice CROWPANEL_P4_PANEL
+        bool "CrowPanel Advanced P4 panel variant"
+        default CROWPANEL_P4_PANEL_MIPI_1024X600
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Select the display bus and geometry used by the attached panel.
+
+        config CROWPANEL_P4_PANEL_MIPI_1024X600
+            bool "7-inch / 9-inch / 10.1-inch (1024x600 MIPI-DSI)"
+            help
+                Use the EK79007 two-lane MIPI-DSI panel used by the
+                CrowPanel Advanced 7-inch, 9-inch, and 10.1-inch variants.
+
+        config CROWPANEL_P4_PANEL_RGB_800X480
+            bool "5-inch (800x480 RGB)"
+            help
+                Use the 16-bit RGB panel used by the CrowPanel Advanced
+                5-inch variant. Its backlight is controlled by the onboard
+                STC8 controller over I2C.
+
+    endchoice
 
     config USE_ILI9341_2
         bool "Use ILI9341 2nd Display Driver"
@@ -1675,7 +1721,7 @@ menu "Ghost ESP Options"
             config HAS_AUDIO_PLAYER
                 bool "Enable Audio Player App"
                 default n
-                depends on WITH_SCREEN && USING_SPI && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER)
+                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168)
                 help
                     Enable MP3 audio player UI and SD card playback. Streams to a
                     GhostLink peer when one is connected, or plays through the
@@ -1725,6 +1771,18 @@ menu "Ghost ESP Options"
                 help
                     Bit index on IO expander port 1 for DAC RESET line.
                     P13 on the TCA9539RTWR corresponds to bit 3 of port 1.
+        endmenu
+
+        menu "CrowPanel P4 NS4168 Audio"
+            config HAS_CROWPANEL_NS4168
+                bool "Enable CrowPanel P4 NS4168 I2S Audio (BCLK22/WCLK21/DIN23, EN30)"
+                default n
+                depends on IDF_TARGET_ESP32P4 && CROWPANEL_ADVANCED_P4
+                help
+                    Enable I2S TX to the CrowPanel Advanced P4 dual NS4168 amplifiers.
+                    Uses I2S_NUM_1 master: BCLK=GPIO22, WCLK=GPIO21, DIN=GPIO23,
+                    amplifier enable (active-low) GPIO30. Audio sourced from SD.
+
         endmenu
 
         menu "TLV320DAC3100 DAC (I2S Audio - S3)"

@@ -1,0 +1,2535 @@
+config ESP_HOSTED_ENABLED
+	bool "Enable ESP-Hosted component"
+	default y if ESP_WIFI_REMOTE_ENABLED && ESP_WIFI_REMOTE_LIBRARY_HOSTED
+	default n
+	help
+		Enable the esp-hosted component, allowing this device to act as a
+		Wi-Fi co-processor for a host MCU. Disable to exclude esp-hosted
+		from the build entirely.
+
+menu "ESP-Hosted config"
+	depends on ESP_HOSTED_ENABLED
+
+	choice ESP_HOSTED_CP_TARGET
+		bool "Choose the Co-processor to use"
+
+		config ESP_HOSTED_CP_TARGET_ESP32
+			depends on SLAVE_IDF_TARGET_ESP32
+			bool "ESP32 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32S2
+			depends on SLAVE_IDF_TARGET_ESP32S2
+			bool "ESP32S2 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32S3
+			depends on SLAVE_IDF_TARGET_ESP32S3
+			bool "ESP32S3 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32C2
+			depends on SLAVE_IDF_TARGET_ESP32C2
+			bool "ESP32-C2 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32C3
+			depends on SLAVE_IDF_TARGET_ESP32C3
+			bool "ESP32-C3 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32C6
+			depends on SLAVE_IDF_TARGET_ESP32C6
+			bool "ESP32-C6 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32C5
+			depends on SLAVE_IDF_TARGET_ESP32C5
+			bool "ESP32-C5 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32C61
+			depends on SLAVE_IDF_TARGET_ESP32C61
+			bool "ESP32-C61 (fetched from Wi-Fi Remote Component)"
+
+		config ESP_HOSTED_CP_TARGET_ESP32H2
+			bool "ESP32-H2"
+
+		# Note: not yet supported on ESP32-H4
+		# - Bluetooth
+		# - SPI interface
+		config ESP_HOSTED_CP_TARGET_ESP32H4
+			bool "ESP32-H4"
+	endchoice
+
+	### To be removed in the future after further testing
+	comment "ESP32-H4 currently does not support Bluetooth and SPI as Hosted transport"
+		depends on ESP_HOSTED_CP_TARGET_ESP32H4
+
+	### config to show / hide Wi-Fi options in Kconfig
+	### Wi-Fi is not supported if target is ESP32-H2, H4
+	config ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool
+		default n if ESP_HOSTED_CP_TARGET_ESP32H2 || ESP_HOSTED_CP_TARGET_ESP32H4
+		default y
+
+	# Show the Co-processor selected
+	comment "ESP32 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32
+	comment "ESP32-S2 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32S2
+	comment "ESP32-S3 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32S3
+	comment "ESP32-C2 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32C2
+	comment "ESP32-C3 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32C3
+	comment "ESP32-C6 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32C6
+	comment "ESP32-C5 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32C5
+	comment "ESP32-C61 is Co-processor Target from Wi-Fi Remote Component"
+		depends on ESP_HOSTED_CP_TARGET_ESP32C61
+	comment "ESP32-H2 is Co-processor Target"
+		depends on ESP_HOSTED_CP_TARGET_ESP32H2
+	comment "ESP32-H4 is Co-processor Target"
+		depends on ESP_HOSTED_CP_TARGET_ESP32H4
+
+	config ESP_HOSTED_IDF_SLAVE_TARGET
+		string
+		default "esp32" if ESP_HOSTED_CP_TARGET_ESP32
+		default "esp32s2" if ESP_HOSTED_CP_TARGET_ESP32S2
+		default "esp32s3" if ESP_HOSTED_CP_TARGET_ESP32S3
+		default "esp32c2" if ESP_HOSTED_CP_TARGET_ESP32C2
+		default "esp32c3" if ESP_HOSTED_CP_TARGET_ESP32C3
+		default "esp32c6" if ESP_HOSTED_CP_TARGET_ESP32C6
+		default "esp32c5" if ESP_HOSTED_CP_TARGET_ESP32C5
+		default "esp32c61" if ESP_HOSTED_CP_TARGET_ESP32C61
+		default "esp32h2" if ESP_HOSTED_CP_TARGET_ESP32H2
+		default "esp32h4" if ESP_HOSTED_CP_TARGET_ESP32H4
+		default "invalid"
+
+	choice ESP_HOSTED_P4_DEV_BOARD
+		bool "Configure GPIOs for Development Board"
+		depends on IDF_TARGET_ESP32P4
+		default ESP_HOSTED_P4_DEV_BOARD_NONE
+		help
+			Sets GPIOs used for transport on these ESP32-P4 Development Boards
+			- ESP32-P4/P4X Function_EV_Board with on-board ESP32-C6
+			- ESP32-P4 Function_EV_Board with ESP32-C5 on a EV board
+			- ESP32-P4 Function_EV_Board with ESP32-C2 on a EV board
+			- ESP32-P4-C5 Code Board with on-board ESP32-C5
+			- ESP32-P4X Function_EV_Board with on-board ESP32-C5
+			Select "No development board" if you want to modify GPIOs used
+
+		config ESP_HOSTED_P4_DEV_BOARD_NONE
+			bool "No development board"
+
+		config ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD
+			depends on ESP_HOSTED_CP_TARGET_ESP32C6 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C2
+			bool "ESP32-P4/P4X-Function-EV-Board with on-board C6 or C5/C2 on EV board"
+
+		config ESP32P4_EYE_C6_BOARD
+			depends on SLAVE_IDF_TARGET_ESP32C6
+			bool "ESP32-P4-EYE Board with on-board C6"
+
+		config ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+			depends on ESP_HOSTED_CP_TARGET_ESP32C5
+			bool "ESP32-P4X-Function-EV-Board with on-board C5"
+
+		config ESP32P4_TAB5_C6_BOARD
+			depends on SLAVE_IDF_TARGET_ESP32C6
+			bool "M5Stack Tab5 with on-board ESP32-C6"
+
+		config ESP_HOSTED_P4_C5_CORE_BOARD
+			depends on ESP_HOSTED_CP_TARGET_ESP32C5
+			bool "ESP32-P4-C5 Core Board with on-board C5"
+
+		config ESP_HOSTED_P4_C6_CORE_BOARD
+			depends on ESP_HOSTED_CP_TARGET_ESP32C6
+			bool "ESP32-P4-C6 Core Board with on-board C6"
+
+		config ESP_HOSTED_P4_C61_CORE_BOARD
+			depends on ESP_HOSTED_CP_TARGET_ESP32C61
+			bool "ESP32-P4-C61 Core Board with on-board C61"
+
+	endchoice
+
+	# y if SDIO Transport is available, based on host and slave selection
+	config ESP_HOSTED_PRIV_SDIO_OPTION
+		bool
+		default y if (IDF_TARGET_ESP32 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && (ESP_HOSTED_CP_TARGET_ESP32 || ESP_HOSTED_CP_TARGET_ESP32C6 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61)
+		default n
+
+	# y if SPI HD Transport is available, based on host and slave selection
+	config ESP_HOSTED_PRIV_SPI_HD_OPTION
+		bool
+		default n if (IDF_TARGET_ESP32 || ESP_HOSTED_CP_TARGET_ESP32 || ESP_HOSTED_CP_TARGET_ESP32H4)
+		default y
+
+	choice ESP_HOSTED_HOST_INTERFACE
+		bool "Transport layer"
+		default ESP_HOSTED_SDIO_HOST_INTERFACE if ESP_HOSTED_PRIV_SDIO_OPTION
+		default ESP_HOSTED_SPI_HOST_INTERFACE
+		help
+			Bus interface to be used for communication with the host
+
+		config ESP_HOSTED_SPI_HOST_INTERFACE
+			depends on !ESP_HOSTED_CP_TARGET_ESP32H4 # SPI currently not working
+			bool "SPI Full-duplex"
+			help
+				Enable/Disable SPI Full-duplex host interface
+
+		config ESP_HOSTED_SDIO_HOST_INTERFACE
+			depends on ESP_HOSTED_PRIV_SDIO_OPTION
+			bool "SDIO"
+			help
+				Enable/Disable SDIO host interface
+
+		# SPI Half Duplex is not supported in ESP32
+		config ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			depends on ESP_HOSTED_PRIV_SPI_HD_OPTION
+			bool "SPI Half-duplex"
+			help
+				Enable/Disable SPI Half-duplex host interface
+
+		config ESP_HOSTED_UART_HOST_INTERFACE
+			bool "UART"
+			help
+				Enable/Disable UART host interface
+	endchoice
+
+	menu "SPI Configuration"
+		depends on ESP_HOSTED_SPI_HOST_INTERFACE
+
+		choice ESP_HOSTED_SPI_PRIV_MODE_ESP32
+			depends on ESP_HOSTED_CP_TARGET_ESP32
+			bool "Host SPI mode"
+			default ESP_HOSTED_SPI_PRIV_MODE_2_ESP32
+
+			config ESP_HOSTED_SPI_PRIV_MODE_0_ESP32
+				bool "Host SPI mode 0"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_1_ESP32
+				bool "Host SPI mode 1"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_2_ESP32
+				bool "Host SPI mode 2"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_3_ESP32
+				bool "Host SPI mode 3"
+		endchoice
+
+		choice ESP_HOSTED_SPI_PRIV_MODE_ESP32XX
+			depends on !ESP_HOSTED_CP_TARGET_ESP32
+			bool "Host SPI mode"
+			default ESP_HOSTED_SPI_PRIV_MODE_3_ESP32XX
+
+			config ESP_HOSTED_SPI_PRIV_MODE_0_ESP32XX
+				bool "Host  SPI mode 0"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_1_ESP32XX
+				bool "Host  SPI mode 1"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_2_ESP32XX
+				bool "Host  SPI mode 2"
+
+			config ESP_HOSTED_SPI_PRIV_MODE_3_ESP32XX
+				bool "Host  SPI mode 3"
+		endchoice
+
+		config ESP_HOSTED_SPI_MODE
+			int
+			default 0 if ESP_HOSTED_SPI_PRIV_MODE_0_ESP32
+			default 1 if ESP_HOSTED_SPI_PRIV_MODE_1_ESP32
+			default 2 if ESP_HOSTED_SPI_PRIV_MODE_2_ESP32
+			default 3 if ESP_HOSTED_SPI_PRIV_MODE_3_ESP32
+			default 0 if ESP_HOSTED_SPI_PRIV_MODE_0_ESP32XX
+			default 1 if ESP_HOSTED_SPI_PRIV_MODE_1_ESP32XX
+			default 2 if ESP_HOSTED_SPI_PRIV_MODE_2_ESP32XX
+			default 3 if ESP_HOSTED_SPI_PRIV_MODE_3_ESP32XX
+
+		choice ESP_HOSTED_SPI_CONTROLLER
+			bool "Host SPI controller to use"
+			default ESP_HOSTED_SPI_HSPI
+
+			config ESP_HOSTED_SPI_HSPI
+				bool "HSPI/FSPI"
+				help
+					"HSPI/FSPI: SPI_controller_1"
+
+			config ESP_HOSTED_SPI_VSPI
+				depends on IDF_TARGET_ESP32
+				bool "VSPI"
+				help
+					"VSPI: SPI_controller_2"
+
+		endchoice
+
+		config ESP_HOSTED_SPI_CONTROLLER
+			int
+			default 2 if ESP_HOSTED_SPI_VSPI
+			default 1
+
+		menu "Host SPI GPIOs Config"
+
+			choice ESP_HOSTED_SPI_HANDSHAKE_GPIO_CONFIG
+				bool "Handshake GPIO Config"
+				default ESP_HOSTED_HS_ACTIVE_HIGH
+
+				config ESP_HOSTED_HS_ACTIVE_HIGH
+					bool "HS: Active High"
+				config ESP_HOSTED_HS_ACTIVE_LOW
+					bool "HS: Active Low"
+			endchoice
+
+			choice ESP_HOSTED_SPI_DATAREADY__GPIO_CONFIG
+				bool "DataReady GPIO Config"
+				default ESP_HOSTED_DR_ACTIVE_HIGH
+
+				config ESP_HOSTED_DR_ACTIVE_HIGH
+					bool "DR: Active High"
+				config ESP_HOSTED_DR_ACTIVE_LOW
+					bool "DR: Active Low"
+			endchoice
+
+			choice ESP_HOSTED_SPI_RESET_GPIO_CONFIG
+				bool "Reset GPIO Config"
+				default ESP_HOSTED_SPI_RESET_ACTIVE_HIGH
+				help
+					"If Active High, High->Low->High will trigger reset (Low will trigger reset)
+					 If Active Low, Low->High->Low will trigger reset (High will trigger reset)"
+
+				config ESP_HOSTED_SPI_RESET_ACTIVE_HIGH
+					bool "RESET: Active High"
+				config ESP_HOSTED_SPI_RESET_ACTIVE_LOW
+					bool "RESET: Active Low"
+			endchoice
+
+			config ESP_HOSTED_SPI_MOSI_RANGE_MIN
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_MOSI_RANGE_MAX
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HSPI_GPIO_MOSI
+				depends on ESP_HOSTED_SPI_HSPI
+				int "GPIO pin for Host MOSI"
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 8 if IDF_TARGET_ESP32P4
+				default 13 if IDF_TARGET_ESP32
+				default 11 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+				default 5 if IDF_TARGET_ESP32H2
+				default 7
+				range ESP_HOSTED_SPI_MOSI_RANGE_MIN ESP_HOSTED_SPI_MOSI_RANGE_MAX
+				help
+					SPI controller Host MOSI
+
+			config ESP_HOSTED_SPI_MISO_RANGE_MIN
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_MISO_RANGE_MAX
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HSPI_GPIO_MISO
+				depends on ESP_HOSTED_SPI_HSPI
+				int "GPIO pin for Host MISO"
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 10 if IDF_TARGET_ESP32P4
+				default 12 if IDF_TARGET_ESP32
+				default 13 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+				default 0 if IDF_TARGET_ESP32H2
+				default 2
+				range ESP_HOSTED_SPI_MISO_RANGE_MIN ESP_HOSTED_SPI_MISO_RANGE_MAX
+				help
+					SPI controller Host MISO
+
+			config ESP_HOSTED_SPI_CLK_RANGE_MIN
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_CLK_RANGE_MAX
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HSPI_GPIO_CLK
+				depends on ESP_HOSTED_SPI_HSPI
+				int "GPIO pin for Host CLK"
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 9 if IDF_TARGET_ESP32P4
+				default 14 if IDF_TARGET_ESP32
+				default 12 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+				default 4 if IDF_TARGET_ESP32H2
+				default 6
+				range ESP_HOSTED_SPI_CLK_RANGE_MIN ESP_HOSTED_SPI_CLK_RANGE_MAX
+				help
+					SPI controller Host CLK
+
+			config ESP_HOSTED_SPI_CS_RANGE_MIN
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_CS_RANGE_MAX
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HSPI_GPIO_CS
+				depends on ESP_HOSTED_SPI_HSPI
+				int "GPIO pin for Host  CS"
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 7 if IDF_TARGET_ESP32P4
+				default 15 if IDF_TARGET_ESP32
+				default 10 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+				default 1 if IDF_TARGET_ESP32H2
+				default 10
+				range ESP_HOSTED_SPI_CS_RANGE_MIN ESP_HOSTED_SPI_CS_RANGE_MAX
+				help
+					SPI controller Host CS
+
+			config ESP_HOSTED_SPI_VSPI_GPIO_MOSI
+				depends on ESP_HOSTED_SPI_VSPI
+				int "GPIO pin for Host MOSI"
+				default 23
+				help
+					SPI controller Host MOSI
+
+			config ESP_HOSTED_SPI_VSPI_GPIO_MISO
+				depends on ESP_HOSTED_SPI_VSPI
+				int "GPIO pin for Host MISO"
+				default 19
+				help
+					SPI controller Host MISO
+
+			config ESP_HOSTED_SPI_VSPI_GPIO_CLK
+				depends on ESP_HOSTED_SPI_VSPI
+				int "GPIO pin for Host CLK"
+				default 18
+				help
+					SPI controller Host CLK
+
+			config ESP_HOSTED_SPI_VSPI_GPIO_CS
+				depends on ESP_HOSTED_SPI_VSPI
+				int "GPIO pin for Host CS"
+				default 5
+				help
+					SPI controller Host CS
+
+			config ESP_HOSTED_SPI_GPIO_MOSI
+				int
+				default ESP_HOSTED_SPI_VSPI_GPIO_MOSI if ESP_HOSTED_SPI_VSPI
+				default ESP_HOSTED_SPI_HSPI_GPIO_MOSI
+
+			config ESP_HOSTED_SPI_GPIO_MISO
+				int
+				default ESP_HOSTED_SPI_VSPI_GPIO_MISO if ESP_HOSTED_SPI_VSPI
+				default ESP_HOSTED_SPI_HSPI_GPIO_MISO
+
+			config ESP_HOSTED_SPI_GPIO_CLK
+				int
+				default ESP_HOSTED_SPI_VSPI_GPIO_CLK if ESP_HOSTED_SPI_VSPI
+				default ESP_HOSTED_SPI_HSPI_GPIO_CLK
+
+			config ESP_HOSTED_SPI_GPIO_CS
+				int
+				default ESP_HOSTED_SPI_VSPI_GPIO_CS if ESP_HOSTED_SPI_VSPI
+				default ESP_HOSTED_SPI_HSPI_GPIO_CS
+
+			config ESP_HOSTED_SPI_HANDSHAKE_RANGE_MIN
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_HANDSHAKE_RANGE_MAX
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_GPIO_HANDSHAKE
+				int "GPIO pin for handshake"
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 6 if IDF_TARGET_ESP32P4
+				default 3 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6
+				default 17 if IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S2
+				default 22 if IDF_TARGET_ESP32H2
+				default 26
+				range ESP_HOSTED_SPI_HANDSHAKE_RANGE_MIN ESP_HOSTED_SPI_HANDSHAKE_RANGE_MAX
+				help
+					GPIO pin to use for handshake with other spi controller
+
+			config ESP_HOSTED_SPI_DATA_READY_RANGE_MIN
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_DATA_READY_RANGE_MAX
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_GPIO_DATA_READY
+				int "GPIO pin for data ready interrupt"
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 11 if IDF_TARGET_ESP32P4
+				default 12 if IDF_TARGET_ESP32H2
+				default 4
+				range ESP_HOSTED_SPI_DATA_READY_RANGE_MIN ESP_HOSTED_SPI_DATA_READY_RANGE_MAX
+				help
+					GPIO pin for indicating host that SPI slave has data to be read by host
+
+			config ESP_HOSTED_SPI_RESET_RANGE_MIN
+				int
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 0
+
+			config ESP_HOSTED_SPI_RESET_RANGE_MAX
+				int
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_GPIO_RESET_SLAVE
+				int "GPIO pin for Resetting slave ESP"
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 12 if IDF_TARGET_ESP32P4
+				default 10 if IDF_TARGET_ESP32H2
+				default 5
+				range ESP_HOSTED_SPI_RESET_RANGE_MIN ESP_HOSTED_SPI_RESET_RANGE_MAX
+				help
+					GPIO pin for Resetting ESP SPI slave device. Should be connected to RST/EN of ESP SPI slave device.
+		endmenu
+
+ESP32XX_SPI_CLK_FREQ_RANGE_MIN := 1
+ESP32_SPI_CLK_FREQ_RANGE_MAX := 10
+ESP32H2_SPI_CLK_FREQ_RANGE_MAX := 32
+ESP32C6_SPI_CLK_FREQ_RANGE_MAX := 40
+ESP32XX_SPI_CLK_FREQ_RANGE_MAX := 40
+
+	config ESP_HOSTED_SPI_FREQ_ESP32
+		depends on ESP_HOSTED_CP_TARGET_ESP32
+		int "SPI Clock Freq (MHz)"
+		default 10
+		range $(ESP32XX_SPI_CLK_FREQ_RANGE_MIN) $(ESP32_SPI_CLK_FREQ_RANGE_MAX)
+		help
+			"Optimize SPI CLK by increasing till host practically can support"
+
+	config ESP_HOSTED_SPI_FREQ_ESP32H2
+		depends on ESP_HOSTED_CP_TARGET_ESP32H2
+		int "SPI Clock Freq (MHz)"
+		default 32 if IDF_TARGET_ESP32P4 #config for ESP32-P4 Function_EV_Board
+		default 26
+		range $(ESP32XX_SPI_CLK_FREQ_RANGE_MIN) $(ESP32H2_SPI_CLK_FREQ_RANGE_MAX)
+		help
+			"Optimize SPI CLK by increasing till host practically can support"
+
+	config ESP_HOSTED_SPI_FREQ_ESP32C6
+		depends on ESP_HOSTED_CP_TARGET_ESP32C6
+		int "SPI Clock Freq (MHz)"
+		default 40 if IDF_TARGET_ESP32P4 #config for ESP32-P4 Function_EV_Board
+		default 26
+		range $(ESP32XX_SPI_CLK_FREQ_RANGE_MIN) $(ESP32C6_SPI_CLK_FREQ_RANGE_MAX)
+		help
+			"Optimize SPI CLK by increasing till host practically can support"
+
+	config ESP_HOSTED_SPI_FREQ_ESP32XX
+		depends on ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+		int "SPI Clock Freq"
+		default 40 if ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+		range $(ESP32XX_SPI_CLK_FREQ_RANGE_MIN) $(ESP32XX_SPI_CLK_FREQ_RANGE_MAX)
+		help
+			"Optimize SPI CLK by increasing till host practically can support"
+
+	config ESP_HOSTED_SPI_CLK_FREQ
+		int
+		default ESP_HOSTED_SPI_FREQ_ESP32 if ESP_HOSTED_CP_TARGET_ESP32
+		default ESP_HOSTED_SPI_FREQ_ESP32C6 if ESP_HOSTED_CP_TARGET_ESP32C6
+		default ESP_HOSTED_SPI_FREQ_ESP32H2 if ESP_HOSTED_CP_TARGET_ESP32H2
+		default ESP_HOSTED_SPI_FREQ_ESP32XX if ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+		help
+			"Optimize SPI CLK by increasing till host practically can support"
+
+		config ESP_HOSTED_SPI_TX_Q_SIZE
+			int "ESP to Host SPI queue size"
+			default 7 if ESP_HOSTED_HOST_OT_ENABLE
+			default 15
+			help
+				Very small tx queue will lower ESP -- SPI --> Host data rate
+
+		config ESP_HOSTED_SPI_RX_Q_SIZE
+			int "Host to ESP SPI queue size"
+			default 7 if ESP_HOSTED_HOST_OT_ENABLE
+			default 15
+			help
+				Very small RX queue will lower ESP <-- SPI -- Host data rate
+
+	endmenu
+
+		menu "Hosted SDIO Configuration"
+			depends on ESP_HOSTED_SDIO_HOST_INTERFACE
+
+			choice ESP_HOSTED_SDIO_RESET_GPIO_CONFIG
+				bool "RESET GPIO Config"
+				# M5Stack Tab5's C6 reset circuit is active-low; with the
+				# active-high default the slave never leaves reset and SDIO
+				# enumeration times out (sdmmc send_op_cond 0x107).
+				default ESP_HOSTED_SDIO_RESET_ACTIVE_LOW if ESP32P4_TAB5_C6_BOARD
+				default ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH
+				help
+					"If Active High, High->Low->High will trigger reset (Low will trigger reset)
+					 If Active Low, Low->High->Low will trigger reset (High will trigger reset)"
+
+				config ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH
+					bool "RESET: Active High"
+				config ESP_HOSTED_SDIO_RESET_ACTIVE_LOW
+					bool "RESET: Active Low"
+			endchoice
+
+			choice ESP_HOSTED_SDIO_RX_OPTIMIZATION
+				bool "SDIO Receive Optimization"
+				default ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE
+
+				config ESP_HOSTED_SDIO_OPTIMIZATION_RX_NONE
+					bool "No optimization"
+					help
+						Use SDIO as is, with no optimizations.
+
+				config ESP_HOSTED_SDIO_OPTIMIZATION_RX_MAX_SIZE
+					bool "Always Rx Max Packet size"
+					help
+						Always read max Rx Packet Size (512 * 3 bytes). This saves one SDIO
+						transaction (get Rx Packet Size) when reading data from slave by
+						always transferring a fixed amount of data. Extra data at end of valid
+						packet data is discarded.
+
+				config ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE
+					bool "Use Streaming Mode"
+					help
+						Receive a stream of queued data from the slave, made up of one or more
+						packets of data. Host extracts packets from the stream. This improves
+						SDIO read performance by doing one large read transaction instead of
+						many smaller read transactions for each packet.
+						(Note: requires slave to support streaming mode.)
+
+				endchoice
+
+			choice
+				prompt "SDIO Slot To Use"
+				default ESP_HOSTED_SDIO_SLOT_1
+				help
+					On the ESP32-P4 EV Board:
+					- Slot 0 connects to the MicroSD Card slot
+					- Slot 1 connects to the on-board ESP32-C6
+					For the ESP32, Slot 0 is usually occupied by SPI Flash and not usable for SDIO.
+					For the ESP32-P4, Slot 0 is IOMUXed and GPIO values cannot be changed
+
+				config ESP_HOSTED_SDIO_SLOT_0
+					depends on IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32S3
+					bool "Slot 0"
+
+				config ESP_HOSTED_SDIO_SLOT_1
+					bool "Slot 1"
+			endchoice
+
+			config ESP_HOSTED_SDIO_SLOT
+				int
+				default 0 if ESP_HOSTED_SDIO_SLOT_0
+				default 1 if ESP_HOSTED_SDIO_SLOT_1
+
+			config ESP_HOSTED_SD_PWR_CTRL_LDO_INTERNAL_IO
+				depends on SOC_SDMMC_IO_POWER_EXTERNAL
+				bool "SDIO power supply comes from internal LDO IO (READ HELP!)"
+				default n
+				help
+					Only needed when the SDIO module is connected to specific IO pins which can be used for high-speed SDIO.
+					Please read the schematic first and check if the SD VDD is connected to any internal LDO output.
+					Unselect this option if the SDIO is powered by an external power supply.
+					For ESP32-P4 EV Board, SDMMC slot 0 may require internal LDO output.
+
+			config ESP_HOSTED_SD_PWR_CTRL_LDO_IO_ID
+				depends on SOC_SDMMC_IO_POWER_EXTERNAL && ESP_HOSTED_SD_PWR_CTRL_LDO_INTERNAL_IO
+				int "LDO ID"
+				default 4 if IDF_TARGET_ESP32P4
+				help
+					Please check your schematic first and input your LDO ID.
+
+			choice
+				prompt "SDIO Bus Width"
+				default ESP_HOSTED_SDIO_4_BIT_BUS
+				help
+					Select the SDIO Bus Width to use
+
+				config ESP_HOSTED_SDIO_4_BIT_BUS
+					bool "4 Bits"
+
+				config ESP_HOSTED_SDIO_1_BIT_BUS
+					bool "1 Bit"
+			endchoice
+
+			config ESP_HOSTED_SDIO_BUS_WIDTH
+				int
+				default 1 if ESP_HOSTED_SDIO_1_BIT_BUS
+				default 4
+
+ESP32_SDIO_CLK_FREQ_KHZ_RANGE_MIN := 400
+ESP32_SDIO_CLK_FREQ_KHZ_RANGE_MAX := 40000
+ESP32XX_SDIO_CLK_FREQ_KHZ_RANGE_MIN := 400
+ESP32XX_SDIO_CLK_FREQ_KHZ_RANGE_MAX := 50000
+
+			config ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ
+				int "SDIO Clock Freq (in kHz)"
+				default 40000
+				range $(ESP32_SDIO_CLK_FREQ_KHZ_RANGE_MIN) $(ESP32_SDIO_CLK_FREQ_KHZ_RANGE_MAX) if IDF_TARGET_ESP32
+				range $(ESP32XX_SDIO_CLK_FREQ_KHZ_RANGE_MIN) $(ESP32XX_SDIO_CLK_FREQ_KHZ_RANGE_MAX) if IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4
+				help
+					"Optimize SDIO CLK by increasing till host practically can support. Clock frequency for ESP32-P4 as host <= 40MHz"
+
+			config ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 13 if ESP32P4_TAB5_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 15 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MAX
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 13 if ESP32P4_TAB5_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 15 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 12 if ESP32P4_TAB5_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 14 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MAX
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 12 if ESP32P4_TAB5_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 14 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 11 if ESP32P4_TAB5_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 2 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_D0_GPIO_RANGE_MAX
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 11 if ESP32P4_TAB5_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 2 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 10 if ESP32P4_TAB5_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 4 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_D1_GPIO_RANGE_MAX
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 10 if ESP32P4_TAB5_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 4 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 9 if ESP32P4_TAB5_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 12 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_D2_GPIO_RANGE_MAX
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 9 if ESP32P4_TAB5_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 12 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 8 if ESP32P4_TAB5_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 13 if IDF_TARGET_ESP32
+				default 0
+
+			config ESP_HOSTED_SDIO_D3_GPIO_RANGE_MAX
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 8 if ESP32P4_TAB5_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 13 if IDF_TARGET_ESP32
+				default 100
+
+			config ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MIN
+				int
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP32P4_TAB5_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 5 if IDF_TARGET_ESP32
+				default 0
+				help
+					GPIO pin for Resetting ESP SDIO slave device. Should be connected to RST/EN of ESP SDIO slave device.
+
+			config ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MAX
+				int
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP32P4_TAB5_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 5 if IDF_TARGET_ESP32
+				default 100
+
+### *START* GPIO SDIO pin configurations for Slot 0 and 1
+			config ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_0
+				depends on ESP_HOSTED_SDIO_SLOT_0
+				int "CMD GPIO number"
+				default 47 if IDF_TARGET_ESP32S3
+				range 44 44 if IDF_TARGET_ESP32P4
+				range 15 15 if IDF_TARGET_ESP32
+				help
+					"Value can only be configured for some targets. Displayed always for reference."
+
+			config ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1
+				depends on ESP_HOSTED_SDIO_SLOT_1
+				int "CMD GPIO number"
+				default 47 if IDF_TARGET_ESP32S3
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 13 if ESP32P4_TAB5_C6_BOARD
+				default 19 if IDF_TARGET_ESP32P4
+				default 15 if IDF_TARGET_ESP32
+				range ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MAX
+				help
+					CMD GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+
+			config ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_0
+				depends on ESP_HOSTED_SDIO_SLOT_0
+				int "CLK GPIO number"
+				default 19 if IDF_TARGET_ESP32S3
+				range 43 43 if IDF_TARGET_ESP32P4
+				range 14 14 if IDF_TARGET_ESP32
+				help
+					"Value can only be configured for some targets. Displayed always for reference."
+
+			config ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1
+				depends on ESP_HOSTED_SDIO_SLOT_1
+				int "CLK GPIO number"
+				default 19 if IDF_TARGET_ESP32S3
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 12 if ESP32P4_TAB5_C6_BOARD
+				default 18 if IDF_TARGET_ESP32P4
+				default 14 if IDF_TARGET_ESP32
+				range ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MAX
+				help
+					CLK GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+
+			config ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_0
+				depends on ESP_HOSTED_SDIO_SLOT_0
+				int "D0 GPIO number"
+				default 13 if IDF_TARGET_ESP32S3
+				range 39 39 if IDF_TARGET_ESP32P4
+				range 2 2 if IDF_TARGET_ESP32
+				help
+					"Value can only be configured for some targets. Displayed always for reference."
+
+			config ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1
+				depends on ESP_HOSTED_SDIO_SLOT_1
+				int "D0 GPIO number"
+				default 13 if IDF_TARGET_ESP32S3
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 11 if ESP32P4_TAB5_C6_BOARD
+				default 14 if IDF_TARGET_ESP32P4
+				default 2 if IDF_TARGET_ESP32
+				range ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN ESP_HOSTED_SDIO_D0_GPIO_RANGE_MAX
+				help
+					D0 GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+
+			if ESP_HOSTED_SDIO_4_BIT_BUS
+				config ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_0
+					depends on ESP_HOSTED_SDIO_SLOT_0
+					int "D1 GPIO number"
+					default 35 if IDF_TARGET_ESP32S3
+					range 40 40 if IDF_TARGET_ESP32P4
+					range 4 4 if IDF_TARGET_ESP32
+					help
+						"Value can only be configured for some targets. Displayed always for reference."
+
+				config ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1
+					depends on ESP_HOSTED_SDIO_SLOT_1
+					int "D1 GPIO number"
+					default 35 if IDF_TARGET_ESP32S3
+					default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+					default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+					default 30 if ESP32P4_EYE_C6_BOARD
+					default 10 if ESP32P4_TAB5_C6_BOARD
+					default 15 if IDF_TARGET_ESP32P4
+					default 4 if IDF_TARGET_ESP32
+					range ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN ESP_HOSTED_SDIO_D1_GPIO_RANGE_MAX
+					help
+						D1 GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+
+				config ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_0
+					depends on ESP_HOSTED_SDIO_SLOT_0
+					int "D2 GPIO number"
+					default 20 if IDF_TARGET_ESP32S3
+					range 41 41 if IDF_TARGET_ESP32P4
+					range 12 12 if IDF_TARGET_ESP32
+					help
+						"Value can only be configured for some targets. Displayed always for reference."
+
+				config ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1
+					depends on ESP_HOSTED_SDIO_SLOT_1
+					int "D2 GPIO number"
+					default 20 if IDF_TARGET_ESP32S3
+					default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+					default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+					default 31 if ESP32P4_EYE_C6_BOARD
+					default 9 if ESP32P4_TAB5_C6_BOARD
+					default 16 if IDF_TARGET_ESP32P4
+					default 12 if IDF_TARGET_ESP32
+					range ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN ESP_HOSTED_SDIO_D2_GPIO_RANGE_MAX
+					help
+						D2 GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+
+				config ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_0
+					depends on ESP_HOSTED_SDIO_SLOT_0
+					int "D3 GPIO number"
+					default 9 if IDF_TARGET_ESP32S3
+					range 42 42 if IDF_TARGET_ESP32P4
+					range 13 13 if IDF_TARGET_ESP32
+					help
+						"Value can only be configured for some targets. Displayed always for reference."
+
+				config ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1
+					depends on ESP_HOSTED_SDIO_SLOT_1
+					int "D3 GPIO number"
+					default 9 if IDF_TARGET_ESP32S3
+					default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+					default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+					default 32 if ESP32P4_EYE_C6_BOARD
+					default 8 if ESP32P4_TAB5_C6_BOARD
+					default 17 if IDF_TARGET_ESP32P4
+					default 13 if IDF_TARGET_ESP32
+					range ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN ESP_HOSTED_SDIO_D3_GPIO_RANGE_MAX
+					help
+						D3 GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+			endif
+
+			if !ESP_HOSTED_SDIO_4_BIT_BUS
+				config ESP_HOSTED_PRIV_SDIO_PIN_D1_1BIT_BUS_SLOT_0
+					depends on ESP_HOSTED_SDIO_SLOT_0
+					int "D1 GPIO number (Interrupt Line)"
+					default 35 if IDF_TARGET_ESP32S3
+					range 40 40 if IDF_TARGET_ESP32P4
+					range 4 4 if IDF_TARGET_ESP32
+					help
+						"Value can only be configured for some targets. Displayed always for reference."
+				config ESP_HOSTED_PRIV_SDIO_PIN_D1_1BIT_BUS_SLOT_1
+					depends on ESP_HOSTED_SDIO_SLOT_1
+					int "D1 GPIO number (Interrupt Line)"
+					default 35 if IDF_TARGET_ESP32S3
+					default 30 if ESP32P4_EYE_C6_BOARD
+					default 10 if ESP32P4_TAB5_C6_BOARD
+					default 15 if IDF_TARGET_ESP32P4
+					default 4 if IDF_TARGET_ESP32
+					range ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN ESP_HOSTED_SDIO_D1_GPIO_RANGE_MAX
+					help
+						D1 GPIO pin for SDIO. Range enforced dynamically based on slave target to ensure IOMUX compliance.
+			endif
+
+			config ESP_HOSTED_SDIO_GPIO_RESET_SLAVE
+				int "GPIO pin for Resetting slave ESP"
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP32P4_TAB5_C6_BOARD
+				default 54 if IDF_TARGET_ESP32P4
+				default 42 if IDF_TARGET_ESP32S3
+				default 5 if IDF_TARGET_ESP32
+				range ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MIN ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MAX
+				help
+					GPIO pin for Resetting ESP SDIO slave device. Should be connected to RST/EN of ESP SDIO slave device.
+
+### *END* GPIO SDIO pin configurations for Slot 0 and 1
+
+			config ESP_HOSTED_SDIO_PIN_CMD
+				int
+				default ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+				default ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+
+			config ESP_HOSTED_SDIO_PIN_CLK
+				int
+				default ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+				default ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+
+			config ESP_HOSTED_SDIO_PIN_D0
+				int
+				default ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+				default ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+
+			if ESP_HOSTED_SDIO_4_BIT_BUS
+				config ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS
+					int
+					default ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+					default ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+
+				config ESP_HOSTED_SDIO_PIN_D2
+					int
+					default ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+					default ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+
+				config ESP_HOSTED_SDIO_PIN_D3
+					int
+					default ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+					default ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+			endif
+
+			if !ESP_HOSTED_SDIO_4_BIT_BUS
+				config ESP_HOSTED_SDIO_PRIV_PIN_D1_1BIT_BUS
+					int
+					default ESP_HOSTED_PRIV_SDIO_PIN_D1_1BIT_BUS_SLOT_0 if ESP_HOSTED_SDIO_SLOT_0
+					default ESP_HOSTED_PRIV_SDIO_PIN_D1_1BIT_BUS_SLOT_1 if ESP_HOSTED_SDIO_SLOT_1
+			endif
+
+			config ESP_HOSTED_SDIO_PIN_D1
+				int
+				default ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS if ESP_HOSTED_SDIO_4_BIT_BUS
+				default ESP_HOSTED_SDIO_PRIV_PIN_D1_1BIT_BUS if !ESP_HOSTED_SDIO_4_BIT_BUS
+
+			config ESP_HOSTED_SDIO_TX_Q_SIZE
+				int "Host SDIO Tx queue size"
+				default 10 if ESP_HOSTED_HOST_OT_ENABLE
+				default 20
+				help
+					Very small tx queue will lower data rate
+
+			config ESP_HOSTED_SDIO_RX_Q_SIZE
+				int "Host SDIO Rx queue size"
+				default 10 if ESP_HOSTED_HOST_OT_ENABLE
+				default 20
+				help
+					Very small RX queue will lower data rate
+
+			config ESP_HOSTED_SDIO_RESET_DELAY_MS
+				int "Delay (in ms) after Co-processor Reset"
+				default 1500
+				help
+					The co-processor needs some time to be ready after being reset by the host.
+					Increase this value if host sees SDMMC errors after resetting the co-processor.
+
+			config ESP_HOSTED_SDIO_CHECKSUM
+				bool "SDIO checksum ENABLE/DISABLE"
+				help
+					ENABLE/DISABLE software SDIO checksum
+		endmenu
+
+	menu "SPI Half-duplex Configuration"
+		depends on ESP_HOSTED_SPI_HD_HOST_INTERFACE
+
+		config ESP_HOSTED_SPI_HD_MODE
+			int "SPI Mode to use"
+			default 3
+			range 0 3
+			help
+				SPI Mode to use. The same mode must be used on both host and slave.
+
+		choice ESP_HOSTED_SPI_HD_PRIV_INTERFACE_NUM_DATA_LINES
+			bool "Num Data Lines to use"
+			default ESP_HOSTED_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
+			help
+				Number of Data Lines to use in the SPI HD interface
+
+			config ESP_HOSTED_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
+				bool "4 data lines"
+
+			config ESP_HOSTED_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
+				bool "2 data lines"
+
+			config ESP_HOSTED_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+				depends on $(ESP_IDF_VERSION) >= "6.1"
+				bool "1 data line"
+		endchoice
+
+		### SPI-HD 1-bit mode not compatible with 2/4-bit modes
+		comment "Make sure co-processor is also configured for 1 data line or SPI-HD transport will not work"
+			depends on ESP_HOSTED_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+
+		config ESP_HOSTED_SPI_HD_INTERFACE_NUM_DATA_LINES
+			int
+			default 4 if ESP_HOSTED_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
+			default 2 if ESP_HOSTED_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
+			default 1 if ESP_HOSTED_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+
+		choice ESP_HOSTED_SPI_HD_RESET_GPIO_CONFIG
+			bool "RESET GPIO Config"
+			default ESP_HOSTED_SPI_HD_RESET_ACTIVE_HIGH
+			help
+				"If Active High, High->Low->High will trigger reset (Low will trigger reset)
+				 If Active Low, Low->High->Low will trigger reset (High will trigger reset)"
+
+			config ESP_HOSTED_SPI_HD_RESET_ACTIVE_HIGH
+				bool "RESET: Active High"
+			config ESP_HOSTED_SPI_HD_RESET_ACTIVE_LOW
+				bool "RESET: Active Low"
+		endchoice
+
+		config ESP_HOSTED_SPI_HD_DATA_READY_ENABLED
+			bool "Use DATA_READY GPIO (interrupt-driven)"
+			default y
+			help
+				Enable to use a dedicated GPIO for DATA_READY signaling from slave.
+				Disable for polled mode (saves one GPIO, adds ~1-5 ms latency).
+
+		config ESP_HOSTED_SPI_HD_POLL_INTERVAL_MS
+			int "Polling interval when DATA_READY is disabled (ms)"
+			depends on !ESP_HOSTED_SPI_HD_DATA_READY_ENABLED
+			default 5
+			range 0 100
+			help
+				How often the host polls the slave TX_BUF_LEN register when
+				DATA_READY GPIO is not used.
+				Setting to 0 causes host to continually poll for data.
+
+		### warning if FreeRTOS clock tick is too coarse for polling interval
+		if (!ESP_HOSTED_SPI_HD_DATA_READY_ENABLED) && (ESP_HOSTED_SPI_HD_POLL_INTERVAL_MS != 0) && (ESP_HOSTED_SPI_HD_POLL_INTERVAL_MS < 10) && (FREERTOS_HZ <= 100)
+			comment "Set FreeRTOS -> Kernel -> configTICK_RATE_HZ to a value greater than 100 to support this polling interval"
+			comment "Recommended configTICK_RATE_HZ value is 1000"
+		endif
+
+		choice ESP_HOSTED_SPI_HD_DATAREADY_GPIO_CONFIG
+			depends on ESP_HOSTED_SPI_HD_DATA_READY_ENABLED
+			bool "DataReady GPIO Config"
+			default ESP_HOSTED_SPI_HD_DR_ACTIVE_HIGH
+
+			config ESP_HOSTED_SPI_HD_DR_ACTIVE_HIGH
+				bool "DR: Active High"
+			config ESP_HOSTED_SPI_HD_DR_ACTIVE_LOW
+				bool "DR: Active Low"
+		endchoice
+
+		menu "Host GPIOs Config"
+			config ESP_HOSTED_SPI_HD_CS_RANGE_MIN
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_CS_RANGE_MAX
+				int
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 19 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 19 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_CS
+				int "GPIO pin for Host CS"
+				default 51 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 52 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 27 if ESP32P4_EYE_C6_BOARD
+				default 7 if IDF_TARGET_ESP32P4
+				default 10 if IDF_TARGET_ESP32S3
+				default 1 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_CS_RANGE_MIN ESP_HOSTED_SPI_HD_CS_RANGE_MAX
+				help
+					SPI Half-duplex controller Host CS
+
+			config ESP_HOSTED_SPI_HD_CLK_RANGE_MIN
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_CLK_RANGE_MAX
+				int
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 18 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 33 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 18 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_CLK
+				int "GPIO pin for Host CLK"
+				default 50 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 51 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 28 if ESP32P4_EYE_C6_BOARD
+				default 9 if IDF_TARGET_ESP32P4
+				default 12 if IDF_TARGET_ESP32S3
+				default 4 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_CLK_RANGE_MIN ESP_HOSTED_SPI_HD_CLK_RANGE_MAX
+				help
+					SPI Half-duplex controller Host CLK
+
+			config ESP_HOSTED_SPI_HD_D0_RANGE_MIN
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_D0_RANGE_MAX
+				int
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 23 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_D0
+				int "GPIO pin for Host D0"
+				default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 29 if ESP32P4_EYE_C6_BOARD
+				default 8 if IDF_TARGET_ESP32P4
+				default 11 if IDF_TARGET_ESP32S3
+				default 5 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_D0_RANGE_MIN ESP_HOSTED_SPI_HD_D0_RANGE_MAX
+				help
+					SPI Half-duplex controller Host D0
+
+			config ESP_HOSTED_SPI_HD_D1_RANGE_MIN
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_D1_RANGE_MAX
+				int
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 22 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_D1
+				depends on !ESP_HOSTED_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+				int "GPIO pin for Host D1"
+				default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 30 if ESP32P4_EYE_C6_BOARD
+				default 10 if IDF_TARGET_ESP32P4
+				default 13 if IDF_TARGET_ESP32S3
+				default 0 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_D1_RANGE_MIN ESP_HOSTED_SPI_HD_D1_RANGE_MAX
+				help
+					SPI Half-duplex controller Host D1
+
+			config ESP_HOSTED_SPI_HD_D2_RANGE_MIN
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_D2_RANGE_MAX
+				int
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 16 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 20 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 16 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_D2
+				depends on ESP_HOSTED_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
+				int "GPIO pin for Host D2"
+				default 53 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 48 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 31 if ESP32P4_EYE_C6_BOARD
+				default 11 if IDF_TARGET_ESP32P4
+				default 14 if IDF_TARGET_ESP32S3
+				default 2 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_D2_RANGE_MIN ESP_HOSTED_SPI_HD_D2_RANGE_MAX
+				help
+					SPI Half-duplex controller Host D2
+
+			config ESP_HOSTED_SPI_HD_D3_RANGE_MIN
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_D3_RANGE_MAX
+				int
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 17 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 21 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 17 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_D3
+				depends on ESP_HOSTED_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
+				int "GPIO pin for Host D3"
+				default 52 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 47 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 32 if ESP32P4_EYE_C6_BOARD
+				default 6 if IDF_TARGET_ESP32P4
+				default 9 if IDF_TARGET_ESP32S3
+				default 3 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_D3_RANGE_MIN ESP_HOSTED_SPI_HD_D3_RANGE_MAX
+				help
+					SPI Half-duplex controller Host D3
+
+			config ESP_HOSTED_SPI_HD_DATA_READY_RANGE_MIN
+				int
+				default 47 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 53 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 33 if ESP32P4_EYE_C6_BOARD
+				default 6 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 6 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_DATA_READY_RANGE_MAX
+				int
+				default 47 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 53 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 33 if ESP32P4_EYE_C6_BOARD
+				default 6 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 32 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 6 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_DATA_READY
+				depends on ESP_HOSTED_SPI_HD_DATA_READY_ENABLED
+				int "GPIO pin for data ready interrupt"
+				default 47 if ESP_HOSTED_P4_C5_CORE_BOARD
+				default 53 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 33 if ESP32P4_EYE_C6_BOARD
+				default 13 if IDF_TARGET_ESP32P4
+				default 4 if IDF_TARGET_ESP32S3
+				default 12 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_DATA_READY_RANGE_MIN ESP_HOSTED_SPI_HD_DATA_READY_RANGE_MAX
+				help
+					GPIO pin for indicating host that slave has data to be read by host
+
+			config ESP_HOSTED_SPI_HD_RESET_RANGE_MIN
+				int
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default -1
+
+			config ESP_HOSTED_SPI_HD_RESET_RANGE_MAX
+				int
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 54 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C5
+				default 53 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C2
+				default 54 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+				default 100
+
+			config ESP_HOSTED_SPI_HD_GPIO_RESET_SLAVE
+				int "GPIO pin for Resetting slave ESP"
+				default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+				default 9 if ESP32P4_EYE_C6_BOARD
+				default 12 if IDF_TARGET_ESP32P4
+				default 5 if IDF_TARGET_ESP32S3
+				default 10 if IDF_TARGET_ESP32H2
+				default -1 if !IDF_TARGET_ESP32P4 || !IDF_TARGET_ESP32H2 || !IDF_TARGET_ESP32S3
+				range ESP_HOSTED_SPI_HD_RESET_RANGE_MIN ESP_HOSTED_SPI_HD_RESET_RANGE_MAX
+				help
+					GPIO pin for Resetting ESP slave device. Should be connected to RST/EN of ESP SPI slave device.
+		endmenu
+
+ESP32XX_SPI_HD_CLK_FREQ_RANGE_MIN := 1
+ESP32_SPI_HD_CLK_FREQ_RANGE_MAX := 10
+ESP32C6_SPI_HD_CLK_FREQ_RANGE_MAX := 40
+ESP32XX_SPI_HD_CLK_FREQ_RANGE_MAX := 40
+
+		config ESP_HOSTED_SPI_HD_FREQ_ESP32C6
+			depends on ESP_HOSTED_CP_TARGET_ESP32C6
+			int "SPI HD Clock Freq (MHz)"
+			default 40 if IDF_TARGET_ESP32P4 #config for ESP32-P4 Function_EV_Board
+			default 10
+			range $(ESP32XX_SPI_HD_CLK_FREQ_RANGE_MIN) $(ESP32C6_SPI_HD_CLK_FREQ_RANGE_MAX)
+			help
+				"Optimize CLK by increasing till host practically can support"
+
+		config ESP_HOSTED_SPI_HD_FREQ_ESP32XX
+			depends on ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+			int "SPI HD Clock Freq (MHz)"
+			default 40 if ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+			range $(ESP32XX_SPI_HD_CLK_FREQ_RANGE_MIN) $(ESP32XX_SPI_HD_CLK_FREQ_RANGE_MAX)
+			help
+				"Optimize CLK by increasing till host practically can support"
+
+		config ESP_HOSTED_SPI_HD_CLK_FREQ
+			int
+			default ESP_HOSTED_SPI_HD_FREQ_ESP32C6 if ESP_HOSTED_CP_TARGET_ESP32C6
+			default ESP_HOSTED_SPI_HD_FREQ_ESP32XX if ESP_HOSTED_CP_TARGET_ESP32C2 || ESP_HOSTED_CP_TARGET_ESP32C3 || ESP_HOSTED_CP_TARGET_ESP32S2 || ESP_HOSTED_CP_TARGET_ESP32S3 || ESP_HOSTED_CP_TARGET_ESP32C5 || ESP_HOSTED_CP_TARGET_ESP32C61
+			help
+				"Optimize CLK by increasing till host practically can support"
+
+		config ESP_HOSTED_SPI_HD_TX_Q_SIZE
+			int "ESP to Host queue size"
+			default 10 if ESP_HOSTED_HOST_OT_ENABLE
+			default 15
+			help
+				Very small tx queue will lower ESP -- SPI Half-duplex --> Host data rate
+
+		config ESP_HOSTED_SPI_HD_RX_Q_SIZE
+			int "Host to ESP queue size"
+			default 10 if ESP_HOSTED_HOST_OT_ENABLE
+			default 15
+			help
+				Very small RX queue will lower ESP <-- SPI Half-duplex -- Host data rate
+
+		config ESP_HOSTED_SPI_HD_CHECKSUM
+				bool "Checksum ENABLE/DISABLE"
+				default y
+				help
+					ENABLE/DISABLE software checksum
+	endmenu
+
+	menu "UART Configuration"
+		depends on ESP_HOSTED_UART_HOST_INTERFACE
+
+		choice ESP_HOSTED_UART_RESET_GPIO_CONFIG
+			bool "RESET GPIO Config"
+			default ESP_HOSTED_UART_RESET_ACTIVE_HIGH
+			help
+				"If Active High, High->Low->High will trigger reset (Low will trigger reset)
+				 If Active Low, Low->High->Low will trigger reset (High will trigger reset)"
+
+			config ESP_HOSTED_UART_RESET_ACTIVE_HIGH
+				bool "RESET: Active High"
+			config ESP_HOSTED_UART_RESET_ACTIVE_LOW
+				bool "RESET: Active Low"
+		endchoice
+
+		config ESP_HOSTED_UART_PORT
+			int "UART Port to Use"
+			default 1
+			range 0 2 if IDF_TARGET_ESP32
+			range 0 1 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6
+			range 0 2 if IDF_TARGET_ESP32C61
+			range 0 1 if IDF_TARGET_ESP32S2
+			range 0 2 if IDF_TARGET_ESP32S3
+			range 0 4 if IDF_TARGET_ESP32P4
+			help
+				Select UART Port to Use. Do not select the UART Port used for console output (if enabled)
+
+		config ESP_HOSTED_UART_TX_RANGE_MIN
+			int
+			default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 31 if ESP32P4_EYE_C6_BOARD
+			default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+			default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+			default 0
+
+		config ESP_HOSTED_UART_TX_RANGE_MAX
+			int
+			default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 31 if ESP32P4_EYE_C6_BOARD
+			default 14 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+			default 14 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+			default 100
+
+		config ESP_HOSTED_UART_PIN_TX
+			int "TX GPIO number"
+			default 13 if IDF_TARGET_ESP32
+			default 5 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
+			default 14 if IDF_TARGET_ESP32C5
+			default 21 if IDF_TARGET_ESP32C6
+			default 5 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+			default 49 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 50 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 31 if ESP32P4_EYE_C6_BOARD
+			default 14 if IDF_TARGET_ESP32P4
+			default 12 if IDF_TARGET_ESP32H2
+			range ESP_HOSTED_UART_TX_RANGE_MIN ESP_HOSTED_UART_TX_RANGE_MAX
+			help
+				GPIO used for UART TX
+
+		config ESP_HOSTED_UART_RX_RANGE_MIN
+			int
+			default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 32 if ESP32P4_EYE_C6_BOARD
+			default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+			default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+			default 0
+
+		config ESP_HOSTED_UART_RX_RANGE_MAX
+			int
+			default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 32 if ESP32P4_EYE_C6_BOARD
+			default 15 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_CP_TARGET_ESP32C6
+			default 15 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD
+			default 100
+
+		config ESP_HOSTED_UART_PIN_RX
+			int "RX GPIO number"
+			default 12 if IDF_TARGET_ESP32
+			default 4 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
+			default 13 if IDF_TARGET_ESP32C5
+			default 20 if IDF_TARGET_ESP32C6
+			default 4 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+			default 48 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 49 if ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 32 if ESP32P4_EYE_C6_BOARD
+			default 15 if IDF_TARGET_ESP32P4
+			default 22 if IDF_TARGET_ESP32H2
+			range ESP_HOSTED_UART_RX_RANGE_MIN ESP_HOSTED_UART_RX_RANGE_MAX
+			help
+				GPIO used for UART RX
+
+		config ESP_HOSTED_UART_BAUDRATE
+			int "Baud Rate"
+			default 921600
+			range 9600 3500000
+			help
+				Baud Rate to Use. Make sure Hardware supports the rate. Standard rates are 9600, 19200, 38400, 57600, 115200, 460800, 921600
+
+		choice ESP_HOSTED_UART_PRIV_NUM_DATA_BITS
+			bool "Number of Data Bits"
+			default ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_8
+			help
+				Number of Data Bits to use
+
+			config ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_5
+				bool "5 Bits"
+
+			config ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_6
+				bool "6 Bits"
+
+			config ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_7
+				bool "7 Bits"
+
+			config ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_8
+				bool "8 Bits"
+		endchoice
+
+		config ESP_HOSTED_UART_NUM_DATA_BITS
+			int
+			default 0 if ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_5
+			default 1 if ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_6
+			default 2 if ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_7
+			default 3 if ESP_HOSTED_UART_PRIV_NUM_DATA_BITS_8
+
+		choice ESP_HOSTED_UART_PRIV_PARITY
+			bool "Parity"
+
+			config ESP_HOSTED_UART_PRIV_PARITY_NONE
+				bool "None"
+
+			config ESP_HOSTED_UART_PRIV_PARITY_EVEN
+				bool "Even"
+
+			config ESP_HOSTED_UART_PRIV_PARITY_ODD
+				bool "Odd"
+		endchoice
+
+		config ESP_HOSTED_UART_PARITY
+			int
+			default 0 if ESP_HOSTED_UART_PRIV_PARITY_NONE
+			default 2 if ESP_HOSTED_UART_PRIV_PARITY_EVEN
+			default 3 if ESP_HOSTED_UART_PRIV_PARITY_ODD
+
+		choice ESP_HOSTED_UART_PRIV_STOP_BITS
+			bool "Number of Stop Bits"
+
+			config ESP_HOSTED_UART_PRIV_STOP_BITS_1
+				bool "1"
+
+			config ESP_HOSTED_UART_PRIV_STOP_BITS_1_5
+				bool "1.5"
+
+			config ESP_HOSTED_UART_PRIV_STOP_BITS_2
+				bool "2"
+		endchoice
+
+		config ESP_HOSTED_UART_STOP_BITS
+			int
+			default 1 if ESP_HOSTED_UART_PRIV_STOP_BITS_1
+			default 2 if ESP_HOSTED_UART_PRIV_STOP_BITS_1_5
+			default 3 if ESP_HOSTED_UART_PRIV_STOP_BITS_2
+
+		config ESP_HOSTED_UART_GPIO_RESET_SLAVE
+			int "GPIO pin for Resetting slave ESP"
+			default 54 if ESP_HOSTED_P4_C5_CORE_BOARD || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD
+			default 9 if ESP32P4_EYE_C6_BOARD
+			default 54 if IDF_TARGET_ESP32P4
+			default 42 if IDF_TARGET_ESP32S3
+			default 5
+			help
+				GPIO pin for Resetting slave ESP. Should be connected to RST/EN of slave ESP.
+
+		config ESP_HOSTED_UART_TX_Q_SIZE
+			int "Tx Queue Size"
+			default 5
+			help
+				UART rates are low, so large queue sizes are not required
+
+		config ESP_HOSTED_UART_RX_Q_SIZE
+			int "Rx Queue Size"
+			default 5
+			help
+				UART rates are low, so large queue sizes are not required
+
+		config ESP_HOSTED_UART_CHECKSUM
+			bool "UART checksum ENABLE/DISABLE"
+			default y
+			help
+				ENABLE/DISABLE software UART checksum
+	endmenu
+
+	menu "Common Slave Reset Strategy"
+		choice ESP_HOSTED_SLAVE_RESET_STRATEGY
+			bool "When to reset the slave device"
+			default ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP
+			help
+				Select Select when to reset the slave
+
+			config ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP
+				bool "Reset slave on every host boot-up"
+				help
+					Reset the slave device every time the host boots up. This ensures a clean
+					transport state and prevents any inconsistent states, but causes
+					the slave to reboot every time.
+
+			config ESP_HOSTED_SLAVE_RESET_ONLY_IF_NECESSARY
+				bool "Reset slave only if necessary"
+				depends on ESP_HOSTED_SDIO_HOST_INTERFACE
+				help
+					Only reset the slave if initialization fails. This reduces slave
+					reboots but assumes the slave interface is in a consistent state.
+					If initialization fails, the host will assume the slave is in an
+					inconsistent or deinitialized state and will reset it.
+					Note: This option is only available for SDIO transport.
+		endchoice
+
+		config ESP_HOSTED_HOST_RESTART_NO_COMMUNICATION_WITH_SLAVE
+			bool "Enable host auto-restart on communication failure"
+			depends on ESP_HOSTED_SLAVE_RESET_ONLY_IF_NECESSARY
+			default y
+			help
+				Enable host to automatically restart if it fails to establish communication with the slave.
+				When enabled, the host will reset itself to recover the connection if the slave
+				becomes non-responsive for the configured timeout period. This acts as a safeguard
+				in case the slave does not issue the first event on the transport line.
+
+		config ESP_HOSTED_HOST_RESTART_NO_COMMUNICATION_WITH_SLAVE_TIMEOUT
+			depends on ESP_HOSTED_HOST_RESTART_NO_COMMUNICATION_WITH_SLAVE
+			int "Communication failure timeout (seconds)"
+			default 5
+			help
+				Maximum time in seconds that the host will wait for a response from the slave
+				before triggering an automatic restart. If no communication is established within
+				this period, the host will reset itself to recover the connection.
+	endmenu
+
+	config ESP_HOSTED_GPIO_SLAVE_RESET_SLAVE
+			int
+			default ESP_HOSTED_SPI_GPIO_RESET_SLAVE if ESP_HOSTED_SPI_HOST_INTERFACE
+			default ESP_HOSTED_SDIO_GPIO_RESET_SLAVE if ESP_HOSTED_SDIO_HOST_INTERFACE
+			default ESP_HOSTED_SPI_HD_GPIO_RESET_SLAVE if ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default ESP_HOSTED_UART_GPIO_RESET_SLAVE if ESP_HOSTED_UART_HOST_INTERFACE
+
+	config ESP_HOSTED_RESET_GPIO_ACTIVE_LOW
+			bool
+			default n if ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH || ESP_HOSTED_SPI_RESET_ACTIVE_HIGH || ESP_HOSTED_SPI_HD_RESET_ACTIVE_HIGH || ESP_HOSTED_UART_RESET_ACTIVE_HIGH
+			default y if ESP_HOSTED_SDIO_RESET_ACTIVE_LOW || ESP_HOSTED_SPI_RESET_ACTIVE_LOW || ESP_HOSTED_SPI_HD_RESET_ACTIVE_LOW || ESP_HOSTED_UART_RESET_ACTIVE_LOW
+
+	menu "Bluetooth Support"
+
+		comment "Following options must be set before this option can be enabled"
+			depends on !BT_ENABLED || BT_CONTROLLER_ONLY || (BT_NIMBLE_ENABLED && (BT_NIMBLE_TRANSPORT_UART || BT_CONTROLLER_ENABLED)) || (BT_BLUEDROID_ENABLED && BT_CONTROLLER_ENABLED)
+
+		comment "'Component config->Bluetooth' must be enabled"
+			depends on !BT_ENABLED
+
+		comment "'Component config->Bluetooth->Host' must be enabled"
+			depends on BT_ENABLED && BT_CONTROLLER_ONLY
+
+		comment "'Component config->Bluetooth->Controller' must be disabled"
+			depends on BT_ENABLED && BT_CONTROLLER_ENABLED
+
+		comment "'Component config->Bluetooth->NimBLE Options->Host-controller Transport->Uart Transport' must be disabled"
+			depends on BT_NIMBLE_ENABLED && BT_NIMBLE_TRANSPORT_UART
+
+		if BT_ENABLED && BT_BLUEDROID_ENABLED && !BT_CONTROLLER_ENABLED
+			config ESP_HOSTED_ENABLE_BT_BLUEDROID
+				bool "Enable Hosted Bluedroid Bluetooth support"
+				default n
+				help
+					Enable Bluetooth Support for Bluedroid via Hosted
+
+			choice ESP_HOSTED_BLUEDROID_HCI_TYPE
+				bool "BT Bluedroid HCI Type"
+				default ESP_HOSTED_BLUEDROID_HCI_VHCI
+				depends on ESP_HOSTED_ENABLE_BT_BLUEDROID
+				help
+					Selects the HCI to use
+
+				config ESP_HOSTED_BLUEDROID_HCI_VHCI
+					bool "VHCI"
+					help
+						Bluetooth data is sent through the selected transport layer
+			endchoice
+		endif
+
+		if BT_ENABLED && BT_NIMBLE_ENABLED && !BT_CONTROLLER_ENABLED && !BT_NIMBLE_TRANSPORT_UART
+			config ESP_HOSTED_ENABLE_BT_NIMBLE
+				bool "Enable Hosted Nimble Bluetooth support"
+				default n
+				help
+					Enable Bluetooth Support via Hosted
+
+			choice ESP_HOSTED_NIMBLE_HCI_TYPE
+				bool "BT Nimble HCI Type"
+				default ESP_HOSTED_NIMBLE_HCI_VHCI
+				depends on ESP_HOSTED_ENABLE_BT_NIMBLE
+				help
+					Selects the HCI to use
+
+				config ESP_HOSTED_NIMBLE_HCI_VHCI
+					bool "VHCI"
+					help
+						Bluetooth data is sent through the selected transport layer
+			endchoice
+		endif
+	endmenu
+
+	menu "Task defaults"
+		config ESP_HOSTED_RPC_TASK_STACK
+			int "RPC task stack size"
+			default 4096
+
+		config ESP_HOSTED_DFLT_TASK_STACK
+			int "Hosted default task size"
+			default 3072
+
+		config ESP_HOSTED_DFLT_TASK_FROM_SPIRAM
+			bool "Hosted task stack from SPIRAM"
+			default n
+			help
+				When enabled, Hosted tasks would be allocated
+				from SPIRAM, instead of default internal RAM.
+
+	endmenu
+
+	config ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE
+		bool "Restart transport upon failure"
+		default y
+		help
+			When enabled, transport restarts the system when it encounters a failure.
+			Disable to custom handle the transport failure in application.
+			A transport failure will always be sent as an ESP_HOSTED_EVENT_TRANSPORT_FAILURE event, irrespective of the setting.
+
+	config ESP_HOSTED_MEM_MONITOR
+		bool "Enable Memory Monitor Interface"
+		default y
+		help
+			Enable the Memory Monitor Interface. Host can query co-processor to get
+			information on heap size or get an event when heap falls below a set threshold.
+
+	config ESP_HOSTED_ENABLE_ITWT
+		depends on ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool "Enable iTWT support"
+		depends on SLAVE_SOC_WIFI_HE_SUPPORT
+		default y
+		help
+			Enable Wi-Fi iTWT (individual Target Wake Time) APIs on Host. Using the API, Host
+			can instruct the co-processor to negotiate specific wake and sleep schedules with
+			the access point (AP) for lower power consumption.
+
+	config ESP_HOSTED_WIFI_AUTO_CONNECT_ON_STA_START
+		depends on ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool "Auto-connect WiFi at host on STA_START event"
+		default n
+		help
+			Automatically trigger WiFi connect from host when slave station starts.
+			Generally should be disabled to give application control over connection timing.
+			When disabled, application must explicitly call esp_wifi_connect() after
+			receiving WIFI_EVENT_STA_START event.
+
+	config ESP_HOSTED_ENABLE_GPIO_EXPANDER
+		bool "Enable GPIO Expander feature on host"
+		default n
+		help
+			Enable RPC methods that allow the HOST MCU to configure and control GPIOs
+			on the co-processor. Leave disabled unless you really need it.
+			GPIO requests that target pins used by the active transport will be rejected.
+			Note: ESP_HOSTED_ENABLE_GPIO_EXPANDER should also be enabled at co-processor to use this
+
+	config ESP_HOSTED_CP_EXT_COEX
+		bool "Co-Processor External Coexistence"
+		default n
+		help
+			Enable RPC methods to configure external coexistence GPIO pins on the
+			co-processor (slave). Call before esp_wifi_init(). GPIOs are on the
+			slave; used for C6-H2 external coex. Requires CONFIG_ESP_HOSTED_CP_EXT_COEX
+			and CONFIG_EXTERNAL_COEX_ENABLE on the co-processor.
+
+	config ESP_HOSTED_CP_EXT_COEX_ADVANCE
+		bool "Co-Processor External Coexistence - Advanced"
+		depends on ESP_HOSTED_CP_EXT_COEX
+		default n
+		help
+			Enable work mode, grant delay, and validate-high RPCs. Requires
+			SOC_EXTERNAL_COEX_ADVANCE support on the co-processor (e.g. ESP32-C6).
+
+	config ESP_HOSTED_ENABLE_DPP
+		depends on ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool "Enable Wi-Fi Easy Connect (DPP)"
+		default n
+		help
+			Enable Wi-Fi Easy Connect (DPP) support
+
+	config ESP_HOSTED_DPP_URI_LEN_MAX
+		int "Maximum length of URI used to generate QR code in Wi-Fi Easy Connect"
+		depends on ESP_HOSTED_ENABLE_DPP
+		default 255
+		help
+			URIs used to generate the QR code should be less than this length.
+			Increase this value if the received URI can be larger
+
+	menuconfig ESP_HOSTED_HOST_OT_ENABLE
+		depends on OPENTHREAD_ENABLED || ZB_ENABLED
+		bool "Enable OpenThread/Zigbee Host Support"
+		default n
+		help
+			"Enable OpenThread/Zigbee Host support. It will communicate with the OpenThread RCP on the co-processor"
+
+	if ESP_HOSTED_HOST_OT_ENABLE
+
+		if OPENTHREAD_ENABLED && !OPENTHREAD_FTD
+			comment "Full Thread Device must be selected:"
+			comment"   Component config → OpenThread → Thread Core Features"
+			comment"      → Thread device type → Full Thread Device"
+		endif
+
+		choice ESP_HOSTED_OT_INTERFACE
+			bool "OpenThread/Zigbee Transport"
+			default ESP_HOSTED_OT_TRANSPORT_UART
+			help
+				Transport used communicate with OpenThread RCP
+
+			config ESP_HOSTED_OT_TRANSPORT_HOSTED
+				bool "Use ESP-Hosted Transport"
+				help
+					Use ESP-Hosted transport to communicate with OpenThread Host
+
+			config ESP_HOSTED_OT_TRANSPORT_UART
+				bool "UART"
+				help
+					Use UART to communicate with OpenThread RCP
+		endchoice
+
+		if ESP_HOSTED_OT_TRANSPORT_UART
+
+		   comment " :warning: OpenThread UART port and Hosted UART transport port is same — pick a different UART port"
+      	   		   depends on ESP_HOSTED_UART_HOST_INTERFACE && ESP_HOSTED_OT_UART_PORT = ESP_HOSTED_UART_PORT
+
+			config ESP_HOSTED_OT_UART_PORT
+				int "UART Port to Use"
+				default 1
+				range 0 4 if IDF_TARGET_ESP32P4
+				range 0 1 if IDF_TARGET_ESP32H2
+				help
+					Select UART Port to Use. Do not select the UART Port used for console output (if enabled)
+
+			# GPIO that connects to the RCP Tx pins
+			config ESP_HOSTED_OT_PIN_TO_RCP_TX
+				int "Pin to RCP TX"
+				default 4
+				help
+					GPIO used to connect to Tx Pin on RCP
+
+			# GPIO that connects to the RCP Rx pins
+			config ESP_HOSTED_OT_PIN_TO_RCP_RX
+				int "Pin to RCP RX"
+				default 5
+				help
+					GPIO used to connect to Rx Pin on RCP
+
+			config ESP_HOSTED_OT_UART_BAUDRATE
+				int "Baud Rate"
+				default 460800
+				range 9600 3500000
+				help
+					Baud Rate to Use. Make sure Hardware supports the rate. Standard rates are 9600, 19200, 38400, 57600, 115200, 460800, 921600
+
+			choice ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS
+				bool "Number of Data Bits"
+				default ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_8
+				help
+					Number of Data Bits to use
+
+				config ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_5
+					bool "5 Bits"
+
+				config ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_6
+					bool "6 Bits"
+
+				config ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_7
+					bool "7 Bits"
+
+				config ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_8
+					bool "8 Bits"
+			endchoice
+
+			config ESP_HOSTED_OT_UART_NUM_DATA_BITS
+				int
+				default 0 if ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_5
+				default 1 if ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_6
+				default 2 if ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_7
+				default 3 if ESP_HOSTED_OT_UART_PRIV_NUM_DATA_BITS_8
+
+			choice ESP_HOSTED_OT_UART_PRIV_PARITY
+				bool "Parity"
+
+				config ESP_HOSTED_OT_UART_PRIV_PARITY_NONE
+					bool "None"
+
+				config ESP_HOSTED_OT_UART_PRIV_PARITY_EVEN
+					bool "Even"
+
+				config ESP_HOSTED_OT_UART_PRIV_PARITY_ODD
+					bool "Odd"
+			endchoice
+
+			config ESP_HOSTED_OT_UART_PARITY
+				int
+				default 0 if ESP_HOSTED_OT_UART_PRIV_PARITY_NONE
+				default 2 if ESP_HOSTED_OT_UART_PRIV_PARITY_EVEN
+				default 3 if ESP_HOSTED_OT_UART_PRIV_PARITY_ODD
+
+			choice ESP_HOSTED_OT_UART_PRIV_STOP_BITS
+				bool "Number of Stop Bits"
+
+				config ESP_HOSTED_OT_UART_PRIV_STOP_BITS_1
+					bool "1"
+
+				config ESP_HOSTED_OT_UART_PRIV_STOP_BITS_1_5
+					bool "1.5"
+
+				config ESP_HOSTED_OT_UART_PRIV_STOP_BITS_2
+					bool "2"
+			endchoice
+
+			config ESP_HOSTED_OT_UART_STOP_BITS
+				int
+				default 1 if ESP_HOSTED_OT_UART_PRIV_STOP_BITS_1
+				default 2 if ESP_HOSTED_OT_UART_PRIV_STOP_BITS_1_5
+				default 3 if ESP_HOSTED_OT_UART_PRIV_STOP_BITS_2
+
+		endif
+
+	endif
+
+	config ESP_HOSTED_USE_MEMPOOL
+		bool "Enable Mempool"
+		default y
+		help
+			Mempool will help to alloc buffer without going to heap for every memory allocation or free
+
+	config ESP_HOSTED_MEMPOOL_PREFER_SPIRAM
+		bool "Prefer SPIRAM for transport buffer allocations"
+		default n
+		depends on SPIRAM
+		help
+			When enabled, transport buffer allocations first try DMA-capable
+			SPIRAM and fall back to internal DMA-capable RAM on failure. This
+			preserves scarce internal RAM on targets where GDMA can reach
+			PSRAM through cache (e.g. ESP32-P4, ESP32-S3), which is useful
+			for memory-intensive workloads like sustained 1080p video
+			streaming. Leave disabled on targets without DMA-capable PSRAM
+			or when transport latency must be minimised.
+
+	config ESP_HOSTED_MAX_SIMULTANEOUS_SYNC_RPC_REQUESTS
+		int "Maximum number of simultaneous synchronous RPC Request"
+		default 5
+		help
+			Sets the maximum number of simultaneous synchronous RPC Requests.
+			(Synchronous RPC Request: each sending task waits for the response.)
+			Usually, the host application may send up to 3 simultaneous RPC requests to the slave.
+			Increase this number if you need to send more simultaneous RPC requests.
+			Note: the slave will only process one RPC request (sync and async) at a time
+
+	config ESP_HOSTED_MAX_SIMULTANEOUS_ASYNC_RPC_REQUESTS
+		int "Maximum number of simultaneous asynchronous RPC Request"
+		default 5
+		help
+			Sets the maximum number of simultaneous asynchronous RPC Requests.
+			(Asynchronous RPC Request: each sending task registers a callback to get the response.)
+			Usually, the host application may send up to 3 simultaneous RPC requests to the slave.
+			Increase this number if you need to send more simultaneous RPC requests.
+			Note: the slave will only process one RPC request (sync and async) at a time
+
+	config ESP_HOSTED_CLI_ENABLED
+		bool "Enable CLI Shell"
+		default y
+		help
+			Only registers ESP-Hosted cli commands to the existing CLI session opened earlier by other components than esp-hosted
+
+	config ESP_HOSTED_CLI_NEW_INSTANCE
+		depends on ESP_HOSTED_CLI_ENABLED
+		bool "Create new instance & do not reuse existing session if any"
+		default n
+		help
+			Starts a new CLI instance when enabled & registers esp hosted as well.
+			Refrain from enabling this option, if your example already creates cli session, for example, iperf example.
+
+	menu "Debug Settings"
+
+		config ESP_HOSTED_FW_VERSION_MISMATCH_WARNING_SUPPRESS
+			bool "Suppress firmware version mismatch warnings"
+			default n
+			help
+				Suppress warnings when host and co-processor firmware versions do not match.
+				By default, version mismatch warnings are shown during initialization.
+				Enable this option to suppress these warnings.
+
+		config ESP_HOSTED_RAW_THROUGHPUT_TRANSPORT
+			bool "RawTP: Transport level throughput debug test"
+			default n
+				help
+					Find max transport performance which helps to assess stability of porting done
+
+		choice ESP_HOSTED_RAW_THROUGHPUT_DIRECTION
+			bool "RawTP: Send data from:"
+			depends on ESP_HOSTED_RAW_THROUGHPUT_TRANSPORT
+
+			config ESP_HOSTED_RAW_THROUGHPUT_TX_TO_SLAVE
+				bool "Host to Slave"
+				help
+					Sends data from Host to Slave
+
+			config ESP_HOSTED_RAW_THROUGHPUT_RX_FROM_SLAVE
+				bool "Slave to Host"
+				help
+					Sends data from Slave to Slave
+
+			config ESP_HOSTED_RAW_THROUGHPUT_BIDIRECTIONAL
+				bool "Bidirectional"
+				help
+					Sends data in both directions
+		endchoice
+
+		config ESP_HOSTED_RAW_TP_HOST_TO_ESP_PKT_LEN
+			depends on ESP_HOSTED_RAW_THROUGHPUT_TRANSPORT
+			int "RawTP: Host to ESP packet size"
+			range 1 1500
+			default 1460
+
+		config ESP_HOSTED_RAW_TP_REPORT_INTERVAL
+			depends on ESP_HOSTED_RAW_THROUGHPUT_TRANSPORT
+			int "RawTP: periodic duration to report stats accumulated"
+			default 5
+
+		config ESP_HOSTED_PKT_STATS
+			bool "Transport level packet stats"
+			default n
+			help
+				On comparing with slave packet stats helps to understand any packet loss at hosted
+
+		config ESP_HOSTED_PKT_STATS_INTERVAL_SEC
+			depends on ESP_HOSTED_PKT_STATS
+			int "Packet stats reporting interval (sec)"
+			default 30
+
+	endmenu
+
+	menu "Data path options"
+		config ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE
+			bool "Report WiFi queue utilization to host"
+			default y
+			help
+				Proactively drop Host->slave Wi-Fi data when Slave Wi-Fi is under load
+				Slave Wi-Fi may drop ingress bursty or higher than capacity packets.
+				To have synchronous way of packet dropped for application,
+				Host will throttle incoming data if the slave datapath Rx load is high
+
+		config ESP_HOSTED_PRIV_WIFI_TX_SPI_HIGH_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE && ESP_HOSTED_SPI_HOST_INTERFACE
+			int "High threshold to report host to drop data when wifi highly loaded"
+			range 0 100
+			default 90
+			help
+				Host will throttle incoming data if the slave datapath Rx load goes beyond this threshold
+				0 value will disable this function
+
+		config ESP_HOSTED_PRIV_WIFI_TX_SDIO_HIGH_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE && ESP_HOSTED_SDIO_HOST_INTERFACE
+			int "High threshold to report host to drop data when wifi highly loaded"
+			range 0 100
+			default 80
+			help
+				Host will throttle incoming data if the slave datapath Rx load goes beyond this threshold
+				0 value will disable this function
+
+		config ESP_HOSTED_PRIV_WIFI_TX_SPI_HD_HIGH_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			int "High threshold to report host to drop data when wifi highly loaded"
+			range 0 100
+			default 80
+			help
+				Host will throttle incoming data if the slave datapath Rx load goes beyond this threshold
+				0 value will disable this function
+
+		config ESP_HOSTED_PRIV_WIFI_TX_UART_HIGH_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE && ESP_HOSTED_UART_HOST_INTERFACE
+			int "High threshold to report host to drop data when wifi highly loaded"
+			range 0 100
+			default 80
+			help
+				Host will throttle incoming data if the slave datapath Rx load goes beyond this threshold
+				0 value will disable this function
+
+		config ESP_HOSTED_TO_WIFI_DATA_THROTTLE_HIGH_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE
+			int
+			default ESP_HOSTED_PRIV_WIFI_TX_SPI_HIGH_THRESHOLD if ESP_HOSTED_SPI_HOST_INTERFACE
+			default ESP_HOSTED_PRIV_WIFI_TX_SDIO_HIGH_THRESHOLD if ESP_HOSTED_SDIO_HOST_INTERFACE
+			default ESP_HOSTED_PRIV_WIFI_TX_SPI_HD_HIGH_THRESHOLD if ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default ESP_HOSTED_PRIV_WIFI_TX_UART_HIGH_THRESHOLD if ESP_HOSTED_UART_HOST_INTERFACE
+
+		config ESP_HOSTED_TO_WIFI_DATA_THROTTLE_LOW_THRESHOLD
+			depends on ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE
+			int "Low threshold to report host to stop dropping data"
+			range 0 ESP_HOSTED_TO_WIFI_DATA_THROTTLE_HIGH_THRESHOLD
+			default 60
+			help
+				Once the Wi-Fi is no more stressed, data throttling would be stopped, once slave Wi-Fi load
+				is lower than this threshold
+	endmenu
+
+	config ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER
+		bool "Enable peer data transfer (custom RPC)"
+		default y
+		help
+			Enable peer data transfer to send/receive raw bytes between host and coprocessor.
+			This is enabled by default. Disable only if you don't need this feature.
+
+	config ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS
+		int "Maximum number of custom message handlers"
+		depends on ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER
+		range 1 32
+		default 3
+		help
+			Maximum number of concurrent custom message handlers that can be registered.
+			Each handler consumes ~12 bytes of RAM. Reduce this value to save memory
+			if you dont need many concurrent message types.
+
+	config ESP_HOSTED_DECODE_WIFI_RESERVED_FIELD
+		depends on ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool "Copy Wi-Fi configuration reserved field values"
+		default n
+		help
+			ESP-IDF Wi-Fi structures contain reserved bitmask values.
+			Enable this option if you want to copy these values between host and co-processor.
+			It is usually safe to ignore these reserved values.
+
+	config ESP_HOSTED_NETWORK_SPLIT_ENABLED
+		depends on ESP_HOSTED_PRIV_ENABLE_WIFI_OPTIONS
+		bool "Enable Network Split: Shared IP address between host and slave"
+		default n
+		help
+			Enables the LWIP stack on the slave to process its own set of ports,
+			alongside the host stack. Helps split network traffic and allows
+			background tasks on the slave, even when the host is in low-power mode.
+
+	menu "LWIP port config"
+		depends on ESP_HOSTED_NETWORK_SPLIT_ENABLED
+
+		menu "Host side (remote) LWIP port config"
+			config LWIP_TCP_LOCAL_PORT_RANGE_START
+				int "Host TCP start port"
+				default 49152
+				help
+					Host side TCP start port. Slave defaults to 61440
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_TCP_LOCAL_PORT_RANGE_END
+				int "Host TCP end port"
+				default 61439
+				help
+					Host side TCP end port. Slave defaults to 65535
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_UDP_LOCAL_PORT_RANGE_START
+				int "Host UDP start port"
+				default 49152
+				help
+					Host side UDP start port. Slave defaults to 61440
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_UDP_LOCAL_PORT_RANGE_END
+				int "Host UDP end port"
+				default 61439
+				help
+					Host side UDP end port. Slave defaults to 65535
+					Slave range: 61440-65535
+					Host range: 49152-61439
+		endmenu
+
+		menu "Slave side (remote) LWIP port config"
+			config LWIP_TCP_REMOTE_PORT_RANGE_START
+				int "Slave TCP start port"
+				default 61440
+				help
+					Slave side TCP start port. Host defaults to 49152
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_TCP_REMOTE_PORT_RANGE_END
+				int "Slave TCP end port"
+				default 65535
+				help
+					Slave side TCP end port. Host defaults to 61439
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_UDP_REMOTE_PORT_RANGE_START
+				int "Slave UDP start port"
+				default 61440
+				help
+					Slave side UDP start port. Host defaults to 49152
+					Slave range: 61440-65535
+					Host range: 49152-61439
+
+			config LWIP_UDP_REMOTE_PORT_RANGE_END
+				int "Slave UDP end port"
+				default 65535
+				help
+					Slave side UDP end port. Host defaults to 61439
+					Slave range: 61440-65535
+					Host range: 49152-61439
+		endmenu
+
+	endmenu
+
+	config ESP_HOSTED_HOST_POWER_SAVE_ENABLED
+		bool "Allow host to power save"
+		depends on SOC_LIGHT_SLEEP_SUPPORTED || (SOC_DEEP_SLEEP_SUPPORTED && SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP)
+		default n
+
+	config ESP_HOSTED_HOST_DEEP_SLEEP_ALLOWED
+		bool "Allow host to enter deep sleep. Slave will wakeup host using GPIO"
+		depends on ESP_HOSTED_HOST_POWER_SAVE_ENABLED && SOC_DEEP_SLEEP_SUPPORTED && (SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP || SOC_GPIO_SUPPORT_HP_PERIPH_PD_SLEEP_WAKEUP)
+		default y
+		help
+			Allow host to deep sleep for highest power saving. Only RTC memory and RTC GPIOs remain
+			powered during deep sleep. Slave will wake up host using a GPIO when needed. Host must
+			configure a valid RTC GPIO for wakeup. Deep sleep provides maximum power savings but has
+			longer wakeup time compared to light sleep.
+
+
+	menu "Host Power Save Configuration"
+		depends on ESP_HOSTED_HOST_DEEP_SLEEP_ALLOWED
+
+		config ESP_HOSTED_HOST_WAKEUP_GPIO_RANGE_MIN
+			int
+			default 6 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && !ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 6 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD && !ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 4 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 2 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 14 if ESP32P4_TAB5_C6_BOARD
+			default -1 if IDF_TARGET_ESP32P4
+			default -1
+
+		config ESP_HOSTED_HOST_WAKEUP_GPIO_RANGE_MAX
+			int
+			default 6 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && !ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 6 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD && !ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 4 if ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 2 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default 14 if ESP32P4_TAB5_C6_BOARD
+			default 15 if IDF_TARGET_ESP32P4
+			default 100
+
+		config ESP_HOSTED_HOST_WAKEUP_GPIO
+			int "Host in: Host Wakeup GPIO"
+			default 5 if C2_C5_MODULE_SUB_BOARD
+			default 14 if ESP32P4_TAB5_C6_BOARD
+			default 6 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && !ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default 4 if ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD && ESP_HOSTED_SPI_HD_HOST_INTERFACE
+			default -1 if (ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD || ESP32P4_EYE_C6_BOARD)
+			default 6 if IDF_TARGET_ESP32P4 && ESP_HOSTED_CP_TARGET_ESP32C5 && !ESP_HOSTED_P4_C5_CORE_BOARD
+			default 6 if IDF_TARGET_ESP32P4 && !ESP_HOSTED_CP_TARGET_ESP32C6 && !ESP_HOSTED_CP_TARGET_ESP32C5 && !ESP_HOSTED_CP_TARGET_ESP32C61
+			default 1 if IDF_TARGET_ESP32C3
+			default 2 if ESP_HOSTED_P4_C5_CORE_BOARD
+			default -1 if (ESP_HOSTED_P4_DEV_BOARD_NONE || ESP_HOSTED_P4_C6_CORE_BOARD || ESP_HOSTED_P4_C61_CORE_BOARD)
+			range ESP_HOSTED_HOST_WAKEUP_GPIO_RANGE_MIN ESP_HOSTED_HOST_WAKEUP_GPIO_RANGE_MAX
+			help
+				GPIO number to use for host wakeup from sleep.
+				Set to -1 to disable GPIO wakeup.
+				Only RTC GPIOs are supported for deep-sleep-wakeup.
+
+		choice PRIV_HOST_WAKEUP_GPIO_LEVEL
+			bool "Host Wakeup GPIO Level"
+			default PRIV_HOST_WAKEUP_GPIO_LEVEL_HIGH
+
+			config PRIV_HOST_WAKEUP_GPIO_LEVEL_HIGH
+				bool "High"
+			config PRIV_HOST_WAKEUP_GPIO_LEVEL_LOW
+				bool "Low"
+		endchoice
+
+		config ESP_HOSTED_HOST_WAKEUP_GPIO_LEVEL
+			int
+			default 1 if PRIV_HOST_WAKEUP_GPIO_LEVEL_HIGH
+			default 0 if PRIV_HOST_WAKEUP_GPIO_LEVEL_LOW
+			help
+				GPIO level to use for host wakeup from sleep.
+				Set to 0 to use low level, set to 1 to use high level.
+
+	endmenu
+
+	# Config Validation
+	if ESP_HOSTED_HOST_DEEP_SLEEP_ALLOWED
+			if !ESP_HOSTED_SDIO_HOST_INTERFACE && ESP_HOSTED_SLAVE_RESET_ONLY_IF_NECESSARY
+				comment "Error: Invalid configuration. Slave reset is mandatory for non SDIO transports"
+			endif
+
+			if ESP_HOSTED_HOST_WAKEUP_GPIO = -1
+				comment "Error: Host wake-up GPIO is mandatory"
+			endif
+
+			if ESP_HOSTED_SLAVE_RESET_ONLY_IF_NECESSARY && !ESP_HOSTED_HOST_RESTART_NO_COMMUNICATION_WITH_SLAVE
+				comment "Recommended to set up 'auto-restart of host' if communication with slave fails"
+			endif
+	endif
+
+endmenu

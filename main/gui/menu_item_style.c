@@ -85,11 +85,19 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     if (current_page >= page_count) current_page = page_count - 1;
 
     lv_obj_clean(indicator);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_size(indicator, LV_SIZE_CONTENT, 16);
+#else
     lv_obj_set_size(indicator, LV_SIZE_CONTENT, 10);
+#endif
     lv_obj_set_flex_flow(indicator, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(indicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(indicator, 0, LV_PART_MAIN);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_style_pad_column(indicator, 8, LV_PART_MAIN);
+#else
     lv_obj_set_style_pad_column(indicator, 4, LV_PART_MAIN);
+#endif
     lv_obj_set_style_bg_opa(indicator, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(indicator, 0, LV_PART_MAIN);
     lv_obj_clear_flag(indicator, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -97,7 +105,16 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     for (int page = 0; page < page_count; ++page) {
         bool selected = page == current_page;
         lv_obj_t *dot = lv_obj_create(indicator);
-        lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        /* The active page becomes a short pill. It reads more clearly at
+         * arm's length than a slightly larger dot on a 800px+ display. */
+        int dot_w = selected ? 26 : 8;
+        int dot_h = selected ? 10 : 8;
+#else
+        int dot_w = selected ? 6 : 4;
+        int dot_h = selected ? 6 : 4;
+#endif
+        lv_obj_set_size(dot, dot_w, dot_h);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
         lv_obj_set_style_bg_color(dot, selected ? active : inactive, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(dot, selected ? LV_OPA_COVER : LV_OPA_40, LV_PART_MAIN);

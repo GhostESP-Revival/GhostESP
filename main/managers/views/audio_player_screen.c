@@ -37,6 +37,11 @@ void audio_player_set_return_view(View *view) {
  * full-width bar with a centered Back button. Height matches
  * SCROLL_BTN_SIZE + 2*SCROLL_BTN_PADDING used by those views. */
 #define AUDIO_TOUCH_BAR_H 34
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#define AUDIO_BOTTOM_SAFE_H GUI_HOME_SAFE_H
+#else
+#define AUDIO_BOTTOM_SAFE_H AUDIO_TOUCH_BAR_H
+#endif
 
 /* The view has two full-screen sub-screens: a Library (track list) and a
  * dedicated Now Playing screen. Tapping a track opens Now Playing; its back
@@ -108,6 +113,7 @@ static void adjust_volume(int delta);
 static bool play_track_with_toast(int index);
 static bool change_track_with_toast(bool next);
 static bool point_in_obj(lv_obj_t *obj, int x, int y);
+static lv_obj_t *make_round_btn(lv_obj_t *parent, int w, int h, const char *sym, lv_color_t txt);
 
 static void refresh_theme_colors(void)
 {
@@ -309,7 +315,13 @@ static void create_file_list(void)
         lv_obj_t *btn = lv_btn_create(s_file_list);
         gui_apply_pressed_style(btn);
         lv_obj_set_width(btn, LV_PCT(100));
-        lv_obj_set_height(btn, LV_VER_RES <= 160 ? 30 : 34);
+        lv_obj_set_height(btn,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                          LV_VER_RES >= 400 ? 56 : 44
+#else
+                          LV_VER_RES <= 160 ? 30 : 34
+#endif
+        );
         style_track_row(btn, selected, playing);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 
@@ -324,10 +336,28 @@ static void create_file_list(void)
         lv_obj_t *lbl = lv_label_create(btn);
         lv_label_set_text(lbl, fname);
         lv_obj_set_style_text_color(lbl, playing ? s_accent_color : (selected ? s_text_color : s_dim_color), 0);
-        lv_obj_set_style_text_font(lbl, accessibility_get_font_small(), 0);
+        lv_obj_set_style_text_font(lbl,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                                    accessibility_get_font_body(),
+#else
+                                    accessibility_get_font_small(),
+#endif
+                                    0);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(lbl, LV_HOR_RES - 92);
-        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 34, 0);
+        lv_obj_set_width(lbl,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                         ((LV_HOR_RES * 43) / 100) - 112
+#else
+                         LV_HOR_RES - 92
+#endif
+        );
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                     46,
+#else
+                     34,
+#endif
+                     0);
 
         lv_obj_t *badge = lv_label_create(btn);
         lv_label_set_text(badge, playing ? (state == AUDIO_STREAM_STATE_PAUSED ? "PAUSE" : "PLAY") : (selected ? "SEL" : ""));
@@ -530,16 +560,30 @@ static void audio_player_go_back(void)
 static void show_library(void)
 {
     s_screen = SCREEN_LIBRARY;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    /* The P4 keeps both panes alive. This call only changes keyboard/joystick
+     * focus; the library remains available while a track is playing. */
+    update_file_list_selection();
+    return;
+#else
     if (s_np_cont) lv_obj_add_flag(s_np_cont, LV_OBJ_FLAG_HIDDEN);
     if (s_library_cont) lv_obj_clear_flag(s_library_cont, LV_OBJ_FLAG_HIDDEN);
     update_file_list_selection();
+#endif
 }
 
 static void show_nowplaying(void)
 {
     s_screen = SCREEN_NOWPLAYING;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    /* Split view: the player pane is always present, so selecting a track
+     * never causes the library to disappear. */
+    if (s_library_cont) lv_obj_clear_flag(s_library_cont, LV_OBJ_FLAG_HIDDEN);
+    if (s_np_cont) lv_obj_clear_flag(s_np_cont, LV_OBJ_FLAG_HIDDEN);
+#else
     if (s_library_cont) lv_obj_add_flag(s_library_cont, LV_OBJ_FLAG_HIDDEN);
     if (s_np_cont) lv_obj_clear_flag(s_np_cont, LV_OBJ_FLAG_HIDDEN);
+#endif
     update_volume_ui();
     audio_player_update_status();
 }
@@ -565,7 +609,7 @@ static lv_obj_t *make_round_btn(lv_obj_t *parent, int w, int h, const char *sym,
  * which case hardware back input still works as usual). */
 static lv_obj_t *create_touch_bar(lv_obj_t *parent)
 {
-#ifdef CONFIG_USE_TOUCHSCREEN
+#if defined(CONFIG_USE_TOUCHSCREEN) && GUI_LEGACY_TOUCH_BAR
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_remove_style_all(bar);
     lv_obj_set_size(bar, LV_HOR_RES, AUDIO_TOUCH_BAR_H);
@@ -596,16 +640,37 @@ static lv_obj_t *create_touch_bar(lv_obj_t *parent)
 static void build_library(int status_bar_h)
 {
     int screen_h = LV_VER_RES - status_bar_h;
-    int header_h = 30;
-    int list_h = screen_h - header_h - AUDIO_TOUCH_BAR_H - 6;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    const lv_coord_t panel_x = 24;
+    const lv_coord_t panel_w = (LV_HOR_RES * 43) / 100;
+#endif
+    int header_h =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                    64;
+#else
+                    30;
+#endif
+    int list_h = screen_h - header_h - AUDIO_BOTTOM_SAFE_H - 6;
 
     s_library_cont = lv_obj_create(s_root);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_size(s_library_cont, panel_w, screen_h);
+    lv_obj_set_pos(s_library_cont, panel_x, status_bar_h);
+    lv_obj_set_style_bg_color(s_library_cont, s_surface_color, 0);
+    lv_obj_set_style_bg_opa(s_library_cont, LV_OPA_70, 0);
+    lv_obj_set_style_radius(s_library_cont, GUI_RADIUS_MD, 0);
+#else
     lv_obj_set_size(s_library_cont, LV_PCT(100), screen_h);
     lv_obj_align(s_library_cont, LV_ALIGN_TOP_MID, 0, status_bar_h);
+#endif
     lv_obj_set_style_bg_opa(s_library_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_library_cont, 0, 0);
     lv_obj_set_style_pad_all(s_library_cont, 0, 0);
     lv_obj_clear_flag(s_library_cont, LV_OBJ_FLAG_SCROLLABLE);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_style_bg_color(s_library_cont, s_surface_color, 0);
+    lv_obj_set_style_bg_opa(s_library_cont, LV_OPA_70, 0);
+#endif
 
     /* Header: count + title */
 
@@ -618,16 +683,49 @@ static void build_library(int status_bar_h)
     lv_obj_t *title = lv_label_create(s_library_cont);
     lv_label_set_text(title, "Library");
     lv_obj_set_style_text_color(title, s_text_color, 0);
-    lv_obj_set_style_text_font(title, accessibility_get_font_small(), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_style_text_font(title,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                               accessibility_get_font_title(),
+#else
+                               accessibility_get_font_small(),
+#endif
+                               0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                 78,
+#else
+                 0,
+#endif
+                 8);
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_t *library_hint = create_label(s_library_cont, "Tap a track to play", accessibility_get_font_small(), s_dim_color);
+    lv_obj_align(library_hint, LV_ALIGN_TOP_LEFT, 78, 36);
+
+    /* Keep a visible, thumb-friendly escape hatch in addition to the P4 edge
+     * back gesture. This is especially useful when the library has focus and
+     * makes the split view feel like a real two-pane app. */
+    s_lib_back_btn = make_round_btn(s_library_cont, 48, 36, LV_SYMBOL_LEFT, s_dim_color);
+    lv_obj_set_pos(s_lib_back_btn, 16, 8);
+#endif
 
     /* File list */
     s_file_list = lv_obj_create(s_library_cont);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_size(s_file_list, panel_w - 16, list_h);
+#else
     lv_obj_set_size(s_file_list, LV_HOR_RES - 8, list_h);
+#endif
     lv_obj_align(s_file_list, LV_ALIGN_TOP_MID, 0, header_h);
     lv_obj_set_style_bg_opa(s_file_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_file_list, 0, 0);
-    lv_obj_set_style_pad_all(s_file_list, 4, 0);
+    lv_obj_set_style_pad_all(s_file_list,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                             8,
+#else
+                             4,
+#endif
+                             0);
     lv_obj_set_flex_flow(s_file_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_file_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(s_file_list, LV_SCROLLBAR_MODE_AUTO);
@@ -638,28 +736,56 @@ static void build_library(int status_bar_h)
     create_file_list();
     update_list_hint();
 
-    /* Bottom touch bar: Back exits the whole view (same as other views). */
+    /* Bottom touch bar: Back exits the whole view on legacy displays. The P4
+     * uses the header escape button plus its system edge gesture. */
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
     s_lib_back_btn = create_touch_bar(s_library_cont);
+#endif
 }
 
-static void build_nowplaying(int status_bar_h)
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
+static void build_nowplaying_standard(int status_bar_h)
 {
     int screen_h = LV_VER_RES - status_bar_h;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    const lv_coord_t player_x = 24 + ((LV_HOR_RES * 43) / 100) + 16;
+    const lv_coord_t player_w = LV_HOR_RES - player_x - 24;
+#endif
 
     s_np_cont = lv_obj_create(s_root);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_size(s_np_cont, player_w, screen_h);
+    lv_obj_set_pos(s_np_cont, player_x, status_bar_h);
+    lv_obj_set_style_bg_color(s_np_cont, s_surface_color, 0);
+    lv_obj_set_style_bg_opa(s_np_cont, LV_OPA_70, 0);
+    lv_obj_set_style_radius(s_np_cont, GUI_RADIUS_MD, 0);
+#else
     lv_obj_set_size(s_np_cont, LV_PCT(100), screen_h);
     lv_obj_align(s_np_cont, LV_ALIGN_TOP_MID, 0, status_bar_h);
+#endif
     lv_obj_set_style_bg_opa(s_np_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_np_cont, 0, 0);
     lv_obj_set_style_pad_all(s_np_cont, 0, 0);
     lv_obj_clear_flag(s_np_cont, LV_OBJ_FLAG_SCROLLABLE);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_obj_set_style_bg_color(s_np_cont, s_surface_color, 0);
+    lv_obj_set_style_bg_opa(s_np_cont, LV_OPA_70, 0);
+#endif
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
     lv_obj_add_flag(s_np_cont, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     /* Track title */
     s_np_title = lv_label_create(s_np_cont);
     lv_obj_set_style_text_color(s_np_title, s_text_color, 0);
     lv_obj_set_style_text_font(s_np_title, accessibility_get_font_title(), 0);
-    lv_obj_set_width(s_np_title, LV_HOR_RES - 100);
+    lv_obj_set_width(s_np_title,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                     player_w - 48
+#else
+                     LV_HOR_RES - 100
+#endif
+    );
     lv_obj_set_style_text_align(s_np_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_align(s_np_title, LV_ALIGN_TOP_MID, 0, 4);
@@ -669,7 +795,13 @@ static void build_nowplaying(int status_bar_h)
     s_meta_label = lv_label_create(s_np_cont);
     lv_obj_set_style_text_color(s_meta_label, s_dim_color, 0);
     lv_obj_set_style_text_font(s_meta_label, accessibility_get_font_small(), 0);
-    lv_obj_set_width(s_meta_label, LV_HOR_RES - 24);
+    lv_obj_set_width(s_meta_label,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                     player_w - 32
+#else
+                     LV_HOR_RES - 24
+#endif
+    );
     lv_obj_set_style_text_align(s_meta_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_meta_label, LV_LABEL_LONG_DOT);
     lv_obj_align(s_meta_label, LV_ALIGN_TOP_MID, 0, 34);
@@ -677,7 +809,13 @@ static void build_nowplaying(int status_bar_h)
 
     /* Progress bar */
     s_progress_track = lv_obj_create(s_np_cont);
-    lv_obj_set_size(s_progress_track, LV_HOR_RES - 24, 8);
+    lv_obj_set_size(s_progress_track,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                    player_w - 32,
+#else
+                    LV_HOR_RES - 24,
+#endif
+                    8);
     lv_obj_align(s_progress_track, LV_ALIGN_TOP_MID, 0, 54);
     lv_obj_set_style_bg_color(s_progress_track, s_surface_alt_color, 0);
     lv_obj_set_style_bg_opa(s_progress_track, LV_OPA_COVER, 0);
@@ -699,44 +837,106 @@ static void build_nowplaying(int status_bar_h)
     s_time_label = lv_label_create(s_np_cont);
     lv_obj_set_style_text_color(s_time_label, s_dim_color, 0);
     lv_obj_set_style_text_font(s_time_label, accessibility_get_font_small(), 0);
-    lv_obj_set_width(s_time_label, LV_HOR_RES - 24);
+    lv_obj_set_width(s_time_label,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                     player_w - 32
+#else
+                     LV_HOR_RES - 24
+#endif
+    );
     lv_obj_set_style_text_align(s_time_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_time_label, LV_ALIGN_TOP_MID, 0, 66);
     lv_label_set_text(s_time_label, "0:00 / 0:00");
 
     /* Transport row */
-    int transport_y = 88;
-    int btn_h = (screen_h > 200) ? 42 : 34;
-    s_prev_btn = make_round_btn(s_np_cont, 56, btn_h, LV_SYMBOL_PREV, s_accent_color);
-    lv_obj_align(s_prev_btn, LV_ALIGN_TOP_MID, -84, transport_y);
+    int transport_y =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                      (screen_h >= 400) ? 112 : 96;
+#else
+                      88;
+#endif
+    int btn_h =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                  (screen_h >= 400) ? 56 : 46;
+#else
+                  (screen_h > 200) ? 42 : 34;
+#endif
+    int transport_gap =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                       (player_w >= 420) ? 118 : 92;
+#else
+                       84;
+#endif
+    int side_btn_w =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                   (screen_h >= 400) ? 72 : 60;
+#else
+                   56;
+#endif
+    int play_btn_w =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                   (screen_h >= 400) ? 82 : 68;
+#else
+                   64;
+#endif
+    s_prev_btn = make_round_btn(s_np_cont, side_btn_w, btn_h, LV_SYMBOL_PREV, s_accent_color);
+    lv_obj_align(s_prev_btn, LV_ALIGN_TOP_MID, -transport_gap, transport_y);
 
-    s_play_btn = make_round_btn(s_np_cont, 64, btn_h, LV_SYMBOL_PLAY, s_accent_color);
+    s_play_btn = make_round_btn(s_np_cont, play_btn_w, btn_h, LV_SYMBOL_PLAY, s_accent_color);
     lv_obj_align(s_play_btn, LV_ALIGN_TOP_MID, 0, transport_y);
 
-    s_pause_btn = make_round_btn(s_np_cont, 64, btn_h, LV_SYMBOL_PAUSE, s_accent_color);
+    s_pause_btn = make_round_btn(s_np_cont, play_btn_w, btn_h, LV_SYMBOL_PAUSE, s_accent_color);
     lv_obj_align(s_pause_btn, LV_ALIGN_TOP_MID, 0, transport_y);
     lv_obj_add_flag(s_pause_btn, LV_OBJ_FLAG_HIDDEN);
 
-    s_next_btn = make_round_btn(s_np_cont, 56, btn_h, LV_SYMBOL_NEXT, s_accent_color);
-    lv_obj_align(s_next_btn, LV_ALIGN_TOP_MID, 84, transport_y);
+    s_next_btn = make_round_btn(s_np_cont, side_btn_w, btn_h, LV_SYMBOL_NEXT, s_accent_color);
+    lv_obj_align(s_next_btn, LV_ALIGN_TOP_MID, transport_gap, transport_y);
 
     /* Volume row: [-]  [====slider====]  [+] with label above.
      * Anchored above the bottom touch bar. */
     s_volume_label = lv_label_create(s_np_cont);
     lv_obj_set_style_text_color(s_volume_label, s_dim_color, 0);
     lv_obj_set_style_text_font(s_volume_label, accessibility_get_font_small(), 0);
-    lv_obj_align(s_volume_label, LV_ALIGN_BOTTOM_MID, 0, -(AUDIO_TOUCH_BAR_H + 40));
+    lv_obj_align(s_volume_label, LV_ALIGN_BOTTOM_MID, 0, -(AUDIO_BOTTOM_SAFE_H + 40));
     lv_label_set_text(s_volume_label, "Vol 85%");
 
-    s_vol_minus_btn = make_round_btn(s_np_cont, 40, 30, LV_SYMBOL_MINUS, s_text_color);
-    lv_obj_align(s_vol_minus_btn, LV_ALIGN_BOTTOM_LEFT, 6, -(AUDIO_TOUCH_BAR_H + 6));
+    int volume_btn_w =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                      (player_w >= 420) ? 56 : 44;
+#else
+                      40;
+#endif
+    int volume_btn_h =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                      (LV_VER_RES >= 400) ? 42 : 34;
+#else
+                      30;
+#endif
+    s_vol_minus_btn = make_round_btn(s_np_cont, volume_btn_w, volume_btn_h, LV_SYMBOL_MINUS, s_text_color);
+    lv_obj_align(s_vol_minus_btn, LV_ALIGN_BOTTOM_LEFT, 10, -(AUDIO_BOTTOM_SAFE_H + 6));
 
-    s_vol_plus_btn = make_round_btn(s_np_cont, 40, 30, LV_SYMBOL_PLUS, s_text_color);
-    lv_obj_align(s_vol_plus_btn, LV_ALIGN_BOTTOM_RIGHT, -6, -(AUDIO_TOUCH_BAR_H + 6));
+    s_vol_plus_btn = make_round_btn(s_np_cont, volume_btn_w, volume_btn_h, LV_SYMBOL_PLUS, s_text_color);
+    lv_obj_align(s_vol_plus_btn, LV_ALIGN_BOTTOM_RIGHT, -10, -(AUDIO_BOTTOM_SAFE_H + 6));
 
     s_vol_track = lv_obj_create(s_np_cont);
-    lv_obj_set_size(s_vol_track, LV_HOR_RES - 8 - 2 * (40 + 12), 12);
-    lv_obj_align(s_vol_track, LV_ALIGN_BOTTOM_MID, 0, -(AUDIO_TOUCH_BAR_H + 15));
+    lv_coord_t volume_track_w =
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                                player_w - 2 * (volume_btn_w + 28);
+#else
+                                LV_HOR_RES - 2 * (volume_btn_w + 28);
+#endif
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (volume_track_w > 520) volume_track_w = 520;
+#endif
+    if (volume_track_w < 80) volume_track_w = 80;
+    lv_obj_set_size(s_vol_track, volume_track_w,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                    16
+#else
+                    12
+#endif
+    );
+    lv_obj_align(s_vol_track, LV_ALIGN_BOTTOM_MID, 0, -(AUDIO_BOTTOM_SAFE_H + 15));
     lv_obj_set_style_bg_color(s_vol_track, s_surface_alt_color, 0);
     lv_obj_set_style_bg_opa(s_vol_track, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_vol_track, 6, 0);
@@ -745,7 +945,7 @@ static void build_nowplaying(int status_bar_h)
     lv_obj_clear_flag(s_vol_track, LV_OBJ_FLAG_SCROLLABLE);
 
     s_vol_fill = lv_obj_create(s_vol_track);
-    lv_obj_set_size(s_vol_fill, 0, 12);
+    lv_obj_set_size(s_vol_fill, 0, lv_obj_get_height(s_vol_track));
     lv_obj_align(s_vol_fill, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_bg_color(s_vol_fill, s_accent_color, 0);
     lv_obj_set_style_bg_opa(s_vol_fill, LV_OPA_COVER, 0);
@@ -754,10 +954,211 @@ static void build_nowplaying(int status_bar_h)
     lv_obj_set_style_pad_all(s_vol_fill, 0, 0);
     lv_obj_clear_flag(s_vol_fill, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Bottom touch bar: Back returns to the library (same as other views'
-     * sub-screen back handling; the library's Back exits the view). */
+    /* Bottom touch bar: Back returns to the library on small devices. The P4
+     * uses the system edge gesture/home indicator instead. */
     s_np_back_btn = create_touch_bar(s_np_cont);
 }
+
+static void build_nowplaying(int status_bar_h)
+{
+    build_nowplaying_standard(status_bar_h);
+}
+
+#else /* CONFIG_CROWPANEL_ADVANCED_P4 */
+
+LV_IMG_DECLARE(speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48);
+
+/* The 1024x600 P4 has enough room for a real player composition. Keep the
+ * visual hierarchy horizontal so the controls never collapse into a narrow
+ * vertical stack as the library remains visible beside it. */
+static void build_nowplaying_p4(int status_bar_h)
+{
+    const lv_coord_t screen_h = LV_VER_RES - status_bar_h;
+    const lv_coord_t panel_x = 24 + ((LV_HOR_RES * 43) / 100) + 16;
+    const lv_coord_t panel_w = LV_HOR_RES - panel_x - 24;
+    const lv_coord_t pad = 24;
+    const lv_coord_t content_w = panel_w - (pad * 2);
+    const lv_coord_t art_size = content_w >= 430 ? 208 : (content_w >= 360 ? 176 : 148);
+    const lv_coord_t gap = 20;
+    const lv_coord_t info_x = pad + art_size + gap;
+    const lv_coord_t info_w = content_w - art_size - gap;
+
+    s_np_cont = lv_obj_create(s_root);
+    lv_obj_set_size(s_np_cont, panel_w, screen_h);
+    lv_obj_set_pos(s_np_cont, panel_x, status_bar_h);
+    lv_obj_set_style_bg_color(s_np_cont, s_surface_color, 0);
+    lv_obj_set_style_bg_opa(s_np_cont, LV_OPA_90, 0);
+    lv_obj_set_style_radius(s_np_cont, GUI_RADIUS_MD, 0);
+    lv_obj_set_style_border_color(s_np_cont, s_surface_alt_color, 0);
+    lv_obj_set_style_border_width(s_np_cont, 1, 0);
+    lv_obj_set_style_pad_all(s_np_cont, 0, 0);
+    lv_obj_clear_flag(s_np_cont, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *eyebrow = create_label(s_np_cont, "NOW PLAYING", accessibility_get_font_small(), s_accent_color);
+    lv_obj_set_pos(eyebrow, pad, 18);
+
+    char queue_text[24];
+    snprintf(queue_text, sizeof(queue_text), "%d tracks", audio_stream_manager_get_file_count());
+    lv_obj_t *queue = create_label(s_np_cont, queue_text, accessibility_get_font_small(), s_dim_color);
+    lv_obj_align(queue, LV_ALIGN_TOP_RIGHT, -pad, 18);
+
+    /* A proper artwork surface gives the selected track a visual anchor even
+     * when the MP3 has no embedded album art available to the firmware. */
+    lv_obj_t *art = lv_obj_create(s_np_cont);
+    lv_obj_set_size(art, art_size, art_size);
+    lv_obj_set_pos(art, pad, 58);
+    lv_obj_set_style_bg_color(art, s_surface_alt_color, 0);
+    lv_obj_set_style_bg_opa(art, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(art, s_accent_color, 0);
+    lv_obj_set_style_border_width(art, 2, 0);
+    lv_obj_set_style_radius(art, GUI_RADIUS_LG, 0);
+    lv_obj_set_style_shadow_width(art, 18, 0);
+    lv_obj_set_style_shadow_opa(art, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_color(art, s_accent_color, 0);
+    lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *art_glow = lv_obj_create(art);
+    lv_obj_set_size(art_glow, art_size - 28, art_size - 28);
+    lv_obj_center(art_glow);
+    lv_obj_set_style_bg_color(art_glow, s_accent_color, 0);
+    lv_obj_set_style_bg_opa(art_glow, LV_OPA_20, 0);
+    lv_obj_set_style_radius(art_glow, GUI_RADIUS_MD, 0);
+    lv_obj_set_style_border_width(art_glow, 0, 0);
+    lv_obj_clear_flag(art_glow, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *art_icon = lv_img_create(art);
+    lv_img_set_src(art_icon, &speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48);
+    lv_obj_set_style_img_recolor(art_icon, s_accent_color, 0);
+    lv_obj_set_style_img_recolor_opa(art_icon, LV_OPA_COVER, 0);
+    lv_img_set_zoom(art_icon, art_size >= 190 ? 640 : 512);
+    lv_obj_center(art_icon);
+
+    lv_obj_t *art_caption = create_label(art, "AUDIO", accessibility_get_font_small(), s_dim_color);
+    lv_obj_align(art_caption, LV_ALIGN_BOTTOM_MID, 0, -12);
+
+    /* Track identity and status live beside the artwork instead of competing
+     * with the transport controls for the same vertical pixels. */
+    s_np_title = lv_label_create(s_np_cont);
+    lv_obj_set_style_text_color(s_np_title, s_text_color, 0);
+    lv_obj_set_style_text_font(s_np_title, accessibility_get_font_title(), 0);
+    lv_obj_set_width(s_np_title, info_w);
+    lv_obj_set_style_text_align(s_np_title, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(s_np_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(s_np_title, info_x, 62);
+    lv_label_set_text(s_np_title, "Ready");
+
+    s_meta_label = lv_label_create(s_np_cont);
+    lv_obj_set_style_text_color(s_meta_label, s_dim_color, 0);
+    lv_obj_set_style_text_font(s_meta_label, accessibility_get_font_small(), 0);
+    lv_obj_set_width(s_meta_label, info_w);
+    lv_obj_set_style_text_align(s_meta_label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(s_meta_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(s_meta_label, info_x, 98);
+    lv_label_set_text(s_meta_label, "Stopped");
+
+    lv_obj_t *state_line = lv_obj_create(s_np_cont);
+    lv_obj_set_size(state_line, info_w, 2);
+    lv_obj_set_pos(state_line, info_x, 128);
+    lv_obj_set_style_bg_color(state_line, s_surface_alt_color, 0);
+    lv_obj_set_style_bg_opa(state_line, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(state_line, 0, 0);
+
+    s_progress_track = lv_obj_create(s_np_cont);
+    lv_obj_set_size(s_progress_track, info_w, 10);
+    lv_obj_set_pos(s_progress_track, info_x, 158);
+    lv_obj_set_style_bg_color(s_progress_track, s_surface_alt_color, 0);
+    lv_obj_set_style_bg_opa(s_progress_track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_progress_track, 5, 0);
+    lv_obj_set_style_border_width(s_progress_track, 0, 0);
+    lv_obj_set_style_pad_all(s_progress_track, 0, 0);
+    lv_obj_clear_flag(s_progress_track, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_progress_fill = lv_obj_create(s_progress_track);
+    lv_obj_set_size(s_progress_fill, 0, 10);
+    lv_obj_align(s_progress_fill, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_progress_fill, s_accent_color, 0);
+    lv_obj_set_style_bg_opa(s_progress_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_progress_fill, 5, 0);
+    lv_obj_set_style_border_width(s_progress_fill, 0, 0);
+    lv_obj_set_style_pad_all(s_progress_fill, 0, 0);
+    lv_obj_clear_flag(s_progress_fill, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_time_label = lv_label_create(s_np_cont);
+    lv_obj_set_style_text_color(s_time_label, s_dim_color, 0);
+    lv_obj_set_style_text_font(s_time_label, accessibility_get_font_small(), 0);
+    lv_obj_set_width(s_time_label, info_w);
+    lv_obj_set_style_text_align(s_time_label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_pos(s_time_label, info_x, 178);
+    lv_label_set_text(s_time_label, "0:00 / 0:00");
+
+    const lv_coord_t transport_y = 222;
+    const lv_coord_t transport_h = 58;
+    const lv_coord_t side_w = info_w >= 220 ? 56 : 48;
+    const lv_coord_t play_w = info_w >= 220 ? 70 : 60;
+    const lv_coord_t transport_gap = info_w >= 220 ? 14 : 8;
+    const lv_coord_t transport_w = (side_w * 2) + play_w + (transport_gap * 2);
+    const lv_coord_t transport_x = info_x + ((info_w - transport_w) / 2);
+
+    s_prev_btn = make_round_btn(s_np_cont, side_w, transport_h, LV_SYMBOL_PREV, s_accent_color);
+    lv_obj_set_pos(s_prev_btn, transport_x, transport_y);
+
+    s_play_btn = make_round_btn(s_np_cont, play_w, transport_h, LV_SYMBOL_PLAY, s_accent_color);
+    lv_obj_set_pos(s_play_btn, transport_x + side_w + transport_gap, transport_y);
+
+    s_pause_btn = make_round_btn(s_np_cont, play_w, transport_h, LV_SYMBOL_PAUSE, s_accent_color);
+    lv_obj_set_pos(s_pause_btn, transport_x + side_w + transport_gap, transport_y);
+    lv_obj_add_flag(s_pause_btn, LV_OBJ_FLAG_HIDDEN);
+
+    s_next_btn = make_round_btn(s_np_cont, side_w, transport_h, LV_SYMBOL_NEXT, s_accent_color);
+    lv_obj_set_pos(s_next_btn, transport_x + side_w + transport_gap + play_w + transport_gap, transport_y);
+
+    /* Volume is a full-width, thumb-friendly control in the footer. The
+     * bottom safe area is reserved for the P4 home indicator/edge gesture. */
+    const lv_coord_t footer_y = screen_h - AUDIO_BOTTOM_SAFE_H - 72;
+    s_volume_label = lv_label_create(s_np_cont);
+    lv_obj_set_style_text_color(s_volume_label, s_dim_color, 0);
+    lv_obj_set_style_text_font(s_volume_label, accessibility_get_font_small(), 0);
+    lv_obj_set_pos(s_volume_label, pad, footer_y);
+    lv_label_set_text(s_volume_label, "Vol 85%");
+
+    const lv_coord_t volume_btn_w = 50;
+    const lv_coord_t volume_btn_h = 44;
+    s_vol_minus_btn = make_round_btn(s_np_cont, volume_btn_w, volume_btn_h, LV_SYMBOL_MINUS, s_text_color);
+    lv_obj_set_pos(s_vol_minus_btn, pad, footer_y + 24);
+
+    s_vol_plus_btn = make_round_btn(s_np_cont, volume_btn_w, volume_btn_h, LV_SYMBOL_PLUS, s_text_color);
+    lv_obj_set_pos(s_vol_plus_btn, panel_w - pad - volume_btn_w, footer_y + 24);
+
+    const lv_coord_t volume_track_w = content_w - (volume_btn_w * 2) - 24;
+    s_vol_track = lv_obj_create(s_np_cont);
+    lv_obj_set_size(s_vol_track, volume_track_w, 16);
+    lv_obj_set_pos(s_vol_track, pad + volume_btn_w + 12, footer_y + 38);
+    lv_obj_set_style_bg_color(s_vol_track, s_surface_alt_color, 0);
+    lv_obj_set_style_bg_opa(s_vol_track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_vol_track, 8, 0);
+    lv_obj_set_style_border_width(s_vol_track, 0, 0);
+    lv_obj_set_style_pad_all(s_vol_track, 0, 0);
+    lv_obj_clear_flag(s_vol_track, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_vol_fill = lv_obj_create(s_vol_track);
+    lv_obj_set_size(s_vol_fill, 0, 16);
+    lv_obj_align(s_vol_fill, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_vol_fill, s_accent_color, 0);
+    lv_obj_set_style_bg_opa(s_vol_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_vol_fill, 8, 0);
+    lv_obj_set_style_border_width(s_vol_fill, 0, 0);
+    lv_obj_set_style_pad_all(s_vol_fill, 0, 0);
+    lv_obj_clear_flag(s_vol_fill, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_np_back_btn = NULL;
+}
+
+static void build_nowplaying(int status_bar_h)
+{
+    build_nowplaying_p4(status_bar_h);
+}
+
+#endif /* CONFIG_CROWPANEL_ADVANCED_P4 */
 
 void audio_player_create(void)
 {
@@ -945,8 +1346,9 @@ static void audio_player_input_handler(InputEvent *event)
                 set_volume_from_x((int)d->point.x);
                 return;
             }
-            /* Live list drag (library only) */
-            if (s_screen == SCREEN_LIBRARY && s_file_list && lv_obj_is_valid(s_file_list)) {
+            /* Live list drag. On P4 this is selected by the original touch
+             * region because both library and player remain visible. */
+            if (s_file_list && lv_obj_is_valid(s_file_list)) {
                 lv_area_t list_area;
                 lv_obj_get_coords(s_file_list, &list_area);
                 bool started_in_list = (s_touch_drag.start_x >= list_area.x1 && s_touch_drag.start_x <= list_area.x2 &&
@@ -968,15 +1370,31 @@ static void audio_player_input_handler(InputEvent *event)
             if (!s_touch_drag.started) return;
             int dx = (int)d->point.x - s_touch_drag.start_x;
             int dy = (int)d->point.y - s_touch_drag.start_y;
+            int start_x = s_touch_drag.start_x;
+            int start_y = s_touch_drag.start_y;
 
             bool was_dragged = touch_drag_release(&s_touch_drag, d);
             if (was_dragged) return;
 
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            /* Split-view input is routed by pane, not by the last selected
+             * sub-screen. This keeps the library usable while playing. */
+            bool in_library = point_in_obj(s_file_list, d->point.x, d->point.y) ||
+                              point_in_obj(s_lib_back_btn, d->point.x, d->point.y);
+            bool started_in_library = point_in_obj(s_file_list, start_x, start_y) ||
+                                      point_in_obj(s_lib_back_btn, start_x, start_y);
+            if (in_library || started_in_library) {
+                handle_library_tap(d, dx, dy);
+            } else {
+                handle_nowplaying_tap(d, dx, dy);
+            }
+#else
             if (s_screen == SCREEN_NOWPLAYING) {
                 handle_nowplaying_tap(d, dx, dy);
             } else {
                 handle_library_tap(d, dx, dy);
             }
+#endif
         }
         return;
     }

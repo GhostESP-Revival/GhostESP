@@ -42,6 +42,9 @@ jobs:
           - { name: "esp32c3-generic",         idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.default.esp32c3",                 zip_name: "esp32c3-generic.zip" }
           - { name: "esp32c5-generic",         idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.default.esp32c5",                 zip_name: "esp32c5-generic-v01.zip" }
           - { name: "esp32c6-generic",         idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.default.esp32c6",                 zip_name: "esp32c6-generic.zip" }
+          - { name: "CrowPanel Advanced P4 7/9/10.1-inch", idf_target: "esp32p4", sdkconfig_file: "configs/sdkconfig.crowpanel_advanced_p4_mipi_1024x600", zip_name: "CrowPanel_Advanced_P4_7_9_10.1inch.zip" }
+          - { name: "CrowPanel Advanced P4 7/9/10.1-inch v1.1", idf_target: "esp32p4", sdkconfig_file: "configs/sdkconfig.crowpanel_advanced_p4_mipi_1024x600_v11", zip_name: "CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip" }
+          - { name: "CrowPanel Advanced P4 5-inch", idf_target: "esp32p4", sdkconfig_file: "configs/sdkconfig.crowpanel_advanced_p4_rgb_800x480", zip_name: "CrowPanel_Advanced_P4_5inch.zip" }
           - { name: "Awok V5",                 idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32v5_awok.zip" }
           - { name: "ghostboard",              idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",                      zip_name: "ghostboard.zip" }
           - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip", ota: true, ota_slot_size: 6291456, board_key: "marauderv4" }
@@ -244,7 +247,8 @@ jobs:
           cp build/partition_table/partition-table.bin "$ARTIFACT_DIR/partitions.bin" || { echo "Failed to copy partition table"; exit 1; }
           cp build/bootloader/bootloader.bin "$ARTIFACT_DIR/bootloader.bin" || { echo "Failed to copy bootloader"; exit 1; }
           cp build/Ghost_ESP_IDF.bin "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to copy app binary"; exit 1; }
-          if [ -f build/Ghost_ESP_IDF.elf ]; then
+          IDF_TARGET="${{ matrix.target.idf_target }}"
+          if [ "$IDF_TARGET" != "esp32p4" ] && [ -f build/Ghost_ESP_IDF.elf ]; then
             cp build/Ghost_ESP_IDF.elf "$ARTIFACT_DIR/$ELF_FILE" || { echo "Failed to copy app elf"; exit 1; }
           fi
           # Source flash mode/freq/size from the resolved build config so
@@ -259,9 +263,10 @@ jobs:
           FLASH_MODE=${FLASH_MODE:-dio}
           FLASH_FREQ=${FLASH_FREQ:-40m}
           FLASH_SIZE=${FLASH_SIZE:-4MB}
-          IDF_TARGET="${{ matrix.target.idf_target }}"
           if [ "$IDF_TARGET" = "esp32" ] || [ "$IDF_TARGET" = "esp32s2" ]; then
             BOOT_OFFSET=0x1000
+          elif [ "$IDF_TARGET" = "esp32p4" ]; then
+            BOOT_OFFSET=0x2000
           else
             BOOT_OFFSET=0x0
           fi
@@ -295,15 +300,64 @@ jobs:
           PY
           ) || { echo "Failed to read app offset from partition table"; exit 1; }
           echo "App offset for ${{ matrix.target.name }}: $APP_OFFSET"
-          python3 -m esptool --chip "$IDF_TARGET" merge_bin \
-            --output "$ARTIFACT_DIR/merged.bin" \
-            --flash_mode "$FLASH_MODE" \
-            --flash_freq "$FLASH_FREQ" \
-            --flash_size "$FLASH_SIZE" \
-            --target-offset 0x0 \
-            "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
-            0x8000 "$ARTIFACT_DIR/partitions.bin" \
-            "$APP_OFFSET" "$ARTIFACT_DIR/firmware.bin" || { echo "Failed to create merged binary"; exit 1; }
+
+          if [ "$IDF_TARGET" = "esp32p4" ]; then
+            # CrowPanel releases expose only three flashable binaries. Build a
+            # factory bundle based at APP_OFFSET which contains both the P4 app
+            # and the C6 image in the slave_fw data partition. The standalone
+            # C6 image is intentionally not published as a fourth file.
+            SLAVE_OFFSET=$(python3 - "$ARTIFACT_DIR/partitions.bin" <<'PY'
+          import pathlib, struct, sys
+          FMT = "<2sBBLL16sL"
+          SZ = struct.calcsize(FMT)
+          table = pathlib.Path(sys.argv[1]).read_bytes()
+          found = None
+          for pos in range(0, len(table) - SZ + 1, SZ):
+              magic, _ptype, _subtype, offset, _size, label, _flags = struct.unpack(
+                  FMT, table[pos:pos + SZ])
+              if magic != bytes((0xAA, 0x50)):
+                  break
+              if label.rstrip(b"\0") == b"slave_fw":
+                  found = offset
+                  break
+          if found is None:
+              sys.exit("slave_fw partition is missing")
+          print("0x%x" % found)
+          PY
+            ) || { echo "Failed to read slave_fw offset from partition table"; exit 1; }
+            echo "C6 payload offset for ${{ matrix.target.name }}: $SLAVE_OFFSET"
+            cp "$ARTIFACT_DIR/firmware.bin" "$ARTIFACT_DIR/p4-app.bin"
+            python3 - "$APP_OFFSET" "$SLAVE_OFFSET" \
+              "$ARTIFACT_DIR/p4-app.bin" firmware/crowpanel_p4/network_adapter.bin \
+              "$ARTIFACT_DIR/firmware.bin" <<'PY'
+          import pathlib, sys
+          app_offset = int(sys.argv[1], 0)
+          slave_offset = int(sys.argv[2], 0)
+          app = pathlib.Path(sys.argv[3]).read_bytes()
+          slave = pathlib.Path(sys.argv[4]).read_bytes()
+          output = pathlib.Path(sys.argv[5])
+          relative_slave = slave_offset - app_offset
+          if relative_slave < len(app):
+              raise SystemExit("P4 app overlaps slave_fw partition")
+          image = bytearray(b"\xff" * (relative_slave + len(slave)))
+          image[:len(app)] = app
+          image[relative_slave:relative_slave + len(slave)] = slave
+          output.write_bytes(image)
+          print(f"Created three-file P4 factory bundle: {len(image)} bytes")
+          PY
+            rm "$ARTIFACT_DIR/p4-app.bin"
+          else
+            python3 -m esptool --chip "$IDF_TARGET" merge_bin \
+              --output "$ARTIFACT_DIR/merged.bin" \
+              --flash_mode "$FLASH_MODE" \
+              --flash_freq "$FLASH_FREQ" \
+              --flash_size "$FLASH_SIZE" \
+              --target-offset 0x0 \
+              "$BOOT_OFFSET" "$ARTIFACT_DIR/bootloader.bin" \
+              0x8000 "$ARTIFACT_DIR/partitions.bin" \
+              "$APP_OFFSET" "$ARTIFACT_DIR/firmware.bin" \
+              || { echo "Failed to create merged binary"; exit 1; }
+          fi
 
           zip -j "$ZIP_FILE" "$ARTIFACT_DIR"/* || { echo "Failed to create ZIP $ZIP_FILE"; exit 1; }
           ls -lh "$ZIP_FILE"

@@ -4,6 +4,9 @@
 #include "driver/sdmmc_defs.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#endif
 #include "esp_heap_trace.h"
 #include "esp_log.h"
 #include "esp_private/esp_gpio_reserve.h"
@@ -40,6 +43,11 @@
 
 static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+static esp_err_t sdmmc_host_init_dummy(void) { return ESP_OK; }
+static esp_err_t sdmmc_host_deinit_dummy(void) { return ESP_OK; }
+#endif
 static bool s_sd_log_levels_tuned = false;
 static SemaphoreHandle_t s_sd_jit_mutex = NULL;
 static uint32_t s_sd_jit_mount_depth = 0;
@@ -52,6 +60,9 @@ static bool s_spi_bus_owned_by_sd = false;
 static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+static sd_pwr_ctrl_handle_t s_crowpanel_sd_power = NULL;
+#endif
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
@@ -710,6 +721,36 @@ esp_err_t sd_card_init(void) {
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.flags = SDMMC_HOST_FLAG_1BIT;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  if (!s_crowpanel_sd_power) {
+    const sd_pwr_ctrl_ldo_config_t ldo_config = {.ldo_chan_id = 4};
+    ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &s_crowpanel_sd_power);
+    if (ret != ESP_OK) {
+      /* LDO4 may already be held by another driver (e.g. an older display
+       * init path).  On CrowPanel boards the SD card rail is powered by
+       * on-chip LDO4 at 3.3 V; if the channel is already enabled at the
+       * correct voltage the card will work even without our own handle. */
+      ESP_LOGW(TAG, "CrowPanel SD LDO4 acquire returned %s — rail may already be on",
+               esp_err_to_name(ret));
+      s_crowpanel_sd_power = NULL;
+    }
+  }
+  if (s_crowpanel_sd_power) {
+    host.pwr_ctrl_handle = s_crowpanel_sd_power;
+  }
+#endif
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+  // ESP32-P4 has a single SDMMC host controller (SDMMC_LL_HOST_CTLR_NUMS=1).
+  // ESP-Hosted already claimed it for hosted SDIO on slot 1; use dummy
+  // init/deinit so the SD mount reuses that controller and only adds slot 0.
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+  host.init = sdmmc_host_init_dummy;
+  host.deinit = sdmmc_host_deinit_dummy;
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+#endif
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = 1;
@@ -742,6 +783,12 @@ esp_err_t sd_card_init(void) {
              esp_err_to_name(ret));
     }
     sd_card_manager.card = NULL;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
@@ -1370,6 +1417,12 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     
     // Show appropriate status based on context
     switch (context) {
@@ -1406,6 +1459,12 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     s_sd_jit_mount_depth = 0;
     s_sd_jit_display_suspended = false;
     
@@ -1837,6 +1896,15 @@ nvs_write_error:
 }
 
 esp_err_t sd_card_load_config() {
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  // CrowPanel wiring is fixed on the PCB. Do not let generic saved pin values
+  // obscure or override the board profile selected at build time.
+  sd_card_manager.clkpin = CONFIG_SD_MMC_CLK;
+  sd_card_manager.cmdpin = CONFIG_SD_MMC_CMD;
+  sd_card_manager.d0pin = CONFIG_SD_MMC_D0;
+  printf("CrowPanel SD wiring loaded from board profile.\n");
+  return ESP_OK;
+#endif
   nvs_handle_t nvs_handle;
   esp_err_t err;
 
@@ -1923,6 +1991,12 @@ void sd_card_print_config() {
     }
     return;
   }
+#endif
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  printf("SD pins: SDMMC slot 0, 1-bit (CLK %d, CMD %d, D0 %d), max 10 MHz\n",
+         CONFIG_SD_MMC_CLK, CONFIG_SD_MMC_CMD, CONFIG_SD_MMC_D0);
+  return;
 #endif
 
   printf("SD pins: MMC(CLK %d, CMD %d, D0 %d, D1 %d, D2 %d, D3 %d) "

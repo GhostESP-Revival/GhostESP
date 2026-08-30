@@ -383,8 +383,14 @@ static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, i
 
     const char *symbol = app_item_symbol_icon(app_index);
     if (symbol) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        const lv_font_t *symbol_font = layout->carousel_preview_icon_target > 40 ?
+                                       &lv_font_montserrat_32 : &lv_font_montserrat_24;
+#else
+        const lv_font_t *symbol_font = &lv_font_montserrat_24;
+#endif
         lv_obj_t *icon = create_app_symbol_icon(preview, symbol, app_items[app_index].border_color,
-                                                &lv_font_montserrat_24);
+                                                 symbol_font);
         if (icon) lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
         return;
     }
@@ -394,7 +400,12 @@ static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, i
     lv_obj_t *icon = lv_img_create(preview);
     lv_img_set_src(icon, item_icon);
     lv_img_set_antialias(icon, false);
-    gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, 512);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    int max_zoom = layout->screen_width >= 800 && layout->content_height >= 400 ? 768 : 512;
+#else
+    int max_zoom = 512;
+#endif
+    gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, max_zoom);
     if (app_item_icon_should_recolor(app_index, item_icon)) {
         lv_obj_set_style_img_recolor(icon, app_items[app_index].border_color, 0);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -715,8 +726,14 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
     const char *item_symbol = app_item_symbol_icon(app_idx);
     const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(app_idx);
     if (item_symbol) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        const lv_font_t *symbol_font = layout->carousel_icon_target > 40 ?
+                                       &lv_font_montserrat_32 : &lv_font_montserrat_24;
+#else
+        const lv_font_t *symbol_font = &lv_font_montserrat_24;
+#endif
         lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[app_idx].border_color,
-                                                &lv_font_montserrat_24);
+                                                 symbol_font);
         if (icon) {
             lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->carousel_icon_y_offset);
             apps_carousel_cache.icon = icon;
@@ -738,7 +755,12 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         }
         lv_obj_set_style_clip_corner(icon, false, 0);
 
-        gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, 512);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        int max_zoom = layout->screen_width >= 800 && layout->content_height >= 400 ? 768 : 512;
+#else
+        int max_zoom = 512;
+#endif
+        gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, max_zoom);
         int icon_x_offset = 0;
         if (app_items[app_idx].view == &ghostchi_view) {
             icon_x_offset = 9;
@@ -902,7 +924,7 @@ static void create_app_hero_position_indicator(void) {
     if (apps_layout != MAIN_MENU_LAYOUT_HERO) return;
     if (!hero_pip_container) {
         hero_pip_container = lv_obj_create(apps_menu_view.root);
-        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -8);
+        lv_obj_align(hero_pip_container, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 8));
     } else if (lv_obj_is_valid(hero_pip_container)) {
         lv_obj_clean(hero_pip_container);
     }
@@ -1087,7 +1109,13 @@ static void create_apps_launcher_menu(void) {
             const char *item_symbol = app_item_symbol_icon(i);
             const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
             if (item_symbol) {
-                lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                const lv_font_t *symbol_font = icon_target > 40 ?
+                                               &lv_font_montserrat_32 : &lv_font_montserrat_24;
+#else
+                const lv_font_t *symbol_font = &lv_font_montserrat_24;
+#endif
+                lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, symbol_font);
                 if (icon) {
                     lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
                 }
@@ -1107,7 +1135,12 @@ static void create_apps_launcher_menu(void) {
                 int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
                 int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
                 int zoom = LV_MIN(zoom_w, zoom_h);
-                if (zoom > 256) zoom = 256;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                int max_zoom = layout.screen_width >= 800 && layout.content_height >= 400 ? 512 : 256;
+#else
+                int max_zoom = 256;
+#endif
+                if (zoom > max_zoom) zoom = max_zoom;
                 if (zoom < 64) zoom = 64;
                 lv_img_set_zoom(icon, zoom);
                 lv_obj_refresh_self_size(icon);
@@ -1126,6 +1159,9 @@ static void create_apps_launcher_menu(void) {
         }
         lv_label_set_text(label, label_text);
         const lv_font_t *lbl_font = accessibility_get_font_small();
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        if (layout.screen_width >= 800) lbl_font = accessibility_get_font_body();
+#endif
         lv_obj_set_style_text_font(label, lbl_font, 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
 
@@ -1197,7 +1233,13 @@ static void create_apps_list_menu(void) {
         const char *item_symbol = app_item_symbol_icon(i);
         const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
         if (item_symbol) {
-            lv_obj_t *icon = create_app_symbol_icon(btn, item_symbol, app_items[i].border_color, &lv_font_montserrat_24);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            const lv_font_t *symbol_font = icon_target > 40 ?
+                                           &lv_font_montserrat_32 : &lv_font_montserrat_24;
+#else
+            const lv_font_t *symbol_font = &lv_font_montserrat_24;
+#endif
+            lv_obj_t *icon = create_app_symbol_icon(btn, item_symbol, app_items[i].border_color, symbol_font);
             if (icon) {
                 lv_obj_set_width(icon, icon_target);
             }
@@ -1216,7 +1258,12 @@ static void create_apps_list_menu(void) {
             int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
             int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
             int zoom = LV_MIN(zoom_w, zoom_h);
-            if (zoom > 256) zoom = 256;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            int max_zoom = layout.screen_width >= 800 && layout.content_height >= 400 ? 512 : 256;
+#else
+            int max_zoom = 256;
+#endif
+            if (zoom > max_zoom) zoom = max_zoom;
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
             lv_img_set_size_mode(icon, LV_IMG_SIZE_MODE_REAL);
@@ -1370,6 +1417,12 @@ static void apps_plugin_reload_done(void *arg) {
         if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
         }
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
+            lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
+            lv_obj_align(apps_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
+        }
+#endif
     }
 
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);

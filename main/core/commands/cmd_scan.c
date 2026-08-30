@@ -166,7 +166,7 @@ static void sweep_run_internal(void) {
         }
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     // --- BLE Scans ---
     g_sweep_result.current_phase = 3;
     glog("\n--- Phase 3: BLE Flipper Scan (%ds) ---\n", ble_seconds);

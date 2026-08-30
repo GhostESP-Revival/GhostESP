@@ -15,7 +15,7 @@
   20 // Length of the payload to compare for similarity
 #define TIME_WINDOW_MS 3000
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 
 struct ble_gap_event;
 

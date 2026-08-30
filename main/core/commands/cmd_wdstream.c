@@ -10,7 +10,7 @@
 #include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/wifi_manager.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
 #include "nimble/ble.h"
@@ -305,7 +305,7 @@ static void wdstream_scan_wifi_channel(uint8_t channel, uint32_t interval_ms) {
     free(records);
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #ifndef BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP
 #define BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP 0x04
 #endif
@@ -411,7 +411,7 @@ static void wdstream_task(void *pvParameter) {
          (unsigned long)cfg.interval_ms,
          cfg.wifi ? cfg.channel_desc : "none");
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (cfg.ble) {
         ble_ready = wdstream_start_ble();
     }
@@ -452,7 +452,7 @@ static void wdstream_task(void *pvParameter) {
         wdstream_delay_until_next(cycle_start_ms, cfg.interval_ms);
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_ready) {
         wdstream_stop_ble();
     }
@@ -576,7 +576,7 @@ void handle_wdstream_cmd(int argc, char **argv) {
      * The two radio stacks cannot be resident at once on memory-tight targets. */
     cfg.ble = saw_ble_flag;
     cfg.wifi = !saw_ble_flag;
-#ifdef CONFIG_IDF_TARGET_ESP32S2
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
     if (cfg.ble) {
         wdstream_emit("WD:ERROR error=ble_unsupported\n");
         return;

@@ -125,7 +125,7 @@ static TaskHandle_t peer_gps_stream_task_handle = NULL;
 static StackType_t *peer_gps_stream_stack = NULL;
 static StaticTask_t *peer_gps_stream_tcb = NULL;
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #define BLE_WD_SEEN_SIZE 64
 static uint32_t ble_wd_seen_hashes[BLE_WD_SEEN_SIZE];
 static uint16_t ble_wd_seen_idx = 0;
@@ -1099,7 +1099,7 @@ static void trim_trailing(char *str);
 static bool compare_bssid(const uint8_t *bssid1, const uint8_t *bssid2);
 static bool is_beacon_packet(const wifi_promiscuous_pkt_t *pkt);
 static pineap_network_t *find_or_create_network(const uint8_t *bssid);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #endif
 
 // handshake pairing and limited beacon emission for eapol capture
@@ -1291,7 +1291,7 @@ typedef struct {
 } pcap_q_item_t;
 
 #define EAPOL_Q_LEN 64
-#if defined(CONFIG_IDF_TARGET_ESP32S2)
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
 #define PCAP_POOL_SLOTS_DEFAULT 10
 #define PCAP_POOL_SLOTS_MIN 4
 #else
@@ -2019,7 +2019,7 @@ static void start_wardrive_heartbeat(void) {
     peer_gps_stream_rx_fix_packets = 0;
     memset(wardrive_helper_dedupe, 0, sizeof(wardrive_helper_dedupe));
     wardrive_helper_dedupe_idx = 0;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     ble_wardriving_reset_unique_device_count();
 #endif
 
@@ -3517,7 +3517,7 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     }
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #ifndef BLE_HS_ADV_TYPE_APPEARANCE
 #define BLE_HS_ADV_TYPE_APPEARANCE 0x19
 #endif
@@ -3626,7 +3626,7 @@ static int ble_hs_adv_parse_fields_cb(const struct ble_hs_adv_field *field, void
 #endif
 
 // wrap for esp32s2
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 
 static const int suspicious_names_count = sizeof(suspicious_names) / sizeof(suspicious_names[0]);
 void ble_skimmer_scan_callback(struct ble_gap_event *event, void *arg) {

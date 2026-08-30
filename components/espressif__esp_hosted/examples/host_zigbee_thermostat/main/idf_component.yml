@@ -1,0 +1,14 @@
+dependencies:
+  espressif/esp-zigbee-lib:
+    version: '>=2.0.0'
+  espressif/esp_hosted:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    version: ~2
+  espressif/esp_wifi_remote:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    - if: idf_version <6.1
+    version: '>=0.10,<2.0'
+  idf:
+    version: '>=5.2'

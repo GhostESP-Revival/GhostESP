@@ -87,9 +87,13 @@ static void init_styles(void) {
 }
 
 static void get_geometry(lv_coord_t parent_h, lv_coord_t *track_w, lv_coord_t *track_h,
-                         lv_coord_t *knob_size, lv_coord_t *knob_pad) {
+                          lv_coord_t *knob_size, lv_coord_t *knob_pad) {
     if (parent_h <= 0) parent_h = 48;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    *track_h = parent_h >= 56 ? 34 : 28;
+#else
     *track_h = (parent_h <= 40) ? 20 : 26;
+#endif
     *track_w = (lv_coord_t)((*track_h) * 1.7f);
     *knob_size = (*track_h) - 4;
     *knob_pad = 2;

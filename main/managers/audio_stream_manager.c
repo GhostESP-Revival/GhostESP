@@ -123,7 +123,7 @@ static bool audio_sd_should_jit(void)
  * local receiver instead of waiting for a peer. */
 static bool audio_stream_local_output_available(void)
 {
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
     return true;
 #else
     return false;
