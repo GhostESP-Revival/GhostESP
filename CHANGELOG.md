@@ -8,15 +8,14 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Added
 - Added the Hero main menu layout
 - Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
-- Added ESP32-P4 support, including Elecrow 5,7,9 and 10" P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth
- - Refined main menu and App Gallery layouts with larger touch targets and balanced spacing
- - Polished large P4 layouts with fuller spacing, improved control placement and better use of wide displays
- - Redesigned the P4 Audio player as a split-view library and now-playing layout
- - Added swipe gestures for back and home and an iOS-style home bar on the bottom of the screen
- - Enlarged setting selection popups
- - Changed favourites view to make better use of large displays
- - Added new native camera app
-
+- Added ESP32-P4 support, including Elecrow 5,7,9 and 10" P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth (thank you very much to elecrow for sending over boards to work on)
+  - Refined main menu and App Gallery layouts with larger touch targets and balanced spacing
+  - Polished large P4 layouts with fuller spacing, improved control placement and better use of wide displays
+  - Redesigned the P4 Audio player as a split-view library and now-playing layout
+  - Added swipe gestures for back and home and an iOS-style home bar on the bottom of the screen
+  - Enlarged setting selection popups
+  - Changed favourites view to make better use of large displays
+  - Added new native camera app
 - Added favorites menu where you can pin menu items, IR remotes, NFC tags, SubGHz captures and apps
 - Replaced the accent-only menu themes with 21 full color palettes
 - Added BadBLE native Bluetooth HID keyboard that runs DuckyScript payloads over BLE with on-device UI and CLI support
