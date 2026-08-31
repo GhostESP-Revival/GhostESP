@@ -455,6 +455,12 @@ void badble_view_create(void) {
 
     g_ov = options_view_create(root, "BadBLE");
     menu_container = options_view_get_list(g_ov);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    /* Keep the P4 canvas edge-to-edge while the shared list padding keeps
+     * each option row visually inset from the panel edges. */
+    lv_obj_set_width(menu_container, GUI_OPTIONS_LIST_WIDTH);
+    lv_obj_set_style_bg_opa(menu_container, LV_OPA_COVER, 0);
+#endif
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     int screen_height = LV_VER_RES;
@@ -465,7 +471,7 @@ void badble_view_create(void) {
     const int BUTTON_AREA_HEIGHT = 0;
 #endif
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
-    lv_obj_set_size(menu_container, LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W), container_height);
+    lv_obj_set_size(menu_container, GUI_OPTIONS_LIST_WIDTH, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 

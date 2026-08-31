@@ -9,11 +9,30 @@
 #include "freertos/semphr.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
+#if defined(CONFIG_HAS_CROWPANEL_NS4168) && defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+#include "lvgl_i2c/i2c_manager.h"
+#endif
 #ifdef CONFIG_HAS_AW88298_SPEAKER
 #include "managers/m5_audio_codec.h"
 #endif
 
 static const char *TAG = "AudioI2S";
+
+#ifdef CONFIG_HAS_CROWPANEL_NS4168
+static esp_err_t crowpanel_amp_set_enabled(bool enabled)
+{
+#if defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+    // Elecrow 5-inch: STC8 SET_GPIO (0x18) + AUDIO_SD output (2), active low.
+    // GPIO30 is used only by the larger MIPI boards.
+    esp_err_t ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+    if (ret != ESP_OK) return ret;
+    const uint8_t level = enabled ? 0 : 1;
+    return lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, 0x2F, 0x1A, &level, 1);
+#else
+    return gpio_set_level(GPIO_NUM_30, enabled ? 0 : 1);
+#endif
+}
+#endif
 
 static i2s_chan_handle_t s_i2s_tx_chan = NULL;
 static bool s_initialized = false;
@@ -268,6 +287,7 @@ esp_err_t audio_i2s_output_init(void)
     }
 
 #ifdef CONFIG_HAS_CROWPANEL_NS4168
+#if !defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
     gpio_config_t ns4168_en = {
         .pin_bit_mask = 1ULL << 30,
         .mode = GPIO_MODE_OUTPUT,
@@ -275,8 +295,16 @@ esp_err_t audio_i2s_output_init(void)
         .pull_down_en = 0,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    gpio_config(&ns4168_en);
-    gpio_set_level(30, 0);
+    ret = gpio_config(&ns4168_en);
+#endif
+    if (ret == ESP_OK) ret = crowpanel_amp_set_enabled(true);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable CrowPanel amplifier: %s", esp_err_to_name(ret));
+        i2s_channel_disable(s_i2s_tx_chan);
+        i2s_del_channel(s_i2s_tx_chan);
+        s_i2s_tx_chan = NULL;
+        return ret;
+    }
 #endif
 
     s_initialized = true;
@@ -348,7 +376,10 @@ void audio_i2s_output_deinit(void)
      * instead of being left enabled with a dead reference clock. */
     (void)m5_audio_codec_speaker_disable();
 #elif defined(CONFIG_HAS_CROWPANEL_NS4168)
-    gpio_set_level(30, 1);
+    esp_err_t amp_ret = crowpanel_amp_set_enabled(false);
+    if (amp_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable CrowPanel amplifier: %s", esp_err_to_name(amp_ret));
+    }
 #endif
     if (s_i2s_tx_chan) {
         i2s_channel_disable(s_i2s_tx_chan);

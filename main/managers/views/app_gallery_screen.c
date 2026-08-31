@@ -37,6 +37,7 @@ LV_IMG_DECLARE(storefront);
 #include "gui/accessibility_fonts.h"
 #include "gui/asset_pack.h"
 #include "gui/main_menu_layout.h"
+#include "gui/large_builtin_icons.h"
 #include "gui/menu_catalog.h"
 #include "gui/menu_item_style.h"
 #include "gui/theme_palette_api.h"
@@ -218,8 +219,9 @@ static const lv_img_dsc_t *app_item_icon(int index) {
         if (plugin_icon) fallback = plugin_icon;
     }
     const lv_img_dsc_t *icon = asset_pack_get_icon(app_items[index].asset_key, fallback);
+    icon = gui_large_builtin_icon(icon);
     if (icon == fallback && fallback) {
-        icon = asset_pack_get_app_icon(fallback);
+        icon = gui_large_builtin_icon(asset_pack_get_app_icon(fallback));
     }
     return icon;
 }
@@ -247,10 +249,11 @@ static bool app_item_icon_should_recolor(int index, const lv_img_dsc_t *icon) {
         const lv_img_dsc_t *plugin_icon = plugin_manager_get_icon(app);
         if (plugin_icon && icon == plugin_icon) {
             const lv_img_dsc_t *pack_icon = asset_pack_get_icon(app_items[index].asset_key, plugin_icon);
+            pack_icon = gui_large_builtin_icon(pack_icon);
             return icon == pack_icon;
         }
     }
-    return icon == app_items[index].icon;
+    return icon == gui_large_builtin_icon(app_items[index].icon);
 }
 
 static const char *app_item_symbol_icon(int index) {

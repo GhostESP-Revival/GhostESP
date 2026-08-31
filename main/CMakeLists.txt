@@ -96,7 +96,7 @@ if(idf_target STREQUAL "esp32p4")
          "${CMAKE_SOURCE_DIR}/main/attacks/wifi/gtk_abuse_stub.c")
     # Keep these target-gated rather than profile-gated. ESP-IDF may rebuild
     # the component requirements graph without sdkconfig values available.
-    list(APPEND required_components esp_wifi esp_hosted esp_wifi_remote esp_lcd_ek79007 esp_lcd_touch_gt911 esp_mm esp_driver_ppa)
+    list(APPEND required_components esp_wifi esp_hosted esp_wifi_remote esp_lcd_ek79007 esp_lcd_touch_gt911 esp_mm esp_driver_ppa esp_video)
 endif()
 
 # Optionally add extra include directories

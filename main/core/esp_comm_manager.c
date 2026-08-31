@@ -67,6 +67,25 @@
 
 static const char* TAG = "esp_comm_manager";
 
+static bool comm_pins_conflict_with_rgb_display(gpio_num_t tx_pin, gpio_num_t rx_pin)
+{
+#if defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+    // 5-inch P4: RGB data uses GPIO4..19, DE/PCLK use 2/3, HSYNC/VSYNC use 40/41.
+    const int pins[] = { (int)tx_pin, (int)rx_pin };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
+        if ((pins[i] >= 2 && pins[i] <= 19) || pins[i] == 40 || pins[i] == 41) {
+            ESP_LOGW(TAG, "GhostLink TX:%d RX:%d conflicts with 5-inch RGB display; choose free pins",
+                     (int)tx_pin, (int)rx_pin);
+            return true;
+        }
+    }
+#else
+    (void)tx_pin;
+    (void)rx_pin;
+#endif
+    return false;
+}
+
 typedef enum {
     PACKET_TYPE_DISCOVERY = 0x01,
     PACKET_TYPE_HANDSHAKE_REQ = 0x02,
@@ -1380,6 +1399,10 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     desired_uart = UART_NUM_1;
 #endif
 
+    if (comm_pins_conflict_with_rgb_display(resolved_tx, resolved_rx)) {
+        return;
+    }
+
     /* If another subsystem (e.g. GPS NMEA parser) already owns this UART, do not init DualComm. */
     // prefer PSRAM if available, fall back to internal RAM (e.g. ESP32-C6 lacks SPIRAM)
     s_comm_manager = heap_caps_calloc(1, sizeof(esp_comm_manager_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1597,6 +1620,9 @@ bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callb
 }
 
 bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
+    if (comm_pins_conflict_with_rgb_display(tx_pin, rx_pin)) {
+        return false;
+    }
     if (!s_comm_manager || !s_comm_manager->initialized) {
         printf("E: Not initialized\n");
         return false;

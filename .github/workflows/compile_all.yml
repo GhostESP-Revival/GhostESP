@@ -103,7 +103,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.0.2-${{ runner.os }}-v2
+          key: esp-idf-v6.1-${{ runner.os }}-v1
 
       - name: Install ESP-IDF Dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
@@ -114,7 +114,7 @@ jobs:
       - name: Install ESP-IDF
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
-          git clone -b v6.0.2 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+          git clone -b v6.1 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
           ~/esp-idf/install.sh
 
       - name: Repair cached ESP-IDF Python environment if broken
@@ -159,7 +159,7 @@ jobs:
           export IDF_TARGET=${{ matrix.target.idf_target }}
           echo "IDF_TARGET=${{ matrix.target.idf_target }}" >> $GITHUB_ENV
 
-      - name: Patch ESP-IDF 6.0.2 gdbstub compatibility
+      - name: Patch ESP-IDF gdbstub compatibility
         run: |
           python3 - <<'PY'
           from pathlib import Path

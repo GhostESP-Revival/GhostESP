@@ -12,6 +12,7 @@
 #include "gui/gui_anim.h"
 #include "gui/lvgl_safe.h"
 #include "gui/main_menu_layout.h"
+#include "gui/large_builtin_icons.h"
 #include "gui/menu_catalog.h"
 #include "gui/menu_item_style.h"
 #include "gui/screen_layout.h"
@@ -219,13 +220,15 @@ static const lv_img_dsc_t *menu_item_icon(int menu_index) {
     if (strncmp(menu_items[menu_index].id, "plugin:", 7) == 0) {
         const plugin_app_manifest_t *app = plugin_manager_find(menu_items[menu_index].id + 7);
         const lv_img_dsc_t *icon = app ? plugin_manager_get_icon(app) : NULL;
-        return asset_pack_get_app_icon(icon ? icon : menu_items[menu_index].icon);
+        return gui_large_builtin_icon(asset_pack_get_app_icon(icon ? icon : menu_items[menu_index].icon));
     }
-    return asset_pack_get_icon(menu_items[menu_index].asset_key, menu_items[menu_index].icon);
+    return gui_large_builtin_icon(asset_pack_get_icon(menu_items[menu_index].asset_key,
+                                                      menu_items[menu_index].icon));
 }
 
 static bool menu_item_icon_should_recolor(int menu_index, const lv_img_dsc_t *icon) {
-    return menu_index >= 0 && menu_index < get_total_menu_items() && icon == menu_items[menu_index].icon;
+    return menu_index >= 0 && menu_index < get_total_menu_items() &&
+           icon == gui_large_builtin_icon(menu_items[menu_index].icon);
 }
 
 static void update_carousel_preview(lv_obj_t **preview_ptr, int visible_index, int x_offset,

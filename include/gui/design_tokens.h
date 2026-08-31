@@ -8,6 +8,8 @@
 #define GUI_STATUS_BAR_H     44
 #define GUI_CONTROL_H        64
 #define GUI_CONTENT_MAX_W    880
+#define GUI_OPTIONS_LIST_WIDTH LV_HOR_RES
+#define GUI_OPTIONS_LIST_PAD_HOR ((LV_HOR_RES > GUI_CONTENT_MAX_W) ? ((LV_HOR_RES - GUI_CONTENT_MAX_W) / 2) : GUI_SAFEAREA_HOR)
 #define GUI_HOME_SAFE_H      48
 #define GUI_RADIUS_SM        12
 #define GUI_RADIUS_MD        18
@@ -20,6 +22,8 @@
 #define GUI_STATUS_BAR_H     24
 #define GUI_CONTROL_H        48
 #define GUI_CONTENT_MAX_W    LV_HOR_RES
+#define GUI_OPTIONS_LIST_WIDTH LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W)
+#define GUI_OPTIONS_LIST_PAD_HOR GUI_SAFEAREA_HOR
 #define GUI_HOME_SAFE_H      0
 #define GUI_RADIUS_SM        8
 #define GUI_RADIUS_MD        12
@@ -53,11 +57,11 @@ static inline void gui_apply_pressed_style(lv_obj_t *obj) {
     lv_obj_set_style_color_filter_dsc(obj, &gui_pressed_dark_filter_dsc, LV_STATE_PRESSED);
     lv_obj_set_style_color_filter_opa(obj, 35, LV_STATE_PRESSED);
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    /* Large touch targets benefit from a physical-looking press response.
-     * Keep this in the shared helper so dialogs, menus, and view controls
-     * all respond consistently. LVGL applies the state style automatically,
-     * so there is no per-view event callback or object churn. */
-    lv_obj_set_style_transform_zoom(obj, 248, LV_STATE_PRESSED);
+    /* Keep P4 press feedback on the normal framebuffer path. Scaling the
+     * parent tile makes LVGL render its icon/label into a temporary layer;
+     * that path can drop the contents while pressed. Darkening above gives
+     * feedback without a transformed layer or per-press allocation. */
+    lv_obj_set_style_transform_zoom(obj, 256, LV_STATE_PRESSED);
     lv_obj_set_style_transform_zoom(obj, 256, LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_x(obj, LV_PCT(50), LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_y(obj, LV_PCT(50), LV_PART_MAIN);

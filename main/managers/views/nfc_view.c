@@ -6007,7 +6007,7 @@ void nfc_view_create(void) {
     const int TOUCH_BAR_HEIGHT = 0;
 #endif
     int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(menu_container, LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W), container_height);
+    lv_obj_set_size(menu_container, GUI_OPTIONS_LIST_WIDTH, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 
 #if GUI_LEGACY_TOUCH_BAR

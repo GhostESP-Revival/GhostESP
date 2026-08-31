@@ -481,7 +481,15 @@ static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
         }
     }
     
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    // Direct-mode flushes carry the full framebuffer, including intermediate
+    // redraws. Mirror only the completed refresh, as the P4 panel driver does.
+    if (!drv->direct_mode || lv_disp_flush_is_last(drv)) {
+        screen_mirror_send_area(area, color_p);
+    }
+#else
     screen_mirror_send_area(area, color_p);
+#endif
     
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
     m5stack_lvgl_render_callback(drv, area, color_p);
@@ -3042,6 +3050,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Ethernet") == 0 ||
           strcmp(view_name, "AirspaceMonitorView") == 0 ||
           strcmp(view_name, "Audio Player") == 0 ||
+          strcmp(view_name, "Camera") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||

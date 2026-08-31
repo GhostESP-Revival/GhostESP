@@ -166,6 +166,16 @@ menu "Ghost ESP Options"
 
     endchoice
 
+    config CROWPANEL_P4_CAMERA
+        bool "Enable CrowPanel P4 native camera"
+        default y
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Enable the native MIPI-CSI camera app for the Elecrow CrowPanel
+            Advanced P4 boards with the factory camera connector. The camera
+            uses the SC2336 sensor wiring documented by Elecrow and is
+            independent of whether the display uses MIPI or RGB transport.
+
     config USE_ILI9341_2
         bool "Use ILI9341 2nd Display Driver"
         default n
@@ -1775,13 +1785,14 @@ menu "Ghost ESP Options"
 
         menu "CrowPanel P4 NS4168 Audio"
             config HAS_CROWPANEL_NS4168
-                bool "Enable CrowPanel P4 NS4168 I2S Audio (BCLK22/WCLK21/DIN23, EN30)"
+                bool "Enable CrowPanel P4 NS4168 I2S Audio (BCLK22/WCLK21/DIN23)"
                 default n
                 depends on IDF_TARGET_ESP32P4 && CROWPANEL_ADVANCED_P4
                 help
                     Enable I2S TX to the CrowPanel Advanced P4 dual NS4168 amplifiers.
                     Uses I2S_NUM_1 master: BCLK=GPIO22, WCLK=GPIO21, DIN=GPIO23,
-                    amplifier enable (active-low) GPIO30. Audio sourced from SD.
+                    amplifier enable (active-low) via STC8 I2C on the 5-inch RGB
+                    board or GPIO30 on MIPI boards. Audio sourced from SD.
 
         endmenu
 

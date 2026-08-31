@@ -658,7 +658,7 @@ void favorites_manager_create(void) {
     if (list && lv_obj_is_valid(list)) {
         int list_h = LV_VER_RES - GUI_STATUS_BAR_H - touch_bar_h;
         if (list_h < 40) list_h = 40;
-        lv_obj_set_size(list, LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W), list_h);
+        lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
         lv_obj_align(list, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
     }
 

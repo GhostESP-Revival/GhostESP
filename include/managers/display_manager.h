@@ -270,6 +270,7 @@ LV_IMG_DECLARE(wifi);
 LV_IMG_DECLARE(rave);
 LV_IMG_DECLARE(ghost);
 LV_IMG_DECLARE(GESPAppGallery);
+LV_IMG_DECLARE(camera_icon);
 LV_IMG_DECLARE(clock_icon);
 LV_IMG_DECLARE(settings_icon);
 LV_IMG_DECLARE(infrared);

@@ -4635,7 +4635,7 @@ void subghz_view_create(void) {
     const int TOUCH_BAR_HEIGHT = 0;
 #endif
     int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(list, LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W), list_h);
+    lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 

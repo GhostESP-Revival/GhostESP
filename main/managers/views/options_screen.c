@@ -6652,6 +6652,13 @@ void handle_hardware_button_press_options(InputEvent *event) {
             }
         } else if (button == 0) { // left button
             if (is_settings_mode && current_settings_category >= 0) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                /* The P4 left-edge swipe is translated into joystick-left.
+                 * It is a navigation gesture, so it must leave a settings
+                 * submenu instead of changing the highlighted row's value. */
+                ESP_LOGI(TAG, "P4 joystick left/swipe pressed, going back");
+                back_event_cb(NULL);
+#else
                 // in settings submenu, check if we're on the back option
                 lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
                 if (sel) {
@@ -6665,6 +6672,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         change_current_row(false);
                     }
                 }
+#endif
             } else {
                 // otherwise left goes back
                 ESP_LOGI(TAG, "joystick left pressed, going back");

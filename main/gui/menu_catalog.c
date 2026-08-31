@@ -44,6 +44,9 @@
 #ifdef CONFIG_HAS_ACCELEROMETER
 #include "managers/views/accelerometer_screen.h"
 #endif
+#ifdef CONFIG_CROWPANEL_P4_CAMERA
+#include "managers/views/crowpanel_p4_camera_view.h"
+#endif
 #include "esp_heap_caps.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -99,6 +102,9 @@ static const menu_catalog_item_t builtin_items[] = {
     ITEM("visualizer", "Visualizer", "rave", rave, music_visualizer_view, 0, MENU_PLACE_APPS),
 #ifdef CONFIG_HAS_AUDIO_PLAYER
     ITEM("audio", "Audio", "speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, audio_player_view, 0, MENU_PLACE_APPS),
+#endif
+#ifdef CONFIG_CROWPANEL_P4_CAMERA
+    ITEM("camera", "Camera", "camera_icon", camera_icon, crowpanel_p4_camera_view, 0, MENU_PLACE_APPS),
 #endif
     ITEM("terminal", "Terminal", "terminal_icon", terminal_icon, terminal_view, 0, MENU_PLACE_APPS),
     ITEM("sd_browser", "SD Browser", "folder", folder, sd_browser_view, 0, MENU_PLACE_APPS),

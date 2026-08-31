@@ -717,11 +717,20 @@ void app_main(void) {
 
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
-    /* The ESP-Hosted constructor starts the transport, but the C6 handshake
-     * must be explicitly completed before esp_wifi_remote is used. */
-    ESP_LOGI(TAG, "Connecting to ESP-Hosted C6...");
-    esp_err_t hosted_err = esp_hosted_connect_to_slave();
-    bool hosted_ready = hosted_err == ESP_OK;
+    /* Start ESP-Hosted from app_main instead of a C constructor.  IDF 6.1
+     * performs P4 sleep-retention startup after C constructors; initializing
+     * Hosted from the constructor races that initialization and can trip the
+     * sleep-retention module assertion before app_main starts. */
+    ESP_LOGI(TAG, "Starting ESP-Hosted C6 transport...");
+    esp_err_t hosted_init_err = esp_hosted_init();
+    bool hosted_ready = hosted_init_err == ESP_OK;
+    if (!hosted_ready) {
+        ESP_LOGE(TAG, "ESP-Hosted initialization failed: %s", esp_err_to_name(hosted_init_err));
+    }
+
+    /* The C6 handshake must be completed before esp_wifi_remote is used. */
+    esp_err_t hosted_err = hosted_ready ? esp_hosted_connect_to_slave() : hosted_init_err;
+    hosted_ready = hosted_err == ESP_OK;
     if (!hosted_ready) {
         ESP_LOGE(TAG, "ESP-Hosted C6 connection failed: %s", esp_err_to_name(hosted_err));
     } else {

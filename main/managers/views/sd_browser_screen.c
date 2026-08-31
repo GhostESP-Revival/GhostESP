@@ -802,7 +802,7 @@ static void sd_browser_show_list(void) {
 #else
         int container_height = LV_VER_RES - GUI_STATUS_BAR_H;
 #endif
-        lv_obj_set_size(list, LV_MIN(LV_HOR_RES, GUI_CONTENT_MAX_W), container_height);
+        lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, container_height);
         lv_obj_align(list, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
     }
 #endif

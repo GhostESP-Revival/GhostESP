@@ -43,14 +43,17 @@ static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_ldo_channel_handle_t s_ldo3;
 #endif
 static esp_lcd_panel_handle_t s_panel;
-#if !defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
 static SemaphoreHandle_t s_refresh_done;
 static bool s_dirty_rows_pending;
 static int s_dirty_y1;
 static int s_dirty_y2;
 
 static IRAM_ATTR bool crowpanel_p4_refresh_done_cb(esp_lcd_panel_handle_t panel,
+#if defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+                                                   const esp_lcd_rgb_panel_event_data_t *event_data,
+#else
                                                    esp_lcd_dpi_panel_event_data_t *event_data,
+#endif
                                                    void *user_ctx)
 {
     (void)panel;
@@ -59,7 +62,6 @@ static IRAM_ATTR bool crowpanel_p4_refresh_done_cb(esp_lcd_panel_handle_t panel,
     xSemaphoreGiveFromISR((SemaphoreHandle_t)user_ctx, &task_woken);
     return task_woken == pdTRUE;
 }
-#endif
 
 
 esp_err_t crowpanel_p4_display_init(void)
@@ -73,6 +75,9 @@ esp_err_t crowpanel_p4_display_init(void)
         .dma_burst_size = 64,
 #endif
         .num_fbs = 2,
+        // Feed scanout from two internal 20-line buffers, insulating RGB DMA
+        // from bursts of PSRAM traffic during full-screen rendering (e.g. Doom).
+        .bounce_buffer_size_px = 20 * CROWPANEL_P4_H_RES,
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .data_gpio_nums = {
             8, 7, 6, 5, 4, 14, 13, 12,
@@ -105,6 +110,21 @@ esp_err_t crowpanel_p4_display_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "failed to create 5-inch RGB panel: %s", esp_err_to_name(err));
         return err;
+    }
+    s_refresh_done = xSemaphoreCreateBinary();
+    if (!s_refresh_done) {
+        err = ESP_ERR_NO_MEM;
+        goto fail;
+    }
+    const esp_lcd_rgb_panel_event_callbacks_t rgb_callbacks = {
+        // With bounce buffers this fires after the old framebuffer has been
+        // copied out, so LVGL can safely synchronize/reuse it.
+        .on_frame_buf_complete = crowpanel_p4_refresh_done_cb,
+    };
+    err = esp_lcd_rgb_panel_register_event_callbacks(s_panel, &rgb_callbacks, s_refresh_done);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to register RGB frame callback: %s", esp_err_to_name(err));
+        goto fail;
     }
     err = esp_lcd_panel_reset(s_panel);
     if (err == ESP_OK) {
@@ -241,15 +261,14 @@ esp_err_t crowpanel_p4_display_init(void)
 #endif
 
 fail:
-#if !defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
-    if (s_refresh_done) {
-        vSemaphoreDelete(s_refresh_done);
-        s_refresh_done = NULL;
-    }
-#endif
     if (s_panel) {
         esp_lcd_panel_del(s_panel);
         s_panel = NULL;
+    }
+    // Stop the interrupt source before deleting the callback's semaphore.
+    if (s_refresh_done) {
+        vSemaphoreDelete(s_refresh_done);
+        s_refresh_done = NULL;
     }
 #if !defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
     if (s_dbi_io) {
@@ -372,9 +391,9 @@ void crowpanel_p4_display_flush_cb(lv_disp_drv_t *drv,
         return;
     }
 
-    // color_p is a DPI-owned full framebuffer in direct mode. Present it once
-    // per LVGL refresh, syncing only rows touched by this refresh, then wait
-    // for VSYNC before LVGL recycles either buffer.
+    // color_p is a panel-owned full framebuffer in direct mode. Present it
+    // once per refresh, then wait for RGB buffer completion or MIPI VSYNC
+    // before LVGL synchronizes/recycles the other buffer.
     int draw_y1 = s_dirty_rows_pending ? s_dirty_y1 : 0;
     int draw_y2 = s_dirty_rows_pending ? s_dirty_y2 + 1 : CROWPANEL_P4_V_RES;
     s_dirty_rows_pending = false;
@@ -385,7 +404,7 @@ void crowpanel_p4_display_flush_cb(lv_disp_drv_t *drv,
     if (err == ESP_OK && s_refresh_done) {
         xSemaphoreTake(s_refresh_done, 0);
         if (xSemaphoreTake(s_refresh_done, pdMS_TO_TICKS(50)) != pdTRUE) {
-            ESP_LOGW(TAG, "display VSYNC timeout");
+            ESP_LOGW(TAG, "display frame completion timeout");
         }
     } else if (err != ESP_OK) {
         ESP_LOGE(TAG, "display flush failed: %s", esp_err_to_name(err));
