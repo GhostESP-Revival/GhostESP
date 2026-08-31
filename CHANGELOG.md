@@ -22,6 +22,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added BadBLE native Bluetooth HID keyboard that runs DuckyScript payloads over BLE with on-device UI and CLI support
 
 ### Changed
+- Migrated to ESP-IDF v6.1 from v6.0.2
 - Reduced screen mirroring overhead
 - Standardized main menu and App Gallery icons
 - Main Menu and App Gallery contents can be customized and reordered independently on all device targets
