@@ -59,7 +59,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327
 - Fixed GhostLink-relayed Ethernet fingerprint/port/ping scans and ARP poison silently failing; display now flags a peer that doesn't acknowledge
 - Fixed the on-screen terminal keyboard's Done button not submitting commands
-- Fixed TDongleS3 WiFi init
+- Fixed crash on CYD devices by bumping LV_MEM_POOL to 24KB
 
 ### Removed
 - Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)

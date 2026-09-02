@@ -22,6 +22,7 @@ typedef struct {
 
 void ble_device_detect_start(void);
 void ble_device_detect_stop(void);
+void ble_device_detect_clear_results(void);
 bool ble_device_detect_is_active(void);
 
 int ble_device_detect_get_count(void);

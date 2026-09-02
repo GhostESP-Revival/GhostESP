@@ -775,6 +775,11 @@ lv_obj_t *detail_view_add_action(detail_view_t *dv, const char *label, lv_event_
     }
     
     lv_obj_t *lbl = lv_label_create(btn);
+    if (!lbl) {
+        ESP_LOGW(DV_TAG, "add_action: label alloc failed ('%s')", label ? label : "");
+        lv_obj_del(btn);
+        return NULL;
+    }
     lv_label_set_text(lbl, label ? label : "");
     lv_obj_set_style_text_font(lbl, get_item_font(dv), 0);
     lv_color_t text;
@@ -784,15 +789,25 @@ lv_obj_t *detail_view_add_action(detail_view_t *dv, const char *label, lv_event_
     lv_obj_set_flex_grow(lbl, 1);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
     
+#ifdef CONFIG_USE_TOUCHSCREEN
+    /* Touch UIs show a trailing chevron per action row. */
     lv_obj_t *arrow = lv_label_create(btn);
-    lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(arrow, get_item_font(dv), 0);
-    get_theme_colors(NULL, NULL, NULL, &text, NULL);
-    lv_obj_set_style_text_color(arrow, text, 0);
-    lv_obj_set_user_data(arrow, (void *)2);
-    lv_obj_set_style_text_align(arrow, LV_TEXT_ALIGN_RIGHT, 0);
-#ifndef CONFIG_USE_TOUCHSCREEN
-    lv_obj_add_flag(arrow, LV_OBJ_FLAG_HIDDEN);
+    if (arrow) {
+        lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_font(arrow, get_item_font(dv), 0);
+        lv_color_t text2;
+        get_theme_colors(NULL, NULL, NULL, &text2, NULL);
+        lv_obj_set_style_text_color(arrow, text2, 0);
+        lv_obj_set_user_data(arrow, (void *)2);
+        lv_obj_set_style_text_align(arrow, LV_TEXT_ALIGN_RIGHT, 0);
+    } else {
+        /* LVGL pool exhausted: keep the row usable without its arrow. */
+        ESP_LOGW(DV_TAG, "add_action: arrow label alloc failed ('%s')", label ? label : "");
+    }
+#else
+    /* Non-touch (joystick/encoder) builds never show the arrow; it was created
+     * only to be flagged LV_OBJ_FLAG_HIDDEN every row. Skip it entirely. */
+    lv_obj_t *arrow = NULL;
 #endif
     
     dv->rows[dv->count].obj = btn;

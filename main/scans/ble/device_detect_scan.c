@@ -1,6 +1,7 @@
 #include "scans/ble/device_detect_scan.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "core/glog.h"
 #include "core/utils.h"
@@ -72,7 +73,7 @@ typedef struct {
 } BLEDetectTrackingState;
 
 static const char *TAG = "BLEDetect";
-EXT_RAM_BSS_ATTR static BLEDetectDevice s_devices[MAX_BLE_DETECT_DEVICES];
+static BLEDetectDevice *s_devices;
 static int s_device_count = 0;
 static bool s_scan_active = false;
 static BLEDetectTrackingState s_tracking = {0};
@@ -408,7 +409,8 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
 }
 
 void ble_device_detect_start(void) {
-    memset(s_devices, 0, sizeof(s_devices));
+    free(s_devices);
+    s_devices = calloc(MAX_BLE_DETECT_DEVICES, sizeof(*s_devices));
     s_device_count = 0;
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
@@ -421,6 +423,13 @@ void ble_device_detect_start(void) {
     if (!ble_wait_for_ready()) {
         ESP_LOGE(TAG, "BLE stack not ready for detect scan");
         status_display_show_status("BLE Not Ready");
+        free(s_devices);
+        s_devices = NULL;
+        return;
+    }
+
+    if (s_devices == NULL) {
+        status_display_show_status("BLE Detect No Mem");
         return;
     }
 
@@ -431,12 +440,21 @@ void ble_device_detect_start(void) {
     if (!ble_start_scanning()) {
         s_scan_active = false;
         ble_unregister_handler(ble_device_detect_callback);
+        free(s_devices);
+        s_devices = NULL;
         status_display_show_status("BLE Scan Fail");
         return;
     }
 
     glog("BLE device detection started\n");
     status_display_show_status("BLE Detect On");
+}
+
+void ble_device_detect_clear_results(void) {
+    if (s_scan_active || s_tracking.active) return;
+    free(s_devices);
+    s_devices = NULL;
+    s_device_count = 0;
 }
 
 void ble_device_detect_stop(void) {
@@ -466,7 +484,7 @@ int ble_device_detect_get_count(void) {
 }
 
 int ble_device_detect_get_device(int index, BLEDetectDeviceInfo *out_info) {
-    if (out_info == NULL || index < 0 || index >= s_device_count) {
+    if (s_devices == NULL || out_info == NULL || index < 0 || index >= s_device_count) {
         return -1;
     }
 

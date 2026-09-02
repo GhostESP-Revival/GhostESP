@@ -181,7 +181,7 @@ static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
 static int ble_gatt_last_count = -1;
 static int selected_ble_gatt_index = -1;
-EXT_RAM_BSS_ATTR static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
+static char (*ble_oui_vendor_names)[64];
 static const char *ble_oui_vendor_options[BLE_OUI_VENDOR_MAX_RESULTS + 2];
 static int ble_oui_vendor_count = 0;
 static int selected_station_index = -1;
@@ -1168,7 +1168,7 @@ static int settings_submenu_depth = 0;
 
 // Cached chip-info cards for the read-only custom Info page.
 #define OPTIONS_INFO_CARDS_MAX 3
-EXT_RAM_BSS_ATTR static chip_info_card_t s_info_cards[OPTIONS_INFO_CARDS_MAX];
+static chip_info_card_t *s_info_cards;
 static bool             s_info_detail_active = false;
 static lv_obj_t        *s_info_scroll = NULL;
 static lv_obj_t        *s_info_saved_menu_container = NULL;
@@ -1339,7 +1339,9 @@ static void options_show_info_detail(void) {
 
     options_info_add_label(s_info_scroll, GHOSTESP_VERSION, heading_font, LV_TEXT_ALIGN_CENTER, 0);
 
-    int count = chip_info_collect_cards(s_info_cards, OPTIONS_INFO_CARDS_MAX);
+    free(s_info_cards);
+    s_info_cards = calloc(OPTIONS_INFO_CARDS_MAX, sizeof(*s_info_cards));
+    int count = s_info_cards ? chip_info_collect_cards(s_info_cards, OPTIONS_INFO_CARDS_MAX) : 0;
     for (int i = 0; i < count; i++) {
         options_info_add_section(s_info_scroll, s_info_cards[i].title, s_info_cards[i].body,
                                  heading_font, body_font, GUI_GRID * 2);
@@ -9854,6 +9856,8 @@ void options_menu_destroy() {
     }
     s_discard_resume_on_destroy = false;
     s_rendered_menu_state.valid = false;
+    free(s_info_cards);
+    s_info_cards = NULL;
     opt_touch_started = false;
     popup_confirm_close(&settings_confirm_popup);
 #if GHOSTESP_OTA_SUPPORTED
@@ -10119,6 +10123,8 @@ static void back_event_cb(lv_event_t *e) {
 
     if (s_info_detail_active) {
         s_info_detail_active = false;
+        free(s_info_cards);
+        s_info_cards = NULL;
         if (s_info_scroll && lv_obj_is_valid(s_info_scroll)) {
             lv_obj_del(s_info_scroll);
         }
@@ -11161,6 +11167,7 @@ static void ble_detect_list_cleanup(void) {
     if (ble_device_detect_is_active()) {
         ble_device_detect_stop();
     }
+    ble_device_detect_clear_results();
 }
 
 static const char **ble_detect_list_get_options(void) {
@@ -11485,14 +11492,16 @@ static void stop_ble_adv_flow(void) {
 }
 
 static void ble_oui_vendor_clear(void) {
-    memset(ble_oui_vendor_names, 0, sizeof(ble_oui_vendor_names));
+    free(ble_oui_vendor_names);
+    ble_oui_vendor_names = NULL;
     memset(ble_oui_vendor_options, 0, sizeof(ble_oui_vendor_options));
     ble_oui_vendor_count = 0;
 }
 
 static bool ble_oui_vendor_collect_cb(const char *vendor, void *user_data) {
     (void)user_data;
-    if (vendor == NULL || ble_oui_vendor_count >= BLE_OUI_VENDOR_MAX_RESULTS) {
+    if (vendor == NULL || ble_oui_vendor_names == NULL ||
+        ble_oui_vendor_count >= BLE_OUI_VENDOR_MAX_RESULTS) {
         return false;
     }
 
@@ -11541,6 +11550,11 @@ static void ble_oui_vendor_search_kb_cb(const char *text) {
     }
 
     ble_oui_vendor_clear();
+    ble_oui_vendor_names = calloc(BLE_OUI_VENDOR_MAX_RESULTS, sizeof(*ble_oui_vendor_names));
+    if (!ble_oui_vendor_names) {
+        error_popup_create("Not enough memory");
+        return;
+    }
     ouis_foreach_unique_vendor(text, ble_oui_vendor_collect_cb, NULL, BLE_OUI_VENDOR_MAX_RESULTS);
     if (ble_oui_vendor_count <= 0) {
         error_popup_create("No vendors found");

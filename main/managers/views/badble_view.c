@@ -63,7 +63,7 @@ static const char *badble_main_options[] = {
 
 #define MAX_SCRIPTS 32
 #define MAX_SCRIPT_NAME 64
-EXT_RAM_BSS_ATTR static char script_names[MAX_SCRIPTS][MAX_SCRIPT_NAME];
+static char (*script_names)[MAX_SCRIPT_NAME];
 static const char *script_options[MAX_SCRIPTS + 2];
 static int script_count = 0;
 
@@ -114,6 +114,14 @@ static void on_option_click(lv_event_t *e) {
 
 static void populate_script_list(void) {
     script_count = 0;
+
+    free(script_names);
+    script_names = calloc(MAX_SCRIPTS, sizeof(*script_names));
+    if (!script_names) {
+        script_options[0] = "< Back";
+        script_options[1] = NULL;
+        return;
+    }
 
     strncpy(script_names[script_count], BADUSB_BUILTIN_SCRIPT_NAME, MAX_SCRIPT_NAME - 1);
     script_names[script_count][MAX_SCRIPT_NAME - 1] = '\0';
@@ -582,6 +590,8 @@ void badble_view_destroy(void) {
     }
 
     lvgl_obj_del_safe(&root);
+    free(script_names);
+    script_names = NULL;
     badble_view.root = NULL;
     menu_container = NULL;
     scroll_up_btn = NULL;

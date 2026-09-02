@@ -4834,7 +4834,7 @@ static bool karma_running = false;
 static TaskHandle_t karma_task_handle = NULL;
 
 // Add these globals near your other Karma variables
-EXT_RAM_BSS_ATTR static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
+static char (*karma_ssid_cache)[33];
 static int karma_ssid_count = 0;
 static int karma_ssid_index = 0;
 static uint32_t last_ssid_change_time = 0;
@@ -4845,6 +4845,13 @@ static char karma_portal_file[256] = "default"; // non-zero initializer: must st
 // Helper to add SSID to cache if not present
 static void karma_add_ssid(const char *ssid) {
     if (ssid == NULL || strlen(ssid) == 0) return;
+    if (karma_ssid_cache == NULL) {
+        karma_ssid_cache = calloc(KARMA_MAX_SSIDS, sizeof(*karma_ssid_cache));
+        if (karma_ssid_cache == NULL) {
+            printf("Karma: unable to allocate SSID cache\n");
+            return;
+        }
+    }
     // Check for duplicate
     for (int i = 0; i < karma_ssid_count; ++i) {
         if (strcmp(karma_ssid_cache[i], ssid) == 0) return;
@@ -4862,6 +4869,13 @@ static void karma_add_ssid(const char *ssid) {
 void wifi_manager_set_karma_ssid_list(const char **ssids, int count) {
     if (count > KARMA_MAX_SSIDS) count = KARMA_MAX_SSIDS;
     karma_ssid_count = 0;
+    if (count > 0 && karma_ssid_cache == NULL) {
+        karma_ssid_cache = calloc(KARMA_MAX_SSIDS, sizeof(*karma_ssid_cache));
+        if (karma_ssid_cache == NULL) {
+            printf("Karma: unable to allocate SSID cache\n");
+            return;
+        }
+    }
     for (int i = 0; i < count; ++i) {
         if (ssids[i] && strlen(ssids[i]) > 0 && strlen(ssids[i]) < 33) {
             strncpy(karma_ssid_cache[karma_ssid_count], ssids[i], 32);
@@ -5103,6 +5117,8 @@ void wifi_manager_stop_karma(void) {
     }
     karma_running = false;
     karma_ssid_count = 0;
+    free(karma_ssid_cache);
+    karma_ssid_cache = NULL;
     karma_ssid_index = 0;
     karma_ssid_manual_mode = false;
     strncpy(karma_portal_file, "default", sizeof(karma_portal_file));
