@@ -167,6 +167,34 @@ jobs:
           export IDF_TARGET=${{ matrix.target.idf_target }}
           echo "IDF_TARGET=${{ matrix.target.idf_target }}" >> $GITHUB_ENV
 
+      - name: Preserve custom Wi-Fi cache buffer count on ESP-IDF 6.1
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          defaults = Path("sdkconfig.defaults").read_text(encoding="utf-8")
+          match = re.search(r"^CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=(\d+)\s*$", defaults, re.MULTILINE)
+          if not match or match.group(1) == "32":
+              raise SystemExit(0)
+          value = match.group(1)
+          kconfig = Path.home() / "esp-idf/components/esp_wifi/Kconfig"
+          source = kconfig.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"(config ESP_WIFI_CACHE_TX_BUFFER_NUM\n"
+              r"(?:(?!\n\s*config ).)*?\n\s*default )32(\n)",
+              re.DOTALL,
+          )
+          source, count = pattern.subn(
+              rf"\g<1>{value}\g<2>",
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("ESP-IDF Wi-Fi cache buffer Kconfig layout changed")
+          kconfig.write_text(source, encoding="utf-8")
+          PY
+
       - name: Patch ESP-IDF gdbstub compatibility
         run: |
           python3 - <<'PY'
