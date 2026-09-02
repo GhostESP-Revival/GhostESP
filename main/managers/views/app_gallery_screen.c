@@ -1,6 +1,8 @@
 #include "managers/views/app_gallery_screen.h"
-#include "managers/views/ghostchi_screen.h"
 #include "sdkconfig.h"
+#ifdef CONFIG_WITH_SCREEN
+#include "managers/views/ghostchi_screen.h"
+#endif
 #if CONFIG_ENABLE_GHOSTSCRIPT
 #include "managers/views/ghostscript_browser_view.h"
 #endif
@@ -699,9 +701,11 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         int max_zoom = GUI_LARGE_SCREEN ? GUI_IMAGE_ZOOM_MAX : 512;
         gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, max_zoom);
         int icon_x_offset = 0;
+#ifdef CONFIG_WITH_SCREEN
         if (app_items[app_idx].view == &ghostchi_view) {
             icon_x_offset = 9;
         }
+#endif
         lv_obj_align(icon, LV_ALIGN_CENTER, icon_x_offset, layout->carousel_icon_y_offset);
         apps_carousel_cache.icon = icon;
         apps_carousel_cache.icon_src = item_icon;

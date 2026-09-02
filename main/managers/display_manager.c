@@ -34,7 +34,9 @@
 #include "managers/views/subghz_view.h"
 #endif
 #include "managers/views/app_gallery_screen.h"
+#ifdef CONFIG_WITH_SCREEN
 #include "managers/views/ghostchi_screen.h"
+#endif
 #include "managers/views/lockscreen.h"
 #include "managers/views/splash_screen.h"
 #include "managers/encoder_manager.h"
@@ -1348,7 +1350,9 @@ void display_manager_update_status_bar_color(void) {
 
 static void level_label_click_cb(lv_event_t *e) {
     (void)e;
+#ifdef CONFIG_WITH_SCREEN
     display_manager_switch_view(&ghostchi_view);
+#endif
 }
 
 const char *display_manager_get_status_title(void) {

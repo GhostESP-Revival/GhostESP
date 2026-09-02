@@ -23,7 +23,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include "gui/design_tokens.h"
+#include "sdkconfig.h"
 
+#ifdef CONFIG_WITH_SCREEN
 extern const lv_img_dsc_t tired_50x50;
 extern const lv_img_dsc_t what2_50x50;
 extern const lv_img_dsc_t angry_50x50;
@@ -32,6 +34,10 @@ extern const lv_img_dsc_t love_50x50;
 extern const lv_img_dsc_t evil_50x50;
 extern const lv_img_dsc_t sleep_50x50;
 extern const lv_img_dsc_t surpised_50x50;
+#define LOCKSCREEN_SPRITE(name) (&name)
+#else
+#define LOCKSCREEN_SPRITE(name) ((const lv_img_dsc_t *)NULL)
+#endif
 
 #define MAX_INPUT_LEN 31
 #define STORED_PIN_MARKER 0x80
@@ -364,12 +370,12 @@ static void lockscreen_update_dots(void) {
 
 static void lockscreen_update_ghost(bool immediate) {
     if (!s_ghost || !lv_obj_is_valid(s_ghost)) return;
-    const lv_img_dsc_t *src = &tired_50x50;
+    const lv_img_dsc_t *src = LOCKSCREEN_SPRITE(tired_50x50);
     switch (s_ghost_state) {
-        case GHOST_SLEEPING:  src = s_no_pin_mode ? lockscreen_companion_sprite() : &tired_50x50; break;
-        case GHOST_TYPING:    src = &what2_50x50; break;
-        case GHOST_ERROR:     src = &angry_50x50; break;
-        case GHOST_UNLOCKED:  src = &happy_50x50; break;
+        case GHOST_SLEEPING:  src = s_no_pin_mode ? lockscreen_companion_sprite() : LOCKSCREEN_SPRITE(tired_50x50); break;
+        case GHOST_TYPING:    src = LOCKSCREEN_SPRITE(what2_50x50); break;
+        case GHOST_ERROR:     src = LOCKSCREEN_SPRITE(angry_50x50); break;
+        case GHOST_UNLOCKED:  src = LOCKSCREEN_SPRITE(happy_50x50); break;
     }
     lv_img_set_src(s_ghost, src);
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
@@ -736,6 +742,7 @@ static void lockscreen_build_companion_layout(int content_w, int content_h) {
 }
 
 static const lv_img_dsc_t *lockscreen_companion_sprite(void) {
+#ifdef CONFIG_WITH_SCREEN
     ghostchi_mood_snapshot_t mood = {0};
     ghostchi_mood_get_snapshot(&mood);
     switch (mood.mood) {
@@ -762,6 +769,9 @@ static const lv_img_dsc_t *lockscreen_companion_sprite(void) {
         default:
             return &love_50x50;
     }
+#else
+    return NULL;
+#endif
 }
 
 static void lockscreen_destroy_numpad(void) {
@@ -1826,7 +1836,7 @@ void lockscreen_create(void) {
         s_ghost_base_y = group_y;
 
         s_ghost = lv_img_create(s_content);
-        lv_img_set_src(s_ghost, &tired_50x50);
+        lv_img_set_src(s_ghost, LOCKSCREEN_SPRITE(tired_50x50));
         lv_obj_set_pos(s_ghost, ghost_x, s_ghost_base_y + lockscreen_ghost_bob_offset());
         lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
 
@@ -1897,7 +1907,7 @@ void lockscreen_create(void) {
         s_ghost_base_y = icon_y;
 
         s_ghost = lv_img_create(s_content);
-        lv_img_set_src(s_ghost, &tired_50x50);
+        lv_img_set_src(s_ghost, LOCKSCREEN_SPRITE(tired_50x50));
         lv_obj_set_pos(s_ghost, (content_w - 50) / 2, s_ghost_base_y + lockscreen_ghost_bob_offset());
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
         lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);

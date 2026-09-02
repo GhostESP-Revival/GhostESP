@@ -13,7 +13,9 @@
 #if CONFIG_CROWPANEL_EPAPER_42
 #include "managers/views/book_reader_view.h"
 #endif
+#ifdef CONFIG_WITH_SCREEN
 #include "managers/views/ghostchi_screen.h"
+#endif
 #include "managers/views/clock_screen.h"
 #include "managers/views/cloud_store_screen.h"
 #include "managers/views/plugin_runner_view.h"
@@ -120,7 +122,9 @@ static const menu_catalog_item_t builtin_items[] = {
     ITEM("ghostscript", "GhostScript", "description", description, ghostscript_browser_view, 0, MENU_PLACE_APPS),
 #endif
     ITEM("store", "Store", "storefront", storefront, cloud_store_view, 0, MENU_PLACE_APPS),
+#ifdef CONFIG_WITH_SCREEN
     ITEM("ghostchi", "Ghostchi", "ghost", ghost, ghostchi_view, 0, MENU_PLACE_APPS),
+#endif
     ITEM("clock", "Clock", "clock_icon", clock_icon, clock_view, 0, MENU_PLACE_APPS),
 #ifdef CONFIG_HAS_COMPASS
     ITEM("compass", "Compass", "compass", compass, compass_view, 0, MENU_PLACE_APPS),
