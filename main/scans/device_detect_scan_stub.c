@@ -8,6 +8,8 @@ void ble_device_detect_start(void) {}
 
 void ble_device_detect_stop(void) {}
 
+void ble_device_detect_clear_results(void) {}
+
 bool ble_device_detect_is_active(void) {
     return false;
 }
