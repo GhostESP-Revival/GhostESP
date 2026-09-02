@@ -1,13 +1,14 @@
 #include "gui/menu_item_style.h"
+#include "gui/ui_capabilities.h"
 
-#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_USE_TOUCHSCREEN)
+#if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
 static bool s_touch_input = true;
 #else
 static bool s_touch_input = false;
 #endif
 
 bool gui_menu_set_touch_input(bool touch) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_TOUCH_UI
     bool changed = s_touch_input != touch;
     s_touch_input = touch;
     return changed;
@@ -105,7 +106,7 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     if (current_page >= page_count) current_page = page_count - 1;
 
     lv_obj_clean(indicator);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_size(indicator, LV_SIZE_CONTENT, 16);
 #else
     lv_obj_set_size(indicator, LV_SIZE_CONTENT, 10);
@@ -113,7 +114,7 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     lv_obj_set_flex_flow(indicator, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(indicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(indicator, 0, LV_PART_MAIN);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_style_pad_column(indicator, 8, LV_PART_MAIN);
 #else
     lv_obj_set_style_pad_column(indicator, 4, LV_PART_MAIN);
@@ -125,7 +126,7 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     for (int page = 0; page < page_count; ++page) {
         bool selected = page == current_page;
         lv_obj_t *dot = lv_obj_create(indicator);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         /* The active page becomes a short pill. It reads more clearly at
          * arm's length than a slightly larger dot on a 800px+ display. */
         int dot_w = selected ? 26 : 8;

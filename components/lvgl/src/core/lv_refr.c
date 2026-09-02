@@ -573,6 +573,9 @@ static void refr_sync_areas(void)
             buf_off_screen, stride, sync_area,
             buf_on_screen, stride, sync_area
         );
+        if(disp_refr->driver->sync_area_cb) {
+            disp_refr->driver->sync_area_cb(disp_refr->driver, buf_off_screen, sync_area);
+        }
     }
 
     /*Clear sync areas*/

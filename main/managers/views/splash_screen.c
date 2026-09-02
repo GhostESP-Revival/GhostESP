@@ -150,6 +150,18 @@ void splash_create(void) {
     build_name = "M5Stack CoreS3-SE";
   } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "atoms3r") == 0) {
     build_name = "M5Stack AtomS3R";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance24") == 0) {
+    build_name = "CrowPanel Advance 2.4-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance28") == 0) {
+    build_name = "CrowPanel Advance 2.8-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance35") == 0) {
+    build_name = "CrowPanel Advance 3.5-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance43") == 0) {
+    build_name = "CrowPanel Advance 4.3-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance5") == 0) {
+    build_name = "CrowPanel Advance 5-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance7") == 0) {
+    build_name = "CrowPanel Advance 7-inch";
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);

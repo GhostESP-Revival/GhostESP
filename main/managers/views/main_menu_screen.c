@@ -263,8 +263,8 @@ static void update_carousel_preview(lv_obj_t **preview_ptr, int visible_index, i
     lv_img_set_src(icon, item_icon);
     lv_img_set_antialias(icon, false);
     gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, 256);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, 1024);
+#if GUI_LARGE_SCREEN
+    gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, GUI_IMAGE_ZOOM_MAX);
 #endif
     if (menu_item_icon_should_recolor(menu_index, item_icon)) {
         lv_obj_set_style_img_recolor(icon, menu_items[menu_index].border_color, 0);
@@ -437,8 +437,8 @@ static lv_obj_t *create_carousel_card(const main_menu_layout_metrics_t *layout,
     carousel_cache.icon_src = item_icon;
     lv_img_set_antialias(icon, false);
     gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, 256);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, 1024);
+#if GUI_LARGE_SCREEN
+    gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, GUI_IMAGE_ZOOM_MAX);
 #endif
     bool recolor_enabled = menu_item_icon_should_recolor(menu_index, item_icon);
     if (recolor_enabled) {
@@ -498,8 +498,8 @@ static lv_obj_t *create_hero_card(const main_menu_layout_metrics_t *layout,
     carousel_cache.icon_src = item_icon;
     lv_img_set_antialias(icon, false);
     gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 256);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 1024);
+#if GUI_LARGE_SCREEN
+    gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, GUI_IMAGE_ZOOM_MAX);
 #endif
     bool recolor_enabled = menu_item_icon_should_recolor(menu_index, item_icon);
     if (recolor_enabled) {
@@ -557,14 +557,14 @@ static void update_hero_position(void) {
     lv_obj_t *row = hero_pip_container;
     lv_obj_clean(row);
     lv_obj_set_size(row, LV_SIZE_CONTENT, 10);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_height(row, 16);
 #endif
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_style_pad_column(row, 8, LV_PART_MAIN);
 #endif
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -575,7 +575,7 @@ static void update_hero_position(void) {
         bool selected = i == current;
         lv_obj_t *dot = lv_obj_create(row);
         lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         lv_obj_set_size(dot, selected ? 22 : 8, 8);
 #endif
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
@@ -1212,7 +1212,7 @@ static void create_launcher_menu(void) {
             lv_obj_set_size(current_page, screen_width, avail_height);
             lv_obj_set_flex_flow(current_page, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_flex_align(current_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             lv_obj_set_flex_align(current_page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 #endif
             lv_obj_set_style_pad_all(current_page, margin, 0);
@@ -1254,14 +1254,14 @@ static void create_launcher_menu(void) {
             const lv_img_dsc_t *item_icon = menu_item_icon(menu_index);
             lv_img_set_src(icon, item_icon);
             int reserved_for_label = (grid_card_height <= 70 ? 12 : 20);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             reserved_for_label = 40;
 #endif
             int icon_area_h = grid_card_height - reserved_for_label;
             if (icon_area_h < 10) icon_area_h = grid_card_height - reserved_for_label;
             int icon_target = LV_MIN((int)(grid_card_width * 0.78f), (int)(icon_area_h * 0.78f));
             if (icon_target < 16) icon_target = LV_MIN(grid_card_width - 4, icon_area_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             icon_target = LV_MIN(icon_target, 112);
 #endif
             lv_img_set_antialias(icon, false);
@@ -1280,11 +1280,7 @@ static void create_launcher_menu(void) {
             int zoom_w = (img_w > 0) ? (icon_target * 256) / img_w : 256;
             int zoom_h = (img_h > 0) ? (icon_target * 256) / img_h : 256;
             int zoom = LV_MIN(zoom_w, zoom_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-            if (zoom > 1024) zoom = 1024;
-#else
-            if (zoom > 256) zoom = 256;
-#endif
+            if (zoom > GUI_IMAGE_ZOOM_MAX) zoom = GUI_IMAGE_ZOOM_MAX;
             if (zoom < 64)  zoom = 64;
             lv_img_set_zoom(icon, zoom);
             lv_obj_refresh_self_size(icon);
@@ -1300,7 +1296,7 @@ static void create_launcher_menu(void) {
         lv_label_set_text(label, menu_items[menu_index].name);
         // smaller font on small tiles
         const lv_font_t *lbl_font = accessibility_get_font_small();
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         lbl_font = accessibility_get_font_body();
 #endif
         lv_obj_set_style_text_font(label, lbl_font, 0);
@@ -1403,11 +1399,7 @@ static void create_list_menu(void) {
         int zoom_w = (img_w > 0) ? (icon_target * 256) / img_w : 256;
         int zoom_h = (img_h > 0) ? (icon_target * 256) / img_h : 256;
         int zoom = LV_MIN(zoom_w, zoom_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-        if (zoom > 1024) zoom = 1024;
-#else
-        if (zoom > 256) zoom = 256;
-#endif
+        if (zoom > GUI_IMAGE_ZOOM_MAX) zoom = GUI_IMAGE_ZOOM_MAX;
         if (zoom < 64) zoom = 64;
         lv_img_set_zoom(icon, zoom);
 
@@ -1542,7 +1534,7 @@ void main_menu_create(void) {
     // Check if navigation buttons should be shown based on user setting
     // Also respect the original logic for device capabilities
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);
-#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_USE_TOUCHSCREEN)
+#if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
     should_show_nav_buttons = false;
 #endif
 
@@ -1637,7 +1629,7 @@ void main_menu_create(void) {
         if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER || current_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
         }
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         else if (current_layout == MAIN_MENU_LAYOUT_LIST) {
             lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
             lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, status_bar_height);

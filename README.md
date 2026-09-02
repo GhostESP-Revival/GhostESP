@@ -274,6 +274,10 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | CYD 2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
 | Waveshare 7" Touch | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✓ |
+| CrowPanel Advance 7" (S3, TFCard mode) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✓ | ✓ |
 | JC3248W535EN | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |

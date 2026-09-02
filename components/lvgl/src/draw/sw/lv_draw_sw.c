@@ -8,6 +8,9 @@
  *********************/
 #include "../lv_draw.h"
 #include "lv_draw_sw.h"
+#ifdef GHOST_LVGL_S3_SIMD
+#include "lv_draw_sw_s3_simd.h"
+#endif
 
 /*********************
  *      DEFINES
@@ -97,7 +100,12 @@ void lv_draw_sw_buffer_copy(lv_draw_ctx_t * draw_ctx,
     uint32_t line_length = lv_area_get_width(dest_area) * sizeof(lv_color_t);
     lv_coord_t y;
     for(y = dest_area->y1; y <= dest_area->y2; y++) {
-        lv_memcpy(dest_bufc, src_bufc, line_length);
+#ifdef GHOST_LVGL_S3_SIMD
+        if(!lv_draw_sw_s3_simd_copy(dest_bufc, src_bufc, line_length))
+#endif
+        {
+            lv_memcpy(dest_bufc, src_bufc, line_length);
+        }
         dest_bufc += dest_stride;
         src_bufc += src_stride;
     }

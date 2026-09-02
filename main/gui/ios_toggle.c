@@ -1,5 +1,6 @@
 #include "gui/ios_toggle.h"
 
+#include "gui/ui_capabilities.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
 
@@ -89,7 +90,7 @@ static void init_styles(void) {
 static void get_geometry(lv_coord_t parent_h, lv_coord_t *track_w, lv_coord_t *track_h,
                           lv_coord_t *knob_size, lv_coord_t *knob_pad) {
     if (parent_h <= 0) parent_h = 48;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     *track_h = parent_h >= 56 ? 34 : 28;
 #else
     *track_h = (parent_h <= 40) ? 20 : 26;

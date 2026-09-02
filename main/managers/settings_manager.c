@@ -16,7 +16,11 @@
 #define S_TAG "SETTINGS"
 
 static bool settings_should_use_noop_dualcomm_pins(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+  // Standalone SD profile: the generic UART pins overlap SD MOSI and RGB R0.
+  // Override saved defaults too, so existing installations need no NVS erase.
+  return true;
+#elif defined(CONFIG_BUILD_CONFIG_TEMPLATE)
   return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
          strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0;
 #else

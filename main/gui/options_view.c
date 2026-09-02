@@ -51,7 +51,7 @@ static inline bool get_menu_rounded(void) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     return accessibility_get_font_body();
 #else
     uint8_t fs = settings_get_font_size(&G_Settings);

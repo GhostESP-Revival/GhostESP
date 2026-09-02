@@ -1318,6 +1318,12 @@ void esp_comm_manager_init_with_defaults(void) {
 }
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
+#if defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+    // This profile selects the SD slot, not the mutually exclusive wireless
+    // socket. Also block direct CLI initialization with the generic 6/7 pins.
+    printf("ESP Comm Manager disabled on CrowPanel Advance S3 (SD/display profile)\n");
+    return;
+#endif
     ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (s_comm_manager) {

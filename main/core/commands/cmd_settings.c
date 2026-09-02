@@ -601,8 +601,17 @@ void handle_settings_cmd(int argc, char **argv) {
                 glog("Use 'settings list' to see available settings\n");
                 return;
             }
-            FSettings defaults; settings_set_defaults(&defaults);
-            reset_setting_value(d, &G_Settings, &defaults);
+            // A local FSettings makes every settings command reserve several
+            // KB of stack, including get/set. SerialTask also needs stack for
+            // NVS calls, so allocate defaults only when resetting one field.
+            FSettings *defaults = malloc(sizeof(*defaults));
+            if (!defaults) {
+                glog("Not enough memory to reset setting\n");
+                return;
+            }
+            settings_set_defaults(defaults);
+            reset_setting_value(d, &G_Settings, defaults);
+            free(defaults);
             settings_save(&G_Settings);
             glog("Reset %s to default\n", d->name);
         } else {

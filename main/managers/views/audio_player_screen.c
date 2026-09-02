@@ -37,7 +37,7 @@ void audio_player_set_return_view(View *view) {
  * full-width bar with a centered Back button. Height matches
  * SCROLL_BTN_SIZE + 2*SCROLL_BTN_PADDING used by those views. */
 #define AUDIO_TOUCH_BAR_H 34
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_TOUCH_UI
 #define AUDIO_BOTTOM_SAFE_H GUI_HOME_SAFE_H
 #else
 #define AUDIO_BOTTOM_SAFE_H AUDIO_TOUCH_BAR_H
@@ -736,9 +736,9 @@ static void build_library(int status_bar_h)
     create_file_list();
     update_list_hint();
 
-    /* Bottom touch bar: Back exits the whole view on legacy displays. The P4
-     * uses the header escape button plus its system edge gesture. */
-#ifndef CONFIG_CROWPANEL_ADVANCED_P4
+    /* Bottom touch bar: Back exits the whole view on legacy displays. Large
+     * touch panels use the header escape button plus the system edge gesture. */
+#if GUI_LEGACY_TOUCH_BAR
     s_lib_back_btn = create_touch_bar(s_library_cont);
 #endif
 }

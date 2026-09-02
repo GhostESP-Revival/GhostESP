@@ -2,8 +2,9 @@
 #define GUI_DESIGN_TOKENS_H
 
 #include "lvgl.h"
+#include "gui/ui_capabilities.h"
 
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
 #define GUI_GRID             8
 #define GUI_STATUS_BAR_H     44
 #define GUI_CONTROL_H        64
@@ -11,12 +12,10 @@
 #define GUI_OPTIONS_LIST_WIDTH LV_HOR_RES
 #define GUI_OPTIONS_LIST_PAD_HOR ((LV_HOR_RES > GUI_CONTENT_MAX_W) ? ((LV_HOR_RES - GUI_CONTENT_MAX_W) / 2) : GUI_SAFEAREA_HOR)
 #define GUI_HOME_SAFE_H      48
+#define GUI_LEGACY_TOUCH_BAR 0
 #define GUI_RADIUS_SM        12
 #define GUI_RADIUS_MD        18
 #define GUI_RADIUS_LG        24
-/* CrowPanel Advanced P4 has a persistent home indicator + swipe gestures.
- * The legacy bottom touch bar (up / back / down buttons) is redundant. */
-#define GUI_LEGACY_TOUCH_BAR 0
 #else
 #define GUI_GRID             4
 #define GUI_STATUS_BAR_H     24
@@ -56,8 +55,8 @@ static inline void gui_apply_pressed_style(lv_obj_t *obj) {
     lv_color_filter_dsc_init(&gui_pressed_dark_filter_dsc, gui_pressed_dark_filter_cb);
     lv_obj_set_style_color_filter_dsc(obj, &gui_pressed_dark_filter_dsc, LV_STATE_PRESSED);
     lv_obj_set_style_color_filter_opa(obj, 35, LV_STATE_PRESSED);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    /* Keep P4 press feedback on the normal framebuffer path. Scaling the
+#if GUI_LARGE_SCREEN
+    /* Keep large-panel press feedback on the normal framebuffer path. Scaling the
      * parent tile makes LVGL render its icon/label into a temporary layer;
      * that path can drop the contents while pressed. Darkening above gives
      * feedback without a transformed layer or per-press allocation. */
@@ -69,7 +68,7 @@ static inline void gui_apply_pressed_style(lv_obj_t *obj) {
 }
 
 static inline const lv_font_t *gui_font_title(void) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     return &lv_font_montserrat_24;
 #else
     return &lv_font_montserrat_16;
@@ -77,7 +76,7 @@ static inline const lv_font_t *gui_font_title(void) {
 }
 
 static inline const lv_font_t *gui_font_body(void) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     return &lv_font_montserrat_18;
 #else
     return &lv_font_montserrat_14;
@@ -85,7 +84,7 @@ static inline const lv_font_t *gui_font_body(void) {
 }
 
 static inline const lv_font_t *gui_font_caption(void) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     return &lv_font_montserrat_16;
 #else
     return &lv_font_montserrat_12;
@@ -93,7 +92,7 @@ static inline const lv_font_t *gui_font_caption(void) {
 }
 
 static inline const lv_font_t *gui_font_micro(void) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     return &lv_font_montserrat_14;
 #else
     return &lv_font_montserrat_10;
@@ -101,7 +100,7 @@ static inline const lv_font_t *gui_font_micro(void) {
 }
 
 static inline const lv_font_t *gui_font_for_height(lv_coord_t h) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     if (h <= 40) return &lv_font_montserrat_14;
     if (h <= 55) return &lv_font_montserrat_18;
     return &lv_font_montserrat_24;

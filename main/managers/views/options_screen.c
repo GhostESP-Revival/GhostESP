@@ -5361,7 +5361,7 @@ static void settings_select_open(int setting_index) {
 
     int row_h = (button_height_global > 0) ? button_height_global - 8 : 40;
     if (row_h < 30) row_h = 30;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     row_h = 64;
 #endif
 
@@ -5383,7 +5383,7 @@ static void settings_select_open(int setting_index) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     bottom_reserved += SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
 #endif
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_TOUCH_UI
     bottom_reserved = GUI_HOME_SAFE_H + 16;
 #endif
     gui_select_overlay_config_t cfg = {
@@ -5396,7 +5396,7 @@ static void settings_select_open(int setting_index) {
         .max_visible_rows = (LV_VER_RES <= 200) ? 4 : 5,
         .top_reserved = GUI_STATUS_BAR_H + 4,
         .bottom_reserved = bottom_reserved,
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         .min_width = LV_MIN(360, LV_HOR_RES - 64),
         .max_width = LV_MIN(520, LV_HOR_RES - 64),
 #else
@@ -6652,11 +6652,11 @@ void handle_hardware_button_press_options(InputEvent *event) {
             }
         } else if (button == 0) { // left button
             if (is_settings_mode && current_settings_category >= 0) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-                /* The P4 left-edge swipe is translated into joystick-left.
+#if GUI_LARGE_TOUCH_UI
+                /* The large-screen left-edge swipe is translated into joystick-left.
                  * It is a navigation gesture, so it must leave a settings
                  * submenu instead of changing the highlighted row's value. */
-                ESP_LOGI(TAG, "P4 joystick left/swipe pressed, going back");
+                ESP_LOGI(TAG, "System back swipe pressed, going back");
                 back_event_cb(NULL);
 #else
                 // in settings submenu, check if we're on the back option

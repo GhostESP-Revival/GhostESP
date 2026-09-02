@@ -116,6 +116,58 @@ menu "Ghost ESP Options"
         help
             Enable support for Crowtech LCD.
 
+    config CROWPANEL_ADVANCE_7_LCD
+        bool "Enable Elecrow CrowPanel Advance 7-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the Elecrow CrowPanel Advance 7-inch HMI RGB display.
+            This board uses a dedicated RGB pin map and GT911 touch on I2C0.
+
+    config CROWPANEL_ADVANCE_5_LCD
+        bool "Enable Elecrow CrowPanel Advance 5-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the 800x480 ST7262 RGB panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_43_LCD
+        bool "Enable Elecrow CrowPanel Advance 4.3-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the 800x480 ST7265 RGB panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_35_LCD
+        bool "Enable Elecrow CrowPanel Advance 3.5-inch LCD"
+        default n
+        help
+            Enable the 480x320 ILI9488 SPI panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_28_LCD
+        bool "Enable Elecrow CrowPanel Advance 2.8-inch LCD"
+        default n
+        help
+            Enable the 320x240 ST7789 SPI panel and FT6336U/FT5x06 touch controller.
+
+    config CROWPANEL_ADVANCE_24_LCD
+        bool "Enable Elecrow CrowPanel Advance 2.4-inch LCD"
+        default n
+        help
+            Enable the 320x240 ST7789 SPI panel and FT6336U/FT5x06 touch controller.
+
+    config CROWPANEL_ADVANCE_RGB_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_7_LCD || CROWPANEL_ADVANCE_5_LCD || CROWPANEL_ADVANCE_43_LCD
+
+    config CROWPANEL_ADVANCE_SMALL_SPI_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_28_LCD || CROWPANEL_ADVANCE_24_LCD
+
+    config CROWPANEL_ADVANCE_S3_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_RGB_LCD || CROWPANEL_ADVANCE_35_LCD || CROWPANEL_ADVANCE_SMALL_SPI_LCD
+
     config Sunton_LCD
         bool "Enable Sunton LCD"
         default n

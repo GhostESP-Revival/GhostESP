@@ -60,6 +60,15 @@ uint32_t theme_palette_get_text(uint8_t theme);
 
 static const char *TAG = "AppGalleryScreen";
 
+static const lv_font_t *app_symbol_font_for_target(int target) {
+#if LV_FONT_MONTSERRAT_32
+    if (target > 40) return &lv_font_montserrat_32;
+#else
+    (void)target;
+#endif
+    return &lv_font_montserrat_24;
+}
+
 static inline int get_app_anim_duration(void) {
     return settings_get_reduced_motion(&G_Settings) ? 0 : 60;
 }
@@ -298,12 +307,8 @@ static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, i
 
     const char *symbol = app_item_symbol_icon(app_index);
     if (symbol) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-        const lv_font_t *symbol_font = layout->carousel_preview_icon_target > 40 ?
-                                       &lv_font_montserrat_32 : &lv_font_montserrat_24;
-#else
-        const lv_font_t *symbol_font = &lv_font_montserrat_24;
-#endif
+        const lv_font_t *symbol_font =
+            app_symbol_font_for_target(layout->carousel_preview_icon_target);
         lv_obj_t *icon = create_app_symbol_icon(preview, symbol, app_items[app_index].border_color,
                                                  symbol_font);
         if (icon) lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
@@ -315,11 +320,7 @@ static void update_app_carousel_preview(lv_obj_t **preview_ptr, int app_index, i
     lv_obj_t *icon = lv_img_create(preview);
     lv_img_set_src(icon, item_icon);
     lv_img_set_antialias(icon, false);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    int max_zoom = 1024;
-#else
-    int max_zoom = 512;
-#endif
+    int max_zoom = GUI_LARGE_SCREEN ? GUI_IMAGE_ZOOM_MAX : 512;
     gui_menu_image_fit(icon, item_icon, layout->carousel_preview_icon_target, max_zoom);
     if (app_item_icon_should_recolor(app_index, item_icon)) {
         lv_obj_set_style_img_recolor(icon, app_items[app_index].border_color, 0);
@@ -670,12 +671,8 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
     const char *item_symbol = app_item_symbol_icon(app_idx);
     const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(app_idx);
     if (item_symbol) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-        const lv_font_t *symbol_font = layout->carousel_icon_target > 40 ?
-                                       &lv_font_montserrat_32 : &lv_font_montserrat_24;
-#else
-        const lv_font_t *symbol_font = &lv_font_montserrat_24;
-#endif
+        const lv_font_t *symbol_font =
+            app_symbol_font_for_target(layout->carousel_icon_target);
         lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[app_idx].border_color,
                                                  symbol_font);
         if (icon) {
@@ -699,11 +696,7 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         }
         lv_obj_set_style_clip_corner(icon, false, 0);
 
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-        int max_zoom = 1024;
-#else
-        int max_zoom = 512;
-#endif
+        int max_zoom = GUI_LARGE_SCREEN ? GUI_IMAGE_ZOOM_MAX : 512;
         gui_menu_image_fit(icon, item_icon, layout->carousel_icon_target, max_zoom);
         int icon_x_offset = 0;
         if (app_items[app_idx].view == &ghostchi_view) {
@@ -797,8 +790,8 @@ static lv_obj_t *create_app_hero_card(const main_menu_layout_metrics_t *layout,
         lv_obj_set_style_clip_corner(icon, false, 0);
 
         gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 512);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-        gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, 1024);
+#if GUI_LARGE_SCREEN
+        gui_menu_image_fit(icon, item_icon, layout->hero_icon_target, GUI_IMAGE_ZOOM_MAX);
 #endif
         lv_obj_align(icon, LV_ALIGN_CENTER, 0, layout->hero_icon_y_offset);
         apps_carousel_cache.icon = icon;
@@ -847,14 +840,14 @@ static void update_app_hero_position(void) {
     lv_obj_t *row = hero_pip_container;
     lv_obj_clean(row);
     lv_obj_set_size(row, LV_SIZE_CONTENT, 10);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_height(row, 16);
 #endif
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     lv_obj_set_style_pad_column(row, 8, LV_PART_MAIN);
 #endif
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -865,7 +858,7 @@ static void update_app_hero_position(void) {
         bool selected = i == current;
         lv_obj_t *dot = lv_obj_create(row);
         lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         lv_obj_set_size(dot, selected ? 22 : 8, 8);
 #endif
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
@@ -1024,7 +1017,7 @@ static void create_apps_launcher_menu(void) {
             lv_obj_set_size(current_page, screen_width, avail_height);
             lv_obj_set_flex_flow(current_page, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_flex_align(current_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             lv_obj_set_flex_align(current_page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 #endif
             lv_obj_set_style_pad_all(current_page, margin, 0);
@@ -1060,26 +1053,21 @@ static void create_apps_launcher_menu(void) {
 
         if (!apps_is_compact_layout()) {
             int reserved_for_label = (card_height <= 70 ? 12 : 20);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             reserved_for_label = 40;
 #endif
             int icon_area_h = card_height - reserved_for_label;
             if (icon_area_h < 10) icon_area_h = card_height - reserved_for_label;
             int icon_target = LV_MIN((int)(card_width * 0.78f), (int)(icon_area_h * 0.78f));
             if (icon_target < 16) icon_target = LV_MIN(card_width - 4, icon_area_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
             icon_target = LV_MIN(icon_target, 112);
 #endif
 
             const char *item_symbol = app_item_symbol_icon(i);
             const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
             if (item_symbol) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-                const lv_font_t *symbol_font = icon_target > 40 ?
-                                               &lv_font_montserrat_32 : &lv_font_montserrat_24;
-#else
-                const lv_font_t *symbol_font = &lv_font_montserrat_24;
-#endif
+                const lv_font_t *symbol_font = app_symbol_font_for_target(icon_target);
                 lv_obj_t *icon = create_app_symbol_icon(card, item_symbol, app_items[i].border_color, symbol_font);
                 if (icon) {
                     lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, (icon_area_h - 24) / 2);
@@ -1100,11 +1088,7 @@ static void create_apps_launcher_menu(void) {
                 int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
                 int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
                 int zoom = LV_MIN(zoom_w, zoom_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-                int max_zoom = 1024;
-#else
-                int max_zoom = 256;
-#endif
+                int max_zoom = GUI_IMAGE_ZOOM_MAX;
                 if (zoom > max_zoom) zoom = max_zoom;
                 if (zoom < 64) zoom = 64;
                 lv_img_set_zoom(icon, zoom);
@@ -1124,7 +1108,7 @@ static void create_apps_launcher_menu(void) {
         }
         lv_label_set_text(label, label_text);
         const lv_font_t *lbl_font = accessibility_get_font_small();
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         lbl_font = accessibility_get_font_body();
 #endif
         lv_obj_set_style_text_font(label, lbl_font, 0);
@@ -1198,12 +1182,7 @@ static void create_apps_list_menu(void) {
         const char *item_symbol = app_item_symbol_icon(i);
         const lv_img_dsc_t *item_icon = item_symbol ? NULL : app_item_icon(i);
         if (item_symbol) {
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-            const lv_font_t *symbol_font = icon_target > 40 ?
-                                           &lv_font_montserrat_32 : &lv_font_montserrat_24;
-#else
-            const lv_font_t *symbol_font = &lv_font_montserrat_24;
-#endif
+            const lv_font_t *symbol_font = app_symbol_font_for_target(icon_target);
             lv_obj_t *icon = create_app_symbol_icon(btn, item_symbol, app_items[i].border_color, symbol_font);
             if (icon) {
                 lv_obj_set_width(icon, icon_target);
@@ -1223,11 +1202,7 @@ static void create_apps_list_menu(void) {
             int zoom_w = img_w > 0 ? (icon_target * 256) / img_w : 256;
             int zoom_h = img_h > 0 ? (icon_target * 256) / img_h : 256;
             int zoom = LV_MIN(zoom_w, zoom_h);
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-            int max_zoom = 1024;
-#else
-            int max_zoom = 256;
-#endif
+            int max_zoom = GUI_IMAGE_ZOOM_MAX;
             if (zoom > max_zoom) zoom = max_zoom;
             if (zoom < 64) zoom = 64;
             lv_img_set_zoom(icon, zoom);
@@ -1382,7 +1357,7 @@ static void apps_plugin_reload_done(void *arg) {
         if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
         }
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
             lv_obj_align(apps_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
@@ -1391,7 +1366,7 @@ static void apps_plugin_reload_done(void *arg) {
     }
 
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);
-#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_USE_TOUCHSCREEN)
+#if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
     should_show_nav_buttons = false;
 #endif
 

@@ -49,10 +49,10 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     int content_height = screen_height - status_bar_height - GUI_HOME_SAFE_H;
     if (content_height < 60) content_height = screen_height;
 
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    bool large_p4 = screen_width >= 480 && screen_height >= 480 && content_height >= 360;
+#if GUI_LARGE_SCREEN
+    bool large_screen = screen_width >= 480 && screen_height >= 400 && content_height >= 340;
 #else
-    bool large_p4 = false;
+    bool large_screen = false;
 #endif
 
     main_menu_density_t density = MAIN_MENU_DENSITY_REGULAR;
@@ -94,7 +94,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->carousel_show_previews = screen_width >= 200 && carousel_side_space >= 48;
     metrics->carousel_transition_distance = clamp_int(screen_width / 4, 48, 96);
 
-    if (large_p4) {
+    if (large_screen) {
         metrics->carousel_button_size = clamp_int((int)(min_dim * 0.46f), 220, 280);
         metrics->carousel_icon_target = clamp_int((int)(metrics->carousel_button_size * 0.42f), 88, 120);
         metrics->carousel_preview_size = clamp_int((screen_width - metrics->carousel_button_size) / 2 - 64, 64, 112);
@@ -113,7 +113,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->nav_button_size = 60;
         metrics->nav_button_margin = 20;
     }
-    if (large_p4) {
+    if (large_screen) {
         metrics->nav_button_size = 56;
         metrics->nav_button_margin = 32;
     }
@@ -134,7 +134,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->carousel_button_size = metrics->hero_icon_target; /* unused by HERO */
         metrics->carousel_icon_target = metrics->hero_icon_target;
         metrics->carousel_icon_y_offset = metrics->hero_icon_y_offset;
-        if (large_p4) {
+        if (large_screen) {
             metrics->hero_icon_target = clamp_int(content_height / 3, 120, 200);
             metrics->hero_icon_y_offset = -32;
             metrics->hero_pip_count = 7;
@@ -148,7 +148,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->list_row_gap = 6;
     metrics->list_column_gap = 12;
 
-    if (large_p4) {
+    if (large_screen) {
         metrics->list_button_height = 64;
         metrics->list_icon_target = 40;
         metrics->list_button_pad = 12;
@@ -159,7 +159,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
 
     bool portrait = screen_height > screen_width;
     int columns = (screen_width >= 320) ? 4 : (screen_width >= 240) ? 3 : 2;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     if (screen_width >= 800) columns = 6;
 #endif
     if (kind == MAIN_MENU_LAYOUT_COMPACT) {
@@ -180,7 +180,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->page_indicator_height = 0;
     if (kind == MAIN_MENU_LAYOUT_LAUNCHER) {
         metrics->page_indicator_height = density == MAIN_MENU_DENSITY_COMPACT ? 10 : 14;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
         if (screen_width >= 800) metrics->page_indicator_height = 20;
 #endif
         int page_content_height = content_height - metrics->page_indicator_height;
@@ -220,7 +220,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
         metrics->container_y = status_bar_height;
     }
 
-    if (large_p4) {
+    if (large_screen) {
         /* Physical viewport width remains screen_width; page offsets use the
          * inset container width. Both launchers consume the same geometry. */
         metrics->container_width = LV_MIN(screen_width - 64, 880);

@@ -83,7 +83,7 @@ list(REMOVE_ITEM m5gfx_sources "${lgfx_miniz_source}")
 list(APPEND app_sources ${axs15231b_sources} ${image_sources} "${lgfx_miniz_source}")
 
 
-set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls app_update esp_https_ota spi_flash bootloader_support)
+set(required_components bt nvs_flash driver esp_driver_gpio esp_driver_i2c esp_driver_uart esp_driver_rmt esp_driver_i2s esp_driver_usb_serial_jtag esp_http_server mdns cjson esp_http_client mbedtls fatfs sdmmc wpa_supplicant lvgl lvgl_esp32_drivers freertos esp_lcd esp_mm esp_adc esp_timer esp_app_format io_manager esp_eth espcoredump esp-tls app_update esp_https_ota spi_flash bootloader_support)
 
 # The P4 hosts Wi-Fi and Bluetooth through the onboard C6. The P4 runs the
 # NimBLE host while ESP-Hosted supplies the C6 controller over VHCI.

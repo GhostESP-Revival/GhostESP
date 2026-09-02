@@ -46,7 +46,7 @@ static void theme_pattern_draw_cb(lv_event_t *e) {
 
     int spacing;
     if (LV_HOR_RES <= 160) spacing = 12;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#if GUI_LARGE_SCREEN
     else if (LV_HOR_RES >= 800) spacing = 24;
 #endif
     else spacing = 16;
