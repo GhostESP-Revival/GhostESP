@@ -136,7 +136,7 @@ Bluetooth HID keyboard mode (DuckyScript over BLE). BadBLE owns the BLE radio wh
 - **`badble name`** — Show the advertised device name.
 - **`badble set_name <text>`** — Set the advertised name (max 31 characters, persisted in NVS).
 
-See [BadBLE]({{< relref "../../ble/badble.md" >}}) for pairing and usage details.
+See [BadBLE]({{< relref "../ble/badble.md" >}}) for pairing and usage details.
 
 ### Aerial Detection
 
