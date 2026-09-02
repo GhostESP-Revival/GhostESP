@@ -117,6 +117,22 @@ endif()
 
 set(sources ${app_sources})
 
+# The e-paper Reader decodes JPEG pages directly into its LVGL framebuffer.
+# Keep TJpgDec out of the other targets so their existing image pipelines and
+# binary sizes remain unchanged.
+if(idf_target STREQUAL "esp32s3" AND CONFIG_CROWPANEL_EPAPER_42)
+    list(APPEND sources "${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/utility/lgfx_tjpgd.c")
+    # ESP32-S3 has a ROM JPEG decoder. Use it for the reader instead of the
+    # slower software TJpgDec path while retaining the software fallback in
+    # the reader source for non-ROM configurations.
+    if(CONFIG_ESP_ROM_HAS_JPEG_DECODE)
+        list(APPEND sources "${CMAKE_SOURCE_DIR}/components/esp32-camera/conversions/esp_jpg_decode.c")
+        list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/components/esp32-camera/conversions/include")
+    endif()
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/components/M5GFX/src/lgfx/utility/lgfx_miniz.c"
+        PROPERTIES COMPILE_DEFINITIONS "LGFX_MINIZ_ENABLE_ARCHIVE=1")
+endif()
+
 
 
 ## nfc build control: main still compiles NFC sources when NFC is enabled,

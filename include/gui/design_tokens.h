@@ -32,10 +32,17 @@
 #define GUI_SAFEAREA_HOR    (GUI_GRID * 4)
 #define GUI_SAFEAREA_VER    (GUI_GRID * 2)
 
+#if GUI_EPAPER
+#define GUI_ANIM_TRANSITION  0
+#define GUI_ANIM_INTERACT    0
+#define GUI_ANIM_MICRO       0
+#define GUI_ANIM_BREATHE     0
+#else
 #define GUI_ANIM_TRANSITION  300
 #define GUI_ANIM_INTERACT    200
 #define GUI_ANIM_MICRO       120
 #define GUI_ANIM_BREATHE     2000
+#endif
 
 #define GUI_INDICATOR_WIDTH  3
 #define GUI_INDICATOR_RADIUS 2

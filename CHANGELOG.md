@@ -7,8 +7,20 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 - Added the Hero main menu layout
-- Added support for the M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
-- Added ESP32-P4 support, including Elecrow 5,7,9 and 10" P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth (thank you very much to elecrow for sending over boards to work on)
+- Added support for more devices
+  - M5Stack AtomS3R and M5CoreS3SE (huge thank you to M5Stack for providing hardware to work on)
+  - Elecrow CrowPanel 4.2-inch E-paper
+  - Elecrow CrowPanel 5.79-inch E-paper
+  - Elecrow CrowPanel Advance 2.4-inch
+  - Elecrow CrowPanel Advance 2.8-inch
+  - Elecrow CrowPanel Advance 3.5-inch
+  - Elecrow CrowPanel Advance 4.3-inch
+  - Elecrow CrowPanel Advance 5-inch
+  - Elecrow CrowPanel Advance 7-inch
+  - Elecrow CrowPanel Advanced P4 5-inch
+  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.2+)
+  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.1)
+  - ESP32-P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth (thank you very much to elecrow for sending over boards to work on)
   - Refined main menu and App Gallery layouts with larger touch targets and balanced spacing
   - Polished large P4 layouts with fuller spacing, improved control placement and better use of wide displays
   - Redesigned the P4 Audio player as a split-view library and now-playing layout

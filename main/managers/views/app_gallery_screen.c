@@ -1347,6 +1347,10 @@ static void apps_plugin_reload_done(void *arg) {
 
     main_menu_layout_kind_t configured_layout =
         main_menu_layout_from_setting(settings_get_menu_layout(&G_Settings));
+#if GUI_EPAPER
+    /* Match the board's PREV/NEXT/OK controls with a stable, one-axis list. */
+    configured_layout = MAIN_MENU_LAYOUT_LIST;
+#endif
     apps_layout = main_menu_layout_resolve_for_size(configured_layout, LV_HOR_RES, LV_VER_RES);
 
     main_menu_layout_metrics_t layout;

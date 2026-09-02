@@ -19,7 +19,8 @@ typedef enum {
     INPUT_TYPE_JOYSTICK,
     INPUT_TYPE_KEYBOARD,
     INPUT_TYPE_ENCODER,         // --- new
-    INPUT_TYPE_EXIT_BUTTON      // --- new for IO6 exit button
+    INPUT_TYPE_EXIT_BUTTON,     // --- new for IO6 exit button
+    INPUT_TYPE_HOME_BUTTON      // Board-level Home action
 } InputType;
 
 typedef struct {
@@ -35,6 +36,7 @@ typedef struct {
     uint8_t key_value;          // Used for keyboard inputs
     struct { int8_t direction; bool button; } encoder; // Added for encoder input
     bool exit_pressed;          // Used for IO6 exit button
+    bool home_pressed;          // Used for a board-level Home button
   } data;
 } InputEvent;
 

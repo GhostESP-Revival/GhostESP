@@ -10,6 +10,9 @@
 #include "managers/views/music_visualizer.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/sd_browser_screen.h"
+#if CONFIG_CROWPANEL_EPAPER_42
+#include "managers/views/book_reader_view.h"
+#endif
 #include "managers/views/ghostchi_screen.h"
 #include "managers/views/clock_screen.h"
 #include "managers/views/cloud_store_screen.h"
@@ -71,6 +74,11 @@ LV_IMG_DECLARE(accelerometer_icon);
 
 /* Keep historical defaults in order; adding a new item never renumbers IDs. */
 static const menu_catalog_item_t builtin_items[] = {
+#if CONFIG_CROWPANEL_EPAPER_42
+    /* The e-paper board is primarily a reading device. Keep Reader as the
+     * first main-menu entry so it is reachable immediately after boot. */
+    ITEM("book_reader", "Reader", "description", description, book_reader_view, 0, MENU_PLACE_MAIN),
+#endif
     ITEM("wifi", "WiFi", "wifi", wifi, options_menu_view, OT_Wifi, MENU_PLACE_MAIN),
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     ITEM("ble", "BLE", "bluetooth", bluetooth, options_menu_view, OT_Bluetooth, MENU_PLACE_MAIN),
@@ -166,6 +174,9 @@ bool menu_catalog_available(const menu_catalog_item_t *item, bool connected) {
 }
 
 static int item_order(const menu_catalog_item_t *item, uint8_t menu) {
+#if CONFIG_CROWPANEL_EPAPER_42
+    if (menu == MENU_PLACE_MAIN && item && strcmp(item->id, "book_reader") == 0) return -1;
+#endif
     const menu_config_entry_t *entry = menu_config_find(&G_Settings.menu_config, item->id);
     return entry ? entry->order[menu == MENU_PLACE_APPS] : MENU_ORDER_DEFAULT;
 }

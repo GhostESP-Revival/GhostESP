@@ -523,6 +523,10 @@ static void trackpad_input_cb(InputEvent *event) {
     case INPUT_TYPE_EXIT_BUTTON:
         trackpad_stop_and_exit();
         return;
+
+    case INPUT_TYPE_HOME_BUTTON:
+        trackpad_stop_and_exit();
+        return;
     }
 }
 

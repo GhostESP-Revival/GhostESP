@@ -2511,7 +2511,15 @@ void wifi_manager_init(void) {
 
     // Initialize WiFi with default settings
     ESP_LOGI(TAG, "wifi_manager: initializing WiFi driver...");
-    ESP_ERROR_CHECK(ap_manager_ensure_wifi_init());
+    ret = ap_manager_ensure_wifi_init();
+    if (ret != ESP_OK) {
+        // Wi-Fi is optional for boards whose primary interface is local. A
+        // driver/configuration failure must not reboot the display firmware.
+        ESP_LOGE(TAG, "wifi_manager: WiFi driver init failed: %s; continuing without WiFi",
+                 esp_err_to_name(ret));
+        TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(ret));
+        return;
+    }
     ESP_LOGI(TAG, "wifi_manager: WiFi driver init done, free internal RAM: %d bytes (used: %d)", 
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), 
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
@@ -2705,6 +2713,13 @@ bool wifi_manager_wait_for_valid_time(uint32_t timeout_ms) {
 
 void wifi_manager_configure_sta_from_settings(void) {
     wifi_reconnect_reset();
+
+    // wifi_manager_init() can leave the local UI running when the radio
+    // cannot initialize. Do not dereference the event group in that state.
+    if (wifi_event_group == NULL) {
+        ESP_LOGW(TAG, "Skipping STA configuration because WiFi is not initialized");
+        return;
+    }
 
     if (!wifi_driver_started) {
         esp_err_t start_err = esp_wifi_start();

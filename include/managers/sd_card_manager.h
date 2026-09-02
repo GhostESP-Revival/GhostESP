@@ -33,6 +33,7 @@
 #define SD_DIR_SCRIPTDATA SD_GHOSTESP_ROOT "/scriptdata"
 #define SD_DIR_THEMES SD_GHOSTESP_ROOT "/themes"
 #define SD_DIR_DOWNLOADS SD_GHOSTESP_ROOT "/downloads"
+#define SD_DIR_COMICS SD_GHOSTESP_ROOT "/comics"
 
 // SD card unmount context types
 typedef enum {

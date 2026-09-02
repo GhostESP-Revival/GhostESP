@@ -13,6 +13,12 @@
 #define GUI_LARGE_TOUCH_UI 0
 #endif
 
+#if defined(CONFIG_CROWPANEL_EPAPER_42)
+#define GUI_EPAPER 1
+#else
+#define GUI_EPAPER 0
+#endif
+
 /* The S3 RGB panel is bandwidth-bound. Avoid full-screen transition
  * animations for system overlays while retaining the richer static UI. */
 #if defined(CONFIG_CROWPANEL_ADVANCED_P4)
@@ -21,6 +27,9 @@
 #elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
 #define GUI_SYSTEM_OVERLAY_ANIMATIONS 0
 #define GUI_IMAGE_ZOOM_MAX 512
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+#define GUI_SYSTEM_OVERLAY_ANIMATIONS 0
+#define GUI_IMAGE_ZOOM_MAX 256
 #else
 #define GUI_SYSTEM_OVERLAY_ANIMATIONS 0
 #define GUI_IMAGE_ZOOM_MAX 256

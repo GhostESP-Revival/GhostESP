@@ -670,7 +670,27 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
-#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN)
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    /* Factory firmware enables both board rails before touching the panel or
+     * SD socket. GPIO7 is the display rail and GPIO42 is the SD rail; GPIO7
+     * must not later be reused as the generic comm-manager RX pin. */
+    gpio_config_t crowpanel_power_config = {
+        .pin_bit_mask = (1ULL << 7) | (1ULL << 42),
+        /* Keep input enabled so board-driver diagnostics can verify the
+         * physical rail-enable levels, not just the output latch. */
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&crowpanel_power_config);
+    gpio_set_level(7, 1);
+    gpio_set_level(42, 1);
+    ESP_LOGI(TAG, "CrowPanel power rails enabled: display GPIO7, SD GPIO42");
+#endif
+
+#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN) && \
+    !defined(CONFIG_CROWPANEL_EPAPER_42)
     /* Keep the card deselected before any shared-bus display/touch traffic. */
     gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
     gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
@@ -937,6 +957,13 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+        /* GPIO7 is the factory display-power enable, not a UART input. This
+         * board has no wired peer-comm header, so leave the optional manager
+         * off rather than stealing the display rail. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
         if (comm_tx != UART_PIN_NO_CHANGE || comm_rx != UART_PIN_NO_CHANGE) {
             MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
         } else {
@@ -1027,14 +1054,26 @@ void app_main(void) {
         joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
     }
 #else
-    // Standard GPIO joystick mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+    // Standard GPIO joystick mode - map to display manager expectations.
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    // The factory firmware labels these five GPIOs HOME, EXIT, PRV, NEXT, OK.
+    // Keep the five slots available to the existing input stack; the e-paper
+    // adapter translates HOME/EXIT and the prev/next actions at dispatch time.
+    joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // PRV
+    joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // OK
+    joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // HOME
+    joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // NEXT
+    joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // EXIT
+#else
+    // [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
     joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
     joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
     joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
     joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
     joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
-#ifdef CONFIG_JOYSTICK_COM_PIN
-    if (CONFIG_JOYSTICK_COM_PIN >= 0) {
+#endif
+#if defined(CONFIG_JOYSTICK_COM_PIN) && CONFIG_JOYSTICK_COM_PIN >= 0
+    {
         gpio_config_t com_conf = {
             .pin_bit_mask = (1ULL << CONFIG_JOYSTICK_COM_PIN),
             .mode = GPIO_MODE_OUTPUT,

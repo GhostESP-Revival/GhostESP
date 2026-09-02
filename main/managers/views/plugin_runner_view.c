@@ -359,6 +359,10 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
             out.type = GHOSTESP_INPUT_BACK;
             out.pressed = event->data.exit_pressed;
             break;
+        case INPUT_TYPE_HOME_BUTTON:
+            out.type = GHOSTESP_INPUT_BACK;
+            out.pressed = event->data.home_pressed;
+            break;
     }
     return out;
 }

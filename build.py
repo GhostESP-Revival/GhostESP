@@ -380,6 +380,8 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "CYD2432S028R", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.CYD2432S028R", "zip_name": "CYD2432S028R.zip"},
         {"name": "Waveshare_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.waveshare7inch", "zip_name": "Waveshare_LCD.zip"},
         {"name": "Crowtech_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowtech7inch", "zip_name": "Crowtech_LCD.zip"},
+        {"name": "CrowPanel 4.2-inch E-paper", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_42_epaper", "zip_name": "CrowPanel_4.2_Epaper.zip"},
+        {"name": "CrowPanel 5.79-inch E-paper", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_579_epaper", "zip_name": "CrowPanel_5.79_Epaper.zip"},
         {"name": "CrowPanel Advance 2.4-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance24", "zip_name": "CrowPanel_Advance_2.4inch.zip"},
         {"name": "CrowPanel Advance 2.8-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance28", "zip_name": "CrowPanel_Advance_2.8inch.zip"},
         {"name": "CrowPanel Advance 3.5-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance35", "zip_name": "CrowPanel_Advance_3.5inch.zip"},

@@ -84,6 +84,25 @@ menu "Ghost ESP Options"
         help
             Set the height of the TFT display.
 
+    config CROWPANEL_EPAPER_42
+        bool "Use Elecrow CrowPanel 4.2-inch e-paper"
+        default n
+        depends on IDF_TARGET_ESP32S3 && WITH_SCREEN
+        help
+            Enable the Elecrow CrowPanel 4.2-inch 400x300 SSD1683 e-paper
+            display. The panel is driven from the factory firmware's SPI pin
+            map and uses five active-low GPIO buttons for navigation.
+
+    config CROWPANEL_EPAPER_579
+        bool "Use Elecrow CrowPanel 5.79-inch e-paper"
+        default n
+        select CROWPANEL_EPAPER_42
+        depends on IDF_TARGET_ESP32S3 && WITH_SCREEN
+        help
+            Enable the Elecrow CrowPanel 5.79-inch 792x272 dual-SSD1683
+            e-paper display. This selects the shared CrowPanel e-paper
+            support and uses the board's GPIO11/12 and GPIO45-48 EPD pins.
+
     config USE_TOUCHSCREEN
         bool "Enable Touchscreen"
         default n

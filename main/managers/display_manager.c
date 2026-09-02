@@ -162,6 +162,10 @@ static volatile bool g_cached_batt_valid = false;
 #include "vendor/drivers/crowpanel_p4_display.h"
 #endif
 
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+#include "vendor/drivers/crowpanel_epaper.h"
+#endif
+
 #ifdef CONFIG_USE_TDECK
 #include "lvgl_i2c/i2c_manager.h"
 
@@ -289,6 +293,13 @@ bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
 static TaskHandle_t input_task_handle = NULL;
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+/* The e-paper reader, ZIP/FATFS paths, and LVGL callbacks can be much deeper
+ * than the normal display loop. Keep this stack in PSRAM so the LVGL task has
+ * room without consuming the board's small internal-heap reserve. */
+static StackType_t *epaper_lvgl_task_stack = NULL;
+static StaticTask_t *epaper_lvgl_task_buffer = NULL;
+#endif
 /* Cooperative quiesce gate for the LVGL render task. On shared-SPI boards the
  * SD path must free the SPI bus, but it can only do that safely while the render
  * task is OUTSIDE lv_timer_handler() (i.e. not mid-flush). The suspender raises
@@ -382,6 +393,17 @@ static inline uint32_t get_tdeck_repeat_delay(void) {
 
 static void display_manager_flush_pending_scroll_if_due(void);
 static void display_manager_cancel_pending_scroll(void);
+
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+static int crowpanel_epaper_logical_joystick_index(int physical_index) {
+  /* PRV/NEXT are the board's natural list navigation controls. The existing
+   * LVGL views already use slots 2/4 for Up/Down, so preserve that contract
+   * while reserving slot 2's physical button for Home below. */
+  if (physical_index == 0) return 2;
+  if (physical_index == 3) return 4;
+  return physical_index;
+}
+#endif
 
 static inline uint32_t get_tdeck_repeat_rate(void) {
     switch (settings_get_input_repeat_speed(&G_Settings)) {
@@ -514,6 +536,8 @@ static __attribute__((unused)) void invert_flush_cb(lv_disp_drv_t *drv, const lv
     i80_display_flush_cb(drv, area, color_p);
 #elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
     crowpanel_p4_display_flush_cb(drv, area, color_p);
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+    crowpanel_epaper_flush_cb(drv, area, color_p);
 #else
     disp_driver_flush(drv, area, color_p);
 #endif
@@ -986,7 +1010,7 @@ static bool g_use_slide_transition = true;
 
 void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
                               View *view) {
-  if (settings_get_reduced_motion(&G_Settings)) {
+  if (settings_get_reduced_motion(&G_Settings) || GUI_EPAPER) {
     // Skip animation - set final state immediately
     lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
     if (ready_cb) {
@@ -1024,7 +1048,7 @@ void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
 
 void display_manager_fade_in(lv_obj_t *obj) {
   if (!obj) return;
-  if (settings_get_reduced_motion(&G_Settings)) {
+  if (settings_get_reduced_motion(&G_Settings) || GUI_EPAPER) {
     // Skip animation - set final state immediately
     lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
     return;
@@ -1748,6 +1772,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     return;
   }
   touch_driver_init();
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  esp_err_t ret = crowpanel_epaper_init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CrowPanel 4.2 e-paper initialization failed: %s", esp_err_to_name(ret));
+    return;
+  }
 #elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
   /* The Advance 7 uses the dedicated RGB driver below. Keep the legacy LVGL
    * display helper out of this branch; only initialize GT911 touch here. */
@@ -1792,6 +1822,9 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
   int width = CONFIG_TFT_WIDTH;
   int height = CONFIG_TFT_HEIGHT;
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  int width = CROWPANEL_EPAPER_WIDTH;
+  int height = CROWPANEL_EPAPER_HEIGHT;
 #else
   int width = CONFIG_TFT_WIDTH;
   int height = CONFIG_TFT_HEIGHT;
@@ -1817,6 +1850,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
              esp_err_to_name(fb_err));
     return;
   }
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  /* The factory panel is a full-frame device. Keep one complete RGB565 LVGL
+     canvas so the SSD1683 adapter can threshold the rendered UI into its
+     15,000-byte MSB-first 1-bit framebuffer. */
+  buf1_pixels = (size_t)width * (size_t)height;
+  buf2_pixels = 0;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
   /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
@@ -1918,6 +1957,10 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   disp_drv.ver_res = height;
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
   disp_drv.direct_mode = 1;
+#endif
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+  /* LVGL must render the complete canvas before a single e-paper update. */
+  disp_drv.full_refresh = 1;
 #endif
 #ifdef CONFIG_IS_ATOMS3R
   // Match the reference full-canvas present path and avoid stale GC9107 edge
@@ -2098,8 +2141,28 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     xTaskCreatePinnedToCore(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
                             RENDERING_TASK_PRIORITY, &lvgl_task_handle, 1);
 #else
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    epaper_lvgl_task_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    epaper_lvgl_task_buffer = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (epaper_lvgl_task_stack && epaper_lvgl_task_buffer) {
+      lvgl_task_handle = xTaskCreateStatic(lvgl_tick_task, "LVGL Tick Task", 12288, NULL,
+                                           RENDERING_TASK_PRIORITY, epaper_lvgl_task_stack,
+                                           epaper_lvgl_task_buffer);
+      ESP_LOGI(TAG, "LVGL tick task stack allocated from PSRAM: %d bytes",
+               (int)(12288 * sizeof(StackType_t)));
+    } else {
+      if (epaper_lvgl_task_stack) heap_caps_free(epaper_lvgl_task_stack);
+      if (epaper_lvgl_task_buffer) heap_caps_free(epaper_lvgl_task_buffer);
+      epaper_lvgl_task_stack = NULL;
+      epaper_lvgl_task_buffer = NULL;
+      xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
+                  RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+      ESP_LOGW(TAG, "PSRAM LVGL stack allocation failed; using default stack");
+    }
+#else
     xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
                 RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+#endif
 #endif
     ESP_LOGI(TAG, "LVGL tick task stack allocated from internal RAM");
     ESP_LOGI(TAG, "After LVGL task creation, free internal RAM: %d bytes", 
@@ -4167,9 +4230,53 @@ void hardware_input_task(void *pvParameters) {
       if (pressed_now != joystick_reported_pressed[i]) {
         joystick_reported_pressed[i] = pressed_now;
         ESP_LOGI(TAG, "Joystick %d %s", i, pressed_now ? "pressed" : "released");
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+        /* HOME is a board-level route action, not an Up key. It is handled
+         * before the active view callback so every screen gets the same
+         * reliable escape-to-root behavior. */
+        if (i == 2) {
+          joystick_repeat_next_ms[i] = 0;
+          if (pressed_now) {
+            last_touch_time = xTaskGetTickCount();
+            if (!(is_backlight_dimmed || is_backlight_off)) {
+              InputEvent home_event = {0};
+              home_event.type = INPUT_TYPE_HOME_BUTTON;
+              home_event.data.home_pressed = true;
+              xQueueSend(input_queue, &home_event, pdMS_TO_TICKS(10));
+            }
+          }
+          continue;
+        }
+        /* The factory firmware calls GPIO1 EXIT_KEY. It occupies the fifth
+         * joystick slot in main.c only so the existing GPIO setup can be
+         * reused; expose it to every view as the shared Back event instead of
+         * pretending it is a Down key. */
+        if (i == 4) {
+          joystick_repeat_next_ms[i] = 0;
+          if (pressed_now) {
+            last_touch_time = xTaskGetTickCount();
+            if (is_backlight_dimmed || is_backlight_off) {
+              set_backlight_brightness(100);
+              is_backlight_dimmed = false;
+              is_backlight_off = false;
+            } else {
+              InputEvent back_event = {0};
+              back_event.type = INPUT_TYPE_EXIT_BUTTON;
+              back_event.data.exit_pressed = true;
+              xQueueSend(input_queue, &back_event, pdMS_TO_TICKS(10));
+            }
+          }
+          continue;
+        }
+#endif
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
-        event.data.joystick_index = i;
+        event.data.joystick_index =
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+            crowpanel_epaper_logical_joystick_index(i);
+#else
+            i;
+#endif
         event.data.joystick_pressed = pressed_now;
         if (pressed_now) {
           last_touch_time = xTaskGetTickCount();
@@ -4206,7 +4313,12 @@ void hardware_input_task(void *pvParameters) {
         last_touch_time = xTaskGetTickCount();
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
-        event.data.joystick_index = i;
+        event.data.joystick_index =
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+            crowpanel_epaper_logical_joystick_index(i);
+#else
+            i;
+#endif
         event.data.joystick_pressed = true;
 
         if (xQueueSend(input_queue, &event, 0) == pdTRUE) {
@@ -4695,6 +4807,47 @@ static bool dm_update_manual_touch_pressed_state(InputEvent *ev) {
     return consumed;
 }
 
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
+    if (!event || event->type != INPUT_TYPE_HOME_BUTTON ||
+        !event->data.home_pressed || s_lockscreen_overlay_active) {
+        return false;
+    }
+
+    View *leaving = NULL;
+    void (*input_callback)(InputEvent *) = NULL;
+    if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
+        leaving = dm.current_view;
+        if (leaving) input_callback = leaving->input_callback;
+        xSemaphoreGive(dm.mutex);
+    }
+
+    if (!leaving || leaving == &splash_view || leaving == &lockscreen_view ||
+        leaving == &main_menu_view) {
+        return true;
+    }
+
+    /* Give the active screen its normal Back event first so its existing
+     * worker/radio cleanup still runs. Then reset the route, making HOME a
+     * true root action rather than one level of back navigation. */
+    if (input_callback) {
+        InputEvent back = {0};
+        back.type = INPUT_TYPE_EXIT_BUTTON;
+        back.data.exit_pressed = true;
+        input_callback(&back);
+    }
+
+    gui_route_t home = {.id = GUI_ROUTE_VIEW, .view = &main_menu_view};
+    gui_router_reset(&home);
+    return true;
+}
+#else
+static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
+    (void)event;
+    return false;
+}
+#endif
+
 void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
     return;
@@ -4733,6 +4886,10 @@ void processEvent() {  // do not process events until the display manager is up
       continue;
     }
     if (crash_reporter_handle_input(&event)) {
+      processed++;
+      continue;
+    }
+    if (dm_handle_crowpanel_home_event(&event)) {
       processed++;
       continue;
     }
@@ -4820,6 +4977,9 @@ void processEvent() {  // do not process events until the display manager is up
         return;
       }
       if (crash_reporter_handle_input(&event)) {
+        return;
+      }
+      if (dm_handle_crowpanel_home_event(&event)) {
         return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {

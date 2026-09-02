@@ -1509,6 +1509,13 @@ void main_menu_create(void) {
 
     main_menu_layout_kind_t configured_layout =
         main_menu_layout_from_setting(settings_get_menu_layout(&G_Settings));
+#if GUI_EPAPER
+    /* The panel has no touch/animation affordance and only exposes PREV/NEXT.
+     * A dense vertical list makes those factory buttons map naturally to the
+     * existing Up/Down navigation contract and keeps the current selection
+     * visible after every refresh. */
+    configured_layout = MAIN_MENU_LAYOUT_LIST;
+#endif
     current_layout = main_menu_layout_resolve_for_size(configured_layout, LV_HOR_RES, LV_VER_RES);
 
     main_menu_layout_metrics_t layout;

@@ -165,7 +165,10 @@
 // If all macros here are defined the only functionality remaining will be CRC-32, adler-32, tinfl, and tdefl.
 
 // Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O.
+// The reader build opts into the ZIP reader with LGFX_MINIZ_ENABLE_ARCHIVE.
+#ifndef LGFX_MINIZ_ENABLE_ARCHIVE
 #define MINIZ_NO_STDIO
+#endif
 
 // If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or
 // get/set file times, and the C run-time funcs that get/set times won't be called.
@@ -173,9 +176,13 @@
 #define MINIZ_NO_TIME
 
 // Define MINIZ_NO_ARCHIVE_APIS to disable all ZIP archive API's.
+#ifndef LGFX_MINIZ_ENABLE_ARCHIVE
 #define MINIZ_NO_ARCHIVE_APIS
+#endif
 
-// Define MINIZ_NO_ARCHIVE_APIS to disable all writing related ZIP archive API's.
+// Define MINIZ_NO_ARCHIVE_WRITING_APIS to disable all writing related ZIP archive API's.
+// The e-paper Reader only needs archive enumeration/extraction, so keep the
+// writer out even when archive reading is enabled for that target.
 #define MINIZ_NO_ARCHIVE_WRITING_APIS
 
 // Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression API's.
@@ -250,14 +257,17 @@ enum { MZ_DEFAULT_STRATEGY = 0, MZ_FILTERED = 1, MZ_HUFFMAN_ONLY = 2, MZ_RLE = 3
 // Method
 #define MZ_DEFLATED 8
 
-#ifndef MINIZ_NO_ZLIB_APIS
-
-// Heap allocation callbacks.
-// Note that lgfx_mz_alloc_func parameter types purpsosely differ from zlib's: items/size is size_t, not unsigned long.
+// The ZIP archive API uses these callbacks even when the zlib-compatible API
+// surface is disabled. Keep the shared allocator types available for archive
+// builds as well as full zlib builds.
 typedef void *(*lgfx_mz_alloc_func)(void *opaque, size_t items, size_t size);
 typedef void (*lgfx_mz_free_func)(void *opaque, void *address);
 typedef void *(*lgfx_mz_realloc_func)(void *opaque, void *address, size_t items, size_t size);
 
+#ifndef MINIZ_NO_ZLIB_APIS
+
+// Heap allocation callbacks.
+// Note that lgfx_mz_alloc_func parameter types purpsosely differ from zlib's: items/size is size_t, not unsigned long.
 #define MZ_VERSION          "9.1.15"
 #define MZ_VERNUM           0x91F0
 #define MZ_VER_MAJOR        9
@@ -949,6 +959,14 @@ typedef unsigned char lgfx_mz_validate_uint64[sizeof(lgfx_mz_uint64)==8 ? 1 : -1
 #include <string.h>
 #include <assert.h>
 
+#if defined(LGFX_MINIZ_ENABLE_ARCHIVE) && defined(ESP_PLATFORM)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#define LGFX_MZ_ARCHIVE_YIELD() vTaskDelay(1)
+#else
+#define LGFX_MZ_ARCHIVE_YIELD() ((void)0)
+#endif
+
 #define MZ_ASSERT(x) assert(x)
 
 #ifdef MINIZ_NO_MALLOC
@@ -977,6 +995,12 @@ typedef unsigned char lgfx_mz_validate_uint64[sizeof(lgfx_mz_uint64)==8 ? 1 : -1
 #define MZ_MAX(a,b) (((a)>(b))?(a):(b))
 #define MZ_MIN(a,b) (((a)<(b))?(a):(b))
 #define MZ_CLEAR_OBJ(obj) memset(&(obj), 0, sizeof(obj))
+
+#if !defined(MINIZ_NO_ZLIB_APIS) || !defined(MINIZ_NO_ARCHIVE_APIS)
+static void *def_alloc_func(void *opaque, size_t items, size_t size) { (void)opaque, (void)items, (void)size; return MZ_MALLOC(items * size); }
+static void def_free_func(void *opaque, void *address) { (void)opaque, (void)address; MZ_FREE(address); }
+static void *def_realloc_func(void *opaque, void *address, size_t items, size_t size) { (void)opaque, (void)address, (void)items, (void)size; return MZ_REALLOC(address, items * size); }
+#endif
 
 #if MINIZ_USE_UNALIGNED_LOADS_AND_STORES && MINIZ_LITTLE_ENDIAN
   #define MZ_READ_LE16(p) *((const lgfx_mz_uint16 *)(p))
@@ -1032,10 +1056,6 @@ void lgfx_mz_free(void *p)
 }
 
 #ifndef MINIZ_NO_ZLIB_APIS
-
-static void *def_alloc_func(void *opaque, size_t items, size_t size) { (void)opaque, (void)items, (void)size; return MZ_MALLOC(items * size); }
-static void def_free_func(void *opaque, void *address) { (void)opaque, (void)address; MZ_FREE(address); }
-static void *def_realloc_func(void *opaque, void *address, size_t items, size_t size) { (void)opaque, (void)address, (void)items, (void)size; return MZ_REALLOC(address, items * size); }
 
 const char *lgfx_mz_version(void)
 {
@@ -3599,7 +3619,7 @@ lgfx_mz_bool lgfx_mz_zip_reader_extract_to_mem_no_alloc(lgfx_mz_zip_archive *pZi
   lgfx_mz_zip_archive_file_stat file_stat;
   void *pRead_buf;
   lgfx_mz_uint32 local_header_u32[(MZ_ZIP_LOCAL_DIR_HEADER_SIZE + sizeof(lgfx_mz_uint32) - 1) / sizeof(lgfx_mz_uint32)]; lgfx_mz_uint8 *pLocal_header = (lgfx_mz_uint8 *)local_header_u32;
-  lgfx_tinfl_decompressor inflator;
+  lgfx_tinfl_decompressor *pInflator;
 
   if ((buf_size) && (!pBuf))
     return MZ_FALSE;
@@ -3648,9 +3668,6 @@ lgfx_mz_bool lgfx_mz_zip_reader_extract_to_mem_no_alloc(lgfx_mz_zip_archive *pZi
     return ((flags & MZ_ZIP_FLAG_COMPRESSED_DATA) != 0) || (lgfx_mz_crc32(MZ_CRC32_INIT, (const lgfx_mz_uint8 *)pBuf, (size_t)file_stat.m_uncomp_size) == file_stat.m_crc32);
   }
 
-  // Decompress the file either directly from memory or from a file input buffer.
-  lgfx_tinfl_init(&inflator);
-
   if (pZip->m_pState->m_pMem)
   {
     // Read directly from the archive in memory.
@@ -3684,9 +3701,25 @@ lgfx_mz_bool lgfx_mz_zip_reader_extract_to_mem_no_alloc(lgfx_mz_zip_archive *pZi
     comp_remaining = file_stat.m_comp_size;
   }
 
+  // The tinfl state contains several Huffman tables and is too large to keep
+  // on the small LVGL task stack used by the e-paper target.
+  if (NULL == (pInflator = (lgfx_tinfl_decompressor *)MZ_MALLOC(sizeof(*pInflator))))
+  {
+    if ((!pZip->m_pState->m_pMem) && (!pUser_read_buf))
+      pZip->m_pFree(pZip->m_pAlloc_opaque, pRead_buf);
+    return MZ_FALSE;
+  }
+  lgfx_tinfl_init(pInflator);
+
   do
   {
     size_t in_buf_size, out_buf_size = (size_t)(file_stat.m_uncomp_size - out_buf_ofs);
+#if defined(LGFX_MINIZ_ENABLE_ARCHIVE) && defined(ESP_PLATFORM)
+    /* Keep a large JPEG from monopolising the LVGL task long enough to trip
+       the ESP watchdog.  tinfl is resumable when it reports more output. */
+    if (out_buf_size > 8192)
+      out_buf_size = 8192;
+#endif
     if ((!read_buf_avail) && (!pZip->m_pState->m_pMem))
     {
       read_buf_avail = MZ_MIN(read_buf_size, comp_remaining);
@@ -3700,11 +3733,12 @@ lgfx_mz_bool lgfx_mz_zip_reader_extract_to_mem_no_alloc(lgfx_mz_zip_archive *pZi
       read_buf_ofs = 0;
     }
     in_buf_size = (size_t)read_buf_avail;
-    status = lgfx_tinfl_decompress(&inflator, (lgfx_mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size, (lgfx_mz_uint8 *)pBuf, (lgfx_mz_uint8 *)pBuf + out_buf_ofs, &out_buf_size, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF | (comp_remaining ? TINFL_FLAG_HAS_MORE_INPUT : 0));
+    status = lgfx_tinfl_decompress(pInflator, (lgfx_mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size, (lgfx_mz_uint8 *)pBuf, (lgfx_mz_uint8 *)pBuf + out_buf_ofs, &out_buf_size, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF | (comp_remaining ? TINFL_FLAG_HAS_MORE_INPUT : 0));
     read_buf_avail -= in_buf_size;
     read_buf_ofs += in_buf_size;
     out_buf_ofs += out_buf_size;
-  } while (status == TINFL_STATUS_NEEDS_MORE_INPUT);
+    LGFX_MZ_ARCHIVE_YIELD();
+  } while ((status == TINFL_STATUS_NEEDS_MORE_INPUT) || (status == TINFL_STATUS_HAS_MORE_OUTPUT));
 
   if (status == TINFL_STATUS_DONE)
   {
@@ -3715,6 +3749,8 @@ lgfx_mz_bool lgfx_mz_zip_reader_extract_to_mem_no_alloc(lgfx_mz_zip_archive *pZi
 
   if ((!pZip->m_pState->m_pMem) && (!pUser_read_buf))
     pZip->m_pFree(pZip->m_pAlloc_opaque, pRead_buf);
+
+  MZ_FREE(pInflator);
 
   return status == TINFL_STATUS_DONE;
 }

@@ -275,6 +275,13 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | Waveshare 7" Touch | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✓ |
 | CrowPanel Advance 7" (S3, TFCard mode) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel 4.2" E-paper (400×300) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
+| CrowPanel 5.79" E-paper (792×272) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
+| CrowPanel Advance 2.4" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 2.8" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 3.5" (S3, 480×320) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 4.3" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 5" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |

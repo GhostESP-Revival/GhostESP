@@ -328,6 +328,12 @@ static const char *sd_spi_host_name(int host_id) {
 }
 
 static int sd_spi_host_id(void) {
+#if defined(CONFIG_CROWPANEL_EPAPER_42) && defined(CONFIG_IDF_TARGET_ESP32S3)
+  /* Elecrow's factory firmware uses SPIClass(HSPI), i.e. SPI2_HOST, for the
+   * SD socket.  The e-paper adapter is factory-compatible GPIO bit-banged on
+   * GPIO11/12, so SPI2 is free here and is the known-good SD host. */
+  return SPI2_HOST;
+#endif
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && defined(TFT_SPI_HOST)
   if (is_shared_display_sd_spi()) {
     return TFT_SPI_HOST;
@@ -490,15 +496,11 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
-/* Every CYD board (and any classic-ESP32 board with the same topology) keeps
- * its display on SPI2 while SD owns a separate SPI3 bus: display and SD use
- * different pins, so is_shared_display_sd_spi() is false and sd_spi_host_id()
- * picks SPI3_HOST for SD. On the classic ESP32, tearing that SPI3 bus down
- * with spi_bus_free() on mount failure (no card) or unmount disturbs the live
- * SPI2 display and freezes it. So in that topology we leave SD's bus
- * initialized instead of freeing it; a later (re)mount reuses it via
- * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
- * shares the display's bus are unaffected (the shared-bus path handles them). */
+/* Ordinary CYD boards keep their display on SPI2 while SD owns a separate
+ * SPI3 bus. The CrowPanel e-paper is the exception: its display is GPIO-SPI
+ * and the factory assigns SD to SPI2/HSPI. On classic ESP32 boards, tearing
+ * down the separate SPI3 bus on a no-card mount can disturb the live display,
+ * so that topology keeps the bus initialized for a later retry. */
 static bool sd_keep_spi_bus_for_board(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN)
   return !is_shared_display_sd_spi();
@@ -1089,8 +1091,27 @@ esp_err_t sd_card_init(void) {
   }
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   {
+#if !defined(CONFIG_CROWPANEL_EPAPER_42)
     int host_id = sd_host_id;
-#if defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
+#endif
+#if defined(CONFIG_CROWPANEL_EPAPER_42)
+    /* Unlike the generic S3 path, this board has a factory-proven fixed
+     * topology: SD is on HSPI/SPI2. Do not run the free-host probe here,
+     * because it intentionally prefers SPI3 on ordinary S3 boards. */
+    esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
+    if (bus_ret == ESP_OK) {
+      bus_init_success = true;
+      sd_spi_bus_track(SPI2_HOST, true);
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      sd_spi_bus_track(SPI2_HOST, false);
+    } else {
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
+      printf("Failed to initialize factory SD SPI bus: %s\n", esp_err_to_name(bus_ret));
+      return bus_ret;
+    }
+    sd_host_id = SPI2_HOST;
+    host.slot = SPI2_HOST;
+#elif defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
     /* SPI3 is reserved for Ethernet/NRF24 on this config. Use SPI2 directly
      * (old pre-refactor behaviour) so we don't steal SPI3 from those peripherals.
      * INVALID_STATE means the bus is already up — reuse it. */
@@ -1686,6 +1707,7 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *scripts_dir = SD_DIR_SCRIPTS;
   const char *scriptdata_dir = SD_DIR_SCRIPTDATA;
   const char *downloads_dir = SD_DIR_DOWNLOADS;
+  const char *comics_dir = SD_DIR_COMICS;
   const char *themes_dir = SD_DIR_THEMES;
   const char *active_theme_dir = SD_DIR_THEMES "/active";
   const char *evil_portal_dir = SD_GHOSTESP_ROOT "/evil_portal";
@@ -1717,6 +1739,9 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(downloads_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(comics_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(themes_dir);

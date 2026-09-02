@@ -26,6 +26,12 @@ static void anim_set_zoom(void *var, int32_t v) {
 
 void gui_anim_slide_in(lv_obj_t *obj, gui_anim_dir_t dir, uint32_t duration) {
     if (!obj) return;
+#if GUI_EPAPER
+    (void)dir;
+    (void)duration;
+    lv_obj_set_x(obj, 0);
+    return;
+#endif
     lv_coord_t start_x = (dir == GUI_ANIM_DIR_RIGHT) ? LV_HOR_RES : -LV_HOR_RES;
     lv_obj_set_x(obj, start_x);
 
@@ -41,6 +47,22 @@ void gui_anim_slide_in(lv_obj_t *obj, gui_anim_dir_t dir, uint32_t duration) {
 
 void gui_anim_slide_out(lv_obj_t *obj, gui_anim_dir_t dir, uint32_t duration, lv_anim_ready_cb_t ready_cb, void *user_data) {
     if (!obj) return;
+#if GUI_EPAPER
+    (void)duration;
+    lv_obj_set_x(obj, (dir == GUI_ANIM_DIR_LEFT) ? -(LV_HOR_RES / 3) : (LV_HOR_RES / 3));
+    if (ready_cb) {
+        lv_anim_t completed;
+        lv_anim_init(&completed);
+        lv_anim_set_var(&completed, obj);
+#if LV_USE_USER_DATA
+        lv_anim_set_user_data(&completed, user_data);
+#else
+        (void)user_data;
+#endif
+        ready_cb(&completed);
+    }
+    return;
+#endif
     lv_coord_t end_x = (dir == GUI_ANIM_DIR_LEFT) ? -(LV_HOR_RES / 3) : (LV_HOR_RES / 3);
 
     lv_anim_t a;
@@ -102,6 +124,15 @@ static void wipe_ready_cb(lv_anim_t *a) {
 
 void gui_anim_list_wipe(lv_obj_t *parent, lv_obj_t *items[], int count, uint32_t duration) {
     if (!parent || !items || count <= 0) return;
+#if GUI_EPAPER
+    (void)duration;
+    for (int i = 0; i < count; i++) {
+        if (!items[i]) continue;
+        lv_obj_set_style_opa(items[i], LV_OPA_COVER, 0);
+        lv_obj_set_x(items[i], 0);
+    }
+    return;
+#endif
     lv_anim_del(parent, wipe_exec_cb);
 
     lv_coord_t max_y = 0;
@@ -131,6 +162,13 @@ static void travel_set_y(void *var, int32_t v) {
 
 void gui_anim_selection_travel(lv_obj_t *indicator, lv_coord_t from_y, lv_coord_t to_y, lv_coord_t item_h, uint32_t duration) {
     if (!indicator) return;
+#if GUI_EPAPER
+    (void)from_y;
+    (void)duration;
+    lv_obj_set_height(indicator, item_h);
+    lv_obj_set_y(indicator, to_y);
+    return;
+#endif
     lv_obj_set_height(indicator, item_h);
     lv_obj_set_y(indicator, from_y);
 
@@ -160,6 +198,9 @@ static void pulse_color_ready_cb(lv_anim_t *a) {
 
 void gui_anim_press_pulse(lv_obj_t *obj) {
     if (!obj) return;
+#if GUI_EPAPER
+    return;
+#endif
     lv_anim_del(obj, pulse_color_exec_cb);
 
     /* Brief color-wash: fade a semi-transparent overlay in then out.
@@ -203,6 +244,9 @@ static void breathe_exec_cb(void *var, int32_t v) {
 
 void gui_anim_breathe_start(lv_obj_t *obj) {
     if (!obj) return;
+#if GUI_EPAPER
+    return;
+#endif
     lv_anim_del(obj, breathe_exec_cb);
 
     lv_anim_t a;
@@ -232,6 +276,11 @@ static void pop_set_zoom(void *var, int32_t v) {
 
 void gui_anim_pop_in(lv_obj_t *obj) {
     if (!obj) return;
+#if GUI_EPAPER
+    lv_obj_set_style_transform_zoom(obj, 256, 0);
+    lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
+    return;
+#endif
     lv_obj_set_style_transform_zoom(obj, 200, 0);
     lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
 
