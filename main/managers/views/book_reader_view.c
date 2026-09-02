@@ -20,6 +20,9 @@
 #endif
 
 #include "lvgl.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -137,6 +140,15 @@ static bool s_comic_detail_active;
 static uint8_t *s_page_data_cache;
 static size_t s_page_data_cache_length;
 static int s_page_data_cache_index = -1;
+static uint8_t *s_prefetch_data_cache;
+static size_t s_prefetch_data_cache_length;
+static int s_prefetch_data_cache_index = -1;
+static SemaphoreHandle_t s_prefetch_lock;
+static SemaphoreHandle_t s_reader_io_lock;
+static TaskHandle_t s_prefetch_task;
+static volatile bool s_prefetch_stop;
+static reader_page_t s_prefetch_page;
+static int s_prefetch_target = -1;
 static uint8_t *s_comic_render_cache;
 static uint16_t s_comic_render_cache_width;
 static uint16_t s_comic_render_cache_height;
@@ -146,6 +158,7 @@ static void reader_show_library(void);
 static void reader_show_reading(void);
 static void reader_activate_selected(void);
 static void reader_render_page(void);
+static bool reader_load_page_data(const reader_page_t *page, uint8_t **data, size_t *length);
 
 static void *reader_alloc(size_t size) {
     if (!size) size = 1;
@@ -254,6 +267,15 @@ static void reader_free_page_cache(void) {
     s_page_data_cache_index = -1;
 }
 
+static void reader_free_prefetch_cache(void) {
+    if (s_prefetch_lock) xSemaphoreTake(s_prefetch_lock, portMAX_DELAY);
+    reader_free(s_prefetch_data_cache);
+    s_prefetch_data_cache = NULL;
+    s_prefetch_data_cache_length = 0;
+    s_prefetch_data_cache_index = -1;
+    if (s_prefetch_lock) xSemaphoreGive(s_prefetch_lock);
+}
+
 static void reader_free_comic_render_cache(void) {
     reader_free(s_comic_render_cache);
     s_comic_render_cache = NULL;
@@ -263,8 +285,10 @@ static void reader_free_comic_render_cache(void) {
 }
 
 static void reader_fill_white(void);
+static void reader_stop_prefetch(void);
 
 static void reader_free_pages(void) {
+    reader_stop_prefetch();
     reader_free(s_pages);
     s_pages = NULL;
     reader_free(s_text_offsets);
@@ -295,6 +319,100 @@ static bool reader_sd_begin(bool *mounted_here, bool *display_was_suspended) {
 
 static void reader_sd_end(bool mounted_here, bool display_was_suspended) {
     if (mounted_here) sd_card_unmount_after_flush(display_was_suspended);
+}
+
+static void reader_prefetch_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (s_prefetch_stop) break;
+
+        reader_page_t page;
+        int target;
+        if (!s_prefetch_lock || xSemaphoreTake(s_prefetch_lock, portMAX_DELAY) != pdTRUE) continue;
+        page = s_prefetch_page;
+        target = s_prefetch_target;
+        xSemaphoreGive(s_prefetch_lock);
+
+        uint8_t *data = NULL;
+        size_t length = 0;
+        bool mounted_here = false;
+        bool suspended = false;
+        /* FATFS mount state and file handles are not safe to use from the
+         * foreground reader and the prefetch task simultaneously. */
+        if (!s_reader_io_lock || xSemaphoreTake(s_reader_io_lock, portMAX_DELAY) != pdTRUE) continue;
+        bool loaded = reader_sd_begin(&mounted_here, &suspended);
+        if (loaded) loaded = reader_load_page_data(&page, &data, &length);
+        reader_sd_end(mounted_here, suspended);
+        xSemaphoreGive(s_reader_io_lock);
+        if (!loaded) {
+            reader_free(data);
+            continue;
+        }
+
+        if (s_prefetch_lock && xSemaphoreTake(s_prefetch_lock, portMAX_DELAY) == pdTRUE) {
+            if (s_prefetch_stop || target != s_prefetch_target) {
+                reader_free(data);
+            } else {
+                reader_free(s_prefetch_data_cache);
+                s_prefetch_data_cache = data;
+                s_prefetch_data_cache_length = length;
+                s_prefetch_data_cache_index = target;
+                data = NULL;
+                ESP_LOGI(TAG, "Prefetched CBZ page %d: %u bytes", target + 1, (unsigned)length);
+            }
+            xSemaphoreGive(s_prefetch_lock);
+        } else {
+            reader_free(data);
+        }
+    }
+    s_prefetch_task = NULL;
+    vTaskDeleteWithCaps(NULL);
+}
+
+static void reader_schedule_prefetch(int page_index) {
+    if (page_index < 0 || page_index >= s_page_count || !s_pages[page_index].from_zip) return;
+    if (!s_prefetch_lock) s_prefetch_lock = xSemaphoreCreateMutex();
+    if (!s_prefetch_lock) return;
+    if (xSemaphoreTake(s_prefetch_lock, portMAX_DELAY) != pdTRUE) return;
+    if (s_prefetch_data_cache_index == page_index || s_prefetch_target == page_index) {
+        xSemaphoreGive(s_prefetch_lock);
+        return;
+    }
+    s_prefetch_page = s_pages[page_index];
+    s_prefetch_target = page_index;
+    s_prefetch_stop = false;
+    if (!s_prefetch_task) {
+        /* miniz/FATFS has a deep call chain while opening the archive. Keep
+         * this stack in PSRAM so it does not consume the S3's scarce internal
+         * heap, and give it enough headroom for the central-directory seek. */
+        BaseType_t created = xTaskCreateWithCaps(reader_prefetch_task, "reader_prefetch",
+                                                 12288, NULL, 2, &s_prefetch_task,
+                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (created != pdPASS) {
+            created = xTaskCreate(reader_prefetch_task, "reader_prefetch", 12288,
+                                  NULL, 2, &s_prefetch_task);
+        }
+        if (created != pdPASS) s_prefetch_task = NULL;
+    }
+    if (s_prefetch_task) xTaskNotifyGive(s_prefetch_task);
+    xSemaphoreGive(s_prefetch_lock);
+}
+
+static void reader_stop_prefetch(void) {
+    if (s_prefetch_task) {
+        s_prefetch_stop = true;
+        xTaskNotifyGive(s_prefetch_task);
+        for (int i = 0; i < 20 && s_prefetch_task; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+    }
+    reader_free_prefetch_cache();
+    if (s_prefetch_lock) {
+        vSemaphoreDelete(s_prefetch_lock);
+        s_prefetch_lock = NULL;
+    }
+    s_prefetch_target = -1;
 }
 
 static bool reader_add_book(const char *path, const char *name, reader_book_kind_t kind) {
@@ -1476,6 +1594,21 @@ static void reader_render_page(void) {
             reader_free_page_cache();
         }
 
+        /* Promote a background-loaded CBZ page without touching the card or
+         * extracting the archive again. */
+        if (!s_page_data_cache && s_prefetch_lock &&
+            xSemaphoreTake(s_prefetch_lock, portMAX_DELAY) == pdTRUE) {
+            if (s_prefetch_data_cache && s_prefetch_data_cache_index == s_page_index) {
+                s_page_data_cache = s_prefetch_data_cache;
+                s_page_data_cache_length = s_prefetch_data_cache_length;
+                s_page_data_cache_index = s_prefetch_data_cache_index;
+                s_prefetch_data_cache = NULL;
+                s_prefetch_data_cache_length = 0;
+                s_prefetch_data_cache_index = -1;
+            }
+            xSemaphoreGive(s_prefetch_lock);
+        }
+
         bool loaded = false;
         if (s_page_data_cache && s_page_data_cache_index == s_page_index) {
             data = s_page_data_cache;
@@ -1484,7 +1617,9 @@ static void reader_render_page(void) {
             data_is_cached = true;
             ESP_LOGI(TAG, "Using cached page: %u bytes", (unsigned)length);
         } else {
-            loaded = reader_sd_begin(&mounted_here, &display_was_suspended);
+            bool io_locked = s_reader_io_lock &&
+                             xSemaphoreTake(s_reader_io_lock, portMAX_DELAY) == pdTRUE;
+            loaded = io_locked && reader_sd_begin(&mounted_here, &display_was_suspended);
             if (loaded) loaded = reader_load_page_data(&s_pages[s_page_index], &data, &length);
             if (loaded && length <= READER_PAGE_CACHE_MAX_BYTES) {
                 s_page_data_cache = data;
@@ -1492,6 +1627,10 @@ static void reader_render_page(void) {
                 s_page_data_cache_index = s_page_index;
                 data_is_cached = true;
                 ESP_LOGI(TAG, "Cached page for fast half-page turn: %u bytes", (unsigned)length);
+            }
+            if (io_locked) {
+                reader_sd_end(mounted_here, display_was_suspended);
+                xSemaphoreGive(s_reader_io_lock);
             }
         }
         if (loaded) {
@@ -1504,7 +1643,10 @@ static void reader_render_page(void) {
             }
         }
         if (!data_is_cached) reader_free(data);
-        reader_sd_end(mounted_here, display_was_suspended);
+
+        if (loaded && book->kind == READER_BOOK_CBZ && s_page_index + 1 < s_page_count) {
+            reader_schedule_prefetch(s_page_index + 1);
+        }
 
         lv_obj_clean(s_page_area);
         s_page_image = NULL;
@@ -1776,6 +1918,7 @@ static void reader_input_callback(InputEvent *event) {
 }
 
 void book_reader_create(void) {
+    if (!s_reader_io_lock) s_reader_io_lock = xSemaphoreCreateMutex();
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t background = lv_color_hex(theme_palette_get_background(theme));
     display_manager_fill_screen(background);
@@ -1797,6 +1940,10 @@ void book_reader_destroy(void) {
     s_page_footer = NULL;
     reader_free_pages();
     reader_free_library();
+    if (s_reader_io_lock) {
+        vSemaphoreDelete(s_reader_io_lock);
+        s_reader_io_lock = NULL;
+    }
     book_reader_view.root = NULL;
 }
 
