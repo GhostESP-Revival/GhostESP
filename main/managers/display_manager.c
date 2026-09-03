@@ -3419,10 +3419,26 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
             s_switch_backlight_configured = true;
         }
         gpio_hold_dis(CONFIG_LV_DISP_PIN_BCKL);
-        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+        /* Factory T-Dongle-C5 firmware enables the LCD backlight by driving
+         * GPIO0 LOW (active-low BL), matching the rest of the codebase where
+         * CONFIG_LV_BACKLIGHT_ACTIVE_LVL unset == "on when low".  The switch
+         * path below honors that polarity; switch-mode boards with a
+         * high-active backlight (e.g. CYD) set CONFIG_LV_BACKLIGHT_ACTIVE_LVL
+         * and get the normal HIGH=on behavior. */
+        bool on = percentage > 0;
+#if defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, on ? 1 : 0);
+#else
+        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, on ? 0 : 1);
+#endif
         gpio_hold_en(CONFIG_LV_DISP_PIN_BCKL);
-        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (requested=%u%%, scaled=%u%%)",
-                 CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? "ON" : "OFF",
+        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (active%s, requested=%u%%, scaled=%u%%)",
+                 CONFIG_LV_DISP_PIN_BCKL, on ? "ON" : "OFF",
+#if defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+                 "-high",
+#else
+                 "-low",
+#endif
                  (unsigned)((max_brightness > 0) ? (percentage * 100) / max_brightness : 0),
                  (unsigned)percentage);
     } else {

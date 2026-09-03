@@ -60,6 +60,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed GhostLink-relayed Ethernet fingerprint/port/ping scans and ARP poison silently failing; display now flags a peer that doesn't acknowledge
 - Fixed the on-screen terminal keyboard's Done button not submitting commands
 - Fixed crash on CYD devices by bumping LV_MEM_POOL to 24KB
+- Fixed T-Dongle-C5 display colors (pink toast/noise) by enabling RGB565 byte-swap and dropping the SPI clock to 20 MHz to match the factory ST7735 driver
+- Fixed T-Dongle-C5 backlight polarity so the display turns on at boot (active-low GPIO0)
 
 ### Removed
 - Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)
