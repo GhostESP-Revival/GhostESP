@@ -40,17 +40,15 @@ typedef enum {
 typedef struct {
     const char *code;
     const char *name;
-    uint8_t start_channel;
-    uint8_t num_channels;
 } WifiCountry;
 
 static const WifiCountry wifi_countries[] = {
-    {"US", "Americas", 1, 11},
-    {"GB", "Europe", 1, 13},
-    {"JP", "Japan", 1, 14},
-    {"AU", "Australia", 1, 13},
-    {"CN", "Asia", 1, 13},
-    {"01", "World Safe", 1, 11},
+    {"US", "Americas"},
+    {"GB", "Europe"},
+    {"JP", "Japan"},
+    {"AU", "Australia"},
+    {"CN", "Asia"},
+    {"01", "World Safe"},
 };
 #define COUNTRY_COUNT (sizeof(wifi_countries) / sizeof(wifi_countries[0]))
 
@@ -684,24 +682,11 @@ static void show_complete_screen(void) {
 static void apply_wifi_country(int country_index) {
     const WifiCountry *country = &wifi_countries[country_index];
     ESP_LOGI(TAG, "Applying WiFi country: %s (%s)", country->code, country->name);
-    
-#if CONFIG_IDF_TARGET_ESP32C5
+
     esp_err_t err = esp_wifi_set_country_code(country->code, true);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set country code: %s", esp_err_to_name(err));
     }
-#else
-    wifi_country_t wifi_country = {
-        .cc = {country->code[0], country->code[1], 0},
-        .schan = country->start_channel,
-        .nchan = country->num_channels,
-        .policy = WIFI_COUNTRY_POLICY_MANUAL
-    };
-    esp_err_t err = esp_wifi_set_country(&wifi_country);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set country: %s", esp_err_to_name(err));
-    }
-#endif
 }
 
 static void finish_setup(void) {

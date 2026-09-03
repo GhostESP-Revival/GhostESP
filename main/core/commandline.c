@@ -526,9 +526,7 @@ void register_commands() {
     register_command("saeflood", handle_sae_flood_cmd);
     register_command("stopsaeflood", handle_stop_sae_flood_cmd);
     register_command("saefloodhelp", handle_sae_flood_help_cmd);
-#if CONFIG_IDF_TARGET_ESP32C5
     register_command("setcountry", handle_setcountry);
-#endif
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)

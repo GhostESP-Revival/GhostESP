@@ -1700,6 +1700,25 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
         settings_set_display_timeout(settings, display_timeout->valueint);
         ESP_LOGI(TAG, "Setting display timeout to: %d ms", display_timeout->valueint);
     }
+
+    // GhostLink (ESP comm) TX/RX pins. Persist them so they survive reboots.
+    // -1 is the "not used / disabled" sentinel (boards whose shared pins are
+    // otherwise claimed); a live re-pin while connected/scanning is disruptive,
+    // so these are staged and applied on the next comm manager init.
+    cJSON *esp_comm_tx_pin = cJSON_GetObjectItem(root, "esp_comm_tx_pin");
+    cJSON *esp_comm_rx_pin = cJSON_GetObjectItem(root, "esp_comm_rx_pin");
+    if (esp_comm_tx_pin && esp_comm_rx_pin) {
+        int32_t comm_tx = esp_comm_tx_pin->valueint;
+        int32_t comm_rx = esp_comm_rx_pin->valueint;
+        if ((comm_tx < -1 || comm_tx > 48) || (comm_rx < -1 || comm_rx > 48)) {
+            cJSON_Delete(root);
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"error\": \"esp_comm pins must be -1 or 0-48.\"}");
+            return ESP_FAIL;
+        }
+        settings_set_esp_comm_pins(settings, comm_tx, comm_rx);
+    }
     glog("About to Save Settings\n");
 
     esp_err_t save_err = settings_save(settings);

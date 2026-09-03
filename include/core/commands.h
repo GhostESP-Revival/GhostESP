@@ -169,9 +169,7 @@ void handle_mirror_cmd(int argc, char **argv);
 void handle_apps_cmd(int argc, char **argv);
 void handle_log_level_cmd(int argc, char **argv);
 void handle_fav_cmd(int argc, char **argv);
-#if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv);
-#endif
 
 // Capture commands
 void handle_capture_scan(int argc, char **argv);

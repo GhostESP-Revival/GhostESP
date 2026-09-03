@@ -62,6 +62,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed crash on CYD devices by bumping LV_MEM_POOL to 24KB
 - Fixed T-Dongle-C5 display colors (pink toast/noise) by enabling RGB565 byte-swap and dropping the SPI clock to 20 MHz to match the factory ST7735 driver
 - Fixed T-Dongle-C5 backlight polarity so the display turns on at boot (active-low GPIO0)
+- Fixed WebUI GhostLink pin changes not persisting across reboots
+- Extended `setcountry` to all targets via the ESP-IDF country-code API so it works on 2.4 GHz-only boards and the C5 alike
 
 ### Removed
 - Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)

@@ -2525,30 +2525,16 @@ void wifi_manager_init(void) {
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
 
     // configure country based on saved setting
-    static const struct { const char *code; uint8_t schan; uint8_t nchan; } country_table[] = {
-        {"US", 1, 11}, {"GB", 1, 13}, {"JP", 1, 14}, {"AU", 1, 13}, {"CN", 1, 13}, {"01", 1, 11}
-    };
+    static const char *country_table[] = {"US", "GB", "JP", "AU", "CN", "01"};
     uint8_t country_idx = settings_get_wifi_country(&G_Settings);
     if (country_idx >= sizeof(country_table)/sizeof(country_table[0])) country_idx = 5; // default to World Safe
-    
-#if CONFIG_IDF_TARGET_ESP32C5
-    esp_err_t country_err = esp_wifi_set_country_code(country_table[country_idx].code, true);
+
+    esp_err_t country_err = esp_wifi_set_country_code(country_table[country_idx], true);
     if (country_err == ESP_OK) {
-        ESP_LOGI(TAG, "ESP32-C5 Country set to: %s", country_table[country_idx].code);
+        ESP_LOGI(TAG, "Country set to: %s", country_table[country_idx]);
     } else {
-        ESP_LOGW(TAG, "ESP32-C5: Failed to set country: %s", esp_err_to_name(country_err));
+        ESP_LOGW(TAG, "Failed to set country: %s", esp_err_to_name(country_err));
     }
-#else
-    wifi_country_t country_to_set = {
-        .cc     = {country_table[country_idx].code[0], country_table[country_idx].code[1], 0},
-        .schan  = country_table[country_idx].schan,
-        .nchan  = country_table[country_idx].nchan,
-        .policy = WIFI_COUNTRY_POLICY_MANUAL
-    };
-    ESP_LOGI(TAG, "Setting country: CC='%s', schan=%d, nchan=%d",
-             country_to_set.cc, country_to_set.schan, country_to_set.nchan);
-    ESP_ERROR_CHECK(esp_wifi_set_country(&country_to_set));
-#endif
 
     // Create the WiFi event group
     ESP_LOGI(TAG, "wifi_manager: creating event group...");

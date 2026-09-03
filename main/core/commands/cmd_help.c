@@ -169,15 +169,16 @@ void handle_help(int argc, char **argv) {
         glog("    Description: track selected station signal strength (rssi)\n");
         glog("    Usage: tracksta\n");
         glog("    Note: select a station first with 'select -s <index>'\n\n");
-#if CONFIG_IDF_TARGET_ESP32C5
         glog("setcountry\n");
-        glog("    Description: Set the Wi-Fi country code.\n");
+        glog("    Description: Set the Wi-Fi country code. 2.4 GHz-only targets use the full\n");
+        glog("                 1-13 channel range regardless of the code; the C5 applies the real\n");
+        glog("                 regulatory range.\n");
         glog("    Usage: setcountry <CC>\n");
         glog("    Arguments:\n");
         glog("        <CC> : Country code (\"01\" world-safe) or two-letter ISO (e.g., US)\n");
+        glog("    Persisted across reboots: US, GB, JP, AU, CN, 01\n");
         glog("    Supported: 01, AT, AU, BE, BG, BR, CA, CH, CN, CY, CZ, DE, DK, EE, ES, FI, FR, GB, GR, HK, HR, HU,\n");
         glog("               IE, IN, IS, IT, JP, KR, LI, LT, LU, LV, MT, MX, NL, NO, NZ, PL, PT, RO, SE, SI, SK, TW, US\n\n");
-#endif
         return;
     }
 

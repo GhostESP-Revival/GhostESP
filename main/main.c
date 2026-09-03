@@ -921,17 +921,7 @@ void app_main(void) {
     uint8_t country_index = settings_get_wifi_country(&G_Settings);
     const char *country_codes[] = {"US", "GB", "JP", "AU", "CN", "01"};
     if (country_index < sizeof(country_codes) / sizeof(country_codes[0])) {
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
         esp_err_t err = esp_wifi_set_country_code(country_codes[country_index], true);
-#else
-        wifi_country_t wifi_country = {
-            .cc = {country_codes[country_index][0], country_codes[country_index][1], 0},
-            .schan = 1,
-            .nchan = (country_index == 2) ? 14 : (country_index == 0) ? 11 : 13,
-            .policy = WIFI_COUNTRY_POLICY_MANUAL
-        };
-        esp_err_t err = esp_wifi_set_country(&wifi_country);
-#endif
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to set WiFi country: %s", esp_err_to_name(err));
         } else {
