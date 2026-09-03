@@ -41,6 +41,16 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 #define STORE_DATA_ATTR
 #define WPS_OUI 0x0050f204
 #define TAG "WIFI_MONITOR"
+
+/* Heap-on-demand allocation for monitor tables: PSRAM first, internal
+ * fallback (helps PSRAM-less targets by time-slicing instead of static). */
+static void *mon_tbl_calloc(size_t n, size_t size) {
+    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) {
+        p = heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    return p;
+}
 #define WPS_CONF_METHODS_PBC 0x0080
 #define WPS_CONF_METHODS_PIN_DISPLAY 0x0004
 #define WPS_CONF_METHODS_PIN_KEYPAD 0x0008
@@ -207,7 +217,7 @@ static wardrive_role_t wardrive_role = WARDRIVE_ROLE_PRIMARY;
 static volatile bool wardrive_peer_assist_active = false;
 static bool wardrive_peer_assist_pending = false;
 static uint32_t wardrive_peer_status_ms = 0;
-static wardrive_helper_dedupe_t wardrive_helper_dedupe[WARDRIVE_HELPER_DEDUPE_SIZE];
+static wardrive_helper_dedupe_t *wardrive_helper_dedupe = NULL;
 static uint8_t wardrive_helper_dedupe_idx = 0;
 static uint8_t wardrive_forced_helper_channels[WIFI_CHANNELS_MAX] = {0};
 static uint8_t wardrive_forced_helper_channel_count = 0;
@@ -261,6 +271,7 @@ static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels);
 static bool wardrive_obs_queue_ensure(void);
 static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_source_t source);
 static void wardrive_obs_session_stop_and_drain(void);
+static void wardrive_obs_teardown_locked(void);
 
 static void wardrive_obs_init_done(void) {
     portENTER_CRITICAL(&wardrive_obs_init_mux);
@@ -491,7 +502,37 @@ static void wardrive_obs_session_stop_and_drain(void) {
          (unsigned long)wardrive_obs_drop_helper,
          (unsigned long)wardrive_obs_drop_sink,
          wardrive_obs_queue_in_psram ? "PSRAM" : "internal");
+    wardrive_obs_teardown_locked();
     xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+}
+
+// Free the observation queue + worker after a drained stop so ~8k stack +
+// queue storage returns to the heap while wardriving sits idle. The next
+// start_wardriving() recreates everything via wardrive_obs_queue_ensure().
+// Caller must hold wardrive_obs_lifecycle_mutex (as stop_wardriving does);
+// the mutex itself is kept for future sessions.
+static void wardrive_obs_teardown_locked(void) {
+    if (wardrive_obs_task_handle) {
+        vTaskDelete(wardrive_obs_task_handle);
+        wardrive_obs_task_handle = NULL;
+    }
+    if (wardrive_obs_queue) {
+        vQueueDelete(wardrive_obs_queue);
+        wardrive_obs_queue = NULL;
+    }
+    heap_caps_free(wardrive_obs_task_stack);
+    heap_caps_free(wardrive_obs_task_tcb);
+    heap_caps_free(wardrive_obs_queue_storage);
+    heap_caps_free(wardrive_obs_queue_control);
+    wardrive_obs_task_stack = NULL;
+    wardrive_obs_task_tcb = NULL;
+    wardrive_obs_queue_storage = NULL;
+    wardrive_obs_queue_control = NULL;
+    wardrive_obs_queue_capacity = 0;
+    if (wardrive_obs_drain_sem) {
+        vSemaphoreDelete(wardrive_obs_drain_sem);
+        wardrive_obs_drain_sem = NULL;
+    }
 }
 
 static uint8_t wardrive_select_auth_code(const char *encryption_type) {
@@ -584,6 +625,10 @@ static bool wardrive_is_valid_time(const gps_time_t *tim) {
 }
 
 static bool wardrive_helper_should_send(const uint8_t *bssid, int8_t rssi, const char *ssid) {
+    if (!wardrive_helper_dedupe) {
+        wardrive_helper_dedupe = mon_tbl_calloc(WARDRIVE_HELPER_DEDUPE_SIZE, sizeof(*wardrive_helper_dedupe));
+        if (!wardrive_helper_dedupe) return true;
+    }
     uint32_t hash = wardrive_hash_bssid(bssid);
     uint32_t now_ms = now_ms_u32();
     bool ssid_empty = (!ssid || ssid[0] == '\0');
@@ -1112,7 +1157,7 @@ typedef struct {
 } hs_entry_t;
 
 #define HS_TABLE_MAX 16
-static hs_entry_t hs_table[HS_TABLE_MAX];
+static hs_entry_t *hs_table = NULL;
 static uint8_t hs_count_local = 0;
 static uint8_t hs_insert_idx_local = 0;
 static uint32_t hs_found_count = 0;
@@ -1133,7 +1178,9 @@ uint32_t wifi_callbacks_get_handshake_count(void) {
 
 void wifi_callbacks_reset_handshake_tracking(void) {
     portENTER_CRITICAL(&hs_mux);
-    memset(hs_table, 0, sizeof(hs_table));
+    if (hs_table) {
+        memset(hs_table, 0, HS_TABLE_MAX * sizeof(*hs_table));
+    }
     hs_count_local = 0;
     hs_insert_idx_local = 0;
     hs_found_count = 0;
@@ -1158,6 +1205,10 @@ static void process_eapol_candidate_pair(const uint8_t *ap,
     uint8_t log_ap_msg = 0;
     uint8_t log_sta_msg = 0;
 
+    if (!hs_table) {
+        hs_table = mon_tbl_calloc(HS_TABLE_MAX, sizeof(*hs_table));
+        if (!hs_table) return;
+    }
     portENTER_CRITICAL(&hs_mux);
     for (uint8_t i = 0; i < hs_count_local; i++) {
         hs_entry_t *e = &hs_table[i];
@@ -1210,7 +1261,7 @@ typedef struct {
 
 #define BEACON_LIMIT_MAX 64
 #define BEACON_MAX_PER_BSSID 3
-static beacon_limiter_t beacon_limits[BEACON_LIMIT_MAX];
+static beacon_limiter_t *beacon_limits = NULL;
 static uint8_t beacon_limit_count = 0;
 static uint8_t beacon_limit_insert = 0;
 
@@ -1221,11 +1272,15 @@ typedef struct {
     uint32_t ssid_hash;
     uint64_t last_ms;
 } probe_dedupe_t;
-static probe_dedupe_t probe_dedupe_tbl[PROBE_DEDUPE_MAX];
+static probe_dedupe_t *probe_dedupe_tbl = NULL;
 static uint8_t probe_dedupe_count = 0;
 static uint8_t probe_dedupe_insert = 0;
 
 static bool probe_should_emit(const uint8_t *src, uint32_t ssid_hash, uint64_t now_ms) {
+    if (!probe_dedupe_tbl) {
+        probe_dedupe_tbl = mon_tbl_calloc(PROBE_DEDUPE_MAX, sizeof(*probe_dedupe_tbl));
+        if (!probe_dedupe_tbl) return true;
+    }
     for (uint8_t i = 0; i < probe_dedupe_count; i++) {
         probe_dedupe_t *e = &probe_dedupe_tbl[i];
         if (memcmp(e->src, src, 6) == 0 && e->ssid_hash == ssid_hash) {
@@ -1251,6 +1306,10 @@ static bool probe_should_emit(const uint8_t *src, uint32_t ssid_hash, uint64_t n
 }
 
 static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text) {
+    if (!beacon_limits) {
+        beacon_limits = mon_tbl_calloc(BEACON_LIMIT_MAX, sizeof(*beacon_limits));
+        if (!beacon_limits) return true;
+    }
     for (uint8_t i = 0; i < beacon_limit_count; i++) {
         if (mac_equal(beacon_limits[i].bssid, bssid)) {
             if (beacon_limits[i].emitted >= BEACON_MAX_PER_BSSID) {
@@ -1483,8 +1542,83 @@ static const char *suspicious_names[] STORE_DATA_ATTR = {
     "HC-03", "HC-05", "HC-06",  "HC-08",    "BT-HC05", "JDY-31",
     "AT-09", "HM-10", "CC41-A", "MLT-BT05", "SPP-CA",  "FFD0"};
 
-wps_network_t detected_wps_networks[MAX_WPS_NETWORKS];
+static wps_network_t *detected_wps_networks = NULL;
 int detected_network_count = 0;
+static char *last_probe_log = NULL;
+static uint64_t last_probe_log_time_ms = 0;
+
+/* Heap-on-demand monitor tables (~5KB internal when idle). Backing arrays are
+ * allocated at monitor/wardrive session start and released at stop; RX paths
+ * NULL-check and degrade gracefully (emit untracked), so OOM can never
+ * corrupt a capture. Freeing happens strictly after promiscuous delivery
+ * stops; detach-then-free mirrors the s_pcap_pool pattern in this file. */
+static portMUX_TYPE s_mon_tbl_lock = portMUX_INITIALIZER_UNLOCKED;
+
+void wifi_callbacks_monitor_tables_ensure(void) {
+    if (!hs_table) {
+        hs_table = mon_tbl_calloc(HS_TABLE_MAX, sizeof(*hs_table));
+        if (!hs_table) ESP_LOGW(TAG, "hs_table alloc failed; handshake tracking degraded");
+    }
+    if (!probe_dedupe_tbl) {
+        probe_dedupe_tbl = mon_tbl_calloc(PROBE_DEDUPE_MAX, sizeof(*probe_dedupe_tbl));
+        if (!probe_dedupe_tbl) ESP_LOGW(TAG, "probe_dedupe_tbl alloc failed; probe dedupe degraded");
+    }
+    if (!beacon_limits) {
+        beacon_limits = mon_tbl_calloc(BEACON_LIMIT_MAX, sizeof(*beacon_limits));
+        if (!beacon_limits) ESP_LOGW(TAG, "beacon_limits alloc failed; beacon limiting degraded");
+    }
+    if (!detected_wps_networks) {
+        detected_wps_networks = mon_tbl_calloc(MAX_WPS_NETWORKS, sizeof(*detected_wps_networks));
+        if (!detected_wps_networks) ESP_LOGW(TAG, "WPS table alloc failed; WPS detection degraded");
+    }
+    if (!wardrive_helper_dedupe) {
+        wardrive_helper_dedupe = mon_tbl_calloc(WARDRIVE_HELPER_DEDUPE_SIZE, sizeof(*wardrive_helper_dedupe));
+        if (!wardrive_helper_dedupe) ESP_LOGW(TAG, "wardrive dedupe alloc failed; helper suppression degraded");
+    }
+    if (!last_probe_log) {
+        last_probe_log = mon_tbl_calloc(128, 1);
+    }
+}
+
+void wifi_callbacks_monitor_tables_release(void) {
+    hs_entry_t *hs;
+    probe_dedupe_t *probe;
+    beacon_limiter_t *beacon;
+    wps_network_t *wps;
+    wardrive_helper_dedupe_t *wd;
+    char *lp;
+    portENTER_CRITICAL(&hs_mux);
+    hs = hs_table;
+    hs_table = NULL;
+    portEXIT_CRITICAL(&hs_mux);
+    taskENTER_CRITICAL(&s_mon_tbl_lock);
+    probe = probe_dedupe_tbl;
+    probe_dedupe_tbl = NULL;
+    beacon = beacon_limits;
+    beacon_limits = NULL;
+    wps = detected_wps_networks;
+    detected_wps_networks = NULL;
+    wd = wardrive_helper_dedupe;
+    wardrive_helper_dedupe = NULL;
+    lp = last_probe_log;
+    last_probe_log = NULL;
+    taskEXIT_CRITICAL(&s_mon_tbl_lock);
+    heap_caps_free(hs);
+    heap_caps_free(probe);
+    heap_caps_free(beacon);
+    heap_caps_free(wps);
+    heap_caps_free(wd);
+    heap_caps_free(lp);
+}
+
+static void wardrive_dedupe_release(void) {
+    wardrive_helper_dedupe_t *wd;
+    taskENTER_CRITICAL(&s_mon_tbl_lock);
+    wd = wardrive_helper_dedupe;
+    wardrive_helper_dedupe = NULL;
+    taskEXIT_CRITICAL(&s_mon_tbl_lock);
+    heap_caps_free(wd);
+}
 esp_timer_handle_t stop_timer;
 int should_store_wps = 1;
 gps_t *gps = NULL;
@@ -2017,7 +2151,13 @@ static void start_wardrive_heartbeat(void) {
     peer_gps_stream_tx_fail = 0;
     peer_gps_stream_rx_packets = 0;
     peer_gps_stream_rx_fix_packets = 0;
-    memset(wardrive_helper_dedupe, 0, sizeof(wardrive_helper_dedupe));
+    if (!wardrive_helper_dedupe) {
+        wardrive_helper_dedupe = mon_tbl_calloc(WARDRIVE_HELPER_DEDUPE_SIZE, sizeof(*wardrive_helper_dedupe));
+        if (!wardrive_helper_dedupe) ESP_LOGW(TAG, "wardrive dedupe alloc failed; helper suppression degraded");
+    }
+    if (wardrive_helper_dedupe) {
+        memset(wardrive_helper_dedupe, 0, WARDRIVE_HELPER_DEDUPE_SIZE * sizeof(*wardrive_helper_dedupe));
+    }
     wardrive_helper_dedupe_idx = 0;
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     ble_wardriving_reset_unique_device_count();
@@ -2600,6 +2740,7 @@ void stop_wardriving(void) {
     if (wardrive_obs_lifecycle_mutex) {
         xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
     }
+    wardrive_dedupe_release();
 }
 
 void wardriving_set_peer_assist(bool enabled) {
@@ -2916,6 +3057,10 @@ static bool is_pineapple_oui(const uint8_t *bssid) {
 }
 
 bool is_network_duplicate(const char *ssid, const uint8_t *bssid) {
+    if (!detected_wps_networks) {
+        detected_wps_networks = mon_tbl_calloc(MAX_WPS_NETWORKS, sizeof(*detected_wps_networks));
+        if (!detected_wps_networks) return false;
+    }
     for (int i = 0; i < detected_network_count; i++) {
         if (strcmp(detected_wps_networks[i].ssid, ssid) == 0 &&
             compare_bssid(detected_wps_networks[i].bssid, bssid)) {
@@ -3171,14 +3316,20 @@ rsn_done:
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
         const char *tx_ssid = (ssid[0] == '\0') ? "" : ssid;
         uint32_t hash = wardrive_hash_bssid(bssid);
-        uint8_t changed_idx = wardrive_helper_dedupe_idx;
-        for (uint8_t i = 0; i < WARDRIVE_HELPER_DEDUPE_SIZE; i++) {
-            if (wardrive_helper_dedupe[i].used && wardrive_helper_dedupe[i].hash == hash) {
-                changed_idx = i;
-                break;
-            }
+        if (!wardrive_helper_dedupe) {
+            wardrive_helper_dedupe = mon_tbl_calloc(WARDRIVE_HELPER_DEDUPE_SIZE, sizeof(*wardrive_helper_dedupe));
         }
-        wardrive_helper_dedupe_t previous = wardrive_helper_dedupe[changed_idx];
+        uint8_t changed_idx = wardrive_helper_dedupe_idx;
+        wardrive_helper_dedupe_t previous = {0};
+        if (wardrive_helper_dedupe) {
+            for (uint8_t i = 0; i < WARDRIVE_HELPER_DEDUPE_SIZE; i++) {
+                if (wardrive_helper_dedupe[i].used && wardrive_helper_dedupe[i].hash == hash) {
+                    changed_idx = i;
+                    break;
+                }
+            }
+            previous = wardrive_helper_dedupe[changed_idx];
+        }
         uint8_t previous_next_idx = wardrive_helper_dedupe_idx;
         uint32_t previous_new = wardrive_helper_tx_new;
         uint32_t previous_promo = wardrive_helper_tx_ssid_promo;
@@ -3193,7 +3344,9 @@ rsn_done:
             if (send_ok) {
                 wardrive_helper_stream_send_ok++;
             } else {
-                wardrive_helper_dedupe[changed_idx] = previous;
+                if (wardrive_helper_dedupe) {
+                    wardrive_helper_dedupe[changed_idx] = previous;
+                }
                 wardrive_helper_dedupe_idx = previous_next_idx;
                 wardrive_helper_tx_new = previous_new;
                 wardrive_helper_tx_ssid_promo = previous_promo;
@@ -3413,6 +3566,10 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT) {
         return;
+    }
+    if (!detected_wps_networks) {
+        detected_wps_networks = mon_tbl_calloc(MAX_WPS_NETWORKS, sizeof(*detected_wps_networks));
+        if (!detected_wps_networks) return;
     }
 
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
@@ -3769,8 +3926,7 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 // Flag indicating whether to save probe PCAP data to SD (disable UART fallback if false)
 bool g_listen_probes_save_to_sd = false;
 
-static char last_probe_log[128] = {0};
-static uint64_t last_probe_log_time_ms = 0;
+// (last_probe_log / last_probe_log_time_ms are heap-on-demand, declared above)
 
 void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     // Early filtering for management frames only
@@ -3822,11 +3978,16 @@ void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     // Deduplicate: skip if same message within timeout
     uint64_t now_ms = esp_timer_get_time() / 1000ULL;
-    if (strcmp(log_msg, last_probe_log) == 0 && (now_ms - last_probe_log_time_ms) < PROBE_DEDUPE_TIMEOUT_MS) {
+    if (!last_probe_log) {
+        last_probe_log = mon_tbl_calloc(128, 1);
+    }
+    if (last_probe_log && strcmp(log_msg, last_probe_log) == 0 && (now_ms - last_probe_log_time_ms) < PROBE_DEDUPE_TIMEOUT_MS) {
         return;
     }
-    strcpy(last_probe_log, log_msg);
-    last_probe_log_time_ms = now_ms;
+    if (last_probe_log) {
+        strcpy(last_probe_log, log_msg);
+        last_probe_log_time_ms = now_ms;
+    }
 
     // Optionally save packet to SD if enabled
     if (g_listen_probes_save_to_sd && pkt->rx_ctrl.sig_len > 0) {

@@ -219,7 +219,9 @@ void display_manager_resume_lvgl_task(void);
 void display_manager_suspend_input_task(void);
 void display_manager_resume_input_task(void);
 
-void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+bool display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+/* Non-blocking variant for high-rate producers that can drop stale frames. */
+bool display_manager_run_on_lvgl_nowait(void (*fn)(void *), void *arg);
 bool display_manager_is_lvgl_task(void);
 
 /* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
@@ -230,6 +232,7 @@ bool display_manager_is_lvgl_task(void);
  * Every call site outside display_manager.c must go through this instead of
  * calling lv_async_call() directly. */
 lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data);
+lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_data);
 
 /* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
  * instead of running it on every touch sample. The accumulator is flushed

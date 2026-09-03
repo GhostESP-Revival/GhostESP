@@ -33,11 +33,6 @@
 #include "lvgl_touch/tp_spi.h"
 #endif
 
-#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
-#include "esp_rom_gpio.h"
-#include "soc/gpio_sig_map.h"
-#endif
-
 #define MAX_PORTALS 32
 #define MAX_PORTAL_NAME 64
 
@@ -66,6 +61,17 @@ static sd_pwr_ctrl_handle_t s_crowpanel_sd_power = NULL;
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+static int sd_card_c5_max_freq_khz(void) {
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    return 20000;
+  }
+#endif
+  return 1000;
+}
+#endif
 
 static void sd_spi_release_cs_pin(void) {
 #if defined(CONFIG_USING_SPI)
@@ -121,7 +127,10 @@ static bool display_sd_spi_pins_match(void) {
 }
 
 static bool is_shared_display_sd_spi(void) {
-#if (defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)) && defined(CONFIG_LV_TFT_DISPLAY_SPI2_HOST)
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+  /* PARLIO is independent of the SPI2 host used by the SD card. */
+  return false;
+#elif (defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)) && defined(CONFIG_LV_TFT_DISPLAY_SPI2_HOST)
   /* These targets mount SD on SPI2_HOST, so a display on SPI2_HOST must be
    * time-multiplexed even when the display and SD use different pins. */
   return true;
@@ -344,37 +353,6 @@ static int sd_spi_host_id(void) {
 #else
   return SPI2_HOST;
 #endif
-}
-
-static bool sd_card_uses_experimental_shared_spi(void) {
-#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
-#else
-  return false;
-#endif
-}
-
-static esp_err_t sd_card_route_experimental_shared_spi(void) {
-#if defined(CONFIG_EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI) && defined(CONFIG_IDF_TARGET_ESP32C5)
-  if (!sd_card_uses_experimental_shared_spi()) {
-    return ESP_OK;
-  }
-
-  esp_err_t ret = gpio_set_direction(sd_card_manager.spi_mosi_pin, GPIO_MODE_OUTPUT);
-  if (ret != ESP_OK) return ret;
-  ret = gpio_set_direction(sd_card_manager.spi_clk_pin, GPIO_MODE_OUTPUT);
-  if (ret != ESP_OK) return ret;
-  ret = gpio_set_direction(sd_card_manager.spi_miso_pin, GPIO_MODE_INPUT);
-  if (ret != ESP_OK) return ret;
-
-  /* SPI2 is already initialized on the display pins. Mirror its output
-   * signals to the SD pins and select the SD pin as the host's MISO input. */
-  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_mosi_pin, FSPID_OUT_IDX, false, false);
-  esp_rom_gpio_connect_out_signal(sd_card_manager.spi_clk_pin, FSPICLK_OUT_IDX, false, false);
-  esp_rom_gpio_connect_in_signal(sd_card_manager.spi_miso_pin, FSPIQ_IN_IDX, false);
-  ESP_LOGW(TAG, "Experimental persistent shared SPI enabled; TFT and SD remain attached to SPI2");
-#endif
-  return ESP_OK;
 }
 
 static esp_err_t sd_card_prepare_shared_spi_card(void) {
@@ -898,21 +876,16 @@ esp_err_t sd_card_init(void) {
 #endif
 
   bool gating_template = false;
-  bool experimental_shared_spi = sd_card_uses_experimental_shared_spi();
   /* On classic-ESP32 boards whose SD owns a separate SPI3 bus (every CYD
    * variant), SD genuinely *owns* that bus (bus_init_success == true).
    * See sd_keep_spi_bus_for_board() for why freeing it freezes the display;
    * keep the bus alive on mount failure (no card) here. */
   bool keep_bus_on_failure = sd_keep_spi_bus_for_board();
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  gating_template = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo T-Dongle-C5") == 0 ||
-                      strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0);
-#endif
+  gating_template = sd_card_needs_jit_mount();
   bool display_was_suspended = false;
   /* Only boards that explicitly JIT-gate SD or need pin rebinding should detach
    * the panel. Same-pin shared SPI boards like TEmbedC1101 keep the old path. */
-  if (!experimental_shared_spi && (gating_template || display_rebind_required)) {
+  if (gating_template || display_rebind_required) {
     display_was_suspended = display_spi_suspend_for_sd();
     if (display_was_suspended) {
       /* Full suspend removed the panel device. Do not resume the LVGL task via
@@ -1003,15 +976,13 @@ esp_err_t sd_card_init(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
   host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
+  host.max_freq_khz = sd_card_c5_max_freq_khz();
 #elif defined(CONFIG_SHARED_TFT_SD_SPI)
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
-  if (experimental_shared_spi) {
-    host.max_freq_khz = 20000;    /* Persistent routing avoids JIT churn; raised from 10 MHz after stress-testing reads on Banshee C5. */
-  }
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
+  ESP_LOGI(TAG, "SD SPI max clock: %d kHz", host.max_freq_khz);
 
   spi_bus_config_t bus_config = {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
@@ -1063,13 +1034,6 @@ esp_err_t sd_card_init(void) {
     }
   }
 
-  esp_err_t route_ret = sd_card_route_experimental_shared_spi();
-  if (route_ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to configure experimental shared SPI routing: %s",
-             esp_err_to_name(route_ret));
-    sd_spi_bus_release_if_tracked();
-    return route_ret;
-  }
 #elif !defined(CONFIG_USE_TDECK)
 #if defined(CONFIG_IDF_TARGET_ESP32)
   {
@@ -1215,7 +1179,7 @@ esp_err_t sd_card_init(void) {
 
   sd_card_setup_directory_structure();
 
-  if (gating_template && !experimental_shared_spi) {
+  if (gating_template) {
     sd_card_update_cached_stats();
     sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_JIT);
     if (display_was_suspended) {
@@ -1273,13 +1237,17 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   }
 
 #if defined(CONFIG_USING_SPI)
-  // always pause display SPI if the display shares the same SPI bus with SD
-  if (display_was_suspended) *display_was_suspended = display_spi_suspend_for_sd();
+  /* Only time-multiplex display SPI when the active display really shares the
+   * SD bus. A PARLIO display leaves SPI2 available for a permanent SD mount. */
+  if (sd_card_uses_shared_display_spi()) {
+    bool display_suspended = display_spi_suspend_for_sd();
+    if (display_was_suspended) *display_was_suspended = display_suspended;
+  }
   // Minimal SPI mount path for flush: reuse sd_card_init SPI branch logic
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   host.slot = sd_spi_host_id();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 1000;       /* Conservative shared-bus clock for reliable C5 reads */
+  host.max_freq_khz = sd_card_c5_max_freq_khz();
 #endif
 
   spi_bus_config_t bus_config = {
@@ -1381,9 +1349,9 @@ void sd_card_unmount_after_flush(bool display_was_suspended) {
 }
 
 bool sd_card_needs_jit_mount(void) {
-    if (sd_card_uses_experimental_shared_spi()) {
-        return false;
-    }
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    return false;
+#endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     /* Boards where the SD card shares SPI pins/host with the LVGL display
      * cannot keep both attached simultaneously on ESP32-C5 (single SPI host).
@@ -1397,7 +1365,7 @@ bool sd_card_needs_jit_mount(void) {
 }
 
 bool sd_card_uses_shared_display_spi(void) {
-    return sd_card_uses_experimental_shared_spi() || is_shared_display_sd_spi();
+    return is_shared_display_sd_spi();
 }
 
 bool sd_card_jit_begin(bool *display_was_suspended, bool ensure_dirs) {

@@ -361,6 +361,13 @@ bool plugin_api_feature_supported(const char *feature) {
 #endif
     }
     if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
+    if (strcmp(feature, "banshee_c5") == 0) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+        return true;
+#else
+        return false;
+#endif
+    }
     if (strcmp(feature, "wifi") == 0) return true;
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(feature, "ble") == 0) return true;
@@ -457,8 +464,12 @@ bool plugin_api_internal_run_sync(void (*fn)(void *ctx), void *ctx) {
     return plugin_ui_run_sync(fn, ctx);
 }
 
-void plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx) {
-    display_manager_run_on_lvgl(fn, ctx);
+bool plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx) {
+    return display_manager_run_on_lvgl(fn, ctx);
+}
+
+bool plugin_api_internal_run_async_nowait(void (*fn)(void *ctx), void *ctx) {
+    return display_manager_run_on_lvgl_nowait(fn, ctx);
 }
 
 lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent) {
@@ -1408,6 +1419,15 @@ static void *plugin_api_app_malloc(size_t size) {
     header->size = size;
     s_memory_used += size;
     return header + 1;
+}
+
+static void *plugin_api_psram_malloc(size_t size) {
+    if (size == 0) return NULL;
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void plugin_api_psram_free(void *ptr) {
+    if (ptr) heap_caps_free(ptr);
 }
 
 static void *plugin_api_app_calloc(size_t count, size_t size) {
@@ -2443,6 +2463,8 @@ static ghostesp_api_t s_api = {
     .espnow_send = plugin_api_espnow_send,
     .espnow_message_count = plugin_api_espnow_message_count,
     .espnow_receive = plugin_api_espnow_receive,
+    .psram_malloc = plugin_api_psram_malloc,
+    .psram_free = plugin_api_psram_free,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,

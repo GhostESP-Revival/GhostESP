@@ -84,7 +84,11 @@ static int32_t map(int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, i
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#define AVG_SAMPLES 2
+#else
 #define AVG_SAMPLES 4
+#endif
 static int16_t avg_x[AVG_SAMPLES] = {0};
 static int16_t avg_y[AVG_SAMPLES] = {0};
 static uint8_t avg_idx = 0;

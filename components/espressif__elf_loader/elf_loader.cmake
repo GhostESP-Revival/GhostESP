@@ -106,8 +106,12 @@ macro(project_so project_name)
     endif()
 
     # Compile flags for building component sources into position-independent .o files
+    set(so_optimization -Oz)
+    if(DEFINED ELF_OPTIMIZATION)
+        set(so_optimization ${ELF_OPTIMIZATION})
+    endif()
     set(so_compile_flags -c
-                          -Oz
+                          ${so_optimization}
                           -fPIC
                           -fvisibility=hidden
                           -fmerge-all-constants
@@ -123,7 +127,7 @@ macro(project_so project_name)
     # passes strip flags to the linker to remove unneeded content.
     set(so_link_flags -shared
                        -fPIC
-                       -Oz
+                       ${so_optimization}
                        -static-libgcc
                       -nostdlib
                       -nostartfiles
