@@ -7,7 +7,10 @@
   "category": "Games",
   "entry": "doom_port.so",
   "target": "esp32c5",
-  "targets": ["esp32c5", "esp32s3"],
+  "targets": [
+    "esp32c5",
+    "esp32s3"
+  ],
   "api_version": 1,
   "manifest_version": 1,
   "package_version": 1,
@@ -19,9 +22,18 @@
   "icon_width": 50,
   "icon_height": 50,
   "accent_color": "#B22222",
-  "permissions": ["ui", "input", "time", "storage"],
-  "requires_features": ["joystick"],
-  "assets": ["assets"],
+  "permissions": [
+    "ui",
+    "input",
+    "time",
+    "storage"
+  ],
+  "requires_features": [
+    "joystick"
+  ],
+  "assets": [
+    "assets"
+  ],
   "direct_read_assets": true,
   "memory_limit": 0,
   "stack_size": 8192,

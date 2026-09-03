@@ -51,6 +51,17 @@ static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+static int sd_card_c5_max_freq_khz(void) {
+#if defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    return 20000;
+  }
+#endif
+  return 1000;
+}
+#endif
+
 static void sd_spi_release_cs_pin(void) {
 #if defined(CONFIG_USING_SPI)
   int cs_pin = sd_card_manager.spi_cs_pin;
@@ -916,12 +927,13 @@ esp_err_t sd_card_init(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_ENCODER_INA)
   host.max_freq_khz = 4000;       /* 4 MHz for first probe – increase later if needed */
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 1000;       /* Conservative C5 clock retained for initial validation */
+  host.max_freq_khz = sd_card_c5_max_freq_khz();
 #elif defined(CONFIG_SHARED_TFT_SD_SPI)
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
+  ESP_LOGI(TAG, "SD SPI max clock: %d kHz", host.max_freq_khz);
 
   spi_bus_config_t bus_config = {
     .mosi_io_num = sd_card_manager.spi_mosi_pin,
@@ -1167,7 +1179,7 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   host.slot = sd_spi_host_id();
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-  host.max_freq_khz = 1000;       /* Conservative C5 clock retained for initial validation */
+  host.max_freq_khz = sd_card_c5_max_freq_khz();
 #endif
 
   spi_bus_config_t bus_config = {

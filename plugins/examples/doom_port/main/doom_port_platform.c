@@ -119,6 +119,10 @@ void doom_port_platform_init(const ghostesp_api_t *host_api) {
     }
 }
 
+int doom_port_framebuffer_width(void) {
+    return native_banshee_present ? DOOM_WIDTH * 3 / 4 : DOOM_WIDTH;
+}
+
 void *doom_port_psram_malloc(size_t size) {
     return doom_port_has_psram_allocator() ? api->psram_malloc(size) : NULL;
 }
@@ -239,9 +243,9 @@ void doom_port_platform_present(void) {
     frame_pending = false;
 
     const uint16_t *present_pixels = (const uint16_t *)DG_ScreenBuffer;
-    int32_t present_width = DOOM_WIDTH;
+    int32_t present_width = doom_port_framebuffer_width();
     int32_t present_height = DOOM_HEIGHT;
-    int32_t present_stride = DOOM_WIDTH;
+    int32_t present_stride = present_width;
     if (async_present) {
         /* Do not let a slow LVGL refresh back-pressure the game loop. The
            current Doom buffer is the spare buffer whenever a blit is pending,
