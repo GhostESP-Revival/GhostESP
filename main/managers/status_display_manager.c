@@ -396,6 +396,40 @@ static void status_display_sanitize(char *dst, size_t dst_len, const char *src) 
     dst[pos] = '\0';
 }
 
+static bool status_display_ensure_anim_task(void) {
+    if (s_anim_task != NULL) {
+        return true;
+    }
+    // Idle animation disabled -> no worker needed, ever. Saves 3k stack + TCB.
+    uint32_t timeout_ms = settings_get_status_idle_timeout_ms(&G_Settings);
+    if (timeout_ms == 0 || timeout_ms == UINT32_MAX) {
+        return false;
+    }
+    s_next_anim_allowed_tick = 0;
+    s_anim_task_stack = heap_caps_malloc(STATUS_ANIM_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_anim_task_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (s_anim_task_stack && s_anim_task_tcb) {
+        s_anim_task = xTaskCreateStatic(status_display_anim_task, "status_anim",
+                                        STATUS_ANIM_TASK_STACK_BYTES, NULL,
+                                        tskIDLE_PRIORITY + 1,
+                                        s_anim_task_stack, s_anim_task_tcb);
+        if (s_anim_task) {
+            ESP_LOGI(TAG, "status animation task stack allocated from PSRAM: %d bytes", STATUS_ANIM_TASK_STACK_BYTES);
+            return true;
+        }
+    }
+    free(s_anim_task_stack);
+    free(s_anim_task_tcb);
+    s_anim_task_stack = NULL;
+    s_anim_task_tcb = NULL;
+    if (xTaskCreate(status_display_anim_task, "status_anim", STATUS_ANIM_TASK_STACK_BYTES,
+                    NULL, tskIDLE_PRIORITY + 1, &s_anim_task) == pdPASS) {
+        return true;
+    }
+    s_anim_task = NULL;
+    return false;
+}
+
 void status_display_init(void) {
     if (s_ready) return;
 
@@ -492,26 +526,8 @@ void status_display_init(void) {
     if (s_idle_timer) {
         xTimerStart(s_idle_timer, 0);
     }
-    // create animation worker task
-    s_next_anim_allowed_tick = 0;
-    if (s_anim_task == NULL) {
-        s_anim_task_stack = heap_caps_malloc(STATUS_ANIM_TASK_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        s_anim_task_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (s_anim_task_stack && s_anim_task_tcb) {
-            s_anim_task = xTaskCreateStatic(status_display_anim_task, "status_anim",
-                                           STATUS_ANIM_TASK_STACK_BYTES, NULL,
-                                           tskIDLE_PRIORITY + 1,
-                                           s_anim_task_stack, s_anim_task_tcb);
-            ESP_LOGI(TAG, "status animation task stack allocated from PSRAM: %d bytes", STATUS_ANIM_TASK_STACK_BYTES);
-        } else {
-            free(s_anim_task_stack);
-            free(s_anim_task_tcb);
-            s_anim_task_stack = NULL;
-            s_anim_task_tcb = NULL;
-            xTaskCreate(status_display_anim_task, "status_anim", STATUS_ANIM_TASK_STACK_BYTES,
-                        NULL, tskIDLE_PRIORITY + 1, &s_anim_task);
-        }
-    }
+    // create animation worker task (lazy: skipped when idle timeout disabled)
+    (void)status_display_ensure_anim_task();
     ESP_LOGI(TAG, "status display ready");
 }
 
@@ -535,6 +551,8 @@ void status_display_set_lines(const char *line_one, const char *line_two) {
     // reset idle timer
     s_last_update_tick = xTaskGetTickCount();
     status_display_animations_reset();
+    // late-create anim worker if idle animation was enabled after boot
+    (void)status_display_ensure_anim_task();
 }
 
 void status_display_show_attack(const char *attack_name, const char *target) {
@@ -582,6 +600,10 @@ void status_display_deinit(void) {
         vTaskDelete(s_anim_task);
         s_anim_task = NULL;
     }
+    heap_caps_free(s_anim_task_stack);
+    heap_caps_free(s_anim_task_tcb);
+    s_anim_task_stack = NULL;
+    s_anim_task_tcb = NULL;
     if (s_display_dev) {
         i2c_master_bus_rm_device(s_display_dev);
         s_display_dev = NULL;

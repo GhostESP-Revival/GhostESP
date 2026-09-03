@@ -271,6 +271,7 @@ static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels);
 static bool wardrive_obs_queue_ensure(void);
 static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_source_t source);
 static void wardrive_obs_session_stop_and_drain(void);
+static void wardrive_obs_teardown_locked(void);
 
 static void wardrive_obs_init_done(void) {
     portENTER_CRITICAL(&wardrive_obs_init_mux);
@@ -501,7 +502,37 @@ static void wardrive_obs_session_stop_and_drain(void) {
          (unsigned long)wardrive_obs_drop_helper,
          (unsigned long)wardrive_obs_drop_sink,
          wardrive_obs_queue_in_psram ? "PSRAM" : "internal");
+    wardrive_obs_teardown_locked();
     xSemaphoreGiveRecursive(wardrive_obs_lifecycle_mutex);
+}
+
+// Free the observation queue + worker after a drained stop so ~8k stack +
+// queue storage returns to the heap while wardriving sits idle. The next
+// start_wardriving() recreates everything via wardrive_obs_queue_ensure().
+// Caller must hold wardrive_obs_lifecycle_mutex (as stop_wardriving does);
+// the mutex itself is kept for future sessions.
+static void wardrive_obs_teardown_locked(void) {
+    if (wardrive_obs_task_handle) {
+        vTaskDelete(wardrive_obs_task_handle);
+        wardrive_obs_task_handle = NULL;
+    }
+    if (wardrive_obs_queue) {
+        vQueueDelete(wardrive_obs_queue);
+        wardrive_obs_queue = NULL;
+    }
+    heap_caps_free(wardrive_obs_task_stack);
+    heap_caps_free(wardrive_obs_task_tcb);
+    heap_caps_free(wardrive_obs_queue_storage);
+    heap_caps_free(wardrive_obs_queue_control);
+    wardrive_obs_task_stack = NULL;
+    wardrive_obs_task_tcb = NULL;
+    wardrive_obs_queue_storage = NULL;
+    wardrive_obs_queue_control = NULL;
+    wardrive_obs_queue_capacity = 0;
+    if (wardrive_obs_drain_sem) {
+        vSemaphoreDelete(wardrive_obs_drain_sem);
+        wardrive_obs_drain_sem = NULL;
+    }
 }
 
 static uint8_t wardrive_select_auth_code(const char *encryption_type) {
@@ -1513,6 +1544,8 @@ static const char *suspicious_names[] STORE_DATA_ATTR = {
 
 static wps_network_t *detected_wps_networks = NULL;
 int detected_network_count = 0;
+static char *last_probe_log = NULL;
+static uint64_t last_probe_log_time_ms = 0;
 
 /* Heap-on-demand monitor tables (~5KB internal when idle). Backing arrays are
  * allocated at monitor/wardrive session start and released at stop; RX paths
@@ -3893,8 +3926,7 @@ static inline bool is_on_target_channel(const wifi_promiscuous_pkt_t *pkt, uint8
 // Flag indicating whether to save probe PCAP data to SD (disable UART fallback if false)
 bool g_listen_probes_save_to_sd = false;
 
-static char *last_probe_log = NULL;
-static uint64_t last_probe_log_time_ms = 0;
+// (last_probe_log / last_probe_log_time_ms are heap-on-demand, declared above)
 
 void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     // Early filtering for management frames only

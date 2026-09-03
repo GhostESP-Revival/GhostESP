@@ -130,6 +130,11 @@ static bool sae_crypto_initialized = false;
  * internal fallback. Allocated in sae_flood_start before running=true is set
  * and freed in sae_flood_stop after tasks join and monitor mode stops, so no
  * use site needs a NULL check while the attack runs. */
+// Declared here (ahead of sae_heap_alloc/free) so the helpers can use them.
+static uint8_t *sae_frame_buffer = NULL;
+static char *sae_flood_password_buf = NULL;
+static uint8_t *sae_inj_element_x = NULL;
+static uint8_t *sae_inj_element_buf = NULL;
 static void *sae_heap_calloc(size_t n, size_t size) {
     void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!p) {
@@ -184,9 +189,7 @@ static int sae_random_func(void *ctx, unsigned char *buf, size_t len) {
     return 0;
 }
 
-// Static frame buffer (heap-on-demand: see sae_heap_alloc)
-static uint8_t *sae_frame_buffer = NULL;
-static char *sae_flood_password_buf = NULL;
+// Static frame buffer (heap-on-demand: see sae_heap_alloc, declared above)
 
 // Forward declarations
 static esp_err_t sae_init_context(const char *password, const uint8_t *own_mac, const uint8_t *peer_mac, const char *ssid);
@@ -367,8 +370,7 @@ static void sanitize_password_input(const char *in, char *out, size_t out_size) 
 }
 
 static uint8_t sae_inj_token_buf[128];
-static uint8_t *sae_inj_element_x = NULL;
-static uint8_t *sae_inj_element_buf = NULL;
+// (sae_inj_element_x / sae_inj_element_buf are heap-on-demand, declared above)
 
 static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     int frame_len = 0;
